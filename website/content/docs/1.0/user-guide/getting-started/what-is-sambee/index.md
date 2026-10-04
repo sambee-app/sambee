@@ -1,8 +1,10 @@
-# Sambee Turns Your Storage Into a Modern Workspace
++++
+title = "What Is Sambee?"
++++
+
+## Sambee Turns Your Storage Into a Modern Workspace
 
 Sambee gives organizations and individuals a self-hosted, browser-based workspace for files on existing **SMB shares** and **local drives**. Users can browse, view, and edit files from PCs, phones, and tablets, or open and edit them in desktop apps with changes uploaded back to their original location.
-
-[**See the website for details.**](https://sambee.net/)
 
 ## Browser-Based File Manager
 
@@ -37,29 +39,3 @@ Sambee also bridges the gap between the browser and the apps installed on your c
 ## Free & Open Source
 
 Sambee is free and open source software designed for self-hosting as a Docker container.
-
-## Documentation
-
-- [User guide](https://sambee.net/docs/user-guide/)
-- [Admin guide](https://sambee.net/docs/admin-guide/)
-- [Developer guide](https://sambee.net/docs/developer-guide/)
-
-## Reporting Issues
-
-Use the GitHub issue forms for bug reports and feature requests.
-
-- Search for an existing issue first.
-- Include logs and environment details for Companion, SMB, deployment, or browser-specific problems.
-- Check the troubleshooting and support reference docs before filing environment-specific bugs.
-
-## Contributing
-
-Contributions are welcome. Read the [contribution guidelines](CONTRIBUTING.md) for the development, validation, documentation, and pull-request workflow. All project participation is subject to the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-## License
-
-MIT
-
-## Trademark Notice
-
-Sambee and the Sambee logo are trademarks of Helge Klein and are not licensed under the MIT License.
