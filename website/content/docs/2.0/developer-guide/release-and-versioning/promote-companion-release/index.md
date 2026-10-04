@@ -89,4 +89,3 @@ Use this order when you are promoting a Companion release:
 1. Let the workflow verify the Companion provenance, then update and push the selected feed files.
 1. Validate the affected updater channel or Sambee download surface.
 1. Rerun the same workflow later if that same release should move from `test` to `beta` or `stable`.
-

@@ -34,4 +34,3 @@ The `companion-release-publication` concurrency group prevents cleanup from over
 ## When It Runs
 
 Cleanup runs after automatic `test` promotion from `Release: Build Companion Artifact` and after successful manual `Release: Promote Companion Release` runs. Use the maintenance workflow when you need an additional reconciliation pass.
-
