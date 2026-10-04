@@ -3,6 +3,7 @@ import io
 import json
 import sys
 import urllib.error
+from email.message import Message
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -153,7 +154,7 @@ def test_request_asset_bytes_does_not_retry_permanent_http_failure(
     def urlopen(_request: object) -> io.BytesIO:
         nonlocal request_count
         request_count += 1
-        raise urllib.error.HTTPError(asset["url"], 404, "Not Found", None, io.BytesIO(b"not found"))
+        raise urllib.error.HTTPError(asset["url"], 404, "Not Found", Message(), io.BytesIO(b"not found"))
 
     monkeypatch.setattr(MODULE.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(
