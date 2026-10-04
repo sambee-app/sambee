@@ -4,11 +4,11 @@ title = "What Is Sambee?"
 
 ## Sambee Turns Your Storage Into a Modern Workspace
 
-Sambee enables organizations and individuals to provide **access to internal file resources** from any device with a browser. Sambee replaces legacy tools like Windows File Explorer with a secure browser-based workspace from which to view, edit, and manage files on **SMB shares** and **local drives**.
+Sambee gives organizations and individuals a self-hosted, browser-based workspace for files on existing **SMB shares** and **local drives**. Users can browse, view, and edit files from PCs, phones, and tablets, or open and edit them in desktop apps with changes uploaded back to their original location.
 
 ## Browser-Based File Manager
 
-Sambee is a browser-based viewer and manager for files on SMB network shares and on your computer's local drives. Its UI can be switched between single-pane and dual-pane views to suit varying user preferences and work styles.
+Sambee can replace traditional tools like Windows File Explorer.
 
 ### Works on PCs, Phones, and Tablets
 
