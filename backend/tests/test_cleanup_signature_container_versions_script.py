@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
+from urllib.request import Request
 
 import pytest
 
@@ -39,7 +40,16 @@ class FakeResponse:
 
 
 @pytest.mark.unit
-def test_load_versions_uses_name_field_as_digest_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("owner", "owner_type", "owner_path"),
+    [
+        ("example-user", "User", "users/example-user"),
+        ("sambee-app", "Organization", "orgs/sambee-app"),
+    ],
+)
+def test_load_versions_uses_name_field_as_digest_fallback(
+    monkeypatch: pytest.MonkeyPatch, owner: str, owner_type: str, owner_path: str
+) -> None:
     module = load_cleanup_module()
     payload = [
         {
@@ -54,15 +64,18 @@ def test_load_versions_uses_name_field_as_digest_fallback(monkeypatch: pytest.Mo
         }
     ]
 
-    monkeypatch.setattr(
-        module.urllib.request,
-        "urlopen",
-        lambda request: FakeResponse(200, json.dumps(payload).encode("utf-8")),
-    )
+    requested_urls: list[str] = []
 
-    versions = module.load_versions("helgeklein", "User", "sambee", "token")
+    def urlopen(request: Request) -> FakeResponse:
+        requested_urls.append(request.full_url)
+        return FakeResponse(200, json.dumps(payload).encode("utf-8"))
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", urlopen)
+
+    versions = module.load_versions(owner, owner_type, "sambee", "token")
 
     assert [version.digest for version in versions] == ["sha256:" + "a" * 64]
+    assert requested_urls == [f"https://api.github.com/{owner_path}/packages/container/sambee/versions?page=1&per_page=100"]
 
 
 @pytest.mark.unit
