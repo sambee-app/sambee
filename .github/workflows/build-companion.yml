@@ -2,7 +2,7 @@ name: "Release: Build Companion Artifact"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  COMPANION_RELEASE_REPO_OWNER: helgeklein
+  COMPANION_RELEASE_REPO_OWNER: sambee-app
   COMPANION_RELEASE_REPO_NAME: sambee-companion
   COMPANION_RELEASE_REPO_BRANCH: main
 

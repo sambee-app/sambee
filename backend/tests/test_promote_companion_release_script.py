@@ -3,6 +3,7 @@ import io
 import json
 import sys
 import urllib.error
+from email.message import Message
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -153,7 +154,7 @@ def test_request_asset_bytes_does_not_retry_permanent_http_failure(
     def urlopen(_request: object) -> io.BytesIO:
         nonlocal request_count
         request_count += 1
-        raise urllib.error.HTTPError(asset["url"], 404, "Not Found", None, io.BytesIO(b"not found"))
+        raise urllib.error.HTTPError(asset["url"], 404, "Not Found", Message(), io.BytesIO(b"not found"))
 
     monkeypatch.setattr(MODULE.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(
@@ -254,14 +255,14 @@ def test_fetch_release_resolves_a_matching_github_release_url(monkeypatch: pytes
     monkeypatch.setattr(MODULE, "request_json", request)
 
     release = MODULE.fetch_release(
-        "https://github.com/HelgeKlein/Sambee-Companion/releases/tag/companion-v1.2.3?view=1#notes",
-        "helgeklein",
+        "https://github.com/Sambee-App/Sambee-Companion/releases/tag/companion-v1.2.3?view=1#notes",
+        "sambee-app",
         "sambee-companion",
         "token",
     )
 
     assert release["id"] == 123
-    assert requested_urls == ["https://api.github.com/repos/helgeklein/sambee-companion/releases/tags/companion-v1.2.3"]
+    assert requested_urls == ["https://api.github.com/repos/sambee-app/sambee-companion/releases/tags/companion-v1.2.3"]
 
 
 def test_fetch_release_preserves_slashes_in_github_release_url_tags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -274,20 +275,27 @@ def test_fetch_release_preserves_slashes_in_github_release_url_tags(monkeypatch:
     monkeypatch.setattr(MODULE, "request_json", request)
 
     MODULE.fetch_release(
-        "https://github.com/helgeklein/sambee-companion/releases/tag/companion-v1.2.3%2Frc.1/",
-        "helgeklein",
+        "https://github.com/sambee-app/sambee-companion/releases/tag/companion-v1.2.3%2Frc.1/",
+        "sambee-app",
         "sambee-companion",
         "token",
     )
 
-    assert requested_urls == ["https://api.github.com/repos/helgeklein/sambee-companion/releases/tags/companion-v1.2.3%2Frc.1"]
+    assert requested_urls == ["https://api.github.com/repos/sambee-app/sambee-companion/releases/tags/companion-v1.2.3%2Frc.1"]
 
 
-def test_fetch_release_rejects_foreign_github_release_urls(capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize(
+    "release_url",
+    [
+        "https://github.com/other/repository/releases/tag/companion-v1.2.3",
+        "https://github.com/helgeklein/sambee-companion/releases/tag/companion-v1.2.3",
+    ],
+)
+def test_fetch_release_rejects_foreign_github_release_urls(capsys: pytest.CaptureFixture[str], release_url: str) -> None:
     with pytest.raises(SystemExit):
         MODULE.fetch_release(
-            "https://github.com/other/repository/releases/tag/companion-v1.2.3",
-            "helgeklein",
+            release_url,
+            "sambee-app",
             "sambee-companion",
             "token",
         )
@@ -341,9 +349,9 @@ def test_main_resolves_release_to_machine_readable_json(monkeypatch: pytest.Monk
             str(SCRIPT),
             "--resolve-release",
             "--release-ref",
-            "https://github.com/helgeklein/sambee-companion/releases/tag/companion-v1.2.3",
+            "https://github.com/sambee-app/sambee-companion/releases/tag/companion-v1.2.3",
             "--release-owner",
-            "helgeklein",
+            "sambee-app",
             "--release-repo",
             "sambee-companion",
         ],

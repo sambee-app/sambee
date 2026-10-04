@@ -1,6 +1,6 @@
 [package]
 name = "sambee-companion"
-version = "2.0.9"
+version = "2.0.10"
 edition = "2021"
 description = "Sambee Companion — opens files from Sambee in native desktop editors"
 authors = []

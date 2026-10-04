@@ -275,11 +275,11 @@ jobs:
         python3 .github/scripts/promote_companion_release.py \
           --verify-only \
           --release-ref "$companion_tag" \
-          --release-owner helgeklein \
+          --release-owner sambee-app \
           --release-repo sambee-companion
         provenance_dir="$RUNNER_TEMP/companion-provenance"
         mkdir -p "$provenance_dir"
-        gh release download "$companion_tag" --repo helgeklein/sambee-companion \
+        gh release download "$companion_tag" --repo sambee-app/sambee-companion \
           --pattern companion-release-provenance.json --dir "$provenance_dir"
         jq -e \
           --arg version "${{ needs.prepare.outputs.version }}" \
