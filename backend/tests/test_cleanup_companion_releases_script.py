@@ -35,7 +35,7 @@ def write_tauri_marker(root: Path, channel: str, version: str, tag: str, asset_n
                 "version": version,
                 "platforms": {
                     "linux-x86_64": {
-                        "url": f"https://github.com/helgeklein/sambee-companion/releases/download/{tag}/{asset_name}",
+                        "url": f"https://github.com/sambee-app/sambee-companion/releases/download/{tag}/{asset_name}",
                         "signature": "inline-signature",
                     }
                 },
@@ -55,7 +55,7 @@ def configure_main(monkeypatch: pytest.MonkeyPatch, module: ModuleType, root: Pa
             "--release-repo-path",
             str(root),
             "--release-owner",
-            "helgeklein",
+            "sambee-app",
             "--release-repo",
             "sambee-companion",
         ],
@@ -67,7 +67,7 @@ def test_tauri_marker_uses_bundle_url_and_inline_signature(tmp_path: Path) -> No
     module = load_cleanup_module()
     write_tauri_marker(tmp_path, "test", "1.2.3", "companion-v1.2.3")
 
-    markers = module.load_markers(tmp_path, "helgeklein", "sambee-companion")
+    markers = module.load_markers(tmp_path, "sambee-app", "sambee-companion")
 
     assert markers == [
         module.Marker(
@@ -85,7 +85,7 @@ def test_marker_rejects_mismatched_release_versions(tmp_path: Path) -> None:
     write_tauri_marker(tmp_path, "test", "1.2.3", "companion-v1.2.4")
 
     with pytest.raises(RuntimeError, match="does not match"):
-        module.load_markers(tmp_path, "helgeklein", "sambee-companion")
+        module.load_markers(tmp_path, "sambee-app", "sambee-companion")
 
 
 @pytest.mark.unit
@@ -104,7 +104,7 @@ def test_marker_rejects_foreign_release_assets(tmp_path: Path) -> None:
     )
 
     with pytest.raises(RuntimeError, match="must reference"):
-        module.load_markers(tmp_path, "helgeklein", "sambee-companion")
+        module.load_markers(tmp_path, "sambee-app", "sambee-companion")
 
 
 @pytest.mark.unit

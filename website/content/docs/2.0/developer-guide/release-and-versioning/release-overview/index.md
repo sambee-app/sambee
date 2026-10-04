@@ -61,7 +61,7 @@ See this [Overview](../companion-release-overview/). In short:
 
 1. Run [Release: Build Companion Artifact](../build-companion-release/).
    - The workflow:
-      - Creates and publishes a [Companion release](https://github.com/helgeklein/sambee-companion/releases)
+      - Creates and publishes a [Companion release](https://github.com/sambee-app/sambee-companion/releases)
       - Moves the `test` tag to it.
       - Adds the `X.Y.Z` version tag.
 

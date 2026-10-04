@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  COMPANION_RELEASE_REPO_OWNER: helgeklein
+  COMPANION_RELEASE_REPO_OWNER: sambee-app
   COMPANION_RELEASE_REPO_NAME: sambee-companion
   COMPANION_RELEASE_REPO_BRANCH: main
 
