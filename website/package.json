@@ -38,7 +38,7 @@
   },
   "overrides": {
     "shell-quote": "1.9.0",
-    "sharp": "^0.35.4",
+    "sharp": "^0.35.5",
     "undici": "7.29.1"
   }
 }
