@@ -1,8 +1,8 @@
-fastapi==0.142.2
-opentelemetry-api==1.45.0
+fastapi==0.143.0
+opentelemetry-api==1.45.1
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
-sqlmodel==0.0.47
+sqlmodel==0.0.48
 SQLAlchemy==2.0.54
 Authlib==1.8.0
 joserfc==1.7.5
@@ -11,9 +11,9 @@ httpx==0.28.1
 httpx2==2.13.1
 argon2-cffi==25.1.0
 smbprotocol==1.17.0
-pydantic==2.13.5
+pydantic==2.14.0
 pydantic-settings==2.15.0
 python-magic==0.4.27
 aiofiles==25.1.0
 pyvips==3.2.0
-pypdf==6.19.0
+pypdf==6.20.0
