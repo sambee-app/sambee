@@ -18,7 +18,7 @@ desktop status bar; it is an indicator, not a separate mode switch.
 | File icon position | Select item and enter selection mode | Toggle item selection |
 | Row body outside icon | Open item | Clear selection and exit mode; do not open item |
 | Empty file-list space | No action | Clear selection and exit mode |
-| Shift-click icon | Select item and enter selection mode | Select inclusive range from anchor |
+| Shift-click icon | Select item and enter selection mode | Add inclusive range from anchor to selection |
 | Ctrl/Cmd+Shift-click icon | Select item and enter selection mode | Add inclusive range to selection |
 | Other pane | Activate that pane without clearing this pane's selection | Activate that pane without clearing this pane's selection |
 
@@ -58,9 +58,9 @@ desktop status bar; it is an indicator, not a separate mode switch.
   order. Mouse and keyboard use the same selection set and anchor, so a user
   can select with Space or Insert, extend with Shift-click on an icon, and
   continue selecting by keyboard without losing state.
-- Shift-click replaces the explicit selection with the inclusive displayed
-  range; Ctrl/Cmd+Shift-click adds that range. If the anchor is no longer
-  displayed, start a new range at the clicked item.
+- Shift-click and Ctrl/Cmd+Shift-click add the inclusive displayed range to
+  the existing selection. If the anchor is no longer displayed, add the clicked
+  item to the surviving selection and use it as the new anchor.
 - Clear the anchor whenever selection is cleared or the pane changes location
   or connection. Sort, search, and filter changes clear both the selection and
   anchor instead of retaining a selection in a changed view. Preserve existing
@@ -121,8 +121,10 @@ desktop status bar; it is an indicator, not a separate mode switch.
 - Test open-mode row click, icon entry into selection mode, hover/focus icon
   affordance, icon-only toggling, row-body and empty-space exits, last-item
   deselection, and no opening on the dismissal click or its rapid second click.
-- Test inclusive Shift ranges and additive Ctrl/Cmd+Shift ranges from both
+- Test additive inclusive Shift and Ctrl/Cmd+Shift ranges from both
   mouse and keyboard anchors, missing anchors, and virtualized off-screen rows.
+  Include noncontiguous selections before extension and surviving selections
+  after a refreshed listing removes the anchor.
   Test keyboard selection followed by mouse extension and vice versa.
 - Test sorting, starting/changing search, and changing a filter by mouse and
   keyboard clear the affected selection and anchor while performing the

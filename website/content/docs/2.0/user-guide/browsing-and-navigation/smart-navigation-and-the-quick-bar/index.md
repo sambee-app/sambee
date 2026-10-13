@@ -60,7 +60,7 @@ Choose when shortcut hints appear in **Settings** > **File Browser** > **Shortcu
 
 ## Desktop Mouse Selection
 
-On desktop with touch selection off, click a file or folder name to open it, or click its icon to select it. Once an item is selected, the icons become selection controls and the pane's status bar shows the selected count. Click more icons to add or remove items. <kbd>Shift</kbd>-click an icon to select a range from the last selected item; <kbd>Ctrl</kbd> or <kbd>Cmd</kbd> with <kbd>Shift</kbd> adds a range. Keyboard selection and icon selection share the same range anchor.
+On desktop with touch selection off, click a file or folder name to open it, or click its icon to select it. Once an item is selected, the icons become selection controls and the pane's status bar shows the selected count. Click more icons to add or remove items. <kbd>Shift</kbd>-click an icon to add a range from the last selected item without losing earlier selections. <kbd>Ctrl</kbd> or <kbd>Cmd</kbd> with <kbd>Shift</kbd> also adds a range. Keyboard selection and icon selection share the same range anchor.
 
 Click a row outside its icon, click empty list space, or press <kbd>Escape</kbd> to clear selection. The click that clears selection doesn't open a file; click again to open it. Sorting or starting File Search clears that pane's selection. Each pane keeps its own selection when you switch panes. Bulk actions use the selected items, while a focused item alone is not a selection.
 

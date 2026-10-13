@@ -2597,17 +2597,17 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   );
 
   const selectItemFromIcon = useCallback(
-    (file: FileEntry, index: number, extend: boolean, additive: boolean) => {
+    (file: FileEntry, index: number, extend: boolean, _additive: boolean) => {
       skipNextLayoutScrollRef.current = true;
       updateFocus(index, { immediate: true });
       const displayed = filesRef.current;
       const anchorIndex = displayed.findIndex((entry) => entry.path === selectionAnchorRef.current);
       if (extend && anchorIndex !== -1) {
         const range = displayed.slice(Math.min(anchorIndex, index), Math.max(anchorIndex, index) + 1).map((entry) => entry.path);
-        setSelectedFiles((previous) => new Set([...(additive ? previous : []), ...range]));
+        setSelectedFiles((previous) => new Set([...previous, ...range]));
       } else if (extend) {
         selectionAnchorRef.current = file.path;
-        setSelectedFiles(new Set([file.path]));
+        setSelectedFiles((previous) => new Set(previous).add(file.path));
       } else {
         selectionAnchorRef.current = file.path;
         setSelectedFiles((previous) => {
