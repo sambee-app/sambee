@@ -215,6 +215,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
     // Handlers
     handleFileClick,
     toggleItemSelection,
+    selectItemFromIcon,
     selectItem,
     handleClearSelection,
     getItemsByPaths,
@@ -460,6 +461,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   /** Navigate to a breadcrumb path segment. */
   const handleBreadcrumbNavigate = React.useCallback(
     (path: string) => {
+      handleClearSelection();
       if (archiveLocation) {
         if (path === archiveLocation.archivePath) {
           pane.navigateArchiveToPath("");
@@ -474,7 +476,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
       }
       pane.navigateToPath(path);
     },
-    [archiveLocation, pane]
+    [archiveLocation, handleClearSelection, pane]
   );
 
   const breadcrumbPath = archiveLocation
@@ -662,6 +664,8 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
             onFileClick={handleFileClick}
             onToggleItemSelection={toggleItemSelection}
             onSelectItem={selectItem}
+            onIconClick={useTouchSelectionControls ? undefined : selectItemFromIcon}
+            onClearSelection={handleClearSelection}
             rowVirtualizer={rowVirtualizer}
             parentRef={parentRef}
             listContainerRef={listContainerRef}

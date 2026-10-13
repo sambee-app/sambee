@@ -25,6 +25,52 @@ describe("FileList", () => {
     await setLocale("en");
   });
 
+  it("dismisses desktop selection on row or empty space without opening during the same gesture", () => {
+    const file: FileEntry = {
+      name: "readme.txt",
+      path: "readme.txt",
+      type: "file",
+      is_readable: true,
+      is_hidden: false,
+    };
+    const virtualizer = {
+      getVirtualItems: () => [{ index: 0, key: "file-0", start: 0, size: 40 }],
+      getTotalSize: () => 40,
+    } as unknown as Virtualizer<HTMLDivElement, Element>;
+    const onFileClick = vi.fn();
+    const onClearSelection = vi.fn();
+    const renderList = (selectedFiles: Set<string>) => (
+      <FileList
+        files={[file]}
+        focusedIndex={0}
+        selectedFiles={selectedFiles}
+        onFileClick={onFileClick}
+        onIconClick={vi.fn()}
+        onClearSelection={onClearSelection}
+        rowVirtualizer={virtualizer}
+        parentRef={{ current: null }}
+        listContainerRef={() => {}}
+        fileRowStyles={fileRowStylesStub}
+        viewMode="list"
+      />
+    );
+    const { rerender } = render(renderList(new Set([file.path])));
+    const row = screen.getByRole("button", { name: /readme.txt/i });
+    fireEvent.click(row, { detail: 1 });
+    expect(onClearSelection).toHaveBeenCalledTimes(1);
+    expect(onFileClick).not.toHaveBeenCalled();
+
+    rerender(renderList(new Set()));
+    fireEvent.click(row, { detail: 2 });
+    expect(onFileClick).not.toHaveBeenCalled();
+    fireEvent.click(row, { detail: 1 });
+    expect(onFileClick).toHaveBeenCalledWith(file, 0);
+
+    rerender(renderList(new Set([file.path])));
+    fireEvent.click(screen.getByTestId("virtual-list"));
+    expect(onClearSelection).toHaveBeenCalledTimes(2);
+  });
+
   it("renders the translated empty state", async () => {
     await setLocale("en-XA");
 

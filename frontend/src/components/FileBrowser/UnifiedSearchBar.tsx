@@ -228,9 +228,9 @@ export function UnifiedSearchBar({
   const setQuery = useCallback(
     (value: string) => {
       providerRef.current.onQueryChange?.(value);
+      onQueryValueChange?.(value);
 
       if (isControlledQuery) {
-        onQueryValueChange?.(value);
         return;
       }
 

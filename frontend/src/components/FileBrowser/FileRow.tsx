@@ -33,6 +33,8 @@ interface FileRowProps {
   virtualStart: number;
   virtualSize: number;
   onClick: (file: FileEntry, index: number) => void;
+  onDesktopBodyClick?: (file: FileEntry, index: number, event: React.MouseEvent<HTMLButtonElement>) => void;
+  onIconClick?: (file: FileEntry, index: number, extend: boolean, additive: boolean) => void;
   fileRowStyles: {
     buttonSelected: Record<string, unknown>;
     buttonNotSelected: Record<string, unknown>;
@@ -131,6 +133,8 @@ export const FileRow = React.memo(
         virtualStart,
         virtualSize,
         onClick,
+        onDesktopBodyClick,
+        onIconClick,
         fileRowStyles,
         viewMode,
         showCompactActions = false,
@@ -147,6 +151,7 @@ export const FileRow = React.memo(
       const longPressStartRef = useRef<{ pointerId: number; clientX: number; clientY: number } | null>(null);
       const suppressNextClickRef = useRef(false);
       const suppressContextMenuRef = useRef(false);
+      const suppressGestureRef = useRef(false);
       const isListMode = viewMode === "list";
       const linkTarget = file.link_target?.target;
       const isShortcut = isShortcutFile(file);
@@ -155,6 +160,7 @@ export const FileRow = React.memo(
       const fileIconSize = useCompactLayout ? COMPACT_LAYOUT_SIZE.FILE_ROW_ICON_PX : 24;
       const compactMetadata = useCompactLayout ? getCompactFileMetadata(file) : null;
       const canOpenItemActions = showCompactActions && !isUnavailableArchiveEntry && onOpenItemActions !== undefined;
+      const desktopSelection = !useTouchSelectionControls && onIconClick !== undefined;
       const itemTypeLabel = t(file.type === "directory" ? "fileBrowser.row.itemTypes.folder" : "fileBrowser.row.itemTypes.file");
       const linkTargetName = linkTarget?.name;
       const linkTargetPath = linkTarget?.path ?? linkTargetName;
@@ -291,6 +297,14 @@ export const FileRow = React.memo(
                 event.stopPropagation();
                 return;
               }
+              if (desktopSelection && (event.button !== 0 || (suppressGestureRef.current && event.detail > 1))) return;
+              if (desktopSelection && selectionMode) {
+                if (event.detail === 0) return;
+                suppressGestureRef.current = true;
+                onDesktopBodyClick?.(file, index, event);
+                return;
+              }
+              suppressGestureRef.current = false;
               onClick(file, index);
             }}
             onPointerDown={handlePointerDown}
@@ -316,7 +330,7 @@ export const FileRow = React.memo(
                   return <CheckCircleIcon sx={{ fontSize: fileIconSize, color: "primary.main" }} />;
                 }
 
-                if (useTouchSelectionControls && selectionMode) {
+                if (selectionMode) {
                   return <CircleOutlinedIcon sx={{ fontSize: fileIconSize, color: "text.secondary" }} />;
                 }
 
@@ -333,7 +347,7 @@ export const FileRow = React.memo(
 
               return useCompactLayout ? (
                 <>
-                  <Box sx={fileRowStyles.iconBox}>{icon}</Box>
+                  <Box sx={{ ...fileRowStyles.iconBox, visibility: desktopSelection ? "hidden" : undefined }}>{icon}</Box>
                   <Box sx={{ ...fileRowStyles.contentBox, display: "flex", flexDirection: "column", minWidth: 0 }}>
                     {fileName}
                     {compactMetadata ? (
@@ -360,7 +374,7 @@ export const FileRow = React.memo(
               ) : isListMode ? (
                 // List mode: icon + name only
                 <>
-                  <Box sx={fileRowStyles.iconBox}>{icon}</Box>
+                  <Box sx={{ ...fileRowStyles.iconBox, visibility: desktopSelection ? "hidden" : undefined }}>{icon}</Box>
                   <Box sx={{ ...fileRowStyles.contentBox, minWidth: 0 }}>{fileName}</Box>
                 </>
               ) : (
@@ -374,7 +388,7 @@ export const FileRow = React.memo(
                     width: "100%",
                   }}
                 >
-                  <Box sx={fileRowStyles.iconBox}>{icon}</Box>
+                  <Box sx={{ ...fileRowStyles.iconBox, visibility: desktopSelection ? "hidden" : undefined }}>{icon}</Box>
                   <Box sx={{ ...fileRowStyles.contentBox, minWidth: 0 }}>{fileName}</Box>
                   <Typography
                     variant="body2"
@@ -390,6 +404,55 @@ export const FileRow = React.memo(
               );
             })()}
           </FileRowButton>
+          {desktopSelection && (
+            <IconButton
+              role="checkbox"
+              data-file-selection-icon="true"
+              tabIndex={-1}
+              disabled={isUnavailableArchiveEntry}
+              aria-label={`${t(isMultiSelected ? "fileBrowser.compactActions.deselect" : "fileBrowser.compactActions.select")}: ${file.name}`}
+              aria-checked={isMultiSelected}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (event.button !== 0 || (suppressGestureRef.current && event.detail > 1)) return;
+                suppressGestureRef.current = true;
+                onIconClick(file, index, event.shiftKey, event.ctrlKey || event.metaKey);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === " " || event.key === "Enter") event.stopPropagation();
+              }}
+              sx={{
+                position: "absolute",
+                left: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                width: 40,
+                height: 40,
+                "& .selection-affordance": { display: "none" },
+                "&:hover .selection-affordance, &:focus-visible .selection-affordance": { display: "block" },
+                "&:hover .file-icon, &:focus-visible .file-icon": { display: "none" },
+              }}
+            >
+              {selectionMode ? (
+                isMultiSelected ? (
+                  <CheckCircleIcon sx={{ fontSize: fileIconSize, color: "primary.main" }} />
+                ) : (
+                  <CircleOutlinedIcon sx={{ fontSize: fileIconSize }} />
+                )
+              ) : (
+                <>
+                  <Box className="file-icon" sx={{ display: "flex" }}>
+                    {isShortcut ? (
+                      <ShortcutIcon sx={{ fontSize: fileIconSize }} />
+                    ) : (
+                      getFileIcon({ filename: file.name, isDirectory: file.type === "directory", size: fileIconSize })
+                    )}
+                  </Box>
+                  <CircleOutlinedIcon className="selection-affordance" sx={{ fontSize: fileIconSize }} />
+                </>
+              )}
+            </IconButton>
+          )}
           {canOpenItemActions ? (
             <IconButton
               aria-label={t("fileBrowser.compactActions.moreActionsFor", { name: file.name })}
@@ -428,6 +491,8 @@ export const FileRow = React.memo(
     prev.showCompactActions === next.showCompactActions &&
     prev.hasUnsavedLocalDraft === next.hasUnsavedLocalDraft &&
     prev.selectionMode === next.selectionMode &&
+    prev.onIconClick === next.onIconClick &&
+    prev.onDesktopBodyClick === next.onDesktopBodyClick &&
     prev.onLongPressSelect === next.onLongPressSelect &&
     prev.onOpenItemActions === next.onOpenItemActions
 );

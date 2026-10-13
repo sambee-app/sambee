@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { setLocale } from "../../../i18n";
+import { setLocale, translate } from "../../../i18n";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import type { FileEntry } from "../../../types";
 import { StatusBar } from "../StatusBar";
@@ -29,6 +29,30 @@ describe("StatusBar", () => {
 
     expect(screen.queryByText("No selection")).not.toBeInTheDocument();
     expect(screen.getByText("0 items")).toBeInTheDocument();
+  });
+
+  it("replaces focused details with a translated selection count while keeping the total", async () => {
+    const { rerender } = renderWithProvider(
+      <StatusBar files={[baseFile]} focusedIndex={0} selectedCount={0} canResolveShortcutTargets={false} />
+    );
+    expect(screen.getByTestId("status-bar-focused-file-name")).toHaveTextContent("notes.txt");
+
+    rerender(
+      <SambeeThemeProvider>
+        <StatusBar files={[baseFile]} focusedIndex={0} selectedCount={1} canResolveShortcutTargets={false} />
+      </SambeeThemeProvider>
+    );
+    expect(screen.getByText("1 item selected")).toBeInTheDocument();
+    expect(screen.queryByTestId("status-bar-focused-file-name")).not.toBeInTheDocument();
+    expect(screen.getByText("1 item")).toBeInTheDocument();
+
+    await setLocale("en-XA");
+    rerender(
+      <SambeeThemeProvider>
+        <StatusBar files={[baseFile]} focusedIndex={0} selectedCount={2} canResolveShortcutTargets={false} />
+      </SambeeThemeProvider>
+    );
+    expect(screen.getByText(translate("fileBrowser.compactActions.selectedCount", { count: 2 }))).toBeInTheDocument();
   });
 
   it("uses the translated item count without a selected file", async () => {

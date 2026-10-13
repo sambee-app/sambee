@@ -43,6 +43,30 @@ describe("useKeyboardShortcuts", () => {
   };
 
   describe("Basic Functionality", () => {
+    it("keeps icon activation local while allowing file-list navigation", () => {
+      const list = document.createElement("div");
+      list.tabIndex = 0;
+      list.dataset.testid = "file-list-container";
+      const icon = document.createElement("button");
+      icon.dataset.fileSelectionIcon = "true";
+      list.appendChild(icon);
+      document.body.appendChild(list);
+      const shortcuts: KeyboardShortcut[] = [
+        { id: "navigate", keys: "ArrowDown", description: "Next item", handler: mockHandler },
+        { id: "open", keys: "Enter", description: "Open item", handler: mockHandler },
+        { id: "select", keys: " ", description: "Select item", handler: mockHandler },
+      ];
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+      icon.focus();
+      simulateKeyPress("Enter");
+      simulateKeyPress(" ");
+      expect(mockHandler).not.toHaveBeenCalled();
+
+      simulateKeyPress("ArrowDown");
+      expect(document.activeElement).toBe(list);
+      expect(mockHandler).toHaveBeenCalledTimes(1);
+    });
+
     it("should trigger handler on matching key press", () => {
       const shortcuts: KeyboardShortcut[] = [
         {

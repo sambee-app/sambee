@@ -169,7 +169,16 @@ export const useKeyboardShortcuts = ({ shortcuts, inputSelector = "input, textar
       if (event.defaultPrevented) return;
 
       // Check if any interactive control has focus
-      const activeElement = document.activeElement;
+      let activeElement = document.activeElement;
+      if (
+        activeElement instanceof Element &&
+        activeElement.matches('[data-file-selection-icon="true"]') &&
+        ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)
+      ) {
+        const list = activeElement.closest('[data-testid="file-list-container"]');
+        if (list instanceof HTMLElement) list.focus({ preventScroll: true });
+        activeElement = document.activeElement;
+      }
       const interactiveHasFocus = hasInteractiveFocus(activeElement, inputSelector);
 
       const matchesShortcut = (shortcut: KeyboardShortcut): boolean => {
