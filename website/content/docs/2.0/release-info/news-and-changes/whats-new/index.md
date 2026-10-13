@@ -16,6 +16,10 @@ With Sambee's new theme editor, users can change all theme colors via hex values
 
 ## File List
 
+### Mouse Selection on Desktop
+
+Previous versions of Sambee introduced multi-selection for mobile users and keyboard aficionados on desktop. Mouse coverage was lacking. That has been rectified now: Selecting multiple files with a mouse is now straightforward. Click a file or folder icon to select it, then Shift-click another icon to add everything in between without losing your earlier selections. The pane's status bar keeps the count in view.
+
 ### Other Changes
 
 - Native mobile sharing is now available for single or multiple files from the file list.
