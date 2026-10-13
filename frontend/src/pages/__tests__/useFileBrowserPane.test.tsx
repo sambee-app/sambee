@@ -78,6 +78,76 @@ describe("useFileBrowserPane", () => {
     vi.mocked(setPreferredViewerId).mockResolvedValue();
   });
 
+  it("extends mouse ranges from a path anchor and resets it when selection ends", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+
+    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[0], 0, false, false));
+    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[2], 2, true, false));
+    expect([...result.current.selectedFiles]).toEqual(result.current.sortedFiles.map((file) => file.path));
+
+    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[1], 1, false, false));
+    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[0], 0, true, true));
+    expect(result.current.selectedFiles.size).toBe(3);
+
+    act(() => result.current.handleClearSelection());
+    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[2], 2, true, false));
+    expect([...result.current.selectedFiles]).toEqual([result.current.sortedFiles[2].path]);
+  });
+
+  it("keeps earlier selections when extending a mouse range without Ctrl", async () => {
+    const entries = ["A", "B", "C", "D", "E"].map((name) => ({ ...mockDirectoryListing.items[2], name, path: name }));
+    vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: entries, total: entries.length });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(5));
+
+    const [first, , middle, , last] = result.current.sortedFiles;
+    act(() => result.current.selectItemFromIcon(first, 0, false, false));
+    act(() => result.current.selectItemFromIcon(middle, 2, false, false));
+    act(() => result.current.selectItemFromIcon(last, 4, true, false));
+
+    expect(result.current.selectedFiles).toEqual(new Set([first.path, ...result.current.sortedFiles.slice(2).map((file) => file.path)]));
+  });
+
+  it("adds a clicked item after a refresh removes the range anchor", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+
+    const [first, middle, last] = result.current.sortedFiles;
+    act(() => result.current.selectItemFromIcon(first, 0, false, false));
+    act(() => result.current.selectItemFromIcon(last, 2, false, false));
+
+    vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: [first, middle], total: 2 });
+    act(() => result.current.handleRefresh());
+    await waitFor(() => {
+      expect(result.current.sortedFiles).toHaveLength(2);
+      expect(result.current.selectedFiles).toEqual(new Set([first.path]));
+    });
+
+    act(() => result.current.selectItemFromIcon(middle, 1, true, true));
+    expect(result.current.selectedFiles).toEqual(new Set([first.path, middle.path]));
+  });
+
+  it("uses a keyboard selection as the anchor for an icon range", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+
+    const list = document.createElement("div");
+    list.tabIndex = 0;
+    document.body.appendChild(list);
+    act(() => result.current.listContainerRef(list));
+    list.focus();
+    act(() => result.current.handleToggleSelection());
+    expect(result.current.selectedFiles.size).toBe(1);
+    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[2], 2, true, false));
+    expect([...result.current.selectedFiles]).toEqual(result.current.sortedFiles.map((file) => file.path));
+    list.remove();
+  });
+
   it("requests the next virtual page only near the rendered tail or for an underfilled viewport", () => {
     expect(
       shouldLoadNextVirtualPage({

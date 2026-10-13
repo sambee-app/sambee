@@ -2681,23 +2681,25 @@ const Browser: React.FC = () => {
   const openQuickBarMode = useCallback(
     (mode: "navigate" | "commands" | "file-search") => {
       const sourcePaneId = effectiveActivePaneIdRef.current;
+      if (mode === "file-search") (sourcePaneId === "right" ? rightPane : leftPane).handleClearSelection();
       setQuickBarPaneId(sourcePaneId);
       setQuickBarMode(mode);
       setQuickBarActivationToken((current) => current + 1);
       focusQuickBarInput(sourcePaneId);
     },
-    [focusQuickBarInput]
+    [focusQuickBarInput, leftPane, rightPane]
   );
 
   const switchQuickBarMode = useCallback(
     (mode: "navigate" | "commands" | "file-search") => {
       const sourcePaneId = quickBarPaneId === "right" && isDualMode ? "right" : "left";
+      if (mode === "file-search") (sourcePaneId === "right" ? rightPane : leftPane).handleClearSelection();
       setQuickBarPaneId(sourcePaneId);
       setQuickBarMode(mode);
       setQuickBarActivationToken((current) => current + 1);
       focusQuickBarInput(sourcePaneId);
     },
-    [focusQuickBarInput, isDualMode, quickBarPaneId]
+    [focusQuickBarInput, isDualMode, quickBarPaneId, leftPane, rightPane]
   );
 
   const handleCreateArchiveRequest = useCallback(
@@ -3587,7 +3589,9 @@ const Browser: React.FC = () => {
   );
 
   const quickBarQueryValue = undefined;
-  const handleQuickBarQueryValueChange = undefined;
+  const handleQuickBarQueryValueChange = () => {
+    if (quickBarMode === "file-search") quickBarPane.handleClearSelection();
+  };
   const connectionSelectorButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const handleQuickBarArrowDownToFileList = useCallback(() => {
     if (quickBarPane.filesRef.current.length === 0) {
@@ -4168,9 +4172,15 @@ const Browser: React.FC = () => {
           isDualPane={isDualMode}
           onToggleDualPane={handleToggleDualPane}
           sortBy={activePane.sortBy}
-          onSortChange={activePane.setSortBy}
+          onSortChange={(sortBy) => {
+            activePane.handleClearSelection();
+            activePane.setSortBy(sortBy);
+          }}
           sortDirection={activePane.sortDirection}
-          onDirectionChange={() => activePane.setSortDirection((d) => (d === "asc" ? "desc" : "asc"))}
+          onDirectionChange={() => {
+            activePane.handleClearSelection();
+            activePane.setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+          }}
           hasFiles={activePane.files.length > 0}
           onBlurToFileList={() => activePane.listContainerEl?.focus()}
           disableTabFocus={isDualMode}
@@ -4341,6 +4351,7 @@ const Browser: React.FC = () => {
                   <StatusBar
                     files={leftPane.sortedFiles}
                     focusedIndex={leftPane.focusedIndex}
+                    selectedCount={leftPane.selectedFiles.size}
                     canResolveShortcutTargets={leftPane.contentCapabilities.mutate && isLocalDrive(leftPane.connectionId)}
                   />
                 </Box>
@@ -4351,6 +4362,7 @@ const Browser: React.FC = () => {
                       <StatusBar
                         files={rightPane.sortedFiles}
                         focusedIndex={rightPane.focusedIndex}
+                        selectedCount={rightPane.selectedFiles.size}
                         canResolveShortcutTargets={rightPane.contentCapabilities.mutate && isLocalDrive(rightPane.connectionId)}
                       />
                     </Box>

@@ -3,6 +3,7 @@
 //
 
 import { Box, Typography } from "@mui/material";
+import { useTranslation } from "react-i18next";
 import { formatDate, formatFileSize } from "../../pages/FileBrowser/formatters";
 import type { FileEntry } from "../../types";
 import { isShortcutFile } from "../../utils/fileEntries";
@@ -14,6 +15,7 @@ export const STATUS_BAR_HEIGHT = 32;
 interface StatusBarProps {
   files: FileEntry[];
   focusedIndex: number;
+  selectedCount?: number;
   canResolveShortcutTargets: boolean;
 }
 
@@ -21,7 +23,8 @@ interface StatusBarProps {
  * Status bar showing selected file info and total count
  * Desktop only component
  */
-export function StatusBar({ files, focusedIndex, canResolveShortcutTargets }: StatusBarProps) {
+export function StatusBar({ files, focusedIndex, selectedCount = 0, canResolveShortcutTargets }: StatusBarProps) {
+  const { t } = useTranslation();
   const selectedFile = files[focusedIndex];
   const linkTargetStatus = selectedFile?.link_target
     ? STATUS_BAR_STRINGS.linkTargetStatus(selectedFile.link_target)
@@ -45,8 +48,14 @@ export function StatusBar({ files, focusedIndex, canResolveShortcutTargets }: St
       }}
     >
       {/* Left side - Selected file info */}
-      <Box sx={{ display: "flex", gap: 1, alignItems: "center", minWidth: 0, flex: 1 }}>
+      <Box sx={{ display: "flex", gap: 1, alignItems: "center", minWidth: 0, flex: 1, overflow: "hidden" }}>
         {(() => {
+          if (selectedCount > 0)
+            return (
+              <Typography variant="caption" noWrap>
+                {t("fileBrowser.compactActions.selectedCount", { count: selectedCount })}
+              </Typography>
+            );
           if (!selectedFile) return null;
 
           const parts = [];
@@ -61,8 +70,8 @@ export function StatusBar({ files, focusedIndex, canResolveShortcutTargets }: St
           }
 
           return (
-            <Box sx={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0 }}>
-              <Typography data-testid="status-bar-focused-file-name" variant="caption" noWrap>
+            <Box sx={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, overflow: "hidden" }}>
+              <Typography data-testid="status-bar-focused-file-name" variant="caption" noWrap sx={{ minWidth: 0 }}>
                 {selectedFile.name}
               </Typography>
               {selectedFile.type === "file" && selectedFile.size !== undefined && selectedFile.size !== null && (
@@ -85,7 +94,7 @@ export function StatusBar({ files, focusedIndex, canResolveShortcutTargets }: St
         })()}
       </Box>
 
-      <Box sx={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flexShrink: 0 }}>
         <Typography
           variant="caption"
           sx={{

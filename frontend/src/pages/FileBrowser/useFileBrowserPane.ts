@@ -318,6 +318,11 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
   /** Set of currently selected canonical file paths. */
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const selectionAnchorRef = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    if (selectedFiles.size === 0) selectionAnchorRef.current = null;
+  }, [selectedFiles]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // Viewer State
@@ -1512,6 +1517,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       setConnectionId(newConnectionId);
       setCurrentPath("");
       setViewInfo(null);
+      selectionAnchorRef.current = null;
       setSelectedFiles(new Set());
       directoryCache.current.clear();
       navigationHistory.current.clear();
@@ -2430,6 +2436,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   const handleClose = useCallback(() => {
     setViewInfo(null);
     setBrowserViewerPickerState(null);
+    selectionAnchorRef.current = null;
     setSelectedFiles(new Set());
   }, []);
 
@@ -2458,6 +2465,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       const currentFile = files[focusedIndex];
       if (!currentFile) return;
 
+      selectionAnchorRef.current = currentFile.path;
       setSelectedFiles((prev) => {
         const next = new Set(prev);
         if (next.has(currentFile.path)) {
@@ -2465,6 +2473,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         } else {
           next.add(currentFile.path);
         }
+        if (next.size === 0) selectionAnchorRef.current = null;
         return next;
       });
     },
@@ -2487,6 +2496,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       const currentFile = files[focusedIndex];
       if (!currentFile) return;
 
+      selectionAnchorRef.current = currentFile.path;
       // Select the current file
       setSelectedFiles((prev) => {
         const next = new Set(prev);
@@ -2518,6 +2528,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       const currentFile = files[focusedIndex];
       if (!currentFile) return;
 
+      selectionAnchorRef.current = currentFile.path;
       // Select the current file
       setSelectedFiles((prev) => {
         const next = new Set(prev);
@@ -2536,11 +2547,13 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   /** Select all files in the current directory (Ctrl+A). */
   const handleSelectAll = useCallback(() => {
     const allPaths = new Set(filesRef.current.map((file) => file.path));
+    selectionAnchorRef.current = filesRef.current[focusedIndex]?.path ?? null;
     setSelectedFiles(allPaths);
-  }, []);
+  }, [focusedIndex]);
 
   /** Clear all selections. */
   const handleClearSelection = useCallback(() => {
+    selectionAnchorRef.current = null;
     setSelectedFiles(new Set());
   }, []);
 
@@ -2549,6 +2562,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     const removedPaths = new Set(paths);
     setSelectedFiles((previous) => {
       const next = new Set([...previous].filter((path) => !removedPaths.has(path)));
+      if (next.size === 0) selectionAnchorRef.current = null;
       return next.size === previous.size ? previous : next;
     });
   }, []);
@@ -2557,6 +2571,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     (file: FileEntry, index: number) => {
       skipNextLayoutScrollRef.current = true;
       updateFocus(index, { immediate: true });
+      selectionAnchorRef.current = file.path;
       setSelectedFiles((previous) => new Set(previous).add(file.path));
     },
     [updateFocus]
@@ -2566,6 +2581,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     (file: FileEntry, index: number) => {
       skipNextLayoutScrollRef.current = true;
       updateFocus(index, { immediate: true });
+      selectionAnchorRef.current = file.path;
       setSelectedFiles((previous) => {
         const next = new Set(previous);
         if (next.has(file.path)) {
@@ -2573,8 +2589,35 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         } else {
           next.add(file.path);
         }
+        if (next.size === 0) selectionAnchorRef.current = null;
         return next;
       });
+    },
+    [updateFocus]
+  );
+
+  const selectItemFromIcon = useCallback(
+    (file: FileEntry, index: number, extend: boolean, _additive: boolean) => {
+      skipNextLayoutScrollRef.current = true;
+      updateFocus(index, { immediate: true });
+      const displayed = filesRef.current;
+      const anchorIndex = displayed.findIndex((entry) => entry.path === selectionAnchorRef.current);
+      if (extend && anchorIndex !== -1) {
+        const range = displayed.slice(Math.min(anchorIndex, index), Math.max(anchorIndex, index) + 1).map((entry) => entry.path);
+        setSelectedFiles((previous) => new Set([...previous, ...range]));
+      } else if (extend) {
+        selectionAnchorRef.current = file.path;
+        setSelectedFiles((previous) => new Set(previous).add(file.path));
+      } else {
+        selectionAnchorRef.current = file.path;
+        setSelectedFiles((previous) => {
+          const next = new Set(previous);
+          if (next.has(file.path)) next.delete(file.path);
+          else next.add(file.path);
+          if (next.size === 0) selectionAnchorRef.current = null;
+          return next;
+        });
+      }
     },
     [updateFocus]
   );
@@ -2602,12 +2645,14 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   useEffect(() => {
     if (pendingSelectedFilesRestoreRef.current !== null) {
       setSelectedFiles(new Set(pendingSelectedFilesRestoreRef.current));
+      selectionAnchorRef.current = null;
       pendingSelectedFilesRestoreRef.current = null;
       return;
     }
 
+    selectionAnchorRef.current = null;
     setSelectedFiles(new Set());
-  }, [currentPath, connectionId]);
+  }, [currentPath, connectionId, archiveLocation?.archivePath, archiveLocation?.virtualPath]);
 
   useEffect(() => {
     if (loading) return;
@@ -2615,6 +2660,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     setSelectedFiles((previous) => {
       if (previous.size === 0) return previous;
       const next = new Set([...previous].filter((path) => currentPaths.has(path)));
+      if (next.size === 0) selectionAnchorRef.current = null;
       return next.size === previous.size ? previous : next;
     });
   }, [files, loading]);
@@ -3512,6 +3558,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     removeSelectedPaths,
     selectItem,
     toggleItemSelection,
+    selectItemFromIcon,
     getItemsByPaths,
     getEffectiveSelection,
 

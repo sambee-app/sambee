@@ -235,6 +235,7 @@ export interface UseFileBrowserPaneReturn {
   selectItem: (file: FileEntry, index: number) => void;
   /** Toggle one file without requiring list focus. */
   toggleItemSelection: (file: FileEntry, index: number) => void;
+  selectItemFromIcon: (file: FileEntry, index: number, extend: boolean, additive: boolean) => void;
   /** Resolves canonical file paths to the current operation handles. */
   getItemsByPaths: (paths: readonly string[]) => BrowserItem[];
   /**

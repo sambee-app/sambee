@@ -47,6 +47,21 @@ describe("FileRow", () => {
     await setLocale("en");
   });
 
+  it("selects through a labeled icon without opening or activating twice in a double click", () => {
+    const props = createDefaultFileRowProps();
+    props.isMultiSelected = false;
+    const onIconClick = vi.fn();
+    render(<FileRow {...props} selectionMode={false} onIconClick={onIconClick} />);
+
+    const icon = screen.getByRole("checkbox", { name: "Select: report.pdf" });
+    expect(icon).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(icon, { detail: 1, shiftKey: true });
+    fireEvent.click(icon, { detail: 2 });
+    expect(onIconClick).toHaveBeenCalledTimes(1);
+    expect(onIconClick).toHaveBeenCalledWith(props.file, props.index, true, false);
+    expect(props.onClick).not.toHaveBeenCalled();
+  });
+
   it("does not render an application context menu on desktop", async () => {
     await setLocale("en-XA");
 
