@@ -99,7 +99,9 @@ Closing the editor by clicking the X now works in the same way as pressing <kbd>
 
 ### Password Login
 
-When an admin configures a user to require a password change, that change is now enforced upon the next password login.
+- When an admin configures a user to require a password change, that change is now enforced upon the next password login.
+- Local usernames are now evaluated case-insensitively.
+- The password field got an option to reveal the password.
 
 ### Settings
 

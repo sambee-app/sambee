@@ -40,6 +40,58 @@ from app.services.oidc_configuration import encrypt_candidate_snapshot, get_oidc
 from app.services.oidc_flow import start_login_flow, start_test_flow
 
 
+@pytest.mark.parametrize("submitted_username", ["MixedUser", "mixeduser", "MIXEDUSER", " MixedUser ", "STRASSE"])
+def test_password_login_matches_case_insensitively(client: TestClient, session: Session, submitted_username: str) -> None:
+    stored_username = "Straße" if submitted_username == "STRASSE" else "MixedUser"
+    user = User(username=stored_username, password_hash=get_password_hash("Secret123!"))
+    session.add(user)
+    session.commit()
+    response = client.post("/api/auth/token", data={"username": submitted_username, "password": "Secret123!"})
+    assert response.status_code == 200
+    assert decode_access_token(response.json()["access_token"])["sub"] == str(user.id)
+    assert response.json()["username"] == stored_username
+    assert client.post("/api/auth/token", data={"username": submitted_username, "password": "secret123!"}).status_code == 401
+
+
+def test_legacy_conflicts_require_exact_spelling_and_resolve_after_rename(
+    client: TestClient, session: Session, legacy_username_conflict: tuple[User, User]
+) -> None:
+    first, second = legacy_username_conflict
+    for username, password, expected_id in [
+        (first.username, "FirstPassword!", first.id),
+        (second.username, "SecondPassword!", second.id),
+    ]:
+        response = client.post("/api/auth/token", data={"username": username, "password": password})
+        assert response.status_code == 200
+        assert decode_access_token(response.json()["access_token"])["sub"] == str(expected_id)
+    for username, password in [("LEGACYUSER", "FirstPassword!"), (first.username, "SecondPassword!")]:
+        response = client.post("/api/auth/token", data={"username": username, "password": password})
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Incorrect username or password"
+    second.username = "DistinctUser"
+    session.add(second)
+    session.commit()
+    assert client.post("/api/auth/token", data={"username": "LEGACYUSER", "password": "FirstPassword!"}).status_code == 200
+
+
+@pytest.mark.parametrize("state", ["disabled", "expired", "passwordless"])
+def test_unavailable_accounts_still_count_toward_login_conflicts(
+    client: TestClient, session: Session, legacy_username_conflict: tuple[User, User], state: str
+) -> None:
+    _first, second = legacy_username_conflict
+    if state == "disabled":
+        second.is_active = False
+    elif state == "expired":
+        second.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    else:
+        second.password_hash = None
+    session.add(second)
+    session.commit()
+    assert client.post("/api/auth/token", data={"username": "LEGACYUSER", "password": "FirstPassword!"}).status_code == 401
+    assert client.post("/api/auth/token", data={"username": "LegacyUser", "password": "FirstPassword!"}).status_code == 200
+    assert client.post("/api/auth/token", data={"username": "legacyuser", "password": "SecondPassword!"}).status_code == 401
+
+
 def test_pending_oidc_login_cookies_keep_parallel_flows_separate() -> None:
     first_state, second_state = "first-state", "second-state"
     first_cookie = auth_module._oidc_login_flow_cookie_name(first_state)

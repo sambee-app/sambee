@@ -44,7 +44,7 @@ describe("Login Flow Integration", () => {
       await screen.findByLabelText(/username/i);
 
       const usernameInput = screen.getByLabelText(/username/i);
-      const passwordInput = screen.getByLabelText(/password/i);
+      const passwordInput = screen.getByLabelText(/^password/i);
       const loginButton = screen.getByRole("button", { name: /sign in/i });
 
       await user.type(usernameInput, "wronguser");
@@ -72,7 +72,7 @@ describe("Login Flow Integration", () => {
       await screen.findByLabelText(/username/i);
 
       const usernameInput = screen.getByLabelText(/username/i);
-      const passwordInput = screen.getByLabelText(/password/i);
+      const passwordInput = screen.getByLabelText(/^password/i);
       const loginButton = screen.getByRole("button", { name: /sign in/i });
 
       await user.type(usernameInput, "testuser");
@@ -118,9 +118,9 @@ describe("Login Flow Integration", () => {
       const user = userEvent.setup();
 
       // Wait for auth config check to complete
-      await screen.findByLabelText(/password/i);
+      await screen.findByLabelText(/^password/i);
 
-      const passwordInput = screen.getByLabelText(/password/i);
+      const passwordInput = screen.getByLabelText(/^password/i);
       const loginButton = screen.getByRole("button", { name: /sign in/i });
 
       // Only fill password

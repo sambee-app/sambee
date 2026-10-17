@@ -186,6 +186,22 @@ def session_fixture(engine, patch_db_engine) -> Generator[Session, None, None]:
     connection.close()
 
 
+@pytest.fixture
+def legacy_username_conflict(session: Session) -> tuple[User, User]:
+    """Seed pre-upgrade duplicates, then restore the migration's write guards."""
+    from app.db.migrations import _apply_case_insensitive_usernames_migration
+
+    session.connection().exec_driver_sql('UPDATE "user" SET username = username WHERE 0')
+    session.connection().exec_driver_sql("DROP TRIGGER user_username_key_insert")
+    first = User(username="LegacyUser", password_hash=get_password_hash("FirstPassword!"))
+    second = User(username="legacyuser", password_hash=get_password_hash("SecondPassword!"))
+    session.add_all([first, second])
+    session.flush()
+    _apply_case_insensitive_usernames_migration(session.connection())
+    session.commit()
+    return first, second
+
+
 @pytest.fixture(name="client")
 def client_fixture(session: Session, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, None]:
     """Create a test client with database session override."""

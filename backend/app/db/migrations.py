@@ -8,6 +8,7 @@ from sqlalchemy import MetaData, inspect, text
 from sqlalchemy.engine import Connection, Engine
 
 from app.core.logging import get_logger
+from app.core.usernames import USERNAME_COLLISION_CONSTRAINT, USERNAME_KEY_FUNCTION
 from app.models.connection import generate_unique_connection_slug
 
 logger = get_logger(__name__)
@@ -1020,6 +1021,35 @@ def _apply_oidc_no_refresh_sessions_migration(connection: Connection) -> None:
         index.create(bind=connection, checkfirst=True)
 
 
+def _apply_case_insensitive_usernames_migration(connection: Connection) -> None:
+    """Index all names while preventing new collisions without rejecting legacy ones."""
+    if not inspect(connection).has_table("user"):
+        return
+    columns = {column["name"] for column in inspect(connection).get_columns("user")}
+    if "username_key" not in columns:
+        connection.execute(
+            text(f'ALTER TABLE "user" ADD COLUMN username_key VARCHAR GENERATED ALWAYS AS ({USERNAME_KEY_FUNCTION}(username)) VIRTUAL')
+        )
+    connection.execute(text('CREATE INDEX IF NOT EXISTS ix_user_username_key ON "user" (username_key)'))
+    connection.execute(
+        text(f"""
+        CREATE TRIGGER IF NOT EXISTS user_username_key_insert
+        BEFORE INSERT ON "user"
+        WHEN EXISTS (SELECT 1 FROM "user" WHERE username_key = NEW.username_key)
+        BEGIN SELECT RAISE(ABORT, '{USERNAME_COLLISION_CONSTRAINT}'); END
+    """)
+    )
+    connection.execute(
+        text(f"""
+        CREATE TRIGGER IF NOT EXISTS user_username_key_update
+        BEFORE UPDATE OF username ON "user"
+        WHEN NEW.username_key != OLD.username_key
+            AND EXISTS (SELECT 1 FROM "user" WHERE username_key = NEW.username_key AND id != OLD.id)
+        BEGIN SELECT RAISE(ABORT, '{USERNAME_COLLISION_CONSTRAINT}'); END
+    """)
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, name="ensure_connection_slugs", apply=_apply_connection_slug_migration),
     Migration(version=2, name="add_user_role_and_session_fields", apply=_apply_user_role_migration),
@@ -1060,6 +1090,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=35, name="split_system_setting_policy_blobs", apply=_apply_per_field_system_settings_migration),
     Migration(version=36, name="add_download_intent_token_version", apply=_apply_download_intent_token_version_migration),
     Migration(version=37, name="add_oidc_no_refresh_sessions", apply=_apply_oidc_no_refresh_sessions_migration),
+    Migration(version=38, name="case_insensitive_usernames", apply=_apply_case_insensitive_usernames_migration),
 )
 
 

@@ -127,6 +127,35 @@ describe("UserManagementSettings", () => {
     expect(getCachedAsyncData(unrelatedKey)).toBe("unrelated");
   });
 
+  it("shows username conflicts even for an empty directory and clears resolved conflicts", async () => {
+    const directory = {
+      items: [],
+      total: 0,
+      summary: { total: 0, active_admins: 0, disabled: 0, expiring_soon: 0, pending_oidc: 0, unavailable_sign_in: 0 },
+      username_conflicts: [["UserA", "usera"]],
+    };
+    vi.mocked(api.getUsers).mockResolvedValue(directory);
+    const view = render(
+      <SambeeThemeProvider>
+        <UserManagementSettings />
+      </SambeeThemeProvider>
+    );
+    const warning = await screen.findByText(/These accounts have conflicting usernames/);
+    expect(warning.closest('[role="status"]')).toHaveTextContent("UserA, usera");
+    expect(warning).toHaveTextContent("exact spelling");
+    view.unmount();
+    clearCachedAsyncData();
+    vi.mocked(api.getUsers).mockResolvedValue({ ...directory, username_conflicts: [] });
+    render(
+      <SambeeThemeProvider>
+        <UserManagementSettings />
+      </SambeeThemeProvider>
+    );
+    await waitFor(() => expect(api.getUsers).toHaveBeenCalledTimes(2));
+    await screen.findByRole("button", { name: /add user/i });
+    expect(screen.queryByText(/These accounts have conflicting usernames/)).not.toBeInTheDocument();
+  });
+
   it("opens the create-user dialog with outlined form controls", async () => {
     const user = userEvent.setup();
 

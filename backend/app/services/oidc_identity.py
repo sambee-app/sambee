@@ -4,8 +4,10 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import cast
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.core.usernames import is_username_collision, username_key
 from app.models.oidc import (
     OidcAdmissionMode,
     OidcIdentity,
@@ -377,6 +379,8 @@ def resolve_or_provision_oidc_user(
                 correlation_id=correlation_id,
             )
         else:
+            if session.exec(select(User).where(User.username_key == username_key(username))).first() is not None:
+                raise OidcIdentityError(OidcIdentityErrorCode.USERNAME_COLLISION)
             role = resolve_oidc_role(configuration, claims.groups)
             user = User(
                 username=username,
@@ -388,7 +392,13 @@ def resolve_or_provision_oidc_user(
                 is_active=True,
             )
             session.add(user)
-            session.flush()
+            try:
+                session.flush()
+            except IntegrityError as error:
+                session.rollback()
+                if is_username_collision(error):
+                    raise OidcIdentityError(OidcIdentityErrorCode.USERNAME_COLLISION) from error
+                raise
             identity = OidcIdentity(
                 user_id=user.id,
                 issuer=claims.issuer,

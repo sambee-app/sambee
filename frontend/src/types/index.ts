@@ -141,6 +141,7 @@ export interface AdminUserListResponse {
   items: AdminUser[];
   total: number;
   summary: AdminUserListSummary;
+  username_conflicts?: string[][];
 }
 
 export interface AdminUserCreateInput {
