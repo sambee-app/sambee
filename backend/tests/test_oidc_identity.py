@@ -71,6 +71,18 @@ def test_role_resolution_normalizes_groups_and_uses_highest_privilege(session: S
     assert role == UserRole.ADMIN
 
 
+def test_case_only_username_conflict_does_not_link_oidc_identity(session: Session) -> None:
+    configuration = _configuration(session, editor_groups=["Editors"])
+    local = User(username="Alice", password_hash="existing-hash")
+    session.add(local)
+    session.commit()
+    with pytest.raises(OidcIdentityError) as error:
+        resolve_or_provision_oidc_user(session, configuration=configuration, claims=_claims(groups=("sambee users", "Editors")))
+    assert error.value.code == OidcIdentityErrorCode.USERNAME_COLLISION
+    assert session.exec(select(OidcIdentity).where(OidcIdentity.user_id == local.id)).first() is None
+    assert session.get(User, local.id).username == "Alice"
+
+
 def test_role_resolution_grants_viewer_and_denies_nonmatching_groups(session: Session) -> None:
     configuration = _configuration(session, viewer_groups=["Viewers"])
     configuration.admission_mode = OidcAdmissionMode.ALL_IDP_USERS

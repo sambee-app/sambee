@@ -41,6 +41,16 @@ Mapping updates are atomic and revision checked. If another administrator change
 
 Deleting a local user also removes their established identity, pending mappings targeting that user, and incomplete OIDC flows in the same transaction. Pending mappings that the deleted user created for other accounts remain active and show **Deleted user** as their creator. Deletion remains subject to the last-administrator guard.
 
+## Local Username Matching And Upgrade Conflicts
+
+Local-password sign-in matches usernames without regard to capitalization, using Unicode case folding and ignoring leading and trailing whitespace. Stored spelling is preserved. Passwords remain case-sensitive. New accounts and renamed accounts can't introduce case-insensitive duplicates, including accounts created through OIDC.
+
+Upgrades complete automatically even if existing accounts have conflicting names, such as `UserA` and `usera`. Accounts, passwords, roles, ownership, and identity links are preserved. Each conflicting account continues to accept only its exact stored username spelling; other capitalizations are rejected without choosing an account by its password. Disabled, expired, and passwordless accounts also count toward a conflict.
+
+**Settings** > **Administration** > **Users** lists conflicts in a warning, regardless of directory filters or pagination. Resolve a conflict by renaming an account through its normal editor, or deleting an account that's no longer needed. Deleting an account remains subject to the normal deletion consequences and administrator safeguards. Unchanged usernames and case-only renames remain available while resolving existing conflicts. Once only one account has a comparison key, case-insensitive password sign-in applies automatically, without restarting or rerunning a migration.
+
+OIDC identity matching and automatic linking still require the exact username spelling. A case-only match doesn't automatically link an identity or create another account; resolve that collision through the existing identity-mapping controls.
+
 ## Require A Local Password Change
 
 When creating a local user or resetting an existing local password, enable **Require change on next password sign-in** to require a new password before the user can continue. The user directory shows **Pwd change req'd** while this requirement is pending.
@@ -74,3 +84,5 @@ Sambee enforces authentication limits in the application. A reverse proxy can ad
 | Password sign-in | 10 attempts per source IP per 5 minutes and 10 attempts per submitted username per 15 minutes |
 
 Limits refill continuously. A rejected API request returns `Retry-After`; browser-based OIDC requests return to the sign-in page with a generic retry message. Password forms larger than 64 KiB are rejected before parsing. These responses do not expose account existence, the active sign-in mode, provider payloads, or submitted credentials.
+
+All capitalization and Unicode case-folding variants of a username share the same username-based password limit, including legacy conflicting accounts.

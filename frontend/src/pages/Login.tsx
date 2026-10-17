@@ -3,6 +3,7 @@ import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { SettingsPasswordVisibilityToggle } from "../components/Settings/SettingsPasswordVisibilityToggle";
 import { login } from "../services/api";
 import { type AuthConfig, getAuthConfig } from "../services/authConfig";
 import { authSession } from "../services/authSession";
@@ -43,6 +44,7 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [error, setError] = useState(oidcErrorFromFragment);
   const [isLoading, setIsLoading] = useState(true);
   const [configurationUnavailable, setConfigurationUnavailable] = useState(false);
@@ -271,10 +273,22 @@ const Login: React.FC = () => {
               required
               fullWidth
               label={t("auth.login.passwordLabel")}
-              type="password"
+              type={passwordVisible ? "text" : "password"}
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <SettingsPasswordVisibilityToggle
+                      visible={passwordVisible}
+                      onToggle={() => setPasswordVisible((visible) => !visible)}
+                      showLabel={t("auth.login.showPassword", { defaultValue: "Show password" })}
+                      hideLabel={t("auth.login.hidePassword", { defaultValue: "Hide password" })}
+                    />
+                  ),
+                },
+              }}
             />
             <Button type="submit" fullWidth variant="outlined" sx={{ mt: 3, mb: 2 }}>
               {authConfig.sign_in_mode === "oidc_or_password" ? t("auth.login.submitWithPassword") : t("auth.login.submit")}

@@ -30,6 +30,13 @@ def test_single_bucket_rejects_without_consuming_and_evicts_at_capacity() -> Non
     assert limiter.check_authorization("192.0.2.2").allowed
 
 
+def test_password_limit_shares_unicode_case_variants() -> None:
+    limiter = AuthenticationRateLimiter()
+    for attempt in range(10):
+        assert limiter.check_password(f"192.0.2.{attempt + 1}", " Straße ").allowed
+    assert not limiter.check_password("198.51.100.1", "STRASSE").allowed
+
+
 def test_source_ip_uses_only_strict_forwarding_from_trusted_peers() -> None:
     trusted = "10.0.0.0/8, 2001:db8::/32"
 

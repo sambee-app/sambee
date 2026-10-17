@@ -4,9 +4,11 @@ from enum import StrEnum
 from typing import overload
 
 from pydantic import model_validator
-from sqlalchemy import Column
+from sqlalchemy import Column, Computed, String
 from sqlalchemy import Enum as SqlEnum
 from sqlmodel import Field, SQLModel
+
+from app.core.usernames import USERNAME_KEY_FUNCTION
 
 
 class UserRole(StrEnum):
@@ -76,6 +78,7 @@ class AccountSessionKind(StrEnum):
 class User(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     username: str = Field(unique=True, index=True)
+    username_key: str = Field(default=None, sa_column=Column(String, Computed(f"{USERNAME_KEY_FUNCTION}(username)"), index=True))
     name: str | None = Field(default=None)
     email: str | None = Field(default=None, index=True)
     password_hash: str | None = Field(default=None)
@@ -199,6 +202,7 @@ class AdminUserListResponse(SQLModel):
     items: list[AdminUserRead]
     total: int
     summary: AdminUserListSummary
+    username_conflicts: list[list[str]] = Field(default_factory=list)
 
 
 class AdminUserCreate(SQLModel):

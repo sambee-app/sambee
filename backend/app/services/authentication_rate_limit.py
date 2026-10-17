@@ -7,6 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address, ip_network
 
+from app.core.usernames import username_key
+
 AUTHORIZATION_CAPACITY = 20
 AUTHORIZATION_REFILL_SECONDS = 5 * 60
 CALLBACK_CAPACITY = 60
@@ -98,11 +100,11 @@ class AuthenticationRateLimiter:
         return self._check_single(self._refresh, source_ip)
 
     def check_password(self, source_ip: str, username: str) -> RateLimitDecision:
-        username_key = hashlib.sha256(username.strip().encode("utf-8")).hexdigest()
+        normalized_username = hashlib.sha256(username_key(username).encode("utf-8")).hexdigest()
         with self._lock:
             now = self._clock()
             ip_bucket = self._password_ip.get(source_ip, now)
-            username_bucket = self._password_username.get(username_key, now)
+            username_bucket = self._password_username.get(normalized_username, now)
             if ip_bucket.tokens < 1 or username_bucket.tokens < 1:
                 waits = [
                     store.retry_after(bucket)

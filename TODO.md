@@ -2,9 +2,6 @@
 
 ## Bugs
 
-- Login dialog (local users)
-   - The password field has no option to reveal the password.
-   - Usernames are currently evaluated as case sensitive. Change that so that both "Testuser" and "testuser" are accepted.
 - File move across SMB connections
    - Moving a directory tree from one SMB connection to another:
       - The 2nd directory in the source was moved into the 1st (already moved) directory at the target instead of moving it to the root of the target.

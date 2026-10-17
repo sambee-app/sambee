@@ -716,6 +716,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
   });
   const loading = directoryLoading || contextLoading;
   const users = cachedDirectoryData?.users ?? [];
+  const usernameConflicts = cachedDirectoryData?.directory.username_conflicts ?? [];
   const directorySummary = cachedDirectoryData?.directory.summary ?? {
     total: 0,
     active_admins: 0,
@@ -1817,6 +1818,28 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
         spacing={2}
         sx={{ minWidth: 0, containerType: "inline-size", containerName: DIRECTORY_CONTAINER_NAME }}
       >
+        {usernameConflicts.length > 0 && (
+          <SettingsInlineAlert severity="warning" role="status" sx={{ mb: 0, overflowWrap: "anywhere" }}>
+            <Typography variant="body2">
+              {t("settings.userManagement.usernameConflicts", {
+                defaultValue:
+                  "These accounts have conflicting usernames. Password sign-in requires their exact spelling until an administrator renames or removes the duplicates.",
+              })}
+            </Typography>
+            <Box component="ul" sx={{ my: 1, pl: 2 }}>
+              {usernameConflicts.map((group) => (
+                <li key={JSON.stringify(group)}>
+                  {group.map((username, index) => (
+                    <span key={username}>
+                      {index > 0 && ", "}
+                      <bdi>{username}</bdi>
+                    </span>
+                  ))}
+                </li>
+              ))}
+            </Box>
+          </SettingsInlineAlert>
+        )}
         <Stack aria-label="Directory overview" direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
           <Chip
             label={t("settings.userManagement.totalUsers", { count: directorySummary.total })}

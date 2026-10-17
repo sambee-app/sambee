@@ -25,6 +25,7 @@ from app.db.migrations import (
     MIGRATION_TABLE_NAME,
     MIGRATIONS,
     _apply_archive_operation_contract_version_migration,
+    _apply_case_insensitive_usernames_migration,
     run_migrations,
 )
 from app.models.connection import Connection
@@ -35,6 +36,61 @@ from app.models.user import User, UserRole
 @pytest.mark.unit
 class TestDatabaseInitialization:
     """Test database initialization."""
+
+    def test_username_migration_preserves_conflicts_and_guards_writes(self, tmp_path: Path):
+        test_engine = create_engine(f"sqlite:///{tmp_path / 'username-upgrade.db'}")
+        try:
+            with test_engine.begin() as connection:
+                connection.exec_driver_sql('CREATE TABLE "user" (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT)')
+                connection.exec_driver_sql('CREATE TABLE owned_item (user_id TEXT REFERENCES "user"(id), value TEXT)')
+                connection.exec_driver_sql("INSERT INTO user VALUES ('first', 'UserA', 'hash-one'), ('second', 'usera', 'hash-two')")
+                connection.exec_driver_sql("INSERT INTO owned_item VALUES ('second', 'preserved')")
+                _apply_case_insensitive_usernames_migration(connection)
+                _apply_case_insensitive_usernames_migration(connection)
+                assert connection.exec_driver_sql('SELECT id, username, password_hash, username_key FROM "user" ORDER BY id').all() == [
+                    ("first", "UserA", "hash-one", "usera"),
+                    ("second", "usera", "hash-two", "usera"),
+                ]
+                assert connection.exec_driver_sql("SELECT * FROM owned_item").all() == [("second", "preserved")]
+            with pytest.raises(IntegrityError, match="user_username_key_collision"), test_engine.begin() as connection:
+                connection.exec_driver_sql("INSERT INTO user (id, username) VALUES ('third', 'USERA')")
+            with test_engine.begin() as connection:
+                connection.exec_driver_sql("UPDATE user SET username = 'USERA' WHERE id = 'first'")
+                connection.exec_driver_sql("UPDATE user SET username = 'UniqueUser' WHERE id = 'second'")
+            with pytest.raises(IntegrityError, match="user_username_key_collision"), test_engine.begin() as connection:
+                connection.exec_driver_sql("UPDATE user SET username = 'usera' WHERE id = 'second'")
+            with test_engine.begin() as connection:
+                connection.exec_driver_sql("DELETE FROM user WHERE id = 'first'")
+                connection.exec_driver_sql("INSERT INTO user (id, username) VALUES ('third', 'usera')")
+                assert connection.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+        finally:
+            test_engine.dispose()
+
+    def test_concurrent_case_variants_cannot_both_be_created(self, tmp_path: Path):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
+        test_engine = create_engine(f"sqlite:///{tmp_path / 'username-concurrent.db'}")
+        try:
+            with test_engine.begin() as connection:
+                connection.exec_driver_sql('CREATE TABLE "user" (id TEXT PRIMARY KEY, username TEXT UNIQUE)')
+                _apply_case_insensitive_usernames_migration(connection)
+            ready = Barrier(2)
+
+            def insert(username: str) -> bool:
+                ready.wait(timeout=10)
+                try:
+                    with test_engine.begin() as connection:
+                        connection.execute(text('INSERT INTO "user" (id, username) VALUES (:username, :username)'), {"username": username})
+                    return True
+                except IntegrityError as error:
+                    assert "user_username_key_collision" in str(error)
+                    return False
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                assert sorted(executor.map(insert, ["ConcurrentUser", "concurrentuser"])) == [False, True]
+        finally:
+            test_engine.dispose()
 
     def test_no_refresh_migration_preserves_existing_session(self, tmp_path: Path):
         from datetime import datetime, timedelta, timezone
@@ -933,7 +989,7 @@ class TestDatabaseEngine:
                         """
                     )
                 )
-                connection.execute(text('CREATE TABLE "user" (id CHAR(32) NOT NULL PRIMARY KEY)'))
+                connection.execute(text('CREATE TABLE "user" (id CHAR(32) NOT NULL PRIMARY KEY, username VARCHAR NOT NULL UNIQUE)'))
                 connection.execute(text("CREATE TABLE oidcproviderconfiguration (id INTEGER NOT NULL PRIMARY KEY)"))
                 connection.execute(
                     text(
@@ -957,7 +1013,10 @@ class TestDatabaseEngine:
                         """
                     )
                 )
-                connection.execute(text('INSERT INTO "user" (id) VALUES (:target), (:creator)'), {"target": "a" * 32, "creator": "b" * 32})
+                connection.execute(
+                    text("INSERT INTO \"user\" (id, username) VALUES (:target, 'target'), (:creator, 'creator')"),
+                    {"target": "a" * 32, "creator": "b" * 32},
+                )
                 connection.execute(text("INSERT INTO oidcproviderconfiguration (id) VALUES (1)"))
                 connection.execute(
                     text(

@@ -6,12 +6,14 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, case, false, func, not_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.authorization import Capability
 from app.core.logging import get_logger, set_user
 from app.core.secrets import generate_temporary_password
 from app.core.security import get_password_hash, require_capability
+from app.core.usernames import USERNAME_COLLISION_MESSAGE, is_username_collision, username_key
 from app.db.database import get_session
 from app.models.oidc import OidcIdentity, OidcPendingIdentityMapping, OidcProviderConfiguration, OidcRoleAssignmentMode
 from app.models.theme import StoredTheme
@@ -49,6 +51,25 @@ OIDC_MANAGED_IDENTITY_FIELDS_DETAIL = "Full name and email are managed by OIDC"
 USER_DIRECTORY_EXPIRING_SOON_DAYS = 30
 USER_DIRECTORY_DEFAULT_PAGE_SIZE = 25
 USER_DIRECTORY_MAX_PAGE_SIZE = 100
+
+
+def _commit_user_change(session: Session) -> None:
+    try:
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        if is_username_collision(error):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=USERNAME_COLLISION_MESSAGE) from error
+        raise
+
+
+def _username_conflicts(session: Session) -> list[list[str]]:
+    duplicate_keys = select(User.username_key).group_by(User.username_key).having(func.count() > 1)
+    users = session.exec(select(User).where(User.username_key.in_(duplicate_keys)).order_by(User.username_key, User.username)).all()
+    groups: dict[str, list[str]] = {}
+    for user in users:
+        groups.setdefault(user.username_key, []).append(user.username)
+    return list(groups.values())
 
 
 def _count_active_admins(session: Session) -> int:
@@ -420,7 +441,12 @@ async def list_users(
         pending_oidc=_count_directory_users(session, predicates, pending_mapping),
         unavailable_sign_in=_count_directory_users(session, predicates, and_(User.password_hash.is_(None), not_(any_identity))),
     )
-    return AdminUserListResponse(items=_build_admin_user_reads_with_authentication(session, users), total=total, summary=summary)
+    return AdminUserListResponse(
+        items=_build_admin_user_reads_with_authentication(session, users),
+        total=total,
+        summary=summary,
+        username_conflicts=_username_conflicts(session),
+    )
 
 
 @router.post("/users", response_model=AdminUserCreateResult, status_code=status.HTTP_201_CREATED)
@@ -438,9 +464,9 @@ async def create_user(
     username = user_data.username.strip()
     name = user_data.name.strip() if user_data.name else None
     email = user_data.email.strip().lower() if user_data.email else None
-    existing_user = session.exec(select(User).where(User.username == username)).first()
+    existing_user = session.exec(select(User).where(User.username_key == username_key(username))).first()
     if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A user with that username already exists")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=USERNAME_COLLISION_MESSAGE)
 
     if email:
         existing_email_user = session.exec(select(User).where(User.email == email)).first()
@@ -464,7 +490,7 @@ async def create_user(
         expires_at=user_data.expires_at,
     )
     session.add(user)
-    session.commit()
+    _commit_user_change(session)
     session.refresh(user)
 
     logger.info(f"Created user: actor={current_user.username}, username={user.username}, role={user.role}")
@@ -523,10 +549,10 @@ async def update_user(
     next_is_active = user.is_active if user_data.is_active is None else user_data.is_active
     next_expires_at = user.expires_at if user_data.expires_at is None else user_data.expires_at
 
-    if next_username != user.username:
-        existing_user = session.exec(select(User).where(User.username == next_username)).first()
+    if username_key(next_username) != user.username_key:
+        existing_user = session.exec(select(User).where(User.username_key == username_key(next_username))).first()
         if existing_user and existing_user.id != user.id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A user with that username already exists")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=USERNAME_COLLISION_MESSAGE)
 
     if next_email != user.email and next_email:
         existing_email_user = session.exec(select(User).where(User.email == next_email)).first()
@@ -564,7 +590,7 @@ async def update_user(
     user.expires_at = next_expires_at
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
-    session.commit()
+    _commit_user_change(session)
     session.refresh(user)
 
     logger.info(f"Updated user: actor={current_user.username}, username={user.username}, role={user.role}, active={user.is_active}")

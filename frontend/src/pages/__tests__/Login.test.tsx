@@ -52,6 +52,22 @@ class LoginChannel {
 }
 
 describe("Login Component", () => {
+  it("reveals and hides the password without changing it or submitting", async () => {
+    const user = userEvent.setup();
+    render(<Login />);
+    const password = await screen.findByLabelText(/^password/i);
+    expect(password).toHaveAttribute("type", "password");
+    await user.type(password, "Secret123!");
+    await user.click(screen.getByRole("button", { name: "Show password" }));
+    expect(password).toHaveAttribute("type", "text");
+    expect(password).toHaveValue("Secret123!");
+    expect(password).toHaveAttribute("autocomplete", "current-password");
+    await user.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveValue("Secret123!");
+    expect(mockLogin).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     authSession.clear();
     LoginChannel.channels = [];
@@ -269,7 +285,7 @@ describe("Login Component", () => {
 
     // Check for form fields
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^password/i)).toBeInTheDocument();
 
     // Check for submit button
     expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
@@ -288,7 +304,7 @@ describe("Login Component", () => {
     });
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText(/^password/i);
 
     // Type in username
     await user.type(usernameInput, "testuser");
@@ -318,7 +334,7 @@ describe("Login Component", () => {
 
     // Fill in form with valid credentials
     await user.type(screen.getByLabelText(/username/i), "admin");
-    await user.type(screen.getByLabelText(/password/i), "admin");
+    await user.type(screen.getByLabelText(/^password/i), "admin");
 
     // Submit form
     await user.click(screen.getByRole("button", { name: /sign in/i }));
@@ -357,7 +373,7 @@ describe("Login Component", () => {
 
     // Fill in form with invalid credentials
     await user.type(screen.getByLabelText(/username/i), "wronguser");
-    await user.type(screen.getByLabelText(/password/i), "wrongpass");
+    await user.type(screen.getByLabelText(/^password/i), "wrongpass");
 
     // Submit form
     await user.click(screen.getByRole("button", { name: /sign in/i }));
@@ -383,7 +399,7 @@ describe("Login Component", () => {
     // First attempt with invalid credentials
     vi.mocked(mockLogin).mockRejectedValueOnce(new Error("Unauthorized"));
     await user.type(screen.getByLabelText(/username/i), "wronguser");
-    await user.type(screen.getByLabelText(/password/i), "wrongpass");
+    await user.type(screen.getByLabelText(/^password/i), "wrongpass");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     // Wait for error
@@ -393,7 +409,7 @@ describe("Login Component", () => {
 
     // Clear the fields
     await user.clear(screen.getByLabelText(/username/i));
-    await user.clear(screen.getByLabelText(/password/i));
+    await user.clear(screen.getByLabelText(/^password/i));
 
     // Second attempt with valid credentials
     vi.mocked(mockLogin).mockResolvedValueOnce({
@@ -403,7 +419,7 @@ describe("Login Component", () => {
       role: "admin",
     });
     await user.type(screen.getByLabelText(/username/i), "admin");
-    await user.type(screen.getByLabelText(/password/i), "admin");
+    await user.type(screen.getByLabelText(/^password/i), "admin");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledTimes(2));
@@ -428,7 +444,7 @@ describe("Login Component", () => {
 
     // Fill in form
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText(/^password/i);
 
     await user.type(usernameInput, "admin");
     await user.type(passwordInput, "admin");
@@ -458,7 +474,7 @@ describe("Login Component", () => {
 
     // Use the non-admin test user
     await user.type(screen.getByLabelText(/username/i), "testuser");
-    await user.type(screen.getByLabelText(/password/i), "testpass");
+    await user.type(screen.getByLabelText(/^password/i), "testpass");
     await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("testuser", "testpass"));
@@ -476,7 +492,7 @@ describe("Login Component", () => {
     expect(providerButton).toHaveClass("MuiButton-contained");
     expect(screen.getByRole("button", { name: "Sign in with password" })).toHaveClass("MuiButton-outlined");
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^password/i)).toBeInTheDocument();
   });
 
   it("renders no controls while authentication mode is unknown", () => {
@@ -497,7 +513,7 @@ describe("Login Component", () => {
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Authentication is temporarily unavailable");
     expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^password/i)).not.toBeInTheDocument();
   });
 
   it("clears the configuration error after a successful retry", async () => {
@@ -540,7 +556,7 @@ describe("Login Component", () => {
 
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^password/i)).not.toBeInTheDocument();
   });
 
   it("shows a stable OIDC error and clears it from browser history", async () => {
@@ -569,6 +585,6 @@ describe("Login Component", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/identity provider is temporarily unavailable/i);
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^password/i)).toBeInTheDocument();
   });
 });

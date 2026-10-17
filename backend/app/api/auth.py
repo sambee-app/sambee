@@ -29,6 +29,7 @@ from app.core.security import (
     password_change_required,
     verify_password,
 )
+from app.core.usernames import username_key
 from app.db.database import get_immediate_session, get_session
 from app.models.oidc import (
     OidcBrowserSession,
@@ -448,8 +449,12 @@ async def login(
 
     logger.info(f"Login attempt: username={username}")
 
-    statement = select(User).where(User.username == username)
-    user = session.exec(statement).first()
+    candidates = session.exec(select(User).where(User.username_key == username_key(username))).all()
+    user = (
+        candidates[0]
+        if len(candidates) == 1
+        else next((candidate for candidate in candidates if candidate.username == username.strip()), None)
+    )
 
     if (
         not user
