@@ -2337,9 +2337,13 @@ describe("Browser Component - Interactions", () => {
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
         await user.keyboard("{Home}");
-        await waitFor(() => expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true"));
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true")
+        );
         await user.keyboard("{ArrowDown}");
-        await waitFor(() => expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true"));
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true")
+        );
 
         const event = createEvent.keyDown(list, { key, shiftKey: true });
         fireEvent(list, event);
@@ -2347,7 +2351,10 @@ describe("Browser Component - Interactions", () => {
         expect(event.defaultPrevented).toBe(true);
         expect(selectedNames(list)).toEqual(expected);
         await waitFor(() =>
-          expect(within(list).getByRole("button", { name: new RegExp(`: ${target} \\(selected\\)$`) })).toHaveAttribute("data-selected", "true")
+          expect(within(list).getByRole("button", { name: new RegExp(`: ${target} \\(selected\\)$`) })).toHaveAttribute(
+            "data-selected",
+            "true"
+          )
         );
         await user.keyboard(`{Shift>}{${key}}{/Shift}`);
         expect(selectedNames(list)).toEqual(expected);
@@ -2429,9 +2436,13 @@ describe("Browser Component - Interactions", () => {
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
         await user.keyboard("{End}");
-        await waitFor(() => expect(within(list).getByRole("button", { name: "File: readme.txt" })).toHaveAttribute("data-selected", "true"));
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "File: readme.txt" })).toHaveAttribute("data-selected", "true")
+        );
         await user.keyboard("{Home}");
-        await waitFor(() => expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true"));
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true")
+        );
         expect(selectedNames(list)).toEqual([]);
       });
     });
