@@ -427,6 +427,16 @@ export async function executeTransferTree(
   }
 
   const sourceRoot = request.source.path;
+  const operationId = randomUuid();
+  const operationContext = {
+    operationId,
+    kind: request.kind,
+    sourceConnectionId: request.source.location.connectionId,
+    destinationConnectionId: request.destination.connectionId,
+    sourceRoot,
+    destinationParent: request.destination.path,
+  };
+  logger.debug("Directory transfer started", operationContext, "browser");
   const rootName = request.targetName ?? sourceRoot.split("/").pop() ?? "";
   let policy = request.targetResolutionPolicy ?? "ask";
   let completed = 0;
@@ -434,6 +444,9 @@ export async function executeTransferTree(
   let sourceRetained = false;
   let destinationMutated = false;
   let sourceMutated = false;
+  let sourceUnknown = false;
+  let destinationUnknown = false;
+  let replaced = false;
 
   const reportProgress = () => request.onTreeProgress?.(completed, discovered);
   const isMissing = (error: unknown) => isApiError(error) && error.response?.status === 404;
@@ -453,6 +466,7 @@ export async function executeTransferTree(
     return new Map(listing.items.map((item) => [item.name, item]));
   };
   const createDirectory = async (connectionId: string, parentPath: string, name: string) => {
+    logger.debug("Directory transfer request", { ...operationContext, phase: "create", connectionId, parentPath, name }, "browser");
     const resolved = environment.storageRegistry.resolveDirectory({ connectionId, path: parentPath });
     const result = await environment.storageRegistry
       .getBackend(resolved.target)
@@ -461,17 +475,20 @@ export async function executeTransferTree(
     destinationMutated = true;
   };
   const partialEffects = () => ({
-    source: sourceMutated ? ("mutated" as const) : ("unchanged" as const),
-    destination: destinationMutated ? ("mutated" as const) : ("unchanged" as const),
+    source: sourceMutated ? ("mutated" as const) : sourceUnknown ? ("unknown" as const) : ("unchanged" as const),
+    destination: destinationMutated ? ("mutated" as const) : destinationUnknown ? ("unknown" as const) : ("unchanged" as const),
   });
-  const cancelledTreeResult = (): ContentTransferResult => ({ status: "cancelled", replaced: false, effects: partialEffects() });
+  const cancelledTreeResult = (): ContentTransferResult => ({ status: "cancelled", replaced, effects: partialEffects() });
   const recordChildEffects = (result: ContentTransferResult) => {
     sourceMutated ||= result.effects.source === "mutated";
     destinationMutated ||= result.effects.destination === "mutated";
+    sourceUnknown ||= result.effects.source === "unknown";
+    destinationUnknown ||= result.effects.destination === "unknown";
+    replaced ||= result.replaced;
   };
   const preservePartialEffects = (result: ContentTransferResult): ContentTransferResult => {
-    if (result.status === "outcome_unknown") return result;
-    return { ...result, effects: partialEffects() };
+    if (result.status === "skipped") return result;
+    return { ...result, replaced, effects: partialEffects() };
   };
   const decide = async (
     incoming: FileInfo,
@@ -538,6 +555,20 @@ export async function executeTransferTree(
             destination: physicalLocation(request.destination.connectionId, destinationParent),
             targetName: currentTargetName,
             targetResolutionPolicy: currentPolicy,
+            onAttemptStart: (transferAttemptId) => {
+              logger.debug(
+                "Directory transfer request",
+                {
+                  ...operationContext,
+                  phase: "transfer",
+                  transferAttemptId,
+                  sourcePath,
+                  destinationPath: `${destinationParent}/${currentTargetName}`.replace(/^\//, ""),
+                },
+                "browser"
+              );
+              request.onAttemptStart?.(transferAttemptId);
+            },
           },
           environment
         );
@@ -568,7 +599,7 @@ export async function executeTransferTree(
       logger.warn("Directory transfer received an invalid source listing", { sourcePath }, "browser");
       return {
         status: "failed",
-        replaced: false,
+        replaced,
         effects: partialEffects(),
         error: { code: "validation", reason: "invalid-directory-listing" },
       };
@@ -604,7 +635,7 @@ export async function executeTransferTree(
         }
         const result = await transferFile(childSourcePath, destinationPath, targetName);
         recordChildEffects(result);
-        if (result.status === "outcome_unknown") return result;
+        if (result.status === "outcome_unknown") return preservePartialEffects(result);
         if (result.status === "completed_with_source_retained") {
           sourceRetained = true;
         } else if (result.status !== "completed" && result.status !== "skipped") {
@@ -615,6 +646,7 @@ export async function executeTransferTree(
       reportProgress();
     }
     if (request.kind === "move") {
+      logger.debug("Directory transfer request", { ...operationContext, phase: "remove_empty_directory", sourcePath }, "browser");
       const sourceDirectory = environment.storageRegistry.resolveItem({
         connectionId: request.source.location.connectionId,
         path: sourcePath,
@@ -663,26 +695,27 @@ export async function executeTransferTree(
   if (rootTarget.status === "skipped")
     return { status: "skipped", replaced: false, effects: { source: "unchanged", destination: "unchanged" } };
   const result = await walk(sourceRoot, rootTarget.path);
-  return result ?? completedTreeResult(request.kind, sourceRetained, destinationMutated, sourceMutated);
+  return result ?? completedTreeResult(request.kind, sourceRetained, destinationMutated, sourceMutated, replaced);
 }
 
 function completedTreeResult(
   kind: "copy" | "move",
   sourceRetained: boolean,
   destinationMutated: boolean,
-  sourceMutated: boolean
+  sourceMutated: boolean,
+  replaced: boolean
 ): ContentTransferResult {
   if (kind === "move" && sourceRetained) {
     return {
       status: "completed_with_source_retained",
-      replaced: false,
+      replaced,
       effects: { source: sourceMutated ? "mutated" : "unchanged", destination: destinationMutated ? "mutated" : "unchanged" },
       error: { code: "source_delete_failed", detail: "Some source directories still contain skipped or concurrently created entries." },
     };
   }
   return {
     status: "completed",
-    replaced: false,
+    replaced,
     effects: {
       source: kind === "move" && sourceMutated ? "mutated" : "unchanged",
       destination: destinationMutated ? "mutated" : "unchanged",

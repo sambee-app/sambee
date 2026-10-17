@@ -766,7 +766,7 @@ describe("content operations", () => {
       list: vi.fn().mockResolvedValue({ items: [{ name: "report.txt", path: "root/report.txt", type: "file" }] }),
       moveWithinBackend: vi.fn().mockResolvedValue({
         status: "completed",
-        replaced: false,
+        replaced: true,
         effects: { source: "mutated", destination: "mutated" },
       }),
       removeEmptyDirectory: vi.fn().mockResolvedValue({ status: "not_empty" }),
@@ -792,8 +792,64 @@ describe("content operations", () => {
         },
         { ...environment, storageRegistry } as never
       )
-    ).resolves.toMatchObject({ status: "completed_with_source_retained", effects: { source: "mutated", destination: "mutated" } });
+    ).resolves.toMatchObject({
+      status: "completed_with_source_retained",
+      replaced: true,
+      effects: { source: "mutated", destination: "mutated" },
+    });
   });
+
+  it.each(["outcome_unknown", "failed", "cancelled"] as const)(
+    "preserves previous mutations and replacement when a child is %s",
+    async (status) => {
+      const root = { name: "root", path: "root", type: "directory" };
+      const sourceBackend = {
+        getInfo: vi.fn(async () => root),
+        list: vi.fn().mockResolvedValue({
+          items: [
+            { name: "first.txt", path: "root/first.txt", type: "file" },
+            { name: "second.txt", path: "root/second.txt", type: "file" },
+          ],
+        }),
+        moveWithinBackend: vi
+          .fn()
+          .mockResolvedValueOnce({ status: "completed", replaced: true, effects: { source: "mutated", destination: "mutated" } })
+          .mockResolvedValueOnce({
+            status,
+            replaced: false,
+            effects: { source: "unknown", destination: "unknown" },
+            ...(status === "failed" ? { error: { code: "transport", detail: "connection lost" } } : {}),
+          }),
+        removeEmptyDirectory: vi.fn(),
+      };
+      const destinationBackend = {
+        getInfo: vi.fn(async ({ path }: { path: string }) => (path === "output/root" ? root : null)),
+        list: vi.fn().mockResolvedValue({ items: [] }),
+      };
+      const storageRegistry = {
+        resolveItem: vi.fn(({ connectionId, path }) => ({ target: { connectionId }, path })),
+        resolveDirectory: vi.fn(({ connectionId, path }) => ({ target: { connectionId }, path })),
+        getCapabilities: vi.fn(() => ({ writable: true })),
+        getBackend: vi.fn((target: { connectionId: string }) => (target.connectionId === "source" ? sourceBackend : destinationBackend)),
+      };
+      await expect(
+        executeTransferTree(
+          {
+            kind: "move",
+            source: physicalItemHandle("source", "root"),
+            destination: physicalLocation("destination", "output"),
+            onConflict: vi.fn(),
+          },
+          { ...environment, storageRegistry } as never
+        )
+      ).resolves.toMatchObject({
+        status,
+        replaced: true,
+        effects: { source: "mutated", destination: "mutated" },
+      });
+      expect(sourceBackend.removeEmptyDirectory).not.toHaveBeenCalled();
+    }
+  );
 
   it("leaves destination-only merge entries untouched", async () => {
     const root = { name: "root", path: "root", type: "directory" };

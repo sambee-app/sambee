@@ -150,9 +150,9 @@ export type ContentTransferResult =
       effects: { source: "unchanged" | "mutated"; destination: "unchanged" | "mutated" };
       error: { code: "source_delete_failed"; detail: string };
     }
-  | { status: "outcome_unknown"; replaced: false; effects: { source: "unchanged" | "unknown"; destination: "unknown" } }
-  | { status: "failed"; replaced: false; effects: StorageMutationEffects; error: StorageOperationError }
-  | { status: "cancelled"; replaced: false; effects: StorageMutationEffects };
+  | { status: "outcome_unknown"; replaced: boolean; effects: StorageMutationEffects }
+  | { status: "failed"; replaced: boolean; effects: StorageMutationEffects; error: StorageOperationError }
+  | { status: "cancelled"; replaced: boolean; effects: StorageMutationEffects };
 
 export type StorageOperationError =
   | { code: "unavailable"; reason: "read-only" | "unpaired" | "unsupported" | "missing-target" | "source_size_unknown" }

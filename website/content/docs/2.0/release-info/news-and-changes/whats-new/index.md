@@ -27,10 +27,23 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 
 ### Bugfixes
 
+#### File Copy/Move
+
+- Uploads and copy or move operations no longer interfere with each other's conflict decisions.
+- Moving files between SMB connections no longer leaves the original in place when it should have been deleted.
+- SMB moves now protect the source from concurrent edits and renames, preventing deletion of changes that weren't copied.
+- Overwriting an existing SMB file now replaces it atomically instead of failing.
+- Cancelling a move after copying finishes, but before source deletion starts, now correctly reports that both copies were kept.
+- Transfer results now show when a file was copied or replaced, even if removing or checking the original fails.
+- When transferring a folder, a problem with one file no longer hides files already copied, moved, or replaced from the summary.
+- Interrupted SMB moves now release files safely, without leaving them open or interrupting work still in progress.
+- Pressing Enter after a transfer finishes no longer starts the same transfer again.
+
+#### Miscellaneous
+
 - Invalid file browser URLs no longer break the page or prevent the other pane from loading.
 - Overlapping download requests were allowed.
 - A failed background connection refresh no longer hides a recovered file listing.
-- Uploads and copy or move operations no longer interfere with each other's conflict decisions.
 - Renaming a file to a name that differed by case only failed on local drive connections.
 
 ## OpenID Connect (OIDC)

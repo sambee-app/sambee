@@ -3,12 +3,13 @@ from uuid import uuid4
 
 import pytest
 
-from app.models.file import CopyMoveRequest, FileInfo, FileType
+from app.models.file import ContentTransferEffects, ContentTransferError, ContentTransferResult, CopyMoveRequest, FileInfo, FileType
 from app.services.content_transfer import (
     ContentTransferPlan,
     RegularFileSourceSnapshot,
     SourceChangedError,
     SourceDeleteError,
+    SourceDeletionOutcomeUnknown,
     TargetMutationCommitted,
     TargetMutationTargetExistsBeforeMutation,
     resolve_regular_file_transfer,
@@ -27,6 +28,30 @@ def file_info(path: str, modified_at: datetime) -> FileInfo:
         modified_at=modified_at,
         stable_id="source-id",
     )
+
+
+@pytest.mark.parametrize(
+    "status,source,destination,replaced",
+    [
+        ("outcome_unknown", "unknown", "mutated", True),
+        ("outcome_unknown", "unknown", "unknown", False),
+        ("outcome_unknown", "mutated", "mutated", True),
+        ("failed", "unchanged", "mutated", True),
+        ("cancelled", "mutated", "mutated", True),
+        ("completed_with_source_retained", "mutated", "mutated", True),
+        ("completed_with_source_retained", "unchanged", "unchanged", False),
+    ],
+)
+def test_factual_transfer_result_roundtrips_partial_and_legacy_outcomes(status, source, destination, replaced):
+    error = (
+        ContentTransferError(code="source_delete_failed", detail="source retained")
+        if status == "completed_with_source_retained"
+        else (ContentTransferError(code="source_changed", detail="source changed") if status == "failed" else None)
+    )
+    result = ContentTransferResult(
+        status=status, effects=ContentTransferEffects(source=source, destination=destination), replaced=replaced, error=error
+    )
+    assert ContentTransferResult.model_validate_json(result.model_dump_json()) == result
 
 
 class MemoryTransferBackend:
@@ -79,10 +104,13 @@ class RetainedMoveSource(MemoryTransferBackend):
         source = self
 
         class Reader:
+            async def get_file_info(self) -> FileInfo:
+                return await source.get_file_info(path)
+
             async def read_at(self, offset: int, length: int) -> bytes:
                 return source.files[path][offset : offset + length]
 
-            async def commit_delete(self) -> None:
+            async def commit_delete(self, *, cancellation=None) -> None:
                 source.delete_commits.append(path)
                 del source.files[path]
 
@@ -395,6 +423,112 @@ async def test_regular_file_move_deletes_only_through_the_retained_source_reader
     assert source.files == {}
     assert source.delete_commits == ["source.txt"]
     assert source.closed_paths == ["source.txt"]
+
+
+@pytest.mark.asyncio
+async def test_move_cancelled_after_publication_retains_source_and_replacement() -> None:
+    now = datetime.now(timezone.utc)
+    source = RetainedMoveSource({"source.txt": b"content"}, now)
+    target = TargetChangesBeforeCommitBackend({"target.txt": b"old"}, now, now)
+    with pytest.raises(SourceDeleteError, match="cancelled after") as raised:
+        await cross_connection_move(
+            source,
+            target,
+            "source.txt",
+            "target.txt",
+            overwrite=True,
+            cancellation=lambda: target.write_count > 0,
+        )
+    assert raised.value.replaced is True
+    assert source.files == {"source.txt": b"content"}
+    assert target.files == {"target.txt": b"content"}
+    assert source.delete_commits == []
+    assert source.closed_paths == ["source.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uncertain", [False, True])
+@pytest.mark.parametrize("cleanup_failure", [False, True])
+async def test_move_deletion_failure_preserves_replacement_and_published_bytes(uncertain: bool, cleanup_failure: bool) -> None:
+    now = datetime.now(timezone.utc)
+    source = RetainedMoveSource({"source.txt": b"content"}, now)
+    target = TargetChangesBeforeCommitBackend({"target.txt": b"old"}, now, now)
+    original_open = source.open_move_source_reader
+
+    async def open_reader(path):
+        reader = await original_open(path)
+
+        async def reject(*, cancellation=None):
+            if uncertain:
+                raise SourceDeletionOutcomeUnknown("lost acknowledgement")
+            raise SourceDeleteError("server rejected deletion", destination_mutated=True)
+
+        reader.commit_delete = reject
+        if cleanup_failure:
+            original_close = reader.close
+
+            async def fail_close():
+                await original_close()
+                raise OSError("cleanup failed too")
+
+            reader.close = fail_close
+        return reader
+
+    source.open_move_source_reader = open_reader
+    with pytest.raises(SourceDeletionOutcomeUnknown if uncertain else SourceDeleteError) as raised:
+        await cross_connection_move(source, target, "source.txt", "target.txt", overwrite=True)
+    assert raised.value.replaced is True
+    assert target.files == {"target.txt": b"content"}
+    assert source.files == {"source.txt": b"content"}
+    assert source.closed_paths == ["source.txt"]
+
+
+@pytest.mark.asyncio
+async def test_move_rejects_replaced_object_at_handle_acquisition() -> None:
+    now = datetime.now(timezone.utc)
+    source = RetainedMoveSource({"source.txt": b"content"}, now)
+    target = MemoryTransferBackend({}, now)
+    original_open = source.open_move_source_reader
+
+    async def open_reader(path):
+        reader = await original_open(path)
+
+        async def observe():
+            return (await source.get_file_info(path)).model_copy(update={"stable_id": "replacement-object"})
+
+        reader.get_file_info = observe
+        return reader
+
+    source.open_move_source_reader = open_reader
+    with pytest.raises(SourceChangedError, match="before reading"):
+        await cross_connection_move(source, target, "source.txt", "target.txt")
+    assert target.files == {}
+    assert source.delete_commits == []
+    assert source.closed_paths == ["source.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disappears", [False, True])
+async def test_copy_source_change_after_replacement_preserves_publication_facts(disappears: bool) -> None:
+    now = datetime.now(timezone.utc)
+    source = MemoryTransferBackend({"source.txt": b"content"}, now)
+
+    class PostPublicationChange(TargetChangesBeforeCommitBackend):
+        async def stage_and_commit_new_file_from_stream(self, *args, **kwargs):
+            result = await super().stage_and_commit_new_file_from_stream(*args, **kwargs)
+            if disappears:
+                del source.files["source.txt"]
+            else:
+                source.files["source.txt"] = b"newer source content"
+            return result
+
+    target = PostPublicationChange({"target.txt": b"old"}, now, now)
+    with pytest.raises(SourceChangedError) as raised:
+        await cross_connection_copy(source, target, "source.txt", "target.txt", overwrite=True)
+    assert raised.value.destination_mutated is True
+    assert raised.value.replaced is True
+    assert target.files == {"target.txt": b"content"}
+    assert source.files == ({} if disappears else {"source.txt": b"newer source content"})
 
 
 @pytest.mark.asyncio

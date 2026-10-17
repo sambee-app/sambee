@@ -61,10 +61,13 @@ describe("CopyMoveDialog", () => {
   });
 
   it("shows a terminal Close action without allowing the batch to run again", () => {
-    render(<CopyMoveDialog {...defaultProps} error="One item failed" isTerminal />);
+    const onConfirm = vi.fn();
+    render(<CopyMoveDialog {...defaultProps} onConfirm={onConfirm} error="One item failed" isTerminal />);
 
     expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
   it("focuses Close when a still-open dialog enters a terminal state", async () => {
