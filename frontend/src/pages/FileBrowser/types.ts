@@ -225,6 +225,7 @@ export interface UseFileBrowserPaneReturn {
   handleSelectDown: (e?: KeyboardEvent) => void;
   /** Select the focused file and move focus up (Alt+ArrowUp). */
   handleSelectUp: (e?: KeyboardEvent) => void;
+  handleSelectToBoundary: (boundary: "first" | "last") => void;
   /** Select all files in the current directory (Ctrl+A). */
   handleSelectAll: () => void;
   /** Clear all selections. */

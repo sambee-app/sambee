@@ -974,6 +974,8 @@ export const EN_TRANSLATIONS = {
       selectAllFiles: "Select all files",
       selectAndMoveDown: "Select & move down",
       selectAndMoveUp: "Select & move up",
+      selectToFirst: "Select from focused item to first item",
+      selectToLast: "Select from focused item to last item",
       showCommands: "Show commands",
       showHelp: "Show keyboard shortcuts",
       switchActivePane: "Switch active pane",

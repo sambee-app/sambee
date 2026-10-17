@@ -2321,6 +2321,192 @@ describe("Browser Component - Interactions", () => {
   });
 
   describe("Keyboard Navigation", () => {
+    describe("boundary range selection", () => {
+      const selectedNames = (container: HTMLElement) =>
+        within(container)
+          .queryAllByRole("button", { name: /\(selected\)$/i })
+          .map((row) => row.getAttribute("aria-label"));
+
+      it.each([
+        ["Home", ["Folder: Documents (selected)", "Folder: Pictures (selected)"], "Documents"],
+        ["End", ["Folder: Pictures (selected)", "File: readme.txt (selected)"], "readme.txt"],
+      ])("Shift+%s selects the inclusive range from current focus and moves focus to the boundary", async (key, expected, target) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard("{Home}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true")
+        );
+        await user.keyboard("{ArrowDown}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true")
+        );
+
+        const event = createEvent.keyDown(list, { key, shiftKey: true });
+        fireEvent(list, event);
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(selectedNames(list)).toEqual(expected);
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: new RegExp(`: ${target} \\(selected\\)$`) })).toHaveAttribute(
+            "data-selected",
+            "true"
+          )
+        );
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+        expect(selectedNames(list)).toEqual(expected);
+      });
+
+      it.each([
+        ["Home", "End", "File: readme.txt"],
+        ["End", "Home", "Folder: Documents"],
+      ])(
+        "Shift+%s preserves selections outside the range and uses focus instead of the previous anchor",
+        async (key, initialKey, initialName) => {
+          const user = userEvent.setup();
+          renderBrowser("/browse/smb/test-server-1");
+          await screen.findByRole("button", { name: "Folder: Pictures" });
+          const list = screen.getByTestId("file-list-container");
+          await user.click(within(list).getByTestId("virtual-list"));
+          await user.keyboard(`{${initialKey}}`);
+          await waitFor(() => expect(within(list).getByRole("button", { name: initialName })).toHaveAttribute("data-selected", "true"));
+          await user.keyboard(" ");
+          expect(selectedNames(list)).toEqual([`${initialName} (selected)`]);
+          await user.keyboard("{Home}");
+          await waitFor(() =>
+            expect(within(list).getByRole("button", { name: /^Folder: Documents/ })).toHaveAttribute("data-selected", "true")
+          );
+          await user.keyboard("{ArrowDown}");
+          await waitFor(() =>
+            expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true")
+          );
+          await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+
+          expect(selectedNames(list)).toEqual([
+            "Folder: Documents (selected)",
+            "Folder: Pictures (selected)",
+            "File: readme.txt (selected)",
+          ]);
+        }
+      );
+
+      it.each([
+        ["End", "Home", "File: readme.txt (selected)"],
+        ["Home", "End", "Folder: Documents (selected)"],
+      ])("Shift+%s uses pending focus from %s before an animation frame commits", async (key, navigationKey, targetName) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard("{Home}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true")
+        );
+        await user.keyboard("{ArrowDown}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true")
+        );
+
+        const frames: FrameRequestCallback[] = [];
+        const animationFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+        try {
+          fireEvent.keyDown(list, { key: navigationKey });
+          expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true");
+          fireEvent.keyDown(list, { key, shiftKey: true });
+
+          expect(selectedNames(list)).toEqual([
+            "Folder: Documents (selected)",
+            "Folder: Pictures (selected)",
+            "File: readme.txt (selected)",
+          ]);
+          act(() => {
+            for (const callback of frames.splice(0)) callback(performance.now());
+          });
+          expect(within(list).getByRole("button", { name: targetName })).toHaveAttribute("data-selected", "true");
+        } finally {
+          animationFrame.mockRestore();
+          act(() => {
+            for (const callback of frames) callback(performance.now());
+          });
+        }
+      });
+
+      it.each(["Home", "End"])("Shift+%s selects a single-item list without toggling it off", async (key) => {
+        const user = userEvent.setup();
+        vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: [mockDirectoryListing.items[0]!], total: 1 });
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Documents" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard(`{Shift>}{${key}}{${key}}{/Shift}`);
+
+        expect(selectedNames(list)).toEqual(["Folder: Documents (selected)"]);
+      });
+
+      it.each(["Home", "End"])("Shift+%s does nothing in an empty list", async (key) => {
+        const user = userEvent.setup();
+        vi.mocked(api.listDirectory).mockResolvedValue({ path: "", items: [], total: 0 });
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByText("This directory is empty");
+        const list = screen.getByTestId("file-list-container");
+        await user.click(list);
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+
+        expect(selectedNames(list)).toEqual([]);
+      });
+
+      it.each(["Home", "End"])("Shift+%s leaves text inputs and toolbar focus alone", async (key) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        const input = screen.getByPlaceholderText("Navigate to any directory");
+        await user.click(input);
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+        expect(input).toHaveFocus();
+        expect(selectedNames(list)).toEqual([]);
+
+        const settingsButton = screen.getByRole("button", { name: /open settings/i });
+        settingsButton.focus();
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+        expect(settingsButton).toHaveFocus();
+        expect(selectedNames(list)).toEqual([]);
+      });
+
+      it.each(["Home", "End"])("Shift+%s does not select files while a dialog is open", async (key) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        await screen.findByRole("dialog");
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+
+        expect(selectedNames(screen.getByTestId("file-list-container"))).toEqual([]);
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+
+      it("keeps unmodified Home and End as focus-only navigation", async () => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard("{End}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "File: readme.txt" })).toHaveAttribute("data-selected", "true")
+        );
+        await user.keyboard("{Home}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true")
+        );
+        expect(selectedNames(list)).toEqual([]);
+      });
+    });
+
     it("opens navigate mode with Ctrl+K even when a toolbar button is focused", async () => {
       const user = userEvent.setup();
       renderBrowser("/browse/smb/test-server-1");
@@ -3759,6 +3945,8 @@ describe("Browser Component - Interactions", () => {
   });
 
   describe("Rename", () => {
+    const PANE_READY_TIMEOUT_MS = 5000;
+
     it("opens the rename dialog from the active pane toolbar command", async () => {
       const user = userEvent.setup();
       renderBrowser("/browse/smb/test-server-1");
@@ -3769,38 +3957,99 @@ describe("Browser Component - Interactions", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
 
-    it("targets the newly active pane when Rename is invoked from the toolbar", async () => {
-      const user = userEvent.setup();
-      vi.mocked(api.listDirectory).mockImplementation(async (connectionId) => {
-        const name = connectionId === "conn-1" ? "left-item.txt" : "right-item.txt";
-        return {
-          items: [
-            {
-              name,
-              path: name,
-              type: FileType.FILE,
-              size: 1,
-              modified_at: "2024-01-01T00:00:00Z",
-              is_readable: true,
-              is_hidden: false,
-            },
-          ],
-          path: "",
-          total: 1,
-        };
-      });
+    it.each(["immediate", "delayed"] as const)(
+      "targets the newly active pane when Rename is invoked from the toolbar (%s loading)",
+      async (loading) => {
+        const user = userEvent.setup();
+        let releaseConnections!: () => void;
+        let releaseLeftListing!: () => void;
+        let releaseRightListing!: () => void;
+        const connectionsReady = new Promise<void>((resolve) => {
+          releaseConnections = resolve;
+        });
+        const leftListingReady = new Promise<void>((resolve) => {
+          releaseLeftListing = resolve;
+        });
+        const rightListingReady = new Promise<void>((resolve) => {
+          releaseRightListing = resolve;
+        });
+        const listings = new Map([
+          ["conn-1", { name: "left-item.txt", ready: leftListingReady }],
+          ["conn-2", { name: "right-item.txt", ready: rightListingReady }],
+        ]);
+        vi.mocked(api.getConnections).mockImplementation(async () => {
+          await connectionsReady;
+          return mockConnections;
+        });
+        vi.mocked(api.listDirectory).mockImplementation(async (connectionId) => {
+          const listing = listings.get(connectionId);
+          if (!listing) throw new Error(`Unexpected connection in rename test: ${connectionId}`);
+          await listing.ready;
+          return {
+            items: [
+              {
+                name: listing.name,
+                path: listing.name,
+                type: FileType.FILE,
+                size: 1,
+                modified_at: "2024-01-01T00:00:00Z",
+                is_readable: true,
+                is_hidden: false,
+              },
+            ],
+            path: "",
+            total: 1,
+          };
+        });
 
-      const { container } = renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
-      await screen.findByRole("button", { name: "File: right-item.txt" });
+        if (loading === "immediate") {
+          releaseConnections();
+          releaseLeftListing();
+          releaseRightListing();
+        }
+        const { container } = renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+        if (loading === "delayed") {
+          await waitFor(() => expect(api.getConnections).toHaveBeenCalled(), { timeout: PANE_READY_TIMEOUT_MS });
+          expect(api.listDirectory).not.toHaveBeenCalled();
+          await act(async () => releaseConnections());
+        }
+        await waitFor(
+          () => {
+            expectDirectoryLoad("conn-1", "");
+            expectDirectoryLoad("conn-2", "");
+          },
+          { timeout: PANE_READY_TIMEOUT_MS }
+        );
 
-      const rightPane = container.querySelector('[data-pane-id="right"]');
-      expect(rightPane).toBeInstanceOf(HTMLElement);
-      await user.click(rightPane as HTMLElement);
-      await waitFor(() => expect(screen.getByTestId("router-location")).toHaveTextContent("active=2"));
+        const leftPane = container.querySelector('[data-pane-id="left"]');
+        const rightPane = container.querySelector('[data-pane-id="right"]');
+        expect(leftPane).toBeInstanceOf(HTMLElement);
+        expect(rightPane).toBeInstanceOf(HTMLElement);
+        const left = within(leftPane as HTMLElement);
+        const right = within(rightPane as HTMLElement);
+        if (loading === "delayed") {
+          expect(left.queryByRole("button", { name: "File: left-item.txt" })).not.toBeInTheDocument();
+          expect(right.queryByRole("button", { name: "File: right-item.txt" })).not.toBeInTheDocument();
+          await act(async () => releaseLeftListing());
+          await left.findByRole("button", { name: "File: left-item.txt" }, { timeout: PANE_READY_TIMEOUT_MS });
+          expect(right.queryByRole("button", { name: "File: right-item.txt" })).not.toBeInTheDocument();
+          await act(async () => releaseRightListing());
+        }
+        const rightRow = await waitFor(
+          () => {
+            expect(left.getByRole("button", { name: "File: left-item.txt" })).toBeInTheDocument();
+            return right.getByRole("button", { name: "File: right-item.txt" });
+          },
+          { timeout: PANE_READY_TIMEOUT_MS }
+        );
+        await user.click(right.getByTestId("virtual-list"));
+        await waitFor(() => expect(screen.getByTestId("router-location")).toHaveTextContent("active=2"));
+        expect(rightRow).toHaveAttribute("data-selected", "true");
 
-      await user.click(screen.getByRole("button", { name: "Rename" }));
-      expect(await screen.findByLabelText(/new name/i)).toHaveValue("right-item.txt");
-    });
+        await user.click(screen.getByRole("button", { name: "Rename" }));
+        expect(await screen.findByLabelText(/new name/i)).toHaveValue("right-item.txt");
+      }
+    );
 
     it("opens rename dialog when Rename Focused Item is selected from commands mode", async () => {
       const user = userEvent.setup();

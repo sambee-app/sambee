@@ -689,6 +689,26 @@ export const SELECTION_SHORTCUTS = {
     helpGroup: "selection",
     shift: true,
   },
+  SELECT_TO_FIRST: {
+    id: "select-to-first",
+    keys: "Home",
+    get description() {
+      return translate("fileBrowser.shortcuts.selectToFirst");
+    },
+    label: "Shift+Home",
+    helpGroup: "selection",
+    shift: true,
+  },
+  SELECT_TO_LAST: {
+    id: "select-to-last",
+    keys: "End",
+    get description() {
+      return translate("fileBrowser.shortcuts.selectToLast");
+    },
+    label: "Shift+End",
+    helpGroup: "selection",
+    shift: true,
+  },
   SELECT_ALL: {
     id: "select-all",
     keys: "a",
