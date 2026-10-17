@@ -33,7 +33,7 @@ describe("MSW Setup Verification", () => {
 
     // Try to login with invalid credentials
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText(/password/i, { selector: "input" });
     const loginButton = screen.getByRole("button", { name: /sign in/i });
 
     await user.type(usernameInput, "wronguser");
@@ -54,7 +54,7 @@ describe("MSW Setup Verification", () => {
 
     // Try to login (MSW will return default 401 for unknown credentials)
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText(/password/i, { selector: "input" });
     const loginButton = screen.getByRole("button", { name: /sign in/i });
 
     await user.type(usernameInput, "baduser");
@@ -77,7 +77,7 @@ describe("MSW Setup Verification", () => {
     await screen.findByLabelText(/username/i);
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText(/password/i, { selector: "input" });
     const loginButton = screen.getByRole("button", { name: /sign in/i });
 
     await user.type(usernameInput, "testuser");
@@ -100,7 +100,7 @@ describe("MSW Setup Verification", () => {
     await screen.findByLabelText(/username/i);
 
     const usernameInput = screen.getByLabelText(/username/i);
-    const passwordInput = screen.getByLabelText(/password/i);
+    const passwordInput = screen.getByLabelText(/password/i, { selector: "input" });
     const loginButton = screen.getByRole("button", { name: /sign in/i });
 
     await user.type(usernameInput, "testuser");
