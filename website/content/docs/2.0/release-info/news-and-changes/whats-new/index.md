@@ -24,6 +24,7 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 
 - Native mobile sharing is now available for single or multiple files from the file list.
 - Single-file downloads are now streamed directly without buffering in memory. This speeds up downloads and effectively removes limits imposed by file size.
+- Item selection keyboard shortcuts now include <kbd>Shift+Home</kbd> and <kbd>Shift+End</kbd>.
 
 ### Bugfixes
 

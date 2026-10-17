@@ -2321,6 +2321,121 @@ describe("Browser Component - Interactions", () => {
   });
 
   describe("Keyboard Navigation", () => {
+    describe("boundary range selection", () => {
+      const selectedNames = (container: HTMLElement) =>
+        within(container)
+          .queryAllByRole("button", { name: /\(selected\)$/i })
+          .map((row) => row.getAttribute("aria-label"));
+
+      it.each([
+        ["Home", ["Folder: Documents (selected)", "Folder: Pictures (selected)"], "Documents"],
+        ["End", ["Folder: Pictures (selected)", "File: readme.txt (selected)"], "readme.txt"],
+      ])("Shift+%s selects the inclusive range from current focus and moves focus to the boundary", async (key, expected, target) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard("{Home}");
+        await waitFor(() => expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true"));
+        await user.keyboard("{ArrowDown}");
+        await waitFor(() => expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true"));
+
+        const event = createEvent.keyDown(list, { key, shiftKey: true });
+        fireEvent(list, event);
+
+        expect(event.defaultPrevented).toBe(true);
+        expect(selectedNames(list)).toEqual(expected);
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: new RegExp(`: ${target} \\(selected\\)$`) })).toHaveAttribute("data-selected", "true")
+        );
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+        expect(selectedNames(list)).toEqual(expected);
+      });
+
+      it.each([
+        ["Home", "{End} {Home}{ArrowDown}"],
+        ["End", "{Home} {ArrowDown}"],
+      ])("Shift+%s preserves selections outside the range and uses focus instead of the previous anchor", async (key, setup) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard(setup);
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+
+        expect(selectedNames(list)).toEqual(["Folder: Documents (selected)", "Folder: Pictures (selected)", "File: readme.txt (selected)"]);
+      });
+
+      it.each(["Home", "End"])("Shift+%s selects a single-item list without toggling it off", async (key) => {
+        const user = userEvent.setup();
+        vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: [mockDirectoryListing.items[0]!], total: 1 });
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Documents" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard(`{Shift>}{${key}}{${key}}{/Shift}`);
+
+        expect(selectedNames(list)).toEqual(["Folder: Documents (selected)"]);
+      });
+
+      it.each(["Home", "End"])("Shift+%s does nothing in an empty list", async (key) => {
+        const user = userEvent.setup();
+        vi.mocked(api.listDirectory).mockResolvedValue({ path: "", items: [], total: 0 });
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByText("This directory is empty");
+        const list = screen.getByTestId("file-list-container");
+        await user.click(list);
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+
+        expect(selectedNames(list)).toEqual([]);
+      });
+
+      it.each(["Home", "End"])("Shift+%s leaves text inputs and toolbar focus alone", async (key) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        const input = screen.getByPlaceholderText("Navigate to any directory");
+        await user.click(input);
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+        expect(input).toHaveFocus();
+        expect(selectedNames(list)).toEqual([]);
+
+        const settingsButton = screen.getByRole("button", { name: /open settings/i });
+        settingsButton.focus();
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+        expect(settingsButton).toHaveFocus();
+        expect(selectedNames(list)).toEqual([]);
+      });
+
+      it.each(["Home", "End"])("Shift+%s does not select files while a dialog is open", async (key) => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        await screen.findByRole("dialog");
+        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+
+        expect(selectedNames(screen.getByTestId("file-list-container"))).toEqual([]);
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      });
+
+      it("keeps unmodified Home and End as focus-only navigation", async () => {
+        const user = userEvent.setup();
+        renderBrowser("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Pictures" });
+        const list = screen.getByTestId("file-list-container");
+        await user.click(within(list).getByTestId("virtual-list"));
+        await user.keyboard("{End}");
+        await waitFor(() => expect(within(list).getByRole("button", { name: "File: readme.txt" })).toHaveAttribute("data-selected", "true"));
+        await user.keyboard("{Home}");
+        await waitFor(() => expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true"));
+        expect(selectedNames(list)).toEqual([]);
+      });
+    });
+
     it("opens navigate mode with Ctrl+K even when a toolbar button is focused", async () => {
       const user = userEvent.setup();
       renderBrowser("/browse/smb/test-server-1");

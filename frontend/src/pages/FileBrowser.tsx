@@ -3796,6 +3796,18 @@ const Browser: React.FC = () => {
         enabled: browsing && noDialogOrCopyMove && hasFiles,
         priority: 10,
       },
+      {
+        ...SELECTION_SHORTCUTS.SELECT_TO_FIRST,
+        handler: () => activePane.handleSelectToBoundary("first"),
+        enabled: browsing && noDialogOrCopyMove && hasFiles,
+        priority: 10,
+      },
+      {
+        ...SELECTION_SHORTCUTS.SELECT_TO_LAST,
+        handler: () => activePane.handleSelectToBoundary("last"),
+        enabled: browsing && noDialogOrCopyMove && hasFiles,
+        priority: 10,
+      },
       // Select all files (Ctrl+A)
       {
         ...SELECTION_SHORTCUTS.SELECT_ALL,

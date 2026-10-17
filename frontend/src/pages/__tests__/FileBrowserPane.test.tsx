@@ -163,6 +163,7 @@ function createMockPane(overrides: Partial<UseFileBrowserPaneReturn> = {}): UseF
     selectedFiles: new Set<string>(),
     handleToggleSelection: vi.fn(),
     handleSelectDown: vi.fn(),
+    handleSelectToBoundary: vi.fn(),
     handleSelectUp: vi.fn(),
     handleSelectAll: vi.fn(),
     handleClearSelection: vi.fn(),

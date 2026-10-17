@@ -5,10 +5,6 @@
 - File move across SMB connections
    - Moving a directory tree from one SMB connection to another:
       - The 2nd directory in the source was moved into the 1st (already moved) directory at the target instead of moving it to the root of the target.
-- File list: item selection with keyboard
-   - Missing shortcuts:
-      - Shift+End to select all items from current item to the last item
-      - Shift+Home to select all items from current item to the first item
 
 ## Misc. commands
 
