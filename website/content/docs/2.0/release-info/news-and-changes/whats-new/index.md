@@ -51,6 +51,12 @@ Sambee uses a provider refresh token when one is returned, whether or not `offli
 
 ## Miscellaneous
 
+### Native Mobile Sharing
+
+Consolidated the native mobile sharing implementation and error handling across the file list and image, PDF, text, and Markdown viewers and editors. To circumvent Chrome restrictions that prevent sharing file types such as Markdown, an option to share as text was added to the text and Markdown viewers/editors.
+
+When sharing fails, a dialog with details can be invoked to facilitate issue reporting.
+
 ### Local Drive Acess
 
 Sambee now checks local-drive access before saying the browser is ready to use Companion. If the check fails, Local Drives settings distinguish between an outdated Companion, an outdated Sambee page, and a pairing that needs to be restored.
