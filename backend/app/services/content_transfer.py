@@ -101,9 +101,10 @@ def _same_utc_timestamp(left: datetime | None, right: datetime | None) -> bool:
 class SourceChangedError(RuntimeError):
     """Raised when a source no longer matches the plan snapshot."""
 
-    def __init__(self, message: str, *, destination_mutated: bool = False) -> None:
+    def __init__(self, message: str, *, destination_mutated: bool = False, replaced: bool = False) -> None:
         super().__init__(message)
         self.destination_mutated = destination_mutated
+        self.replaced = replaced
 
 
 class SourceDeleteError(RuntimeError):
@@ -117,6 +118,10 @@ class SourceDeleteError(RuntimeError):
 
 class SourceDeletionOutcomeUnknown(RuntimeError):
     """Raised when an attempted source-handle deletion has an unobservable result."""
+
+    def __init__(self, message: str, *, replaced: bool = False) -> None:
+        super().__init__(message)
+        self.replaced = replaced
 
 
 class TargetCollisionError(FileExistsError):

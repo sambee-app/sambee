@@ -1110,6 +1110,23 @@ describe("API Service", () => {
     expect(mockAxiosInstance.post).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { status: "outcome_unknown", replaced: true, effects: { source: "unknown", destination: "mutated" } },
+    { status: "outcome_unknown", replaced: true, effects: { source: "mutated", destination: "mutated" } },
+    {
+      status: "failed",
+      replaced: true,
+      effects: { source: "unchanged", destination: "mutated" },
+      error: { code: "source_changed", detail: "Source changed after publication" },
+    },
+  ] as const)("preserves factual transfer response without retry: %j", async (result) => {
+    mockAxiosInstance.post.mockResolvedValueOnce({ data: result } as AxiosResponse);
+    await expect(
+      apiService.moveItem("source", "report.txt", "incoming/report.txt", "00000000-0000-4000-8000-000000000009", "destination", "replace")
+    ).resolves.toEqual(result);
+    expect(mockAxiosInstance.post).toHaveBeenCalledTimes(1);
+  });
+
   it("phase_10_stabilization_normalizes_unavailable_response", async () => {
     mockAxiosInstance.post.mockResolvedValue({
       data: {

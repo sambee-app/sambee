@@ -23,6 +23,9 @@ class RandomAccessReader(Protocol):
 class MoveSourceReader(RandomAccessReader, Protocol):
     """A retained source handle that can delete only the object it opened."""
 
+    async def get_file_info(self) -> FileInfo:
+        """Observe identity and metadata through the protected handle, not its pathname."""
+
     async def commit_delete(self) -> None:
         """Delete the retained source object after a destination commit."""
 

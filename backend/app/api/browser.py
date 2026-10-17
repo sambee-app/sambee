@@ -1887,6 +1887,10 @@ async def execute_transfer_operation(
         async def check_cancellation_before_commit() -> None:
             check_cancellation()
 
+        def cancellation_requested() -> bool:
+            session.refresh(operation)
+            return operation.cancellation_requested
+
         if operation.kind == "move":
             transfer_result = await cross_connection_move(
                 source_backend,
@@ -1895,6 +1899,7 @@ async def execute_transfer_operation(
                 operation.destination_path,
                 on_progress=persist_progress,
                 before_destination_commit=check_cancellation_before_commit,
+                cancellation=cancellation_requested,
                 target_resolution_policy=TargetResolutionPolicy(operation.target_resolution_policy),
             )
         else:
@@ -1937,6 +1942,7 @@ async def execute_transfer_operation(
                 source="unchanged",
                 destination="mutated" if exc.destination_mutated else "unchanged",
             ),
+            replaced=exc.replaced,
             error=ContentTransferError(code="source_changed", detail=str(exc)),
         )
     except SourceDeleteError as exc:
@@ -1949,12 +1955,13 @@ async def execute_transfer_operation(
             replaced=exc.replaced,
             error=ContentTransferError(code="source_delete_failed", detail=str(exc)),
         )
-    except SourceDeletionOutcomeUnknown:
+    except SourceDeletionOutcomeUnknown as exc:
         result = ContentTransferResult(
             status="outcome_unknown",
-            effects=ContentTransferEffects(source="unknown", destination="unknown"),
+            effects=ContentTransferEffects(source="unknown", destination="mutated"),
+            replaced=exc.replaced,
         )
-    except TransferOperationCancelled:
+    except (TransferOperationCancelled, TransferCancelled):
         result = ContentTransferResult(
             status="cancelled",
             effects=ContentTransferEffects(source="unchanged", destination="unchanged"),
@@ -1968,6 +1975,18 @@ async def execute_transfer_operation(
     finally:
         await disconnect_backend_safely(source_backend, logger=logger, context=f"transfer operation source {operation.id}")
         await disconnect_backend_safely(destination_backend, logger=logger, context=f"transfer operation destination {operation.id}")
+    if result.effects.destination == "mutated":
+        _add_to_directory_cache(str(connection_id), operation.destination_path)
+    logger.info(
+        "Transfer outcome: operation_id=%s source_connection=%s destination_connection=%s source=%s destination=%s status=%s effects=%s",
+        operation.id,
+        operation.source_connection_id,
+        connection_id,
+        operation.source_path,
+        operation.destination_path,
+        result.status,
+        result.effects.model_dump(),
+    )
     _record_transfer_operation_result(session, operation, result)
     return result
 
@@ -2652,6 +2671,8 @@ async def copy_item(
         await _record_transfer_http_error(current_user, body, conflict)
         raise conflict
     except SourceChangedError as exc:
+        if exc.destination_mutated:
+            _add_to_directory_cache(str(connection_id), dest)
         return await _record_transfer_receipt(
             current_user,
             body,
@@ -2661,6 +2682,7 @@ async def copy_item(
                     source="unchanged",
                     destination="mutated" if exc.destination_mutated else "unchanged",
                 ),
+                replaced=exc.replaced,
                 error=ContentTransferError(code="source_changed", detail=str(exc)),
             ),
         )
@@ -3028,6 +3050,16 @@ async def _cross_connection_move(
         except SourceDeleteError as error:
             if not error.destination_mutated:
                 raise
+            logger.warning(
+                "Move source retained: source_connection=%s destination_connection=%s source=%s destination=%s attempt_id=%s phase=source_delete effects=unchanged/mutated replaced=%s detail=%s",
+                src_conn.id,
+                dst_conn.id,
+                source_path,
+                dest_path,
+                transfer_attempt_id,
+                error.replaced,
+                error,
+            )
             _add_to_directory_cache(dst_conn_id, dest_path)
             _notify_cross_connection_complete(dst_conn_id, dest_path, transfer_attempt_id, pending)
             return ContentTransferResult(
@@ -3036,10 +3068,22 @@ async def _cross_connection_move(
                 replaced=error.replaced,
                 error=ContentTransferError(code="source_delete_failed", detail=str(error)),
             )
-        except SourceDeletionOutcomeUnknown:
+        except SourceDeletionOutcomeUnknown as error:
+            logger.warning(
+                "Move source deletion uncertain: source_connection=%s destination_connection=%s source=%s destination=%s attempt_id=%s phase=source_delete effects=unknown/mutated replaced=%s; inspect both locations before another move",
+                src_conn.id,
+                dst_conn.id,
+                source_path,
+                dest_path,
+                transfer_attempt_id,
+                error.replaced,
+            )
+            _add_to_directory_cache(dst_conn_id, dest_path)
+            _notify_cross_connection_complete(dst_conn_id, dest_path, transfer_attempt_id, pending)
             return ContentTransferResult(
                 status="outcome_unknown",
-                effects=ContentTransferEffects(source="unknown", destination="unknown"),
+                effects=ContentTransferEffects(source="unknown", destination="mutated"),
+                replaced=error.replaced,
             )
         if transfer_result.bytes_written is None:
             return ContentTransferResult(

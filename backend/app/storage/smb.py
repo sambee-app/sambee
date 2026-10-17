@@ -9,14 +9,24 @@ from time import monotonic
 from typing import Any, Awaitable, BinaryIO, TypeVar, cast
 
 import smbclient
+from smbclient._io import SMBFileIO, SMBFileTransaction, query_info
 from smbclient._os import FileAttributes
-from smbprotocol.file_info import FileDispositionInformation, InfoType
+from smbprotocol.exceptions import SMBResponseException
+from smbprotocol.file_info import (
+    FileBasicInformation,
+    FileDispositionInformation,
+    FileInternalInformation,
+    FileStandardInformation,
+    InfoType,
+)
 from smbprotocol.open import FileInformationClass, FilePipePrinterAccessMask, SMB2SetInfoRequest, SMB2SetInfoResponse
+from smbprotocol.structure import DateTimeField
 
 from app.core.system_setting_definitions import SystemSettingKey
 from app.models.file import DirectoryListing, FileInfo, FileType
 from app.services.archive.target_write import TargetExistsBeforeContent, TargetWriteFailure, TargetWriteResult
 from app.services.archive.zip_reader import ArchiveSourceUnavailableError
+from app.services.content_transfer import SourceDeleteError, SourceDeletionOutcomeUnknown
 from app.services.system_settings import get_integer_setting_value, get_smbclient_policy_kwargs
 from app.storage.base import ExclusiveWriter, MoveSourceReader, ProgressCallback, RandomAccessReader, StorageBackend
 from app.storage.smb_pool import get_connection_pool, get_smb_connection_cache
@@ -32,8 +42,21 @@ SMB_FILE_CLOSE_TIMEOUT_SECONDS = 5.0
 SMB_WRITE_FILE_TIMEOUT_SECONDS = 120.0
 SMB_EXISTS_TIMEOUT_SECONDS = 10.0
 SMB_DELETE_TIMEOUT_SECONDS = 120.0
+SMB_FILETIME_TICKS_PER_SECOND = 10_000_000
 
 BlockingResultT = TypeVar("BlockingResultT")
+_MOVE_CLEANUP_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _retain_move_cleanup(task: asyncio.Task[None]) -> None:
+    _MOVE_CLEANUP_TASKS.add(task)
+
+    def completed(result: asyncio.Task[None]) -> None:
+        _MOVE_CLEANUP_TASKS.discard(result)
+        if not result.cancelled() and result.exception() is not None:
+            logger.warning("Deferred SMB move cleanup failed", exc_info=result.exception())
+
+    task.add_done_callback(completed)
 
 
 class _SMBRandomAccessReader:
@@ -85,14 +108,86 @@ class _SMBRandomAccessReader:
 class _SMBMoveSourceReader(_SMBRandomAccessReader):
     """A read handle that marks the exact opened SMB object for deletion on commit."""
 
+    def __init__(self, *, backend: "SMBBackend", smb_path: str, handle: BinaryIO, connection_lease: object, source_path: str) -> None:
+        super().__init__(backend=backend, smb_path=smb_path, handle=handle, connection_lease=connection_lease)
+        self._source_path = source_path
+        self._inflight: asyncio.Future[Any] | None = None
+        self._cleanup: asyncio.Task[None] | None = None
+
+    async def _operate(self, operation: Callable[[], BlockingResultT], timeout: float) -> BlockingResultT:
+        if self._closed:
+            raise ValueError("SMB move source reader is closed")
+        if self._inflight is not None and not self._inflight.done():
+            raise RuntimeError("Previous SMB move source operation is still running")
+        future = asyncio.get_running_loop().run_in_executor(None, operation)
+        self._inflight = future
+        return await asyncio.wait_for(asyncio.shield(future), timeout)
+
+    async def read_at(self, offset: int, length: int) -> bytes:
+        if offset < 0 or length < 0:
+            raise ValueError("SMB random-access reads require non-negative offset and length")
+        async with self._lock:
+
+            def read() -> bytes:
+                self._handle.seek(offset)
+                return self._handle.read(length)
+
+            return await self._operate(read, SMB_READ_CHUNK_TIMEOUT_SECONDS)
+
+    async def get_file_info(self) -> FileInfo:
+        async with self._lock:
+
+            def observe() -> FileInfo:
+                raw = cast(SMBFileIO, self._handle)
+                with SMBFileTransaction(raw) as transaction:
+                    query_info(transaction, FileBasicInformation)
+                    query_info(transaction, FileInternalInformation)
+                    query_info(transaction, FileStandardInformation)
+                basic, internal, standard = transaction.results
+                return FileInfo(
+                    name=PurePosixPath(self._smb_path.replace("\\", "/")).name,
+                    path=self._source_path,
+                    type=FileType.DIRECTORY if standard["directory"].get_value() else FileType.FILE,
+                    size=standard["end_of_file"].get_value(),
+                    modified_at=datetime.fromtimestamp(
+                        (basic["last_write_time"].get_value() - DateTimeField.EPOCH_FILETIME) / SMB_FILETIME_TICKS_PER_SECOND
+                    ),
+                    stable_id=str(internal["index_number"].get_value()),
+                )
+
+            return await self._operate(observe, SMB_FILE_INFO_TIMEOUT_SECONDS)
+
+    async def close(self) -> None:
+        async with self._lock:
+            if self._cleanup is None:
+                self._closed = True
+
+                async def cleanup() -> None:
+                    try:
+                        if self._inflight is not None:
+                            try:
+                                await asyncio.shield(self._inflight)
+                            except BaseException:
+                                pass
+                        await asyncio.get_running_loop().run_in_executor(None, self._handle.close)
+                    finally:
+                        await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
+
+                self._cleanup = asyncio.create_task(cleanup())
+                _retain_move_cleanup(self._cleanup)
+            cleanup_task = self._cleanup
+        await asyncio.wait_for(asyncio.shield(cleanup_task), SMB_FILE_CLOSE_TIMEOUT_SECONDS)
+
     async def commit_delete(self) -> None:
         async with self._lock:
             if self._closed:
-                raise ValueError("SMB move source reader is closed")
+                raise SourceDeleteError("Move source handle was closed before delete dispatch", destination_mutated=True)
+
+            dispatched = False
 
             def _delete_opened_file() -> None:
-                # smbclient exposes its protocol handle only through its private wrapper.
-                raw = cast(Any, self._handle).raw
+                nonlocal dispatched
+                raw = cast(SMBFileIO, self._handle)
                 request = SMB2SetInfoRequest()
                 request["info_type"] = InfoType.SMB2_0_INFO_FILE
                 request["file_info_class"] = FileInformationClass.FILE_DISPOSITION_INFORMATION
@@ -100,33 +195,33 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
                 disposition = FileDispositionInformation()
                 disposition["delete_pending"] = True
                 request["buffer"] = disposition.pack()
-                pending = raw.fd.connection.send(
-                    request,
-                    raw.fd.tree_connect.session.session_id,
-                    raw.fd.tree_connect.tree_connect_id,
-                )
-                response = raw.fd.connection.receive(pending)
+                connection = raw.fd.connection
+                session_id = raw.fd.tree_connect.session.session_id
+                tree_connect_id = raw.fd.tree_connect.tree_connect_id
+                dispatched = True
+                pending = connection.send(request, session_id, tree_connect_id)
+                response = connection.receive(pending)
                 parsed = SMB2SetInfoResponse()
                 parsed.unpack(response["data"].get_value())
 
             try:
-                await self._backend._run_blocking_smb_call(
-                    "delete_retained_move_source",
-                    _delete_opened_file,
-                    SMB_DELETE_TIMEOUT_SECONDS,
-                    smb_path=self._smb_path,
-                )
-            finally:
-                self._closed = True
-                try:
-                    await self._backend._run_blocking_smb_call(
-                        "close_deleted_move_source",
-                        self._handle.close,
-                        SMB_FILE_CLOSE_TIMEOUT_SECONDS,
-                        smb_path=self._smb_path,
-                    )
-                finally:
-                    await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
+                await self._operate(_delete_opened_file, SMB_DELETE_TIMEOUT_SECONDS)
+            except SMBResponseException as error:
+                raise SourceDeleteError(
+                    "SMB server rejected source deletion; the destination is published and the source is retained",
+                    destination_mutated=True,
+                ) from error
+            except (Exception, asyncio.CancelledError) as error:
+                if not dispatched and not isinstance(error, (TimeoutError, asyncio.CancelledError)):
+                    raise SourceDeleteError(
+                        "Source delete was not dispatched; the destination is published and source retained",
+                        destination_mutated=True,
+                    ) from error
+                raise SourceDeletionOutcomeUnknown("SMB source delete acknowledgement was not confirmed") from error
+        try:
+            await self.close()
+        except (Exception, asyncio.CancelledError) as error:
+            raise SourceDeletionOutcomeUnknown("SMB source close after delete-pending was not confirmed") from error
 
 
 class _SMBExclusiveWriter:
@@ -783,34 +878,45 @@ class SMBBackend(StorageBackend):
             connection_cache=self._connection_cache,
         )
         await connection_lease.__aenter__()
-        try:
-            handle = await self._run_blocking_smb_call(
-                "open_file_for_guarded_move",
-                lambda: smbclient.open_file(
-                    smb_path,
-                    mode="rb",
-                    buffering=0,
-                    share_access="rwd",
-                    desired_access=(
-                        FilePipePrinterAccessMask.FILE_READ_DATA
-                        | FilePipePrinterAccessMask.FILE_READ_ATTRIBUTES
-                        | FilePipePrinterAccessMask.FILE_READ_EA
-                        | FilePipePrinterAccessMask.DELETE
-                    ),
-                    **self._smb_auth_kwargs(),
+        open_future = asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: smbclient.open_file(
+                smb_path,
+                mode="rb",
+                buffering=0,
+                share_access="r",
+                desired_access=(
+                    FilePipePrinterAccessMask.FILE_READ_DATA
+                    | FilePipePrinterAccessMask.FILE_READ_ATTRIBUTES
+                    | FilePipePrinterAccessMask.FILE_READ_EA
+                    | FilePipePrinterAccessMask.DELETE
                 ),
-                SMB_FILE_OPEN_TIMEOUT_SECONDS,
-                smb_path=smb_path,
-            )
+                **self._smb_auth_kwargs(),
+            ),
+        )
+        try:
+            handle = await asyncio.wait_for(asyncio.shield(open_future), SMB_FILE_OPEN_TIMEOUT_SECONDS)
         except BaseException:
-            await connection_lease.__aexit__(None, None, None)
+
+            async def dispose_late_open() -> None:
+                try:
+                    late_handle = await asyncio.shield(open_future)
+                    await asyncio.get_running_loop().run_in_executor(None, late_handle.close)
+                except Exception:
+                    logger.warning("Failed to dispose late SMB move source open: path=%s", path, exc_info=True)
+                finally:
+                    await connection_lease.__aexit__(None, None, None)
+
+            _retain_move_cleanup(asyncio.create_task(dispose_late_open()))
             raise
-        return _SMBMoveSourceReader(
+        reader = _SMBMoveSourceReader(
             backend=self,
             smb_path=smb_path,
             handle=handle,
             connection_lease=connection_lease,
+            source_path=path,
         )
+        return reader
 
     async def open_archive_source_reader(self, path: str) -> RandomAccessReader:
         """Pin an archive source against concurrent SMB writers for its live operation."""
@@ -1601,7 +1707,7 @@ class SMBBackend(StorageBackend):
                 await self._run_blocking_smb_operation(
                     "replace move destination" if overwrite else "move",
                     lambda: (
-                        smbclient.renames(smb_src, smb_dst, **self._smb_auth_kwargs())
+                        smbclient.replace(smb_src, smb_dst, **self._smb_auth_kwargs())
                         if overwrite
                         else smbclient.rename(smb_src, smb_dst, **self._smb_auth_kwargs())
                     ),
@@ -1891,7 +1997,7 @@ class SMBBackend(StorageBackend):
 
                 final_overwrite = await before_commit()
                 commit_with_replacement = overwrite if final_overwrite is None else final_overwrite
-                commit_stage = smbclient.renames if commit_with_replacement else smbclient.rename
+                commit_stage = smbclient.replace if commit_with_replacement else smbclient.rename
                 await self._run_blocking_smb_operation(
                     "replace transfer destination" if commit_with_replacement else "commit transfer stage",
                     lambda: commit_stage(smb_stage_path, smb_path, **self._smb_auth_kwargs()),

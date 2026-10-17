@@ -188,9 +188,7 @@ async def cross_connection_copy(
         )
         replaced = overwrite
 
-    current_source = await source.get_file_info(source_path)
-    if not source_snapshot.matches(current_source):
-        raise SourceChangedError(f"Source changed while copying: {source_path}", destination_mutated=True)
+    await _verify_published_copy_source(source, source_path, source_snapshot, replaced=replaced)
     return CrossConnectionTransferResult(bytes_written, info, replaced=replaced)
 
 
@@ -236,10 +234,25 @@ async def copy_regular_file_to_missing_target(
         source_snapshot=source_snapshot,
         overwrite=overwrite,
     )
-    current_source = await source.get_file_info(source_path)
-    if not source_snapshot.matches(current_source):
-        raise SourceChangedError(f"Source changed while copying: {source_path}", destination_mutated=True)
+    await _verify_published_copy_source(source, source_path, source_snapshot, replaced=overwrite)
     return bytes_written
+
+
+async def _verify_published_copy_source(
+    source: StorageBackend, source_path: str, snapshot: RegularFileSourceSnapshot, *, replaced: bool
+) -> None:
+    """Keep publication facts when post-copy source validation cannot succeed."""
+
+    try:
+        current = await source.get_file_info(source_path)
+    except Exception as error:
+        raise SourceChangedError(
+            f"Source could not be validated after destination publication: {source_path}",
+            destination_mutated=True,
+            replaced=replaced,
+        ) from error
+    if not snapshot.matches(current):
+        raise SourceChangedError(f"Source changed while copying: {source_path}", destination_mutated=True, replaced=replaced)
 
 
 async def cross_connection_move(
@@ -361,16 +374,31 @@ async def cross_connection_move(
                 overwrite=overwrite,
             )
             replaced = overwrite
-        _raise_if_cancelled(cancellation)
+        if cancellation is not None and cancellation():
+            raise SourceDeleteError(
+                f"Move cancelled after destination publication; source retained: {source_path}",
+                destination_mutated=True,
+                replaced=replaced,
+            )
         try:
             await source_reader.commit_delete()
+        except SourceDeleteError as error:
+            error.replaced = replaced
+            raise
+        except SourceDeletionOutcomeUnknown as error:
+            error.replaced = replaced
+            raise
         except Exception as error:
             raise SourceDeletionOutcomeUnknown(
-                f"Guarded source deletion may have completed before its result was observed: {source_path}"
+                f"Guarded source deletion may have completed before its result was observed: {source_path}",
+                replaced=replaced,
             ) from error
         return CrossConnectionTransferResult(total_bytes, source_info, replaced=replaced)
     finally:
-        await source_reader.close()
+        try:
+            await source_reader.close()
+        except Exception:
+            logger.warning("SMB move source cleanup failed: source=%s destination=%s", source_path, dest_path, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +437,7 @@ async def _copy_file(
     if source_snapshot is not None:
         if source_snapshot.stable_id is None:
             raise SourceChangedError(f"Source has no stable identity for transfer: {source_path}")
-        current_source = await source.get_file_info(source_path)
+        current_source = await source_reader.get_file_info() if source_reader is not None else await source.get_file_info(source_path)
         if not source_snapshot.matches(current_source):
             raise SourceChangedError(f"Source changed before reading: {source_path}")
 
@@ -425,7 +453,7 @@ async def _copy_file(
         if source_snapshot is None:
             return
         try:
-            current_source = await source.get_file_info(source_path)
+            current_source = await source_reader.get_file_info() if source_reader is not None else await source.get_file_info(source_path)
         except FileNotFoundError as error:
             raise SourceChangedError(f"Source disappeared before commit: {source_path}") from error
         if not source_snapshot.matches(current_source):

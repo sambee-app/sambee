@@ -129,16 +129,16 @@ class ContentTransferResult(BaseModel):
             raise ValueError(f"{self.status} transfer outcomes require an error")
         if self.status == "skipped" and (self.effects.source != "unchanged" or self.effects.destination != "unchanged" or self.replaced):
             raise ValueError("skipped transfer outcomes must leave both paths unchanged")
-        if self.status == "outcome_unknown" and (
-            self.effects.source != "unknown" or self.effects.destination != "unknown" or self.replaced
+        if (
+            self.status == "outcome_unknown"
+            and "unknown" not in (self.effects.source, self.effects.destination)
+            and "mutated" not in (self.effects.source, self.effects.destination)
         ):
-            raise ValueError("unknown transfer outcomes must report unknown effects")
-        if self.status == "completed_with_source_retained" and (
-            self.effects.source != "unchanged" or self.effects.destination != "mutated"
-        ):
-            raise ValueError("source-retained outcomes require an unchanged source and mutated destination")
-        if self.status in {"skipped", "outcome_unknown", "failed", "cancelled"} and self.replaced:
-            raise ValueError(f"{self.status} transfer outcomes cannot report a replacement")
+            raise ValueError("unknown transfer outcomes require uncertain effects or confirmed aggregate mutations")
+        if self.status == "completed_with_source_retained" and (self.effects.source == "unknown" or self.effects.destination == "unknown"):
+            raise ValueError("source-retained outcomes require known effects")
+        if self.replaced and self.effects.destination != "mutated":
+            raise ValueError("replacement requires confirmed destination mutation")
         return self
 
 

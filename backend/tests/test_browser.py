@@ -27,7 +27,7 @@ from app.models.connection import Connection, ConnectionScope
 from app.models.edit_lock import EditLock
 from app.models.file import ContentTransferEffects, ContentTransferResult, CopyMoveRequest, DirectoryListing, FileInfo, FileType
 from app.models.transfer_operation import TransferOperation, TransferOperationPhase
-from app.services.content_transfer import SourceDeleteError
+from app.services.content_transfer import SourceChangedError, SourceDeleteError, SourceDeletionOutcomeUnknown
 from app.services.preprocessor import PreprocessorFileTooLargeError
 
 PUBLISH_CONTRACT = json.loads(
@@ -649,10 +649,12 @@ def test_durable_transfer_operation_rejects_a_source_changed_after_preparation(
     destination.stage_and_commit_new_file_from_stream.assert_not_awaited()
 
 
+@pytest.mark.parametrize("uncertain", [False, True])
 def test_cross_connection_move_source_retention_preserves_replacement_fact(
     client: TestClient,
     auth_headers_user: dict,
     multiple_connections: list[Connection],
+    uncertain: bool,
 ):
     source_connection, destination_connection = multiple_connections[:2]
     source_backend = AsyncMock()
@@ -663,7 +665,9 @@ def test_cross_connection_move_source_retention_preserves_replacement_fact(
         patch(
             "app.api.browser.cross_connection_move",
             new_callable=AsyncMock,
-            side_effect=SourceDeleteError("source retention", destination_mutated=True, replaced=True),
+            side_effect=SourceDeletionOutcomeUnknown("delete acknowledgement lost", replaced=True)
+            if uncertain
+            else SourceDeleteError("source retention", destination_mutated=True, replaced=True),
         ),
     ):
         response = client.post(
@@ -679,18 +683,29 @@ def test_cross_connection_move_source_retention_preserves_replacement_fact(
         )
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "completed_with_source_retained",
-        "effects": {"source": "unchanged", "destination": "mutated"},
-        "replaced": True,
-        "error": {"code": "source_delete_failed", "detail": "source retention"},
-    }
+    assert response.json() == (
+        {
+            "status": "outcome_unknown",
+            "effects": {"source": "unknown", "destination": "mutated"},
+            "replaced": True,
+            "error": None,
+        }
+        if uncertain
+        else {
+            "status": "completed_with_source_retained",
+            "effects": {"source": "unchanged", "destination": "mutated"},
+            "replaced": True,
+            "error": {"code": "source_delete_failed", "detail": "source retention"},
+        }
+    )
 
 
+@pytest.mark.parametrize("failure", ["retained", "unknown", "source_changed"])
 def test_durable_transfer_operation_source_retention_preserves_replacement_fact(
     client: TestClient,
     auth_headers_user: dict,
     multiple_connections: list[Connection],
+    failure: str,
 ):
     source_connection, destination_connection = multiple_connections[:2]
     source_info = FileInfo(
@@ -712,7 +727,13 @@ def test_durable_transfer_operation_source_retention_preserves_replacement_fact(
         patch(
             "app.api.browser.cross_connection_move",
             new_callable=AsyncMock,
-            side_effect=SourceDeleteError("source retention", destination_mutated=True, replaced=True),
+            side_effect=(
+                SourceDeletionOutcomeUnknown("delete acknowledgement lost", replaced=True)
+                if failure == "unknown"
+                else SourceChangedError("source changed", destination_mutated=True, replaced=True)
+                if failure == "source_changed"
+                else SourceDeleteError("source retention", destination_mutated=True, replaced=True)
+            ),
         ),
     ):
         prepared = client.post(
@@ -732,14 +753,118 @@ def test_durable_transfer_operation_source_retention_preserves_replacement_fact(
             f"/api/browse/{destination_connection.id}/transfer-operations/{prepared.json()['id']}/execute",
             headers=auth_headers_user,
         )
+        replayed = client.post(
+            f"/api/browse/{destination_connection.id}/transfer-operations/{prepared.json()['id']}/execute",
+            headers=auth_headers_user,
+        )
 
     assert prepared.status_code == 200
-    assert executed.json() == {
-        "status": "completed_with_source_retained",
-        "effects": {"source": "unchanged", "destination": "mutated"},
-        "replaced": True,
-        "error": {"code": "source_delete_failed", "detail": "source retention"},
-    }
+    assert replayed.json() == executed.json()
+    assert executed.json() == (
+        {
+            "status": "outcome_unknown",
+            "effects": {"source": "unknown", "destination": "mutated"},
+            "replaced": True,
+            "error": None,
+        }
+        if failure == "unknown"
+        else {
+            "status": "failed",
+            "effects": {"source": "unchanged", "destination": "mutated"},
+            "replaced": True,
+            "error": {"code": "source_changed", "detail": "source changed"},
+        }
+        if failure == "source_changed"
+        else {
+            "status": "completed_with_source_retained",
+            "effects": {"source": "unchanged", "destination": "mutated"},
+            "replaced": True,
+            "error": {"code": "source_delete_failed", "detail": "source retention"},
+        }
+    )
+
+
+@pytest.mark.parametrize("phase", ["before_publication", "after_publication", "after_delete_dispatch", "uncertain_delete"])
+def test_durable_move_cancellation_preserves_publication_and_delete_facts(
+    client: TestClient,
+    session: Session,
+    auth_headers_user: dict,
+    multiple_connections: list[Connection],
+    phase: str,
+):
+    source_connection, destination_connection = multiple_connections[:2]
+    info = FileInfo(
+        name="report.txt",
+        path="reports/report.txt",
+        type=FileType.FILE,
+        size=6,
+        modified_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        stable_id="original",
+    )
+    prepared_source, source, destination, reader = AsyncMock(), AsyncMock(), AsyncMock(), AsyncMock()
+    prepared_source.get_file_info.return_value = info
+    source.get_file_info.return_value = info
+    reader.get_file_info.return_value = info
+    reader.read_at.return_value = b"report"
+    source.open_move_source_reader.return_value = reader
+    destination.get_file_info.return_value = info.model_copy(update={"path": "incoming/report.txt"})
+    published: list[bytes] = []
+
+    def cancel():
+        operation = session.exec(select(TransferOperation)).one()
+        operation.cancellation_requested = True
+        session.add(operation)
+        session.commit()
+
+    async def stage(_path, stream, *, before_commit, **_kwargs):
+        data = b"".join([chunk async for chunk in stream])
+        if phase == "before_publication":
+            cancel()
+        await before_commit()
+        published.append(data)
+        if phase == "after_publication":
+            cancel()
+        return len(data)
+
+    async def delete():
+        cancel()
+        if phase == "uncertain_delete":
+            raise SourceDeletionOutcomeUnknown("lost delete acknowledgement")
+
+    destination.stage_and_commit_new_file_from_stream.side_effect = stage
+    reader.commit_delete.side_effect = delete
+    with patch("app.api.browser.SMBBackend", side_effect=[prepared_source, source, destination]):
+        prepared = client.post(
+            f"/api/browse/{destination_connection.id}/transfer-operations",
+            headers=auth_headers_user,
+            json={
+                "protocol_version": "v1",
+                "idempotency_key": str(uuid.uuid4()),
+                "kind": "move",
+                "source_connection_id": str(source_connection.id),
+                "source_path": info.path,
+                "destination_path": "incoming/report.txt",
+                "target_resolution_policy": "replace",
+            },
+        )
+        assert prepared.status_code == 200
+        url = f"/api/browse/{destination_connection.id}/transfer-operations/{prepared.json()['id']}/execute"
+        executed = client.post(url, headers=auth_headers_user)
+        replayed = client.post(url, headers=auth_headers_user)
+    assert executed.status_code == 200
+    assert replayed.json() == executed.json()
+    expected = {
+        "before_publication": "cancelled",
+        "after_publication": "completed_with_source_retained",
+        "after_delete_dispatch": "completed",
+        "uncertain_delete": "outcome_unknown",
+    }[phase]
+    assert executed.json()["status"] == expected
+    assert executed.json()["replaced"] is (phase != "before_publication")
+    assert executed.json()["effects"]["destination"] == ("unchanged" if phase == "before_publication" else "mutated")
+    assert published == ([] if phase == "before_publication" else [b"report"])
+    assert reader.commit_delete.await_count == (1 if phase in {"after_delete_dispatch", "uncertain_delete"} else 0)
+    reader.close.assert_awaited_once()
 
 
 def test_durable_transfer_operation_cancels_before_provider_execution(
@@ -3720,7 +3845,12 @@ class TestCopyItem:
     ):
         """Test generic SMB error returns 500."""
         mock_class, mock_instance = mock_smb_backend
-        mock_instance.move_item.side_effect = Exception("Connection lost")
+        mock_instance.stage_and_commit_new_file_from_stream.side_effect = Exception("Connection lost")
+
+        async def source_chunks(_path):
+            yield b"a"
+
+        mock_instance.read_file = source_chunks
         mock_instance.get_file_info.side_effect = [
             FileInfo(name="a.txt", path="a.txt", type=FileType.FILE, size=1, stable_id="source-file"),
             FileNotFoundError("target does not exist"),
@@ -4197,6 +4327,7 @@ class TestMoveItem:
             src_instance.get_file_size.return_value = 100
             move_reader = AsyncMock()
             move_reader.read_at.return_value = b"file content"
+            move_reader.get_file_info.return_value = src_instance.get_file_info.return_value
             src_instance.open_move_source_reader.return_value = move_reader
 
             async def fake_read_file(path):
@@ -4256,6 +4387,7 @@ class TestMoveItem:
             )
             move_reader = AsyncMock()
             move_reader.read_at.return_value = b"file content"
+            move_reader.get_file_info.return_value = source_backend.get_file_info.return_value
             move_reader.commit_delete.side_effect = OSError("source delete denied")
             source_backend.open_move_source_reader.return_value = move_reader
 
@@ -4280,7 +4412,7 @@ class TestMoveItem:
 
         assert response.status_code == 200
         assert response.json()["status"] == "outcome_unknown"
-        assert response.json()["effects"] == {"source": "unknown", "destination": "unknown"}
+        assert response.json()["effects"] == {"source": "unknown", "destination": "mutated"}
         move_reader.commit_delete.assert_awaited_once()
         source_backend.delete_item.assert_not_called()
 

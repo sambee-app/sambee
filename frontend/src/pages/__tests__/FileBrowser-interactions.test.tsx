@@ -1157,6 +1157,137 @@ describe("Browser Component - Interactions", () => {
       });
     });
 
+    it.each(["completed", "completed_with_source_retained", "outcome_unknown", "conflict"] as const)(
+      "keeps sibling roots under the captured F6 destination after refresh and a %s child",
+      async (childStatus) => {
+        const user = userEvent.setup();
+        const sockets: WebSocket[] = [];
+        class CaptureWebSocket extends WebSocket {
+          constructor(url: string | URL) {
+            super(url);
+            sockets.push(this);
+          }
+        }
+        vi.stubGlobal("WebSocket", CaptureWebSocket);
+        const roots = regularTransferTestItems.map((entry) => ({ ...entry, type: FileType.DIRECTORY }));
+        const nested = { ...regularTransferTestItems[0]!, name: "nested", path: "Documents/nested", type: FileType.DIRECTORY };
+        const file = { ...regularTransferTestItems[0]!, name: "report.txt", path: "Documents/nested/report.txt" };
+        const secondFile = { ...file, path: "Pictures/report.txt" };
+        vi.mocked(api.listDirectory).mockImplementation(async (connectionId, path) => ({
+          path,
+          items:
+            connectionId === "conn-1"
+              ? path === ""
+                ? roots
+                : path === "Documents"
+                  ? [nested]
+                  : path === "Documents/nested"
+                    ? [file]
+                    : childStatus === "conflict" && path === "Pictures"
+                      ? [secondFile]
+                      : []
+              : [],
+          total: 0,
+        }));
+        vi.mocked(api.getFileInfo).mockImplementation(async (connectionId, path) => {
+          if (connectionId === "conn-1") {
+            const entry = [...roots, nested, file, secondFile].find((item) => item.path === path);
+            if (entry) return entry;
+          }
+          throw createNotFoundError();
+        });
+        vi.mocked(api.createItem).mockImplementation(async (_connectionId, parent, name) => ({
+          ...nested,
+          name,
+          path: `${parent}/${name}`,
+        }));
+        vi.mocked(api.removeEmptyDirectory).mockResolvedValue(undefined);
+        vi.mocked(api.moveItem).mockImplementation(async (...args) => {
+          const socket = sockets.find((entry) => entry.url.includes("/api/ws"));
+          act(() =>
+            socket?.onmessage?.(
+              new MessageEvent("message", {
+                data: JSON.stringify({ type: "directory_changed", connection_id: "conn-2", path: "Documents" }),
+              })
+            )
+          );
+          if (childStatus === "conflict" && args[5] === "ask")
+            throw {
+              response: { status: 409, data: { detail: { incoming_file: file, existing_file: { ...file, path: args[2] } } } },
+            };
+          if (childStatus === "completed_with_source_retained")
+            return {
+              status: childStatus,
+              replaced: true,
+              effects: { source: "unchanged", destination: "mutated" },
+              error: { code: "source_delete_failed", detail: "Source retained after publication" },
+            };
+          return {
+            status: childStatus === "conflict" ? "completed" : childStatus,
+            replaced: false,
+            effects: { source: childStatus === "outcome_unknown" ? "unknown" : "mutated", destination: "mutated" },
+          };
+        });
+
+        try {
+          renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+          await waitFor(() => {
+            expectDirectoryLoad("conn-1", "");
+            expectDirectoryLoad("conn-2", "Documents");
+          });
+          const list = (await screen.findAllByTestId("virtual-list"))[0]!;
+          await user.click(list);
+          await user.keyboard("{Control>}a{/Control}");
+          await user.keyboard("{F6}");
+          await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Move" }));
+
+          if (childStatus === "conflict") {
+            await user.click(await screen.findByRole("radio", { name: "Overwrite", exact: true }));
+            await user.click(screen.getByRole("checkbox", { name: /apply this choice to remaining conflicts/i }));
+            await user.click(screen.getByRole("button", { name: "Continue" }));
+            await waitFor(() => expect(api.moveItem).toHaveBeenCalledTimes(3));
+            expect(vi.mocked(api.moveItem).mock.calls[2]?.slice(0, 6)).toEqual([
+              "conn-1",
+              "Pictures/report.txt",
+              "Documents/Pictures/report.txt",
+              expect.any(String),
+              "conn-2",
+              "replace",
+            ]);
+          } else await waitFor(() => expect(api.moveItem).toHaveBeenCalledOnce());
+          await waitFor(() => {
+            if (childStatus === "outcome_unknown") expect(screen.getByText(/transfer outcome is unknown/i)).toBeInTheDocument();
+            else expect(api.createItem).toHaveBeenCalledWith("conn-2", "Documents", "Pictures", "directory");
+          });
+          expect(api.createItem).toHaveBeenCalledWith("conn-2", "Documents", "Documents", "directory");
+          expect(api.createItem).toHaveBeenCalledWith("conn-2", "Documents/Documents", "nested", "directory");
+          expect(api.moveItem).toHaveBeenCalledWith(
+            "conn-1",
+            "Documents/nested/report.txt",
+            "Documents/Documents/nested/report.txt",
+            expect.any(String),
+            "conn-2",
+            "ask",
+            expect.any(Object)
+          );
+          expect(vi.mocked(api.createItem).mock.calls.some(([, parent, name]) => name === "Pictures" && parent !== "Documents")).toBe(
+            false
+          );
+          if (childStatus === "outcome_unknown") {
+            expect(vi.mocked(api.createItem).mock.calls.some(([, , name]) => name === "Pictures")).toBe(false);
+            expect(api.removeEmptyDirectory).not.toHaveBeenCalled();
+            const calls = vi.mocked(api.moveItem).mock.calls.length;
+            fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
+            expect(api.moveItem).toHaveBeenCalledTimes(calls);
+          } else {
+            expect(api.removeEmptyDirectory).toHaveBeenCalledWith("conn-1", "Pictures");
+          }
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      }
+    );
+
     it("shows SMB byte progress only for the active copy attempt until the request settles", async () => {
       const sockets: WebSocket[] = [];
       class CaptureWebSocket extends WebSocket {

@@ -175,7 +175,7 @@ const CopyMoveDialog: React.FC<CopyMoveDialogProps> = ({
   const fileNameError = nameValidationError ?? (sameFile ? S.ERROR_SAME_FILENAME : undefined);
 
   // Can confirm only when we have a valid destination
-  const canConfirm = !isProcessing && !isNoOpDestination && !nameValidationError;
+  const canConfirm = !isTerminal && !isProcessing && !isNoOpDestination && !nameValidationError;
 
   const handleConfirm = useCallback(() => {
     if (canConfirm) {

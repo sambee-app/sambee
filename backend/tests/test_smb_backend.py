@@ -24,14 +24,19 @@ from threading import Event
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
+import smbclient
 from smbclient._os import FileAttributes
+from smbprotocol.exceptions import AccessDenied
 from smbprotocol.file_info import FileDispositionInformation, InfoType
 from smbprotocol.open import FileInformationClass, FilePipePrinterAccessMask, SMB2SetInfoResponse
+from smbprotocol.structure import DateTimeField
 
 from app.models.file import DirectoryListing, FileInfo, FileType
 from app.services.archive.extraction import extract_archive_to_new_paths
 from app.services.archive.target_write import TargetWriteFailure
-from app.storage.smb import SMBBackend
+from app.services.content_transfer import SourceDeleteError, SourceDeletionOutcomeUnknown
+from app.services.cross_connection import cross_connection_move
+from app.storage.smb import SMB_FILETIME_TICKS_PER_SECOND, SMBBackend
 
 _LIVE_SMB_ENVIRONMENT_VARIABLES = ("TEST_SMB_HOST", "TEST_SMB_SHARE", "TEST_SMB_USERNAME", "TEST_SMB_PASSWORD")
 _LIVE_SMB_ENABLED = all(os.environ.get(name) for name in _LIVE_SMB_ENVIRONMENT_VARIABLES)
@@ -1115,6 +1120,141 @@ class TestRandomAccessReading:
         mock_file.close.assert_called_once()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [AccessDenied(), TimeoutError("acknowledgement lost"), OSError("connection lost")])
+    async def test_move_delete_classifies_server_rejection_and_lost_acknowledgement(self, failure):
+        handle = MagicMock(spec=["fd", "close", "seek", "read"])
+        handle.fd.file_id = b"f" * 16
+        handle.fd.connection.receive.side_effect = failure
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with patch("app.storage.smb.smbclient.open_file", return_value=handle):
+            reader = await backend.open_move_source_reader("source.txt")
+            expected = SourceDeleteError if isinstance(failure, AccessDenied) else SourceDeletionOutcomeUnknown
+            with pytest.raises(expected):
+                await reader.commit_delete()
+            await reader.close()
+            await reader.close()
+        handle.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_move_close_failure_after_delete_pending_is_unknown(self):
+        handle = MagicMock(spec=["fd", "close", "seek", "read"])
+        handle.fd.file_id = b"f" * 16
+        handle.fd.connection.receive.return_value = {"data": MagicMock(get_value=lambda: SMB2SetInfoResponse().pack())}
+        handle.close.side_effect = OSError("close acknowledgement lost")
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with patch("app.storage.smb.smbclient.open_file", return_value=handle):
+            reader = await backend.open_move_source_reader("source.txt")
+            with pytest.raises(SourceDeletionOutcomeUnknown, match="close"):
+                await reader.commit_delete()
+        handle.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("closed", [False, True])
+    async def test_move_pre_dispatch_failure_definitely_retains_source(self, closed):
+        handle = MagicMock(spec=["close", "seek", "read"])
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with patch("app.storage.smb.smbclient.open_file", return_value=handle):
+            reader = await backend.open_move_source_reader("source.txt")
+            if closed:
+                await reader.close()
+            with pytest.raises(SourceDeleteError) as raised:
+                await reader.commit_delete()
+            assert raised.value.destination_mutated is True
+            await reader.close()
+        handle.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("cancelled", [False, True])
+    async def test_timed_out_move_open_disposes_late_handle_and_releases_lease(self, cancelled):
+        started = Event()
+        finish = Event()
+        released = asyncio.Event()
+        handle = MagicMock(spec=["close", "fd", "seek", "read"])
+
+        @asynccontextmanager
+        async def lease(**_kwargs):
+            try:
+                yield
+            finally:
+                released.set()
+
+        def open_handle(*_args, **_kwargs):
+            started.set()
+            assert finish.wait(2)
+            return handle
+
+        pool = MagicMock()
+        pool.get_connection = lease
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch("app.storage.smb.smbclient.open_file", side_effect=open_handle),
+            patch("app.storage.smb.SMB_FILE_OPEN_TIMEOUT_SECONDS", 2 if cancelled else 0.01),
+        ):
+            try:
+                if cancelled:
+                    opening = asyncio.create_task(backend.open_move_source_reader("source.txt"))
+                    assert await asyncio.to_thread(started.wait, 2)
+                    opening.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await opening
+                else:
+                    with pytest.raises(TimeoutError):
+                        await backend.open_move_source_reader("source.txt")
+                assert started.is_set()
+                assert not released.is_set()
+                handle.close.assert_not_called()
+            finally:
+                finish.set()
+            await asyncio.wait_for(released.wait(), 2)
+        handle.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_timed_out_delete_closes_only_after_dispatch_settles(self):
+        started = Event()
+        finish = Event()
+        released = asyncio.Event()
+        handle = MagicMock(spec=["close", "fd", "seek", "read"])
+        handle.fd.file_id = b"f" * 16
+
+        @asynccontextmanager
+        async def lease(**_kwargs):
+            try:
+                yield
+            finally:
+                released.set()
+
+        def receive(*_args):
+            started.set()
+            assert finish.wait(2)
+            return {"data": MagicMock(get_value=lambda: SMB2SetInfoResponse().pack())}
+
+        handle.fd.connection.receive.side_effect = receive
+        pool = MagicMock()
+        pool.get_connection = lease
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch("app.storage.smb.smbclient.open_file", return_value=handle),
+            patch("app.storage.smb.SMB_DELETE_TIMEOUT_SECONDS", 0.01),
+            patch("app.storage.smb.SMB_FILE_CLOSE_TIMEOUT_SECONDS", 0.01),
+        ):
+            reader = await backend.open_move_source_reader("source.txt")
+            try:
+                with pytest.raises(SourceDeletionOutcomeUnknown):
+                    await reader.commit_delete()
+                with pytest.raises(TimeoutError):
+                    await reader.close()
+                assert started.is_set()
+                assert not released.is_set()
+                handle.close.assert_not_called()
+            finally:
+                finish.set()
+            await asyncio.wait_for(released.wait(), 2)
+            await reader.close()
+        handle.close.assert_called_once()
+
+    @pytest.mark.asyncio
     @patch("app.storage.smb.smbclient.open_file")
     async def test_random_reader_rejects_invalid_offsets_and_closed_reads(self, mock_open):
         mock_open.return_value = MagicMock()
@@ -1142,22 +1282,54 @@ class TestRandomAccessReading:
         await reader.close()
 
     @pytest.mark.asyncio
+    async def test_move_metadata_queries_the_opened_object(self):
+        handle = MagicMock(spec=["fd", "close", "seek", "read"])
+        modified = datetime(2025, 1, 1)
+        values = [
+            {
+                "last_write_time": MagicMock(
+                    get_value=lambda: DateTimeField.EPOCH_FILETIME + int(modified.timestamp()) * SMB_FILETIME_TICKS_PER_SECOND
+                )
+            },
+            {"index_number": MagicMock(get_value=lambda: 123)},
+            {"directory": MagicMock(get_value=lambda: False), "end_of_file": MagicMock(get_value=lambda: 7)},
+        ]
+        transaction = MagicMock()
+        transaction.__enter__.return_value.results = values
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.smbclient.open_file", return_value=handle),
+            patch("app.storage.smb.SMBFileTransaction", return_value=transaction) as begin,
+            patch("app.storage.smb.query_info") as query,
+            patch("app.storage.smb.smbclient.stat") as path_stat,
+        ):
+            reader = await backend.open_move_source_reader("docs/source.txt")
+            info = await reader.get_file_info()
+            await reader.close()
+        assert info.path == "docs/source.txt"
+        assert info.size == 7
+        assert info.stable_id == "123"
+        assert info.modified_at == modified
+        begin.assert_called_once_with(handle)
+        assert query.call_count == 3
+        path_stat.assert_not_called()
+
+    @pytest.mark.asyncio
     @patch("app.storage.smb.smbclient.open_file")
     async def test_move_source_reader_deletes_the_retained_smb_handle(self, mock_open):
         response = SMB2SetInfoResponse().pack()
-        raw = MagicMock()
-        raw.fd.file_id = b"f" * 16
-        raw.fd.connection.receive.return_value = {"data": MagicMock(get_value=lambda: response)}
-        mock_file = MagicMock()
-        mock_file.raw = raw
+        mock_file = MagicMock(spec=["fd", "close", "seek", "read"])
+        mock_file.fd.file_id = b"f" * 16
+        mock_file.fd.connection.receive.return_value = {"data": MagicMock(get_value=lambda: response)}
         mock_open.return_value = mock_file
         backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
 
         reader = await backend.open_move_source_reader("source.txt")
         await reader.commit_delete()
 
+        assert mock_open.call_args.kwargs["share_access"] == "r"
         assert mock_open.call_args.kwargs["desired_access"] & FilePipePrinterAccessMask.DELETE
-        request = raw.fd.connection.send.call_args.args[0]
+        request = mock_file.fd.connection.send.call_args.args[0]
         assert request["info_type"].get_value() == InfoType.SMB2_0_INFO_FILE
         assert request["file_info_class"].get_value() == FileInformationClass.FILE_DISPOSITION_INFORMATION
         assert request["file_id"].get_value() == b"f" * 16
@@ -1200,6 +1372,116 @@ class TestExclusiveArchiveWriting:
         assert await writer.abort_and_delete_if_owned() is False
 
         mock_remove.assert_called_once()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not _LIVE_SMB_ENABLED, reason="requires explicit TEST_SMB_HOST, TEST_SMB_SHARE, TEST_SMB_USERNAME, and TEST_SMB_PASSWORD"
+)
+async def test_live_smb_protected_move_and_atomic_replacement() -> None:
+    """Exercise server sharing and deletion semantics only in a disposable directory."""
+
+    kwargs = dict(
+        host=os.environ["TEST_SMB_HOST"],
+        share_name=os.environ["TEST_SMB_SHARE"],
+        username=os.environ["TEST_SMB_USERNAME"],
+        password=os.environ["TEST_SMB_PASSWORD"],
+    )
+    source = SMBBackend(**kwargs)
+    destination = SMBBackend(**kwargs)
+    root = f"sambee-transfer-{uuid.uuid4().hex}"
+    source_path, target_path = f"{root}/source.txt", f"{root}/target.txt"
+    created = False
+    try:
+        await source.create_directory(root)
+        created = True
+        await source.write_file(source_path, io.BytesIO(b"copied bytes"))
+        await destination.write_file(target_path, io.BytesIO(b"old destination"))
+        writer = await asyncio.to_thread(
+            smbclient.open_file, source._build_smb_path(source_path), mode="r+b", share_access="rwd", **source._smb_auth_kwargs()
+        )
+        try:
+            with pytest.raises((OSError, AccessDenied)):
+                await source.open_move_source_reader(source_path)
+        finally:
+            await asyncio.to_thread(writer.close)
+        reader = await source.open_move_source_reader(source_path)
+        try:
+            assert (await reader.get_file_info()).stable_id == (await source.get_file_info(source_path)).stable_id
+
+            def update() -> None:
+                with smbclient.open_file(
+                    source._build_smb_path(source_path), mode="r+b", share_access="rwd", **source._smb_auth_kwargs()
+                ) as handle:
+                    handle.write(b"newer bytes")
+
+            with pytest.raises(OSError):
+                await asyncio.to_thread(update)
+            with pytest.raises(OSError):
+                await asyncio.to_thread(
+                    smbclient.rename,
+                    source._build_smb_path(source_path),
+                    source._build_smb_path(f"{root}/renamed.txt"),
+                    **source._smb_auth_kwargs(),
+                )
+            assert await reader.read_at(0, 64) == b"copied bytes"
+        finally:
+            await reader.close()
+        result = await cross_connection_move(source, destination, source_path, target_path, overwrite=True)
+        assert result.replaced is True
+        assert not await source.file_exists(source_path)
+        assert b"".join([chunk async for chunk in destination.read_file(target_path)]) == b"copied bytes"
+    finally:
+        if created:
+            await source.delete_item(root)
+        await source.disconnect()
+        await destination.disconnect()
+
+
+class TestTransferPublication:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("overwrite", [False, True])
+    async def test_stage_publication_uses_actual_replacement_primitive(self, overwrite):
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        handle = MagicMock()
+        handle.write.return_value = 7
+
+        async def chunks():
+            yield b"content"
+
+        async def before_commit():
+            return overwrite
+
+        with (
+            patch("app.storage.smb.smbclient.open_file", return_value=handle),
+            patch("app.storage.smb.smbclient.replace") as replace,
+            patch("app.storage.smb.smbclient.rename") as rename,
+            patch("app.storage.smb.smbclient.renames") as renames,
+            patch("app.storage.smb.smbclient.remove") as remove,
+        ):
+            assert await backend.stage_and_commit_new_file_from_stream("target.txt", chunks(), before_commit=before_commit) == 7
+        selected, unused = (replace, rename) if overwrite else (rename, replace)
+        selected.assert_called_once()
+        assert selected.call_args.args[1] == r"\\server.local\share\target.txt"
+        unused.assert_not_called()
+        renames.assert_not_called()
+        remove.assert_not_called()
+        handle.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_same_connection_replacement_never_removes_visible_target(self):
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.smbclient.path.exists", return_value=True),
+            patch("app.storage.smb.smbclient.replace") as replace,
+            patch("app.storage.smb.smbclient.renames") as renames,
+            patch("app.storage.smb.smbclient.remove") as remove,
+        ):
+            await backend.move_item("source.txt", "target.txt", overwrite=True)
+        replace.assert_called_once_with(r"\\server.local\share\source.txt", r"\\server.local\share\target.txt", **SMB_AUTH_KWARGS)
+        renames.assert_not_called()
+        remove.assert_not_called()
 
 
 class TestFileExistence:
