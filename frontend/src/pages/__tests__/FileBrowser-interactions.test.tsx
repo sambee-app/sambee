@@ -2361,18 +2361,78 @@ describe("Browser Component - Interactions", () => {
       });
 
       it.each([
-        ["Home", "{End} {Home}{ArrowDown}"],
-        ["End", "{Home} {ArrowDown}"],
-      ])("Shift+%s preserves selections outside the range and uses focus instead of the previous anchor", async (key, setup) => {
+        ["Home", "End", "File: readme.txt"],
+        ["End", "Home", "Folder: Documents"],
+      ])(
+        "Shift+%s preserves selections outside the range and uses focus instead of the previous anchor",
+        async (key, initialKey, initialName) => {
+          const user = userEvent.setup();
+          renderBrowser("/browse/smb/test-server-1");
+          await screen.findByRole("button", { name: "Folder: Pictures" });
+          const list = screen.getByTestId("file-list-container");
+          await user.click(within(list).getByTestId("virtual-list"));
+          await user.keyboard(`{${initialKey}}`);
+          await waitFor(() => expect(within(list).getByRole("button", { name: initialName })).toHaveAttribute("data-selected", "true"));
+          await user.keyboard(" ");
+          expect(selectedNames(list)).toEqual([`${initialName} (selected)`]);
+          await user.keyboard("{Home}");
+          await waitFor(() =>
+            expect(within(list).getByRole("button", { name: /^Folder: Documents/ })).toHaveAttribute("data-selected", "true")
+          );
+          await user.keyboard("{ArrowDown}");
+          await waitFor(() =>
+            expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true")
+          );
+          await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+
+          expect(selectedNames(list)).toEqual([
+            "Folder: Documents (selected)",
+            "Folder: Pictures (selected)",
+            "File: readme.txt (selected)",
+          ]);
+        }
+      );
+
+      it.each([
+        ["End", "Home", "File: readme.txt (selected)"],
+        ["Home", "End", "Folder: Documents (selected)"],
+      ])("Shift+%s uses pending focus from %s before an animation frame commits", async (key, navigationKey, targetName) => {
         const user = userEvent.setup();
         renderBrowser("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "Folder: Pictures" });
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
-        await user.keyboard(setup);
-        await user.keyboard(`{Shift>}{${key}}{/Shift}`);
+        await user.keyboard("{Home}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Documents" })).toHaveAttribute("data-selected", "true")
+        );
+        await user.keyboard("{ArrowDown}");
+        await waitFor(() =>
+          expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true")
+        );
 
-        expect(selectedNames(list)).toEqual(["Folder: Documents (selected)", "Folder: Pictures (selected)", "File: readme.txt (selected)"]);
+        const frames: FrameRequestCallback[] = [];
+        const animationFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+        try {
+          fireEvent.keyDown(list, { key: navigationKey });
+          expect(within(list).getByRole("button", { name: "Folder: Pictures" })).toHaveAttribute("data-selected", "true");
+          fireEvent.keyDown(list, { key, shiftKey: true });
+
+          expect(selectedNames(list)).toEqual([
+            "Folder: Documents (selected)",
+            "Folder: Pictures (selected)",
+            "File: readme.txt (selected)",
+          ]);
+          act(() => {
+            for (const callback of frames.splice(0)) callback(performance.now());
+          });
+          expect(within(list).getByRole("button", { name: targetName })).toHaveAttribute("data-selected", "true");
+        } finally {
+          animationFrame.mockRestore();
+          act(() => {
+            for (const callback of frames) callback(performance.now());
+          });
+        }
       });
 
       it.each(["Home", "End"])("Shift+%s selects a single-item list without toggling it off", async (key) => {

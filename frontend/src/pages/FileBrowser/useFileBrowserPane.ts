@@ -2551,11 +2551,12 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       if (activeElement !== listContainerEl && !listContainerEl.contains(activeElement)) return;
 
       const displayed = filesRef.current;
-      const currentFile = displayed[focusedIndex];
+      const startIndex = pendingFocusedIndexRef.current ?? focusedIndex;
+      const currentFile = displayed[startIndex];
       if (!currentFile) return;
 
       const targetIndex = boundary === "first" ? 0 : displayed.length - 1;
-      const range = displayed.slice(Math.min(focusedIndex, targetIndex), Math.max(focusedIndex, targetIndex) + 1);
+      const range = displayed.slice(Math.min(startIndex, targetIndex), Math.max(startIndex, targetIndex) + 1);
       selectionAnchorRef.current = currentFile.path;
       setSelectedFiles((previous) => new Set([...previous, ...range.map((file) => file.path)]));
       updateFocus(targetIndex);
