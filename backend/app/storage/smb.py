@@ -178,12 +178,17 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
             cleanup_task = self._cleanup
         await asyncio.wait_for(asyncio.shield(cleanup_task), SMB_FILE_CLOSE_TIMEOUT_SECONDS)
 
-    async def commit_delete(self) -> None:
+    async def commit_delete(self, *, cancellation: Callable[[], bool] | None = None) -> None:
         async with self._lock:
             if self._closed:
                 raise SourceDeleteError("Move source handle was closed before delete dispatch", destination_mutated=True)
 
+            loop = asyncio.get_running_loop()
             dispatched = False
+
+            async def cancellation_requested() -> bool:
+                """Keep callbacks that access database state on their owning event loop."""
+                return cancellation is not None and cancellation()
 
             def _delete_opened_file() -> None:
                 nonlocal dispatched
@@ -198,6 +203,17 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
                 connection = raw.fd.connection
                 session_id = raw.fd.tree_connect.session.session_id
                 tree_connect_id = raw.fd.tree_connect.tree_connect_id
+                if cancellation is not None:
+                    pending_cancellation = asyncio.run_coroutine_threadsafe(cancellation_requested(), loop)
+                    try:
+                        cancelled = pending_cancellation.result(timeout=SMB_DELETE_TIMEOUT_SECONDS)
+                    finally:
+                        pending_cancellation.cancel()
+                    if cancelled:
+                        raise SourceDeleteError(
+                            "Move cancelled before source delete dispatch; the destination is published and the source is retained",
+                            destination_mutated=True,
+                        )
                 dispatched = True
                 pending = connection.send(request, session_id, tree_connect_id)
                 response = connection.receive(pending)
@@ -206,6 +222,8 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
 
             try:
                 await self._operate(_delete_opened_file, SMB_DELETE_TIMEOUT_SECONDS)
+            except SourceDeleteError:
+                raise
             except SMBResponseException as error:
                 raise SourceDeleteError(
                     "SMB server rejected source deletion; the destination is published and the source is retained",

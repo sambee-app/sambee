@@ -381,7 +381,7 @@ async def cross_connection_move(
                 replaced=replaced,
             )
         try:
-            await source_reader.commit_delete()
+            await source_reader.commit_delete(cancellation=cancellation)
         except SourceDeleteError as error:
             error.replaced = replaced
             raise

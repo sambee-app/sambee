@@ -110,7 +110,7 @@ class RetainedMoveSource(MemoryTransferBackend):
             async def read_at(self, offset: int, length: int) -> bytes:
                 return source.files[path][offset : offset + length]
 
-            async def commit_delete(self) -> None:
+            async def commit_delete(self, *, cancellation=None) -> None:
                 source.delete_commits.append(path)
                 del source.files[path]
 
@@ -458,7 +458,7 @@ async def test_move_deletion_failure_preserves_replacement_and_published_bytes(u
     async def open_reader(path):
         reader = await original_open(path)
 
-        async def reject():
+        async def reject(*, cancellation=None):
             if uncertain:
                 raise SourceDeletionOutcomeUnknown("lost acknowledgement")
             raise SourceDeleteError("server rejected deletion", destination_mutated=True)

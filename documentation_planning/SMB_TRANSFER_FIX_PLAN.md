@@ -87,7 +87,7 @@ Acceptance: successful cross-SMB moves leave one destination copy and remove onl
 
 ### Verification Results
 
-- Affected backend transfer, browser API, SMB, and pool suites: 373 passed, two explicit-credential integration tests skipped. Two unrelated image-preview tests still warn about Starlette's deprecated `HTTP_413_REQUEST_ENTITY_TOO_LARGE` constant.
+- Affected backend transfer, browser API, SMB, and pool suites: 379 passed, two explicit-credential integration tests skipped. Two unrelated image-preview tests still warn about Starlette's deprecated `HTTP_413_REQUEST_ENTITY_TOO_LARGE` constant.
 - Affected frontend API/contract, recovery, storage backend, tree, batch, and dialog suites: 351 passed across seven files.
 - Backend Ruff and mypy, frontend Biome and production build, documentation validation, and `git diff --check` passed. The production build reports its non-failing large-chunk warning.
 - Browser smoke check used only the demo connection, opening and dismissing F6 confirmation without moving files. Cross-connection behavior was tested in automated fixtures, not against a live SMB server.
@@ -96,3 +96,11 @@ Acceptance: successful cross-SMB moves leave one destination copy and remove onl
 ## Plan Review
 
 Reviewed against the original implementation with an independent reviewer. The review identified gaps in late executor cleanup, aggregate outcomes, durable late cancellation, and replacement facts after copy validation failure; the implementation and regressions address all four. Real-server validation and the original nesting reproduction remain open.
+
+A follow-up branch review identified three further gaps, now fixed:
+
+- Queued SMB deletion checks cancellation again immediately before sending the delete request. The worker evaluates the callback on its owning event loop so durable cancellation can safely refresh its database session. Regressions cover cancellation while the executor is occupied, successful queued deletion, replacement facts, and handle cleanup.
+- Cross-connection copy source-validation failures update the destination connection's cache rather than the source connection's cache.
+- Direct moves map source-validation failures to factual `failed` / `source_changed` results instead of HTTP 500. Direct copy and move regressions verify effects, replacement facts, cache ownership, and receipt replay.
+
+The existing version 2.0 transfer guide already describes these intended semantics and needs no further wording changes.

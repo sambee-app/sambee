@@ -18,9 +18,10 @@ import stat as stat_module
 import uuid
 import zipfile
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime
-from threading import Event
+from threading import Event, get_ident
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -1146,6 +1147,75 @@ class TestRandomAccessReading:
             reader = await backend.open_move_source_reader("source.txt")
             with pytest.raises(SourceDeletionOutcomeUnknown, match="close"):
                 await reader.commit_delete()
+        handle.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("cancelled", [False, True])
+    async def test_move_queued_delete_rechecks_cancellation_on_event_loop(self, cancelled):
+        loop = asyncio.get_running_loop()
+        event_loop_thread = get_ident()
+        release_worker = Event()
+        worker_started = asyncio.Event()
+        cancellation_requested = asyncio.Event()
+        published = False
+        handle = MagicMock(spec=["fd", "close", "seek", "read"])
+        handle.fd.file_id = b"f" * 16
+        handle.fd.connection.receive.return_value = {"data": MagicMock(get_value=lambda: SMB2SetInfoResponse().pack())}
+        handle.read.return_value = b"content"
+        source_info = FileInfo(name="source.txt", path="source.txt", type=FileType.FILE, size=7, stable_id="original")
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with patch("app.storage.smb.smbclient.open_file", return_value=handle):
+            reader = await backend.open_move_source_reader("source.txt")
+        reader.get_file_info = AsyncMock(return_value=source_info)
+        source = AsyncMock()
+        source.get_file_info.return_value = source_info
+        source.open_move_source_reader.return_value = reader
+        destination = AsyncMock()
+        run_in_executor = loop.run_in_executor
+
+        def occupy_worker():
+            loop.call_soon_threadsafe(worker_started.set)
+            assert release_worker.wait(5)
+
+        async def publish(_path, stream, *, before_commit, **_kwargs):
+            nonlocal published
+            payload = b"".join([chunk async for chunk in stream])
+            await before_commit()
+            published = True
+            loop.run_in_executor(None, occupy_worker)
+            await worker_started.wait()
+            return len(payload)
+
+        def is_cancelled():
+            assert get_ident() == event_loop_thread
+            if published and not cancellation_requested.is_set():
+                loop.call_soon(cancellation_requested.set)
+            return cancelled and cancellation_requested.is_set()
+
+        destination.stage_and_commit_new_file_from_stream.side_effect = publish
+        with (
+            ThreadPoolExecutor(max_workers=1) as executor,
+            patch.object(loop, "run_in_executor", side_effect=lambda _executor, operation: run_in_executor(executor, operation)),
+        ):
+            moving = asyncio.create_task(
+                cross_connection_move(source, destination, "source.txt", "target.txt", cancellation=is_cancelled, overwrite=True)
+            )
+            try:
+                await asyncio.wait_for(cancellation_requested.wait(), 5)
+                handle.fd.connection.send.assert_not_called()
+            finally:
+                release_worker.set()
+            if cancelled:
+                with pytest.raises(SourceDeleteError, match="cancelled") as raised:
+                    await moving
+                assert raised.value.destination_mutated is True
+                assert raised.value.replaced is True
+                handle.fd.connection.send.assert_not_called()
+            else:
+                result = await moving
+                assert result.bytes_written == len(b"content")
+                assert result.replaced is True
+                handle.fd.connection.send.assert_called_once()
         handle.close.assert_called_once()
 
     @pytest.mark.asyncio

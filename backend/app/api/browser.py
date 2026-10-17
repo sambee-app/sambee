@@ -2672,7 +2672,7 @@ async def copy_item(
         raise conflict
     except SourceChangedError as exc:
         if exc.destination_mutated:
-            _add_to_directory_cache(str(connection_id), dest)
+            _add_to_directory_cache(str(body.dest_connection_id) if is_cross_connection else str(connection_id), dest)
         return await _record_transfer_receipt(
             current_user,
             body,
@@ -2840,6 +2840,22 @@ async def move_item(
             current_user,
             body,
             ContentTransferResult(status="cancelled", effects=ContentTransferEffects(source="unchanged", destination="unchanged")),
+        )
+    except SourceChangedError as exc:
+        if exc.destination_mutated:
+            _add_to_directory_cache(str(body.dest_connection_id) if is_cross_connection else str(connection_id), dest)
+        return await _record_transfer_receipt(
+            current_user,
+            body,
+            ContentTransferResult(
+                status="failed",
+                effects=ContentTransferEffects(
+                    source="unchanged",
+                    destination="mutated" if exc.destination_mutated else "unchanged",
+                ),
+                replaced=exc.replaced,
+                error=ContentTransferError(code="source_changed", detail=str(exc)),
+            ),
         )
     except RegularFileTransferRequiredError as exc:
         unsupported = HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))

@@ -700,6 +700,50 @@ def test_cross_connection_move_source_retention_preserves_replacement_fact(
     )
 
 
+@pytest.mark.parametrize("kind", ["copy", "move"])
+@pytest.mark.parametrize("published", [False, True])
+def test_cross_connection_source_change_preserves_facts_and_destination_cache(
+    client: TestClient,
+    auth_headers_user: dict,
+    multiple_connections: list[Connection],
+    kind: str,
+    published: bool,
+):
+    source_connection, destination_connection = multiple_connections[:2]
+    request = {
+        "idempotency_key": str(uuid.uuid4()),
+        "source_path": "reports/report.txt",
+        "dest_path": "incoming/report.txt",
+        "dest_connection_id": str(destination_connection.id),
+        "target_resolution_policy": "replace",
+    }
+    with (
+        patch("app.api.browser.SMBBackend", side_effect=[AsyncMock(), AsyncMock()]),
+        patch(
+            f"app.api.browser.cross_connection_{kind}",
+            new_callable=AsyncMock,
+            side_effect=SourceChangedError("source changed", destination_mutated=published, replaced=published),
+        ) as transfer,
+        patch("app.api.browser._add_to_directory_cache") as update_cache,
+    ):
+        response = client.post(f"/api/browse/{source_connection.id}/{kind}", headers=auth_headers_user, json=request)
+        replay = client.post(f"/api/browse/{source_connection.id}/{kind}", headers=auth_headers_user, json=request)
+
+    assert response.status_code == 200
+    assert replay.json() == response.json()
+    assert response.json() == {
+        "status": "failed",
+        "effects": {"source": "unchanged", "destination": "mutated" if published else "unchanged"},
+        "replaced": published,
+        "error": {"code": "source_changed", "detail": "source changed"},
+    }
+    transfer.assert_awaited_once()
+    if published:
+        update_cache.assert_called_once_with(str(destination_connection.id), request["dest_path"])
+    else:
+        update_cache.assert_not_called()
+
+
 @pytest.mark.parametrize("failure", ["retained", "unknown", "source_changed"])
 def test_durable_transfer_operation_source_retention_preserves_replacement_fact(
     client: TestClient,
@@ -826,7 +870,7 @@ def test_durable_move_cancellation_preserves_publication_and_delete_facts(
             cancel()
         return len(data)
 
-    async def delete():
+    async def delete(*, cancellation=None):
         cancel()
         if phase == "uncertain_delete":
             raise SourceDeletionOutcomeUnknown("lost delete acknowledgement")
