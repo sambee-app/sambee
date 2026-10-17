@@ -141,6 +141,7 @@ async function enterEditMode(): Promise<HTMLElement> {
 describe("TextViewer", () => {
   afterEach(() => {
     sessionStorage.clear();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
@@ -166,6 +167,47 @@ describe("TextViewer", () => {
     mockTextEditorCommands.replaceAllSearchResults.mockReset();
     mockTextEditorCommands.replaceCurrentSearchResult.mockReset();
     mockSetWordWrapEnabled.mockReset();
+  });
+
+  it("shares current unsaved editor text separately from the saved attachment", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
+    vi.stubGlobal("navigator", { share, canShare: () => true });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }))
+    );
+    const raw = vi
+      .spyOn(apiService, "getOriginalFileBlob")
+      .mockResolvedValue(new Blob(["saved bytes"], { type: "application/octet-stream" }));
+    renderViewer();
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "unsaved text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Share as text" }));
+    expect(share).toHaveBeenCalledExactlyOnceWith({ text: "unsaved text" });
+    expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const fileChoice = screen.getByRole("menuitem", { name: "Share as file" });
+    await waitFor(() => expect(fileChoice).not.toHaveAttribute("aria-disabled", "true"));
+    fireEvent.click(fileChoice);
+    expect(share).toHaveBeenLastCalledWith({
+      files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 11 })],
+      title: "readme.txt",
+    });
+    expect(raw).toHaveBeenCalledTimes(1);
+    expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
   });
 
   it("toggles word wrap with Alt+Z while viewing read-only text", async () => {

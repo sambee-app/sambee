@@ -23,6 +23,7 @@ import {
 } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   beginViewerTextEdit,
   type ContentEditSession,
@@ -56,11 +57,12 @@ import {
 import { openExternalUrl } from "../../utils/externalLinks";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
-import { createShareFile, shareNativeContent, shouldWarmNativeSharePayload, supportsNativeShare } from "../../utils/nativeShare";
+import { createShareFile, supportsNativeShare } from "../../utils/nativeShare";
 import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
 import { HelpMenu } from "../FileBrowser/HelpMenu";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 import { settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
+import { ViewerShareMenu } from "../Sharing/ViewerShareMenu";
 import { CodeMirrorFindReplacePopover } from "./CodeMirrorFindReplacePopover";
 import { scheduleRetriableFocusRestore } from "./focusRestoration";
 import { loadMarkdownRichEditor } from "./loadMarkdownRichEditor";
@@ -203,7 +205,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
-  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareRevision, setShareRevision] = useState(0);
   const [draftStorageWarning, setDraftStorageWarning] = useState<string | null>(null);
   const [recoveryDraft, setRecoveryDraft] = useState<DraftSnapshot | null>(null);
   const [isResumingRecoveryDraft, setIsResumingRecoveryDraft] = useState(false);
@@ -213,7 +215,6 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editSession, setEditSession] = useState<ContentEditSession | null>(null);
-  const [sharing, setSharing] = useState(false);
   const [viewerSearchText, setViewerSearchText] = useState("");
   const [editorSearchCaseSensitive, setEditorSearchCaseSensitive] = useState(false);
   const [editorSearchFocusTarget, setEditorSearchFocusTarget] = useState<"find" | "replace" | null>(null);
@@ -249,8 +250,6 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const unsavedChangesCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const editSessionRef = useRef<ContentEditSession | null>(null);
   const searchHighlightsRef = useRef<DomTextSearchMatch[]>([]);
-  const prefetchedShareFileRef = useRef<File | null>(null);
-  const sharePrefetchPromiseRef = useRef<Promise<File> | null>(null);
   const editBaselineContentRef = useRef("");
   const isEditingRef = useRef(false);
   const editorLoadStateRef = useRef<EditorModuleLoadState>("idle");
@@ -260,7 +259,6 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const muiTheme = useTheme();
   const isMobile = useMediaQuery(muiTheme.breakpoints.down("sm"));
   const shareEnabled = isMobile && supportsNativeShare();
-  const shareWarmEnabled = shareEnabled && shouldWarmNativeSharePayload();
   const { viewerBg, toolbarBg, toolbarText, viewerText, linkColor, linkHoverColor } = getViewerColors(currentTheme, "markdown");
   const markdownTableSurfaceColors = getMarkdownTableSurfaceColors(muiTheme);
   const searchHighlightColors = useMemo(() => getSearchHighlightColors(muiTheme, currentTheme), [currentTheme, muiTheme]);
@@ -673,67 +671,18 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   );
 
   const loadShareFile = useCallback(
-    async (signal?: AbortSignal) => {
-      if (prefetchedShareFileRef.current) {
-        return prefetchedShareFileRef.current;
-      }
-
-      if (sharePrefetchPromiseRef.current) {
-        return sharePrefetchPromiseRef.current;
-      }
-
-      const shareFilePromise = readViewerContent(connectionId, path, { kind: "raw" }, { signal, virtualSource }, contentProviders).then(
-        (blob) => createShareFile(blob, filename)
-      );
-      sharePrefetchPromiseRef.current = shareFilePromise;
-
-      try {
-        return await shareFilePromise;
-      } finally {
-        if (sharePrefetchPromiseRef.current === shareFilePromise) {
-          sharePrefetchPromiseRef.current = null;
-        }
-      }
-    },
+    (signal: AbortSignal) =>
+      readViewerContent(connectionId, path, { kind: "raw" }, { signal, virtualSource }, contentProviders).then((blob) =>
+        createShareFile(blob, filename)
+      ),
     [connectionId, contentProviders, filename, path, virtualSource]
   );
-
-  useEffect(() => {
-    void loadShareFile;
-    prefetchedShareFileRef.current = null;
-    sharePrefetchPromiseRef.current = null;
-  }, [loadShareFile]);
-
-  const handleShareIntent = useCallback(() => {
-    if (!shareWarmEnabled) {
-      return;
-    }
-
-    void loadShareFile();
-  }, [shareWarmEnabled, loadShareFile]);
-
-  const handleShare = useCallback(async () => {
-    setShareError(null);
-    setSharing(true);
-
-    try {
-      const shareFile = await loadShareFile();
-      const result = await shareNativeContent({
-        file: shareFile,
-        title: filename,
-        text: content,
-      });
-
-      if (result === "unsupported") {
-        setShareError(t("viewer.share.unsupported"));
-      }
-    } catch (err) {
-      logError("Failed to share markdown", { error: err, path, connectionId });
-      setShareError(t("viewer.share.failed"));
-    } finally {
-      setSharing(false);
-    }
-  }, [connectionId, content, filename, loadShareFile, path, t]);
+  const nativeSharing = useViewerSharing({
+    entryPoint: "markdown",
+    identity: `${connectionId}:${path}:${fileModifiedAt}:${shareRevision}`,
+    enabled: shareEnabled && !loading && !isSaving && !error,
+    loadFile: loadShareFile,
+  });
 
   useEffect(() => {
     const markdownRoot = contentRef.current?.querySelector(MARKDOWN_SEARCH_ROOT_SELECTOR);
@@ -977,6 +926,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         clearPendingBaselineSync();
         beginBaselineSyncWindow();
         setContent(savedContent);
+        setShareRevision((revision) => revision + 1);
         setDraftContent(savedContent);
         setEditBaselineContent(savedContent);
         markEditSessionPristine();
@@ -1806,9 +1756,18 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
                 hideSearchPanel: isEditing,
               }}
               onDownload={handleDownload}
-              onShare={handleShare}
-              onShareIntent={handleShareIntent}
-              shareDisabled={sharing}
+              shareControl={
+                <ViewerShareMenu
+                  onFile={nativeSharing.shareFile}
+                  onText={() =>
+                    nativeSharing.shareText(() => (isEditing ? (editorRef.current?.getCanonicalMarkdown() ?? draftContent) : content))
+                  }
+                  fileDisabled={!nativeSharing.ready || isSaving}
+                  filePreparing={nativeSharing.preparing}
+                  textDisabled={loading || Boolean(error)}
+                  disabled={nativeSharing.sharing}
+                />
+              }
             />
           </Box>
 
@@ -1846,11 +1805,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
             </Alert>
           )}
 
-          {shareError && (
-            <Alert severity="error" sx={{ m: 2, flexShrink: 0 }}>
-              {shareError}
-            </Alert>
-          )}
+          {nativeSharing.failureDialog}
 
           {draftStorageWarning && (
             <Alert severity="warning" sx={{ m: 2, flexShrink: 0 }}>

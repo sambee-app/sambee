@@ -1,6 +1,14 @@
 # Native Mobile Sharing: Proposed Fix
 
-Status: Proposal for review. No implementation changes have been made.
+Status: Implemented. Automated and mocked-browser validation completed; native Android/iOS delivery validation remains manual.
+
+## Implementation Validation
+
+- All 394 tests in the 10 affected frontend suites pass, covering shared policy, lifecycle, menus, viewers, image caching, and file-browser interactions. Original and normalized PDF sharing assert the complete displayed document bytes.
+- Frontend lint, the production build, and website documentation validation pass. Existing test WebSocket warnings and production bundle-size warnings remain.
+- Mocked-browser checks at the demo connection cover file/text selection, privacy-filtered details, copy feedback, focus restoration, and short-phone/desktop layouts. Failure evidence survives responsive action visibility changes and is cleared when the source changes.
+- The stricter app-project TypeScript check is not clean at HEAD and still reports existing repository errors. The new shared sharing modules have no editor diagnostics; the normal production build passes.
+- Actual Android Chromium, Android Firefox, and Safari iOS share-sheet delivery still require the manual checks below. Mocked API success does not establish receiving-app delivery.
 
 ## Goal
 

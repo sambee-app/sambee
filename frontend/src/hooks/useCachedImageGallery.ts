@@ -66,6 +66,7 @@ export interface UseImageGalleryDataResult {
   filename: string;
   imageCacheRef: React.MutableRefObject<Map<number, string>>;
   getCachedImageSrc: (index: number) => string | undefined;
+  getCachedImageBlob: (index: number) => Blob | undefined;
   loadingStates: Map<number, boolean>;
   errorStates: Map<number, string | null>;
   currentImageLoadPhase: ImageLoadPhase;
@@ -105,6 +106,7 @@ interface GallerySessionResources {
   galleryIdentity: string;
   generation: number;
   imageCache: Map<number, string>;
+  imageBlobs: Map<number, Blob>;
   abortControllers: Map<number, AbortController>;
   inFlightRequests: Map<number, InFlightImageRequest>;
   failedBackgroundRequestKeys: Set<string>;
@@ -148,6 +150,7 @@ function createGallerySessionResources(galleryIdentity: string, generation: numb
     galleryIdentity,
     generation,
     imageCache: new Map(),
+    imageBlobs: new Map(),
     abortControllers: new Map(),
     inFlightRequests: new Map(),
     failedBackgroundRequestKeys: new Set(),
@@ -215,6 +218,7 @@ function disposeGallerySessionResources(session: GallerySessionResources): void 
     URL.revokeObjectURL(url);
   });
   session.imageCache.clear();
+  session.imageBlobs.clear();
 }
 
 function waitForRetryDelay(delayMs: number, signal: AbortSignal): Promise<void> {
@@ -675,6 +679,7 @@ export const useCachedImageGallery = ({
         }
 
         requestSessionResources.imageCache.set(index, blobUrl);
+        requestSessionResources.imageBlobs.set(index, blob);
         setImageSourceRevision((revision) => revision + 1);
         requestSessionResources.failedBackgroundRequestKeys.delete(failureKey);
         if (requestSessionResources.currentRetryGate?.index === index) {
@@ -955,6 +960,7 @@ export const useCachedImageGallery = ({
         logInfo("Revoking blob URL for distant image", { index, url });
         URL.revokeObjectURL(url);
         imageCache.delete(index);
+        sessionResourcesRef.current.imageBlobs.delete(index);
         removedIndexes.push(index);
       }
     });
@@ -1021,6 +1027,7 @@ export const useCachedImageGallery = ({
     if (cachedSource) {
       URL.revokeObjectURL(cachedSource);
       resources.imageCache.delete(index);
+      resources.imageBlobs.delete(index);
       setImageSourceRevision((revision) => revision + 1);
     }
 
@@ -1058,6 +1065,7 @@ export const useCachedImageGallery = ({
     filename,
     imageCacheRef,
     getCachedImageSrc,
+    getCachedImageBlob: (index: number) => activeSessionResources.imageBlobs.get(index),
     loadingStates,
     errorStates,
     currentImageLoadPhase,

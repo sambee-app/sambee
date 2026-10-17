@@ -68,7 +68,7 @@ import {
   SETTINGS_CATEGORY_ORDER,
   type SettingsCategory,
 } from "../components/Settings/settingsNavigation";
-import { downloadViewerBlob } from "../components/Viewer/viewerContent";
+import { useNativeSharing } from "../components/Sharing/useNativeSharing";
 import { getEnabledBrowserCommands } from "../config/browserCommands";
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, COPY_MOVE_SHORTCUTS, PANE_SHORTCUTS, SELECTION_SHORTCUTS } from "../config/keyboardShortcuts";
 import { useCompanion } from "../hooks/useCompanion";
@@ -100,7 +100,7 @@ import type { ConflictInfo, Connection, FileEntry } from "../types";
 import { FileType, isApiError } from "../types";
 import { openExternalUrl } from "../utils/externalLinks";
 import { compareLocalizedStrings } from "../utils/localeFormatting";
-import { createShareFile, shareNativeContent, supportsNativeShare } from "../utils/nativeShare";
+import { createShareFile, supportsNativeShare } from "../utils/nativeShare";
 import { getConnectionById, isConnectionReadOnly, isConnectionWritable } from "./FileBrowser/access";
 import { captureDropEntries, manifestFromDrop, manifestFromFiles } from "./FileBrowser/browserUploadManifest";
 import {
@@ -203,11 +203,6 @@ type FileListShortcutAvailability = { available: true } | { available: false; re
 type UnavailableShortcutNotice = { id: number; message: string };
 type FileShareState = { status: "preparing"; count: number } | { status: "ready" | "sharing"; files: File[] };
 type RecoveryPhase = "pending" | "awaiting-route" | "ready";
-
-function fileShareErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error) return `${fallback}: ${error.name}: ${error.message}`;
-  return error == null ? fallback : `${fallback}: ${String(error)}`;
-}
 
 const AVAILABLE_FILE_LIST_SHORTCUT: FileListShortcutAvailability = { available: true };
 
@@ -481,9 +476,7 @@ const Browser: React.FC = () => {
   const [companionHintOpen, setCompanionHintOpen] = useState(false);
   const [unavailableShortcutNotice, setUnavailableShortcutNotice] = useState<UnavailableShortcutNotice | null>(null);
   const [transferNotice, setTransferNotice] = useState("");
-  const [shareNotice, setShareNotice] = useState("");
-  const [shareNoticeIsError, setShareNoticeIsError] = useState(false);
-  const [failedShareDownload, setFailedShareDownload] = useState<{ files: File[]; nextIndex: number } | null>(null);
+  const nativeSharing = useNativeSharing("file-list");
   const [fileShareState, setFileShareState] = useState<FileShareState | null>(null);
   const fileShareRequestRef = React.useRef<{
     controller: AbortController;
@@ -3031,9 +3024,7 @@ const Browser: React.FC = () => {
     async (context: FileOperationPolicyContext, selectionAction: boolean) => {
       const items = selectionAction ? context.items : context.focusedItem ? [context.focusedItem] : [];
       if (!getFileListShortcutAvailability("share", { ...context, items }).available || !items.length) return;
-      setShareNotice("");
-      setShareNoticeIsError(false);
-      setFailedShareDownload(null);
+      nativeSharing.clearFailure();
 
       const controller = new AbortController();
       const request = {
@@ -3061,11 +3052,10 @@ const Browser: React.FC = () => {
           error instanceof Error ? error : new Error(String(error))
         );
         cancelFileShare();
-        setShareNotice(fileShareErrorMessage(error, t("viewer.share.failed")));
-        setShareNoticeIsError(true);
+        nativeSharing.preparationFailed();
       }
     },
-    [browserContentServices.providers, cancelFileShare, getFileListShortcutAvailability, getPaneForId, t]
+    [browserContentServices.providers, cancelFileShare, getFileListShortcutAvailability, getPaneForId, nativeSharing]
   );
   const finishFileShare = useCallback(async () => {
     const request = fileShareRequestRef.current;
@@ -3073,55 +3063,11 @@ const Browser: React.FC = () => {
     const files = fileShareState.files;
     setFileShareState({ status: "sharing", files });
     try {
-      const result = await shareNativeContent({ files });
-      if (fileShareRequestRef.current === request && result === "unsupported") {
-        setShareNotice(t("viewer.share.unsupported"));
-        setShareNoticeIsError(true);
-        setFailedShareDownload({ files, nextIndex: 0 });
-      }
-    } catch (error) {
-      if (fileShareRequestRef.current === request) {
-        logger.error(
-          "Failed to share file-list selection",
-          undefined,
-          "file-browser",
-          error instanceof Error ? error : new Error(String(error))
-        );
-        setShareNotice(
-          error instanceof DOMException && error.name === "NotAllowedError" && error.message === "Permission denied"
-            ? t("fileBrowser.share.fileTypeRejected")
-            : fileShareErrorMessage(error, t("fileBrowser.share.rejected"))
-        );
-        setShareNoticeIsError(true);
-        setFailedShareDownload({ files, nextIndex: 0 });
-      }
+      await nativeSharing.invoke({ files });
     } finally {
       if (fileShareRequestRef.current === request) cancelFileShare();
     }
-  }, [cancelFileShare, fileShareState, t]);
-  const downloadFailedShare = useCallback(() => {
-    if (!failedShareDownload) return;
-    const { files, nextIndex } = failedShareDownload;
-    const file = files[nextIndex];
-    if (!file) return;
-    try {
-      downloadViewerBlob(file, file.name);
-      if (nextIndex + 1 === files.length) {
-        setFailedShareDownload(null);
-        setShareNotice("");
-      } else {
-        setFailedShareDownload({ files, nextIndex: nextIndex + 1 });
-      }
-    } catch (error) {
-      logger.error(
-        "Failed to download prepared share file",
-        undefined,
-        "file-browser",
-        error instanceof Error ? error : new Error(String(error))
-      );
-      setShareNotice(fileShareErrorMessage(error, t("fileBrowser.share.downloadFailed")));
-    }
-  }, [failedShareDownload, t]);
+  }, [cancelFileShare, fileShareState, nativeSharing]);
 
   const handleUploadRequest = useCallback(
     (paneId: PaneId, folder = false) => {
@@ -4602,13 +4548,13 @@ const Browser: React.FC = () => {
         <MenuItem onClick={() => selectUploadChoice(true)}>{t("fileBrowser.toolbar.uploadChoiceFolder")}</MenuItem>
       </Menu>
       <Snackbar
-        open={Boolean(fileShareState || shareNotice)}
+        open={Boolean(fileShareState)}
         anchorOrigin={{ vertical: "top", horizontal: "center" }}
         sx={{
           top: `calc(${COMPACT_SHARE_SNACKBAR_TOP_PX}px + env(safe-area-inset-top))`,
           "& .MuiSnackbarContent-message": { overflowWrap: "anywhere" },
         }}
-        autoHideDuration={fileShareState || shareNoticeIsError ? null : TRANSFER_NOTICE_AUTOHIDE_MS}
+        autoHideDuration={null}
         message={
           fileShareState
             ? t(
@@ -4619,7 +4565,7 @@ const Browser: React.FC = () => {
                     : "fileBrowser.share.sharing",
                 { count: fileShareState.status === "preparing" ? fileShareState.count : fileShareState.files.length }
               )
-            : shareNotice
+            : ""
         }
         action={
           fileShareState?.status === "ready" ? (
@@ -4635,37 +4581,10 @@ const Browser: React.FC = () => {
             <Button color="inherit" onClick={cancelFileShare}>
               {t("common.actions.cancel")}
             </Button>
-          ) : shareNoticeIsError ? (
-            <>
-              {failedShareDownload && (
-                <Button color="inherit" onClick={downloadFailedShare}>
-                  {failedShareDownload.files.length === 1
-                    ? t("common.actions.download")
-                    : t("fileBrowser.share.downloadNext", {
-                        current: failedShareDownload.nextIndex + 1,
-                        count: failedShareDownload.files.length,
-                      })}
-                </Button>
-              )}
-              <Button
-                color="inherit"
-                onClick={() => {
-                  setShareNotice("");
-                  setFailedShareDownload(null);
-                }}
-              >
-                {t("common.actions.close")}
-              </Button>
-            </>
           ) : undefined
         }
-        onClose={() => {
-          if (!fileShareState) {
-            setShareNotice("");
-            setFailedShareDownload(null);
-          }
-        }}
       />
+      {nativeSharing.failureDialog}
       <Snackbar
         key={
           uploadProgress

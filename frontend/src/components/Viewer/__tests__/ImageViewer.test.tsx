@@ -58,6 +58,7 @@ const createGalleryMock = () => ({
   filename: "photo.jpg",
   imageCacheRef: { current: new Map() },
   getCachedImageSrc: () => undefined,
+  getCachedImageBlob: (): Blob | undefined => undefined,
   loadingStates: new Map(),
   errorStates: new Map(),
   currentImageLoadPhase: "ready" as const,
@@ -118,6 +119,38 @@ describe("ImageViewer", () => {
     );
 
     expect(screen.getByText("Read only")).toBeInTheDocument();
+  });
+
+  it("shares the retained displayed conversion instead of fetching the stored original", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { share, canShare: () => true });
+    const displayed = new Blob(["displayed PNG"], { type: "image/png" });
+    mockUseCachedImageGallery.mockReturnValue({ ...createGalleryMock(), filename: "photo.heic", getCachedImageBlob: () => displayed });
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: query.includes("max-width"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      render(
+        <SambeeThemeProvider>
+          <ImageViewer connectionId="conn-1" path="photo.heic" onClose={() => {}} />
+        </SambeeThemeProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      expect(share).toHaveBeenCalledExactlyOnceWith({
+        files: [expect.objectContaining({ name: "photo.png", type: "image/png", size: displayed.size })],
+        title: "photo.png",
+      });
+      await act(async () => {});
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("updates a preloaded slide source before marking it decoded", () => {

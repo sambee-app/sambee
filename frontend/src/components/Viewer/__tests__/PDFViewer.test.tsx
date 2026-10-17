@@ -1,6 +1,6 @@
 import { act, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type ReactNode, useCallback, useEffect, useRef } from "react";
+import { type ComponentProps, type ReactNode, useCallback, useEffect, useRef } from "react";
 import type { Mock } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
@@ -259,8 +259,8 @@ vi.mock("../../../services/logger", () => ({
 // Mock URL.createObjectURL and revokeObjectURL
 const mockCreateObjectURL = vi.fn(() => "blob:mock-url");
 const mockRevokeObjectURL = vi.fn();
-global.URL.createObjectURL = mockCreateObjectURL;
-global.URL.revokeObjectURL = mockRevokeObjectURL;
+globalThis.URL.createObjectURL = mockCreateObjectURL;
+globalThis.URL.revokeObjectURL = mockRevokeObjectURL;
 
 let capturedInitialDocumentItemClick: ((args: { dest?: unknown; pageIndex?: number; pageNumber?: number }) => void) | undefined;
 let mockBlobUrlCounter = 0;
@@ -291,7 +291,7 @@ function mockMatchMedia(matches: boolean) {
 }
 
 // Mock ResizeObserver
-global.ResizeObserver = class MockResizeObserver {
+globalThis.ResizeObserver = class MockResizeObserver {
   callback: ResizeObserverCallback;
 
   constructor(callback: ResizeObserverCallback) {
@@ -401,13 +401,13 @@ describe("PDFViewer", () => {
     (apiService.getPdfBlob as Mock).mockResolvedValue(new Blob(["mock pdf content"], { type: "application/pdf" }));
 
     // Reset AbortController to default
-    global.AbortController = class MockAbortController {
+    globalThis.AbortController = class MockAbortController {
       signal = { aborted: false } as AbortSignal;
       abort = vi.fn();
     } as unknown as typeof AbortController;
   });
 
-  const renderPDFViewer = (props = defaultProps) => {
+  const renderPDFViewer = (props: ComponentProps<typeof PDFViewer> = defaultProps) => {
     return render(
       <SambeeThemeProvider>
         <PDFViewer {...props} />
@@ -468,9 +468,10 @@ describe("PDFViewer", () => {
   });
 
   describe("Rendering States", () => {
-    it("renders loading state initially", () => {
+    it("renders loading state initially", async () => {
       renderPDFViewer();
       expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      await waitForPageNavigationReady();
     });
 
     it("renders PDF document when loaded successfully", async () => {
@@ -507,9 +508,10 @@ describe("PDFViewer", () => {
       );
     });
 
-    it("shows CircularProgress while loading", () => {
+    it("shows CircularProgress while loading", async () => {
       renderPDFViewer();
       expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      await waitForPageNavigationReady();
     });
 
     it("does not show loading text for a promptly rendered PDF", async () => {
@@ -704,10 +706,16 @@ describe("PDFViewer", () => {
       expect(apiService.getPdfBlob).toHaveBeenCalledTimes(2);
     });
 
-    it("reuses the loaded PDF blob for mobile share", async () => {
+    it.each(["original", "normalized"] as const)("reuses the loaded %s PDF bytes for mobile share", async (variant) => {
       mockMatchMedia(true);
       const share = vi.fn().mockResolvedValue(undefined);
       const canShare = vi.fn().mockReturnValue(true);
+      const originalContent = "complete original PDF";
+      const normalizedContent = "complete normalized PDF with compatible structure";
+      (apiService.getPdfBlob as Mock).mockImplementation((_connectionId, _path, options) =>
+        Promise.resolve(new Blob([options?.pdfVariant === "normalized" ? normalizedContent : originalContent], { type: "application/pdf" }))
+      );
+      if (variant === "normalized") mockDocumentLoadErrors = [new Error("InvalidPDFException: Invalid PDF structure")];
 
       Object.defineProperty(globalThis, "navigator", {
         configurable: true,
@@ -725,7 +733,7 @@ describe("PDFViewer", () => {
       });
 
       await waitForPageNavigationReady();
-      fireEvent.click(screen.getByLabelText("Share"));
+      await act(async () => fireEvent.click(screen.getByLabelText("Share")));
 
       await waitFor(() => {
         expect(share).toHaveBeenCalledWith({
@@ -734,7 +742,18 @@ describe("PDFViewer", () => {
         });
       });
 
-      expect(apiService.getPdfBlob).toHaveBeenCalledTimes(1);
+      const attachment = share.mock.calls[0]?.[0]?.files[0];
+      let sharedContent = "";
+      await act(async () => {
+        sharedContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsText(attachment);
+        });
+      });
+      expect(sharedContent).toBe(variant === "normalized" ? normalizedContent : originalContent);
+      expect(apiService.getPdfBlob).toHaveBeenCalledTimes(variant === "normalized" ? 2 : 1);
     });
   });
 
@@ -802,7 +821,7 @@ describe("PDFViewer", () => {
         abort = abortSpy;
       }
 
-      global.AbortController = TestAbortController as unknown as typeof AbortController;
+      globalThis.AbortController = TestAbortController as unknown as typeof AbortController;
 
       const { unmount } = renderPDFViewer();
 
@@ -1009,7 +1028,9 @@ describe("PDFViewer", () => {
         expect(getActivePdfPage()).toHaveAttribute("data-page", "4");
       });
 
-      await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      });
       expect(getActivePdfPage()).toHaveAttribute("data-page", "4");
     });
 
@@ -1038,7 +1059,9 @@ describe("PDFViewer", () => {
         expect(getActivePdfPage()).toHaveAttribute("data-page", "1");
       });
 
-      await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      });
       expect(getActivePdfPage()).toHaveAttribute("data-page", "1");
 
       dragCarousel(screen.getByTestId("pdf-viewer-content"), 300, 200, 50, 200);

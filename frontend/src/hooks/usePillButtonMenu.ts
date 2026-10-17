@@ -5,6 +5,7 @@ const SPACE_TRIGGER_KEYS = new Set([" ", "Space", "Spacebar"]);
 
 interface PillButtonMenuOptions {
   openOnSpaceKeyDown?: boolean;
+  restoreFocus?: boolean;
 }
 
 function hasModifierKey(event: React.KeyboardEvent<HTMLElement>): boolean {
@@ -108,6 +109,7 @@ export function usePillButtonMenu(onAfterClose?: () => void, options?: PillButto
     suppressSpaceKeyUpRef.current = null;
     suppressNextClickRef.current = null;
     setAnchorEl(null);
+    if (options?.restoreFocus) return;
     // Defer focus change to ensure menu closes first
     setTimeout(() => {
       if (buttonEl) {

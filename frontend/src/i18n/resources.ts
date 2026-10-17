@@ -1391,7 +1391,17 @@ export const EN_TRANSLATIONS = {
     share: {
       preparing: "Preparing file to share...",
       failed: "Failed to share file",
+      failedText: "Failed to share text",
       unsupported: "Sharing is not available on this device or browser",
+      payloadUnsupported: "This browser cannot share this attachment payload.",
+      details: "Sharing details",
+      detailsAction: "Details",
+      copyDetails: "Copy sharing details",
+      copySuccess: "Sharing details copied.",
+      copyError: "Could not copy sharing details. Select the report to copy it manually.",
+      downloadSuggestion: "Download the file and share it from your device's Files app instead.",
+      asFile: "Share as file",
+      asText: "Share as text",
     },
     shortcuts: {
       open: "Open",

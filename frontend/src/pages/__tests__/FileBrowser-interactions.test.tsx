@@ -3166,7 +3166,7 @@ describe("Browser Component - Interactions", () => {
         await user.click(screen.getByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
         await user.click(await screen.findByRole("button", { name: "Share" }));
-        expect(await screen.findByText("Sharing is not available on this device or browser")).toBeInTheDocument();
+        expect(await screen.findByText("This browser cannot share this attachment payload.")).toBeInTheDocument();
         expect(share).toHaveBeenCalledOnce();
       } finally {
         restore();
@@ -3239,11 +3239,14 @@ describe("Browser Component - Interactions", () => {
 
         await waitFor(() => expect(share).toHaveBeenCalledOnce());
         expect((share.mock.calls[0]![0].files as File[])[0]).toMatchObject({ name: "document.pdf", type: "application/pdf" });
-        expect(
-          await screen.findByText(
-            "Browser could not share these files. Download them instead: NotAllowedError: The browser blocked this file"
-          )
-        ).toBeInTheDocument();
+        expect(await screen.findByText("Failed to share file")).toBeInTheDocument();
+        expect(screen.queryByText(/The browser blocked this file/)).not.toBeInTheDocument();
+        await user.click(screen.getByRole("button", { name: "Details" }));
+        const report = await screen.findByText(/"reason": "NotAllowedError"/);
+        expect(report.textContent).not.toContain("document.pdf");
+        expect(report.textContent).toContain('"entryPoint": "file-list"');
+        await user.click(screen.getByRole("button", { name: "Close" }));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
         await user.click(screen.getByRole("button", { name: "Download" }));
         expect(downloadBlob).toHaveBeenCalledWith((share.mock.calls[0]![0].files as File[])[0], "document.pdf");
         expect(api.getOriginalFileBlob).toHaveBeenCalledOnce();
@@ -3275,25 +3278,22 @@ describe("Browser Component - Interactions", () => {
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
         await user.click(await screen.findByRole("button", { name: "Share" }));
 
-        expect(
-          await screen.findByText(
-            "This browser may not allow sharing these file types. Download them and try sharing them from your device's Files app."
-          )
-        ).toBeInTheDocument();
+        expect(await screen.findByText("Failed to share file")).toBeInTheDocument();
         expect(screen.queryByText(/Permission denied/)).not.toBeInTheDocument();
         const files = share.mock.calls[0]![0].files as File[];
         downloadBlob.mockImplementationOnce(() => {
           throw new Error("Storage unavailable");
         });
         await user.click(screen.getByRole("button", { name: "Download 1/2" }));
-        expect(await screen.findByText("Failed to download file: Error: Storage unavailable")).toBeInTheDocument();
+        expect(await screen.findByText("Failed to download file")).toBeInTheDocument();
+        expect(screen.queryByText(/Storage unavailable/)).not.toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Download 1/2" })).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Download 1/2" }));
         expect(downloadBlob).toHaveBeenNthCalledWith(2, files[0], "Documents");
         await user.click(screen.getByRole("button", { name: "Download 2/2" }));
         expect(downloadBlob).toHaveBeenNthCalledWith(3, files[1], "Pictures");
         expect(api.getOriginalFileBlob).toHaveBeenCalledTimes(2);
-        expect(screen.queryByText("Failed to download file: Error: Storage unavailable")).not.toBeInTheDocument();
+        expect(screen.queryByText("Failed to download file")).not.toBeInTheDocument();
       } finally {
         downloadBlob.mockRestore();
         restore();
@@ -3312,7 +3312,9 @@ describe("Browser Component - Interactions", () => {
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
 
-        expect(await screen.findByText("Failed to share file: Error: Download failed (403): Forbidden")).toBeInTheDocument();
+        expect(await screen.findByText("Failed to share file")).toBeInTheDocument();
+        expect(screen.queryByText(/Forbidden/)).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Details" })).toBeInTheDocument();
         expect(share).not.toHaveBeenCalled();
       } finally {
         restore();
@@ -3450,7 +3452,7 @@ describe("Browser Component - Interactions", () => {
 
         canShare.mockReturnValue(false);
         await user.click(screen.getByRole("button", { name: "Share" }));
-        expect(await screen.findByText("Sharing is not available on this device or browser")).toBeInTheDocument();
+        expect(await screen.findByText("This browser cannot share this attachment payload.")).toBeInTheDocument();
         expect(screen.getByText("Preparing upload")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Cancel" }));
         await waitFor(() => expect(screen.queryByText("Preparing upload")).not.toBeInTheDocument());

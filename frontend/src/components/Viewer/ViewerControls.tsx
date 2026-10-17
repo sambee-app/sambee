@@ -111,6 +111,7 @@ export interface ViewerControlsProps {
   onDownload?: () => void;
   /** Share handler (optional) */
   onShare?: () => void;
+  shareControl?: React.ReactNode;
   /** Warm share payload on early user intent (optional) */
   onShareIntent?: () => void;
   /** Disable share button while work is in progress */
@@ -200,6 +201,7 @@ export const ViewerControls: React.FC<ViewerControlsProps> = ({
   toolbarAccessory,
   onDownload,
   onShare,
+  shareControl,
   onShareIntent,
   shareDisabled = false,
   controlsDisabled = false,
@@ -790,19 +792,22 @@ export const ViewerControls: React.FC<ViewerControlsProps> = ({
         )}
 
         {/* Share button */}
-        {config.share && onShare && isMobile && (
-          <IconButton
-            color="inherit"
-            onClick={onShare}
-            onPointerDown={onShareIntent}
-            aria-label={t("common.actions.share")}
-            title={t("common.actions.share")}
-            size="small"
-            disabled={controlsDisabled || shareDisabled}
-          >
-            <IosShare fontSize="small" />
-          </IconButton>
-        )}
+        {config.share &&
+          isMobile &&
+          (shareControl ??
+            (onShare && (
+              <IconButton
+                color="inherit"
+                onClick={onShare}
+                onPointerDown={onShareIntent}
+                aria-label={t("common.actions.share")}
+                title={t("common.actions.share")}
+                size="small"
+                disabled={controlsDisabled || shareDisabled}
+              >
+                <IosShare fontSize="small" />
+              </IconButton>
+            )))}
 
         {toolbarAccessory}
 
