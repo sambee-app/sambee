@@ -144,6 +144,7 @@ class CurrentAccountRead(CurrentUserRead):
     has_local_password: bool
     identity_source: AccountIdentitySource
     password_change_available: bool
+    password_change_required: bool
     browser_session_management_available: bool
     oidc_provider_name: str | None
     current_session: "CurrentAccountSessionRead | None"

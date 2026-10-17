@@ -76,6 +76,7 @@ import { companionSession } from "./companionSession";
 import { snapshotRegisteredDrafts } from "./draftRecovery";
 import { logger } from "./logger";
 import { sanitizeReturnPath } from "./oidcAuth";
+import { setPasswordChangeRequired } from "./passwordChange";
 import type { ContentTransferResult, TargetResolutionPolicy } from "./storageContracts";
 
 export interface DirectorySearchOptions {
@@ -452,6 +453,13 @@ class ApiService {
             sentAuthorization !== `Bearer ${currentToken}`
           );
         };
+        if (error.response?.status === 403 && !obsoleteSession()) {
+          const body = error.response.data as { detail?: { code?: string } } | undefined;
+          if (body?.detail?.code === "password_change_required") {
+            setPasswordChangeRequired(true);
+            return Promise.reject(error);
+          }
+        }
         if (error.response?.status === 401 && (oidcExchangePending || config?._oidcExchangePending || obsoleteSession())) {
           return Promise.reject(error);
         }

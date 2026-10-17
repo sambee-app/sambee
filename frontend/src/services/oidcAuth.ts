@@ -1,6 +1,7 @@
 import type { AuthToken } from "../types";
 import { authSession } from "./authSession";
 import { logger } from "./logger";
+import { PASSWORD_CHANGE_PATH } from "./passwordChange";
 
 export const OIDC_ATTEMPT_MARKER = "sambee_oidc_attempted";
 export const OIDC_LOGOUT_MARKER = "sambee_oidc_logout";
@@ -54,8 +55,9 @@ export async function completeAuthentication(response: AuthToken, fallbackReturn
   if (renewable && previousUserId === (response.user_id ?? null)) authSession.notifyNewLogin();
   sessionStorage.removeItem(OIDC_ATTEMPT_MARKER);
   sessionStorage.removeItem(OIDC_LOGOUT_MARKER);
-  await logger.initializeBackendTracing();
   const returnPath = sanitizeReturnPath(response.return_path ?? fallbackReturnPath ?? sessionStorage.getItem(OIDC_RETURN_PATH_MARKER));
   sessionStorage.removeItem(OIDC_RETURN_PATH_MARKER);
+  if (response.password_change_required) return `${PASSWORD_CHANGE_PATH}?return_path=${encodeURIComponent(returnPath)}`;
+  await logger.initializeBackendTracing();
   return returnPath;
 }

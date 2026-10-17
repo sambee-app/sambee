@@ -598,6 +598,13 @@ async def reset_user_password(
     user.password_hash = get_password_hash(reset_data.new_password)
     user.must_change_password = reset_data.must_change_password
     user.token_version += 1
+    write_audit_event(
+        session,
+        event_name=AuditEventName.PASSWORD_RESET,
+        result=AuditResult.SUCCEEDED,
+        acting_user_id=current_user.id,
+        affected_user_id=user.id,
+    )
     user.updated_at = datetime.now(timezone.utc)
     session.add(user)
     session.commit()

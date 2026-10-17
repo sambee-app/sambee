@@ -41,9 +41,19 @@ Mapping updates are atomic and revision checked. If another administrator change
 
 Deleting a local user also removes their established identity, pending mappings targeting that user, and incomplete OIDC flows in the same transaction. Pending mappings that the deleted user created for other accounts remain active and show **Deleted user** as their creator. Deletion remains subject to the last-administrator guard.
 
+## Require A Local Password Change
+
+When creating a local user or resetting an existing local password, enable **Require change on next password sign-in** to require a new password before the user can continue. The user directory shows **Pwd change req'd** while this requirement is pending.
+
+After signing in with the temporary or existing local password, the user must enter that password, choose a different password, and confirm it. They can sign out instead, but can't browse files, use administration settings, or issue companion credentials until the change succeeds. Successful changes invalidate existing Sambee tokens and require another sign-in.
+
+The requirement applies only to local-password sessions. A linked user can still sign in through OIDC; that doesn't clear the local-password requirement or change the identity provider's password. Passwordless OIDC accounts have no local password to reset. In **OIDC only** mode, local password changes are unavailable.
+
+Existing password-change flags are enforced after upgrading. They aren't cleared automatically. If a user can't complete the change, an administrator can set another local password through User Management. Switch the requirement off during that reset only when the replacement password is intended to be permanent. Authentication-disabled mode doesn't enforce the change workflow.
+
 ## Audit Events
 
-OIDC configuration and identity events are stored in the Sambee database. They do not contain raw subjects, provider tokens, client secrets, authorization codes, nonces, verifiers, or one-time login grants. Events are retained until the database is removed or an external retention process deletes them.
+OIDC configuration, identity events, and successful local password changes and resets are stored in the Sambee database. They do not contain passwords, raw subjects, provider tokens, client secrets, authorization codes, nonces, verifiers, or one-time login grants. Events are retained until the database is removed or an external retention process deletes them.
 
 Export the complete audit stream as JSON Lines:
 

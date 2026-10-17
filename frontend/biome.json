@@ -23,13 +23,41 @@
         "useLiteralKeys": "off"
       },
       "style": {
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "off",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@mui/material": {
+                "importNames": [
+                  "Chip"
+                ],
+                "message": "Use CompactBadge to enforce the 18-character badge-label limit."
+              },
+              "@mui/material/Chip": "Use CompactBadge to enforce the 18-character badge-label limit."
+            }
+          }
+        }
       },
       "suspicious": {
         "noExplicitAny": "warn"
       }
     }
   },
+  "overrides": [
+    {
+      "includes": [
+        "src/components/CompactBadge.tsx"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": "off"
+          }
+        }
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double",

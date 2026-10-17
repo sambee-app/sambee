@@ -10,6 +10,8 @@ from app.models.audit import AuditEvent
 
 
 class AuditEventName(StrEnum):
+    PASSWORD_CHANGED = "auth.password.changed"
+    PASSWORD_RESET = "auth.password.reset"
     CONFIG_VALIDATED = "oidc.config.validated"
     CONFIG_UPDATED = "oidc.config.updated"
     AUTHORIZATION_STARTED = "oidc.authorization.started"

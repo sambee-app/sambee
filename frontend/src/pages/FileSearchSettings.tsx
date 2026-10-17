@@ -1,7 +1,8 @@
 import { Add as AddIcon, Cancel as CancelIcon } from "@mui/icons-material";
-import { Alert, Button, Checkbox, Chip, FormControl, FormControlLabel, FormGroup, FormLabel, Stack, TextField } from "@mui/material";
+import { Alert, Button, Checkbox, FormControl, FormControlLabel, FormGroup, FormLabel, Stack, TextField } from "@mui/material";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CompactBadge as Chip } from "../components/CompactBadge";
 import { SettingsFieldHelp } from "../components/Settings/SettingsFieldHelp";
 import { SettingsGroup } from "../components/Settings/SettingsGroup";
 import { SettingsPage } from "../components/Settings/SettingsPage";

@@ -21,9 +21,12 @@ from app.core.security import (
     BrowserAuthentication,
     build_user_access_token,
     get_current_browser_authentication_with_auth_check,
+    get_current_user_for_password_change,
     get_current_user_with_auth_check,
+    get_password_change_authentication,
     get_password_hash,
     is_user_expired,
+    password_change_required,
     verify_password,
 )
 from app.db.database import get_immediate_session, get_session
@@ -184,6 +187,7 @@ def _build_login_response(
         "role": user.role,
         "expires_at": normalize_utc_datetime(user.expires_at),
         "must_change_password": user.must_change_password,
+        "password_change_required": user.must_change_password and oidc_browser_session_id is None,
         "access_token_expires_at": token_expiry.isoformat(),
     }
     if return_path is not None:
@@ -1119,7 +1123,7 @@ async def revoke_oidc_browser_session(
 #
 @router.get("/me", response_model=CurrentUserRead)
 async def get_current_user_info(
-    current_user: User = Depends(get_current_user_with_auth_check),
+    current_user: User = Depends(get_current_user_for_password_change),
 ) -> CurrentUserRead:
     """Get current user information"""
 
@@ -1131,7 +1135,7 @@ async def get_current_user_info(
 
 @router.get("/account", response_model=CurrentAccountRead)
 async def get_current_account(
-    authentication: BrowserAuthentication = Depends(get_current_browser_authentication_with_auth_check),
+    authentication: BrowserAuthentication = Depends(get_password_change_authentication),
     session: Session = Depends(get_session),
 ) -> CurrentAccountRead:
     current_user = authentication.user
@@ -1168,6 +1172,7 @@ async def get_current_account(
         has_local_password=current_user.password_hash is not None,
         identity_source=AccountIdentitySource.OIDC if oidc_identity is not None else AccountIdentitySource.LOCAL,
         password_change_available=current_user.password_hash is not None and is_password_change_available(session),
+        password_change_required=password_change_required(authentication, session),
         browser_session_management_available=configuration is not None,
         oidc_provider_name=configuration.display_name if configuration is not None else None,
         current_session=current_session,
@@ -1204,7 +1209,7 @@ async def change_password(
     payload: PasswordChangeRequest | None = Body(default=None),
     current_password: str | None = Query(default=None),
     new_password: str | None = Query(default=None),
-    current_user: User = Depends(get_current_user_with_auth_check),
+    current_user: User = Depends(get_current_user_for_password_change),
     session: Session = Depends(get_session),
 ) -> dict[str, str]:
     """Change current user's password"""
@@ -1239,9 +1244,19 @@ async def change_password(
             detail="Current password is incorrect",
         )
 
+    if verify_password(effective_new_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a password different from your current password")
+
     current_user.password_hash = get_password_hash(effective_new_password)
     current_user.must_change_password = False
     current_user.token_version += 1
+    write_audit_event(
+        session,
+        event_name=AuditEventName.PASSWORD_CHANGED,
+        result=AuditResult.SUCCEEDED,
+        acting_user_id=current_user.id,
+        affected_user_id=current_user.id,
+    )
     session.add(current_user)
     session.commit()
 

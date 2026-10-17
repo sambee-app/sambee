@@ -57,6 +57,7 @@ def websocket_state_fixture(session) -> Generator[None, None, None]:
     manager.active_connections.clear()
     manager.subscriptions.clear()
     manager.users.clear()
+    manager.authentication_tokens.clear()
     manager._resolved_paths.clear()
     websocket_module.DBSession = cast(Any, lambda _engine: _SessionContext(session))
 
@@ -65,6 +66,7 @@ def websocket_state_fixture(session) -> Generator[None, None, None]:
     manager.active_connections.clear()
     manager.subscriptions.clear()
     manager.users.clear()
+    manager.authentication_tokens.clear()
     manager._resolved_paths.clear()
     websocket_module.DBSession = original_db_session
 
@@ -108,6 +110,25 @@ async def test_transfer_progress_drops_stalled_subscriber_without_blocking_other
 
 @pytest.mark.integration
 class TestWebSocketAuthentication:
+    def test_flagged_password_session_cannot_connect(self, client, regular_user, user_token, session, websocket_state) -> None:
+        regular_user.must_change_password = True
+        session.add(regular_user)
+        session.commit()
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(_ws_path(user_token)):
+                pass
+
+    def test_existing_socket_closes_after_password_reset(self, client, regular_user, user_token, session, websocket_state) -> None:
+        with client.websocket_connect(_ws_path(user_token)) as websocket:
+            ws_client = WebSocketClient(websocket)
+            assert ws_client.ping() == {"type": "pong"}
+            regular_user.must_change_password = True
+            regular_user.token_version += 1
+            session.add(regular_user)
+            session.commit()
+            with pytest.raises(WebSocketDisconnect):
+                ws_client.ping()
+
     def test_websocket_requires_authentication(self, client, websocket_state) -> None:
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(_ws_path(None)):

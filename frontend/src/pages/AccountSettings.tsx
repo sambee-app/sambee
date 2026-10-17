@@ -27,12 +27,12 @@ import { SettingsSectionList } from "../components/Settings/SettingsSectionList"
 import { settingsPrimaryButtonSx, settingsUtilityButtonSx } from "../components/Settings/settingsButtonStyles";
 import { clearCurrentBrowserSession, signOutCurrentBrowser } from "../services/accountSession";
 import api from "../services/api";
+import { PASSWORD_CHANGED_MARKER } from "../services/passwordChange";
 import type { AccountSessionKind, CurrentAccount, CurrentAccountSession, OidcBrowserSession } from "../types";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { dialogEnterKeyHandler } from "../utils/keyboardUtils";
 import { formatLocalizedDateTime } from "../utils/localeFormatting";
 
-const PASSWORD_CHANGED_MARKER = "sambee_password_changed";
 const PASSWORD_CONFIRMATION_MISMATCH_MESSAGE = "The new password and confirmation do not match.";
 const PASSWORD_FIELDS_REQUIRED_MESSAGE = "Complete all password fields.";
 

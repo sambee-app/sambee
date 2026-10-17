@@ -21,7 +21,7 @@ from app.core.exceptions import ConfigurationError
 from app.core.logging import get_logger
 from app.db.database import get_session
 from app.models.user import User
-from app.services.authentication_config import get_effective_authentication_mode
+from app.services.authentication_config import get_effective_authentication_mode, is_password_change_available
 
 logger = get_logger(__name__)
 
@@ -47,6 +47,21 @@ class BrowserAuthentication:
     token_version_current: bool
     oidc_browser_session_id: uuid.UUID | None = None
     authentication_enforced: bool = True
+
+
+def password_change_required(authentication: BrowserAuthentication, session: Session) -> bool:
+    return (
+        authentication.authentication_enforced
+        and authentication.oidc_browser_session_id is None
+        and authentication.user.password_hash is not None
+        and authentication.user.must_change_password
+        and is_password_change_available(session)
+    )
+
+
+def require_password_change_completed(authentication: BrowserAuthentication, session: Session) -> None:
+    if password_change_required(authentication, session):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={"code": "password_change_required"})
 
 
 def is_user_expired(user: User, now: datetime | None = None) -> bool:
@@ -230,6 +245,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), session: Session
     authentication = _authenticate_browser_token(token, session)
     if not authentication.token_version_current:
         raise _build_credentials_exception()
+    require_password_change_completed(authentication, session)
     return authentication.user
 
 
@@ -299,6 +315,7 @@ async def get_admin_browser_authentication_allowing_stale_token(
         )
     if not user_has_capability(authentication.user, Capability.ACCESS_ADMIN_SETTINGS):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+    require_password_change_completed(authentication, session)
     return authentication
 
 
@@ -322,6 +339,15 @@ async def get_current_browser_authentication_with_auth_check(
     token: Optional[str] = Depends(oauth2_scheme_optional),
     session: Session = Depends(get_session),
 ) -> BrowserAuthentication:
+    authentication = await get_password_change_authentication(token, session)
+    require_password_change_completed(authentication, session)
+    return authentication
+
+
+async def get_password_change_authentication(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    session: Session = Depends(get_session),
+) -> BrowserAuthentication:
     """Return the validated browser authentication context for account session views."""
 
     if get_effective_authentication_mode(session).value == "none":
@@ -337,6 +363,12 @@ async def get_current_browser_authentication_with_auth_check(
     if not authentication.token_version_current:
         raise _build_credentials_exception()
     return authentication
+
+
+async def get_current_user_for_password_change(
+    authentication: BrowserAuthentication = Depends(get_password_change_authentication),
+) -> User:
+    return authentication.user
 
 
 async def get_current_user_for_token(token: Optional[str], session: Session) -> User:

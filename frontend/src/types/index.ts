@@ -18,6 +18,7 @@ export interface User {
   role?: UserRole;
   is_active?: boolean;
   must_change_password?: boolean;
+  password_change_required?: boolean;
   expires_at?: string | null;
   access_token_expires_at?: string;
   created_at?: string;
@@ -33,6 +34,7 @@ export interface CurrentAccount extends User {
   has_local_password: boolean;
   identity_source: AccountIdentitySource;
   password_change_available: boolean;
+  password_change_required: boolean;
   browser_session_management_available: boolean;
   oidc_provider_name: string | null;
   current_session: CurrentAccountSession | null;

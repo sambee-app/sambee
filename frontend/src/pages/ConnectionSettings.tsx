@@ -4,24 +4,12 @@ import { SettingsActionBar } from "../components/Settings/SettingsActionBar";
 //
 
 import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon, MoreVert as MoreVertIcon } from "@mui/icons-material";
-import {
-  Box,
-  Button,
-  Chip,
-  Divider,
-  IconButton,
-  ListItem,
-  Menu,
-  MenuItem,
-  Tooltip,
-  Typography,
-  useMediaQuery,
-  useTheme,
-} from "@mui/material";
+import { Box, Button, Divider, IconButton, ListItem, Menu, MenuItem, Tooltip, Typography, useMediaQuery, useTheme } from "@mui/material";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ConnectionDialog from "../components/Admin/ConnectionDialog";
 import DeleteDialog from "../components/Admin/DeleteDialog";
+import { CompactBadge as Chip } from "../components/CompactBadge";
 import { SettingsNotificationSnackbar, type SettingsNotificationState } from "../components/Settings/SettingsFeedback";
 import { SettingsGroup } from "../components/Settings/SettingsGroup";
 import { SettingsList } from "../components/Settings/SettingsList";

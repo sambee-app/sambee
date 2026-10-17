@@ -790,6 +790,7 @@ class TestGetCurrentUserEndpoint:
             "has_local_password": True,
             "identity_source": "local",
             "password_change_available": True,
+            "password_change_required": False,
             "browser_session_management_available": False,
             "oidc_provider_name": None,
             "current_session": {
@@ -847,6 +848,78 @@ class TestGetCurrentUserEndpoint:
 @pytest.mark.integration
 class TestChangePasswordEndpoint:
     """Test password change functionality."""
+
+    @pytest.mark.parametrize(
+        ("mode", "enforced", "oidc_session", "expected"),
+        [
+            ("password_only", True, False, True),
+            ("oidc_or_password", True, False, True),
+            ("oidc_or_password", True, True, False),
+            ("oidc_only", True, False, False),
+            ("password_only", False, False, False),
+        ],
+    )
+    def test_password_change_requirement_respects_authentication_context(
+        self, session: Session, regular_user: User, mode: str, enforced: bool, oidc_session: bool, expected: bool
+    ):
+        import uuid
+
+        from app.core.auth_methods import AuthenticationMode
+        from app.core.security import BrowserAuthentication, password_change_required
+        from app.services.authentication_config import set_ui_authentication_mode
+
+        set_ui_authentication_mode(session, mode=AuthenticationMode(mode), updated_by_user_id=None)
+        regular_user.must_change_password = True
+        authentication = BrowserAuthentication(
+            user=regular_user,
+            token_version_current=True,
+            oidc_browser_session_id=uuid.uuid4() if oidc_session else None,
+            authentication_enforced=enforced,
+        )
+        assert password_change_required(authentication, session) is expected
+
+    def test_required_password_change_blocks_access_until_completed(
+        self, client: TestClient, session: Session, regular_user: User, auth_headers_user: dict
+    ):
+        regular_user.must_change_password = True
+        session.add(regular_user)
+        session.commit()
+
+        assert client.get("/api/auth/me", headers=auth_headers_user).status_code == 200
+        account = client.get("/api/auth/account", headers=auth_headers_user)
+        assert account.status_code == 200
+        assert account.json()["password_change_required"] is True
+        blocked = client.get("/api/auth/me/settings", headers=auth_headers_user)
+        assert blocked.status_code == 403
+        assert blocked.json()["detail"] == {"code": "password_change_required"}
+
+        rejected = client.post(
+            "/api/auth/change-password",
+            headers=auth_headers_user,
+            json={"current_password": "incorrect", "new_password": "newpass123"},
+        )
+        assert rejected.status_code == 400
+        session.refresh(regular_user)
+        assert regular_user.must_change_password is True
+
+        response = client.post(
+            "/api/auth/change-password",
+            headers=auth_headers_user,
+            json={"current_password": "userpass123", "new_password": "newpass123"},
+        )
+        assert response.status_code == 200
+        session.refresh(regular_user)
+        assert regular_user.must_change_password is False
+        assert client.get("/api/auth/me", headers=auth_headers_user).status_code == 401
+
+    def test_change_password_rejects_current_password(self, client: TestClient, auth_headers_user: dict):
+        response = client.post(
+            "/api/auth/change-password",
+            headers=auth_headers_user,
+            json={"current_password": "userpass123", "new_password": "userpass123"},
+        )
+        assert response.status_code == 400
+        assert "different" in response.json()["detail"]
 
     def test_change_password_success(self, client: TestClient, session: Session):
         """Test successful password change."""
