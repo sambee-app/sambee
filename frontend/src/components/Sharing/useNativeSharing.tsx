@@ -130,6 +130,7 @@ export function useNativeSharing(entryPoint: string, source: ShareSource = "save
       : failure?.diagnostic.reason === "payload-unsupported"
         ? t("viewer.share.payloadUnsupported")
         : t(failure?.mode === "text" ? "viewer.share.failedText" : "viewer.share.failed");
+  const detailsOpen = Boolean(failure) && details;
   const failureDialog = (
     <>
       <Snackbar open={Boolean(failure) && !details} anchorOrigin={{ vertical: "top", horizontal: "center" }}>
@@ -166,7 +167,7 @@ export function useNativeSharing(entryPoint: string, source: ShareSource = "save
         </Alert>
       </Snackbar>
       <ResponsiveDialogShell
-        open={Boolean(failure) && details}
+        open={detailsOpen}
         onClose={() => setDetails(false)}
         title={t("viewer.share.details")}
         onTransitionExited={() => detailsButtonRef.current?.focus()}
@@ -196,5 +197,5 @@ export function useNativeSharing(entryPoint: string, source: ShareSource = "save
       </ResponsiveDialogShell>
     </>
   );
-  return { invoke, preparationFailed, clearFailure, sharing, failureDialog };
+  return { invoke, preparationFailed, clearFailure, sharing, detailsOpen, failureDialog };
 }

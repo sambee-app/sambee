@@ -68,13 +68,13 @@ export function shouldWarmNativeSharePayload(): boolean {
   return !["slow-2g", "2g", "3g"].includes(connection.effectiveType ?? "");
 }
 
+const GENERIC_SHARE_MIME_TYPE = "application/octet-stream";
+
 export function createShareFile(blob: Blob, filename: string, mimeType?: string): File {
-  const normalizedType = blob.type.split(";")[0]?.trim() ?? "";
-  const fallbackType = mimeType?.split(";")[0]?.trim() || getFileTypeByExtension(filename)?.mimeTypes[0];
   const fileType =
-    normalizedType === "application/octet-stream"
-      ? fallbackType || normalizedType
-      : normalizedType || fallbackType || "application/octet-stream";
+    [blob.type, mimeType, getFileTypeByExtension(filename)?.mimeTypes[0]]
+      .map((candidate) => candidate?.split(";")[0]?.trim().toLowerCase())
+      .find((candidate) => candidate && candidate !== GENERIC_SHARE_MIME_TYPE) || GENERIC_SHARE_MIME_TYPE;
   return new File([blob], filename, { type: fileType });
 }
 

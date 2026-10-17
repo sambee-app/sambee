@@ -13,9 +13,19 @@ interface ViewerSharingOptions {
 
 export function useViewerSharing({ entryPoint, identity, enabled, file, loadFile, source = "saved-file" }: ViewerSharingOptions) {
   const native = useNativeSharing(entryPoint, source);
-  const [prepared, setPrepared] = useState<{ identity: string; loader: typeof loadFile; file: File } | null>(null);
+  const [prepared, setPrepared] = useState<{
+    identity: string;
+    loader: typeof loadFile;
+    sourceFile: typeof file;
+    attempt: number;
+    file: File;
+  } | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const preparedFile =
+    prepared?.identity === identity && prepared.loader === loadFile && prepared.sourceFile === file && prepared.attempt === attempt
+      ? prepared.file
+      : null;
   const failureRef = useRef(native.preparationFailed);
   const clearRef = useRef(native.clearFailure);
   failureRef.current = native.preparationFailed;
@@ -26,16 +36,16 @@ export function useViewerSharing({ entryPoint, identity, enabled, file, loadFile
     clearRef.current();
   }, [identity, loadFile, file, attempt]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resource replacement and explicit retry must reset preparation.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: completion must not restart preparation; availability changes reuse valid prepared bytes.
   useEffect(() => {
     const controller = new AbortController();
-    setPrepared(null);
+    if (!preparedFile) setPrepared(null);
     setPreparing(false);
-    if (enabled && loadFile) {
+    if (enabled && loadFile && !file && !preparedFile) {
       setPreparing(true);
       void loadFile(controller.signal)
         .then((nextFile) => {
-          if (!controller.signal.aborted) setPrepared({ identity, loader: loadFile, file: nextFile });
+          if (!controller.signal.aborted) setPrepared({ identity, loader: loadFile, sourceFile: file, attempt, file: nextFile });
         })
         .catch(() => {
           if (!controller.signal.aborted) failureRef.current({}, () => setAttempt((value) => value + 1));
@@ -49,7 +59,7 @@ export function useViewerSharing({ entryPoint, identity, enabled, file, loadFile
     };
   }, [enabled, identity, loadFile, file, attempt]);
 
-  const readyFile = enabled ? (file ?? (prepared?.identity === identity && prepared.loader === loadFile ? prepared.file : null)) : null;
+  const readyFile = enabled ? (file ?? preparedFile) : null;
   const shareFile = () => {
     if (readyFile) void native.invoke({ file: readyFile, title: readyFile.name });
   };

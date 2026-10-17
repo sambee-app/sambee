@@ -11,6 +11,65 @@ afterEach(() => {
 });
 
 describe("shared viewer sharing", () => {
+  it("retains valid prepared bytes across availability changes but invalidates a saved-file version", async () => {
+    const saved = new File(["saved"], "note.txt");
+    const updated = new File(["updated"], "note.txt");
+    const loadFile = vi.fn().mockResolvedValueOnce(saved).mockResolvedValueOnce(updated);
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { share });
+    const { result, rerender } = renderHook(
+      ({ enabled, identity }) => useViewerSharing({ entryPoint: "text", identity, enabled, loadFile }),
+      { initialProps: { enabled: true, identity: "version-one" } }
+    );
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    rerender({ enabled: false, identity: "version-one" });
+    expect(result.current.ready).toBe(false);
+    rerender({ enabled: true, identity: "version-one" });
+    expect(result.current.ready).toBe(true);
+    expect(loadFile).toHaveBeenCalledTimes(1);
+    act(() => result.current.shareFile());
+    expect(share).toHaveBeenLastCalledWith({ files: [saved] });
+    await waitFor(() => expect(result.current.sharing).toBe(false));
+    rerender({ enabled: false, identity: "version-two" });
+    rerender({ enabled: true, identity: "version-two" });
+    expect(result.current.ready).toBe(false);
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    act(() => result.current.shareFile());
+    expect(share).toHaveBeenLastCalledWith({ files: [updated] });
+    expect(loadFile).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(result.current.sharing).toBe(false));
+  });
+
+  it("aborts pending work when unavailable and ignores its completion after re-enabling", async () => {
+    let resolveOld: (file: File) => void = () => {};
+    const activeFile = new File(["active"], "note.txt");
+    const loadFile = vi
+      .fn<(signal: AbortSignal) => Promise<File>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOld = resolve;
+          })
+      )
+      .mockResolvedValue(activeFile);
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { share });
+    const { result, rerender } = renderHook(({ enabled }) => useViewerSharing({ entryPoint: "text", identity: "one", enabled, loadFile }), {
+      initialProps: { enabled: true },
+    });
+    const signal = loadFile.mock.calls[0]?.[0];
+    rerender({ enabled: false });
+    expect(signal?.aborted).toBe(true);
+    expect(result.current.preparing).toBe(false);
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    await act(async () => resolveOld(new File(["stale"], "note.txt")));
+    expect(share).not.toHaveBeenCalled();
+    act(() => result.current.shareFile());
+    expect(share).toHaveBeenLastCalledWith({ files: [activeFile] });
+    await waitFor(() => expect(result.current.sharing).toBe(false));
+  });
+
   it("retains failure details across action visibility changes but clears them for a new source", async () => {
     vi.stubGlobal("navigator", { share: vi.fn().mockRejectedValue(new DOMException("private", "NotAllowedError")) });
     const file = new File(["saved"], "file.txt");

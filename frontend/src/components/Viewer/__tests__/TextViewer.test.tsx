@@ -6,7 +6,7 @@ import i18n from "../../../i18n";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
 import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
-import { createStorageBackedTestContentProviderRegistry } from "../../../test/helpers";
+import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
 import { CODEMIRROR_FIND_HISTORY_STORAGE_KEY, CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY } from "../codeMirrorFindReplaceConstants";
 
@@ -114,10 +114,10 @@ vi.mock("../TextCodeEditor", () => {
 
 import TextViewer from "../TextViewer";
 
-function renderViewer() {
+function renderViewer({ onClose = vi.fn() }: { onClose?: () => void } = {}) {
   return render(
     <SambeeThemeProvider>
-      <TextViewer connectionId="conn1" path="/docs/readme.txt" onClose={vi.fn()} />
+      <TextViewer connectionId="conn1" path="/docs/readme.txt" onClose={onClose} />
     </SambeeThemeProvider>
   );
 }
@@ -208,6 +208,60 @@ describe("TextViewer", () => {
     expect(raw).toHaveBeenCalledTimes(1);
     expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+    const previousAttachment = share.mock.calls[1]?.[0]?.files[0];
+    expect(await readBlobAsText(previousAttachment)).toBe("saved bytes");
+    raw.mockResolvedValueOnce(new Blob(["unsaved text"], { type: "application/octet-stream" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const savedChoice = screen.getByRole("menuitem", { name: "Share as file" });
+    await waitFor(() => expect(savedChoice).not.toHaveAttribute("aria-disabled", "true"));
+    fireEvent.click(savedChoice);
+    expect(share).toHaveBeenLastCalledWith({
+      files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 12 })],
+      title: "readme.txt",
+    });
+    expect(share.mock.calls[2]?.[0]?.files[0]).not.toBe(previousAttachment);
+    expect(await readBlobAsText(share.mock.calls[2]?.[0]?.files[0])).toBe("unsaved text");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+  });
+
+  it.each(["file", "text"])("closes only sharing Details on Escape after a %s failure", async (mode) => {
+    const user = userEvent.setup();
+    const share = vi.fn().mockRejectedValue(new DOMException("blocked", "NotAllowedError"));
+    vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
+    vi.stubGlobal("navigator", { share, canShare: () => true });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }))
+    );
+    vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["saved bytes"], { type: "text/plain" }));
+    const onClose = vi.fn();
+    renderViewer({ onClose });
+    await screen.findByRole("textbox", { name: "Text editor" });
+    await user.click(screen.getByRole("button", { name: "Share" }));
+    const choice = screen.getByRole("menuitem", { name: mode === "file" ? "Share as file" : "Share as text" });
+    await waitFor(() => expect(choice).not.toHaveAttribute("aria-disabled", "true"));
+    await user.click(choice);
+    await user.click(await screen.findByRole("button", { name: "Details" }));
+    await screen.findByText(/"reason": "NotAllowedError"/);
+    await user.keyboard("{Escape}");
+    const details = await screen.findByRole("button", { name: "Details" });
+    await waitFor(() => expect(details).toHaveFocus());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toBeInTheDocument();
+    if (mode === "file") expect(screen.getByRole("button", { name: "Download" })).toBeEnabled();
+    expect(share).toHaveBeenCalledTimes(1);
   });
 
   it("toggles word wrap with Alt+Z while viewing read-only text", async () => {

@@ -265,12 +265,12 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
    */
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (nativeSharing.detailsOpen || event.key !== "Escape") return;
       event.preventDefault();
       if (blurActiveToolbarControl()) return;
       onClose();
     },
-    [onClose]
+    [nativeSharing.detailsOpen, onClose]
   );
 
   const handleViewChange = useCallback(
@@ -566,7 +566,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   );
 
   useKeyboardShortcuts({
-    active: !showHelp,
+    active: !showHelp && !nativeSharing.detailsOpen,
     shortcuts: imageShortcuts,
   });
 

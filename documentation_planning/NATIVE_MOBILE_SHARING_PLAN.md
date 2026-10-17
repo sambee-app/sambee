@@ -4,10 +4,11 @@ Status: Implemented. Automated and mocked-browser validation completed; native A
 
 ## Implementation Validation
 
-- All 394 tests in the 10 affected frontend suites pass, covering shared policy, lifecycle, menus, viewers, image caching, and file-browser interactions. Original and normalized PDF sharing assert the complete displayed document bytes.
-- Frontend lint, the production build, and website documentation validation pass. Existing test WebSocket warnings and production bundle-size warnings remain.
+- All 404 tests in the 10 affected frontend suites pass, covering shared policy, lifecycle, menus, viewers, image caching, and file-browser interactions. Image and original/normalized PDF sharing assert displayed content bytes. Regression coverage includes pending/failed representation replacement, ignored late PDF responses, exact displayed-attachment recovery downloads, and saved-attachment invalidation after Text/Markdown saves.
+- Frontend lint and the production build pass. Website documentation validation passed during the original implementation; published documentation is unchanged by these fixes. Existing production bundle-size warnings remain.
 - Mocked-browser checks at the demo connection cover file/text selection, privacy-filtered details, copy feedback, focus restoration, and short-phone/desktop layouts. Failure evidence survives responsive action visibility changes and is cleared when the source changes.
-- The stricter app-project TypeScript check is not clean at HEAD and still reports existing repository errors. The new shared sharing modules have no editor diagnostics; the normal production build passes.
+- Review follow-up fixes suspend all viewer shortcuts while sharing Details is open, retain valid prepared attachments across availability changes, and ignore generic MIME metadata before consulting the filename registry. Integrated viewer tests cover Details Escape dismissal; a mocked-browser check confirms that the text viewer, Download recovery, focus, and report survive dismissal and responsive changes at phone, short-phone, and desktop sizes.
+- The stricter app-project TypeScript check remains blocked by existing repository errors. Comparing against an isolated HEAD archive found no new diagnostics: 789 at HEAD versus 781 after correcting the image test mock's types. The normal production build passes.
 - Actual Android Chromium, Android Firefox, and Safari iOS share-sheet delivery still require the manual checks below. Mocked API success does not establish receiving-app delivery.
 
 ## Goal

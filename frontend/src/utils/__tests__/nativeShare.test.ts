@@ -130,6 +130,17 @@ describe("nativeShare", () => {
     expect(createShareFile(rawBlob, "document.pdf", "application/pdf").type).toBe("application/pdf");
   });
 
+  it.each(["", "application/octet-stream; charset=utf-8"])("ignores generic listed metadata for a %s download", (type) => {
+    const blob = new Blob(["saved bytes"], { type });
+    expect(createShareFile(blob, "note.txt", " Application/Octet-Stream; charset=utf-8 ").type).toBe("text/plain");
+    expect(createShareFile(blob, "file.unknown", "application/octet-stream").type).toBe("application/octet-stream");
+    expect(createShareFile(blob, "note.txt", "text/markdown; charset=utf-8").type).toBe("text/markdown");
+  });
+
+  it("prefers the actual representation MIME type over listed metadata and extensions", () => {
+    expect(createShareFile(new Blob(["PNG bytes"], { type: "image/png" }), "photo.heic", "image/heic").type).toBe("image/png");
+  });
+
   it("shares files when file sharing is supported", async () => {
     const share = vi.fn().mockResolvedValue(undefined);
     const canShare = vi.fn().mockReturnValue(true);

@@ -1195,12 +1195,12 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
    */
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (nativeSharing.detailsOpen || event.key !== "Escape") return;
       event.preventDefault();
       if (blurActiveToolbarControl(containerRef)) return;
       handleEscape();
     },
-    [handleEscape]
+    [handleEscape, nativeSharing.detailsOpen]
   );
 
   const handleShowHelp = useCallback(() => {
@@ -1326,7 +1326,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   );
 
   useKeyboardShortcuts({
-    active: !showHelp,
+    active: !showHelp && !nativeSharing.detailsOpen,
     shortcuts: pdfShortcuts,
   });
 
