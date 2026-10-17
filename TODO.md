@@ -1,5 +1,10 @@
 # TODO
 
+## Bugs
+
+- Text + Markdown editors on mobile:
+   - The X returns to the file list instead of going back to the viewer.
+
 ## Misc. commands
 
 - Add a command to open the current file list location in a new browser tab (which keyboard shortcut to assign? Ctrl+(Shift)+Tab is needed by the browser)
