@@ -2,6 +2,7 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { Alert, Box, Button, IconButton, Snackbar, Tooltip } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FOCUS_OUTLINE_OFFSET_PX, FOCUS_OUTLINE_WIDTH_PX } from "../../theme/constants";
 import {
   createShareDiagnostic,
   type ShareDiagnostic,
@@ -137,7 +138,15 @@ export function useNativeSharing(entryPoint: string, source: ShareSource = "save
         <Alert severity="error" sx={{ maxWidth: "100%", overflowWrap: "anywhere", "& .MuiAlert-message": { minWidth: 0 } }}>
           {downloadError ? t("fileBrowser.share.downloadFailed") : message}
           {failure && failure.files.length > 0 && <Box sx={{ mt: 1 }}>{t("viewer.share.downloadSuggestion")}</Box>}
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1 }}>
+          <Box
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 1,
+              mt: 1,
+              p: `${FOCUS_OUTLINE_WIDTH_PX + FOCUS_OUTLINE_OFFSET_PX}px`,
+            }}
+          >
             <Button ref={detailsButtonRef} color="inherit" onClick={() => setDetails(true)}>
               {t("viewer.share.detailsAction")}
             </Button>
