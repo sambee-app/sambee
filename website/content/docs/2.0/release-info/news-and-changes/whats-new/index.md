@@ -27,7 +27,7 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 
 ### Bugfixes
 
-#### File Copy/Move
+#### File Copy/Move Fixes
 
 - Uploads and copy or move operations no longer interfere with each other's conflict decisions.
 - Moving files between SMB connections no longer leaves the original in place when it should have been deleted.
@@ -39,7 +39,7 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 - Interrupted SMB moves now release files safely, without leaving them open or interrupting work still in progress.
 - Pressing Enter after a transfer finishes no longer starts the same transfer again.
 
-#### Miscellaneous
+#### Other Fixes
 
 - Invalid file browser URLs no longer break the page or prevent the other pane from loading.
 - Overlapping download requests were allowed.
@@ -54,7 +54,7 @@ Many identity providers require the `offline_access` scope to issue refresh toke
 
 Sambee uses a provider refresh token when one is returned, whether or not `offline_access` was requested. If no refresh token is returned, Sambee can continue issuing short-lived API tokens from the browser session for up to 8 hours by default (configurable from 1 to 24 hours). After Sambee's user session expires, the user must sign in through the identity provider again.
 
-### Miscellaneous
+### Other Changes
 
 - When an OIDC login is necessary, all Sambee browser tabs switch to the login page. After a successful login in one tab, that tab now broadcasts a login complete hint. When other tabs on the login page receive that hint, they return to their respectice previous URLs.
 
@@ -93,9 +93,17 @@ HTTP for development on `localhost` is treated as secure by browsers and continu
 
 If your browser is too old or lacks features Sambee needs, you'll now see a clear message instead of a blank page. The message identifies missing capabilities and links to the browser requirements so you can choose a supported browser.
 
-## Text and Markdown Editors
+### Text and Markdown Editors
 
 Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
+
+### Password Login
+
+When an admin configures a user to require a password change, that change is now enforced upon the next password login.
+
+### Settings
+
+- User Management: Table column content could overflow into the next row. This was fixes with a comprehensive layout revision.
 
 ## Under the Hood
 
@@ -107,7 +115,7 @@ Closing the editor by clicking the X now works in the same way as pressing <kbd>
 - Mobile log uploads have a size limit, and stored logs are pruned when they exceed the storage budget.
 - HTML, XHTML, and SVG files, including archive members, download instead of running as active content in the viewer.
 
-### Miscellaneous
+### Other Changes
 
 - The backend's Python environment was upgraded from 3.13 to 3.14.
 - Fixed the container startup warning: `AuthlibDeprecationWarning: The httpx module is deprecated; please use httpx2 instead.`

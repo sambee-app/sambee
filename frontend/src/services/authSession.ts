@@ -1,5 +1,6 @@
 import axios, { type AxiosError } from "axios";
 import type { AuthToken } from "../types";
+import { setPasswordChangeRequired } from "./passwordChange";
 
 export type AuthSessionState =
   | "idle"
@@ -93,6 +94,7 @@ export class AuthSessionManager {
   }
 
   setAuthenticated(response: AuthToken, renewable: boolean): void {
+    setPasswordChangeRequired(response.password_change_required ?? false);
     const nextUserId = response.user_id ?? null;
     const identityChanged = this.userId !== nextUserId;
     this.userId = nextUserId;
@@ -142,6 +144,7 @@ export class AuthSessionManager {
   }
 
   clear(): void {
+    setPasswordChangeRequired(false);
     this.accessToken = null;
     this.expiresAt = null;
     this.sessionDeadline = null;

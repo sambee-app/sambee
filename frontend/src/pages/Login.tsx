@@ -16,6 +16,7 @@ import {
   OIDC_RETURN_PATH_MARKER,
   startOidcAuthorization,
 } from "../services/oidcAuth";
+import { PASSWORD_CHANGED_MARKER } from "../services/passwordChange";
 
 const OIDC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   oidc_authorization_state_invalid: "This sign-in request expired or is invalid. Start again.",
@@ -31,7 +32,6 @@ const OIDC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
     "Your administrator access changed and no local password exists. Restore the administrator group at the identity provider.",
   oidc_rate_limited: "Too many sign-in attempts. Wait and try again.",
 };
-const PASSWORD_CHANGED_MARKER = "sambee_password_changed";
 
 const oidcErrorFromFragment = (): string => {
   const code = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("error");

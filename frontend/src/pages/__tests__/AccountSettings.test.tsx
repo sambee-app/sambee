@@ -40,6 +40,7 @@ const PASSWORD_ACCOUNT: CurrentAccount = {
   has_local_password: true,
   identity_source: "local",
   password_change_available: true,
+  password_change_required: false,
   browser_session_management_available: false,
   oidc_provider_name: null,
   current_session: {

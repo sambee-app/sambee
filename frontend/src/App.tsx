@@ -18,6 +18,7 @@ import { ConnectionsSettings } from "./pages/ConnectionsSettings";
 import { FileBrowserSettings } from "./pages/FileBrowserSettings";
 import { LocalDrivesSettings } from "./pages/LocalDrivesSettings";
 import { NetworkSettings } from "./pages/NetworkSettings";
+import PasswordChange, { PasswordChangeGate } from "./pages/PasswordChange";
 import { AppearanceSettings } from "./pages/PreferencesSettings";
 import { TextEditorSettings } from "./pages/TextEditorSettings";
 import { UserManagementSettings } from "./pages/UserManagementSettings";
@@ -79,28 +80,31 @@ function AppContent() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/login/oidc/callback" element={<OidcCallback />} />
-              <Route
-                path="/browse/:targetType/:targetId/*"
-                element={authBootstrapComplete ? <FileBrowser /> : <div>{translate("app.loading")}</div>}
-              />
-              <Route path="/browse" element={authBootstrapComplete ? <FileBrowser /> : <div>{translate("app.loading")}</div>} />
-              <Route path="/settings" element={authBootstrapComplete ? <SettingsLayout /> : <div>{translate("app.loading")}</div>}>
-                <Route index element={<Navigate to="/settings/appearance" replace />} />
-                <Route path="appearance" element={<AppearanceSettings />} />
-                <Route path="account" element={<AccountSettings />} />
-                <Route path="sessions" element={<Navigate to="/settings/account" replace />} />
-                <Route path="file-browser" element={<FileBrowserSettings />} />
-                <Route path="text-editor" element={<TextEditorSettings />} />
-                <Route path="preferences" element={<Navigate to="/settings/appearance" replace />} />
-                <Route path="connections" element={<ConnectionsSettings />} />
-                <Route path="connections/local-drives" element={<LocalDrivesSettings />} />
-                <Route path="connections/smb" element={<Navigate to="/settings/connections" replace />} />
-                <Route path="admin/users" element={<UserManagementSettings />} />
-                <Route path="admin/authentication" element={<AuthenticationSettings />} />
-                <Route path="admin/network" element={<NetworkSettings />} />
-                <Route path="admin/system" element={<AdvancedSettings />} />
+              <Route path="/change-password" element={<PasswordChange />} />
+              <Route element={<PasswordChangeGate ready={authBootstrapComplete} />}>
+                <Route
+                  path="/browse/:targetType/:targetId/*"
+                  element={authBootstrapComplete ? <FileBrowser /> : <div>{translate("app.loading")}</div>}
+                />
+                <Route path="/browse" element={authBootstrapComplete ? <FileBrowser /> : <div>{translate("app.loading")}</div>} />
+                <Route path="/settings" element={authBootstrapComplete ? <SettingsLayout /> : <div>{translate("app.loading")}</div>}>
+                  <Route index element={<Navigate to="/settings/appearance" replace />} />
+                  <Route path="appearance" element={<AppearanceSettings />} />
+                  <Route path="account" element={<AccountSettings />} />
+                  <Route path="sessions" element={<Navigate to="/settings/account" replace />} />
+                  <Route path="file-browser" element={<FileBrowserSettings />} />
+                  <Route path="text-editor" element={<TextEditorSettings />} />
+                  <Route path="preferences" element={<Navigate to="/settings/appearance" replace />} />
+                  <Route path="connections" element={<ConnectionsSettings />} />
+                  <Route path="connections/local-drives" element={<LocalDrivesSettings />} />
+                  <Route path="connections/smb" element={<Navigate to="/settings/connections" replace />} />
+                  <Route path="admin/users" element={<UserManagementSettings />} />
+                  <Route path="admin/authentication" element={<AuthenticationSettings />} />
+                  <Route path="admin/network" element={<NetworkSettings />} />
+                  <Route path="admin/system" element={<AdvancedSettings />} />
+                </Route>
+                <Route path="/" element={<Navigate to="/browse" replace />} />
               </Route>
-              <Route path="/" element={<Navigate to="/browse" replace />} />
             </Routes>
           </Suspense>
         </Router>

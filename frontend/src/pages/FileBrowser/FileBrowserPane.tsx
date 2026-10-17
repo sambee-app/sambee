@@ -16,9 +16,10 @@
 
 import BlockOutlinedIcon from "@mui/icons-material/BlockOutlined";
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
-import { alpha, Box, Chip, CircularProgress, Typography, useTheme } from "@mui/material";
+import { alpha, Box, CircularProgress, Typography, useTheme } from "@mui/material";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CompactBadge as Chip } from "../../components/CompactBadge";
 import { BreadcrumbsNavigation } from "../../components/FileBrowser/BreadcrumbsNavigation";
 import { BrowserViewerPicker } from "../../components/FileBrowser/BrowserViewerPicker";
 import { CompactCreateMenu } from "../../components/FileBrowser/CompactCreateMenu";

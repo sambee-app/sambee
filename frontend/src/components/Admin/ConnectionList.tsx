@@ -1,7 +1,6 @@
 import { Delete as DeleteIcon, Edit as EditIcon, CheckCircle as TestIcon } from "@mui/icons-material";
 import {
   Box,
-  Chip,
   IconButton,
   Paper,
   Table,
@@ -16,6 +15,7 @@ import {
 import type React from "react";
 import { useTranslation } from "react-i18next";
 import type { Connection } from "../../types";
+import { CompactBadge as Chip } from "../CompactBadge";
 
 interface ConnectionListProps {
   connections: Connection[];

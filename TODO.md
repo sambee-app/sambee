@@ -2,11 +2,6 @@
 
 ## Bugs
 
-- Settings > User management
-   - The password reset option is unavailable on a linked OIDC user
-      - The option is available on an unlinked local user.
-   - My own admin user has a status "password reset pending".
-      - What does that mean and how to get rid of it?
 - Login dialog (local users)
    - The password field has no option to reveal the password.
    - Usernames are currently evaluated as case sensitive. Change that so that both "Testuser" and "testuser" are accepted.

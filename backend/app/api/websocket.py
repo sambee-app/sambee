@@ -35,19 +35,34 @@ class ConnectionManager:
         self.subscriptions: Dict[WebSocket, Set[str]] = {}
         # Map: WebSocket -> authenticated user
         self.users: Dict[WebSocket, User] = {}
+        self.authentication_tokens: dict[WebSocket, str] = {}
         # Map: subscription key -> resolved SMB path (with path_prefix applied)
         self._resolved_paths: Dict[str, str] = {}
 
     #
     # connect
     #
-    async def connect(self, websocket: WebSocket, user: User) -> None:
+    async def connect(self, websocket: WebSocket, user: User, token: str | None = None) -> None:
         """Accept a new WebSocket connection"""
 
         await websocket.accept()
         self.subscriptions[websocket] = set()
         self.users[websocket] = user
+        if token is not None:
+            self.authentication_tokens[websocket] = token
         logger.debug(f"WebSocket connected: {id(websocket)}")
+
+    async def is_authorized(self, websocket: WebSocket) -> bool:
+        token = self.authentication_tokens.get(websocket)
+        if token is None:
+            return True
+        try:
+            with DBSession(engine) as session:
+                await get_current_user_for_token(token, session)
+        except HTTPException:
+            await websocket.close(code=1008, reason="Authentication is no longer valid")
+            return False
+        return True
 
     #
     # disconnect
@@ -62,6 +77,7 @@ class ConnectionManager:
             del self.subscriptions[websocket]
 
         self.users.pop(websocket, None)
+        self.authentication_tokens.pop(websocket, None)
 
         # Remove from active_connections and stop monitoring if last subscriber
         for key in subscriptions_to_remove:
@@ -216,6 +232,9 @@ class ConnectionManager:
             disconnected = []
             for websocket in self.active_connections[key]:
                 try:
+                    if not await self.is_authorized(websocket):
+                        disconnected.append(websocket)
+                        continue
                     await websocket.send_json(
                         {
                             "type": "directory_changed",
@@ -275,6 +294,8 @@ class ConnectionManager:
 
         async def send(websocket: WebSocket) -> WebSocket | None:
             try:
+                if not await self.is_authorized(websocket):
+                    return websocket
                 await asyncio.wait_for(websocket.send_json(payload), timeout=TRANSFER_PROGRESS_SEND_TIMEOUT_SECONDS)
             except Exception as error:
                 logger.warning(
@@ -321,12 +342,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             await websocket.close(code=1008, reason="Not authenticated")
             return
 
-    await manager.connect(websocket, current_user)
+    await manager.connect(websocket, current_user, token)
 
     try:
         while True:
             # Receive messages from client
             data = await websocket.receive_json()
+            if not await manager.is_authorized(websocket):
+                break
             action = data.get("action")
             connection_id = data.get("connection_id")
             path = data.get("path", "")
@@ -355,6 +378,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         manager.disconnect(websocket)
     except Exception as e:
         logger.error(f"WebSocket error: {e}", exc_info=True)
+        manager.disconnect(websocket)
+    finally:
         manager.disconnect(websocket)
 
 

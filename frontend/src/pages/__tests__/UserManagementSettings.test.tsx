@@ -7,6 +7,7 @@ import {
   getCachedAsyncData,
   primeCachedAsyncData,
 } from "../../hooks/useCachedAsyncData";
+import { setRegionalLocalePreference } from "../../i18n";
 import { SambeeThemeProvider } from "../../theme";
 import type { AdminUserCreateResult, AdminUserPasswordResetResult } from "../../types";
 import { USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY, UserManagementSettings } from "../UserManagementSettings";
@@ -277,7 +278,7 @@ describe("UserManagementSettings", () => {
         "Choose an access level",
         "Leave blank for no expiration",
         "If left blank, the server will generate a secure temporary password",
-        "Prompt for a new password at next sign-in",
+        "Block local-password access until the password is changed. OIDC sign-in remains available.",
       ];
 
       for (const description of descriptions) {
@@ -607,7 +608,7 @@ describe("UserManagementSettings", () => {
     expect(passwordInput).toHaveAttribute("type", "text");
     expect(screen.getByRole("button", { name: /hide initial password/i })).toBeInTheDocument();
 
-    const passwordChangeSwitch = screen.getByLabelText(/require password change after next sign-in/i);
+    const passwordChangeSwitch = screen.getByLabelText(/require change on next password sign-in/i);
     expect(screen.getByText("On")).toBeInTheDocument();
     await user.click(passwordChangeSwitch);
     expect(screen.getByText("Off")).toBeInTheDocument();
@@ -682,18 +683,24 @@ describe("UserManagementSettings", () => {
 
       expect(header.querySelectorAll('[role="columnheader"]')).toHaveLength(6);
       expect(row.children).toHaveLength(6);
-      expect(screen.getByTestId("user-row-role")).toHaveStyle({ width: "fit-content" });
+      expect(screen.getByTestId("user-row-role")).toHaveTextContent("Admin");
+      expect(row.querySelector(".MuiChip-root")).toBeNull();
       const sortButtons = within(header).getAllByRole("button", { name: /^Sort by/ });
       expect(sortButtons).toHaveLength(5);
       for (const sortButton of sortButtons) {
         expect(sortButton).toHaveAttribute("tabindex", "-1");
       }
-      expect(within(header).getByRole("button", { name: "Manage visible columns" })).toHaveAttribute("tabindex", "-1");
+      expect(screen.getAllByRole("button", { name: "Columns" })).toHaveLength(1);
+      const headerColumnsButton = within(header.lastElementChild as HTMLElement).getByRole("button", { name: "Manage visible columns" });
 
       await user.tab();
       expect(screen.getByRole("textbox", { name: "Search users" })).toHaveFocus();
       await user.tab();
       expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole("button", { name: "Columns" })).toHaveFocus();
+      await user.tab();
+      expect(headerColumnsButton).toHaveFocus();
       await user.tab();
       expect(screen.getByRole("button", { name: "Edit admin" })).toHaveFocus();
       await user.tab();
@@ -707,7 +714,7 @@ describe("UserManagementSettings", () => {
     }
   });
 
-  it("lets users choose and restore directory columns", async () => {
+  it("keeps the header column menu open through selection changes and restores focus to the visible trigger", async () => {
     const restoreViewport = mockViewportWidth(1200);
     const user = userEvent.setup();
 
@@ -719,18 +726,41 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByTestId("user-directory-header");
-      await user.click(within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" }));
+      const columnsButton = within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" });
+      const headerBounds = vi.spyOn(columnsButton, "getBoundingClientRect").mockReturnValue(new DOMRect(800, 200, 28, 28));
+      await user.click(columnsButton);
+      const expectStableTrigger = () => {
+        expect(screen.getByRole("button", { name: "Manage visible columns", hidden: true })).toBe(columnsButton);
+        expect(columnsButton).toBeVisible();
+        expect(columnsButton).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getByRole("menu")).toBeVisible();
+      };
+      await user.click(screen.getByRole("menuitemcheckbox", { name: "Email" }));
+      expect(screen.getByTestId("user-row").children).toHaveLength(7);
+      expectStableTrigger();
       await user.click(screen.getByRole("menuitemcheckbox", { name: "Expiration" }));
 
       expect(within(screen.getByTestId("user-directory-header")).queryByText("Expiration", { exact: true })).not.toBeInTheDocument();
-      expect(screen.getByTestId("user-row").children).toHaveLength(5);
+      expect(screen.getByTestId("user-row").children).toHaveLength(6);
       expect(JSON.parse(window.localStorage.getItem(USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY) ?? "[]")).not.toContain("expiration");
+      expectStableTrigger();
 
       await user.click(screen.getByRole("menuitem", { name: "Reset columns" }));
 
       expect(within(screen.getByTestId("user-directory-header")).getByText("Expiration", { exact: true })).toBeInTheDocument();
       expect(screen.getByTestId("user-row").children).toHaveLength(6);
       expect(window.localStorage.getItem(USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY)).toBeNull();
+      expectStableTrigger();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(columnsButton).toHaveFocus();
+      expect(columnsButton).toHaveAttribute("aria-expanded", "false");
+      await user.click(columnsButton);
+      headerBounds.mockReturnValue(new DOMRect());
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Columns" })).toHaveFocus();
+      headerBounds.mockRestore();
     } finally {
       restoreViewport();
     }
@@ -748,7 +778,7 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByTestId("user-directory-header");
-      await user.click(within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" }));
+      await user.click(screen.getByRole("button", { name: "Columns" }));
 
       expect(screen.getByRole("menuitemcheckbox", { name: "Email" })).toBeInTheDocument();
       expect(screen.getByRole("menuitemcheckbox", { name: "Created" })).toBeInTheDocument();
@@ -775,7 +805,7 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByTestId("user-directory-header");
-      await user.click(within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" }));
+      await user.click(screen.getByRole("button", { name: "Columns" }));
 
       expect(screen.getByRole("menuitemcheckbox", { name: "Last OIDC sign-in" })).toBeInTheDocument();
       expect(screen.getByRole("menuitemcheckbox", { name: "OIDC state" })).toBeInTheDocument();
@@ -833,6 +863,81 @@ describe("UserManagementSettings", () => {
       expect(within(row.children[5]).getByRole("button", { name: "User actions for admin" })).toBeInTheDocument();
     } finally {
       restoreViewport();
+    }
+  });
+
+  it("keeps long identifiers and multiple statuses as full plain text with compact localized timestamps", async () => {
+    const timestamp = "2026-03-01T10:00:00Z";
+    const email = "very.long.email.address.without.breaks@example-with-a-very-long-domain.example";
+    const provider = "VeryLongIdentityProviderNameWithoutSpaces";
+    const columns = [
+      "role",
+      "status",
+      "signIn",
+      "lastSignIn",
+      "expiration",
+      "email",
+      "createdAt",
+      "updatedAt",
+      "oidcState",
+      "roleSource",
+      "oidcProvider",
+    ];
+    window.localStorage.setItem(USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY, JSON.stringify(columns));
+    mockOidcAuthenticationEnabled();
+    vi.mocked(api.getUsers).mockResolvedValue([
+      {
+        id: "long-user",
+        username: "very-long-username-without-spaces",
+        name: "Layout test",
+        email,
+        role: "admin",
+        is_active: false,
+        must_change_password: true,
+        has_local_password: true,
+        expires_at: "2025-01-01T10:00:00Z",
+        created_at: timestamp,
+        updated_at: timestamp,
+        oidc_role_assignment: "admin",
+        pending_oidc: null,
+        oidc: {
+          identity_id: "identity",
+          user_id: "long-user",
+          provider_display_name: provider,
+          issuer: "https://idp.example",
+          subject: "subject",
+          last_seen_username: "long-user",
+          last_groups: [],
+          created_at: timestamp,
+          last_login_at: timestamp,
+        },
+      },
+    ]);
+    await setRegionalLocalePreference("de-DE");
+    try {
+      render(
+        <SambeeThemeProvider>
+          <UserManagementSettings />
+        </SambeeThemeProvider>
+      );
+      const row = await screen.findByTestId("user-row");
+      expect(row.querySelector(".MuiChip-root")).toBeNull();
+      expect(row.children).toHaveLength(columns.length + 2);
+      expect(screen.getByTestId("user-row-email")).toHaveTextContent(email);
+      expect(screen.getByTestId("user-row-oidc-provider")).toHaveTextContent(provider);
+      expect(screen.getByTestId("user-row-role")).toHaveTextContent("Admin");
+      const statuses = screen.getByTestId("user-metadata");
+      expect(Array.from(statuses.children, (status) => status.textContent)).toEqual(["Disabled", "Expired", "Pwd change req'd"]);
+      const created = screen.getByTestId("user-row-created");
+      expect(
+        within(created).getByText(new Intl.DateTimeFormat("de-DE", { dateStyle: "short" }).format(new Date(timestamp)))
+      ).toBeInTheDocument();
+      expect(
+        within(created).getByText(new Intl.DateTimeFormat("de-DE", { timeStyle: "short" }).format(new Date(timestamp)))
+      ).toBeInTheDocument();
+      expect(created.querySelector("time")).toHaveAttribute("datetime", timestamp);
+    } finally {
+      await setRegionalLocalePreference("browser");
     }
   });
 
@@ -1081,15 +1186,14 @@ describe("UserManagementSettings", () => {
     );
 
     expect((await screen.findAllByText("OIDC", { exact: true })).length).toBeGreaterThan(0);
-    const localTimestamp = new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      timeZoneName: "short",
-    }).format(new Date("2026-03-01T10:00:00Z"));
-    expect(screen.getByText(localTimestamp)).toBeInTheDocument();
+    const lastSignIn = screen.getAllByTestId("user-row-last-oidc-sign-in")[0];
+    expect(
+      within(lastSignIn).getByText(new Intl.DateTimeFormat(undefined, { dateStyle: "short" }).format(new Date("2026-03-01T10:00:00Z")))
+    ).toBeInTheDocument();
+    expect(
+      within(lastSignIn).getByText(new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date("2026-03-01T10:00:00Z")))
+    ).toBeInTheDocument();
+    expect(lastSignIn.querySelector("time")).toHaveAttribute("datetime", "2026-03-01T10:00:00Z");
     expect(screen.getAllByText("second-oidc-user", { exact: true })).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /reset password/i })).not.toBeInTheDocument();
   });
@@ -1567,7 +1671,7 @@ describe("UserManagementSettings", () => {
 
     await user.type(passwordInput, "BrandNewPass123!");
     expect(screen.getByText("On")).toBeInTheDocument();
-    await user.click(screen.getByLabelText(/require password change after next sign-in/i));
+    await user.click(screen.getByLabelText(/require change on next password sign-in/i));
     expect(screen.getByText("Off")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /set password/i }));

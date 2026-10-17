@@ -1,11 +1,12 @@
 import { ArrowBack, ArrowForward, Close, Download, IosShare, RotateLeft, RotateRight, Search, ZoomIn, ZoomOut } from "@mui/icons-material";
-import { Box, Button, Chip, IconButton, TextField, Typography, useMediaQuery, useTheme } from "@mui/material";
+import { Box, Button, IconButton, TextField, Typography, useMediaQuery, useTheme } from "@mui/material";
 import React, { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { withShortcut } from "../../hooks/useKeyboardShortcuts";
 import { PAGE_INPUT, RESPONSIVE_FONT_SIZE, TOOLBAR_HEIGHT, Z_INDEX } from "../../theme/constants";
 import { getViewerToolbarForegroundColors, VIEWER_DEFAULTS } from "../../theme/viewerStyles";
+import { CompactBadge as Chip } from "../CompactBadge";
 
 export const VIEWER_SEARCH_INPUT_ATTRIBUTE = "data-viewer-search-input";
 
