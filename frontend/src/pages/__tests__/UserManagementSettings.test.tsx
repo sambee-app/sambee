@@ -690,7 +690,8 @@ describe("UserManagementSettings", () => {
       for (const sortButton of sortButtons) {
         expect(sortButton).toHaveAttribute("tabindex", "-1");
       }
-      expect(within(header).getByRole("button", { name: "Manage visible columns" })).toHaveAttribute("tabindex", "-1");
+      expect(screen.getAllByRole("button", { name: "Columns" })).toHaveLength(1);
+      const headerColumnsButton = within(header.lastElementChild as HTMLElement).getByRole("button", { name: "Manage visible columns" });
 
       await user.tab();
       expect(screen.getByRole("textbox", { name: "Search users" })).toHaveFocus();
@@ -698,6 +699,8 @@ describe("UserManagementSettings", () => {
       expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
       await user.tab();
       expect(screen.getByRole("button", { name: "Columns" })).toHaveFocus();
+      await user.tab();
+      expect(headerColumnsButton).toHaveFocus();
       await user.tab();
       expect(screen.getByRole("button", { name: "Edit admin" })).toHaveFocus();
       await user.tab();
@@ -711,7 +714,7 @@ describe("UserManagementSettings", () => {
     }
   });
 
-  it("lets users choose and restore directory columns", async () => {
+  it("keeps the header column menu open through selection changes and restores focus to the visible trigger", async () => {
     const restoreViewport = mockViewportWidth(1200);
     const user = userEvent.setup();
 
@@ -723,18 +726,41 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByTestId("user-directory-header");
-      await user.click(within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" }));
+      const columnsButton = within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" });
+      const headerBounds = vi.spyOn(columnsButton, "getBoundingClientRect").mockReturnValue(new DOMRect(800, 200, 28, 28));
+      await user.click(columnsButton);
+      const expectStableTrigger = () => {
+        expect(screen.getByRole("button", { name: "Manage visible columns", hidden: true })).toBe(columnsButton);
+        expect(columnsButton).toBeVisible();
+        expect(columnsButton).toHaveAttribute("aria-expanded", "true");
+        expect(screen.getByRole("menu")).toBeVisible();
+      };
+      await user.click(screen.getByRole("menuitemcheckbox", { name: "Email" }));
+      expect(screen.getByTestId("user-row").children).toHaveLength(7);
+      expectStableTrigger();
       await user.click(screen.getByRole("menuitemcheckbox", { name: "Expiration" }));
 
       expect(within(screen.getByTestId("user-directory-header")).queryByText("Expiration", { exact: true })).not.toBeInTheDocument();
-      expect(screen.getByTestId("user-row").children).toHaveLength(5);
+      expect(screen.getByTestId("user-row").children).toHaveLength(6);
       expect(JSON.parse(window.localStorage.getItem(USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY) ?? "[]")).not.toContain("expiration");
+      expectStableTrigger();
 
       await user.click(screen.getByRole("menuitem", { name: "Reset columns" }));
 
       expect(within(screen.getByTestId("user-directory-header")).getByText("Expiration", { exact: true })).toBeInTheDocument();
       expect(screen.getByTestId("user-row").children).toHaveLength(6);
       expect(window.localStorage.getItem(USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY)).toBeNull();
+      expectStableTrigger();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(columnsButton).toHaveFocus();
+      expect(columnsButton).toHaveAttribute("aria-expanded", "false");
+      await user.click(columnsButton);
+      headerBounds.mockReturnValue(new DOMRect());
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: "Columns" })).toHaveFocus();
+      headerBounds.mockRestore();
     } finally {
       restoreViewport();
     }
@@ -752,7 +778,7 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByTestId("user-directory-header");
-      await user.click(within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" }));
+      await user.click(screen.getByRole("button", { name: "Columns" }));
 
       expect(screen.getByRole("menuitemcheckbox", { name: "Email" })).toBeInTheDocument();
       expect(screen.getByRole("menuitemcheckbox", { name: "Created" })).toBeInTheDocument();
@@ -779,7 +805,7 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByTestId("user-directory-header");
-      await user.click(within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" }));
+      await user.click(screen.getByRole("button", { name: "Columns" }));
 
       expect(screen.getByRole("menuitemcheckbox", { name: "Last OIDC sign-in" })).toBeInTheDocument();
       expect(screen.getByRole("menuitemcheckbox", { name: "OIDC state" })).toBeInTheDocument();

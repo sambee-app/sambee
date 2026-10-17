@@ -30,7 +30,9 @@ Add a relevant `@mui/icons-material` icon with `startIcon` to labeled outlined o
 
 User Management renders roles and statuses as ordinary text, with each simultaneous status on its own line. Summary counts and removable filters remain badges. Keep column headings and cell values readable: wrap headings, email addresses, usernames, provider names, and other long values without truncating their underlying text. Top-align row contents, and reserve space for sort icons and row actions.
 
-Use the settings content container's width and the selected columns' space requirements to choose between the desktop grid and stacked records. A narrow settings overlay must stack even on a wide screen. Preserve every selected field when stacking; don't introduce horizontal scrolling or silently hide columns. Show timestamps as a short localized date and time on separate lines, retaining the full timestamp in a tooltip and the original value in a semantic `time` element.
+Use the settings content container's width to choose between the desktop grid and stacked records, with a shared 40rem breakpoint for the table and its toolbar. Changing selected columns must not change the layout breakpoint. A narrow settings overlay must stack even on a wide screen. Preserve every selected field when stacking; don't introduce horizontal scrolling or silently hide columns. Show timestamps as a short localized date and time on separate lines, retaining the full timestamp in a tooltip and the original value in a semantic `time` element.
+
+Place the desktop column chooser icon at the far-right end of the table header, above the row actions. In stacked layouts, place the Columns control at the toolbar's right edge. Keep the toolbar control available while the directory is loading or empty. Anchor the menu to the visible control, reposition it when the settings container resizes, and return focus to the visible control when it closes.
 
 Validate the layout in a real browser with all columns enabled, long identifiers, multiple statuses, different regional formats, narrow containers, mobile widths, and zoom. Component tests don't measure text overlap or container-query behavior.
 

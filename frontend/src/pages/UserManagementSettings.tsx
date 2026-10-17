@@ -252,10 +252,8 @@ type DirectoryColumn =
 const DIRECTORY_DEFAULT_PAGE_SIZE = 25;
 const DIRECTORY_SEARCH_DEBOUNCE_MS = 300;
 const DIRECTORY_ACTIONS_COLUMN_WIDTH = "76px";
-const DIRECTORY_IDENTITY_MIN_WIDTH_REM = 12;
-const DIRECTORY_ACTIONS_WIDTH_REM = 4.75;
-const DIRECTORY_COLUMN_GAP_REM = 0.75;
 const DIRECTORY_CONTAINER_NAME = "user-directory";
+const DIRECTORY_WIDE_QUERY = `@container ${DIRECTORY_CONTAINER_NAME} (min-width: 40rem)`;
 export const USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY = "sambee.user-directory.visible-columns.v1";
 const DIRECTORY_PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
 const DIRECTORY_SECONDARY_CONTROL_FONT_SIZE = "0.875rem";
@@ -314,30 +312,17 @@ const DIRECTORY_COLUMN_LABELS: Record<DirectoryColumn, string> = {
   oidcProvider: "OIDC provider",
 };
 const DIRECTORY_COLUMN_GRID_WIDTHS: Record<DirectoryColumn, string> = {
-  role: "minmax(0, 0.6fr)",
+  role: "minmax(0, 0.8fr)",
   status: "minmax(0, 0.9fr)",
   signIn: "minmax(0, 1fr)",
   lastSignIn: "minmax(0, 1fr)",
-  expiration: "minmax(0, 1fr)",
-  email: "minmax(0, 1.8fr)",
+  expiration: "minmax(0, 1.2fr)",
+  email: "minmax(0, 1.4fr)",
   createdAt: "minmax(0, 1.1fr)",
   updatedAt: "minmax(0, 1.1fr)",
   oidcState: "minmax(0, 1fr)",
   roleSource: "minmax(0, 1.2fr)",
   oidcProvider: "minmax(0, 1.1fr)",
-};
-const DIRECTORY_COLUMN_MIN_WIDTHS_REM: Record<DirectoryColumn, number> = {
-  role: 4,
-  status: 7,
-  signIn: 6,
-  lastSignIn: 8,
-  expiration: 8,
-  email: 12,
-  createdAt: 8,
-  updatedAt: 8,
-  oidcState: 5,
-  roleSource: 8,
-  oidcProvider: 7,
 };
 const DIRECTORY_HEADER_LABEL_SX = {
   alignItems: "flex-start",
@@ -357,12 +342,6 @@ const DIRECTORY_SECONDARY_CONTROL_SX = {
   fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE,
   "& .MuiInputBase-input, & .MuiSelect-select": { fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE },
   "& .MuiInputLabel-root": { fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE },
-} as const;
-const DIRECTORY_COLUMNS_ICON_BUTTON_SX = {
-  color: "text.secondary",
-  opacity: 0.7,
-  "&:hover": { bgcolor: "action.hover", color: "text.primary", opacity: 1 },
-  "&.Mui-focusVisible": { bgcolor: "action.hover", color: "text.primary", opacity: 1 },
 } as const;
 const DIRECTORY_COLUMN_MENU_ICON_SX = { justifyContent: "center", minWidth: 36 } as const;
 
@@ -421,15 +400,6 @@ function getCompactRoleSource(source: AdminUserDirectoryRoleSource): string {
   return labels[source];
 }
 
-function getDirectoryWideQuery(visibleColumns: DirectoryColumn[]): string {
-  const minimumWidth =
-    DIRECTORY_IDENTITY_MIN_WIDTH_REM +
-    DIRECTORY_ACTIONS_WIDTH_REM +
-    visibleColumns.reduce((width, column) => width + DIRECTORY_COLUMN_MIN_WIDTHS_REM[column], 0) +
-    (visibleColumns.length + 1) * DIRECTORY_COLUMN_GAP_REM;
-  return `@container ${DIRECTORY_CONTAINER_NAME} (min-width: ${minimumWidth}rem)`;
-}
-
 function DirectoryTimestamp({ value }: { value: string | null | undefined }) {
   if (!value) return <>Never</>;
   return (
@@ -448,7 +418,7 @@ function DirectoryTimestamp({ value }: { value: string | null | undefined }) {
 
 function getDirectoryRowGridSx(visibleColumns: DirectoryColumn[]) {
   const desktopColumns = [
-    "minmax(0, 2fr)",
+    "minmax(0, 1.6fr)",
     ...visibleColumns.map((column) => DIRECTORY_COLUMN_GRID_WIDTHS[column]),
     DIRECTORY_ACTIONS_COLUMN_WIDTH,
   ].join(" ");
@@ -462,7 +432,7 @@ function getDirectoryRowGridSx(visibleColumns: DirectoryColumn[]) {
     alignItems: "start",
     minWidth: 0,
     width: "100%",
-    [getDirectoryWideQuery(visibleColumns)]: {
+    [DIRECTORY_WIDE_QUERY]: {
       display: "grid",
       gridTemplateColumns: desktopColumns,
       gridTemplateAreas: "none",
@@ -650,7 +620,22 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
   const [directoryQuery, setDirectoryQuery] = useState<DirectoryQueryState>(() => getDirectoryQueryFromLocation(window.location.search));
   const [searchInput, setSearchInput] = useState(directoryQuery.q);
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
-  const [columnsAnchor, setColumnsAnchor] = useState<HTMLElement | null>(null);
+  const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+  const columnsMenuId = useId();
+  const directoryContainerRef = useRef<HTMLDivElement>(null);
+  const toolbarColumnsRef = useRef<HTMLButtonElement>(null);
+  const headerColumnsRef = useRef<HTMLButtonElement>(null);
+  const columnsMenuActionsRef = useRef<{ updatePosition: () => void }>(null);
+  const getColumnsAnchor = useCallback(() => {
+    const headerButton = headerColumnsRef.current;
+    return headerButton && headerButton.getBoundingClientRect().width > 0 ? headerButton : toolbarColumnsRef.current;
+  }, []);
+  useEffect(() => {
+    if (!columnsMenuOpen || !directoryContainerRef.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => columnsMenuActionsRef.current?.updatePosition());
+    observer.observe(directoryContainerRef.current);
+    return () => observer.disconnect();
+  }, [columnsMenuOpen]);
   const [selectedDirectoryColumns, setSelectedDirectoryColumns] = useState<DirectoryColumn[] | null>(readVisibleDirectoryColumns);
   const [notification, setNotification] = useState<SettingsNotificationState>({
     open: false,
@@ -1827,7 +1812,11 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
         ) : undefined
       }
     >
-      <Stack spacing={2} sx={{ minWidth: 0, containerType: "inline-size", containerName: DIRECTORY_CONTAINER_NAME }}>
+      <Stack
+        ref={directoryContainerRef}
+        spacing={2}
+        sx={{ minWidth: 0, containerType: "inline-size", containerName: DIRECTORY_CONTAINER_NAME }}
+      >
         <Stack aria-label="Directory overview" direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
           <Chip
             label={t("settings.userManagement.totalUsers", { count: directorySummary.total })}
@@ -1850,9 +1839,10 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(12rem, 20rem) max-content" },
+            gridTemplateColumns: "minmax(0, 1fr)",
             gap: 1,
             alignItems: "center",
+            [DIRECTORY_WIDE_QUERY]: { gridTemplateColumns: "minmax(12rem, 20rem) minmax(0, 1fr)" },
           }}
         >
           <TextField
@@ -1860,16 +1850,15 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             size="small"
-            sx={[DIRECTORY_SECONDARY_CONTROL_SX, { gridColumn: { sm: 1 }, minWidth: 0, width: "100%" }]}
+            sx={[DIRECTORY_SECONDARY_CONTROL_SX, { minWidth: 0, width: "100%" }]}
           />
           <Stack
             direction="row"
             spacing={1}
             sx={{
-              gridColumn: { xs: "1 / -1", sm: 2 },
-              justifyContent: { xs: "space-between", sm: "flex-start" },
-              justifySelf: "start",
-              width: { xs: "100%", sm: "auto" },
+              justifyContent: "space-between",
+              minWidth: 0,
+              width: "100%",
             }}
           >
             <Stack direction="row" spacing={1}>
@@ -1898,23 +1887,41 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               </Button>
             </Stack>
             <Button
-              aria-expanded={Boolean(columnsAnchor)}
+              ref={toolbarColumnsRef}
+              aria-expanded={columnsMenuOpen}
               aria-haspopup="menu"
+              aria-controls={columnsMenuOpen ? columnsMenuId : undefined}
               aria-label="Columns"
               variant="text"
-              onClick={(event) => setColumnsAnchor(event.currentTarget)}
+              startIcon={<ViewWeekIcon />}
+              onClick={() => setColumnsMenuOpen(true)}
               sx={{
                 color: "text.secondary",
                 fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE,
                 minWidth: 0,
-                [getDirectoryWideQuery(visibleDirectoryColumns)]: { display: "none" },
+                flexShrink: 0,
+                whiteSpace: "nowrap",
+                [DIRECTORY_WIDE_QUERY]: { display: !loading && users.length > 0 ? "none" : "inline-flex" },
               }}
             >
               Columns
             </Button>
           </Stack>
         </Box>
-        <Menu anchorEl={columnsAnchor} aria-label="Directory columns" onClose={() => setColumnsAnchor(null)} open={Boolean(columnsAnchor)}>
+        <Menu
+          action={columnsMenuActionsRef}
+          anchorEl={getColumnsAnchor}
+          aria-label="Directory columns"
+          disableRestoreFocus
+          onClose={() => setColumnsMenuOpen(false)}
+          open={columnsMenuOpen}
+          anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+          transformOrigin={{ vertical: "top", horizontal: "right" }}
+          slotProps={{
+            list: { id: columnsMenuId },
+            transition: { onExited: () => getColumnsAnchor()?.focus() },
+          }}
+        >
           {availableDirectoryColumns.map((column) => {
             const isVisible = visibleDirectoryColumns.includes(column);
             return (
@@ -2143,7 +2150,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               "& [data-directory-cell] > .MuiTypography-body2 > span, & [data-directory-cell] .MuiTypography-caption": {
                 display: "inline",
               },
-              [getDirectoryWideQuery(visibleDirectoryColumns)]: {
+              [DIRECTORY_WIDE_QUERY]: {
                 "& [data-directory-cell] > .MuiTypography-body2 > span, & [data-directory-cell] .MuiTypography-caption": {
                   display: "none",
                 },
@@ -2268,15 +2275,16 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   onSort={handleDirectorySort}
                 />
               )}
-              <Box role="columnheader" sx={{ alignItems: "center", display: "flex", justifyContent: "flex-end" }}>
+              <Box role="columnheader" sx={{ display: "flex", justifyContent: "flex-end" }}>
                 <Tooltip title="Manage visible columns">
                   <IconButton
-                    aria-expanded={Boolean(columnsAnchor)}
+                    ref={headerColumnsRef}
+                    aria-expanded={columnsMenuOpen}
                     aria-haspopup="menu"
+                    aria-controls={columnsMenuOpen ? columnsMenuId : undefined}
                     aria-label="Manage visible columns"
-                    onClick={(event) => setColumnsAnchor(event.currentTarget)}
-                    sx={{ ...DIRECTORY_COLUMNS_ICON_BUTTON_SX, height: 28, p: 0, width: 28 }}
-                    tabIndex={-1}
+                    onClick={() => setColumnsMenuOpen(true)}
+                    sx={{ color: "text.secondary", width: 28, height: 28, p: 0 }}
                   >
                     <ViewWeekIcon />
                   </IconButton>
