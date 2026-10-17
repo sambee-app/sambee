@@ -43,7 +43,7 @@ import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge } fr
 import { downloadViewerBlob } from "./viewerContent";
 import { createEditToolbarAction, createSaveToolbarAction } from "./viewerToolbarActions";
 
-type PendingUnsavedChangesAction = "cancel-edit" | "close-viewer" | "stay-edit";
+type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit";
 type TextSearchCloseReason = "escape" | "toggle";
 
 const DRAFT_SNAPSHOT_DEBOUNCE_MS = 250;
@@ -568,9 +568,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         markEditSessionPristine();
         clearDraft(connectionId, path, "text");
 
-        if (afterSave === "close-viewer") {
-          await closeViewer();
-        } else if (afterSave === "cancel-edit") {
+        if (afterSave === "cancel-edit") {
           await exitEditMode(savedContent);
         }
 
@@ -590,7 +588,6 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     },
     [
       clearBaselineSyncWindow,
-      closeViewer,
       connectionId,
       draftContent,
       editSession,
@@ -611,14 +608,13 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   }, [persistDraft]);
 
   const handleRequestClose = useCallback(async () => {
-    if (isEditing && hasUnsavedChanges) {
-      preserveTextEditorSelection(editorRef);
-      setPendingUnsavedChangesAction("close-viewer");
+    if (isEditing) {
+      await handleCancelEdit();
       return;
     }
 
     await closeViewer();
-  }, [closeViewer, hasUnsavedChanges, isEditing]);
+  }, [closeViewer, handleCancelEdit, isEditing]);
 
   const closeSearchPanel = useCallback(({ preserveQuery, restoreEditorFocus }: { preserveQuery: boolean; restoreEditorFocus: boolean }) => {
     setSearchPanelOpen(false);
@@ -1234,11 +1230,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
           setPendingUnsavedChangesAction(null);
         }}
         title={t("viewer.edit.unsavedChangesTitle")}
-        description={
-          pendingUnsavedChangesAction === "close-viewer"
-            ? t("viewer.edit.unsavedChangesCloseMessage")
-            : t("viewer.edit.unsavedChangesExitMessage")
-        }
+        description={t("viewer.edit.unsavedChangesExitMessage")}
         maxWidth="xs"
         disableAutoFocus
         disableEnforceFocus
@@ -1260,11 +1252,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
                 if (resumedRecoveryDraft) {
                   clearDraft(connectionId, path, "text");
                 }
-                if (pendingUnsavedChangesAction === "close-viewer") {
-                  void closeViewer();
-                } else {
-                  void exitEditMode();
-                }
+                void exitEditMode();
               }}
               disabled={isSaving}
               color="error"
