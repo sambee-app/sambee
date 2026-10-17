@@ -328,6 +328,75 @@ describe("TextViewer", () => {
     });
   });
 
+  it.each(["Close", "Escape"])("returns to the viewer on %s and closes it on the next Close", async (action) => {
+    const onClose = vi.fn();
+    renderViewer({ onClose });
+
+    const editor = await enterEditMode();
+    if (action === "Escape") {
+      editor.focus();
+      fireEvent.keyDown(editor, { key: "Escape" });
+    } else {
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    }
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
+    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(["Save", "Discard"])("returns to the text viewer after Close and %s", async (choice) => {
+    const onClose = vi.fn();
+    renderViewer({ onClose });
+
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "updated text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: choice }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled());
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue(choice === "Save" ? "updated text" : "hello world");
+    expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(choice === "Save" ? 1 : 0);
+    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(["Cancel", "failed Save"])("keeps text editing after Close and %s", async (choice) => {
+    const onClose = vi.fn();
+    if (choice === "failed Save") {
+      vi.mocked(apiService.writeTextWithEditLock).mockRejectedValueOnce(new Error("Save failed"));
+    }
+    renderViewer({ onClose });
+
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "updated text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: choice === "Cancel" ? "Cancel" : "Save" }));
+
+    if (choice === "Cancel") {
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument());
+    } else {
+      await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled());
+      expect(dialog).toBeInTheDocument();
+    }
+    expect(editor).toHaveValue("updated text");
+    expect(editor).not.toHaveAttribute("readonly");
+    expect(apiService.releaseEditLock).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("enters edit mode and saves text changes", async () => {
     renderViewer();
 

@@ -173,7 +173,7 @@ function withOpacity(color: string, opacity: number): string {
   return color;
 }
 
-type PendingUnsavedChangesAction = "cancel-edit" | "close-viewer" | "stay-edit";
+type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit";
 type MarkdownSearchCloseReason = "escape" | "toggle";
 type EditorModuleLoadState = "idle" | "loading" | "loaded" | "failed";
 
@@ -932,9 +932,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         markEditSessionPristine();
         clearDraft(connectionId, path, "markdown");
 
-        if (afterSave === "close-viewer") {
-          await closeViewer();
-        } else if (afterSave === "cancel-edit") {
+        if (afterSave === "cancel-edit") {
           await exitEditMode(savedContent);
         }
 
@@ -962,7 +960,6 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     [
       beginBaselineSyncWindow,
       clearPendingBaselineSync,
-      closeViewer,
       connectionId,
       draftContent,
       editSession,
@@ -983,14 +980,13 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   }, [persistDraft]);
 
   const handleRequestClose = useCallback(async () => {
-    if (isEditing && hasUnsavedChanges) {
-      preserveMarkdownEditorSelection(editorRef);
-      setPendingUnsavedChangesAction("close-viewer");
+    if (isEditing) {
+      await handleCancelEdit();
       return;
     }
 
     await closeViewer();
-  }, [closeViewer, hasUnsavedChanges, isEditing]);
+  }, [closeViewer, handleCancelEdit, isEditing]);
 
   const handleUnsavedChangesDialogClose = useCallback(() => {
     setPendingUnsavedChangesAction(null);
@@ -1046,13 +1042,8 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       clearDraft(connectionId, path, "markdown");
     }
 
-    if (pendingUnsavedChangesAction === "close-viewer") {
-      await closeViewer();
-      return;
-    }
-
     await exitEditMode();
-  }, [closeViewer, connectionId, exitEditMode, path, pendingUnsavedChangesAction, resumedRecoveryDraft]);
+  }, [connectionId, exitEditMode, path, resumedRecoveryDraft]);
 
   const handleUnsavedChangesSave = useCallback(async () => {
     if (!pendingUnsavedChangesAction) {
@@ -2027,11 +2018,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
           }
         }}
         title={t("viewer.edit.unsavedChangesTitle")}
-        description={
-          pendingUnsavedChangesAction === "close-viewer"
-            ? t("viewer.edit.unsavedChangesCloseMessage")
-            : t("viewer.edit.unsavedChangesExitMessage")
-        }
+        description={t("viewer.edit.unsavedChangesExitMessage")}
         maxWidth="xs"
         disableAutoFocus
         disableEnforceFocus

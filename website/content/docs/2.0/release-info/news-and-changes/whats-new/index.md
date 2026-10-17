@@ -93,6 +93,10 @@ HTTP for development on `localhost` is treated as secure by browsers and continu
 
 If your browser is too old or lacks features Sambee needs, you'll now see a clear message instead of a blank page. The message identifies missing capabilities and links to the browser requirements so you can choose a supported browser.
 
+## Text and Markdown Editors
+
+Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
+
 ## Under the Hood
 
 ### Security Review

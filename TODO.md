@@ -2,8 +2,6 @@
 
 ## Bugs
 
-- Text + Markdown editors on mobile:
-   - The X returns to the file list instead of going back to the viewer.
 - Settings > User management
    - The password reset option is unavailable on a linked OIDC user
       - The option is available on an unlinked local user.

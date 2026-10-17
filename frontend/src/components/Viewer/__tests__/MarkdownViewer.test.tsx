@@ -879,7 +879,7 @@ describe("MarkdownViewer", () => {
     expect(contentContainer.scrollTop).toBe(0);
   });
 
-  it("exits edit mode on Escape without closing the viewer or prompting when nothing changed", async () => {
+  it.each(["Escape", "Close"])("exits edit mode on %s without closing the viewer or prompting when nothing changed", async (action) => {
     const onClose = vi.fn();
 
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
@@ -905,15 +905,23 @@ describe("MarkdownViewer", () => {
       expect(editor).toHaveFocus();
     });
 
-    fireEvent.keyDown(editor, { key: "Escape" });
+    if (action === "Escape") {
+      fireEvent.keyDown(editor, { key: "Escape" });
+    } else {
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    }
 
     await waitFor(() => {
       expect(screen.queryByRole("textbox", { name: "Markdown editor" })).not.toBeInTheDocument();
     });
 
     expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
     expect(releaseSpy).toHaveBeenCalledWith("conn1", "/docs/readme.md", expect.objectContaining(mockEditLockInfo));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it("renders only the close button in the top bar while editing", async () => {
@@ -2029,7 +2037,7 @@ describe("MarkdownViewer", () => {
     expect(releaseSpy).not.toHaveBeenCalled();
   });
 
-  it("discards and closes from the unsaved changes dialog", async () => {
+  it("discards to the viewer and requires a second Close to close the viewer", async () => {
     const onClose = vi.fn();
 
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
@@ -2057,11 +2065,16 @@ describe("MarkdownViewer", () => {
 
     await waitFor(() => {
       expect(releaseSpy).toHaveBeenCalledWith("conn1", "/docs/readme.md", expect.objectContaining(mockEditLockInfo));
-      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
     });
+    expect(await screen.findByText("Readme")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
-  it("saves from the unsaved changes dialog before closing the viewer", async () => {
+  it("saves to the viewer and requires a second Close to close the viewer", async () => {
     const onClose = vi.fn();
 
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
@@ -2094,8 +2107,44 @@ describe("MarkdownViewer", () => {
         mimeType: "text/markdown;charset=utf-8",
       });
       expect(releaseSpy).toHaveBeenCalledWith("conn1", "/docs/readme.md", expect.objectContaining(mockEditLockInfo));
-      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled();
     });
+    expect(await screen.findByText("Updated")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(["Cancel", "failed Save"])("keeps Markdown editing after Close and %s", async (choice) => {
+    const onClose = vi.fn();
+    vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    const releaseSpy = vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    if (choice === "failed Save") {
+      vi.mocked(apiService.writeTextWithEditLock).mockRejectedValueOnce(new Error("Save failed"));
+    }
+    renderViewerWithProps({ onClose });
+
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Updated\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: choice === "Cancel" ? "Cancel" : "Save" }));
+
+    if (choice === "Cancel") {
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument());
+    } else {
+      await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled());
+      expect(dialog).toBeInTheDocument();
+    }
+    expect(editor).toHaveValue("# Updated\n");
+    expect(editor).not.toHaveAttribute("readonly");
+    expect(releaseSpy).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("sends heartbeat requests while an edit lock is held", async () => {
