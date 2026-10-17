@@ -302,7 +302,9 @@ describe("ImageViewer", () => {
       expect(screen.getByText("Image viewer shortcuts")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    const searchInput = screen.getByRole("searchbox");
+    await waitFor(() => expect(searchInput).toHaveFocus());
+    fireEvent.keyDown(searchInput, { key: "Escape" });
 
     await waitFor(() => {
       expect(screen.queryByText("Image viewer shortcuts")).not.toBeInTheDocument();

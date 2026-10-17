@@ -6,6 +6,8 @@ import { useKeyboardShortcuts } from "../../../hooks/useKeyboardShortcuts";
 import { SambeeThemeProvider } from "../../../theme";
 import { ResponsiveDialogShell } from "../../Dialog/ResponsiveDialogShell";
 
+const IME_PROCESS_KEY_CODE = 229;
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -134,9 +136,91 @@ describe("ResponsiveFormDialog", () => {
     fireEvent.keyDown(report, { key: "a", ctrlKey: true });
     expect(childShortcut).toHaveBeenCalledOnce();
     expect(parentShortcut).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByText("Parent"), { key: "Escape" });
+    expect(parentClose).not.toHaveBeenCalled();
+    expect(childClose).not.toHaveBeenCalled();
     fireEvent.keyDown(report, { key: "Escape" });
     expect(childClose).toHaveBeenCalledOnce();
     expect(parentClose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { isMobile: false, disableClose: false },
+    { isMobile: false, disableClose: true },
+    { isMobile: true, disableClose: false },
+    { isMobile: true, disableClose: true },
+  ])("calls only the custom Escape action (mobile: $isMobile, close disabled: $disableClose)", ({ isMobile, disableClose }) => {
+    mockMobileMode(isMobile);
+    const onClose = vi.fn();
+    const onEscape = vi.fn();
+    render(
+      <ResponsiveDialogShell open onClose={onClose} onEscape={onEscape} disableClose={disableClose} title="Cancel operation">
+        Operation in progress
+      </ResponsiveDialogShell>
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { isMobile: false, disableClose: false },
+    { isMobile: false, disableClose: true },
+    { isMobile: true, disableClose: false },
+    { isMobile: true, disableClose: true },
+  ])(
+    "keeps the close button separate from custom Escape (mobile: $isMobile, close disabled: $disableClose)",
+    ({ isMobile, disableClose }) => {
+      mockMobileMode(isMobile);
+      const onClose = vi.fn();
+      const onEscape = vi.fn();
+      render(
+        <ResponsiveDialogShell open onClose={onClose} onEscape={onEscape} disableClose={disableClose} showCloseButton title="Operation">
+          Operation content
+        </ResponsiveDialogShell>
+      );
+      const closeButton = screen.getByRole("button", { name: "common.actions.close" });
+      expect(closeButton).toHaveProperty("disabled", disableClose);
+      fireEvent.click(closeButton);
+      expect(onClose).toHaveBeenCalledTimes(disableClose ? 0 : 1);
+      expect(onEscape).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([false, true])("ignores IME Escape before handling a normal Escape (mobile: %s)", (isMobile) => {
+    mockMobileMode(isMobile);
+    const onClose = vi.fn();
+    const onEscape = vi.fn();
+    const { rerender } = render(
+      <ResponsiveDialogShell open onClose={onClose} title="Input workflow">
+        Input content
+      </ResponsiveDialogShell>
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), {
+      key: "Escape",
+      keyCode: IME_PROCESS_KEY_CODE,
+      which: IME_PROCESS_KEY_CODE,
+      isComposing: true,
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+    rerender(
+      <ResponsiveDialogShell open onClose={onClose} onEscape={onEscape} title="Input workflow">
+        Input content
+      </ResponsiveDialogShell>
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), {
+      key: "Escape",
+      keyCode: IME_PROCESS_KEY_CODE,
+      which: IME_PROCESS_KEY_CODE,
+      isComposing: true,
+    });
+    expect(onEscape).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("renders the shared description above the dialog body on desktop", () => {

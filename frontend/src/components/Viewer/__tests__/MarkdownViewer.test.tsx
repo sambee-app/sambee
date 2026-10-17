@@ -2167,7 +2167,9 @@ describe("MarkdownViewer", () => {
       expect(screen.getByText("Markdown viewer shortcuts")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    const searchInput = screen.getByRole("searchbox");
+    await waitFor(() => expect(searchInput).toHaveFocus());
+    fireEvent.keyDown(searchInput, { key: "Escape" });
 
     await waitFor(() => {
       expect(screen.queryByText("Markdown viewer shortcuts")).not.toBeInTheDocument();

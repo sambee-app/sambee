@@ -104,7 +104,6 @@ export function ResponsiveDialogShell({
   const shortcutScopeId = useKeyboardShortcutScope(open);
   const triggerElementRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(open);
-  const escapeCloseHandledRef = useRef(false);
   const renderedDescription = description ? (
     <Box id={descriptionId} sx={{ mb: 3 }}>
       {typeof description === "string" ? (
@@ -146,22 +145,12 @@ export function ResponsiveDialogShell({
     event.stopPropagation();
     if (event.key !== "Escape") {
       onKeyDown?.(event);
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    if (onEscape) {
-      onEscape();
-    } else if (!disableClose) {
-      escapeCloseHandledRef.current = true;
-      onClose();
     }
   };
 
   const handleShellClose = (_event: unknown, reason: string) => {
-    if (reason === "escapeKeyDown" && escapeCloseHandledRef.current) {
-      escapeCloseHandledRef.current = false;
+    if (reason === "escapeKeyDown" && onEscape) {
+      onEscape();
       return;
     }
     handleRequestClose();
