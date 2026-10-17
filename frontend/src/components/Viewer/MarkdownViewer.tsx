@@ -1360,7 +1360,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
    */
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (unsavedChangesDialogOpen || nativeSharing.detailsOpen) {
+      if (unsavedChangesDialogOpen) {
         return;
       }
 
@@ -1374,7 +1374,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       if (blurActiveToolbarControl(contentRef)) return;
       handleEscape();
     },
-    [handleEscape, nativeSharing.detailsOpen, unsavedChangesDialogOpen]
+    [handleEscape, unsavedChangesDialogOpen]
   );
 
   const handleShowViewerHelp = useCallback(() => {
@@ -1606,7 +1606,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     : !loading && !error && content.trim().length > 0;
 
   useKeyboardShortcuts({
-    active: !showViewerHelp && !showEditorHelp && !nativeSharing.detailsOpen,
+    active: !showViewerHelp && !showEditorHelp,
     shortcuts: [...markdownViewerShortcuts, ...markdownEditorShortcuts],
     inputSelector: "input, textarea",
   });

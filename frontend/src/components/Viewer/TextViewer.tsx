@@ -743,7 +743,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
 
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (unsavedChangesDialogOpen || nativeSharing.detailsOpen || event.key !== "Escape") {
+      if (unsavedChangesDialogOpen || event.key !== "Escape") {
         return;
       }
 
@@ -761,7 +761,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
 
       handleEscape();
     },
-    [handleEscape, nativeSharing.detailsOpen, unsavedChangesDialogOpen]
+    [handleEscape, unsavedChangesDialogOpen]
   );
 
   const handleToggleFullscreen = useCallback(() => {
@@ -892,7 +892,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   );
 
   useKeyboardShortcuts({
-    active: !showViewerHelp && !showEditorHelp && !nativeSharing.detailsOpen,
+    active: !showViewerHelp && !showEditorHelp,
     shortcuts: [...textViewerShortcuts, ...textEditorShortcuts],
     inputSelector: "input, textarea",
   });
