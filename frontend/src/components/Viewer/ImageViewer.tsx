@@ -1,4 +1,4 @@
-import { Alert, Box, Button, CircularProgress, Dialog, Typography, useMediaQuery, useTheme } from "@mui/material";
+import { Box, Button, CircularProgress, Dialog, Typography, useMediaQuery, useTheme } from "@mui/material";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Lightbox, { type Slide } from "yet-another-react-lightbox";
@@ -10,13 +10,14 @@ import "./ImageViewer.css";
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { useCachedImageGallery } from "../../hooks/useCachedImageGallery";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useViewerSharing } from "../../hooks/useViewerSharing";
 import { readViewerContent, readVirtualContent, useContentProviderRegistry } from "../../pages/FileBrowser/contentProviders";
 import { error as logError, info as logInfo } from "../../services/logger";
 import { useSambeeTheme } from "../../theme";
 import { getViewerColors } from "../../theme/viewerStyles";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
-import { createShareFile, shareNativeContent, shouldWarmNativeSharePayload, supportsNativeShare } from "../../utils/nativeShare";
+import { createDisplayedShareFile, supportsNativeShare } from "../../utils/nativeShare";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 import { ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
 import { downloadViewerBlob } from "./viewerContent";
@@ -80,12 +81,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const [rotate, setRotate] = useState(0);
   const [hideControls, setHideControls] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [shareError, setShareError] = useState<string | null>(null);
-  const [sharing, setSharing] = useState(false);
   const zoomRef = useRef<ZoomRef | null>(null);
   const fullscreenRef = useRef<FullscreenRef | null>(null);
-  const prefetchedShareFileRef = useRef<File | null>(null);
-  const sharePrefetchPromiseRef = useRef<Promise<File> | null>(null);
 
   // Callback-ref + state ensures the Lightbox only renders once the portal
   // container is mounted.  Without this, portalRef.current is null on the
@@ -101,7 +98,6 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const muiTheme = useTheme();
   const isMobile = useMediaQuery(muiTheme.breakpoints.down("sm"));
   const shareEnabled = isMobile && supportsNativeShare();
-  const shareWarmEnabled = shareEnabled && shouldWarmNativeSharePayload();
   const { viewerBg, toolbarBg, toolbarText } = getViewerColors(currentTheme, "image");
   const readOnlyIndicator =
     isReadOnly || virtualSource ? (
@@ -130,6 +126,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     currentPath,
     filename,
     getCachedImageSrc,
+    getCachedImageBlob,
     errorStates,
     currentImageLoadPhase,
     showLoadingSpinner,
@@ -159,6 +156,18 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const isCurrentImageLoading = currentImageLoadPhase === "fetching" || currentImageLoadPhase === "decoding";
   const isCurrentImageReady = currentImageLoadPhase === "ready";
   const currentImageError = errorStates.get(currentIndex) ?? null;
+  const displayedBlob = isCurrentImageReady ? getCachedImageBlob(currentIndex) : undefined;
+  const displayedShareFile = useMemo(
+    () => (displayedBlob ? createDisplayedShareFile(displayedBlob, filename) : null),
+    [displayedBlob, filename]
+  );
+  const nativeSharing = useViewerSharing({
+    entryPoint: "image",
+    identity: `${connectionId}:${currentPath}`,
+    enabled: shareEnabled,
+    file: displayedShareFile,
+    source: "displayed-resource",
+  });
 
   useEffect(() => {
     viewerSessionMetaRef.current = {
@@ -300,71 +309,6 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       logError("Failed to download file", { error: err, path: currentPath, connectionId });
     }
   }, [connectionId, contentProviders, currentPath, filename, virtualSource]);
-
-  const loadShareFile = useCallback(
-    async (signal?: AbortSignal) => {
-      if (prefetchedShareFileRef.current) {
-        return prefetchedShareFileRef.current;
-      }
-
-      if (sharePrefetchPromiseRef.current) {
-        return sharePrefetchPromiseRef.current;
-      }
-
-      const shareFilePromise = (
-        virtualSource
-          ? readViewerContent(connectionId, currentPath, { kind: "image", noResizing: true }, { signal, virtualSource }, contentProviders)
-          : readViewerContent(connectionId, currentPath, { kind: "image", noResizing: true }, { signal }, contentProviders)
-      ).then((blob) => createShareFile(blob, filename));
-
-      sharePrefetchPromiseRef.current = shareFilePromise;
-
-      try {
-        return await shareFilePromise;
-      } finally {
-        if (sharePrefetchPromiseRef.current === shareFilePromise) {
-          sharePrefetchPromiseRef.current = null;
-        }
-      }
-    },
-    [connectionId, contentProviders, currentPath, filename, virtualSource]
-  );
-
-  useEffect(() => {
-    void loadShareFile;
-    prefetchedShareFileRef.current = null;
-    sharePrefetchPromiseRef.current = null;
-  }, [loadShareFile]);
-
-  const handleShareIntent = useCallback(() => {
-    if (!shareWarmEnabled) {
-      return;
-    }
-
-    void loadShareFile();
-  }, [shareWarmEnabled, loadShareFile]);
-
-  const handleShare = useCallback(async () => {
-    setShareError(null);
-    setSharing(true);
-
-    try {
-      const shareFile = await loadShareFile();
-      const result = await shareNativeContent({
-        file: shareFile,
-        title: filename,
-      });
-
-      if (result === "unsupported") {
-        setShareError(t("viewer.share.unsupported"));
-      }
-    } catch (err) {
-      logError("Failed to share image", { error: err, path: currentPath, connectionId });
-      setShareError(t("viewer.share.failed"));
-    } finally {
-      setSharing(false);
-    }
-  }, [connectionId, currentPath, filename, loadShareFile, t]);
 
   const handleRotateLeft = useCallback(() => {
     setRotate((value) => value - 90);
@@ -712,9 +656,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                 onRotateRight: handleRotateRight,
               }}
               onDownload={handleDownload}
-              onShare={handleShare}
-              onShareIntent={handleShareIntent}
-              shareDisabled={sharing || !isCurrentImageReady}
+              onShare={nativeSharing.shareFile}
+              shareDisabled={nativeSharing.sharing || !nativeSharing.ready}
               controlsDisabled={!isCurrentImageReady}
               navigationDisabled={false}
               downloadDisabled={isCurrentImageLoading}
@@ -722,11 +665,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
           </Box>
         )}
 
-        {shareError && (
-          <Alert severity="error" sx={{ m: 2, flexShrink: 0 }}>
-            {shareError}
-          </Alert>
-        )}
+        {nativeSharing.failureDialog}
 
         {/* Lightbox container - fills remaining space below toolbar */}
         <Box

@@ -2,11 +2,11 @@ import type { ViewUpdate } from "@codemirror/view";
 import { act, configure, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, type ReactNode, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
 import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
-import { createStorageBackedTestContentProviderRegistry } from "../../../test/helpers";
+import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
 import MarkdownViewer from "../MarkdownViewer";
 import { normalizeMarkdownTableCellLineBreaks } from "../markdownTableCellLineBreaks";
@@ -424,6 +424,70 @@ const MockMarkdownRichEditor = forwardRef<
 MockMarkdownRichEditor.displayName = "MockMarkdownRichEditor";
 
 describe("MarkdownViewer", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shares canonical unsaved Markdown rather than rendered HTML or stale draft state", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
+    vi.stubGlobal("navigator", { share, canShare: () => true });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }))
+    );
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Saved\n");
+    const raw = vi
+      .spyOn(apiService, "getOriginalFileBlob")
+      .mockResolvedValue(new Blob(["# Saved\n"], { type: "application/octet-stream" }));
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    vi.spyOn(apiService, "saveTextFile").mockResolvedValue();
+    const onClose = vi.fn();
+    renderViewerWithProps({ onClose });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    mockMarkdownEditorBehavior.canonicalMarkdownOverride = "# Latest unsaved\n";
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Share as text" }));
+    expect(share).toHaveBeenCalledExactlyOnceWith({ text: "# Latest unsaved\n" });
+    expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const savedChoice = screen.getByRole("menuitem", { name: "Share as file" });
+    await waitFor(() => expect(savedChoice).not.toHaveAttribute("aria-disabled", "true"));
+    fireEvent.click(savedChoice);
+    expect(await readBlobAsText(share.mock.calls[1]?.[0]?.files[0])).toBe("# Saved\n");
+    expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+    expect(raw).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+    raw.mockResolvedValueOnce(new Blob(["# Latest unsaved\n"], { type: "application/octet-stream" }));
+    fireEvent.change(editor, { target: { value: "# Latest unsaved\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(raw).toHaveBeenCalledTimes(2));
+    share.mockRejectedValueOnce(new DOMException("blocked", "NotAllowedError"));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const updatedChoice = screen.getByRole("menuitem", { name: "Share as file" });
+    await waitFor(() => expect(updatedChoice).not.toHaveAttribute("aria-disabled", "true"));
+    fireEvent.click(updatedChoice);
+    expect(await readBlobAsText(share.mock.calls[2]?.[0]?.files[0])).toBe("# Latest unsaved\n");
+    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    await screen.findByText(/"reason": "NotAllowedError"/);
+    await userEvent.keyboard("{Escape}");
+    const details = await screen.findByRole("button", { name: "Details" });
+    await waitFor(() => expect(details).toHaveFocus());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Markdown editor" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download" })).toBeEnabled();
+  });
   const viewerSearch = createViewerSearchTestDriver({
     assertCurrentMatchActive: () => {
       expect(document.querySelectorAll('mark[data-text-search-current="true"]').length).toBeGreaterThan(0);
@@ -2103,7 +2167,9 @@ describe("MarkdownViewer", () => {
       expect(screen.getByText("Markdown viewer shortcuts")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    const searchInput = screen.getByRole("searchbox");
+    await waitFor(() => expect(searchInput).toHaveFocus());
+    fireEvent.keyDown(searchInput, { key: "Escape" });
 
     await waitFor(() => {
       expect(screen.queryByText("Markdown viewer shortcuts")).not.toBeInTheDocument();

@@ -19,6 +19,11 @@ import {
 } from "@mui/material";
 import { type ReactNode, type Ref, useEffect, useId, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE,
+  KeyboardShortcutScopeContext,
+  useKeyboardShortcutScope,
+} from "../../hooks/useKeyboardShortcuts";
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
 import {
   mobileFullscreenDrawerPaperSx,
@@ -96,9 +101,9 @@ export function ResponsiveDialogShell({
   const { t } = useTranslation();
   const titleId = useId();
   const descriptionId = useId();
+  const shortcutScopeId = useKeyboardShortcutScope(open);
   const triggerElementRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(open);
-  const escapeCloseHandledRef = useRef(false);
   const renderedDescription = description ? (
     <Box id={descriptionId} sx={{ mb: 3 }}>
       {typeof description === "string" ? (
@@ -137,24 +142,15 @@ export function ResponsiveDialogShell({
   };
 
   const handleShellKeyDown: DialogProps["onKeyDown"] = (event) => {
+    event.stopPropagation();
     if (event.key !== "Escape") {
       onKeyDown?.(event);
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    if (onEscape) {
-      onEscape();
-    } else if (!disableClose) {
-      escapeCloseHandledRef.current = true;
-      onClose();
     }
   };
 
   const handleShellClose = (_event: unknown, reason: string) => {
-    if (reason === "escapeKeyDown" && escapeCloseHandledRef.current) {
-      escapeCloseHandledRef.current = false;
+    if (reason === "escapeKeyDown" && onEscape) {
+      onEscape();
       return;
     }
     handleRequestClose();
@@ -175,163 +171,169 @@ export function ResponsiveDialogShell({
 
   if (isMobile) {
     return (
-      <Drawer
-        anchor="right"
-        open={open}
-        onClose={handleShellClose}
-        onKeyDown={handleShellKeyDown}
-        disableAutoFocus={disableAutoFocus}
-        disableEnforceFocus={disableEnforceFocus}
-        disableRestoreFocus={disableRestoreFocus}
-        sx={{ zIndex: (currentTheme) => currentTheme.zIndex.modal + dialogZIndexOffset }}
-        slotProps={{
-          transition: { onEntered: onTransitionEntered, onExited: onTransitionExited },
-          paper: {
-            ref: paperRef,
-            sx: [
-              (currentTheme) => ({ ...mobileFullscreenDrawerPaperSx, ...getSurfaceSx(currentTheme) }),
-              ...(Array.isArray(paperSx) ? paperSx : paperSx ? [paperSx] : []),
-            ],
-          },
-        }}
-      >
-        <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-          <AppBar position="static" sx={mobileSafeAreaAppBarSx}>
-            <Toolbar sx={mobileSafeAreaToolbarSx}>
-              {!showCloseButton && (
-                <IconButton
-                  edge="start"
-                  color="inherit"
-                  onClick={handleRequestClose}
-                  aria-label={mobileActionLabel ?? t("common.navigation.goBack")}
-                  disabled={disableClose}
+      <KeyboardShortcutScopeContext value={shortcutScopeId}>
+        <Drawer
+          {...{ [KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE]: shortcutScopeId }}
+          anchor="right"
+          open={open}
+          onClose={handleShellClose}
+          onKeyDown={handleShellKeyDown}
+          disableAutoFocus={disableAutoFocus}
+          disableEnforceFocus={disableEnforceFocus}
+          disableRestoreFocus={disableRestoreFocus}
+          sx={{ zIndex: (currentTheme) => currentTheme.zIndex.modal + dialogZIndexOffset }}
+          slotProps={{
+            transition: { onEntered: onTransitionEntered, onExited: onTransitionExited },
+            paper: {
+              ref: paperRef,
+              sx: [
+                (currentTheme) => ({ ...mobileFullscreenDrawerPaperSx, ...getSurfaceSx(currentTheme) }),
+                ...(Array.isArray(paperSx) ? paperSx : paperSx ? [paperSx] : []),
+              ],
+            },
+          }}
+        >
+          <Box sx={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+            <AppBar position="static" sx={mobileSafeAreaAppBarSx}>
+              <Toolbar sx={mobileSafeAreaToolbarSx}>
+                {!showCloseButton && (
+                  <IconButton
+                    edge="start"
+                    color="inherit"
+                    onClick={handleRequestClose}
+                    aria-label={mobileActionLabel ?? t("common.navigation.goBack")}
+                    disabled={disableClose}
+                  >
+                    <ArrowBackIcon />
+                  </IconButton>
+                )}
+                <Typography
+                  id={titleId}
+                  variant="h6"
+                  component="h1"
+                  sx={{ flex: 1, ml: showCloseButton ? 0 : 2, fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_TITLE_PX}px` }}
                 >
-                  <ArrowBackIcon />
-                </IconButton>
-              )}
-              <Typography
-                id={titleId}
-                variant="h6"
-                component="h1"
-                sx={{ flex: 1, ml: showCloseButton ? 0 : 2, fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_TITLE_PX}px` }}
-              >
-                {title}
-              </Typography>
-              {showCloseButton && (
-                <IconButton
-                  edge="end"
-                  color="inherit"
-                  onClick={handleRequestClose}
-                  aria-label={closeButtonAriaLabel ?? t("common.actions.close")}
-                  disabled={disableClose}
-                >
-                  <CloseIcon />
-                </IconButton>
-              )}
-            </Toolbar>
-          </AppBar>
-          <Box
-            sx={[
-              responsiveDialogShellContentPaddingSx,
-              {
-                ...mobileScrollableContentSx,
-                pb: `calc(16px + ${SAFE_AREA_INSET.BOTTOM})`,
-                fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_BODY_PX}px`,
-                "& .MuiTypography-body1, & .MuiTypography-body2, & .MuiDialogContentText-root": {
-                  fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_BODY_PX}px`,
-                },
-                "& .MuiInputLabel-root": {
-                  fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_FORM_LABEL_PX}px`,
-                },
-              },
-              ...(Array.isArray(contentSx) ? contentSx : contentSx ? [contentSx] : []),
-            ]}
-          >
-            {renderedDescription}
-            {contextualNotice}
-            {children}
-            {actionNotice}
-          </Box>
-          {actions && (
+                  {title}
+                </Typography>
+                {showCloseButton && (
+                  <IconButton
+                    edge="end"
+                    color="inherit"
+                    onClick={handleRequestClose}
+                    aria-label={closeButtonAriaLabel ?? t("common.actions.close")}
+                    disabled={disableClose}
+                  >
+                    <CloseIcon />
+                  </IconButton>
+                )}
+              </Toolbar>
+            </AppBar>
             <Box
-              data-testid="responsive-form-dialog-mobile-actions"
-              sx={{
-                position: "sticky",
-                bottom: 0,
-                display: "flex",
-                gap: 1,
-                flexShrink: 0,
-                mt: "auto",
-                p: 2,
-                pb: `calc(16px + ${SAFE_AREA_INSET.BOTTOM})`,
-                pl: `calc(16px + ${SAFE_AREA_INSET.LEFT})`,
-                pr: `calc(16px + ${SAFE_AREA_INSET.RIGHT})`,
-                borderTop: 1,
-                borderColor: "divider",
-                zIndex: 1,
-              }}
+              sx={[
+                responsiveDialogShellContentPaddingSx,
+                {
+                  ...mobileScrollableContentSx,
+                  pb: `calc(16px + ${SAFE_AREA_INSET.BOTTOM})`,
+                  fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_BODY_PX}px`,
+                  "& .MuiTypography-body1, & .MuiTypography-body2, & .MuiDialogContentText-root": {
+                    fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_BODY_PX}px`,
+                  },
+                  "& .MuiInputLabel-root": {
+                    fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_FORM_LABEL_PX}px`,
+                  },
+                },
+                ...(Array.isArray(contentSx) ? contentSx : contentSx ? [contentSx] : []),
+              ]}
             >
-              {actions}
+              {renderedDescription}
+              {contextualNotice}
+              {children}
+              {actionNotice}
             </Box>
-          )}
-        </Box>
-      </Drawer>
+            {actions && (
+              <Box
+                data-testid="responsive-form-dialog-mobile-actions"
+                sx={{
+                  position: "sticky",
+                  bottom: 0,
+                  display: "flex",
+                  gap: 1,
+                  flexShrink: 0,
+                  mt: "auto",
+                  p: 2,
+                  pb: `calc(16px + ${SAFE_AREA_INSET.BOTTOM})`,
+                  pl: `calc(16px + ${SAFE_AREA_INSET.LEFT})`,
+                  pr: `calc(16px + ${SAFE_AREA_INSET.RIGHT})`,
+                  borderTop: 1,
+                  borderColor: "divider",
+                  zIndex: 1,
+                }}
+              >
+                {actions}
+              </Box>
+            )}
+          </Box>
+        </Drawer>
+      </KeyboardShortcutScopeContext>
     );
   }
 
   return (
-    <Dialog
-      open={open}
-      onClose={handleShellClose}
-      onKeyDown={handleShellKeyDown}
-      aria-labelledby={titleId}
-      aria-describedby={description ? descriptionId : undefined}
-      maxWidth={maxWidth}
-      fullWidth={fullWidth}
-      disableAutoFocus={disableAutoFocus}
-      disableEnforceFocus={disableEnforceFocus}
-      disableRestoreFocus={disableRestoreFocus}
-      slotProps={{
-        paper: {
-          ref: paperRef,
-          sx: [(currentTheme) => getSurfaceSx(currentTheme), ...(Array.isArray(paperSx) ? paperSx : paperSx ? [paperSx] : [])],
-        },
-        transition: { onEntered: onTransitionEntered, onExited: onTransitionExited },
-      }}
-      sx={{ zIndex: (currentTheme) => currentTheme.zIndex.modal + dialogZIndexOffset }}
-    >
-      <DialogTitle id={titleId} sx={showCloseButton ? { pr: 7 } : undefined}>
-        {title}
-      </DialogTitle>
-      {showCloseButton && (
-        <IconButton
-          onClick={handleRequestClose}
-          aria-label={closeButtonAriaLabel ?? t("common.actions.close")}
-          disabled={disableClose}
-          size="small"
-          sx={{ position: "absolute", right: 8, top: 8, zIndex: 1 }}
-        >
-          <CloseIcon />
-        </IconButton>
-      )}
-      {paperOverlay}
-      <DialogContent
-        sx={[
-          { ".MuiDialogTitle-root + &&": { pt: 2 } },
-          responsiveDialogShellContentPaddingSx,
-          ...(Array.isArray(contentSx) ? contentSx : contentSx ? [contentSx] : []),
-        ]}
+    <KeyboardShortcutScopeContext value={shortcutScopeId}>
+      <Dialog
+        {...{ [KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE]: shortcutScopeId }}
+        open={open}
+        onClose={handleShellClose}
+        onKeyDown={handleShellKeyDown}
+        aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
+        maxWidth={maxWidth}
+        fullWidth={fullWidth}
+        disableAutoFocus={disableAutoFocus}
+        disableEnforceFocus={disableEnforceFocus}
+        disableRestoreFocus={disableRestoreFocus}
+        slotProps={{
+          paper: {
+            ref: paperRef,
+            sx: [(currentTheme) => getSurfaceSx(currentTheme), ...(Array.isArray(paperSx) ? paperSx : paperSx ? [paperSx] : [])],
+          },
+          transition: { onEntered: onTransitionEntered, onExited: onTransitionExited },
+        }}
+        sx={{ zIndex: (currentTheme) => currentTheme.zIndex.modal + dialogZIndexOffset }}
       >
-        {renderedDescription}
-        {contextualNotice}
-        {children}
-        {actionNotice}
-      </DialogContent>
-      {actions && (
-        <DialogActions data-testid="responsive-form-dialog-desktop-actions" sx={{ borderTop: 1, borderColor: "divider" }}>
-          {actions}
-        </DialogActions>
-      )}
-    </Dialog>
+        <DialogTitle id={titleId} sx={showCloseButton ? { pr: 7 } : undefined}>
+          {title}
+        </DialogTitle>
+        {showCloseButton && (
+          <IconButton
+            onClick={handleRequestClose}
+            aria-label={closeButtonAriaLabel ?? t("common.actions.close")}
+            disabled={disableClose}
+            size="small"
+            sx={{ position: "absolute", right: 8, top: 8, zIndex: 1 }}
+          >
+            <CloseIcon />
+          </IconButton>
+        )}
+        {paperOverlay}
+        <DialogContent
+          sx={[
+            { ".MuiDialogTitle-root + &&": { pt: 2 } },
+            responsiveDialogShellContentPaddingSx,
+            ...(Array.isArray(contentSx) ? contentSx : contentSx ? [contentSx] : []),
+          ]}
+        >
+          {renderedDescription}
+          {contextualNotice}
+          {children}
+          {actionNotice}
+        </DialogContent>
+        {actions && (
+          <DialogActions data-testid="responsive-form-dialog-desktop-actions" sx={{ borderTop: 1, borderColor: "divider" }}>
+            {actions}
+          </DialogActions>
+        )}
+      </Dialog>
+    </KeyboardShortcutScopeContext>
   );
 }

@@ -1,12 +1,12 @@
 import { act, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type ReactNode, useCallback, useEffect, useRef } from "react";
+import { type ComponentProps, type ReactNode, useCallback, useEffect, useRef } from "react";
 import type { Mock } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
 import apiService from "../../../services/api";
 import * as logger from "../../../services/logger";
-import { createStorageBackedTestContentProviderRegistry } from "../../../test/helpers";
+import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
 import { DOM_TEXT_SEARCH_CURRENT_MATCH_ATTRIBUTE, DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR } from "../../../utils/domTextSearch";
 import PDFViewer from "../PDFViewer";
@@ -259,8 +259,8 @@ vi.mock("../../../services/logger", () => ({
 // Mock URL.createObjectURL and revokeObjectURL
 const mockCreateObjectURL = vi.fn(() => "blob:mock-url");
 const mockRevokeObjectURL = vi.fn();
-global.URL.createObjectURL = mockCreateObjectURL;
-global.URL.revokeObjectURL = mockRevokeObjectURL;
+globalThis.URL.createObjectURL = mockCreateObjectURL;
+globalThis.URL.revokeObjectURL = mockRevokeObjectURL;
 
 let capturedInitialDocumentItemClick: ((args: { dest?: unknown; pageIndex?: number; pageNumber?: number }) => void) | undefined;
 let mockBlobUrlCounter = 0;
@@ -291,7 +291,7 @@ function mockMatchMedia(matches: boolean) {
 }
 
 // Mock ResizeObserver
-global.ResizeObserver = class MockResizeObserver {
+globalThis.ResizeObserver = class MockResizeObserver {
   callback: ResizeObserverCallback;
 
   constructor(callback: ResizeObserverCallback) {
@@ -401,13 +401,13 @@ describe("PDFViewer", () => {
     (apiService.getPdfBlob as Mock).mockResolvedValue(new Blob(["mock pdf content"], { type: "application/pdf" }));
 
     // Reset AbortController to default
-    global.AbortController = class MockAbortController {
+    globalThis.AbortController = class MockAbortController {
       signal = { aborted: false } as AbortSignal;
       abort = vi.fn();
     } as unknown as typeof AbortController;
   });
 
-  const renderPDFViewer = (props = defaultProps) => {
+  const renderPDFViewer = (props: ComponentProps<typeof PDFViewer> = defaultProps) => {
     return render(
       <SambeeThemeProvider>
         <PDFViewer {...props} />
@@ -468,9 +468,10 @@ describe("PDFViewer", () => {
   });
 
   describe("Rendering States", () => {
-    it("renders loading state initially", () => {
+    it("renders loading state initially", async () => {
       renderPDFViewer();
       expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      await waitForPageNavigationReady();
     });
 
     it("renders PDF document when loaded successfully", async () => {
@@ -507,9 +508,10 @@ describe("PDFViewer", () => {
       );
     });
 
-    it("shows CircularProgress while loading", () => {
+    it("shows CircularProgress while loading", async () => {
       renderPDFViewer();
       expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      await waitForPageNavigationReady();
     });
 
     it("does not show loading text for a promptly rendered PDF", async () => {
@@ -704,10 +706,16 @@ describe("PDFViewer", () => {
       expect(apiService.getPdfBlob).toHaveBeenCalledTimes(2);
     });
 
-    it("reuses the loaded PDF blob for mobile share", async () => {
+    it.each(["original", "normalized"] as const)("reuses the loaded %s PDF bytes for mobile share", async (variant) => {
       mockMatchMedia(true);
-      const share = vi.fn().mockResolvedValue(undefined);
+      const share = vi.fn().mockRejectedValue(new DOMException("blocked", "NotAllowedError"));
       const canShare = vi.fn().mockReturnValue(true);
+      const originalContent = "complete original PDF";
+      const normalizedContent = "complete normalized PDF with compatible structure";
+      (apiService.getPdfBlob as Mock).mockImplementation((_connectionId, _path, options) =>
+        Promise.resolve(new Blob([options?.pdfVariant === "normalized" ? normalizedContent : originalContent], { type: "application/pdf" }))
+      );
+      if (variant === "normalized") mockDocumentLoadErrors = [new Error("InvalidPDFException: Invalid PDF structure")];
 
       Object.defineProperty(globalThis, "navigator", {
         configurable: true,
@@ -725,7 +733,7 @@ describe("PDFViewer", () => {
       });
 
       await waitForPageNavigationReady();
-      fireEvent.click(screen.getByLabelText("Share"));
+      await act(async () => fireEvent.click(screen.getByLabelText("Share")));
 
       await waitFor(() => {
         expect(share).toHaveBeenCalledWith({
@@ -734,7 +742,96 @@ describe("PDFViewer", () => {
         });
       });
 
-      expect(apiService.getPdfBlob).toHaveBeenCalledTimes(1);
+      const attachment = share.mock.calls[0]?.[0]?.files[0];
+      expect(await readBlobAsText(attachment)).toBe(variant === "normalized" ? normalizedContent : originalContent);
+      expect(apiService.getPdfBlob).toHaveBeenCalledTimes(variant === "normalized" ? 2 : 1);
+      await userEvent.click(await screen.findByRole("button", { name: "Details" }));
+      await screen.findByText(/"reason": "NotAllowedError"/);
+      await userEvent.keyboard("{Escape}");
+      const details = await screen.findByRole("button", { name: "Details" });
+      await waitFor(() => expect(details).toHaveFocus());
+      expect(mockOnClose).not.toHaveBeenCalled();
+      mockCreateObjectURL.mockClear();
+      const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      try {
+        await userEvent.click(screen.getByRole("button", { name: "Download" }));
+        expect(mockCreateObjectURL).toHaveBeenCalledExactlyOnceWith(attachment);
+        expect(click).toHaveBeenCalledTimes(1);
+        expect(apiService.getOriginalFileBlob).not.toHaveBeenCalled();
+        expect(share).toHaveBeenCalledTimes(1);
+      } finally {
+        click.mockRestore();
+      }
+    });
+
+    it("invalidates a loaded PDF immediately and ignores a late replaced document", async () => {
+      mockMatchMedia(true);
+      const share = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "share", { configurable: true, value: share });
+      Object.defineProperty(navigator, "canShare", { configurable: true, value: () => true });
+      let resolveStale: (blob: Blob) => void = () => {};
+      (apiService.getPdfBlob as Mock)
+        .mockResolvedValueOnce(new Blob(["first document"], { type: "application/pdf" }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveStale = resolve;
+            })
+        )
+        .mockResolvedValueOnce(new Blob(["active replacement document"], { type: "application/pdf" }));
+      const { rerender } = renderPDFViewer();
+      await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+      const firstAttachment = share.mock.calls[0]?.[0]?.files[0];
+      rerender(
+        <SambeeThemeProvider>
+          <PDFViewer {...defaultProps} path="/test/stale.pdf" />
+        </SambeeThemeProvider>
+      );
+      expect(screen.getByRole("button", { name: "Share" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      expect(share).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(apiService.getPdfBlob).toHaveBeenCalledTimes(2));
+      rerender(
+        <SambeeThemeProvider>
+          <PDFViewer {...defaultProps} path="/test/active.pdf" />
+        </SambeeThemeProvider>
+      );
+      await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+      await act(async () => resolveStale(new Blob(["late stale document"], { type: "application/pdf" })));
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      expect(await readBlobAsText(share.mock.calls[1]?.[0]?.files[0])).toBe("active replacement document");
+      expect(await readBlobAsText(firstAttachment)).toBe("first document");
+      expect(apiService.getPdfBlob).toHaveBeenCalledTimes(3);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+    });
+
+    it("never shares the failed original while PDF normalization is pending or failed", async () => {
+      mockMatchMedia(true);
+      const share = vi.fn();
+      Object.defineProperty(navigator, "share", { configurable: true, value: share });
+      let rejectNormalization: (error: Error) => void = () => {};
+      (apiService.getPdfBlob as Mock)
+        .mockResolvedValueOnce(new Blob(["incompatible original"], { type: "application/pdf" }))
+        .mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              rejectNormalization = reject;
+            })
+        );
+      mockDocumentLoadErrors = [new Error("InvalidPDFException: Invalid PDF structure")];
+      renderPDFViewer();
+      await waitFor(() => expect(apiService.getPdfBlob).toHaveBeenCalledTimes(2));
+      const button = screen.getByRole("button", { name: "Share" });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+      await act(async () => rejectNormalization(Object.assign(new Error("normalization failed"), { response: { status: 403 } })));
+      expect(await screen.findByText(/PDF compatibility processing could not make this file viewable/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Share" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      expect(share).not.toHaveBeenCalled();
+      expect(apiService.getOriginalFileBlob).not.toHaveBeenCalled();
     });
   });
 
@@ -802,7 +899,7 @@ describe("PDFViewer", () => {
         abort = abortSpy;
       }
 
-      global.AbortController = TestAbortController as unknown as typeof AbortController;
+      globalThis.AbortController = TestAbortController as unknown as typeof AbortController;
 
       const { unmount } = renderPDFViewer();
 
@@ -1009,7 +1106,9 @@ describe("PDFViewer", () => {
         expect(getActivePdfPage()).toHaveAttribute("data-page", "4");
       });
 
-      await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      });
       expect(getActivePdfPage()).toHaveAttribute("data-page", "4");
     });
 
@@ -1038,7 +1137,9 @@ describe("PDFViewer", () => {
         expect(getActivePdfPage()).toHaveAttribute("data-page", "1");
       });
 
-      await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, SWIPE_SETTLE_WAIT_MS));
+      });
       expect(getActivePdfPage()).toHaveAttribute("data-page", "1");
 
       dragCarousel(screen.getByTestId("pdf-viewer-content"), 300, 200, 50, 200);

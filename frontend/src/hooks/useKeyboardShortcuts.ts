@@ -1,4 +1,32 @@
-import { useLayoutEffect } from "react";
+import { createContext, useContext, useId, useLayoutEffect } from "react";
+
+export const KeyboardShortcutScopeContext = createContext<string | null>(null);
+export const KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE = "data-keyboard-shortcut-scope";
+const activeShortcutScopes = new Map<string, string | null>();
+
+export function useKeyboardShortcutScope(open: boolean): string {
+  const scope = useId();
+  const parent = useContext(KeyboardShortcutScopeContext);
+  useLayoutEffect(() => {
+    if (!open) return;
+    activeShortcutScopes.set(scope, parent);
+    return () => {
+      activeShortcutScopes.delete(scope);
+    };
+  }, [open, scope, parent]);
+  return scope;
+}
+
+function getActiveKeyboardShortcutScope(): string | null {
+  const parentScopes = new Set(activeShortcutScopes.values());
+  return [...activeShortcutScopes.keys()].findLast((scope) => !parentScopes.has(scope)) ?? null;
+}
+
+function getKeyboardShortcutScope(target: EventTarget | null): string | null {
+  return target instanceof Element
+    ? (target.closest(`[${KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE}]`)?.getAttribute(KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE) ?? null)
+    : null;
+}
 
 const INTERACTIVE_SHORTCUT_BLOCK_SELECTOR = [
   "button",
@@ -157,6 +185,8 @@ export const withShortcut = (shortcut: Omit<KeyboardShortcut, "handler" | "enabl
  * ```
  */
 export const useKeyboardShortcuts = ({ shortcuts, inputSelector = "input, textarea", active = true }: UseKeyboardShortcutsConfig): void => {
+  const scope = useContext(KeyboardShortcutScopeContext);
+
   useLayoutEffect(() => {
     if (!active) {
       return;
@@ -167,6 +197,9 @@ export const useKeyboardShortcuts = ({ shortcuts, inputSelector = "input, textar
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      const activeScope = getActiveKeyboardShortcutScope();
+      if (activeScope !== null && activeScope !== scope) return;
+      if ((getKeyboardShortcutScope(event.target) ?? getKeyboardShortcutScope(document.activeElement) ?? activeScope) !== scope) return;
 
       // Check if any interactive control has focus
       let activeElement = document.activeElement;
@@ -247,5 +280,5 @@ export const useKeyboardShortcuts = ({ shortcuts, inputSelector = "input, textar
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
     };
-  }, [active, shortcuts, inputSelector]);
+  }, [active, shortcuts, inputSelector, scope]);
 };

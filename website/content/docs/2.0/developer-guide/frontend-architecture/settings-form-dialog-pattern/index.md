@@ -45,6 +45,14 @@ Choose the content pattern that matches the job:
 
 The desktop settings overlay and mobile settings drawer are navigation containers, not form dialogs. Keep their information architecture separate while composing settings-form pages inside them.
 
+## Keyboard Isolation
+
+`ResponsiveDialogShell` establishes a keyboard shortcut scope automatically for both its Drawer and Dialog layouts. While it's open, `useKeyboardShortcuts` ignores background registrations and lets the innermost open dialog own shortcuts, including when a control portals outside the dialog. The shell also stops key events from bubbling into parent workspace handlers. Closing the dialog releases its scope; normal shortcut handling resumes when focus returns to the workspace.
+
+Don't add dialog-specific flags to parent shortcut handlers to provide this isolation. Keep ordinary dialog keyboard behavior in the shell's `onKeyDown` or `onEscape` callbacks. If dialog content needs `useKeyboardShortcuts`, register it in a child component rendered inside the shell so it inherits the dialog's scope, not in the component that creates the shell. Existing focus trapping and interactive-control checks still apply.
+
+Escape dismissal goes through MUI's modal close callback, preserving its top-modal and IME process-key checks. `onEscape`, when supplied, replaces the normal Escape close action and runs once, even when `disableClose` blocks ordinary closing. Use it for cancellation requests during pending operations. Close buttons and backdrop requests still use `onClose` and respect `disableClose`. Don't add document-level Escape listeners or duplicate Escape closing in `onKeyDown`; the shared shell owns that behavior.
+
 ## Dialog Action Buttons
 
 Choose each action's treatment by what it does, including in decisions embedded inside full-screen viewers. Keep the viewer workspace shell and toolbars separate from its decision dialogs.

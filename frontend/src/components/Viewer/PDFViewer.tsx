@@ -26,6 +26,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   type ContentProviderRegistry,
   invalidateViewerPdfDerivative,
@@ -49,7 +50,7 @@ import {
 } from "../../utils/domTextSearch";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
-import { createShareFile, shareNativeContent, supportsNativeShare } from "../../utils/nativeShare";
+import { createDisplayedShareFile, supportsNativeShare } from "../../utils/nativeShare";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 import { settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
 import { ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
@@ -169,7 +170,6 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   const [pdfPasswordCallback, setPdfPasswordCallback] = useState<PdfPasswordCallback | null>(null);
   const [pdfPassword, setPdfPassword] = useState("");
   const [showPdfPassword, setShowPdfPassword] = useState(false);
-  const [shareError, setShareError] = useState<string | null>(null);
   const [searchText, setSearchText] = useState<string>("");
   const [currentMatch, setCurrentMatch] = useState<number>(0);
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -205,7 +205,6 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   const [isSearchable, setIsSearchable] = useState(true); // Assume searchable until proven otherwise
   const [showHelp, setShowHelp] = useState(false);
   const [renderedTextLayerPage, setRenderedTextLayerPage] = useState<number | null>(null);
-  const [sharing, setSharing] = useState(false);
   const [isSwipeTransitioning, setIsSwipeTransitioning] = useState(false);
   const [{ carouselX }, carouselApi] = useSpring(() => ({ carouselX: 0 }));
   const fetchWithRetry = useApiRetry();
@@ -216,6 +215,13 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   const isMobile = useMediaQuery(muiTheme.breakpoints.down("sm"));
   const swipeNavigationEnabled = isMobile && scale === "fit-page" && userRotation % 180 === 0;
   const shareEnabled = isMobile && supportsNativeShare();
+  const nativeSharing = useViewerSharing({
+    entryPoint: "pdf",
+    identity: `${connectionId}:${path}:${pdfSourceVariant}`,
+    enabled: shareEnabled,
+    file: pdfLoadPhase === "ready" ? shareFile : null,
+    source: pdfSourceVariant === "normalized" ? "displayed-derivative" : "displayed-original",
+  });
   const { viewerBg, toolbarBg, toolbarText } = getViewerColors(currentTheme, "pdf");
   const readOnlyIndicator = isReadOnly ? (
     <ViewerFilenameBadge label={t("settings.connectionDialog.accessMode.readOnlyLabel")} toolbarText={toolbarText} />
@@ -410,7 +416,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
         const blobUrl = URL.createObjectURL(blob);
         activePdfUrlRef.current = blobUrl;
         setPdfUrl(blobUrl);
-        setShareFile(createShareFile(blob, filename));
+        setShareFile(createDisplayedShareFile(blob, filename));
         setPdfLoadPhase("parsing");
       } catch (err) {
         if (activePdfLoadRef.current !== activeLoad || abortController.signal.aborted) return;
@@ -928,30 +934,6 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
     setError(PDF_LOAD_CANCELED_MESSAGE);
   }, [disposePdfLoad, releasePdfUrl]);
 
-  const handleShare = useCallback(async () => {
-    setShareError(null);
-    setSharing(true);
-
-    try {
-      const fileToShare =
-        shareFile ??
-        createShareFile(await readViewerContent(connectionId, path, { kind: "pdf" }, { virtualSource }, contentProviders), filename);
-      const result = await shareNativeContent({
-        file: fileToShare,
-        title: filename,
-      });
-
-      if (result === "unsupported") {
-        setShareError(t("viewer.share.unsupported"));
-      }
-    } catch (err) {
-      logError("Failed to share PDF", { error: err, path, connectionId });
-      setShareError(t("viewer.share.failed"));
-    } finally {
-      setSharing(false);
-    }
-  }, [connectionId, contentProviders, filename, path, shareFile, t, virtualSource]);
-
   /**
    * Perform search across all extracted page texts using simple regex approach.
    * Finds matches and stores reference to containing text item for positioning.
@@ -1462,18 +1444,14 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
               isSearchable,
             }}
             onDownload={handleDownload}
-            onShare={handleShare}
-            shareDisabled={sharing || (shareEnabled && !shareFile)}
+            onShare={nativeSharing.shareFile}
+            shareDisabled={nativeSharing.sharing || !nativeSharing.ready}
             controlsDisabled={isPdfLoading || Boolean(error)}
             downloadDisabled={isPdfLoading}
           />
         </Box>
 
-        {shareError && (
-          <Alert severity="error" sx={{ m: 2, flexShrink: 0 }}>
-            {shareError}
-          </Alert>
-        )}
+        {nativeSharing.failureDialog}
 
         {/* PDF content area */}
         <Box

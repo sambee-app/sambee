@@ -1,8 +1,12 @@
 import { Button } from "@mui/material";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createPortal } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useKeyboardShortcuts } from "../../../hooks/useKeyboardShortcuts";
 import { SambeeThemeProvider } from "../../../theme";
 import { ResponsiveDialogShell } from "../../Dialog/ResponsiveDialogShell";
+
+const IME_PROCESS_KEY_CODE = 229;
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -34,6 +38,189 @@ describe("ResponsiveFormDialog", () => {
 
   beforeEach(() => {
     mockMobileMode(false);
+  });
+
+  it.each([false, true])("isolates dialog shortcuts from the parent workspace (mobile: %s)", async (isMobile) => {
+    mockMobileMode(isMobile);
+    const backgroundShortcut = vi.fn();
+    const unavailableShortcut = vi.fn(() => true);
+    const dialogShortcut = vi.fn();
+    const backgroundKeyDown = vi.fn();
+    const onClose = vi.fn();
+    function DialogContent() {
+      useKeyboardShortcuts({
+        shortcuts: [{ id: "select", keys: "a", ctrl: true, description: "Select report", handler: dialogShortcut }],
+      });
+      return (
+        <>
+          <div tabIndex={-1} data-testid="report">
+            Report
+          </div>
+          {createPortal(<div data-testid="portaled-control">Portaled control</div>, document.body)}
+        </>
+      );
+    }
+    function Workspace({ open }: { open: boolean }) {
+      useKeyboardShortcuts({
+        shortcuts: [
+          { id: "select", keys: "a", ctrl: true, description: "Select files", handler: backgroundShortcut },
+          { id: "delete", keys: "Delete", description: "Delete files", handler: backgroundShortcut },
+          {
+            id: "save",
+            keys: "s",
+            ctrl: true,
+            description: "Save",
+            handler: backgroundShortcut,
+            enabled: false,
+            onUnavailable: unavailableShortcut,
+          },
+        ],
+      });
+      return (
+        <div role="application" onKeyDown={backgroundKeyDown} tabIndex={-1} data-testid="workspace">
+          <ResponsiveDialogShell open={open} onClose={onClose} title="Report">
+            <DialogContent />
+          </ResponsiveDialogShell>
+        </div>
+      );
+    }
+    const { rerender } = render(<Workspace open />);
+    const report = screen.getByTestId("report");
+    report.focus();
+    fireEvent.keyDown(report, { key: "a", ctrlKey: true });
+    expect(dialogShortcut).toHaveBeenCalledOnce();
+    expect(backgroundShortcut).not.toHaveBeenCalled();
+    expect(backgroundKeyDown).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByTestId("portaled-control"), { key: "a", ctrlKey: true });
+    expect(dialogShortcut).toHaveBeenCalledTimes(2);
+    expect(backgroundShortcut).not.toHaveBeenCalled();
+    expect(backgroundKeyDown).not.toHaveBeenCalled();
+    expect(fireEvent.keyDown(report, { key: "Delete" })).toBe(true);
+    expect(fireEvent.keyDown(report, { key: "s", ctrlKey: true })).toBe(true);
+    expect(backgroundShortcut).not.toHaveBeenCalled();
+    expect(unavailableShortcut).not.toHaveBeenCalled();
+    expect(backgroundKeyDown).not.toHaveBeenCalled();
+    fireEvent.keyDown(report, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(backgroundKeyDown).not.toHaveBeenCalled();
+    rerender(<Workspace open={false} />);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    screen.getByTestId("workspace").focus();
+    fireEvent.keyDown(screen.getByTestId("workspace"), { key: "a", ctrlKey: true });
+    expect(backgroundShortcut).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("keeps nested dialog shortcuts and Escape in the innermost scope (mobile: %s)", (isMobile) => {
+    mockMobileMode(isMobile);
+    const parentShortcut = vi.fn();
+    const childShortcut = vi.fn();
+    const parentClose = vi.fn();
+    const childClose = vi.fn();
+    function ShortcutContent({ handler }: { handler: () => void }) {
+      useKeyboardShortcuts({ shortcuts: [{ id: "select", keys: "a", ctrl: true, description: "Select", handler }] });
+      return null;
+    }
+    render(
+      <ResponsiveDialogShell open onClose={parentClose} title="Parent">
+        <ShortcutContent handler={parentShortcut} />
+        <ResponsiveDialogShell open onClose={childClose} title="Child">
+          <ShortcutContent handler={childShortcut} />
+          <div tabIndex={-1} data-testid="child-report">
+            Report
+          </div>
+        </ResponsiveDialogShell>
+      </ResponsiveDialogShell>
+    );
+    const report = screen.getByTestId("child-report");
+    report.focus();
+    fireEvent.keyDown(report, { key: "a", ctrlKey: true });
+    expect(childShortcut).toHaveBeenCalledOnce();
+    expect(parentShortcut).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByText("Parent"), { key: "Escape" });
+    expect(parentClose).not.toHaveBeenCalled();
+    expect(childClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(report, { key: "Escape" });
+    expect(childClose).toHaveBeenCalledOnce();
+    expect(parentClose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { isMobile: false, disableClose: false },
+    { isMobile: false, disableClose: true },
+    { isMobile: true, disableClose: false },
+    { isMobile: true, disableClose: true },
+  ])("calls only the custom Escape action (mobile: $isMobile, close disabled: $disableClose)", ({ isMobile, disableClose }) => {
+    mockMobileMode(isMobile);
+    const onClose = vi.fn();
+    const onEscape = vi.fn();
+    render(
+      <ResponsiveDialogShell open onClose={onClose} onEscape={onEscape} disableClose={disableClose} title="Cancel operation">
+        Operation in progress
+      </ResponsiveDialogShell>
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { isMobile: false, disableClose: false },
+    { isMobile: false, disableClose: true },
+    { isMobile: true, disableClose: false },
+    { isMobile: true, disableClose: true },
+  ])(
+    "keeps the close button separate from custom Escape (mobile: $isMobile, close disabled: $disableClose)",
+    ({ isMobile, disableClose }) => {
+      mockMobileMode(isMobile);
+      const onClose = vi.fn();
+      const onEscape = vi.fn();
+      render(
+        <ResponsiveDialogShell open onClose={onClose} onEscape={onEscape} disableClose={disableClose} showCloseButton title="Operation">
+          Operation content
+        </ResponsiveDialogShell>
+      );
+      const closeButton = screen.getByRole("button", { name: "common.actions.close" });
+      expect(closeButton).toHaveProperty("disabled", disableClose);
+      fireEvent.click(closeButton);
+      expect(onClose).toHaveBeenCalledTimes(disableClose ? 0 : 1);
+      expect(onEscape).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([false, true])("ignores IME Escape before handling a normal Escape (mobile: %s)", (isMobile) => {
+    mockMobileMode(isMobile);
+    const onClose = vi.fn();
+    const onEscape = vi.fn();
+    const { rerender } = render(
+      <ResponsiveDialogShell open onClose={onClose} title="Input workflow">
+        Input content
+      </ResponsiveDialogShell>
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), {
+      key: "Escape",
+      keyCode: IME_PROCESS_KEY_CODE,
+      which: IME_PROCESS_KEY_CODE,
+      isComposing: true,
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+    rerender(
+      <ResponsiveDialogShell open onClose={onClose} onEscape={onEscape} title="Input workflow">
+        Input content
+      </ResponsiveDialogShell>
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), {
+      key: "Escape",
+      keyCode: IME_PROCESS_KEY_CODE,
+      which: IME_PROCESS_KEY_CODE,
+      isComposing: true,
+    });
+    expect(onEscape).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onEscape).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("renders the shared description above the dialog body on desktop", () => {

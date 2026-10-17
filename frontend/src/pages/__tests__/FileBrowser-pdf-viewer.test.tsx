@@ -545,7 +545,9 @@ describe("Browser - PDF Viewer Integration", () => {
         expect(screen.getByText("PDF viewer shortcuts")).toBeInTheDocument();
       });
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const searchInput = screen.getByRole("searchbox");
+      await waitFor(() => expect(searchInput).toHaveFocus());
+      fireEvent.keyDown(searchInput, { key: "Escape" });
 
       await waitFor(() => {
         expect(screen.queryByText("PDF viewer shortcuts")).not.toBeInTheDocument();

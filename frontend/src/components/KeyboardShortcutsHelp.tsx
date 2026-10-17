@@ -1,7 +1,6 @@
 import ClearIcon from "@mui/icons-material/Clear";
 import SearchIcon from "@mui/icons-material/Search";
 import { Box, IconButton, InputAdornment, Table, TableBody, TableCell, TableRow, TextField, Typography } from "@mui/material";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { KeyboardShortcut, ShortcutHelpGroup } from "../hooks/useKeyboardShortcuts";
@@ -79,37 +78,6 @@ export const KeyboardShortcutsHelp: React.FC<KeyboardShortcutsHelpProps> = ({ op
     }
   }, [open]);
 
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const handleDocumentKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-
-    document.addEventListener("keydown", handleDocumentKeyDown, true);
-    return () => {
-      document.removeEventListener("keydown", handleDocumentKeyDown, true);
-    };
-  }, [onClose, open]);
-
-  const handleDialogKeyDown = (event: ReactKeyboardEvent) => {
-    if (event.key !== "Escape") {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    onClose();
-  };
-
   const groupedShortcuts = useMemo<ShortcutHelpSection[]>(() => {
     const normalizedQuery = normalizeSearchValue(searchQuery);
     const sections = new Map<ShortcutHelpGroup, GroupedShortcut[]>();
@@ -168,7 +136,6 @@ export const KeyboardShortcutsHelp: React.FC<KeyboardShortcutsHelpProps> = ({ op
     <ResponsiveDialogShell
       open={open}
       onClose={onClose}
-      onKeyDown={handleDialogKeyDown}
       title={dialogTitle}
       maxWidth={false}
       fullWidth={false}

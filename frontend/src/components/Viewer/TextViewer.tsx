@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { BROWSER_SHORTCUTS, CODEMIRROR_EDITOR_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   beginViewerTextEdit,
   type ContentEditSession,
@@ -26,11 +27,12 @@ import { getApiErrorMessage } from "../../utils/apiErrors";
 import { openExternalUrl } from "../../utils/externalLinks";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
-import { createShareFile, shareNativeContent, shouldWarmNativeSharePayload, supportsNativeShare } from "../../utils/nativeShare";
+import { createShareFile, supportsNativeShare } from "../../utils/nativeShare";
 import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
 import { HelpMenu } from "../FileBrowser/HelpMenu";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 import { settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
+import { ViewerShareMenu } from "../Sharing/ViewerShareMenu";
 import { CodeMirrorFindReplacePopover } from "./CodeMirrorFindReplacePopover";
 import { scheduleRetriableFocusRestore } from "./focusRestoration";
 import MarkdownEditorErrorBoundary from "./MarkdownEditorErrorBoundary";
@@ -119,7 +121,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
-  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareRevision, setShareRevision] = useState(0);
   const [draftStorageWarning, setDraftStorageWarning] = useState<string | null>(null);
   const [recoveryDraft, setRecoveryDraft] = useState<DraftSnapshot | null>(null);
   const [isResumingRecoveryDraft, setIsResumingRecoveryDraft] = useState(false);
@@ -129,7 +131,6 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editSession, setEditSession] = useState<ContentEditSession | null>(null);
-  const [sharing, setSharing] = useState(false);
   const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
   const [searchFocusTarget, setSearchFocusTarget] = useState<"find" | "replace" | null>(null);
   const [searchMode, setSearchMode] = useState<"find" | "replace">("find");
@@ -156,8 +157,6 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const dialogRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<TextCodeEditorHandle | null>(null);
   const unsavedChangesCancelButtonRef = useRef<HTMLButtonElement | null>(null);
-  const prefetchedShareFileRef = useRef<File | null>(null);
-  const sharePrefetchPromiseRef = useRef<Promise<File> | null>(null);
   const editBaselineContentRef = useRef("");
   const editSessionRef = useRef<ContentEditSession | null>(null);
   const isEditingRef = useRef(false);
@@ -168,7 +167,6 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const muiTheme = useTheme();
   const isMobile = useMediaQuery(muiTheme.breakpoints.down("sm"));
   const shareEnabled = isMobile && supportsNativeShare();
-  const shareWarmEnabled = shareEnabled && shouldWarmNativeSharePayload();
   const { viewerBg, toolbarBg, toolbarText, viewerText, linkColor } = getViewerColors(currentTheme, "markdown");
   const searchHighlightColors = useMemo(() => getSearchHighlightColors(muiTheme, currentTheme), [currentTheme, muiTheme]);
   const filename = path.split("/").pop() || path;
@@ -400,30 +398,18 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   }, [connectionId, path]);
 
   const loadShareFile = useCallback(
-    async (signal?: AbortSignal) => {
-      if (prefetchedShareFileRef.current) {
-        return prefetchedShareFileRef.current;
-      }
-
-      if (sharePrefetchPromiseRef.current) {
-        return sharePrefetchPromiseRef.current;
-      }
-
-      const shareFilePromise = readViewerContent(connectionId, path, { kind: "raw" }, { signal, virtualSource }, contentProviders).then(
-        (blob) => createShareFile(blob, filename)
-      );
-      sharePrefetchPromiseRef.current = shareFilePromise;
-
-      try {
-        return await shareFilePromise;
-      } finally {
-        if (sharePrefetchPromiseRef.current === shareFilePromise) {
-          sharePrefetchPromiseRef.current = null;
-        }
-      }
-    },
+    (signal: AbortSignal) =>
+      readViewerContent(connectionId, path, { kind: "raw" }, { signal, virtualSource }, contentProviders).then((blob) =>
+        createShareFile(blob, filename)
+      ),
     [connectionId, contentProviders, filename, path, virtualSource]
   );
+  const nativeSharing = useViewerSharing({
+    entryPoint: "text",
+    identity: `${connectionId}:${path}:${fileModifiedAt}:${shareRevision}`,
+    enabled: shareEnabled && !loading && !isSaving && !error,
+    loadFile: loadShareFile,
+  });
 
   const handleDownload = useCallback(async () => {
     try {
@@ -436,32 +422,6 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       logError("Failed to download file", { error: err, path, connectionId });
     }
   }, [connectionId, contentProviders, filename, path, virtualSource]);
-
-  const handleShareIntent = useCallback(() => {
-    if (!shareWarmEnabled) {
-      return;
-    }
-
-    void loadShareFile();
-  }, [loadShareFile, shareWarmEnabled]);
-
-  const handleShare = useCallback(async () => {
-    setShareError(null);
-    setSharing(true);
-
-    try {
-      const shareFile = await loadShareFile();
-      const result = await shareNativeContent({ file: shareFile, title: filename, text: content });
-      if (result === "unsupported") {
-        setShareError(t("viewer.share.unsupported"));
-      }
-    } catch (err) {
-      logError("Failed to share text file", { error: err, path, connectionId });
-      setShareError(t("viewer.share.failed"));
-    } finally {
-      setSharing(false);
-    }
-  }, [connectionId, content, filename, loadShareFile, path, t]);
 
   useEffect(() => {
     setSearchMatches(editorSearchState.searchMatches);
@@ -601,6 +561,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         if (!editSession) throw new Error("Edit session is no longer active");
         await editSession.writeText(savedContent);
         setContent(savedContent);
+        setShareRevision((revision) => revision + 1);
         setDraftContent(savedContent);
         setEditBaselineContent(savedContent);
         clearBaselineSyncWindow();
@@ -1100,9 +1061,18 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
                 searchUnavailableTitle: exceedsEditorLimit ? t("viewer.text.limitSearchUnavailable") : undefined,
               }}
               onDownload={handleDownload}
-              onShare={handleShare}
-              onShareIntent={handleShareIntent}
-              shareDisabled={sharing}
+              shareControl={
+                <ViewerShareMenu
+                  onFile={nativeSharing.shareFile}
+                  onText={() =>
+                    nativeSharing.shareText(() => (isEditing ? (editorRef.current?.getCanonicalText() ?? draftContent) : content))
+                  }
+                  fileDisabled={!nativeSharing.ready || isSaving}
+                  filePreparing={nativeSharing.preparing}
+                  textDisabled={loading || Boolean(error)}
+                  disabled={nativeSharing.sharing}
+                />
+              }
             />
           </Box>
 
@@ -1137,11 +1107,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
               {editError}
             </Alert>
           ) : null}
-          {shareError ? (
-            <Alert severity="error" sx={{ m: 2, flexShrink: 0 }}>
-              {shareError}
-            </Alert>
-          ) : null}
+          {nativeSharing.failureDialog}
           {draftStorageWarning ? (
             <Alert severity="warning" sx={{ m: 2, flexShrink: 0 }}>
               {draftStorageWarning}

@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KeyboardShortcut } from "../../hooks/useKeyboardShortcuts";
 import { setLocale } from "../../i18n";
+import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 
 describe("KeyboardShortcutsHelp", () => {
@@ -13,6 +14,7 @@ describe("KeyboardShortcutsHelp", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
     await setLocale("en");
   });
 
@@ -362,7 +364,46 @@ describe("KeyboardShortcutsHelp", () => {
 
       await user.keyboard("{Escape}");
 
-      expect(mockOnClose).toHaveBeenCalled();
+      expect(mockOnClose).toHaveBeenCalledOnce();
+    });
+
+    it.each([false, true])("leaves Escape to the dialog above Help (mobile: %s)", async (isMobile) => {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => ({
+          matches: isMobile,
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }))
+      );
+      const user = userEvent.setup();
+      const topClose = vi.fn();
+      const renderDialogs = (topOpen: boolean) => (
+        <>
+          <KeyboardShortcutsHelp open onClose={mockOnClose} shortcuts={createShortcuts()} />
+          <ResponsiveDialogShell open={topOpen} onClose={topClose} title="Top dialog">
+            <div tabIndex={-1}>Top content</div>
+          </ResponsiveDialogShell>
+        </>
+      );
+      const { rerender } = render(renderDialogs(false));
+      await waitFor(() => expect(screen.getByRole("searchbox", { name: "Search keyboard shortcuts" })).toHaveFocus());
+      rerender(renderDialogs(true));
+      act(() => screen.getByText("Top content").focus());
+      await user.keyboard("{Escape}");
+      expect(topClose).toHaveBeenCalledOnce();
+      expect(mockOnClose).not.toHaveBeenCalled();
+      rerender(renderDialogs(false));
+      await waitFor(() => expect(screen.queryByText("Top content")).not.toBeInTheDocument());
+      act(() => screen.getByRole("searchbox", { name: "Search keyboard shortcuts" }).focus());
+      await user.keyboard("{Escape}");
+      expect(mockOnClose).toHaveBeenCalledOnce();
+      expect(topClose).toHaveBeenCalledOnce();
     });
 
     it("should stop Escape from bubbling to parent React handlers", async () => {

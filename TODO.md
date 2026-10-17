@@ -1,5 +1,29 @@
 # TODO
 
+## Bugs
+
+- Text + Markdown editors on mobile:
+   - The X returns to the file list instead of going back to the viewer.
+- Settings > User management
+   - The password reset option is unavailable on a linked OIDC user
+      - The option is available on an unlinked local user.
+   - My own admin user has a status "password reset pending".
+      - What does that mean and how to get rid of it?
+- Login dialog (local users)
+   - The password field has no option to reveal the password.
+   - Usernames are currently evaluated as case sensitive. Change that so that both "Testuser" and "testuser" are accepted.
+- File move across SMB connections
+   - Moving a file from one SMB connection to another fails with: "The transfer outcome is unknown. Both locations were refreshed." Details:
+      - The file is moved.
+      - After the file move, the error is shown.
+      - The moved file is NOT deleted in the source.
+   - Moving a directory tree from one SMB connection to another:
+      - The 2nd directory in the source was moved into the 1st (already moved) directory at the target instead of moving it to the root of the target.
+- File list: item selection with keyboard
+   - Missing shortcuts:
+      - Shift+End to select all items from current item to the last item
+      - Shift+Home to select all items from current item to the first item
+
 ## Misc. commands
 
 - Add a command to open the current file list location in a new browser tab (which keyboard shortcut to assign? Ctrl+(Shift)+Tab is needed by the browser)

@@ -1,10 +1,13 @@
 import { act, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ImageLoadPhase } from "../../../hooks/useCachedImageGallery";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
-import { createStorageBackedTestContentProviderRegistry } from "../../../test/helpers";
+import apiService from "../../../services/api";
+import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
 import ImageViewer from "../ImageViewer";
+import { downloadViewerBlob } from "../viewerContent";
 
 const contentProviders = createStorageBackedTestContentProviderRegistry();
 
@@ -57,10 +60,11 @@ const createGalleryMock = () => ({
   currentPath: "/images/photo.jpg",
   filename: "photo.jpg",
   imageCacheRef: { current: new Map() },
-  getCachedImageSrc: () => undefined,
+  getCachedImageSrc: (_index: number): string | undefined => undefined,
+  getCachedImageBlob: (): Blob | undefined => undefined,
   loadingStates: new Map(),
   errorStates: new Map(),
-  currentImageLoadPhase: "ready" as const,
+  currentImageLoadPhase: "ready" as ImageLoadPhase,
   imageSourceRevision: 0,
   showLoadingSpinner: false,
   canRetryCurrentImage: false,
@@ -88,6 +92,8 @@ vi.mock("../../../services/logger", () => ({
   error: vi.fn(),
   info: vi.fn(),
 }));
+
+vi.mock("../viewerContent", () => ({ downloadViewerBlob: vi.fn() }));
 
 describe("ImageViewer", () => {
   beforeEach(() => {
@@ -118,6 +124,113 @@ describe("ImageViewer", () => {
     );
 
     expect(screen.getByText("Read only")).toBeInTheDocument();
+  });
+
+  it("shares the retained displayed conversion instead of fetching the stored original", async () => {
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { share, canShare: () => true });
+    const displayed = new Blob(["displayed PNG"], { type: "image/png" });
+    mockUseCachedImageGallery.mockReturnValue({ ...createGalleryMock(), filename: "photo.heic", getCachedImageBlob: () => displayed });
+    vi.mocked(window.matchMedia).mockImplementation((query) => ({
+      matches: query.includes("max-width"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      render(
+        <SambeeThemeProvider>
+          <ImageViewer connectionId="conn-1" path="photo.heic" onClose={() => {}} />
+        </SambeeThemeProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      expect(share).toHaveBeenCalledExactlyOnceWith({
+        files: [expect.objectContaining({ name: "photo.png", type: "image/png", size: displayed.size })],
+        title: "photo.png",
+      });
+      expect(await readBlobAsText(share.mock.calls[0]?.[0]?.files[0])).toBe("displayed PNG");
+      expect(apiService.getImageBlob).not.toHaveBeenCalled();
+      await act(async () => {});
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("blocks stale image bytes during replacement and downloads the exact failed displayed attachment", async () => {
+    const share = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new DOMException("blocked", "NotAllowedError"));
+    vi.stubGlobal("navigator", { share, canShare: () => true });
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: query.includes("max-width"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }))
+    );
+    const onClose = vi.fn();
+    const gallery = {
+      ...createGalleryMock(),
+      currentImageLoadPhase: "ready" as ImageLoadPhase,
+      getCachedImageBlob: () => new Blob(["displayed original JPEG"], { type: "image/jpeg" }),
+    };
+    const original = gallery.getCachedImageBlob();
+    gallery.getCachedImageBlob = () => original;
+    mockUseCachedImageGallery.mockImplementation(() => gallery);
+    const viewer = (
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
+      </SambeeThemeProvider>
+    );
+    try {
+      const { rerender } = render(viewer);
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+      expect(await readBlobAsText(share.mock.calls[0]?.[0]?.files[0])).toBe("displayed original JPEG");
+      for (const phase of ["fetching", "error"] as const) {
+        gallery.currentImageLoadPhase = phase;
+        rerender(
+          <SambeeThemeProvider>
+            <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
+          </SambeeThemeProvider>
+        );
+        const button = screen.getByRole("button", { name: "Share" });
+        expect(button).toBeDisabled();
+        fireEvent.click(button);
+        expect(share).toHaveBeenCalledTimes(1);
+      }
+      const replacement = new Blob(["replacement resized PNG"], { type: "image/png" });
+      gallery.getCachedImageBlob = () => replacement;
+      gallery.currentImageLoadPhase = "ready";
+      rerender(
+        <SambeeThemeProvider>
+          <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
+        </SambeeThemeProvider>
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      const details = await screen.findByRole("button", { name: "Details" });
+      const attachment = share.mock.calls[1]?.[0]?.files[0];
+      expect(attachment).toMatchObject({ name: "photo.png", type: "image/png" });
+      expect(await readBlobAsText(attachment)).toBe("replacement resized PNG");
+      fireEvent.click(details);
+      await screen.findByText(/"reason": "NotAllowedError"/);
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await screen.findByRole("button", { name: "Details" });
+      expect(onClose).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Download" }));
+      expect(downloadViewerBlob).toHaveBeenCalledWith(attachment, "photo.png");
+      expect(apiService.getImageBlob).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("updates a preloaded slide source before marking it decoded", () => {
@@ -189,7 +302,9 @@ describe("ImageViewer", () => {
       expect(screen.getByText("Image viewer shortcuts")).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    const searchInput = screen.getByRole("searchbox");
+    await waitFor(() => expect(searchInput).toHaveFocus());
+    fireEvent.keyDown(searchInput, { key: "Escape" });
 
     await waitFor(() => {
       expect(screen.queryByText("Image viewer shortcuts")).not.toBeInTheDocument();
