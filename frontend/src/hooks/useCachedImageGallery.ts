@@ -11,7 +11,7 @@
  */
 
 import axios from "axios";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { isLocalAbortError } from "../services/backendAvailability";
 import { error as logError, logger, info as logInfo } from "../services/logger";
 import { PreviewUnavailableError } from "../services/previewPolicy";
@@ -467,10 +467,13 @@ export const useCachedImageGallery = ({
     });
   }, [galleryIdentity, pendingSessionGeneration, pendingSessionResources, safeInitialIndex]);
 
-  // Notify parent component of index changes
+  const notifyIndexChange = useEffectEvent((index: number) => {
+    if (index !== safeInitialIndex) onIndexChange?.(index);
+  });
+
   useEffect(() => {
-    onIndexChange?.(currentIndex);
-  }, [currentIndex, onIndexChange]);
+    notifyIndexChange(currentIndex);
+  }, [currentIndex]);
 
   // Show spinner only after delay to avoid flicker on fast image loads
   useEffect(() => {

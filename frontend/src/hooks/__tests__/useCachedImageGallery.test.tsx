@@ -53,6 +53,42 @@ describe("useCachedImageGallery", () => {
     });
   });
 
+  it("notifies local index changes without echoing callback replacement or routed index updates", async () => {
+    vi.mocked(apiService.getImageBlob).mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
+    const onIndexChange = vi.fn();
+    const replacement = vi.fn();
+    const images = ["/0.jpg", "/1.jpg", "/2.jpg"];
+    const { result, rerender } = renderHook(
+      ({ initialIndex, callback }) =>
+        useCachedImageGallery({
+          connectionId: "conn-1",
+          images,
+          initialIndex,
+          onIndexChange: callback,
+          loadImageBlob: loadMockImageBlob,
+          preloadRange: 0,
+        }),
+      { initialProps: { initialIndex: 0, callback: onIndexChange } }
+    );
+    await waitFor(() => expect(result.current.currentImageLoadPhase).toBe("decoding"));
+    expect(onIndexChange).not.toHaveBeenCalled();
+
+    rerender({ initialIndex: 0, callback: replacement });
+    expect(replacement).not.toHaveBeenCalled();
+    act(() => result.current.setCurrentIndex(1));
+    expect(replacement).toHaveBeenCalledExactlyOnceWith(1);
+
+    rerender({ initialIndex: 1, callback: onIndexChange });
+    rerender({ initialIndex: 2, callback: replacement });
+    expect(result.current.currentIndex).toBe(2);
+    expect(replacement).toHaveBeenCalledTimes(1);
+    expect(onIndexChange).not.toHaveBeenCalled();
+
+    act(() => result.current.setCurrentIndex(0));
+    expect(replacement).toHaveBeenLastCalledWith(0);
+    expect(replacement).toHaveBeenCalledTimes(2);
+  });
+
   it("waits for native image decoding before marking the current image ready", async () => {
     vi.mocked(apiService.getImageBlob).mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
 
@@ -1179,7 +1215,7 @@ describe("useCachedImageGallery", () => {
     expect(result.current.imageCacheRef.current.has(0)).toBe(false);
   });
 
-  it("does not emit a stale carried index when a gallery switch resets to the new initialIndex", async () => {
+  it("does not echo an external gallery switch or its stale carried index", async () => {
     const onIndexChange = vi.fn();
 
     vi.mocked(apiService.getImageBlob).mockImplementation((_connectionId: string, path: string) => {
@@ -1212,7 +1248,7 @@ describe("useCachedImageGallery", () => {
       expect(result.current.currentIndex).toBe(2);
     });
 
-    const callbackCountBeforeSwitch = onIndexChange.mock.calls.length;
+    expect(onIndexChange).toHaveBeenCalledExactlyOnceWith(2);
 
     rerender({
       images: ["/b0.jpg", "/b1.jpg", "/b2.jpg"],
@@ -1223,6 +1259,6 @@ describe("useCachedImageGallery", () => {
       expect(result.current.currentIndex).toBe(1);
     });
 
-    expect(onIndexChange.mock.calls.slice(callbackCountBeforeSwitch)).toEqual([[1]]);
+    expect(onIndexChange).toHaveBeenCalledTimes(1);
   });
 });
