@@ -243,11 +243,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     onClose();
   }, [onClose]);
 
-  /**
-   * Escape handler for useKeyboardShortcuts (window-level).
-   * Blur-first logic lives on the Dialog Paper's onKeyDown instead,
-   * because it must fire before the parent FileBrowser's window listener.
-   */
+  /** Closes the viewer when the capture-phase shortcut can handle Escape. */
   const handleEscape = useCallback(
     (_event?: KeyboardEvent) => {
       onClose();
@@ -256,16 +252,13 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   );
 
   /**
-   * Paper-level keydown handler — single authority for all Escape logic.
-   * MUI Dialogs render in a portal at document.body (outside the React root),
-   * so native events may not reliably reach window listeners. Handling
-   * everything here and calling preventDefault() makes close robust.
+   * Handles Escape not already consumed by a capture-phase shortcut or child.
    * 1. If a toolbar button/input has focus → blur it (hide focus ring)
    * 2. Otherwise → close the viewer
    */
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       if (blurActiveToolbarControl()) return;
       onClose();
@@ -671,6 +664,9 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
         <Box
           ref={portalRef}
           className={currentImageError ? "image-viewer-load-error" : undefined}
+          onKeyDownCapture={(event) => {
+            if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) event.stopPropagation();
+          }}
           sx={{
             flex: 1,
             position: "relative",
@@ -695,7 +691,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                 controls: () => null, // Controls rendered in our custom toolbar
               }}
               toolbar={{ buttons: [] }}
-              controller={{ focus: true }} // Auto-focus yarl container on mount for keyboard nav
+              controller={{ focus: true, closeOnEscape: false }} // The viewer owns Escape dismissal.
               carousel={{
                 finite: true,
                 padding: 0,

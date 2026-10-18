@@ -776,7 +776,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
 
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (unsavedChangesDialogOpen || event.key !== "Escape") {
+      if (unsavedChangesDialogOpen || event.key !== "Escape" || event.defaultPrevented) {
         return;
       }
 

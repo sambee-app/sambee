@@ -939,6 +939,35 @@ describe("MarkdownViewer", () => {
     expect(contentContainer.scrollTop).toBe(0);
   });
 
+  it("closes exactly once on Escape from viewer content", async () => {
+    const onClose = vi.fn();
+    vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
+    renderViewerWithProps({ onClose });
+    await screen.findByText("Readme");
+    const content = screen.getByTestId("markdown-viewer-content");
+    content.focus();
+
+    fireEvent.keyDown(content, { key: "Escape" });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("blurs toolbar focus on the first Escape and closes once on the next", async () => {
+    const onClose = vi.fn();
+    vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
+    renderViewerWithProps({ onClose });
+    await screen.findByText("Readme");
+    const close = screen.getByRole("button", { name: "Close" });
+    close.focus();
+
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(close).not.toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByTestId("markdown-viewer-content"), { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
   it.each(["Escape", "Close"])("exits edit mode on %s without closing the viewer or prompting when nothing changed", async (action) => {
     const onClose = vi.fn();
 

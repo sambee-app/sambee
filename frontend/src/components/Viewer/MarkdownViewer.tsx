@@ -1149,11 +1149,6 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     [isEditing]
   );
 
-  // Context-aware Escape handler (window-level via useKeyboardShortcuts)
-  // Blur-first logic lives on the Dialog Paper's onKeyDown instead,
-  // because it must fire before the parent FileBrowser's window listener.
-  // - If in fullscreen: exit fullscreen
-  // - Otherwise: close the viewer
   const handleEscape = useCallback(
     (_event?: KeyboardEvent) => {
       if (searchPanelOpen || isViewerSearchInputFocused()) {
@@ -1382,10 +1377,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   );
 
   /**
-   * Paper-level keydown handler — single authority for all Escape logic.
-   * MUI Dialogs render in a portal at document.body (outside the React root),
-   * so native events may not reliably reach window listeners. Handling
-   * everything here and calling preventDefault() makes close robust.
+   * Handles Escape not already consumed by a capture-phase shortcut or child.
    * 1. If a toolbar button/input has focus → blur it (hide focus ring)
    * 2. If in fullscreen → exit fullscreen
    * 3. Otherwise → close the viewer
@@ -1396,7 +1388,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         return;
       }
 
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
       if (isMarkdownEditorTextInputFocused()) {

@@ -388,6 +388,33 @@ describe("TextViewer", () => {
     });
   });
 
+  it("closes exactly once on Escape from the viewer dialog", async () => {
+    const onClose = vi.fn();
+    renderViewer({ onClose });
+    await screen.findByRole("textbox", { name: "Text editor" });
+    const dialog = screen.getByRole("dialog");
+    dialog.focus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it("blurs toolbar focus on the first Escape and closes once on the next", async () => {
+    const onClose = vi.fn();
+    renderViewer({ onClose });
+    await screen.findByRole("textbox", { name: "Text editor" });
+    const close = screen.getByRole("button", { name: "Close" });
+    close.focus();
+
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(close).not.toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
   it.each(["Close", "Escape"])("returns to the viewer on %s and closes it on the next Close", async (action) => {
     const onClose = vi.fn();
     renderViewer({ onClose });

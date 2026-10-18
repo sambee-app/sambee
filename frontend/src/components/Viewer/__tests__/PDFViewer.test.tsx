@@ -1449,16 +1449,17 @@ describe("PDFViewer", () => {
       });
     });
 
-    it("closes viewer on Escape", async () => {
+    it.each(["document", "viewer"])("closes viewer exactly once on Escape from %s", async (target) => {
       renderPDFViewer();
 
       await waitFor(() => {
         expect(screen.getByTestId("pdf-page")).toBeInTheDocument();
       });
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const eventTarget = target === "document" ? document : screen.getByTestId("pdf-viewer-content");
+      fireEvent.keyDown(eventTarget, { key: "Escape" });
 
-      expect(mockOnClose).toHaveBeenCalled();
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
 
     it("closes search instead of the viewer when Escape is pressed in the search input", async () => {

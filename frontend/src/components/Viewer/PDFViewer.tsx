@@ -1159,10 +1159,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   }, []);
 
   /**
-   * Context-aware Escape handler (window-level via useKeyboardShortcuts).
-   * Blur-first logic lives on the Dialog Paper's onKeyDown instead,
-   * because it must fire before the parent FileBrowser's window listener.
-   * Pattern: Single handler checks state to determine appropriate action
+   * Context-aware Escape action shared by the shortcut and dialog handlers.
    * - If search panel is open: close search and clear results
    * - Otherwise: close the entire viewer
    */
@@ -1185,17 +1182,14 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   );
 
   /**
-   * Paper-level keydown handler — single authority for all Escape logic.
-   * MUI Dialogs render in a portal at document.body (outside the React root),
-   * so native events may not reliably reach window listeners. Handling
-   * everything here and calling preventDefault() makes close robust.
+   * Handles Escape not already consumed by a capture-phase shortcut or child.
    * 1. If a toolbar button/input has focus → blur it (hide focus ring)
    * 2. If search panel is open → close search and clear results
    * 3. Otherwise → close the viewer
    */
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       if (blurActiveToolbarControl(containerRef)) return;
       handleEscape();
