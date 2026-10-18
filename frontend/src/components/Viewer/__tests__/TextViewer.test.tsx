@@ -485,6 +485,7 @@ describe("TextViewer", () => {
   });
 
   it.each(["Back", "Close"])("leaves clean editing with %s and serializes rapid re-entry behind lock release", async (action) => {
+    const user = userEvent.setup();
     const router = renderRoutedViewer();
     await enterEditMode();
     await waitFor(() => expect(router.state.location.search).toContain("mode=edit"));
@@ -502,9 +503,9 @@ describe("TextViewer", () => {
     });
     try {
       if (action === "Back") await act(() => router.navigate(-1));
-      else fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      else await user.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
       await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
-      expect(router.state.location.search).not.toContain("mode=edit");
       expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
 
       await act(() => router.navigate(action === "Back" ? 1 : -1));
