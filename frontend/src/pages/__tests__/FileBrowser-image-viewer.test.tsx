@@ -28,16 +28,21 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
             path,
             currentIndex = 0,
             onCurrentIndexChange,
+            onClose,
           }: {
             path: string;
             currentIndex?: number;
             onCurrentIndexChange?: (index: number) => void;
+            onClose: () => void;
           }) {
             return (
               <div data-testid="image-view" data-path={path}>
                 Image View
                 <button type="button" onClick={() => onCurrentIndexChange?.(currentIndex + 1)}>
                   Next image
+                </button>
+                <button type="button" onClick={onClose}>
+                  Close image
                 </button>
               </div>
             );
@@ -137,6 +142,14 @@ describe("Browser - Image View Integration", () => {
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "one.jpg"));
     await act(() => router.navigate(1));
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
+    fireEvent.click(screen.getByRole("button", { name: "Close image" }));
+    await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
+    await act(() => router.navigate(-1));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
+    await act(() => router.navigate(-1));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "one.jpg"));
+    await act(() => router.navigate(2));
+    await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
   });
 
   it("renders image view when clicking on image file", async () => {

@@ -7,6 +7,7 @@ interface BlockedTransition {
   reset: () => void;
 }
 export interface ViewerLeaveGuard {
+  shouldBlock: () => boolean;
   requestLeave: (transition: BlockedTransition) => void;
 }
 export interface ViewerNavigation {
@@ -17,6 +18,7 @@ export interface ViewerNavigation {
 
 export function WorkspaceNavigationGuard({ guard }: { guard: ViewerLeaveGuard }) {
   const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    if (!guard.shouldBlock()) return false;
     const current = parseViewerRoute(new URLSearchParams(currentLocation.search), true);
     const next = parseViewerRoute(new URLSearchParams(nextLocation.search), true);
     return (
@@ -75,9 +77,22 @@ export function useRoutedViewerEditing({
     };
   }, []);
   const [requested, setRequested] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const exitPromise = useRef<Promise<void> | null>(null);
+  const blocking = useRef(false);
+  blocking.current = dirty || isSaving || isAcquiring;
   const attemptedMode = useRef<string | null>(null);
   const enter = useEffectEvent(enterEdit);
-  const exit = useEffectEvent(exitEdit);
+  const exit = useEffectEvent(() => {
+    if (exitPromise.current) return exitPromise.current;
+    setIsExiting(true);
+    const promise = exitEdit().finally(() => {
+      exitPromise.current = null;
+      if (alive.current) setIsExiting(false);
+    });
+    exitPromise.current = promise;
+    return promise;
+  });
   const changeMode = useEffectEvent((mode: "view" | "edit", replace = false) => navigation?.onModeChange(mode, replace));
   const cancelAcquire = useEffectEvent(cancelAcquisition);
   const showUnsaved = useEffectEvent(requestUnsavedChanges);
@@ -91,7 +106,7 @@ export function useRoutedViewerEditing({
   const active = isEditing || isAcquiring || isSaving;
   useEffect(() => {
     if (!onGuardChange || !active) return;
-    onGuardChange({ requestLeave });
+    onGuardChange({ requestLeave, shouldBlock: () => blocking.current });
     return () => onGuardChange(null);
   }, [onGuardChange, active]);
 
@@ -109,7 +124,7 @@ export function useRoutedViewerEditing({
 
   useEffect(() => {
     const mode = navigation?.mode;
-    if (!mode || loading || isAcquiring || attemptedMode.current === mode) return;
+    if (!mode || loading || isAcquiring || isExiting || exitPromise.current || attemptedMode.current === mode) return;
     attemptedMode.current = mode;
     if (mode === "edit" && !isEditing) {
       acquisitionCancelled.current = false;
@@ -117,7 +132,7 @@ export function useRoutedViewerEditing({
         if (!success && alive.current && !acquisitionCancelled.current) changeMode("view", true);
       });
     } else if (mode === "view" && isEditing && !pending.current) void exit();
-  }, [navigation?.mode, loading, isAcquiring, isEditing]);
+  }, [navigation?.mode, loading, isAcquiring, isEditing, isExiting]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -130,6 +145,7 @@ export function useRoutedViewerEditing({
   }, [dirty]);
 
   return {
+    isExiting,
     cancelNavigation: () => {
       pending.current?.reset();
       pending.current = null;
@@ -140,7 +156,7 @@ export function useRoutedViewerEditing({
       if (!transition) return false;
       pending.current = null;
       setRequested(false);
-      await exitEdit();
+      await exit();
       transition.proceed();
       return true;
     },

@@ -606,6 +606,55 @@ describe("MarkdownViewer", () => {
     );
   }
 
+  it.each(["Back", "Close"])("leaves clean editing with %s and serializes rapid re-entry behind lock release", async (action) => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    let finishRelease!: () => void;
+    const release = vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    release.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRelease = resolve;
+        })
+    );
+    const viewer = "/viewer?file=smb%2Fdemo%2Fdocs%2Freadme.md&viewer=markdown";
+    const router = createMemoryRouter([{ path: "/viewer", element: <RoutedMarkdownViewer /> }], {
+      initialEntries: [viewer, `${viewer}&mode=edit`],
+    });
+    render(
+      <SambeeThemeProvider>
+        <RouterProvider router={router} />
+      </SambeeThemeProvider>
+    );
+    await screen.findByRole("textbox", { name: "Markdown editor" });
+    const blocked = vi.fn();
+    const unsubscribe = router.subscribe((state) => {
+      if ([...state.blockers.values()].some((blocker) => blocker.state === "blocked")) blocked();
+    });
+    try {
+      if (action === "Back") await act(() => router.navigate(-1));
+      else fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+      expect(router.state.location.search).not.toContain("mode=edit");
+      expect(screen.getByRole("textbox", { name: "Markdown editor" })).toHaveAttribute("readonly");
+
+      await act(() => router.navigate(action === "Back" ? 1 : -1));
+      expect(router.state.location.search).toContain("mode=edit");
+      expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        finishRelease();
+      });
+      await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2));
+      await screen.findByRole("textbox", { name: "Markdown editor" });
+      expect(blocked).not.toHaveBeenCalled();
+
+      await act(() => router.navigate(-1));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(2));
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("opens an edit bookmark and guards dirty Back with Cancel and Discard", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
     vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);

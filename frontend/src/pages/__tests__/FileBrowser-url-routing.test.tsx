@@ -39,9 +39,21 @@ vi.mock("../AccountSettings", () => ({ AccountSettings: () => <div>Account conte
 
 // Mock components using lazy mock factories
 vi.mock("../../components/Viewer/MarkdownViewer", () => ({
-  default: ({ onClose }: { onClose: () => void }) => (
-    <div role="dialog" data-testid="markdown-viewer">
+  default: ({
+    onClose,
+    navigation,
+  }: {
+    onClose: () => void;
+    navigation?: { mode: string; onModeChange: (mode: "view" | "edit") => void };
+  }) => (
+    <div role="dialog" data-testid="markdown-viewer" data-mode={navigation?.mode}>
       Markdown Viewer
+      <button type="button" onClick={() => navigation?.onModeChange("edit")}>
+        Enter editor
+      </button>
+      <button type="button" onClick={() => navigation?.onModeChange("view")}>
+        Leave editor
+      </button>
       <button type="button" onClick={onClose}>
         Close Viewer
       </button>
@@ -197,10 +209,11 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       await act(() => router.navigate(1));
       await waitFor(() => expect(router.state.location.search).toContain("settings=account"));
     });
-    it("traverses categories and closes to its known workspace entry", async () => {
+    it("records settings Close and retraces category history with Back and Forward", async () => {
       const user = userEvent.setup();
       const { router } = renderBrowser("/browse/smb/test-server-1");
       await user.click(await screen.findByRole("button", { name: /open settings/i }));
+      const initialCategory = (await screen.findByTestId("settings-dialog")).getAttribute("data-category");
       await user.click(await screen.findByRole("button", { name: "Account category" }));
       await user.click(screen.getByRole("button", { name: "Connections category" }));
       expect(router.state.location.search).toContain("settings=connections");
@@ -208,8 +221,13 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
       await user.click(screen.getByRole("button", { name: "Close Settings" }));
       await waitFor(() => expect(router.state.location.search).not.toContain("settings="));
-      await act(() => router.navigate(1));
+      await act(() => router.navigate(-1));
       expect(await screen.findByTestId("settings-dialog")).toBeInTheDocument();
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", initialCategory);
+      await act(() => router.navigate(2));
+      await waitFor(() => expect(screen.queryByTestId("settings-dialog")).not.toBeInTheDocument());
     });
 
     it("dismisses a direct category link without leaving the workspace", async () => {
@@ -266,6 +284,64 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
       await act(() => router.navigate(1));
       expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+    });
+
+    it.each([false, true])("records viewer Close and restores the file with Back (direct link: %s)", async (direct) => {
+      const user = userEvent.setup();
+      const directory = "/browse/smb/test-server-1/Documents";
+      const viewer = `${directory}?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown&keep=1#anchor`;
+      const { router } = renderBrowser(direct ? viewer : `${directory}?keep=1#anchor`);
+      if (!direct) await user.click(await screen.findByRole("button", { name: /file: readme\.md/i }));
+      await user.click(await screen.findByRole("button", { name: "Close Viewer" }));
+      await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+      expect(router.state.location.pathname).toBe(directory);
+      expect(router.state.location.search).toBe("?keep=1");
+      expect(router.state.location.hash).toBe("#anchor");
+
+      await act(() => router.navigate(-1));
+      expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+      if (!direct) {
+        await act(() => router.navigate(-1));
+        await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+        expect(router.state.location.pathname).toBe(directory);
+        await act(() => router.navigate(1));
+        expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+      }
+      await act(() => router.navigate(1));
+      await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+    });
+
+    it("records edit exit without overwriting the prior editor entry", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      await user.click(await screen.findByRole("button", { name: "Enter editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "edit"));
+      await user.click(screen.getByRole("button", { name: "Leave editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view"));
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "edit");
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view");
+      await act(() => router.navigate(2));
+      expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view");
+    });
+
+    it("records settings Close while preserving its underlying viewer", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser(
+        "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown&settings=account&keep=1#anchor"
+      );
+      await screen.findByTestId("markdown-viewer");
+      await user.click(await screen.findByRole("button", { name: "Close Settings" }));
+      await waitFor(() => expect(screen.queryByTestId("settings-dialog")).not.toBeInTheDocument());
+      expect(screen.getByTestId("markdown-viewer")).toBeInTheDocument();
+      expect(router.state.location.search).toContain("keep=1");
+      expect(router.state.location.hash).toBe("#anchor");
+      await act(() => router.navigate(-1));
+      expect(await screen.findByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(1));
+      await waitFor(() => expect(screen.queryByTestId("settings-dialog")).not.toBeInTheDocument());
+      expect(screen.getByTestId("markdown-viewer")).toBeInTheDocument();
     });
 
     it("opens a fresh viewer URL without a file-row click", async () => {

@@ -9,36 +9,6 @@ import { type BrowserItem, physicalLocation, virtualItemHandle, virtualLocation 
 import { type BrowseRouteState, buildBrowseRouteTarget, resolveBrowseRouteTarget, serializeBrowseRoute } from "./routing";
 import type { PaneId, UseFileBrowserPaneReturn, ViewInfo } from "./types";
 
-interface ReturnEntry {
-  key: string;
-  url: string;
-}
-interface WorkspaceState {
-  viewer?: ReturnEntry;
-  settings?: ReturnEntry;
-  edit?: ReturnEntry;
-}
-
-function readReturns(value: unknown): WorkspaceState {
-  if (!value || typeof value !== "object") return {};
-  const result: WorkspaceState = {};
-  for (const layer of ["viewer", "settings", "edit"] as const) {
-    const entry = (value as Record<string, unknown>)[layer];
-    if (
-      entry &&
-      typeof entry === "object" &&
-      "key" in entry &&
-      typeof entry.key === "string" &&
-      "url" in entry &&
-      typeof entry.url === "string" &&
-      entry.url.startsWith("/browse")
-    ) {
-      result[layer] = { key: entry.key, url: entry.url };
-    }
-  }
-  return result;
-}
-
 export function useWorkspaceNavigation({
   route,
   connections,
@@ -76,7 +46,6 @@ export function useWorkspaceNavigation({
     history.current = location.key;
   }
   const state = location.state && typeof location.state === "object" ? location.state : {};
-  const returns = readReturns(state.workspaceReturns);
   const pendingViewer = useRef<{ identity: string; info: ViewInfo } | null>(null);
   const panes = useRef({ left, right });
   panes.current = { left, right };
@@ -93,15 +62,15 @@ export function useWorkspaceNavigation({
   });
 
   const navigateRoute = useCallback(
-    (next: BrowseRouteState, options?: { replace?: boolean; returns?: WorkspaceState }) => {
+    (next: BrowseRouteState, options?: { replace?: boolean }) => {
       const url = serializeBrowseRoute(next);
       if (url === location.pathname + location.search) return;
       void navigate(
         { pathname: url.split("?")[0], search: url.includes("?") ? url.slice(url.indexOf("?")) : "", hash: location.hash },
-        { replace: options?.replace, state: { ...state, workspaceReturns: options?.returns ?? returns } }
+        { replace: options?.replace, state }
       );
     },
-    [location, navigate, returns, state]
+    [location, navigate, state]
   );
 
   useEffect(() => {
@@ -117,16 +86,6 @@ export function useWorkspaceNavigation({
     );
   }, [location, navigate, route.viewer, route.settings]);
 
-  const dismiss = (layer: keyof WorkspaceState, next: BrowseRouteState) => {
-    const target = returns[layer];
-    const index = target ? entries.current.keys.indexOf(target.key) : -1;
-    if (index >= 0 && index < entries.current.index) {
-      void navigate(index - entries.current.index);
-    } else {
-      navigateRoute(next, { replace: true, returns: { ...returns, [layer]: undefined } });
-    }
-  };
-
   const openViewer = (paneId: PaneId, info: ViewInfo) => {
     const virtual = info.virtualSource;
     const target = buildBrowseRouteTarget(
@@ -138,15 +97,7 @@ export function useWorkspaceNavigation({
     if (!target || !info.viewerId) return;
     const nextViewer = { file: target, paneId, viewerId: info.viewerId, mode: "view" as const };
     pendingViewer.current = { identity: JSON.stringify([target, info.viewerId, paneId]), info };
-    navigateRoute(
-      { ...route, viewer: nextViewer, settings: undefined },
-      {
-        returns: {
-          ...returns,
-          viewer: route.viewer ? returns.viewer : { key: location.key, url: location.pathname + location.search },
-        },
-      }
-    );
+    navigateRoute({ ...route, viewer: nextViewer, settings: undefined });
   };
 
   useEffect(() => {
@@ -251,7 +202,7 @@ export function useWorkspaceNavigation({
   return {
     navigateRoute,
     openViewer,
-    closeViewer: () => dismiss("viewer", { ...route, viewer: undefined }),
+    closeViewer: () => navigateRoute({ ...route, viewer: undefined }),
     changeImage: (paneId: PaneId, index: number) => {
       const info = panes.current[paneId].viewInfo;
       const path = info?.images?.[index];
@@ -268,24 +219,10 @@ export function useWorkspaceNavigation({
     changeMode: (mode: "view" | "edit", replace = false) => {
       if (!viewer || viewer.mode === mode) return;
       const next = { ...route, viewer: { ...viewer, mode } };
-      if (mode === "view" && !replace) dismiss("edit", next);
-      else
-        navigateRoute(next, {
-          replace,
-          returns: { ...returns, edit: mode === "edit" ? { key: location.key, url: location.pathname + location.search } : undefined },
-        });
+      navigateRoute(next, { replace });
     },
-    openSettings: (settings: MobileSettingsView) =>
-      navigateRoute(
-        { ...route, settings },
-        {
-          returns: {
-            ...returns,
-            settings: route.settings ? returns.settings : { key: location.key, url: location.pathname + location.search },
-          },
-        }
-      ),
-    closeSettings: () => dismiss("settings", { ...route, settings: undefined }),
+    openSettings: (settings: MobileSettingsView) => navigateRoute({ ...route, settings }),
+    closeSettings: () => navigateRoute({ ...route, settings: undefined }),
     backSettings: () => {
       if (entries.current.index > 0) void navigate(-1);
       else navigateRoute({ ...route, settings: route.settings === "main" ? undefined : "main" }, { replace: true });

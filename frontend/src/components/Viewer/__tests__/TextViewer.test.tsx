@@ -484,6 +484,46 @@ describe("TextViewer", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it.each(["Back", "Close"])("leaves clean editing with %s and serializes rapid re-entry behind lock release", async (action) => {
+    const router = renderRoutedViewer();
+    await enterEditMode();
+    await waitFor(() => expect(router.state.location.search).toContain("mode=edit"));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
+    let finishRelease!: () => void;
+    vi.mocked(apiService.releaseEditLock).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRelease = resolve;
+        })
+    );
+    const blocked = vi.fn();
+    const unsubscribe = router.subscribe((state) => {
+      if ([...state.blockers.values()].some((blocker) => blocker.state === "blocked")) blocked();
+    });
+    try {
+      if (action === "Back") await act(() => router.navigate(-1));
+      else fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
+      expect(router.state.location.search).not.toContain("mode=edit");
+      expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
+
+      await act(() => router.navigate(action === "Back" ? 1 : -1));
+      expect(router.state.location.search).toContain("mode=edit");
+      expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        finishRelease();
+      });
+      await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
+      expect(blocked).not.toHaveBeenCalled();
+
+      await act(() => router.navigate(-1));
+      await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(2));
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("guards routed Back, preserves a cancelled draft, and continues Discard", async () => {
     const router = renderRoutedViewer();
     await enterEditMode();
