@@ -1,7 +1,10 @@
 import { act, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { forwardRef, type ReactNode, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, type ReactNode, useEffect, useEffectEvent, useImperativeHandle, useRef, useState } from "react";
+import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useRemoveLocationFragment } from "../../../hooks/useRemoveLocationFragment";
+import { type ViewerLeaveGuard, WorkspaceNavigationGuard } from "../../../hooks/useRoutedViewerEditing";
 import i18n from "../../../i18n";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
 import apiService from "../../../services/api";
@@ -113,6 +116,63 @@ vi.mock("../TextCodeEditor", () => {
 });
 
 import TextViewer from "../TextViewer";
+
+function RoutedTextViewer() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [guard, setGuard] = useState<ViewerLeaveGuard | null>(null);
+  const removeFragment = useEffectEvent(useRemoveLocationFragment());
+  useEffect(() => {
+    if (location.hash.includes("flow=")) removeFragment(["flow"]);
+  }, [location.hash]);
+  return (
+    <>
+      {guard ? <WorkspaceNavigationGuard guard={guard} /> : null}
+      <TextViewer
+        connectionId="conn1"
+        path="/docs/readme.txt"
+        onClose={() => void navigate("/browse")}
+        navigation={{
+          mode: new URLSearchParams(location.search).get("mode") === "edit" ? "edit" : "view",
+          onGuardChange: setGuard,
+          onModeChange: (mode, replace) => {
+            const search = new URLSearchParams(location.search);
+            if (mode === "edit") search.set("mode", "edit");
+            else search.delete("mode");
+            if (search.toString() !== new URLSearchParams(location.search).toString())
+              void navigate({ search: search.toString() }, { replace });
+          },
+        }}
+      />
+    </>
+  );
+}
+
+function renderRoutedViewer(edit = false, fragment = false) {
+  const router = createMemoryRouter(
+    [
+      { path: "/browse", element: <div>Files</div> },
+      { path: "/viewer", element: <RoutedTextViewer /> },
+    ],
+    {
+      initialEntries: [
+        "/browse",
+        {
+          pathname: "/viewer",
+          search: `?file=smb%2Fdemo%2Fdocs%2Freadme.txt&viewer=text${edit ? "&mode=edit" : ""}`,
+          hash: fragment ? "#flow=opaque&keep=1" : "",
+          state: { returnTo: "/browse" },
+        },
+      ],
+    }
+  );
+  render(
+    <SambeeThemeProvider>
+      <RouterProvider router={router} />
+    </SambeeThemeProvider>
+  );
+  return router;
+}
 
 function renderViewer({ onClose = vi.fn() }: { onClose?: () => void } = {}) {
   return render(
@@ -395,6 +455,100 @@ describe("TextViewer", () => {
     expect(editor).not.toHaveAttribute("readonly");
     expect(apiService.releaseEditLock).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("guards routed Back, preserves a cancelled draft, and continues Discard", async () => {
+    const router = renderRoutedViewer();
+    await enterEditMode();
+    await waitFor(() => expect(router.state.location.search).toContain("mode=edit"));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
+    const routedEditor = screen.getByRole("textbox", { name: "Text editor" });
+    fireEvent.change(routedEditor, { target: { value: "unsaved routed text" } });
+    await act(() => router.navigate(-1));
+    let dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(routedEditor).toHaveValue("unsaved routed text");
+    expect(router.state.location.search).toContain("mode=edit");
+    expect(apiService.releaseEditLock).not.toHaveBeenCalled();
+    await act(() => router.navigate(-1));
+    dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
+    await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
+    await act(() => router.navigate(1));
+    await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2));
+  });
+
+  it("acquires a fresh edit session for an editor bookmark", async () => {
+    const router = renderRoutedViewer(true);
+    await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
+    expect(router.state.location.search).toContain("mode=edit");
+  });
+
+  it.each(["Save", "failed Save"])("guards Back with %s after router-safe fragment cleanup", async (choice) => {
+    const router = renderRoutedViewer(false, true);
+    await waitFor(() => expect(router.state.location.hash).toBe("#keep=1"));
+    expect(router.state.location.state).toEqual({ returnTo: "/browse" });
+    await enterEditMode();
+    await waitFor(() => expect(router.state.location.search).toContain("mode=edit"));
+    const editor = screen.getByRole("textbox", { name: "Text editor" });
+    fireEvent.change(editor, { target: { value: "updated routed text" } });
+    const unload = new Event("beforeunload", { cancelable: true });
+    fireEvent(window, unload);
+    expect(unload.defaultPrevented).toBe(true);
+    if (choice === "failed Save") vi.mocked(apiService.writeTextWithEditLock).mockRejectedValueOnce(new Error("Save failed"));
+    let release!: () => void;
+    if (choice === "Save")
+      vi.mocked(apiService.releaseEditLock).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      );
+    await act(() => router.navigate(-1));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
+    if (choice === "Save") {
+      await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
+      expect(router.state.location.search).toContain("mode=edit");
+      await act(async () => {
+        release();
+      });
+      await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
+      expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
+      await act(() => router.navigate(-1));
+      expect(router.state.location.pathname).toBe("/browse");
+      await act(() => router.navigate(1));
+      expect(router.state.location.hash).toBe("#keep=1");
+    } else {
+      await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled());
+      expect(router.state.location.search).toContain("mode=edit");
+      expect(editor).toHaveValue("updated routed text");
+      expect(apiService.releaseEditLock).not.toHaveBeenCalled();
+    }
+  });
+
+  it("leaves during acquisition and releases a late lock without restoring the old route", async () => {
+    const acquire = vi.mocked(apiService.acquireEditLock);
+    const lock = await acquire.getMockImplementation()!("conn1", "/docs/readme.txt");
+    let finish!: (value: typeof lock) => void;
+    acquire.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const router = renderRoutedViewer(true);
+    await waitFor(() => expect(acquire).toHaveBeenCalledTimes(1));
+    await act(() => router.navigate("/browse"));
+    expect(await screen.findByText("Files")).toBeInTheDocument();
+    await act(async () => {
+      finish(lock);
+    });
+    await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
+    expect(router.state.location.pathname).toBe("/browse");
   });
 
   it("enters edit mode and saves text changes", async () => {

@@ -22,6 +22,18 @@ Compared with desktop, mobile navigation is more compact:
 - Opening files in natively installed apps is not available.
 - Local drive access is not available.
 
+## Back, Forward, and Bookmarks
+
+Opening a file, entering its editor, moving between gallery images, and navigating settings update the browser address. You can bookmark or share that address on desktop or mobile. The recipient still needs access to the connection and file; local-drive links also need a paired companion with that drive available.
+
+Use browser Back to retrace your steps: editing to viewing, viewing to the file list, or one settings category to the previous one. Forward reopens those locations. Reopening an editor checks access and obtains a new edit lock.
+
+If you have unsaved edits, Back or another navigation asks you to **Save**, **Discard**, or **Cancel**. Cancel keeps your draft and current location. A failed save keeps you in the editor. Your browser can also warn before reloading or closing a tab with unsaved edits.
+
+Settings **Close** returns to the underlying file browser even after several category changes. The mobile settings back arrow follows your settings history. When you opened a bookmark directly, these controls use an in-app parent instead of sending you to an unrelated page. Resizing between phone and desktop layouts keeps the selected settings category.
+
+Refreshing a bookmark restores its requested location, not a different workspace saved earlier in the tab. A missing file or unavailable connection offers recovery actions rather than silently opening another file.
+
 ## Share Files and Text
 
 On a phone, use **Share** in a file's action menu, or select several files and choose **Share** from the selection menu. Sambee prepares the stored files first. When they're ready, tap **Share** to open your device's share sheet. Multiple files are submitted together; Sambee doesn't silently drop files or retry a smaller selection.

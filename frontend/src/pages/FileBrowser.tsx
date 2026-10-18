@@ -42,7 +42,7 @@ import type { CompactItemAction } from "../components/FileBrowser/CompactItemAct
 import CopyMoveDialog, { type CopyMoveMode } from "../components/FileBrowser/CopyMoveDialog";
 import { DesktopToolbar } from "../components/FileBrowser/DesktopToolbar";
 import { DialogOperationContext } from "../components/FileBrowser/DialogOperationContext";
-import { DynamicViewer } from "../components/FileBrowser/DynamicViewer";
+import { DynamicViewer, ViewerFallbackDialog } from "../components/FileBrowser/DynamicViewer";
 import type { CompanionLifecycleStatus } from "../components/FileBrowser/FileBrowserAlerts";
 import { FileBrowserAlerts } from "../components/FileBrowser/FileBrowserAlerts";
 import { FileOperationsToolbar } from "../components/FileBrowser/FileOperationsToolbar";
@@ -62,17 +62,13 @@ import { KeyboardShortcutsHelp } from "../components/KeyboardShortcutsHelp";
 import HamburgerMenu from "../components/Mobile/HamburgerMenu";
 import { MobileSettingsDrawer } from "../components/Mobile/MobileSettingsDrawer";
 import SettingsDialog from "../components/Settings/SettingsDialog";
-import {
-  DEFAULT_SETTINGS_CATEGORY,
-  type MobileSettingsView,
-  SETTINGS_CATEGORY_ORDER,
-  type SettingsCategory,
-} from "../components/Settings/settingsNavigation";
+import { DEFAULT_SETTINGS_CATEGORY } from "../components/Settings/settingsNavigation";
 import { useNativeSharing } from "../components/Sharing/useNativeSharing";
 import { getEnabledBrowserCommands } from "../config/browserCommands";
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, COPY_MOVE_SHORTCUTS, PANE_SHORTCUTS, SELECTION_SHORTCUTS } from "../config/keyboardShortcuts";
 import { useCompanion } from "../hooks/useCompanion";
 import { type KeyboardShortcut, useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
+import { type ViewerLeaveGuard, WorkspaceNavigationGuard } from "../hooks/useRoutedViewerEditing";
 import { signOutCurrentBrowser } from "../services/accountSession";
 import { authSession } from "../services/authSession";
 import { markBackendAvailable, useBackendAvailability } from "../services/backendAvailability";
@@ -162,11 +158,12 @@ import {
   resolveBrowseRouteState,
   serializeBrowseRoute,
 } from "./FileBrowser/routing";
-import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, VirtualRouteLocation } from "./FileBrowser/types";
+import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, ViewInfo, VirtualRouteLocation } from "./FileBrowser/types";
 import { ACTIVE_PANE_QUERY_KEY, ACTIVE_PANE_STORAGE_KEY, RIGHT_PANE_QUERY_KEY } from "./FileBrowser/types";
 import { useBrowserDownload } from "./FileBrowser/useBrowserDownload";
 import { useBrowserUpload } from "./FileBrowser/useBrowserUpload";
 import { useFileBrowserPane } from "./FileBrowser/useFileBrowserPane";
+import { useWorkspaceNavigation } from "./FileBrowser/useWorkspaceNavigation";
 
 // ============================================================================
 // Main Component
@@ -424,12 +421,15 @@ const Browser: React.FC = () => {
   const params = useParams<{ targetType: string; targetId: string; "*": string }>();
   const location = useLocation();
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const currentRoute = useMemo(
+    () => parseBrowseRoute({ targetType: params.targetType, targetId: params.targetId, path: params["*"], searchParams }),
+    [params.targetType, params.targetId, params["*"], searchParams]
+  );
   const theme = useTheme();
   const { t } = useTranslation();
-  const initialRecoverySnapshotRef = React.useRef(loadBrowserRecoverySnapshot());
+  const initialRecoverySnapshotRef = React.useRef(loadBrowserRecoverySnapshot(location.pathname + location.search));
   const hasHydratedRecoverySnapshotRef = React.useRef(false);
   const hasStartedInitialConnectionLoadRef = React.useRef(false);
-  const recoveryNavigationStartKeyRef = React.useRef<string | null>(null);
   const [recoveryPhase, setRecoveryPhase] = useState<RecoveryPhase>(() =>
     initialRecoverySnapshotRef.current === null ? "ready" : "pending"
   );
@@ -464,10 +464,11 @@ const Browser: React.FC = () => {
   const [connections, setConnections] = useState<Connection[]>(() => initialRecoverySnapshotRef.current?.connections ?? []);
   const [loadingConnections, setLoadingConnections] = useState(() => initialRecoverySnapshotRef.current === null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialCategory, setSettingsInitialCategory] = useState<SettingsCategory>(DEFAULT_SETTINGS_CATEGORY);
-  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
-  const [mobileSettingsInitialView, setMobileSettingsInitialView] = useState<MobileSettingsView>("main");
+  const settingsOpen = Boolean(currentRoute.settings) && !useCompactLayout;
+  const mobileSettingsOpen = Boolean(currentRoute.settings) && useCompactLayout;
+  const settingsInitialCategory =
+    currentRoute.settings && currentRoute.settings !== "main" ? currentRoute.settings : DEFAULT_SETTINGS_CATEGORY;
+  const mobileSettingsInitialView = currentRoute.settings ?? "main";
   const [showHelp, setShowHelp] = useState(false);
   const [quickBarMode, setQuickBarMode] = useState<"navigate" | "commands" | "file-search">("navigate");
   const [quickBarActivationToken, setQuickBarActivationToken] = useState(0);
@@ -490,34 +491,6 @@ const Browser: React.FC = () => {
   const uploadMenuOpenId = React.useRef(0);
   const [uploadMenu, setUploadMenu] = useState<{ anchor: HTMLElement; paneId: PaneId; destination: PhysicalLocation } | null>(null);
   const backendAvailability = useBackendAvailability();
-
-  useEffect(() => {
-    const requestedCategory = searchParams.get("settings");
-    if (!requestedCategory || !SETTINGS_CATEGORY_ORDER.includes(requestedCategory as SettingsCategory)) {
-      return;
-    }
-
-    const category = requestedCategory as SettingsCategory;
-    if (useCompactLayout) {
-      setMobileSettingsInitialView(category);
-      setMobileSettingsOpen(true);
-    } else {
-      setSettingsInitialCategory(category);
-      setSettingsOpen(true);
-    }
-
-    const nextSearchParams = new URLSearchParams(searchParams);
-    nextSearchParams.delete("settings");
-    const nextSearch = nextSearchParams.toString();
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextSearch ? `?${nextSearch}` : "",
-        hash: location.hash,
-      },
-      { replace: true }
-    );
-  }, [location.hash, location.pathname, navigate, searchParams, useCompactLayout]);
 
   // ── Companion detection & drive management ──────────────────────────────
   const companion = useCompanion();
@@ -680,16 +653,6 @@ const Browser: React.FC = () => {
     return saved === "right" ? "right" : "left";
   });
 
-  const currentRoute = useMemo(
-    () =>
-      parseBrowseRoute({
-        targetType: params.targetType,
-        targetId: params.targetId,
-        path: params["*"],
-        searchParams,
-      }),
-    [params.targetId, params.targetType, params["*"], searchParams]
-  );
   const companionLifecycleStatus = useMemo(
     () => parseCompanionLifecycleStatus(searchParams.get(COMPANION_STATUS_QUERY_PARAM)),
     [searchParams]
@@ -726,6 +689,7 @@ const Browser: React.FC = () => {
   const rightRouteLocationResolveRef = React.useRef<(path: string, archiveLocation: ArchiveLocation | null) => void>(() => undefined);
   const pendingPaneFocusRef = React.useRef<PaneId | null>(null);
   const routeSyncTokenRef = React.useRef(0);
+  const openViewerRef = React.useRef<(paneId: PaneId, info: ViewInfo) => void>(() => undefined);
 
   // WebSocket for real-time directory updates (server)
   const wsRef = React.useRef<WebSocket | null>(null);
@@ -761,6 +725,7 @@ const Browser: React.FC = () => {
     onNavigateDirectory: (connectionId, path) => leftDirectoryNavigateRef.current(connectionId, path),
     onNavigateVirtualLocation: (location) => leftVirtualLocationNavigateRef.current(location),
     onResolveRouteLocation: (path, archiveLocation) => leftRouteLocationResolveRef.current(path, archiveLocation),
+    onOpenViewer: (info) => openViewerRef.current("left", info),
   });
 
   // Right pane — always instantiated (React hooks rule: no conditional hooks),
@@ -780,11 +745,22 @@ const Browser: React.FC = () => {
     onNavigateDirectory: (connectionId, path) => rightDirectoryNavigateRef.current(connectionId, path),
     onNavigateVirtualLocation: (location) => rightVirtualLocationNavigateRef.current(location),
     onResolveRouteLocation: (path, archiveLocation) => rightRouteLocationResolveRef.current(path, archiveLocation),
+    onOpenViewer: (info) => openViewerRef.current("right", info),
   });
   const leftPaneRef = React.useRef(leftPane);
   const rightPaneRef = React.useRef(rightPane);
   leftPaneRef.current = leftPane;
   rightPaneRef.current = rightPane;
+  const workspace = useWorkspaceNavigation({
+    route: currentRoute,
+    connections: allConnections,
+    services: browserContentServices,
+    left: leftPane,
+    right: rightPane,
+    ready: !loadingConnections && recoveryPhase === "ready",
+  });
+  const [viewerLeaveGuard, setViewerLeaveGuard] = useState<ViewerLeaveGuard | null>(null);
+  openViewerRef.current = workspace.openViewer;
 
   /**
    * Active pane — the pane that receives keyboard input and toolbar actions.
@@ -917,8 +893,6 @@ const Browser: React.FC = () => {
   );
   const isBrowserBrowsing = !settingsOpen && !mobileSettingsOpen && !activePane.viewInfo;
   const quickBarPaneConnection = getConnectionById(allConnections, quickBarPane.connectionId);
-  const leftPaneConnection = getConnectionById(allConnections, leftPane.connectionId);
-  const rightPaneConnection = getConnectionById(allConnections, rightPane.connectionId);
   const activePaneFocusedFile = activePane.focusedIndex >= 0 ? activePane.sortedFiles[activePane.focusedIndex] : undefined;
   const quickBarFocusedFile = quickBarPane.focusedIndex >= 0 ? quickBarPane.sortedFiles[quickBarPane.focusedIndex] : undefined;
   const activePaneIsArchive = activePane.archiveLocation !== null;
@@ -1314,52 +1288,16 @@ const Browser: React.FC = () => {
 
     hasHydratedRecoverySnapshotRef.current = true;
 
-    leftPane.restoreRecoverySnapshot(snapshot.left);
-    rightPane.restoreRecoverySnapshot(snapshot.right);
-
-    if (!snapshot.right) {
-      rightPane.applyLocation("", "");
+    if (snapshot.routeUrl === location.pathname + location.search) {
+      if (snapshot.left) leftPane.restoreRecoverySnapshot(snapshot.left);
+      if (snapshot.right) rightPane.restoreRecoverySnapshot(snapshot.right);
     }
-
-    if (paneMode !== snapshot.paneMode) {
-      setPaneMode(snapshot.paneMode);
-    }
-
-    if (activePaneId !== snapshot.activePaneId) {
-      setActivePaneId(snapshot.activePaneId);
-    }
-
-    setFileBrowserPaneModePreference(snapshot.paneMode);
-    localStorage.setItem(ACTIVE_PANE_STORAGE_KEY, snapshot.activePaneId);
-
-    const currentUrl = location.pathname + location.search;
-    if (currentUrl === snapshot.routeUrl) {
-      setRecoveryPhase("ready");
-      return;
-    }
-
-    recoveryNavigationStartKeyRef.current = location.key;
-    setRecoveryPhase("awaiting-route");
-    navigate(snapshot.routeUrl, { replace: true });
-  }, [activePaneId, leftPane, location.key, location.pathname, location.search, navigate, paneMode, rightPane]);
+    setRecoveryPhase("ready");
+  }, [leftPane, location.pathname, location.search, rightPane]);
 
   useEffect(() => {
     restoreInitialRecoverySnapshot();
   }, [restoreInitialRecoverySnapshot]);
-
-  useEffect(() => {
-    const snapshot = initialRecoverySnapshotRef.current;
-    if (!snapshot || recoveryPhase !== "awaiting-route") {
-      return;
-    }
-
-    const currentUrl = location.pathname + location.search;
-    const snapshotRouteReached = currentUrl === snapshot.routeUrl;
-    const routeChangedAfterRecoveryNavigation = location.key !== recoveryNavigationStartKeyRef.current;
-    if (snapshotRouteReached || routeChangedAfterRecoveryNavigation) {
-      setRecoveryPhase("ready");
-    }
-  }, [location.key, location.pathname, location.search, recoveryPhase]);
 
   useEffect(() => {
     const leftSnapshot = leftPane.captureRecoverySnapshot();
@@ -1388,23 +1326,26 @@ const Browser: React.FC = () => {
             toVirtualRouteLocation(rightSnapshot.archiveLocation ?? null)
           );
 
+    const paneRoute = { left: leftTarget, right: rightTarget, activePaneId: rightTarget ? activePaneId : ("left" as const) };
+    if (
+      serializeBrowseRoute(paneRoute) !==
+      serializeBrowseRoute({ left: currentRoute.left, right: currentRoute.right, activePaneId: currentRoute.activePaneId })
+    )
+      return;
     saveBrowserRecoverySnapshot({
       savedAt: Date.now(),
-      routeUrl: serializeBrowseRoute({
-        left: leftTarget,
-        right: rightTarget,
-        activePaneId: rightTarget ? activePaneId : "left",
-      }),
+      routeUrl: serializeBrowseRoute(currentRoute),
       activePaneId: rightTarget ? activePaneId : "left",
       paneMode: rightTarget ? "dual" : "single",
       connections,
-      left: leftSnapshot,
-      right: rightSnapshot,
+      left: { ...leftSnapshot, viewInfo: null },
+      right: rightSnapshot ? { ...rightSnapshot, viewInfo: null } : null,
     });
   }, [
     activePaneId,
     allConnections,
     connections,
+    currentRoute,
     leftPane.error,
     leftPane.loading,
     paneMode,
@@ -1420,15 +1361,21 @@ const Browser: React.FC = () => {
 
   const navigateToBrowseState = useCallback(
     (nextRoute: BrowseRouteState, options?: { replace?: boolean }) => {
-      const nextUrl = serializeBrowseRoute(nextRoute);
+      const nextUrl = serializeBrowseRoute({
+        ...nextRoute,
+        extraSearch: nextRoute.extraSearch ?? currentRoute.extraSearch,
+        ...(options?.replace
+          ? { viewer: nextRoute.viewer ?? currentRoute.viewer, settings: nextRoute.settings ?? currentRoute.settings }
+          : {}),
+      });
       const currentUrl = location.pathname + location.search;
       if (currentUrl === nextUrl) {
         return;
       }
 
-      navigate(nextUrl, { replace: options?.replace ?? false });
+      navigate(nextUrl + location.hash, { replace: options?.replace ?? false, state: location.state });
     },
-    [location.pathname, location.search, navigate]
+    [currentRoute, location, navigate]
   );
 
   const getCurrentLeftTarget = useCallback(() => {
@@ -2616,18 +2563,11 @@ const Browser: React.FC = () => {
   }, [copyMoveProcessing]);
 
   const handleOpenSettings = useCallback(() => {
-    if (useCompactLayout) {
-      setMobileSettingsInitialView("main");
-      setMobileSettingsOpen(true);
-      return;
-    }
-
-    setSettingsInitialCategory(DEFAULT_SETTINGS_CATEGORY);
-    setSettingsOpen(true);
-  }, [useCompactLayout]);
+    workspace.openSettings("main");
+  }, [workspace.openSettings]);
 
   const handleSettingsClose = () => {
-    setSettingsOpen(false);
+    workspace.closeSettings();
     // Return focus to active pane's file list after closing settings
     setTimeout(() => {
       activePane.listContainerEl?.focus();
@@ -2639,26 +2579,12 @@ const Browser: React.FC = () => {
   }, []);
 
   const openConnectionsSettings = useCallback(() => {
-    if (useCompactLayout) {
-      setMobileSettingsInitialView("connections");
-      setMobileSettingsOpen(true);
-      return;
-    }
-
-    setSettingsInitialCategory("connections");
-    setSettingsOpen(true);
-  }, [useCompactLayout]);
+    workspace.openSettings("connections");
+  }, [workspace.openSettings]);
 
   const openLocalDrivesSettings = useCallback(() => {
-    if (useCompactLayout) {
-      setMobileSettingsInitialView("local-drives");
-      setMobileSettingsOpen(true);
-      return;
-    }
-
-    setSettingsInitialCategory("local-drives");
-    setSettingsOpen(true);
-  }, [useCompactLayout]);
+    workspace.openSettings("local-drives");
+  }, [workspace.openSettings]);
 
   const focusQuickBarInput = useCallback(
     (sourcePaneId: PaneId) => {
@@ -4173,15 +4099,7 @@ const Browser: React.FC = () => {
           backendAvailabilityStatus={backendAvailability.status}
           onDismissCompanionLifecycleStatus={dismissCompanionLifecycleStatus}
           onRetry={leftPane.handleRefresh}
-          onOpenConnectionsSettings={() => {
-            if (useCompactLayout) {
-              setMobileSettingsInitialView("connections");
-              setMobileSettingsOpen(true);
-            } else {
-              setSettingsInitialCategory("connections");
-              setSettingsOpen(true);
-            }
-          }}
+          onOpenConnectionsSettings={openConnectionsSettings}
         />
         {isDualMode && rightPane.error && (
           <FileBrowserAlerts
@@ -4337,6 +4255,8 @@ const Browser: React.FC = () => {
           open={settingsOpen}
           onClose={handleSettingsClose}
           initialCategory={settingsInitialCategory}
+          category={settingsInitialCategory}
+          onNavigate={workspace.openSettings}
           onConnectionsChanged={handleConnectionsChanged}
         />
       )}
@@ -4344,22 +4264,36 @@ const Browser: React.FC = () => {
       {useCompactLayout && (
         <MobileSettingsDrawer
           open={mobileSettingsOpen}
-          onClose={() => {
-            setMobileSettingsOpen(false);
-            setMobileSettingsInitialView("main");
-          }}
+          onClose={handleSettingsClose}
           onConnectionsChanged={handleConnectionsChanged}
           initialView={mobileSettingsInitialView}
+          view={mobileSettingsInitialView}
+          onNavigate={workspace.openSettings}
+          onBack={workspace.backSettings}
         />
       )}
       {/* Viewer overlay — full-screen, from whichever pane opened it */}
+      {viewerLeaveGuard ? <WorkspaceNavigationGuard guard={viewerLeaveGuard} /> : null}
+      {workspace.viewerError && currentRoute.viewer ? (
+        <ViewerFallbackDialog
+          mode="failed"
+          path={currentRoute.viewer.file.path}
+          error={workspace.viewerError}
+          onClose={workspace.closeViewer}
+          onRetry={workspace.retryViewer}
+        />
+      ) : null}
+      {workspace.viewerLoading && currentRoute.viewer ? (
+        <ViewerFallbackDialog mode="loading" path={currentRoute.viewer.file.path} onClose={workspace.closeViewer} />
+      ) : null}
       {leftPane.viewInfo && (
         <DynamicViewer
           connectionId={leftPane.viewInfo.connectionId ?? leftPane.connectionId}
-          isReadOnly={isConnectionReadOnly(leftPaneConnection)}
+          isReadOnly={isConnectionReadOnly(getConnectionById(allConnections, leftPane.viewInfo.connectionId ?? leftPane.connectionId))}
           viewInfo={leftPane.viewInfo}
-          onClose={leftPane.handleViewClose}
-          onIndexChange={leftPane.handleViewIndexChange}
+          navigation={{ mode: currentRoute.viewer?.mode ?? "view", onModeChange: workspace.changeMode, onGuardChange: setViewerLeaveGuard }}
+          onClose={workspace.closeViewer}
+          onIndexChange={(index) => workspace.changeImage("left", index)}
           hasMoreItems={leftPane.viewInfo.virtualSource ? leftPane.archiveHasMore : false}
           isLoadingMoreItems={leftPane.viewInfo.virtualSource ? leftPane.archiveLoadingMore : false}
           onLoadMoreItems={leftPane.viewInfo.virtualSource ? leftPane.loadMoreArchive : undefined}
@@ -4369,10 +4303,11 @@ const Browser: React.FC = () => {
       {rightPane.viewInfo && !leftPane.viewInfo && (
         <DynamicViewer
           connectionId={rightPane.viewInfo.connectionId ?? rightPane.connectionId}
-          isReadOnly={isConnectionReadOnly(rightPaneConnection)}
+          isReadOnly={isConnectionReadOnly(getConnectionById(allConnections, rightPane.viewInfo.connectionId ?? rightPane.connectionId))}
           viewInfo={rightPane.viewInfo}
-          onClose={rightPane.handleViewClose}
-          onIndexChange={rightPane.handleViewIndexChange}
+          navigation={{ mode: currentRoute.viewer?.mode ?? "view", onModeChange: workspace.changeMode, onGuardChange: setViewerLeaveGuard }}
+          onClose={workspace.closeViewer}
+          onIndexChange={(index) => workspace.changeImage("right", index)}
           hasMoreItems={rightPane.viewInfo.virtualSource ? rightPane.archiveHasMore : false}
           isLoadingMoreItems={rightPane.viewInfo.virtualSource ? rightPane.archiveLoadingMore : false}
           onLoadMoreItems={rightPane.viewInfo.virtualSource ? rightPane.loadMoreArchive : undefined}

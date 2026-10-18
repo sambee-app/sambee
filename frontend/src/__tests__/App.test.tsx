@@ -7,9 +7,8 @@ vi.mock("react-router-dom", async (importOriginal) => {
 
   return {
     ...actual,
-    BrowserRouter: ({ children }: { children: React.ReactNode }) => (
-      <actual.MemoryRouter initialEntries={["/browse"]}>{children}</actual.MemoryRouter>
-    ),
+    createBrowserRouter: (routes: Parameters<typeof actual.createMemoryRouter>[0]) =>
+      actual.createMemoryRouter(routes, { initialEntries: ["/browse"] }),
   };
 });
 

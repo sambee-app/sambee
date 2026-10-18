@@ -44,6 +44,7 @@ import {
 } from "@mui/material";
 import { startTransition, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
 import DeleteDialog from "../components/Admin/DeleteDialog";
 import { adminDialogActionButtonSx, adminDialogEndActionRowSx } from "../components/Admin/dialogActionStyles";
 import { CompactBadge as Chip } from "../components/CompactBadge";
@@ -523,6 +524,20 @@ function toDirectorySearch(query: DirectoryQueryState): string {
   return params.toString();
 }
 
+const DIRECTORY_QUERY_KEYS = [
+  "q",
+  "role",
+  "state",
+  "auth",
+  "oidc_state",
+  "role_source",
+  "expiration",
+  "sort",
+  "direction",
+  "page",
+  "page_size",
+];
+
 function DirectoryFilterSelect<T extends string>({
   label,
   options,
@@ -614,10 +629,12 @@ function DirectoryColumnHeader({
 }
 
 export function UserManagementSettings({ dialogSafeHeader = false }: UserManagementSettingsProps) {
+  const location = useLocation();
+  const navigate = useNavigate();
   const { t } = useTranslation();
   const theme = useTheme();
   const usesDesktopFormLayout = useMediaQuery(theme.breakpoints.up("md"));
-  const [directoryQuery, setDirectoryQuery] = useState<DirectoryQueryState>(() => getDirectoryQueryFromLocation(window.location.search));
+  const directoryQuery = useMemo(() => getDirectoryQueryFromLocation(location.search), [location.search]);
   const [searchInput, setSearchInput] = useState(directoryQuery.q);
   const [filterAnchor, setFilterAnchor] = useState<HTMLElement | null>(null);
   const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
@@ -645,36 +662,26 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
   const showNotification = useCallback((message: string, severity: "success" | "error" | "info") => {
     setNotification({ open: true, message, severity });
   }, []);
-  const updateDirectoryQuery = useCallback((update: Partial<DirectoryQueryState>, resetPage = true) => {
-    setDirectoryQuery((current) => {
-      const nextQuery = {
-        ...current,
-        ...update,
-        page: resetPage ? 1 : (update.page ?? current.page),
-      };
-      const nextSearch = toDirectorySearch(nextQuery);
-      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
-      window.history.pushState(null, "", nextUrl);
-      return nextQuery;
-    });
-  }, []);
-  const replaceDirectoryQuery = useCallback((update: Partial<DirectoryQueryState>) => {
-    setDirectoryQuery((current) => {
-      const nextQuery = { ...current, ...update, page: 1 };
-      const nextSearch = toDirectorySearch(nextQuery);
-      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
-      window.history.replaceState(null, "", nextUrl);
-      return nextQuery;
-    });
-  }, []);
+  const updateDirectoryQuery = useCallback(
+    (update: Partial<DirectoryQueryState>, resetPage = true, replace = false) => {
+      const nextQuery = { ...directoryQuery, ...update, page: resetPage ? 1 : (update.page ?? directoryQuery.page) };
+      const search = new URLSearchParams(location.search);
+      for (const key of DIRECTORY_QUERY_KEYS) search.delete(key);
+      for (const [key, value] of new URLSearchParams(toDirectorySearch(nextQuery))) search.append(key, value);
+      if (search.toString() === new URLSearchParams(location.search).toString()) return;
+      void navigate({ pathname: location.pathname, search: search.toString(), hash: location.hash }, { replace, state: location.state });
+    },
+    [directoryQuery, location, navigate]
+  );
+  const replaceDirectoryQuery = useCallback(
+    (update: Partial<DirectoryQueryState>) => {
+      updateDirectoryQuery({ ...update, page: 1 }, false, true);
+    },
+    [updateDirectoryQuery]
+  );
   const directoryRequest = useMemo(() => toAdminUserListQuery(directoryQuery), [directoryQuery]);
   const loadDirectoryData = useCallback(() => loadUserManagementDirectoryData(directoryRequest), [directoryRequest]);
   const directoryCacheKey = useMemo(() => getUserManagementSettingsDataCacheKey(directoryRequest), [directoryRequest]);
-  useEffect(() => {
-    const handlePopState = () => setDirectoryQuery(getDirectoryQueryFromLocation(window.location.search));
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
   useEffect(() => {
     setSearchInput(directoryQuery.q);
   }, [directoryQuery.q]);

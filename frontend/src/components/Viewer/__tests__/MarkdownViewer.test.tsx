@@ -2,7 +2,9 @@ import type { ViewUpdate } from "@codemirror/view";
 import { act, configure, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, type ReactNode, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type ViewerLeaveGuard, WorkspaceNavigationGuard } from "../../../hooks/useRoutedViewerEditing";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
 import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
@@ -20,6 +22,33 @@ function ContentProviderTestWrapper({ children }: { children: ReactNode }) {
 
 function render(ui: ReactNode) {
   return renderBase(ui, { wrapper: ContentProviderTestWrapper });
+}
+
+function RoutedMarkdownViewer() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [guard, setGuard] = useState<ViewerLeaveGuard | null>(null);
+  return (
+    <>
+      {guard ? <WorkspaceNavigationGuard guard={guard} /> : null}
+      <MarkdownViewer
+        connectionId="conn1"
+        path="/docs/readme.md"
+        onClose={() => void navigate("/browse")}
+        navigation={{
+          mode: new URLSearchParams(location.search).get("mode") === "edit" ? "edit" : "view",
+          onGuardChange: setGuard,
+          onModeChange: (mode, replace) => {
+            const search = new URLSearchParams(location.search);
+            if (mode === "edit") search.set("mode", "edit");
+            else search.delete("mode");
+            if (search.toString() !== new URLSearchParams(location.search).toString())
+              void navigate({ search: search.toString() }, { replace });
+          },
+        }}
+      />
+    </>
+  );
 }
 
 const { mockLoadMarkdownRichEditor } = vi.hoisted(() => ({
@@ -576,6 +605,37 @@ describe("MarkdownViewer", () => {
       </SambeeThemeProvider>
     );
   }
+
+  it("opens an edit bookmark and guards dirty Back with Cancel and Discard", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    const release = vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    const router = createMemoryRouter(
+      [
+        { path: "/browse", element: <div>Files</div> },
+        { path: "/viewer", element: <RoutedMarkdownViewer /> },
+      ],
+      { initialEntries: ["/browse", "/viewer?file=smb%2Fdemo%2Fdocs%2Freadme.md&viewer=markdown&mode=edit"] }
+    );
+    render(
+      <SambeeThemeProvider>
+        <RouterProvider router={router} />
+      </SambeeThemeProvider>
+    );
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Unsaved\n" } });
+    await act(() => router.navigate(-1));
+    let dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(router.state.location.pathname).toBe("/viewer");
+    expect(editor).toHaveValue("# Unsaved\n");
+    expect(release).not.toHaveBeenCalled();
+    await act(() => router.navigate(-1));
+    dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    expect(await screen.findByText("Files")).toBeInTheDocument();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
 
   it("does not expose markdown edit mode for read-only connections", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");

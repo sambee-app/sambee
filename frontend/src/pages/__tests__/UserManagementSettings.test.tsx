@@ -1,5 +1,7 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearCachedAsyncData,
@@ -11,6 +13,13 @@ import { setRegionalLocalePreference } from "../../i18n";
 import { SambeeThemeProvider } from "../../theme";
 import type { AdminUserCreateResult, AdminUserPasswordResetResult } from "../../types";
 import { USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY, UserManagementSettings } from "../UserManagementSettings";
+
+let testRouter: ReturnType<typeof createMemoryRouter>;
+const render = (ui: ReactNode) => {
+  const url = new URL(document.URL);
+  testRouter = createMemoryRouter([{ path: "*", element: ui }], { initialEntries: [url.pathname + url.search] });
+  return renderBase(<RouterProvider router={testRouter} />);
+};
 
 vi.mock("../../services/api", () => ({
   default: {
@@ -1086,15 +1095,15 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByText("admin (you)", { exact: true });
-      await user.click(screen.getByRole("button", { name: "Filters" }));
+      await user.click(await screen.findByRole("button", { name: "Filters", exact: true }));
 
       expect(screen.queryByRole("combobox", { name: "OIDC state" })).not.toBeInTheDocument();
       expect(screen.queryByRole("combobox", { name: "Role source" })).not.toBeInTheDocument();
       expect(screen.queryByText("Last OIDC sign-in", { exact: true })).not.toBeInTheDocument();
       expect(screen.queryByText(/OIDC setup pending/)).not.toBeInTheDocument();
-      expect(window.location.search).not.toContain("auth=oidc");
-      expect(window.location.search).not.toContain("oidc_state");
-      expect(window.location.search).not.toContain("role_source");
+      expect(testRouter.state.location.search).not.toContain("auth=oidc");
+      expect(testRouter.state.location.search).not.toContain("oidc_state");
+      expect(testRouter.state.location.search).not.toContain("role_source");
 
       await user.keyboard("{Escape}");
       await openUserActions(user, "admin");

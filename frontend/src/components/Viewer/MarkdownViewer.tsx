@@ -23,6 +23,7 @@ import {
 } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useRoutedViewerEditing } from "../../hooks/useRoutedViewerEditing";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   beginViewerTextEdit,
@@ -173,7 +174,7 @@ function withOpacity(color: string, opacity: number): string {
   return color;
 }
 
-type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit";
+type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit" | "navigate";
 type MarkdownSearchCloseReason = "escape" | "toggle";
 type EditorModuleLoadState = "idle" | "loading" | "loaded" | "failed";
 
@@ -196,6 +197,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   onClose,
   isReadOnly: connectionIsReadOnly = false,
   virtualSource,
+  navigation,
 }) => {
   const isReadOnly = connectionIsReadOnly || virtualSource !== undefined;
   const contentProviders = useContentProviderRegistry();
@@ -214,6 +216,8 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const [showEditorHelp, setShowEditorHelp] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAcquiring, setIsAcquiring] = useState(false);
+  const editActivation = useRef(0);
   const [editSession, setEditSession] = useState<ContentEditSession | null>(null);
   const [viewerSearchText, setViewerSearchText] = useState("");
   const [editorSearchCaseSensitive, setEditorSearchCaseSensitive] = useState(false);
@@ -611,22 +615,19 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     ) : null;
 
   const releaseEditSession = useCallback(async () => {
-    if (!editSession) {
+    const session = editSessionRef.current;
+    if (!session) {
       return;
     }
-
+    editSessionRef.current = null;
     try {
-      await editSession.release();
+      await session.release();
     } catch (err) {
       logError("Failed to release markdown edit lock", { error: err, path, connectionId });
     } finally {
       setEditSession(null);
     }
-  }, [connectionId, editSession, path]);
-
-  useEffect(() => {
-    editSessionRef.current = editSession;
-  }, [editSession]);
+  }, [connectionId, path]);
 
   useEffect(() => {
     if (!isEditing || !editSession) {
@@ -646,6 +647,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   useEffect(() => {
     return () => {
+      editActivation.current += 1;
       if (editSessionRef.current) {
         void editSessionRef.current.release().catch((err) => {
           logError("Failed to release markdown edit lock during cleanup", { error: err, path, connectionId });
@@ -782,16 +784,24 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   const handleEnterEditMode = useCallback(
     async (initialDraft = content): Promise<boolean> => {
+      if (editSessionRef.current || isAcquiring) return Boolean(editSessionRef.current);
       if (isReadOnly || loading || error) {
         return false;
       }
 
       setEditError(null);
       setEditorLoadError(null);
+      const activation = ++editActivation.current;
+      setIsAcquiring(true);
 
       try {
         const editResult = await beginViewerTextEdit(connectionId, path, contentProviders);
         if (editResult.kind !== "acquired") throw new Error(`Editing is ${editResult.kind}`);
+        if (activation !== editActivation.current) {
+          await editResult.session.release();
+          return false;
+        }
+        editSessionRef.current = editResult.session;
         setEditSession(editResult.session);
 
         setDraftContent(normalizeMarkdownTableCellLineBreaks(initialDraft));
@@ -811,12 +821,15 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         setEditorFailed(false);
         setEditorBoundaryKey((previousKey) => previousKey + 1);
         setIsEditing(true);
+        navigation?.onModeChange("edit");
         return true;
       } catch (err) {
         const message = getApiErrorMessage(err, t("viewer.edit.lockFailedReason"), { includeOriginalMessage: true });
         setEditError(t("viewer.edit.lockFailed", { message }));
         logError("Failed to enter markdown edit mode", { error: err, path, connectionId });
         return false;
+      } finally {
+        setIsAcquiring(false);
       }
     },
     [
@@ -828,6 +841,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       EditorComponent,
       error,
       isReadOnly,
+      isAcquiring,
       loading,
       markEditSessionPristine,
       path,
@@ -835,6 +849,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       setEditBaselineContent,
       t,
       viewerSearchText,
+      navigation,
     ]
   );
 
@@ -855,6 +870,24 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       .finally(() => setIsResumingRecoveryDraft(false));
   }, [handleEnterEditMode, isResumingRecoveryDraft, recoveryDraft]);
 
+  const routedEditing = useRoutedViewerEditing({
+    navigation,
+    isEditing,
+    isSaving,
+    isAcquiring,
+    loading,
+    dirty: hasUnsavedChanges,
+    enterEdit: handleEnterEditMode,
+    exitEdit: exitEditMode,
+    cancelAcquisition: () => {
+      editActivation.current += 1;
+    },
+    requestUnsavedChanges: () => {
+      preserveMarkdownEditorSelection(editorRef);
+      setPendingUnsavedChangesAction("navigate");
+    },
+  });
+
   const handleDiscardRecoveryDraft = useCallback(() => {
     clearDraft(connectionId, path, "markdown");
     setDraftContent(content);
@@ -864,6 +897,10 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   }, [connectionId, content, path, setEditBaselineContent]);
 
   const handleCancelEdit = useCallback(async () => {
+    if (navigation) {
+      navigation.onModeChange("view");
+      return;
+    }
     if (hasUnsavedChanges) {
       preserveMarkdownEditorSelection(editorRef);
       setPendingUnsavedChangesAction("cancel-edit");
@@ -871,7 +908,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     }
 
     await exitEditMode();
-  }, [exitEditMode, hasUnsavedChanges]);
+  }, [exitEditMode, hasUnsavedChanges, navigation]);
 
   const persistDraft = useCallback(
     async (afterSave: PendingUnsavedChangesAction = "stay-edit") => {
@@ -989,8 +1026,9 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   }, [closeViewer, handleCancelEdit, isEditing]);
 
   const handleUnsavedChangesDialogClose = useCallback(() => {
+    routedEditing.cancelNavigation();
     setPendingUnsavedChangesAction(null);
-  }, []);
+  }, [routedEditing]);
 
   useEffect(() => {
     if (!unsavedChangesDialogOpen) {
@@ -1042,16 +1080,19 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       clearDraft(connectionId, path, "markdown");
     }
 
-    await exitEditMode();
-  }, [connectionId, exitEditMode, path, resumedRecoveryDraft]);
+    if (pendingUnsavedChangesAction === "navigate") await routedEditing.completeNavigation();
+    else await exitEditMode();
+  }, [connectionId, exitEditMode, path, resumedRecoveryDraft, pendingUnsavedChangesAction, routedEditing]);
 
   const handleUnsavedChangesSave = useCallback(async () => {
     if (!pendingUnsavedChangesAction) {
       return;
     }
 
-    await persistDraft(pendingUnsavedChangesAction);
-  }, [pendingUnsavedChangesAction, persistDraft]);
+    if (pendingUnsavedChangesAction === "navigate") {
+      if (await persistDraft("stay-edit")) await routedEditing.completeNavigation();
+    } else await persistDraft(pendingUnsavedChangesAction);
+  }, [pendingUnsavedChangesAction, persistDraft, routedEditing]);
 
   // Toggle fullscreen mode
   const handleToggleFullscreen = useCallback(() => {

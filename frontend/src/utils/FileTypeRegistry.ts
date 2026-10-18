@@ -9,6 +9,7 @@
  */
 
 import type React from "react";
+import type { ViewerNavigation } from "../hooks/useRoutedViewerEditing";
 import type { VirtualItemHandle } from "../pages/FileBrowser/contentProviders";
 import { logger } from "../services/logger";
 
@@ -32,6 +33,7 @@ export interface ViewerComponentProps {
   currentIndex?: number;
   onCurrentIndexChange?: (index: number) => void;
   sessionId?: string;
+  navigation?: ViewerNavigation;
 }
 
 export type ViewerComponent = React.ComponentType<ViewerComponentProps>;

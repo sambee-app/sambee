@@ -571,7 +571,9 @@ describe("Login Component", () => {
     render(<Login />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/did not supply required account information/i);
-    expect(replaceState).toHaveBeenCalledWith(null, "", window.location.pathname + window.location.search);
+    expect(
+      replaceState.mock.calls.some(([state, , url]) => typeof state?.idx === "number" && typeof url === "string" && !url.includes("error="))
+    ).toBe(true);
   });
 
   it("shows a provider failure alongside password login in mixed mode", async () => {

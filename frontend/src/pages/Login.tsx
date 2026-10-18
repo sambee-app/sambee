@@ -1,9 +1,10 @@
 import { Alert, Box, Button, Container, Divider, Paper, TextField, Typography } from "@mui/material";
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { SettingsPasswordVisibilityToggle } from "../components/Settings/SettingsPasswordVisibilityToggle";
+import { useRemoveLocationFragment } from "../hooks/useRemoveLocationFragment";
 import { login } from "../services/api";
 import { type AuthConfig, getAuthConfig } from "../services/authConfig";
 import { authSession } from "../services/authSession";
@@ -42,6 +43,7 @@ const oidcErrorFromFragment = (): string => {
 const Login: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const removeLocationFragment = useEffectEvent(useRemoveLocationFragment());
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -63,7 +65,7 @@ const Login: React.FC = () => {
 
   useEffect(() => {
     if (oidcErrorFromFragment()) {
-      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      removeLocationFragment(["error"]);
     }
   }, []);
 

@@ -30,6 +30,8 @@ interface SettingsDialogProps {
   onClose: () => void;
   /** Initial category to show when dialog opens */
   initialCategory?: SettingsCategory;
+  category?: SettingsCategory;
+  onNavigate?: (item: SettingsNavItem) => void;
   /** Callback when connections are added, updated, or deleted */
   onConnectionsChanged?: () => void;
 }
@@ -46,8 +48,12 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   onClose,
   initialCategory = DEFAULT_SETTINGS_CATEGORY,
   onConnectionsChanged,
+  category,
+  onNavigate,
 }) => {
-  const [selectedItem, setSelectedItem] = useState<SettingsNavItem>(initialCategory);
+  const [localSelectedItem, setLocalSelectedItem] = useState<SettingsNavItem>(initialCategory);
+  const selectedItem = category ?? localSelectedItem;
+  const setSelectedItem = onNavigate ?? setLocalSelectedItem;
   const { isAdmin, canWrite } = useSettingsAccess(open);
   const { t } = useTranslation();
 
@@ -101,7 +107,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
         }
       }
     },
-    [availableItems, focusCategoryButton, selectedItem]
+    [availableItems, focusCategoryButton, selectedItem, setSelectedItem]
   );
 
   useEffect(() => {
@@ -112,10 +118,10 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
 
   // Set category when dialog opens (use initialCategory prop)
   useEffect(() => {
-    if (open) {
-      setSelectedItem(availableItems.includes(initialCategory) ? initialCategory : (availableItems[0] ?? DEFAULT_SETTINGS_CATEGORY));
+    if (open && category === undefined) {
+      setLocalSelectedItem(availableItems.includes(initialCategory) ? initialCategory : (availableItems[0] ?? DEFAULT_SETTINGS_CATEGORY));
     }
-  }, [availableItems, initialCategory, open]);
+  }, [availableItems, initialCategory, open, category]);
 
   // Focus the initial category button when dialog opens
   useEffect(() => {

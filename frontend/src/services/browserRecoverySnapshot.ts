@@ -1,3 +1,4 @@
+import { buildBrowseRouteTarget, parseBrowseRoute } from "../pages/FileBrowser/routing";
 import type { ArchiveLocation, FileBrowserPaneRecoverySnapshot, PaneId, PaneMode } from "../pages/FileBrowser/types";
 import type { Connection } from "../types";
 
@@ -69,7 +70,7 @@ export function saveBrowserRecoverySnapshot(snapshot: BrowserRecoverySnapshot): 
   }
 }
 
-export function loadBrowserRecoverySnapshot(): BrowserRecoverySnapshot | null {
+export function loadBrowserRecoverySnapshot(routeUrl?: string): BrowserRecoverySnapshot | null {
   try {
     const raw = sessionStorage.getItem(BROWSER_RECOVERY_SNAPSHOT_KEY);
     if (!raw) {
@@ -87,7 +88,28 @@ export function loadBrowserRecoverySnapshot(): BrowserRecoverySnapshot | null {
       return null;
     }
 
-    return parsed;
+    if (!routeUrl) return parsed;
+    const url = new URL(routeUrl, "http://localhost");
+    const match = /^\/browse\/(smb|local)\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
+    if (!match) return null;
+    const route = parseBrowseRoute({ targetType: match[1], targetId: match[2], path: match[3], searchParams: url.searchParams });
+    const matchPane = (pane: FileBrowserPaneRecoverySnapshot | null, target: typeof route.left) => {
+      if (!pane || !target) return null;
+      const archive = pane.archiveLocation;
+      const cached = buildBrowseRouteTarget(
+        pane.connectionId,
+        pane.path,
+        parsed.connections,
+        archive ? { providerId: archive.providerId, sourcePath: archive.archivePath, virtualPath: archive.virtualPath } : null
+      );
+      return cached?.kind === target.kind && cached.targetId === target.targetId && cached.path === target.path
+        ? { ...pane, viewInfo: null }
+        : null;
+    };
+    const left = matchPane(parsed.left, route.left);
+    const right = matchPane(parsed.right, route.right);
+    if (!left && !right) return null;
+    return { ...parsed, routeUrl, left, right, paneMode: route.right ? "dual" : "single", activePaneId: route.activePaneId };
   } catch {
     clearBrowserRecoverySnapshot();
     return null;

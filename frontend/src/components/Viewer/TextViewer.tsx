@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { BROWSER_SHORTCUTS, CODEMIRROR_EDITOR_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useRoutedViewerEditing } from "../../hooks/useRoutedViewerEditing";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   beginViewerTextEdit,
@@ -43,7 +44,7 @@ import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge } fr
 import { downloadViewerBlob } from "./viewerContent";
 import { createEditToolbarAction, createSaveToolbarAction } from "./viewerToolbarActions";
 
-type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit";
+type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit" | "navigate";
 type TextSearchCloseReason = "escape" | "toggle";
 
 const DRAFT_SNAPSHOT_DEBOUNCE_MS = 250;
@@ -112,6 +113,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   onClose,
   isReadOnly: connectionIsReadOnly = false,
   virtualSource,
+  navigation,
 }) => {
   const isReadOnly = connectionIsReadOnly || virtualSource !== undefined;
   const contentProviders = useContentProviderRegistry();
@@ -130,6 +132,8 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const [showEditorHelp, setShowEditorHelp] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAcquiring, setIsAcquiring] = useState(false);
+  const editActivation = useRef(0);
   const [editSession, setEditSession] = useState<ContentEditSession | null>(null);
   const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
   const [searchFocusTarget, setSearchFocusTarget] = useState<"find" | "replace" | null>(null);
@@ -354,22 +358,19 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   }, [connectionId, draftContent, path]);
 
   const releaseEditSession = useCallback(async () => {
-    if (!editSession) {
+    const session = editSessionRef.current;
+    if (!session) {
       return;
     }
-
+    editSessionRef.current = null;
     try {
-      await editSession.release();
+      await session.release();
     } catch (err) {
       logError("Failed to release text edit lock", { error: err, path, connectionId });
     } finally {
       setEditSession(null);
     }
-  }, [connectionId, editSession, path]);
-
-  useEffect(() => {
-    editSessionRef.current = editSession;
-  }, [editSession]);
+  }, [connectionId, path]);
 
   useEffect(() => {
     if (!isEditing || !editSession) {
@@ -389,6 +390,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
 
   useEffect(() => {
     return () => {
+      editActivation.current += 1;
       if (editSessionRef.current) {
         void editSessionRef.current.release().catch((err) => {
           logError("Failed to release text edit lock during cleanup", { error: err, path, connectionId });
@@ -458,15 +460,23 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
 
   const handleEnterEditMode = useCallback(
     async (initialDraft = content): Promise<boolean> => {
+      if (editSessionRef.current || isAcquiring) return Boolean(editSessionRef.current);
       if (isReadOnly || loading || error || exceedsEditorLimit) {
         return false;
       }
 
       setEditError(null);
+      const activation = ++editActivation.current;
+      setIsAcquiring(true);
 
       try {
         const editResult = await beginViewerTextEdit(connectionId, path, contentProviders);
         if (editResult.kind !== "acquired") throw new Error(`Editing is ${editResult.kind}`);
+        if (activation !== editActivation.current) {
+          await editResult.session.release();
+          return false;
+        }
+        editSessionRef.current = editResult.session;
         setEditSession(editResult.session);
 
         setDraftContent(initialDraft);
@@ -477,12 +487,15 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         setSearchAutoNavigate(true);
         setEditorBoundaryKey((previousKey) => previousKey + 1);
         setIsEditing(true);
+        navigation?.onModeChange("edit");
         return true;
       } catch (err) {
         const message = getApiErrorMessage(err, t("viewer.text.lockFailedReason"), { includeOriginalMessage: true });
         setEditError(t("viewer.text.lockFailed", { message }));
         logError("Failed to enter text edit mode", { error: err, path, connectionId });
         return false;
+      } finally {
+        setIsAcquiring(false);
       }
     },
     [
@@ -494,13 +507,33 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       error,
       exceedsEditorLimit,
       isReadOnly,
+      isAcquiring,
       loading,
       markEditSessionPristine,
       path,
       setEditBaselineContent,
       t,
+      navigation,
     ]
   );
+
+  const routedEditing = useRoutedViewerEditing({
+    navigation,
+    isEditing,
+    isSaving,
+    isAcquiring,
+    loading,
+    dirty: hasUnsavedChanges,
+    enterEdit: handleEnterEditMode,
+    exitEdit: exitEditMode,
+    cancelAcquisition: () => {
+      editActivation.current += 1;
+    },
+    requestUnsavedChanges: () => {
+      preserveTextEditorSelection(editorRef);
+      setPendingUnsavedChangesAction("navigate");
+    },
+  });
 
   const handleResumeRecoveryDraft = useCallback(() => {
     const recoveredDraft = recoveryDraft;
@@ -528,6 +561,10 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   }, [connectionId, content, path, setEditBaselineContent]);
 
   const handleCancelEdit = useCallback(async () => {
+    if (navigation) {
+      navigation.onModeChange("view");
+      return;
+    }
     if (hasUnsavedChanges) {
       preserveTextEditorSelection(editorRef);
       setPendingUnsavedChangesAction("cancel-edit");
@@ -535,7 +572,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     }
 
     await exitEditMode();
-  }, [exitEditMode, hasUnsavedChanges]);
+  }, [exitEditMode, hasUnsavedChanges, navigation]);
 
   const persistDraft = useCallback(
     async (afterSave: PendingUnsavedChangesAction = "stay-edit") => {
@@ -1227,6 +1264,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       <ResponsiveDialogShell
         open={unsavedChangesDialogOpen}
         onClose={() => {
+          routedEditing.cancelNavigation();
           setPendingUnsavedChangesAction(null);
         }}
         title={t("viewer.edit.unsavedChangesTitle")}
@@ -1239,7 +1277,10 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
           <>
             <Button
               ref={unsavedChangesCancelButtonRef}
-              onClick={() => setPendingUnsavedChangesAction(null)}
+              onClick={() => {
+                routedEditing.cancelNavigation();
+                setPendingUnsavedChangesAction(null);
+              }}
               disabled={isSaving}
               autoFocus
               variant="outlined"
@@ -1252,7 +1293,8 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
                 if (resumedRecoveryDraft) {
                   clearDraft(connectionId, path, "text");
                 }
-                void exitEditMode();
+                if (pendingUnsavedChangesAction === "navigate") void routedEditing.completeNavigation();
+                else void exitEditMode();
               }}
               disabled={isSaving}
               color="error"
@@ -1263,7 +1305,11 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
             <Button
               onClick={() => {
                 if (pendingUnsavedChangesAction) {
-                  void persistDraft(pendingUnsavedChangesAction);
+                  if (pendingUnsavedChangesAction === "navigate") {
+                    void persistDraft("stay-edit").then((saved) => {
+                      if (saved) void routedEditing.completeNavigation();
+                    });
+                  } else void persistDraft(pendingUnsavedChangesAction);
                 }
               }}
               disabled={isSaving}

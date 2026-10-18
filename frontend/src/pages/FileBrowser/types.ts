@@ -187,6 +187,7 @@ export interface UseFileBrowserPaneConfig {
 
   /** Called when an incoming route resolves to a canonical existing location. */
   onResolveRouteLocation?: (path: string, archiveLocation: ArchiveLocation | null) => void;
+  onOpenViewer?: (info: ViewInfo) => void;
 }
 
 /** Everything returned by useFileBrowserPane for use by the parent and pane component. */

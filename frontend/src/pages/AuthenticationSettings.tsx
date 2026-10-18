@@ -18,7 +18,7 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { adminDialogActionButtonSx, adminDialogEndActionRowSx } from "../components/Admin/dialogActionStyles";
 import { DialogNotice } from "../components/Dialog/DialogNotice";
@@ -42,6 +42,7 @@ import { SettingsSelectMenuItem } from "../components/Settings/SettingsSelectMen
 import { settingsPrimaryButtonSx, settingsUtilityButtonSx } from "../components/Settings/settingsButtonStyles";
 import { loadAuthenticationSettingsData, SETTINGS_DATA_CACHE_KEYS } from "../components/Settings/settingsDataSources";
 import { clearCachedAsyncData, getCachedAsyncData, primeCachedAsyncData } from "../hooks/useCachedAsyncData";
+import { useRemoveLocationFragment } from "../hooks/useRemoveLocationFragment";
 import api from "../services/api";
 import { clearAuthConfigCache } from "../services/authConfig";
 import { authSession } from "../services/authSession";
@@ -293,6 +294,7 @@ const mappingReviewFor = (identity: OidcTestedIdentity) =>
 
 export function AuthenticationSettings() {
   const navigate = useNavigate();
+  const removeLocationFragment = useEffectEvent(useRemoveLocationFragment());
   const theme = useTheme();
   const usesDesktopFormLayout = useMediaQuery(theme.breakpoints.up("md"));
   const formFieldSize = usesDesktopFormLayout ? "small" : "medium";
@@ -478,7 +480,7 @@ export function AuthenticationSettings() {
       const fragmentFlowId = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("flow");
       if (fragmentFlowId) {
         sessionStorage.setItem(OIDC_SETUP_FLOW_STORAGE_KEY, fragmentFlowId);
-        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        removeLocationFragment(["flow"]);
       }
       const pendingFinalization = storedPendingFinalization();
       if (pendingFinalization) {

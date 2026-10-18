@@ -1,7 +1,20 @@
 import CloseIcon from "@mui/icons-material/Close";
-import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  LinearProgress,
+  Stack,
+  Typography,
+} from "@mui/material";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { ViewerNavigation } from "../../hooks/useRoutedViewerEditing";
 import { translate } from "../../i18n";
 import {
   type ContentProviderRegistry,
@@ -33,6 +46,7 @@ interface DynamicViewerProps {
   isLoadingMoreItems?: boolean;
   onLoadMoreItems?: () => void;
   contentProviders: ContentProviderRegistry;
+  navigation?: ViewerNavigation;
 }
 
 type DynamicViewerLoadState =
@@ -57,14 +71,14 @@ function getViewerLoadFailureMessage(error: unknown): string {
 }
 
 interface ViewerFallbackDialogProps {
-  mode: "unsupported" | "failed";
+  mode: "unsupported" | "failed" | "loading";
   path: string;
   error?: unknown;
   onClose: () => void;
   onRetry?: () => void;
 }
 
-function ViewerFallbackDialog({ mode, path, error, onClose, onRetry }: ViewerFallbackDialogProps) {
+export function ViewerFallbackDialog({ mode, path, error, onClose, onRetry }: ViewerFallbackDialogProps) {
   const { t } = useTranslation();
   const filename = path.split("/").pop() || path;
   const message = mode === "failed" ? getViewerLoadFailureMessage(error) : t("viewer.fallback.unsupportedMessage");
@@ -72,7 +86,11 @@ function ViewerFallbackDialog({ mode, path, error, onClose, onRetry }: ViewerFal
   return (
     <Dialog open={true} onClose={onClose} fullScreen disableRestoreFocus aria-labelledby="viewer-fallback-title">
       <DialogTitle id="viewer-fallback-title" sx={{ pr: 7 }}>
-        {mode === "failed" ? t("viewer.fallback.failedTitle") : t("viewer.fallback.unsupportedTitle")}
+        {mode === "loading"
+          ? t("common.status.loading")
+          : mode === "failed"
+            ? t("viewer.fallback.failedTitle")
+            : t("viewer.fallback.unsupportedTitle")}
         <IconButton
           aria-label={t("viewer.fallback.closeAriaLabel")}
           onClick={onClose}
@@ -85,7 +103,7 @@ function ViewerFallbackDialog({ mode, path, error, onClose, onRetry }: ViewerFal
       <DialogContent>
         <Stack spacing={2} sx={{ maxWidth: 640, pt: 1 }}>
           <Typography variant="h6">{filename}</Typography>
-          <Alert severity={mode === "failed" ? "warning" : "info"}>{message}</Alert>
+          {mode === "loading" ? <LinearProgress /> : <Alert severity={mode === "failed" ? "warning" : "info"}>{message}</Alert>}
           <Box>
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
               {t("viewer.fallback.stillAvailable")}
@@ -117,6 +135,7 @@ export const DynamicViewer = memo(function DynamicViewer({
   isLoadingMoreItems = false,
   onLoadMoreItems,
   contentProviders,
+  navigation,
 }: DynamicViewerProps) {
   const [loadState, setLoadState] = useState<DynamicViewerLoadState>({ status: "loading" });
   const [retryToken, setRetryToken] = useState(0);
@@ -222,7 +241,7 @@ export const DynamicViewer = memo(function DynamicViewer({
       },
       "viewer"
     );
-    return null;
+    return <ViewerFallbackDialog mode="loading" path={viewInfo.path} onClose={onClose} />;
   }
 
   const ViewerComponent = loadState.component;
@@ -230,6 +249,7 @@ export const DynamicViewer = memo(function DynamicViewer({
   return (
     <ContentProviderRegistryContext.Provider value={contentProviders}>
       <ViewerComponent
+        key={viewInfo.viewerId === "text" || viewInfo.viewerId === "markdown" ? `${connectionId}:${viewInfo.path}` : undefined}
         connectionId={connectionId}
         path={viewInfo.path}
         fileSize={viewInfo.fileSize}
@@ -244,6 +264,7 @@ export const DynamicViewer = memo(function DynamicViewer({
         currentIndex={viewInfo.currentIndex}
         onCurrentIndexChange={onIndexChange}
         sessionId={viewInfo.sessionId}
+        navigation={navigation}
       />
     </ContentProviderRegistryContext.Provider>
   );

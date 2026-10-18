@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import type { MockedObject } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import apiService from "../../services/api";
@@ -24,8 +24,23 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
       if (mimeType?.startsWith("image/")) {
         return Promise.resolve({
           status: "loaded",
-          component: function ImageView() {
-            return <div data-testid="image-view">Image View</div>;
+          component: function ImageView({
+            path,
+            currentIndex = 0,
+            onCurrentIndexChange,
+          }: {
+            path: string;
+            currentIndex?: number;
+            onCurrentIndexChange?: (index: number) => void;
+          }) {
+            return (
+              <div data-testid="image-view" data-path={path}>
+                Image View
+                <button type="button" onClick={() => onCurrentIndexChange?.(currentIndex + 1)}>
+                  Next image
+                </button>
+              </div>
+            );
           },
         });
       }
@@ -57,17 +72,22 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
 
 describe("Browser - Image View Integration", () => {
   const renderBrowser = (initialPath = "/browse/smb/test-server-1") => {
-    return render(
-      <SambeeThemeProvider>
-        <MemoryRouter initialEntries={[initialPath]}>
-          <Routes>
-            <Route path="/browse/:targetType/:targetId/*" element={<FileBrowser />} />
-            <Route path="/browse" element={<FileBrowser />} />
-            <Route path="/login" element={<div>Login Page</div>} />
-          </Routes>
-        </MemoryRouter>
-      </SambeeThemeProvider>
+    const router = createMemoryRouter(
+      [
+        { path: "/browse/:targetType/:targetId/*", element: <FileBrowser /> },
+        { path: "/browse", element: <FileBrowser /> },
+        { path: "/login", element: <div>Login Page</div> },
+      ],
+      { initialEntries: [initialPath] }
     );
+    return {
+      ...render(
+        <SambeeThemeProvider>
+          <RouterProvider router={router} />
+        </SambeeThemeProvider>
+      ),
+      router,
+    };
   };
 
   beforeEach(() => {
@@ -91,6 +111,32 @@ describe("Browser - Image View Integration", () => {
         updated_at: "2024-01-01T00:00:00Z",
       },
     ]);
+  });
+
+  it("pushes gallery images and restores the displayed file through Back and Forward", async () => {
+    mockedApi.listDirectory.mockResolvedValue({
+      path: "/",
+      total: 2,
+      items: ["one.jpg", "two.jpg"].map((name) => ({
+        name,
+        path: name,
+        type: FileType.FILE,
+        mime_type: "image/jpeg",
+        size: 10,
+        is_readable: true,
+        is_hidden: false,
+      })),
+    });
+    mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
+    const { router } = renderBrowser();
+    fireEvent.click(await screen.findByRole("button", { name: "File: one.jpg" }));
+    expect(await screen.findByTestId("image-view")).toHaveAttribute("data-path", "one.jpg");
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await waitFor(() => expect(new URLSearchParams(router.state.location.search).get("file")).toBe("smb/test-server-1/two.jpg"));
+    await act(() => router.navigate(-1));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "one.jpg"));
+    await act(() => router.navigate(1));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
   });
 
   it("renders image view when clicking on image file", async () => {

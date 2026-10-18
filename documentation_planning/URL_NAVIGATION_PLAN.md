@@ -1,6 +1,32 @@
 # URL-Driven Workspace Navigation
 
-Status: Proposed; not implemented.
+Status: Implemented. See implementation and verification results below.
+
+## Implementation and Verification
+
+The shared route model now controls viewers, gallery navigation, editing intent,
+and desktop/mobile settings. Recovery is subordinate to the incoming URL. The app
+uses a data router, supported edit blocking, and router-owned authentication
+cleanup and User Management queries. Shared settings identifiers are independent
+of translated presentation metadata.
+
+- All 2,180 frontend tests pass across 157 suites, including routed history,
+  direct links, dirty-editor decisions, slow lock release, late acquisition,
+  authentication-fragment cleanup, recovery precedence, gallery navigation,
+  invalid descriptors, and mobile settings history.
+- Frontend lint passes without errors or warnings. The production build passes
+  with a bundle-size advisory for large chunks.
+- Documentation content validation passes. The 2.0 user and developer guides
+  describe the URL contract and navigation behavior.
+- Live settings category navigation, Back/Forward, explicit Close, refresh, and
+  direct-link parent fallback were checked on the permitted demo connection at
+  desktop and phone widths.
+- Live file-viewer/editor validation remains blocked: the demo SMB directory
+  returns a missing-directory error. Cached file rows aren't evidence of current
+  file availability; automated coverage doesn't substitute for that live check.
+
+The investigation and design below record the original behavior and agreed
+implementation contract.
 
 ## Goal
 
