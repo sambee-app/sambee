@@ -146,6 +146,7 @@ interface PdfInternalLinkTarget {
  * Fetches PDFs via API with authentication headers, then creates blob URLs.
  */
 const PDFViewer: React.FC<ViewerComponentProps> = ({
+  isTransitioning = false,
   connectionId,
   path,
   onClose,
@@ -1338,6 +1339,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
   return (
     <Dialog
+      inert={isTransitioning}
       open={true}
       onClose={handleDialogClose}
       maxWidth={false}

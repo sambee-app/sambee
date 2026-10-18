@@ -24,6 +24,7 @@ export interface ViewerComponentProps {
   fileModifiedAt?: string;
   onClose: () => void;
   isReadOnly?: boolean;
+  isTransitioning?: boolean;
   virtualSource?: VirtualItemHandle;
   hasMoreItems?: boolean;
   isLoadingMoreItems?: boolean;

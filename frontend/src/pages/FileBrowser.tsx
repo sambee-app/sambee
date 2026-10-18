@@ -760,6 +760,8 @@ const Browser: React.FC = () => {
     ready: !loadingConnections && recoveryPhase === "ready",
   });
   const [viewerLeaveGuard, setViewerLeaveGuard] = useState<ViewerLeaveGuard | null>(null);
+  const displayedViewerPane = leftPane.viewInfo ? leftPane : rightPane;
+  const displayedViewerInfo = displayedViewerPane.viewInfo;
   openViewerRef.current = workspace.openViewer;
 
   /**
@@ -4283,34 +4285,25 @@ const Browser: React.FC = () => {
           onRetry={workspace.retryViewer}
         />
       ) : null}
-      {workspace.viewerLoading && currentRoute.viewer ? (
-        <ViewerFallbackDialog mode="loading" path={currentRoute.viewer.file.path} onClose={workspace.closeViewer} />
-      ) : null}
-      {leftPane.viewInfo && (
+      {displayedViewerInfo && (
         <DynamicViewer
-          connectionId={leftPane.viewInfo.connectionId ?? leftPane.connectionId}
-          isReadOnly={isConnectionReadOnly(getConnectionById(allConnections, leftPane.viewInfo.connectionId ?? leftPane.connectionId))}
-          viewInfo={leftPane.viewInfo}
-          navigation={{ mode: currentRoute.viewer?.mode ?? "view", onModeChange: workspace.changeMode, onGuardChange: setViewerLeaveGuard }}
+          connectionId={displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId}
+          isReadOnly={isConnectionReadOnly(
+            getConnectionById(allConnections, displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId)
+          )}
+          isPending={workspace.viewerLoading}
+          viewInfo={displayedViewerInfo}
+          navigation={{
+            selectionKey: workspace.viewerSelectionKey,
+            mode: currentRoute.viewer?.mode ?? "view",
+            onModeChange: workspace.changeMode,
+            onGuardChange: setViewerLeaveGuard,
+          }}
           onClose={workspace.closeViewer}
-          onIndexChange={(index) => workspace.changeImage("left", index)}
-          hasMoreItems={leftPane.viewInfo.virtualSource ? leftPane.archiveHasMore : false}
-          isLoadingMoreItems={leftPane.viewInfo.virtualSource ? leftPane.archiveLoadingMore : false}
-          onLoadMoreItems={leftPane.viewInfo.virtualSource ? leftPane.loadMoreArchive : undefined}
-          contentProviders={browserContentServices.providers}
-        />
-      )}
-      {rightPane.viewInfo && !leftPane.viewInfo && (
-        <DynamicViewer
-          connectionId={rightPane.viewInfo.connectionId ?? rightPane.connectionId}
-          isReadOnly={isConnectionReadOnly(getConnectionById(allConnections, rightPane.viewInfo.connectionId ?? rightPane.connectionId))}
-          viewInfo={rightPane.viewInfo}
-          navigation={{ mode: currentRoute.viewer?.mode ?? "view", onModeChange: workspace.changeMode, onGuardChange: setViewerLeaveGuard }}
-          onClose={workspace.closeViewer}
-          onIndexChange={(index) => workspace.changeImage("right", index)}
-          hasMoreItems={rightPane.viewInfo.virtualSource ? rightPane.archiveHasMore : false}
-          isLoadingMoreItems={rightPane.viewInfo.virtualSource ? rightPane.archiveLoadingMore : false}
-          onLoadMoreItems={rightPane.viewInfo.virtualSource ? rightPane.loadMoreArchive : undefined}
+          onIndexChange={(index) => workspace.changeImage(leftPane.viewInfo ? "left" : "right", index)}
+          hasMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveHasMore : false}
+          isLoadingMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveLoadingMore : false}
+          onLoadMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.loadMoreArchive : undefined}
           contentProviders={browserContentServices.providers}
         />
       )}

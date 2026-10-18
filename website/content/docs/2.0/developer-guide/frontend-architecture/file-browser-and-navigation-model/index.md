@@ -85,6 +85,14 @@ Viewer links resolve metadata through the storage registry or content provider, 
 
 The incoming URL always wins over a browser recovery snapshot. Snapshot hydration matches each pane's resource identity, clears legacy viewer state, and ignores unmatched panes. A bare `/browse` uses normal default navigation. Captured snapshots use the current canonical workspace URL and contain neither callback fragments nor edit-session tokens.
 
+### Viewer Loading and Transitions
+
+Loading feedback belongs to the selected image, PDF, text, or Markdown viewer. Workspace metadata resolution and dynamic component imports do not show an intermediate full-screen loading dialog. On an initial opening, the browser remains visible until metadata and the viewer component are available; the viewer then displays its existing content-loading feedback.
+
+During file-to-file or history navigation, keep the outgoing viewer presentation mounted until the replacement metadata and component are ready. Do not expose the directory between viewers or pass the new target's props to the old viewer component. Outgoing controls and shortcuts are suspended during the handoff, while Escape can cancel the pending opening. The existing error dialogs retain Retry and Close actions. Cancellation rejects late results rather than reopening a dismissed viewer.
+
+One dynamic viewer host serves both panes. An explicit viewer ID, not an image's changing MIME type, controls component loading. Text and Markdown still reset resource-local state when the actual file changes; mode-only and settings-only navigation do not restart the viewer.
+
 ### Editing and Router Integrity
 
 The app uses a data router (`createBrowserRouter` and `RouterProvider`) for supported `useBlocker` behavior. One guard owner delegates resource-leaving transitions to the active text or Markdown editor when its draft is dirty, a save is pending, or a session is being acquired. Clean editor Back and Forward navigate directly, avoiding the history reversal required by a blocked browser navigation. Cancel keeps the draft and lock; successful Save or Discard continues the original transition; failed Save keeps the editor open. Changes that retain the same edited resource and mode don't discard its draft. Dirty drafts also register `beforeunload` protection.

@@ -1,8 +1,10 @@
-import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useKeyboardShortcuts } from "../../../hooks/useKeyboardShortcuts";
 import { useContentProviderRegistry } from "../../../pages/FileBrowser/contentProviders";
 import { createStorageBackedTestContentProviderRegistry } from "../../../test/helpers";
-import type { ViewerComponentProps } from "../../../utils/FileTypeRegistry";
+import type { ViewerComponentLoadResult, ViewerComponentProps } from "../../../utils/FileTypeRegistry";
 import { DynamicViewer } from "../DynamicViewer";
 
 const { mockGetViewerComponentLoadResult, mockLogger } = vi.hoisted(() => ({
@@ -74,6 +76,15 @@ describe("DynamicViewer", () => {
     render(<DynamicViewer {...defaultProps} />);
 
     expect(await screen.findByTestId("loaded-viewer")).toBeInTheDocument();
+  });
+
+  it("does not show an intermediate dialog while the viewer module loads", () => {
+    mockGetViewerComponentLoadResult.mockReturnValue(new Promise(() => {}));
+
+    render(<DynamicViewer {...defaultProps} />);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 
   it("forwards an archive source to the loaded viewer component", async () => {
@@ -156,6 +167,26 @@ describe("DynamicViewer", () => {
     expect(await screen.findByTestId("loaded-viewer")).toBeInTheDocument();
   });
 
+  it("keeps the error dialog in place during a delayed module retry", async () => {
+    let finishLoad!: (result: ViewerComponentLoadResult) => void;
+    mockGetViewerComponentLoadResult
+      .mockResolvedValueOnce({ status: "failed", error: new Error("Loading chunk failed") })
+      .mockReturnValueOnce(
+        new Promise<ViewerComponentLoadResult>((resolve) => {
+          finishLoad = resolve;
+        })
+      );
+    render(<DynamicViewer {...defaultProps} />);
+    const dialog = await screen.findByRole("dialog", { name: /viewer unavailable/i });
+
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(screen.getByRole("dialog", { name: /viewer unavailable/i })).toBe(dialog);
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    await act(async () => finishLoad({ status: "loaded", component: () => <div data-testid="loaded-viewer">Loaded</div> }));
+    expect(screen.getByTestId("loaded-viewer")).toBeInTheDocument();
+  });
+
   it("shows an unsupported dialog when no viewer exists", async () => {
     mockGetViewerComponentLoadResult.mockResolvedValue({ status: "unsupported" });
 
@@ -191,5 +222,98 @@ describe("DynamicViewer", () => {
 
     expect(screen.getByTestId("loaded-viewer")).toBeInTheDocument();
     expect(mockGetViewerComponentLoadResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reload the image viewer when its explicit viewer ID stays the same across MIME types", async () => {
+    const unmounted = vi.fn();
+    mockGetViewerComponentLoadResult.mockResolvedValue({
+      status: "loaded",
+      component: function LoadedViewer({ path }: ViewerComponentProps) {
+        useEffect(() => unmounted, []);
+        return <div data-testid="loaded-viewer">{path}</div>;
+      },
+    });
+    const { rerender } = render(
+      <DynamicViewer {...defaultProps} viewInfo={{ ...defaultProps.viewInfo, viewerId: "image", mimeType: "image/png" }} />
+    );
+    await screen.findByTestId("loaded-viewer");
+    rerender(
+      <DynamicViewer
+        {...defaultProps}
+        viewInfo={{ ...defaultProps.viewInfo, viewerId: "image", mimeType: "image/jpeg", path: "other.jpg" }}
+      />
+    );
+    expect(screen.getByTestId("loaded-viewer")).toHaveTextContent("other.jpg");
+    expect(mockGetViewerComponentLoadResult).toHaveBeenCalledTimes(1);
+    expect(unmounted).not.toHaveBeenCalled();
+  });
+
+  it("retains the outgoing viewer and its resource until the replacement module is loaded", async () => {
+    let finishLoad!: (result: ViewerComponentLoadResult) => void;
+    const unmounted = vi.fn();
+    mockGetViewerComponentLoadResult
+      .mockResolvedValueOnce({
+        status: "loaded",
+        component: function LoadedViewer({ path, isTransitioning }: ViewerComponentProps) {
+          useEffect(() => unmounted, []);
+          return (
+            <div data-testid="outgoing-viewer" data-pending={isTransitioning}>
+              {path}
+            </div>
+          );
+        },
+      })
+      .mockReturnValueOnce(
+        new Promise<ViewerComponentLoadResult>((resolve) => {
+          finishLoad = resolve;
+        })
+      );
+    const { rerender } = render(<DynamicViewer {...defaultProps} />);
+    await screen.findByTestId("outgoing-viewer");
+    rerender(
+      <DynamicViewer
+        {...defaultProps}
+        viewInfo={{ ...defaultProps.viewInfo, viewerId: "image", path: "next.png", mimeType: "image/png" }}
+      />
+    );
+    expect(screen.getByTestId("outgoing-viewer")).toHaveTextContent("/docs/file.pdf");
+    expect(screen.getByTestId("outgoing-viewer")).toHaveAttribute("data-pending", "true");
+    expect(unmounted).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await act(async () => finishLoad({ status: "loaded", component: ({ path }) => <div data-testid="incoming-viewer">{path}</div> }));
+    expect(screen.getByTestId("incoming-viewer")).toHaveTextContent("next.png");
+    expect(unmounted).toHaveBeenCalledTimes(1);
+  });
+
+  it("suspends outgoing shortcuts and gallery callbacks while metadata resolves but allows Escape to cancel", async () => {
+    const download = vi.fn();
+    mockGetViewerComponentLoadResult.mockResolvedValue({
+      status: "loaded",
+      component: function LoadedViewer({ path, isTransitioning, onCurrentIndexChange, navigation }: ViewerComponentProps) {
+        useKeyboardShortcuts({ shortcuts: [{ id: "download", keys: "d", handler: download }] });
+        return (
+          <div
+            data-testid="loaded-viewer"
+            data-pending={isTransitioning}
+            data-gallery={Boolean(onCurrentIndexChange)}
+            data-mode={navigation?.mode}
+          >
+            {path}
+          </div>
+        );
+      },
+    });
+    const { rerender } = render(<DynamicViewer {...defaultProps} />);
+    await screen.findByTestId("loaded-viewer");
+    rerender(<DynamicViewer {...defaultProps} isPending navigation={{ mode: "edit", onModeChange: vi.fn(), onGuardChange: vi.fn() }} />);
+    expect(screen.getByTestId("loaded-viewer")).toHaveAttribute("data-pending", "true");
+    expect(screen.getByTestId("loaded-viewer")).toHaveAttribute("data-gallery", "false");
+    fireEvent.keyDown(document, { key: "d" });
+    expect(download).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
+    rerender(<DynamicViewer {...defaultProps} />);
+    fireEvent.keyDown(document, { key: "d" });
+    expect(download).toHaveBeenCalledTimes(1);
   });
 });

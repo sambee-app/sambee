@@ -42,11 +42,15 @@ vi.mock("../../components/Viewer/MarkdownViewer", () => ({
   default: ({
     onClose,
     navigation,
+    path,
+    isTransitioning,
   }: {
     onClose: () => void;
+    path: string;
+    isTransitioning?: boolean;
     navigation?: { mode: string; onModeChange: (mode: "view" | "edit") => void };
   }) => (
-    <div role="dialog" data-testid="markdown-viewer" data-mode={navigation?.mode}>
+    <div role="dialog" data-testid="markdown-viewer" data-mode={navigation?.mode} data-path={path} data-pending={isTransitioning}>
       Markdown Viewer
       <button type="button" onClick={() => navigation?.onModeChange("edit")}>
         Enter editor
@@ -349,6 +353,57 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
       expect(router.state.location.search).toContain("viewer=markdown");
       expect(api.getFileInfo).toHaveBeenCalled();
+    });
+
+    it("keeps the same viewer mounted through delayed file navigation and Back", async () => {
+      const first = "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown";
+      const second = "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Fother.md&viewer=markdown";
+      const { router } = renderBrowser(first);
+      const outgoing = await screen.findByTestId("markdown-viewer");
+      let finishMetadata!: (metadata: never) => void;
+      vi.mocked(api.getFileInfo).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishMetadata = resolve;
+          })
+      );
+      await act(() => router.navigate(second));
+      expect(screen.getByTestId("markdown-viewer")).toBe(outgoing);
+      expect(outgoing).toHaveAttribute("data-path", "readme.md");
+      expect(outgoing).toHaveAttribute("data-pending", "true");
+      expect(screen.queryByRole("dialog", { name: /^loading$/i })).not.toBeInTheDocument();
+      await act(async () => finishMetadata({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "other.md"));
+      const incoming = screen.getByTestId("markdown-viewer");
+      vi.mocked(api.getFileInfo).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishMetadata = resolve;
+          })
+      );
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("markdown-viewer")).toBe(incoming);
+      expect(incoming).toHaveAttribute("data-path", "other.md");
+      await act(async () => finishMetadata({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "readme.md"));
+    });
+
+    it("cancels a pending file change on Escape and ignores its late metadata", async () => {
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      await screen.findByTestId("markdown-viewer");
+      let finishMetadata!: (metadata: never) => void;
+      vi.mocked(api.getFileInfo).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishMetadata = resolve;
+          })
+      );
+      await act(() => router.navigate("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Fother.md&viewer=markdown"));
+      const user = userEvent.setup();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(router.state.location.search).not.toContain("viewer="));
+      await act(async () => finishMetadata({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never));
+      expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument();
     });
 
     it("offers retry for an unavailable file and closes a direct link safely", async () => {

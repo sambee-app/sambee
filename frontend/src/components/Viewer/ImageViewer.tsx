@@ -67,6 +67,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   path,
   onClose,
   isReadOnly = false,
+  isTransitioning = false,
+  navigation,
   virtualSource,
   hasMoreItems = false,
   isLoadingMoreItems = false,
@@ -143,6 +145,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       : undefined,
     loadImageBlob,
     initialIndex,
+    selectionKey: navigation?.selectionKey,
     onIndexChange: onCurrentIndexChange,
     isTouchDevice: isTouchDevice(),
     preloadRange: PRELOAD_COUNT,
@@ -579,6 +582,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       {/* Full-screen dialog overlay — consistent with PDFViewer and MarkdownViewer.
           Provides built-in focus trapping, aria-modal, and portal isolation. */}
       <Dialog
+        inert={isTransitioning}
         open={true}
         onClose={handleDialogClose}
         maxWidth={false}

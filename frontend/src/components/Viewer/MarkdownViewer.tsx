@@ -198,6 +198,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   isReadOnly: connectionIsReadOnly = false,
   virtualSource,
   navigation,
+  isTransitioning = false,
 }) => {
   const isReadOnly = connectionIsReadOnly || virtualSource !== undefined;
   const contentProviders = useContentProviderRegistry();
@@ -1695,6 +1696,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   return (
     <>
       <Dialog
+        inert={isTransitioning}
         open={true}
         onClose={handleDialogClose}
         maxWidth={false}

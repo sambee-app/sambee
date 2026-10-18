@@ -51,6 +51,7 @@ export interface UseImageGalleryDataParams {
   gallerySourceKey?: string;
   loadImageBlob: (path: string, options: { signal: AbortSignal; viewportWidth: number; viewportHeight: number }) => Promise<Blob>;
   initialIndex?: number;
+  selectionKey?: string;
   onIndexChange?: (index: number) => void;
   spinnerDelayMs?: number;
   cacheRange?: number;
@@ -314,6 +315,7 @@ export const useCachedImageGallery = ({
   gallerySourceKey,
   loadImageBlob,
   initialIndex = 0,
+  selectionKey,
   onIndexChange,
   spinnerDelayMs = SPINNER_DELAY_MS_DEFAULT,
   cacheRange = CACHE_RANGE_DEFAULT,
@@ -427,6 +429,7 @@ export const useCachedImageGallery = ({
   const suspendPreload = useCallback(() => shouldSuspendRef.current(), []);
 
   // Commit gallery switches after render so abandoned renders cannot retire the active session.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new route entry must reapply even an unchanged index after an optimistic move.
   useEffect(() => {
     const committedResources = sessionResourcesRef.current;
 
@@ -465,7 +468,7 @@ export const useCachedImageGallery = ({
         index: safeInitialIndex,
       };
     });
-  }, [galleryIdentity, pendingSessionGeneration, pendingSessionResources, safeInitialIndex]);
+  }, [galleryIdentity, pendingSessionGeneration, pendingSessionResources, safeInitialIndex, selectionKey]);
 
   const notifyIndexChange = useEffectEvent((index: number) => {
     if (index !== safeInitialIndex) onIndexChange?.(index);

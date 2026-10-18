@@ -1,19 +1,9 @@
 import CloseIcon from "@mui/icons-material/Close";
-import {
-  Alert,
-  Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  IconButton,
-  LinearProgress,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Stack, Typography } from "@mui/material";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { COMMON_SHORTCUTS } from "../../config/keyboardShortcuts";
+import { KeyboardShortcutScopeContext, useKeyboardShortcutScope, useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import type { ViewerNavigation } from "../../hooks/useRoutedViewerEditing";
 import { translate } from "../../i18n";
 import {
@@ -27,6 +17,7 @@ import { getViewerComponentLoadResult, getViewerLoadErrorDiagnostics } from "../
 import { settingsSubduedIconButtonSx, settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
 
 interface DynamicViewerProps {
+  isPending?: boolean;
   connectionId: string;
   isReadOnly?: boolean;
   viewInfo: {
@@ -51,7 +42,7 @@ interface DynamicViewerProps {
 
 type DynamicViewerLoadState =
   | { status: "loading" }
-  | { status: "loaded"; component: ViewerComponentType }
+  | { status: "loaded"; component: ViewerComponentType; viewerKey: string }
   | { status: "unsupported" }
   | { status: "failed"; error: unknown };
 
@@ -71,7 +62,7 @@ function getViewerLoadFailureMessage(error: unknown): string {
 }
 
 interface ViewerFallbackDialogProps {
-  mode: "unsupported" | "failed" | "loading";
+  mode: "unsupported" | "failed";
   path: string;
   error?: unknown;
   onClose: () => void;
@@ -86,11 +77,7 @@ export function ViewerFallbackDialog({ mode, path, error, onClose, onRetry }: Vi
   return (
     <Dialog open={true} onClose={onClose} fullScreen disableRestoreFocus aria-labelledby="viewer-fallback-title">
       <DialogTitle id="viewer-fallback-title" sx={{ pr: 7 }}>
-        {mode === "loading"
-          ? t("common.status.loading")
-          : mode === "failed"
-            ? t("viewer.fallback.failedTitle")
-            : t("viewer.fallback.unsupportedTitle")}
+        {mode === "failed" ? t("viewer.fallback.failedTitle") : t("viewer.fallback.unsupportedTitle")}
         <IconButton
           aria-label={t("viewer.fallback.closeAriaLabel")}
           onClick={onClose}
@@ -103,7 +90,7 @@ export function ViewerFallbackDialog({ mode, path, error, onClose, onRetry }: Vi
       <DialogContent>
         <Stack spacing={2} sx={{ maxWidth: 640, pt: 1 }}>
           <Typography variant="h6">{filename}</Typography>
-          {mode === "loading" ? <LinearProgress /> : <Alert severity={mode === "failed" ? "warning" : "info"}>{message}</Alert>}
+          <Alert severity={mode === "failed" ? "warning" : "info"}>{message}</Alert>
           <Box>
             <Typography variant="body2" sx={{ color: "text.secondary" }}>
               {t("viewer.fallback.stillAvailable")}
@@ -125,61 +112,58 @@ export function ViewerFallbackDialog({ mode, path, error, onClose, onRetry }: Vi
   );
 }
 
-export const DynamicViewer = memo(function DynamicViewer({
-  connectionId,
-  isReadOnly,
-  viewInfo,
-  onClose,
-  onIndexChange,
-  hasMoreItems = false,
-  isLoadingMoreItems = false,
-  onLoadMoreItems,
-  contentProviders,
-  navigation,
-}: DynamicViewerProps) {
+function PendingViewerShortcuts({ onClose }: { onClose: () => void }) {
+  useKeyboardShortcuts({ shortcuts: [{ ...COMMON_SHORTCUTS.CLOSE, handler: onClose, allowInInput: true }] });
+  return null;
+}
+
+export const DynamicViewer = memo(function DynamicViewer(props: DynamicViewerProps) {
+  const { viewInfo, onClose, isPending = false } = props;
+  const viewerKey = viewInfo.viewerId ?? viewInfo.mimeType;
   const [loadState, setLoadState] = useState<DynamicViewerLoadState>({ status: "loading" });
   const [retryToken, setRetryToken] = useState(0);
   const latestViewInfoRef = useRef(viewInfo);
+  const presentation = useRef<DynamicViewerProps | null>(null);
+  const isTransitioning = isPending || (loadState.status === "loaded" && loadState.viewerKey !== viewerKey);
+  const pendingShortcutScope = useKeyboardShortcutScope(isTransitioning);
 
   latestViewInfoRef.current = viewInfo;
 
   useEffect(() => {
     let mounted = true;
     const loadAttempt = retryToken;
-    const requestedPath = latestViewInfoRef.current.path;
-    const requestedSessionId = latestViewInfoRef.current.sessionId;
-    setLoadState((current) => (current.status === "loading" ? current : { status: "loading" }));
+    const { path: requestedPath, sessionId: requestedSessionId, mimeType, viewerId } = latestViewInfoRef.current;
 
     logger.info(
       "DynamicViewer: Loading viewer component",
       {
         loadAttempt,
-        mimeType: viewInfo.mimeType,
+        mimeType,
         sessionId: requestedSessionId,
       },
       "viewer"
     );
 
-    getViewerComponentLoadResult(viewInfo.mimeType, viewInfo.viewerId).then((result: ViewerComponentLoadResult) => {
+    getViewerComponentLoadResult(mimeType, viewerId).then((result: ViewerComponentLoadResult) => {
       if (mounted) {
         logger.info("DynamicViewer: Viewer component loaded", {
-          mimeType: viewInfo.mimeType,
-          viewerId: viewInfo.viewerId,
+          mimeType,
+          viewerId,
           componentFound: result.status === "loaded",
           resultStatus: result.status,
           sessionId: requestedSessionId,
         });
         if (result.status === "loaded") {
-          setLoadState({ status: "loaded", component: result.component });
+          setLoadState({ status: "loaded", component: result.component, viewerKey });
         } else if (result.status === "failed") {
           logger.error(
             "DynamicViewer: Viewer component failed to load",
             {
               loadAttempt,
-              mimeType: viewInfo.mimeType,
+              mimeType,
               path: requestedPath,
               sessionId: requestedSessionId,
-              viewerId: viewInfo.viewerId,
+              viewerId,
               online: typeof navigator !== "undefined" ? navigator.onLine : undefined,
               pageUrl: typeof window !== "undefined" ? window.location.href : undefined,
               ...getViewerLoadErrorDiagnostics(result.error),
@@ -197,7 +181,7 @@ export const DynamicViewer = memo(function DynamicViewer({
     return () => {
       mounted = false;
     };
-  }, [retryToken, viewInfo.mimeType, viewInfo.viewerId]);
+  }, [retryToken, viewerKey]);
 
   useEffect(() => {
     if (loadState.status !== "loaded") {
@@ -241,30 +225,52 @@ export const DynamicViewer = memo(function DynamicViewer({
       },
       "viewer"
     );
-    return <ViewerFallbackDialog mode="loading" path={viewInfo.path} onClose={onClose} />;
+    return null;
   }
 
   const ViewerComponent = loadState.component;
+  if (!isTransitioning) presentation.current = props;
+  const displayed = presentation.current;
+  if (!displayed) return null;
+  const { connectionId, isReadOnly, onIndexChange, hasMoreItems, isLoadingMoreItems, onLoadMoreItems, contentProviders, navigation } =
+    displayed;
+  const displayedInfo = displayed.viewInfo;
 
   return (
     <ContentProviderRegistryContext.Provider value={contentProviders}>
+      {isTransitioning ? (
+        <KeyboardShortcutScopeContext.Provider value={pendingShortcutScope}>
+          <PendingViewerShortcuts onClose={onClose} />
+        </KeyboardShortcutScopeContext.Provider>
+      ) : null}
       <ViewerComponent
-        key={viewInfo.viewerId === "text" || viewInfo.viewerId === "markdown" ? `${connectionId}:${viewInfo.path}` : undefined}
+        key={
+          displayedInfo.viewerId === "text" || displayedInfo.viewerId === "markdown" ? `${connectionId}:${displayedInfo.path}` : undefined
+        }
         connectionId={connectionId}
-        path={viewInfo.path}
-        fileSize={viewInfo.fileSize}
-        fileModifiedAt={viewInfo.fileModifiedAt}
+        path={displayedInfo.path}
+        fileSize={displayedInfo.fileSize}
+        fileModifiedAt={displayedInfo.fileModifiedAt}
         onClose={onClose}
         isReadOnly={isReadOnly}
-        virtualSource={viewInfo.virtualSource}
+        isTransitioning={isTransitioning}
+        virtualSource={displayedInfo.virtualSource}
         hasMoreItems={hasMoreItems}
         isLoadingMoreItems={isLoadingMoreItems}
-        onLoadMoreItems={onLoadMoreItems}
-        images={viewInfo.images}
-        currentIndex={viewInfo.currentIndex}
-        onCurrentIndexChange={onIndexChange}
-        sessionId={viewInfo.sessionId}
-        navigation={navigation}
+        onLoadMoreItems={isTransitioning ? undefined : onLoadMoreItems}
+        images={displayedInfo.images}
+        currentIndex={displayedInfo.currentIndex}
+        onCurrentIndexChange={isTransitioning ? undefined : onIndexChange}
+        sessionId={displayedInfo.sessionId}
+        navigation={
+          navigation
+            ? {
+                ...navigation,
+                selectionKey: props.navigation?.selectionKey,
+                ...(isTransitioning ? { mode: "view", onModeChange: () => {} } : {}),
+              }
+            : navigation
+        }
       />
     </ContentProviderRegistryContext.Provider>
   );

@@ -11,6 +11,7 @@ export interface ViewerLeaveGuard {
   requestLeave: (transition: BlockedTransition) => void;
 }
 export interface ViewerNavigation {
+  selectionKey?: string;
   mode: "view" | "edit";
   onModeChange: (mode: "view" | "edit", replace?: boolean) => void;
   onGuardChange: (guard: ViewerLeaveGuard | null) => void;

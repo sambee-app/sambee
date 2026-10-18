@@ -89,6 +89,39 @@ describe("useCachedImageGallery", () => {
     expect(replacement).toHaveBeenCalledTimes(2);
   });
 
+  it("reapplies an unchanged routed index after an optimistic move without dropping cached images", async () => {
+    vi.mocked(apiService.getImageBlob).mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
+    const onIndexChange = vi.fn();
+    const images = ["/0.jpg", "/1.jpg"];
+    const { result, rerender } = renderHook(
+      ({ selectionKey }) =>
+        useCachedImageGallery({
+          connectionId: "conn-1",
+          images,
+          initialIndex: 0,
+          selectionKey,
+          onIndexChange,
+          loadImageBlob: loadMockImageBlob,
+          preloadRange: 0,
+        }),
+      { initialProps: { selectionKey: "opening" } }
+    );
+    await waitFor(() => expect(result.current.getCachedImageSrc(0)).toBeDefined());
+    act(() => result.current.setCurrentIndex(1));
+    await waitFor(() => expect(result.current.getCachedImageSrc(1)).toBeDefined());
+    expect(onIndexChange).toHaveBeenCalledExactlyOnceWith(1);
+    const originalImage = result.current.getCachedImageSrc(0);
+    const fetches = vi.mocked(apiService.getImageBlob).mock.calls.length;
+
+    rerender({ selectionKey: "back" });
+
+    expect(result.current.currentIndex).toBe(0);
+    expect(result.current.getCachedImageSrc(0)).toBe(originalImage);
+    expect(apiService.getImageBlob).toHaveBeenCalledTimes(fetches);
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    expect(onIndexChange).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for native image decoding before marking the current image ready", async () => {
     vi.mocked(apiService.getImageBlob).mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
 

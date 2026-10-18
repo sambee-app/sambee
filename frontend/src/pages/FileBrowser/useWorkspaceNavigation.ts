@@ -51,14 +51,20 @@ export function useWorkspaceNavigation({
   panes.current = { left, right };
   const [viewerError, setViewerError] = useState<unknown>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
+  const [resolvedViewerIdentity, setResolvedViewerIdentity] = useState("");
+  const [viewerRequestRevision, setViewerRequestRevision] = useState(0);
   const [retry, setRetry] = useState(0);
   const viewer = route.viewer;
   const viewerIdentity = viewer ? JSON.stringify([viewer.file, viewer.viewerId, viewer.paneId]) : "";
   const getViewer = useEffectEvent(() => viewer);
   const applyViewer = useEffectEvent((paneId: PaneId, info: ViewInfo | null) => {
     const pane = panes.current[paneId];
-    if (info) pane.setViewInfo(info);
-    else if (pane.viewInfo) pane.handleViewClose();
+    if (info) {
+      pane.setViewInfo(info);
+      if (info.currentIndex !== undefined) pane.handleViewIndexChange(info.currentIndex);
+      const other = panes.current[paneId === "left" ? "right" : "left"];
+      if (other.viewInfo) other.handleViewClose();
+    } else if (pane.viewInfo) pane.handleViewClose();
   });
 
   const navigateRoute = useCallback(
@@ -95,6 +101,7 @@ export function useWorkspaceNavigation({
       virtual ? { providerId: virtual.location.providerId, sourcePath: virtual.location.source.path, virtualPath: virtual.path } : null
     );
     if (!target || !info.viewerId) return;
+    setViewerRequestRevision((revision) => revision + 1);
     const nextViewer = { file: target, paneId, viewerId: info.viewerId, mode: "view" as const };
     pendingViewer.current = { identity: JSON.stringify([target, info.viewerId, paneId]), info };
     navigateRoute({ ...route, viewer: nextViewer, settings: undefined });
@@ -106,6 +113,7 @@ export function useWorkspaceNavigation({
     if (!viewer) {
       pendingViewer.current = null;
       setViewerLoading(false);
+      setResolvedViewerIdentity("");
       applyViewer("left", null);
       applyViewer("right", null);
       return;
@@ -113,12 +121,12 @@ export function useWorkspaceNavigation({
     if (!ready) return;
     const controller = new AbortController();
     const paneId = viewer.paneId;
-    applyViewer(paneId === "left" ? "right" : "left", null);
     const cached = pendingViewer.current;
     pendingViewer.current = null;
     if (cached?.identity === viewerIdentity) {
       applyViewer(paneId, cached.info);
       setViewerLoading(false);
+      setResolvedViewerIdentity(viewerIdentity);
       return;
     }
     const existing = panes.current[paneId].viewInfo;
@@ -139,9 +147,9 @@ export function useWorkspaceNavigation({
       !retry
     ) {
       setViewerLoading(false);
+      setResolvedViewerIdentity(viewerIdentity);
       return;
     }
-    applyViewer(paneId, null);
     setViewerLoading(true);
     void (async () => {
       if (!target) throw new Error("The file's connection is unavailable. Close the viewer and check Connections settings.");
@@ -189,6 +197,7 @@ export function useWorkspaceNavigation({
         currentIndex: gallery?.indexOf(path),
         sessionId: crypto.randomUUID(),
       });
+      setResolvedViewerIdentity(viewerIdentity);
     })()
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setViewerError(error);
@@ -207,7 +216,6 @@ export function useWorkspaceNavigation({
       const info = panes.current[paneId].viewInfo;
       const path = info?.images?.[index];
       if (info && path) {
-        panes.current[paneId].handleViewIndexChange(index);
         openViewer(paneId, {
           ...info,
           path,
@@ -228,7 +236,8 @@ export function useWorkspaceNavigation({
       else navigateRoute({ ...route, settings: route.settings === "main" ? undefined : "main" }, { replace: true });
     },
     viewerError,
-    viewerLoading,
+    viewerSelectionKey: `${location.key}:${viewerRequestRevision}`,
+    viewerLoading: Boolean(viewer && (viewerLoading || resolvedViewerIdentity !== viewerIdentity)),
     retryViewer: () => setRetry((value) => value + 1),
   };
 }
