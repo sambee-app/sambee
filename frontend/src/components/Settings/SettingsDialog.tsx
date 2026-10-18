@@ -4,7 +4,7 @@
 
 import CloseIcon from "@mui/icons-material/Close";
 import { Box, Dialog, Divider, IconButton, Typography } from "@mui/material";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FORM_SURFACE_CSS_VARIABLE, getOverlaySurfaceTokens, OVERLAY_SURFACE_CSS_VARIABLE } from "../../theme/palette";
 import { RESIZABLE_DIALOG_VIEWPORT_GUTTER_PX, ResizableDialogHandle, useResizableDialogSize } from "../ResizableDialog";
@@ -34,6 +34,33 @@ interface SettingsDialogProps {
   onNavigate?: (item: SettingsNavItem) => void;
   /** Callback when connections are added, updated, or deleted */
   onConnectionsChanged?: () => void;
+}
+
+function SettingsCategoryFocus({
+  open,
+  selectedItem,
+  availableItems,
+  categoryRefs,
+}: {
+  open: boolean;
+  selectedItem: SettingsNavItem;
+  availableItems: SettingsNavItem[];
+  categoryRefs: RefObject<Partial<Record<SettingsNavItem, HTMLDivElement | null>>>;
+}) {
+  const initialized = useRef(false);
+  useLayoutEffect(() => {
+    if (!open) {
+      initialized.current = false;
+      return;
+    }
+    const item = availableItems.includes(selectedItem) ? selectedItem : (availableItems[0] ?? DEFAULT_SETTINGS_CATEGORY);
+    const element = categoryRefs.current[item];
+    if (!element) return;
+    const ownsFocus = Object.values(categoryRefs.current).some((category) => category === element.ownerDocument.activeElement);
+    if (!initialized.current || ownsFocus) element.focus();
+    initialized.current = true;
+  }, [open, selectedItem, availableItems, categoryRefs]);
+  return null;
 }
 
 /**
@@ -122,17 +149,6 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
       setLocalSelectedItem(availableItems.includes(initialCategory) ? initialCategory : (availableItems[0] ?? DEFAULT_SETTINGS_CATEGORY));
     }
   }, [availableItems, initialCategory, open, category]);
-
-  // Focus the initial category button when dialog opens
-  useEffect(() => {
-    if (open) {
-      // Use setTimeout to ensure the dialog is fully rendered
-      const timeoutId = setTimeout(() => {
-        focusCategoryButton(availableItems.includes(initialCategory) ? initialCategory : (availableItems[0] ?? DEFAULT_SETTINGS_CATEGORY));
-      }, 0);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [availableItems, focusCategoryButton, initialCategory, open]);
 
   return (
     <Dialog
@@ -226,6 +242,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
               sx: { fontWeight: selected ? "medium" : "normal" },
             })}
           />
+          <SettingsCategoryFocus open={open} selectedItem={selectedItem} availableItems={availableItems} categoryRefs={categoryRefs} />
         </Box>
 
         {/* Right Content Area */}

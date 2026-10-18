@@ -190,6 +190,23 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
   });
 
   describe("settings dialog routing", () => {
+    it("commits category navigation synchronously while retaining category history", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1?settings=appearance");
+      await screen.findByTestId("settings-dialog");
+      const navigate = vi.spyOn(router, "navigate");
+      await user.click(screen.getByRole("button", { name: "Account category" }));
+      expect(navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ search: "?settings=account" }),
+        expect.objectContaining({ flushSync: true })
+      );
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "appearance");
+      await act(() => router.navigate(1));
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+    });
+
     it("uses observed mobile category history even when the main view was a direct link", async () => {
       vi.stubGlobal(
         "matchMedia",
@@ -416,6 +433,29 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       await user.click(screen.getByRole("button", { name: "Close Viewer" }));
       await waitFor(() => expect(router.state.location.search).not.toContain("viewer="));
       expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
+    });
+
+    it.each([1, 2])("reuses resolved viewer metadata after %s failed attempts", async (failures) => {
+      const user = userEvent.setup();
+      for (let attempt = 0; attempt < failures; attempt += 1) {
+        vi.mocked(api.getFileInfo).mockRejectedValueOnce(new Error("File unavailable"));
+      }
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      for (let attempt = 0; attempt < failures; attempt += 1) {
+        await screen.findByText(/File unavailable/);
+        await user.click(screen.getByRole("button", { name: /retry/i }));
+      }
+      await screen.findByTestId("markdown-viewer");
+      expect(api.getFileInfo).toHaveBeenCalledTimes(failures + 1);
+      await user.click(screen.getByRole("button", { name: "Enter editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "edit"));
+      await user.click(screen.getByRole("button", { name: "Leave editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view"));
+      await act(() => router.navigate(`${router.state.location.pathname}${router.state.location.search}&settings=account`));
+      expect(await screen.findByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(-1));
+      await act(() => router.navigate(1));
+      expect(api.getFileInfo).toHaveBeenCalledTimes(failures + 1);
     });
 
     it("normalizes an invalid workspace descriptor while preserving unrelated query and hash", async () => {

@@ -1,7 +1,7 @@
 import { ThemeProvider } from "@mui/material";
 import CssBaseline from "@mui/material/CssBaseline";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { createBrowserRouter, Navigate, Route, RouterProvider, Routes } from "react-router-dom";
+import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, Route, RouterProvider, useOutletContext } from "react-router-dom";
 import AppUpdatePrompt from "./components/AppUpdatePrompt";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { SettingsCategoryContent } from "./components/Settings/SettingsCategoryContent";
@@ -29,6 +29,11 @@ const FileBrowser = lazy(() => import("./pages/FileBrowser"));
 function SettingsRoutePage({ item }: { item: SettingsCategory }) {
   const { isAdmin } = useSettingsAccess();
   return <SettingsCategoryContent item={item} isAdmin={isAdmin} />;
+}
+
+function ProtectedRoutes() {
+  const ready = useOutletContext<boolean>();
+  return <PasswordChangeGate ready={ready} />;
 }
 
 //
@@ -74,32 +79,7 @@ function AppContent() {
       <CompanionLocalizationSync />
       <div ref={appRef}>
         <Suspense fallback={<div>{translate("app.loading")}</div>}>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/login/oidc/callback" element={<OidcCallback />} />
-            <Route path="/change-password" element={<PasswordChange />} />
-            <Route element={<PasswordChangeGate ready={authBootstrapComplete} />}>
-              <Route
-                path="/browse/:targetType/:targetId/*"
-                element={authBootstrapComplete ? <FileBrowser /> : <div>{translate("app.loading")}</div>}
-              />
-              <Route path="/browse" element={authBootstrapComplete ? <FileBrowser /> : <div>{translate("app.loading")}</div>} />
-              <Route path="/settings" element={authBootstrapComplete ? <SettingsLayout /> : <div>{translate("app.loading")}</div>}>
-                <Route index element={<Navigate to="/settings/appearance" replace />} />
-                {SETTINGS_CATEGORY_ORDER.map((item) => (
-                  <Route
-                    key={item}
-                    path={SETTINGS_ROUTE_BY_CATEGORY[item].slice("/settings/".length)}
-                    element={<SettingsRoutePage item={item} />}
-                  />
-                ))}
-                <Route path="sessions" element={<Navigate to="/settings/account" replace />} />
-                <Route path="preferences" element={<Navigate to="/settings/appearance" replace />} />
-                <Route path="connections/smb" element={<Navigate to="/settings/connections" replace />} />
-              </Route>
-              <Route path="/" element={<Navigate to="/browse" replace />} />
-            </Route>
-          </Routes>
+          <Outlet context={authBootstrapComplete} />
         </Suspense>
       </div>
     </ThemeProvider>
@@ -110,7 +90,34 @@ function AppContent() {
 // App
 //
 
-const router = createBrowserRouter([{ path: "*", element: <AppContent /> }]);
+const router = createBrowserRouter(
+  createRoutesFromElements(
+    <Route element={<AppContent />}>
+      <Route path="/login" element={<Login />} />
+      <Route path="/login/oidc/callback" element={<OidcCallback />} />
+      <Route path="/change-password" element={<PasswordChange />} />
+      <Route element={<ProtectedRoutes />}>
+        <Route path="/browse/:targetType/:targetId/*" element={<FileBrowser />} />
+        <Route path="/browse" element={<FileBrowser />} />
+        <Route path="/settings" element={<SettingsLayout />}>
+          <Route index element={<Navigate to="/settings/appearance" replace />} />
+          {SETTINGS_CATEGORY_ORDER.map((item) => (
+            <Route
+              key={item}
+              path={SETTINGS_ROUTE_BY_CATEGORY[item].slice("/settings/".length)}
+              element={<SettingsRoutePage item={item} />}
+            />
+          ))}
+          <Route path="sessions" element={<Navigate to="/settings/account" replace />} />
+          <Route path="preferences" element={<Navigate to="/settings/appearance" replace />} />
+          <Route path="connections/smb" element={<Navigate to="/settings/connections" replace />} />
+        </Route>
+        <Route path="/" element={<Navigate to="/browse" replace />} />
+      </Route>
+      <Route path="*" element={null} />
+    </Route>
+  )
+);
 
 function App() {
   return (

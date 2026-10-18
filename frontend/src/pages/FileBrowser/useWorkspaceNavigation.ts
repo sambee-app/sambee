@@ -55,6 +55,7 @@ export function useWorkspaceNavigation({
   const [viewerSelectionRevision, setViewerSelectionRevision] = useState(0);
   const [viewerRequestRevision, setViewerRequestRevision] = useState(0);
   const [retry, setRetry] = useState(0);
+  const resolvedRetry = useRef(0);
   const viewer = route.viewer;
   const viewerIdentity = viewer ? JSON.stringify([viewer.file, viewer.viewerId, viewer.paneId]) : "";
   const getViewer = useEffectEvent(() => viewer);
@@ -68,17 +69,18 @@ export function useWorkspaceNavigation({
     } else if (pane.viewInfo) pane.handleViewClose();
   });
   const resolveViewerSelection = useEffectEvent((identity: string) => {
+    resolvedRetry.current = retry;
     setResolvedViewerIdentity(identity);
     setViewerSelectionRevision((revision) => revision + 1);
   });
 
   const navigateRoute = useCallback(
-    (next: BrowseRouteState, options?: { replace?: boolean }) => {
+    (next: BrowseRouteState, options?: { replace?: boolean; flushSync?: boolean }) => {
       const url = serializeBrowseRoute(next);
       if (url === location.pathname + location.search) return;
       void navigate(
         { pathname: url.split("?")[0], search: url.includes("?") ? url.slice(url.indexOf("?")) : "", hash: location.hash },
-        { replace: options?.replace, state }
+        { replace: options?.replace, flushSync: options?.flushSync, state }
       );
     },
     [location, navigate, state]
@@ -152,7 +154,7 @@ export function useWorkspaceNavigation({
       existing?.connectionId === target?.connectionId &&
       existing.path === path &&
       existing.viewerId === viewer.viewerId &&
-      !retry
+      retry === resolvedRetry.current
     ) {
       setViewerLoading(false);
       resolveViewerSelection(viewerIdentity);
@@ -237,7 +239,7 @@ export function useWorkspaceNavigation({
       const next = { ...route, viewer: { ...viewer, mode } };
       navigateRoute(next, { replace });
     },
-    openSettings: (settings: MobileSettingsView) => navigateRoute({ ...route, settings }),
+    openSettings: (settings: MobileSettingsView) => navigateRoute({ ...route, settings }, { flushSync: true }),
     closeSettings: () => navigateRoute({ ...route, settings: undefined }),
     backSettings: () => {
       if (entries.current.index > 0) void navigate(-1);

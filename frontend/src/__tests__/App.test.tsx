@@ -1,5 +1,6 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -59,6 +60,8 @@ vi.mock("../services/authSession", async (importOriginal) => {
 vi.mock("../pages/FileBrowser", () => ({
   __esModule: true,
   default: function MockFileBrowser() {
+    const location = useLocation();
+    const navigate = useNavigate();
     const [lastReason, setLastReason] = useState<string>("none");
     const [recoveredReason, setRecoveredReason] = useState<string>("none");
 
@@ -81,6 +84,17 @@ vi.mock("../pages/FileBrowser", () => ({
       <div>
         <div data-testid="mock-file-browser">{lastReason}</div>
         <div data-testid="mock-file-browser-recovered">{recoveredReason}</div>
+        <div data-testid="mock-file-browser-location">{location.search}</div>
+        <button
+          type="button"
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowDown") return;
+            void navigate({ search: "?settings=account" }, { flushSync: true });
+            event.currentTarget.dataset.committedSearch = screen.getByTestId("mock-file-browser-location").textContent ?? "";
+          }}
+        >
+          Next settings category
+        </button>
       </div>
     );
   },
@@ -110,6 +124,13 @@ describe("App backend recovery integration", () => {
     expect(screen.queryByTestId("mock-file-browser")).not.toBeInTheDocument();
     act(() => completeBootstrap());
     expect(await screen.findByTestId("mock-file-browser")).toBeInTheDocument();
+  });
+
+  it("commits synchronous category navigation before the keyboard handler returns", async () => {
+    render(<App />);
+    const category = await screen.findByRole("button", { name: "Next settings category" });
+    fireEvent.keyDown(category, { key: "ArrowDown" });
+    expect(category).toHaveAttribute("data-committed-search", "?settings=account");
   });
 
   it("emits a reconnect event on focus when backend recovery is needed", async () => {

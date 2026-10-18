@@ -99,6 +99,7 @@ export function useRoutedViewerEditing({
   const showUnsaved = useEffectEvent(requestUnsavedChanges);
   const requestLeave = useEffectEvent((transition: BlockedTransition) => {
     acquisitionCancelled.current = true;
+    if (isAcquiring) attemptedMode.current = null;
     cancelAcquire();
     pending.current = transition;
     setRequested(true);

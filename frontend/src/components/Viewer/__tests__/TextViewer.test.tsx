@@ -546,6 +546,37 @@ describe("TextViewer", () => {
     await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2));
   });
 
+  it.each(["acquired", "failed"])("retries editing after Back and Forward during a late %s acquisition", async (result) => {
+    const acquire = vi.mocked(apiService.acquireEditLock);
+    const lock = await acquire.getMockImplementation()!("conn1", "/docs/readme.txt");
+    let finish!: (value: typeof lock) => void;
+    let fail!: (error: Error) => void;
+    acquire.mockImplementationOnce(
+      () =>
+        new Promise((resolve, reject) => {
+          finish = resolve;
+          fail = reject;
+        })
+    );
+    const router = renderRoutedViewer();
+    await screen.findByRole("textbox", { name: "Text editor" });
+    await act(() => router.navigate("/viewer?file=smb%2Fdemo%2Fdocs%2Freadme.txt&viewer=text&mode=edit"));
+    await waitFor(() => expect(acquire).toHaveBeenCalledTimes(1));
+    await act(() => router.navigate(-1));
+    await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
+    await act(() => router.navigate(1));
+    expect(router.state.location.search).toContain("mode=edit");
+    expect(acquire).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      if (result === "acquired") finish(lock);
+      else fail(new Error("Cancelled acquisition failed"));
+    });
+    await waitFor(() => expect(acquire).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
+    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(result === "acquired" ? 1 : 0);
+    expect(router.state.location.search).toContain("mode=edit");
+  });
+
   it("acquires a fresh edit session for an editor bookmark", async () => {
     const router = renderRoutedViewer(true);
     await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1));
