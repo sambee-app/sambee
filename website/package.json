@@ -37,7 +37,7 @@
     "wrangler": "^4.102.0"
   },
   "overrides": {
-    "shell-quote": "1.9.0",
+    "shell-quote": "1.11.0",
     "sharp": "^0.35.5",
     "undici": "7.29.1"
   }
