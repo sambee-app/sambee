@@ -5,6 +5,7 @@ import {
   Button,
   CircularProgress,
   Dialog,
+  Fade,
   IconButton,
   InputAdornment,
   Paper,
@@ -84,6 +85,8 @@ const FULL_ROTATION_DEGREES = 360;
 const PDF_LOADING_TEXT_DELAY_MS = 500;
 const PDF_LOADING_PHASE_DELAY_MS = 2000;
 const PDF_LOADING_SLOW_DELAY_MS = 5000;
+const PDF_REVEAL_DURATION_MS = 160;
+const PDF_LOADING_SPINNER_SIZE = 40;
 const PDF_LOAD_CANCELED_MESSAGE = "PDF loading was canceled. You can still download the original file.";
 
 type PdfLoadPhase = "downloading" | "parsing" | "rendering" | "ready" | "error";
@@ -146,6 +149,7 @@ interface PdfInternalLinkTarget {
  * Fetches PDFs via API with authentication headers, then creates blob URLs.
  */
 const PDFViewer: React.FC<ViewerComponentProps> = ({
+  isTransitioning = false,
   connectionId,
   path,
   onClose,
@@ -213,6 +217,8 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   const muiTheme = useTheme();
   const searchHighlightColors = useMemo(() => getSearchHighlightColors(muiTheme, currentTheme), [currentTheme, muiTheme]);
   const isMobile = useMediaQuery(muiTheme.breakpoints.down("sm"));
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const revealDuration = prefersReducedMotion ? 0 : PDF_REVEAL_DURATION_MS;
   const swipeNavigationEnabled = isMobile && scale === "fit-page" && userRotation % 180 === 0;
   const shareEnabled = isMobile && supportsNativeShare();
   const nativeSharing = useViewerSharing({
@@ -1159,10 +1165,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   }, []);
 
   /**
-   * Context-aware Escape handler (window-level via useKeyboardShortcuts).
-   * Blur-first logic lives on the Dialog Paper's onKeyDown instead,
-   * because it must fire before the parent FileBrowser's window listener.
-   * Pattern: Single handler checks state to determine appropriate action
+   * Context-aware Escape action shared by the shortcut and dialog handlers.
    * - If search panel is open: close search and clear results
    * - Otherwise: close the entire viewer
    */
@@ -1185,17 +1188,14 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   );
 
   /**
-   * Paper-level keydown handler — single authority for all Escape logic.
-   * MUI Dialogs render in a portal at document.body (outside the React root),
-   * so native events may not reliably reach window listeners. Handling
-   * everything here and calling preventDefault() makes close robust.
+   * Handles Escape not already consumed by a capture-phase shortcut or child.
    * 1. If a toolbar button/input has focus → blur it (hide focus ring)
    * 2. If search panel is open → close search and clear results
    * 3. Otherwise → close the viewer
    */
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       if (blurActiveToolbarControl(containerRef)) return;
       handleEscape();
@@ -1344,6 +1344,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
   return (
     <Dialog
+      inert={isTransitioning}
       open={true}
       onClose={handleDialogClose}
       maxWidth={false}
@@ -1477,36 +1478,52 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
           }}
         >
           {/* Loading state */}
-          {isPdfLoading && !pdfPasswordCallback && (
-            <Box
-              data-testid="pdf-loading-overlay"
-              sx={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 1,
-                alignItems: "center",
-                justifyContent: "center",
-                position: "absolute",
-                inset: 0,
-                zIndex: 3,
-                backgroundColor: "transparent",
-              }}
-            >
-              <CircularProgress />
-              {pdfLoadingStage !== "spinner" && (
-                <Box role="status" aria-live="polite" data-testid="pdf-loading-status" sx={{ textAlign: "center", px: 2 }}>
-                  <Typography>{pdfLoadingStage === "loading" ? "Loading PDF" : getPdfLoadPhaseMessage(pdfLoadPhase)}</Typography>
-                  {pdfLoadingStage === "slow" && (
-                    <>
-                      <Typography variant="body2">This PDF is taking longer than usual.</Typography>
-                      <Button color="inherit" size="small" onClick={handleCancelPdfLoad}>
-                        Cancel
-                      </Button>
-                    </>
-                  )}
-                </Box>
-              )}
-            </Box>
+          {!error && !pdfPasswordCallback && (
+            <Fade in={isPdfLoading} appear={false} timeout={{ enter: 0, exit: revealDuration }} unmountOnExit>
+              <Box
+                data-testid="pdf-loading-overlay"
+                aria-hidden={!isPdfLoading}
+                inert={!isPdfLoading}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 3,
+                  pointerEvents: isPdfLoading ? "auto" : "none",
+                }}
+              >
+                <CircularProgress size={PDF_LOADING_SPINNER_SIZE} />
+                {pdfLoadingStage !== "spinner" && (
+                  <Box
+                    role="status"
+                    aria-live="polite"
+                    data-testid="pdf-loading-status"
+                    sx={{
+                      position: "absolute",
+                      top: `calc(50% + ${PDF_LOADING_SPINNER_SIZE / 2}px)`,
+                      insetInline: 0,
+                      maxHeight: `calc(50% - ${PDF_LOADING_SPINNER_SIZE / 2}px)`,
+                      overflow: "auto",
+                      textAlign: "center",
+                      px: 2,
+                      pt: 1,
+                    }}
+                  >
+                    <Typography>{pdfLoadingStage === "loading" ? "Loading PDF" : getPdfLoadPhaseMessage(pdfLoadPhase)}</Typography>
+                    {pdfLoadingStage === "slow" && (
+                      <>
+                        <Typography variant="body2">This PDF is taking longer than usual.</Typography>
+                        <Button color="inherit" size="small" onClick={handleCancelPdfLoad}>
+                          Cancel
+                        </Button>
+                      </>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            </Fade>
           )}
 
           {/* Error state */}
@@ -1536,12 +1553,18 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
           {/* PDF Document */}
           {!error && pdfUrl && containerWidth > 0 && containerHeight > 0 && (
             <Box
+              data-testid="pdf-document-presentation"
+              aria-hidden={isPdfLoading}
+              inert={isPdfLoading}
               sx={{
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 width: "100%",
                 height: "100%",
+                opacity: isPdfLoading ? 0 : 1,
+                visibility: isPdfLoading ? "hidden" : "visible",
+                transition: isPdfLoading ? "none" : `opacity ${revealDuration}ms ease-in-out`,
                 // Override any padding/margin from react-pdf
                 "& .react-pdf__Document": {
                   padding: 0,

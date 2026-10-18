@@ -1,19 +1,7 @@
 import { translate } from "../../i18n";
+import { SETTINGS_CATEGORY_ORDER, type SettingsCategory } from "./settingsCategories";
 
-export type SettingsCategory =
-  | "appearance"
-  | "account"
-  | "file-browser"
-  | "text-editor"
-  | "connections"
-  | "local-drives"
-  | "admin-network"
-  | "admin-authentication"
-  | "admin-users"
-  | "admin-smb"
-  | "admin-file-search"
-  | "admin-system"
-  | "admin-about";
+export { SETTINGS_CATEGORY_ORDER, type SettingsCategory } from "./settingsCategories";
 export type SettingsNavItem = SettingsCategory;
 export type SettingsContentItem = SettingsNavItem;
 
@@ -175,22 +163,6 @@ export const SETTINGS_CATEGORY_META: Record<SettingsCategory, SettingsCategoryMe
     adminOnly: true,
   },
 };
-
-export const SETTINGS_CATEGORY_ORDER: SettingsCategory[] = [
-  "appearance",
-  "account",
-  "file-browser",
-  "text-editor",
-  "connections",
-  "local-drives",
-  "admin-network",
-  "admin-authentication",
-  "admin-users",
-  "admin-smb",
-  "admin-file-search",
-  "admin-system",
-  "admin-about",
-];
 
 export const DEFAULT_SETTINGS_CATEGORY: SettingsCategory = SETTINGS_CATEGORY_ORDER[0]!;
 

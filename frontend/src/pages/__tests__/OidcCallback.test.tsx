@@ -1,11 +1,22 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { StrictMode, useEffect, useState } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { type ReactNode, StrictMode, useEffect, useState } from "react";
+import { createMemoryRouter, Route, RouterProvider, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { server } from "../../test/mocks/server";
 import { SambeeThemeProvider, useSambeeTheme } from "../../theme";
 import OidcCallback from "../OidcCallback";
+
+let testRouter: ReturnType<typeof createMemoryRouter>;
+function MemoryRouter({ initialEntries = ["/login/oidc/callback"], children }: { initialEntries?: string[]; children: ReactNode }) {
+  const [router] = useState(() =>
+    createMemoryRouter([{ path: "*", element: children }], {
+      initialEntries: initialEntries.map((entry) => `${entry}${window.location.hash ? `#${window.location.hash.replace(/^#/, "")}` : ""}`),
+    })
+  );
+  testRouter = router;
+  return <RouterProvider router={router} />;
+}
 
 vi.mock("../../services/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../services/api")>();
@@ -56,12 +67,9 @@ describe("OIDC callback", () => {
         }
       );
       expect(window.location.hash).toContain("grant=one-time-grant");
-      const replaceState = vi.spyOn(window.history, "replaceState");
       let fragmentScrubbedBeforeExchange = false;
       vi.mocked(exchangeOidcGrant).mockImplementation(async () => {
-        fragmentScrubbedBeforeExchange = replaceState.mock.calls.some(
-          ([state, , url]) => state === null && typeof url === "string" && !url.includes("grant")
-        );
+        fragmentScrubbedBeforeExchange = !testRouter.state.location.hash.includes("grant");
         return {
           access_token: "sambee-token",
           token_type: "bearer",

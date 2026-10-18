@@ -1,11 +1,5 @@
 # TODO
 
-## Bugs
-
-- File move across SMB connections
-   - Moving a directory tree from one SMB connection to another:
-      - The 2nd directory in the source was moved into the 1st (already moved) directory at the target instead of moving it to the root of the target.
-
 ## Misc. commands
 
 - Add a command to open the current file list location in a new browser tab (which keyboard shortcut to assign? Ctrl+(Shift)+Tab is needed by the browser)

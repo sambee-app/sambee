@@ -73,6 +73,10 @@ Text and Markdown viewers/editors now have an option to share the current conten
 
 Image and PDF viewers alway share the displayed content, which may have been normalized for viewing in the browser.
 
+### Full Browser History Navigation
+
+Every navigation step is now encoded in the URL and recorded in browser history. This enables browser back/forward navigation across the entire Sambee workspace, including the file list, viewers, and editors.
+
 ### Local Drive Acess
 
 Sambee now checks local-drive access before saying the browser is ready to use Companion. If the check fails, Local Drives settings distinguish between an outdated Companion, an outdated Sambee page, and a pairing that needs to be restored.

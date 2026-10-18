@@ -1,5 +1,8 @@
+import { SETTINGS_CATEGORY_ORDER, type SettingsCategory } from "../../components/Settings/settingsCategories";
+import type { MobileSettingsView } from "../../components/Settings/settingsNavigation";
 import { extractDriveId, isLocalDrive, LOCAL_DRIVE_PREFIX } from "../../services/backendRouter";
 import type { Connection } from "../../types";
+import type { ViewerId } from "../../utils/FileTypeRegistry";
 import type { PaneId, VirtualRouteLocation } from "./types";
 import { ACTIVE_PANE_QUERY_KEY, RIGHT_PANE_QUERY_KEY } from "./types";
 
@@ -7,6 +10,16 @@ export const BROWSE_TARGET_KIND_SMB = "smb";
 export const BROWSE_TARGET_KIND_LOCAL = "local";
 
 export type BrowseTargetKind = typeof BROWSE_TARGET_KIND_SMB | typeof BROWSE_TARGET_KIND_LOCAL;
+
+export const WORKSPACE_QUERY_KEYS = ["file", "viewer", "mode", "pane", "virtual", "settings"] as const;
+const VIEWER_IDS: readonly string[] = ["image", "markdown", "pdf", "text"];
+
+export interface ViewerRoute {
+  file: BrowseRouteTarget;
+  paneId: PaneId;
+  viewerId: ViewerId;
+  mode: "view" | "edit";
+}
 
 export interface BrowseRouteTarget {
   kind: BrowseTargetKind;
@@ -23,6 +36,9 @@ export interface BrowseRouteState {
   left: BrowseRouteTarget | null;
   right: BrowseRouteTarget | null;
   activePaneId: PaneId;
+  viewer?: ViewerRoute;
+  settings?: MobileSettingsView;
+  extraSearch?: string;
 }
 
 export interface ResolvedBrowseRouteState {
@@ -163,24 +179,57 @@ export const parseBrowseRoute = ({ targetType, targetId, path, searchParams }: P
   }
 
   const activePaneId: PaneId = right && searchParams.get(ACTIVE_PANE_QUERY_KEY) === "2" ? "right" : "left";
+  const viewer = parseViewerRoute(searchParams, Boolean(right));
+  const settings = searchParams.get("settings");
+  const extra = new URLSearchParams(searchParams);
+  for (const key of [...WORKSPACE_QUERY_KEYS, RIGHT_PANE_QUERY_KEY, ACTIVE_PANE_QUERY_KEY]) extra.delete(key);
 
   return {
     left,
     right,
     activePaneId,
+    ...(viewer ? { viewer } : {}),
+    ...(settings === "main" || SETTINGS_CATEGORY_ORDER.includes(settings as SettingsCategory)
+      ? { settings: settings as MobileSettingsView }
+      : {}),
+    ...(extra.size ? { extraSearch: extra.toString() } : {}),
   };
 };
 
-export const serializeBrowseRoute = ({ left, right, activePaneId }: BrowseRouteState): string => {
-  if (!left) {
-    return "/browse";
+export function parseViewerRoute(searchParams: URLSearchParams, hasRightPane: boolean): ViewerRoute | undefined {
+  const file = searchParams.get("file");
+  const viewerId = searchParams.get("viewer");
+  const mode = searchParams.get("mode") ?? "view";
+  const pane = searchParams.get("pane") ?? "1";
+  if (!file || !viewerId || !VIEWER_IDS.includes(viewerId) || !["view", "edit"].includes(mode)) return;
+  if (!["1", "2"].includes(pane) || (pane === "2" && !hasRightPane)) return;
+  if (mode === "edit" && viewerId !== "text" && viewerId !== "markdown") return;
+  const [kind, targetId, ...segments] = file.split("/");
+  const target = parseRouteTarget(kind, targetId, segments.join("/"));
+  if (!target?.path) return;
+  const virtual = searchParams.get("virtual");
+  if (virtual) {
+    try {
+      const descriptor: unknown = JSON.parse(virtual);
+      if (!Array.isArray(descriptor) || descriptor.length !== 3 || descriptor.some((value) => typeof value !== "string")) return;
+      const [providerId, sourcePath, virtualPath] = descriptor as string[];
+      if (providerId !== "zip" || !sourcePath || !virtualPath) return;
+      target.virtualLocation = { providerId, sourcePath, virtualPath };
+    } catch {
+      return;
+    }
   }
+  return { file: target, viewerId: viewerId as ViewerId, paneId: pane === "2" ? "right" : "left", mode: mode as ViewerRoute["mode"] };
+}
 
-  const encodedTargetId = encodeURIComponent(left.targetId);
-  const encodedLeftPath = encodePath(buildRoutePath(left.path, left.virtualLocation));
-  let nextUrl = `/browse/${left.kind}/${encodedTargetId}${encodedLeftPath ? `/${encodedLeftPath}` : ""}`;
+export const serializeBrowseRoute = ({ left, right, activePaneId, viewer, settings, extraSearch }: BrowseRouteState): string => {
+  const encodedLeftPath = left ? encodePath(buildRoutePath(left.path, left.virtualLocation)) : "";
+  let nextUrl = left
+    ? `/browse/${left.kind}/${encodeURIComponent(left.targetId)}${encodedLeftPath ? `/${encodedLeftPath}` : ""}`
+    : "/browse";
 
-  const queryParams = new URLSearchParams();
+  const queryParams = new URLSearchParams(extraSearch);
+  for (const key of [...WORKSPACE_QUERY_KEYS, RIGHT_PANE_QUERY_KEY, ACTIVE_PANE_QUERY_KEY]) queryParams.delete(key);
   if (right) {
     const encodedRightTargetId = encodeURIComponent(right.targetId);
     const encodedRightPath = encodePath(buildRoutePath(right.path, right.virtualLocation));
@@ -190,6 +239,16 @@ export const serializeBrowseRoute = ({ left, right, activePaneId }: BrowseRouteS
       queryParams.set(ACTIVE_PANE_QUERY_KEY, "2");
     }
   }
+
+  if (viewer) {
+    queryParams.set("file", `${viewer.file.kind}/${encodeURIComponent(viewer.file.targetId)}/${encodePath(viewer.file.path)}`);
+    queryParams.set("viewer", viewer.viewerId);
+    if (viewer.mode === "edit") queryParams.set("mode", "edit");
+    if (viewer.paneId === "right") queryParams.set("pane", "2");
+    const virtual = viewer.file.virtualLocation;
+    if (virtual) queryParams.set("virtual", JSON.stringify([virtual.providerId, virtual.sourcePath, virtual.virtualPath]));
+  }
+  if (settings) queryParams.set("settings", settings);
 
   if (queryParams.size > 0) {
     nextUrl += `?${queryParams.toString()}`;

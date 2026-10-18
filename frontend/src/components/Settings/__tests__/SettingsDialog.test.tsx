@@ -1,8 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { Dialog } from "@mui/material";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SambeeThemeProvider } from "../../../theme";
 import SettingsDialog from "../SettingsDialog";
+import type { SettingsCategory } from "../settingsCategories";
 
 vi.mock("../settingsDataSources", () => ({
   prefetchSettingsDataForItems: vi.fn(),
@@ -18,7 +21,12 @@ vi.mock("../../../services/api", () => ({
 
 // Mock the consolidated settings pages since they're rendered by the dialog
 vi.mock("../../../pages/PreferencesSettings", () => ({
-  AppearanceSettings: () => <div>Appearance Settings Content</div>,
+  AppearanceSettings: () => (
+    <div>
+      Appearance Settings Content
+      <input aria-label="Appearance preference" />
+    </div>
+  ),
 }));
 
 vi.mock("../../../pages/AccountSettings", () => ({
@@ -242,6 +250,110 @@ describe("SettingsDialog Component", () => {
     });
 
     expect(screen.getByText("Connections Settings Content")).toBeInTheDocument();
+  });
+
+  it("focuses the initial category on each opening", async () => {
+    const { rerender } = renderWithTheme(<SettingsDialog open={false} onClose={mockOnClose} initialCategory="connections" />);
+    rerender(
+      <SambeeThemeProvider>
+        <SettingsDialog open={true} onClose={mockOnClose} initialCategory="connections" />
+      </SambeeThemeProvider>
+    );
+    expect(await screen.findByRole("option", { name: /^connections$/i })).toHaveFocus();
+    rerender(
+      <SambeeThemeProvider>
+        <SettingsDialog open={false} onClose={mockOnClose} initialCategory="connections" />
+      </SambeeThemeProvider>
+    );
+    rerender(
+      <SambeeThemeProvider>
+        <SettingsDialog open={true} onClose={mockOnClose} initialCategory="account" />
+      </SambeeThemeProvider>
+    );
+    expect(await screen.findByRole("option", { name: /^account$/i })).toHaveFocus();
+  });
+
+  it("synchronizes controlled category focus without waiting for a timer", async () => {
+    const { rerender } = renderWithTheme(
+      <SettingsDialog open={true} onClose={mockOnClose} initialCategory="connections" category="connections" />
+    );
+    expect(await screen.findByRole("option", { name: /^connections$/i })).toHaveFocus();
+    for (const category of ["account", "appearance", "connections"] as const) {
+      rerender(
+        <SambeeThemeProvider>
+          <SettingsDialog open={true} onClose={mockOnClose} initialCategory={category} category={category} />
+        </SambeeThemeProvider>
+      );
+      expect(screen.getByRole("option", { name: new RegExp(`^${category}$`, "i") })).toHaveFocus();
+    }
+  });
+
+  it("keeps category focus aligned through Back, Forward, and rapid history navigation", async () => {
+    function RoutedSettingsDialog() {
+      const location = useLocation();
+      const navigate = useNavigate();
+      const category = new URLSearchParams(location.search).get("settings") as SettingsCategory;
+      return (
+        <SettingsDialog
+          open={true}
+          onClose={mockOnClose}
+          initialCategory={category}
+          category={category}
+          onNavigate={(next) => void navigate({ search: `?settings=${next}` }, { flushSync: true })}
+        />
+      );
+    }
+    const router = createMemoryRouter([{ path: "/settings-test", element: <RoutedSettingsDialog /> }], {
+      initialEntries: ["/settings-test?settings=appearance", "/settings-test?settings=account", "/settings-test?settings=connections"],
+    });
+    renderWithTheme(<RouterProvider router={router} />);
+    expect(await screen.findByRole("option", { name: /^connections$/i })).toHaveFocus();
+    await act(() => router.navigate(-1));
+    expect(screen.getByRole("option", { name: /^account$/i })).toHaveFocus();
+    await act(() => router.navigate(1));
+    expect(screen.getByRole("option", { name: /^connections$/i })).toHaveFocus();
+    await act(() => {
+      void router.navigate(-1);
+      void router.navigate(-1);
+    });
+    expect(screen.getByRole("option", { name: /^appearance$/i })).toHaveFocus();
+  });
+
+  it("preserves form focus when available categories change after permissions load", async () => {
+    let resolveUser!: (user: Awaited<ReturnType<typeof api.getCurrentUser>>) => void;
+    vi.mocked(api.getCurrentUser).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveUser = resolve;
+      })
+    );
+    renderWithTheme(<SettingsDialog open={true} onClose={mockOnClose} />);
+    const input = await screen.findByRole("textbox", { name: "Appearance preference" });
+    input.focus();
+    await act(async () => resolveUser({ id: "admin-id", username: "admin", role: "admin" }));
+    await screen.findByRole("option", { name: /^about$/i });
+    expect(input).toHaveFocus();
+  });
+
+  it("does not steal focus from a nested dialog during category changes", async () => {
+    const renderDialogs = (category: SettingsCategory, nestedOpen: boolean) => (
+      <SambeeThemeProvider>
+        <SettingsDialog open={true} onClose={mockOnClose} initialCategory={category} category={category} />
+        <Dialog open={nestedOpen} aria-label="Nested settings dialog">
+          <input autoFocus aria-label="Nested preference" />
+        </Dialog>
+      </SambeeThemeProvider>
+    );
+    const { rerender } = render(renderDialogs("connections", false));
+    expect(await screen.findByRole("option", { name: /^connections$/i })).toHaveFocus();
+    const account = screen.getByRole("option", { name: /^account$/i });
+    rerender(renderDialogs("connections", true));
+    const input = await screen.findByRole("textbox", { name: "Nested preference" });
+    expect(input).toHaveFocus();
+    const focusCategory = vi.spyOn(account, "focus");
+    rerender(renderDialogs("account", true));
+    expect(focusCategory).not.toHaveBeenCalled();
+    expect(input).toHaveFocus();
+    focusCategory.mockRestore();
   });
 
   it("falls back to Appearance when an admin-only initial category is unavailable", async () => {

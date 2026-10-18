@@ -77,7 +77,7 @@ describe("Browser Component - Rendering", () => {
       right: null,
     });
 
-    renderBrowser("/browse");
+    renderBrowser("/browse/smb/test-server-1");
 
     expect((await screen.findAllByText("Documents")).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Loading connections/i)).not.toBeInTheDocument();
@@ -118,7 +118,7 @@ describe("Browser Component - Rendering", () => {
     }
   );
 
-  it("preserves a recovered viewer while synchronizing a different initial route", async () => {
+  it("ignores stale recovery navigation and legacy viewer state for an explicit URL", async () => {
     saveBrowserRecoverySnapshot({
       savedAt: Date.now(),
       routeUrl: "/browse/smb/test-server-1",
@@ -146,18 +146,12 @@ describe("Browser Component - Rendering", () => {
       right: null,
     });
 
-    renderBrowser("/browse");
+    renderBrowser("/browse/smb/test-server-1/Documents");
 
     await waitFor(() => {
-      expect(screen.getByTestId("router-location")).toHaveTextContent("/browse/smb/test-server-1");
+      expectDirectoryLoad("conn-1", "Documents");
     });
-    expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /documents/i }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("router-location")).toHaveTextContent("/browse/smb/test-server-1/Documents");
-    });
+    expect(screen.getByTestId("router-location")).toHaveTextContent("/browse/smb/test-server-1/Documents");
     expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument();
   });
 

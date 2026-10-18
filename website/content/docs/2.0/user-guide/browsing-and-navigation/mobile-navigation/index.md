@@ -22,6 +22,18 @@ Compared with desktop, mobile navigation is more compact:
 - Opening files in natively installed apps is not available.
 - Local drive access is not available.
 
+## Back, Forward, and Bookmarks
+
+Opening or closing a file, entering or leaving its editor, moving between gallery images, and navigating or closing settings update the browser address and add history entries. You can bookmark or share that address on desktop or mobile. The recipient still needs access to the connection and file; local-drive links also need a paired companion with that drive available.
+
+Use browser Back to retrace your navigation steps. If you open an image and close it, Back reopens that image; another Back returns to the file list from before you opened it. Forward follows those same locations in the other direction. Reopening an editor checks access and obtains a new edit lock. History doesn't undo saved file changes or restore discarded edits. Starting a new navigation after Back replaces the old Forward branch.
+
+If you have unsaved edits, Back or another navigation asks you to **Save**, **Discard**, or **Cancel**. Cancel keeps your draft and current location. A failed save keeps you in the editor. Your browser can also warn before reloading or closing a tab with unsaved edits.
+
+Settings **Close** reveals the underlying workspace and adds a history entry, so browser Back reopens the last settings category. Closing a directly opened viewer or settings bookmark also adds an entry without sending you to an unrelated page. The mobile settings back arrow follows your history; without an earlier location observed in this workspace, it uses an in-app parent. Resizing between phone and desktop layouts keeps the selected settings category.
+
+Refreshing a bookmark restores its requested location, not a different workspace saved earlier in the tab. A missing file or unavailable connection offers recovery actions rather than silently opening another file.
+
 ## Share Files and Text
 
 On a phone, use **Share** in a file's action menu, or select several files and choose **Share** from the selection menu. Sambee prepares the stored files first. When they're ready, tap **Share** to open your device's share sheet. Multiple files are submitted together; Sambee doesn't silently drop files or retry a smaller selection.

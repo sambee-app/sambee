@@ -1,4 +1,4 @@
-import { act, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ImageLoadPhase } from "../../../hooks/useCachedImageGallery";
@@ -26,20 +26,35 @@ vi.mock("yet-another-react-lightbox", () => ({
     index,
     carousel,
     render: lightboxRender,
+    close,
+    controller,
   }: {
     slides: Array<{ src: string }>;
     index: number;
     carousel?: { imageProps?: (slide: { src: string }) => Record<string, unknown> };
     render?: { slideHeader?: (props: { slide: { src: string } }) => React.ReactNode };
+    close?: () => void;
+    controller?: { closeOnEscape?: boolean };
   }) => {
     const slide = slides[index];
     const imageProps = slide ? carousel?.imageProps?.(slide) : undefined;
 
     return (
-      <div data-testid="image-lightbox" data-current-src={slide?.src ?? ""}>
+      <section
+        aria-label="Image lightbox"
+        tabIndex={-1}
+        data-testid="image-lightbox"
+        data-current-src={slide?.src ?? ""}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && (controller?.closeOnEscape ?? true)) {
+            event.stopPropagation();
+            close?.();
+          }
+        }}
+      >
         {slide && <img alt="" data-testid="lightbox-image" src={slide.src} {...imageProps} />}
         {slide && lightboxRender?.slideHeader?.({ slide })}
-      </div>
+      </section>
     );
   },
 }));
@@ -114,6 +129,38 @@ describe("ImageViewer", () => {
         dispatchEvent: vi.fn(),
       })),
     });
+  });
+
+  it("closes exactly once on Escape from lightbox content", () => {
+    const onClose = vi.fn();
+    render(
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
+      </SambeeThemeProvider>
+    );
+
+    screen.getByRole("dialog").focus();
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("blurs toolbar focus on the first Escape and closes once on the next", () => {
+    const onClose = vi.fn();
+    render(
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
+      </SambeeThemeProvider>
+    );
+    const close = screen.getByRole("button", { name: "Close" });
+    close.focus();
+
+    fireEvent.keyDown(close, { key: "Escape" });
+    expect(close).not.toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("shows a read-only badge in the toolbar when opened in read-only mode", () => {
@@ -283,6 +330,27 @@ describe("ImageViewer", () => {
     );
 
     expect(onLoadMoreItems).toHaveBeenCalledOnce();
+  });
+
+  it.each(["ArrowLeft", "ArrowRight"])("leaves Alt+%s to browser history while forwarding the plain arrow to the lightbox", (key) => {
+    render(
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    const lightbox = screen.getByTestId("image-lightbox");
+    const lightboxKeyDown = vi.fn((event: Event) => event.preventDefault());
+    lightbox.addEventListener("keydown", lightboxKeyDown);
+
+    const historyKey = createEvent.keyDown(lightbox, { key, altKey: true });
+    fireEvent(lightbox, historyKey);
+    expect(lightboxKeyDown).not.toHaveBeenCalled();
+    expect(historyKey.defaultPrevented).toBe(false);
+
+    const galleryKey = createEvent.keyDown(lightbox, { key });
+    fireEvent(lightbox, galleryKey);
+    expect(lightboxKeyDown).toHaveBeenCalledTimes(1);
+    expect(galleryKey.defaultPrevented).toBe(true);
   });
 
   it("closes shortcuts help on Escape without closing the viewer", async () => {

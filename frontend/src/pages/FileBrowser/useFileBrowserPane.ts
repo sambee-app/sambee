@@ -282,6 +282,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     onNavigateDirectory,
     onNavigateVirtualLocation,
     onResolveRouteLocation,
+    onOpenViewer,
   } = config;
   const providerRegistry = contentProviders;
 
@@ -1735,7 +1736,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         currentViewIndexRef.current = effectiveIndex;
         currentViewImagesRef.current = galleryImages;
         lastDisplayedImagePathRef.current = null;
-        setViewInfo({
+        (onOpenViewer ?? setViewInfo)({
           connectionId: targetConnectionId,
           path: filePath,
           fileSize: file.size,
@@ -1755,7 +1756,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       if (!virtualSource) {
         recordRecentFileAttempt(targetConnectionId, filePath);
       }
-      setViewInfo({
+      (onOpenViewer ?? setViewInfo)({
         connectionId: targetConnectionId,
         path: filePath,
         fileSize: file.size,
@@ -1766,7 +1767,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         sessionId: viewerSessionId,
       });
     },
-    [imageFiles, recordRecentFileAttempt, sortedItems]
+    [imageFiles, onOpenViewer, recordRecentFileAttempt, sortedItems]
   );
 
   const openNativeFile = useCallback(

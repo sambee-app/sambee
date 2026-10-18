@@ -12,14 +12,14 @@
  * - URL query param constants are correct
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
-import { type ApiMock, createMarkdownViewerMock, createSettingsDialogMock, setupSuccessfulApiMocks } from "../../test/helpers";
+import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { FileType } from "../../types";
-import { parseBrowseRoute, serializeBrowseRoute } from "../FileBrowser/routing";
+import { type BrowseRouteState, parseBrowseRoute, serializeBrowseRoute } from "../FileBrowser/routing";
 import { ACTIVE_PANE_QUERY_KEY, RIGHT_PANE_QUERY_KEY } from "../FileBrowser/types";
 import { mockDirectoryListing, renderBrowser } from "./FileBrowser.test.utils";
 
@@ -35,14 +35,66 @@ const expectDirectoryLoad = (connectionId: string, path: string) => {
 
 // Mock the API module
 vi.mock("../../services/api");
+vi.mock("../AccountSettings", () => ({ AccountSettings: () => <div>Account content</div> }));
 
 // Mock components using lazy mock factories
-vi.mock("../../components/Viewer/MarkdownViewer", () => createMarkdownViewerMock());
-vi.mock("../../components/Settings/SettingsDialog", () => createSettingsDialogMock());
+vi.mock("../../components/Viewer/MarkdownViewer", () => ({
+  default: ({
+    onClose,
+    navigation,
+    path,
+    isTransitioning,
+  }: {
+    onClose: () => void;
+    path: string;
+    isTransitioning?: boolean;
+    navigation?: { mode: string; onModeChange: (mode: "view" | "edit") => void };
+  }) => (
+    <div role="dialog" data-testid="markdown-viewer" data-mode={navigation?.mode} data-path={path} data-pending={isTransitioning}>
+      Markdown Viewer
+      <button type="button" onClick={() => navigation?.onModeChange("edit")}>
+        Enter editor
+      </button>
+      <button type="button" onClick={() => navigation?.onModeChange("view")}>
+        Leave editor
+      </button>
+      <button type="button" onClick={onClose}>
+        Close Viewer
+      </button>
+    </div>
+  ),
+}));
+vi.mock("../../components/Settings/SettingsDialog", () => ({
+  default: ({
+    open,
+    category,
+    onNavigate,
+    onClose,
+  }: {
+    open: boolean;
+    category: string;
+    onNavigate: (value: string) => void;
+    onClose: () => void;
+  }) =>
+    open ? (
+      <div data-testid="settings-dialog" data-category={category}>
+        <button type="button" onClick={() => onNavigate("account")}>
+          Account category
+        </button>
+        <button type="button" onClick={() => onNavigate("connections")}>
+          Connections category
+        </button>
+        <button type="button" onClick={onClose}>
+          Close Settings
+        </button>
+      </div>
+    ) : null,
+}));
 // @tanstack/react-virtual mock
 vi.mock("@tanstack/react-virtual", () => import("../../__mocks__/@tanstack/react-virtual"));
 
 describe("FileBrowser — URL Routing (Phase 3)", () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.clearAllMocks();
     authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
@@ -59,6 +111,40 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
   // --------------------------------------------------------------------------
 
   describe("URL query param constants", () => {
+    it("round trips independent viewer targets, edit intent, settings, and unrelated query state", () => {
+      const route: BrowseRouteState = {
+        left: { kind: "smb", targetId: "test-server-1", path: "Documents" },
+        right: { kind: "local", targetId: "drive %", path: "" },
+        activePaneId: "right",
+        viewer: {
+          file: {
+            kind: "smb",
+            targetId: "other server",
+            path: "archive.zip/notes/100% #.md",
+            virtualLocation: { providerId: "zip", sourcePath: "archive.zip", virtualPath: "notes/100% #.md" },
+          },
+          paneId: "right",
+          viewerId: "markdown",
+          mode: "edit",
+        },
+        settings: "admin-users",
+        extraSearch: "q=someone&page=2",
+      };
+      const url = new URL(serializeBrowseRoute(route), "http://localhost");
+      expect(parseBrowseRoute({ targetType: "smb", targetId: "test-server-1", path: "Documents", searchParams: url.searchParams })).toEqual(
+        route
+      );
+    });
+
+    it.each([
+      "file=smb%2Fdemo%2Ffile.txt&viewer=unknown",
+      "file=smb%2Fdemo%2Ffile.txt&viewer=text&pane=2",
+      "file=smb%2Fdemo%2Fimage.png&viewer=image&mode=edit",
+      "file=smb%2Fdemo%2F%25broken&viewer=text&virtual=invalid",
+    ])("ignores invalid workspace descriptors: %s", (search) => {
+      expect(parseBrowseRoute({ searchParams: new URLSearchParams(search) }).viewer).toBeUndefined();
+    });
+
     it("RIGHT_PANE_QUERY_KEY is 'p2'", () => {
       expect(RIGHT_PANE_QUERY_KEY).toBe("p2");
     });
@@ -104,6 +190,74 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
   });
 
   describe("settings dialog routing", () => {
+    it("commits category navigation synchronously while retaining category history", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1?settings=appearance");
+      await screen.findByTestId("settings-dialog");
+      const navigate = vi.spyOn(router, "navigate");
+      await user.click(screen.getByRole("button", { name: "Account category" }));
+      expect(navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ search: "?settings=account" }),
+        expect.objectContaining({ flushSync: true })
+      );
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "appearance");
+      await act(() => router.navigate(1));
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+    });
+
+    it("uses observed mobile category history even when the main view was a direct link", async () => {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => ({
+          matches: query.includes("max-width"),
+          media: query,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }))
+      );
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1?settings=main");
+      const drawer = await screen.findByRole("dialog");
+      await user.click(within(drawer).getByText("Account", { exact: true }));
+      expect(router.state.location.search).toContain("settings=account");
+      await user.click(screen.getByRole("button", { name: "Go back" }));
+      await waitFor(() => expect(router.state.location.search).toContain("settings=main"));
+      await act(() => router.navigate(1));
+      await waitFor(() => expect(router.state.location.search).toContain("settings=account"));
+    });
+    it("records settings Close and retraces category history with Back and Forward", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1");
+      await user.click(await screen.findByRole("button", { name: /open settings/i }));
+      const initialCategory = (await screen.findByTestId("settings-dialog")).getAttribute("data-category");
+      await user.click(await screen.findByRole("button", { name: "Account category" }));
+      await user.click(screen.getByRole("button", { name: "Connections category" }));
+      expect(router.state.location.search).toContain("settings=connections");
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await user.click(screen.getByRole("button", { name: "Close Settings" }));
+      await waitFor(() => expect(router.state.location.search).not.toContain("settings="));
+      await act(() => router.navigate(-1));
+      expect(await screen.findByTestId("settings-dialog")).toBeInTheDocument();
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("settings-dialog")).toHaveAttribute("data-category", initialCategory);
+      await act(() => router.navigate(2));
+      await waitFor(() => expect(screen.queryByTestId("settings-dialog")).not.toBeInTheDocument());
+    });
+
+    it("dismisses a direct category link without leaving the workspace", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1?settings=account");
+      await user.click(await screen.findByRole("button", { name: "Close Settings" }));
+      expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
+      expect(router.state.location.search).not.toContain("settings=");
+    });
     it("opens the requested settings category from the settings query parameter", async () => {
       renderBrowser("/browse/smb/test-server-1?settings=admin-authentication#flow=test-flow");
 
@@ -118,6 +272,197 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       const dialog = await screen.findByTestId("settings-dialog");
 
       expect(dialog).toHaveAttribute("data-category", "admin-file-search");
+    });
+  });
+
+  describe("viewer history", () => {
+    beforeEach(() => {
+      vi.mocked(api.listDirectory).mockResolvedValue({
+        ...mockDirectoryListing,
+        items: [
+          ...mockDirectoryListing.items,
+          {
+            name: "readme.md",
+            path: "readme.md",
+            type: FileType.FILE,
+            mime_type: "text/markdown",
+            size: 20,
+            is_readable: true,
+            is_hidden: false,
+          },
+        ],
+      });
+      vi.mocked(api.getFileInfo).mockResolvedValue({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never);
+    });
+    it("pushes a viewer location and restores it with Back and Forward", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1");
+      await user.click(await screen.findByRole("button", { name: /file: readme\.md/i }));
+      expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+      expect(new URLSearchParams(router.state.location.search).get("viewer")).toBe("markdown");
+      await act(() => router.navigate(-1));
+      await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+      expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
+      await act(() => router.navigate(1));
+      expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+    });
+
+    it.each([false, true])("records viewer Close and restores the file with Back (direct link: %s)", async (direct) => {
+      const user = userEvent.setup();
+      const directory = "/browse/smb/test-server-1/Documents";
+      const viewer = `${directory}?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown&keep=1#anchor`;
+      const { router } = renderBrowser(direct ? viewer : `${directory}?keep=1#anchor`);
+      if (!direct) await user.click(await screen.findByRole("button", { name: /file: readme\.md/i }));
+      await user.click(await screen.findByRole("button", { name: "Close Viewer" }));
+      await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+      expect(router.state.location.pathname).toBe(directory);
+      expect(router.state.location.search).toBe("?keep=1");
+      expect(router.state.location.hash).toBe("#anchor");
+
+      await act(() => router.navigate(-1));
+      expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+      if (!direct) {
+        await act(() => router.navigate(-1));
+        await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+        expect(router.state.location.pathname).toBe(directory);
+        await act(() => router.navigate(1));
+        expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+      }
+      await act(() => router.navigate(1));
+      await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+    });
+
+    it("records edit exit without overwriting the prior editor entry", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      await user.click(await screen.findByRole("button", { name: "Enter editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "edit"));
+      await user.click(screen.getByRole("button", { name: "Leave editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view"));
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "edit");
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view");
+      await act(() => router.navigate(2));
+      expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view");
+    });
+
+    it("records settings Close while preserving its underlying viewer", async () => {
+      const user = userEvent.setup();
+      const { router } = renderBrowser(
+        "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown&settings=account&keep=1#anchor"
+      );
+      await screen.findByTestId("markdown-viewer");
+      await user.click(await screen.findByRole("button", { name: "Close Settings" }));
+      await waitFor(() => expect(screen.queryByTestId("settings-dialog")).not.toBeInTheDocument());
+      expect(screen.getByTestId("markdown-viewer")).toBeInTheDocument();
+      expect(router.state.location.search).toContain("keep=1");
+      expect(router.state.location.hash).toBe("#anchor");
+      await act(() => router.navigate(-1));
+      expect(await screen.findByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(1));
+      await waitFor(() => expect(screen.queryByTestId("settings-dialog")).not.toBeInTheDocument());
+      expect(screen.getByTestId("markdown-viewer")).toBeInTheDocument();
+    });
+
+    it("opens a fresh viewer URL without a file-row click", async () => {
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+      expect(router.state.location.search).toContain("viewer=markdown");
+      expect(api.getFileInfo).toHaveBeenCalled();
+    });
+
+    it("keeps the same viewer mounted through delayed file navigation and Back", async () => {
+      const first = "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown";
+      const second = "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Fother.md&viewer=markdown";
+      const { router } = renderBrowser(first);
+      const outgoing = await screen.findByTestId("markdown-viewer");
+      let finishMetadata!: (metadata: never) => void;
+      vi.mocked(api.getFileInfo).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishMetadata = resolve;
+          })
+      );
+      await act(() => router.navigate(second));
+      expect(screen.getByTestId("markdown-viewer")).toBe(outgoing);
+      expect(outgoing).toHaveAttribute("data-path", "readme.md");
+      expect(outgoing).toHaveAttribute("data-pending", "true");
+      expect(screen.queryByRole("dialog", { name: /^loading$/i })).not.toBeInTheDocument();
+      await act(async () => finishMetadata({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "other.md"));
+      const incoming = screen.getByTestId("markdown-viewer");
+      vi.mocked(api.getFileInfo).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishMetadata = resolve;
+          })
+      );
+      await act(() => router.navigate(-1));
+      expect(screen.getByTestId("markdown-viewer")).toBe(incoming);
+      expect(incoming).toHaveAttribute("data-path", "other.md");
+      await act(async () => finishMetadata({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "readme.md"));
+    });
+
+    it("cancels a pending file change on Escape and ignores its late metadata", async () => {
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      await screen.findByTestId("markdown-viewer");
+      let finishMetadata!: (metadata: never) => void;
+      vi.mocked(api.getFileInfo).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishMetadata = resolve;
+          })
+      );
+      await act(() => router.navigate("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Fother.md&viewer=markdown"));
+      const user = userEvent.setup();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(router.state.location.search).not.toContain("viewer="));
+      await act(async () => finishMetadata({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never));
+      expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument();
+    });
+
+    it("offers retry for an unavailable file and closes a direct link safely", async () => {
+      const user = userEvent.setup();
+      vi.mocked(api.getFileInfo).mockRejectedValueOnce(new Error("File unavailable"));
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      expect(await screen.findByText(/File unavailable/)).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: /retry/i }));
+      expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Close Viewer" }));
+      await waitFor(() => expect(router.state.location.search).not.toContain("viewer="));
+      expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
+    });
+
+    it.each([1, 2])("reuses resolved viewer metadata after %s failed attempts", async (failures) => {
+      const user = userEvent.setup();
+      for (let attempt = 0; attempt < failures; attempt += 1) {
+        vi.mocked(api.getFileInfo).mockRejectedValueOnce(new Error("File unavailable"));
+      }
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      for (let attempt = 0; attempt < failures; attempt += 1) {
+        await screen.findByText(/File unavailable/);
+        await user.click(screen.getByRole("button", { name: /retry/i }));
+      }
+      await screen.findByTestId("markdown-viewer");
+      expect(api.getFileInfo).toHaveBeenCalledTimes(failures + 1);
+      await user.click(screen.getByRole("button", { name: "Enter editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "edit"));
+      await user.click(screen.getByRole("button", { name: "Leave editor" }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "view"));
+      await act(() => router.navigate(`${router.state.location.pathname}${router.state.location.search}&settings=account`));
+      expect(await screen.findByTestId("settings-dialog")).toHaveAttribute("data-category", "account");
+      await act(() => router.navigate(-1));
+      await act(() => router.navigate(1));
+      expect(api.getFileInfo).toHaveBeenCalledTimes(failures + 1);
+    });
+
+    it("normalizes an invalid workspace descriptor while preserving unrelated query and hash", async () => {
+      const { router } = renderBrowser("/browse/smb/test-server-1?file=bad&viewer=unknown&settings=unknown&keep=1#anchor");
+      await waitFor(() => expect(router.state.location.search).toBe("?keep=1"));
+      expect(router.state.location.hash).toBe("#anchor");
+      expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
     });
   });
 

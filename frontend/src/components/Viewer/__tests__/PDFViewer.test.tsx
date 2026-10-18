@@ -273,12 +273,12 @@ let submittedPdfPassword: string | null = null;
 let mockTextExtractionDelayMs = 0;
 let mockPageRenderDelayMs = 0;
 
-function mockMatchMedia(matches: boolean) {
+function mockMatchMedia(matches: boolean, reducedMotion = false) {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     configurable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches,
+      matches: query === "(prefers-reduced-motion: reduce)" ? reducedMotion : matches,
       media: query,
       onchange: null,
       addListener: vi.fn(),
@@ -524,6 +524,82 @@ describe("PDFViewer", () => {
       expect(screen.queryByTestId("pdf-loading-status")).not.toBeInTheDocument();
     });
 
+    it.each([false, true])("reveals only the rendered page with reduced motion %s", async (reducedMotion) => {
+      vi.useFakeTimers();
+      mockMatchMedia(false, reducedMotion);
+      mockPageRenderDelayMs = 1000;
+
+      try {
+        renderPDFViewer();
+        await act(async () => {
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+
+        const presentation = screen.getByTestId("pdf-document-presentation");
+        expect(screen.getByTestId("pdf-page")).toBeInTheDocument();
+        expect(presentation).toHaveStyle({ opacity: "0", visibility: "hidden", transition: "none" });
+        expect(presentation).toHaveAttribute("aria-hidden", "true");
+        expect(presentation).toHaveAttribute("inert");
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1000);
+        });
+
+        expect(presentation).toHaveStyle({
+          opacity: "1",
+          visibility: "visible",
+          transition: `opacity ${reducedMotion ? 0 : 160}ms ease-in-out`,
+        });
+        expect(presentation).toHaveAttribute("aria-hidden", "false");
+        expect(presentation).not.toHaveAttribute("inert");
+        expect(screen.getByLabelText("Next page")).toBeEnabled();
+
+        if (!reducedMotion) {
+          const overlay = screen.getByTestId("pdf-loading-overlay");
+          expect(overlay).toHaveStyle({ opacity: "0", pointerEvents: "none" });
+          expect(overlay).toHaveAttribute("aria-hidden", "true");
+          expect(overlay).toHaveAttribute("inert");
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(159);
+          });
+          expect(overlay).toBeInTheDocument();
+        }
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(screen.queryByTestId("pdf-loading-overlay")).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByLabelText("Next page"));
+        expect(getActivePdfPage()).toHaveAttribute("data-page", "2");
+        expect(presentation).toHaveStyle({ opacity: "1", visibility: "visible" });
+        expect(screen.queryByTestId("pdf-loading-overlay")).not.toBeInTheDocument();
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    });
+
+    it("conceals a replacement document until its first page renders", async () => {
+      const { rerender } = renderPDFViewer();
+      await waitForPageNavigationReady();
+      mockPageRenderDelayMs = 1000;
+
+      rerender(
+        <SambeeThemeProvider>
+          <PDFViewer {...defaultProps} path="/test/replacement.pdf" />
+        </SambeeThemeProvider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("pdf-document")).toHaveAttribute("data-file", "blob:mock-url-2");
+      });
+      expect(screen.getByTestId("pdf-document-presentation")).toHaveStyle({ opacity: "0", visibility: "hidden", transition: "none" });
+      expect(screen.getByTestId("pdf-loading-overlay")).toHaveAttribute("aria-hidden", "false");
+      expect(screen.getByLabelText("Zoom in")).toBeDisabled();
+    });
+
     it("keeps users informed until the first page has rendered", async () => {
       vi.useFakeTimers();
       mockPageRenderDelayMs = 6000;
@@ -550,6 +626,7 @@ describe("PDFViewer", () => {
           await vi.advanceTimersByTimeAsync(500);
         });
         expect(screen.getByText("Loading PDF")).toBeInTheDocument();
+        expect(screen.getByTestId("pdf-loading-status")).toHaveStyle({ position: "absolute", top: "calc(50% + 20px)" });
 
         await act(async () => {
           await vi.advanceTimersByTimeAsync(1500);
@@ -611,6 +688,8 @@ describe("PDFViewer", () => {
         expect(screen.getByRole("button", { name: "Try compatibility mode" })).toBeInTheDocument();
       });
 
+      expect(screen.queryByTestId("pdf-loading-overlay")).not.toBeInTheDocument();
+      mockPageRenderDelayMs = 1000;
       await userEvent.click(screen.getByRole("button", { name: "Try compatibility mode" }));
 
       await waitFor(() => {
@@ -620,6 +699,8 @@ describe("PDFViewer", () => {
           expect.objectContaining({ pdfVariant: "normalized" })
         );
       });
+      expect(screen.getByTestId("pdf-document-presentation")).toHaveStyle({ opacity: "0", visibility: "hidden" });
+      expect(screen.getByTestId("pdf-loading-overlay")).toHaveAttribute("aria-hidden", "false");
     });
 
     it("submits an encrypted PDF password without requesting compatibility mode", async () => {
@@ -630,6 +711,8 @@ describe("PDFViewer", () => {
 
       await user.type(await screen.findByLabelText("PDF password"), "secret");
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("pdf-loading-overlay")).not.toBeInTheDocument();
+      expect(screen.getByTestId("pdf-document-presentation")).toHaveAttribute("inert");
       await user.click(screen.getByRole("button", { name: "Open PDF" }));
 
       expect(submittedPdfPassword).toBe("secret");
@@ -1449,16 +1532,17 @@ describe("PDFViewer", () => {
       });
     });
 
-    it("closes viewer on Escape", async () => {
+    it.each(["document", "viewer"])("closes viewer exactly once on Escape from %s", async (target) => {
       renderPDFViewer();
 
       await waitFor(() => {
         expect(screen.getByTestId("pdf-page")).toBeInTheDocument();
       });
 
-      fireEvent.keyDown(document, { key: "Escape" });
+      const eventTarget = target === "document" ? document : screen.getByTestId("pdf-viewer-content");
+      fireEvent.keyDown(eventTarget, { key: "Escape" });
 
-      expect(mockOnClose).toHaveBeenCalled();
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
 
     it("closes search instead of the viewer when Escape is pressed in the search input", async () => {
