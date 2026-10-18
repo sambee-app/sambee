@@ -266,7 +266,6 @@ export const DynamicViewer = memo(function DynamicViewer(props: DynamicViewerPro
           navigation
             ? {
                 ...navigation,
-                selectionKey: props.navigation?.selectionKey,
                 ...(isTransitioning ? { mode: "view", onModeChange: () => {} } : {}),
               }
             : navigation

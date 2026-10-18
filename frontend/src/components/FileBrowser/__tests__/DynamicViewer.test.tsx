@@ -316,4 +316,28 @@ describe("DynamicViewer", () => {
     fireEvent.keyDown(document, { key: "d" });
     expect(download).toHaveBeenCalledTimes(1);
   });
+
+  it("retains the selection key with its matching image index until the replacement is ready", async () => {
+    mockGetViewerComponentLoadResult.mockResolvedValue({
+      status: "loaded",
+      component: function LoadedViewer({ currentIndex, navigation }: ViewerComponentProps) {
+        return <div data-testid="selection" data-index={currentIndex} data-key={navigation?.selectionKey} />;
+      },
+    });
+    const navigation = { mode: "view" as const, onModeChange: vi.fn(), onGuardChange: vi.fn(), selectionKey: "opening" };
+    const viewInfo = { ...defaultProps.viewInfo, viewerId: "image" as const, currentIndex: 0 };
+    const { rerender } = render(<DynamicViewer {...defaultProps} viewInfo={viewInfo} navigation={navigation} />);
+    const selection = await screen.findByTestId("selection");
+
+    rerender(<DynamicViewer {...defaultProps} viewInfo={viewInfo} isPending navigation={{ ...navigation, selectionKey: "next" }} />);
+    expect(selection).toHaveAttribute("data-index", "0");
+    expect(selection).toHaveAttribute("data-key", "opening");
+
+    rerender(
+      <DynamicViewer {...defaultProps} viewInfo={{ ...viewInfo, currentIndex: 1 }} navigation={{ ...navigation, selectionKey: "next" }} />
+    );
+    expect(screen.getByTestId("selection")).toBe(selection);
+    expect(selection).toHaveAttribute("data-index", "1");
+    expect(selection).toHaveAttribute("data-key", "next");
+  });
 });

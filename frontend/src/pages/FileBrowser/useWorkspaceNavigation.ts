@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import type { MobileSettingsView } from "../../components/Settings/settingsNavigation";
 import type { BrowserContentServices } from "../../services/browserContentServices";
@@ -52,6 +52,7 @@ export function useWorkspaceNavigation({
   const [viewerError, setViewerError] = useState<unknown>(null);
   const [viewerLoading, setViewerLoading] = useState(false);
   const [resolvedViewerIdentity, setResolvedViewerIdentity] = useState("");
+  const [viewerSelectionRevision, setViewerSelectionRevision] = useState(0);
   const [viewerRequestRevision, setViewerRequestRevision] = useState(0);
   const [retry, setRetry] = useState(0);
   const viewer = route.viewer;
@@ -65,6 +66,10 @@ export function useWorkspaceNavigation({
       const other = panes.current[paneId === "left" ? "right" : "left"];
       if (other.viewInfo) other.handleViewClose();
     } else if (pane.viewInfo) pane.handleViewClose();
+  });
+  const resolveViewerSelection = useEffectEvent((identity: string) => {
+    setResolvedViewerIdentity(identity);
+    setViewerSelectionRevision((revision) => revision + 1);
   });
 
   const navigateRoute = useCallback(
@@ -101,12 +106,15 @@ export function useWorkspaceNavigation({
       virtual ? { providerId: virtual.location.providerId, sourcePath: virtual.location.source.path, virtualPath: virtual.path } : null
     );
     if (!target || !info.viewerId) return;
-    setViewerRequestRevision((revision) => revision + 1);
     const nextViewer = { file: target, paneId, viewerId: info.viewerId, mode: "view" as const };
     pendingViewer.current = { identity: JSON.stringify([target, info.viewerId, paneId]), info };
-    navigateRoute({ ...route, viewer: nextViewer, settings: undefined });
+    startTransition(() => {
+      setViewerRequestRevision((revision) => revision + 1);
+      navigateRoute({ ...route, viewer: nextViewer, settings: undefined });
+    });
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Route entries and requests must reapply unchanged selections after coalesced Back navigation.
   useEffect(() => {
     const viewer = getViewer();
     setViewerError(null);
@@ -126,7 +134,7 @@ export function useWorkspaceNavigation({
     if (cached?.identity === viewerIdentity) {
       applyViewer(paneId, cached.info);
       setViewerLoading(false);
-      setResolvedViewerIdentity(viewerIdentity);
+      resolveViewerSelection(viewerIdentity);
       return;
     }
     const existing = panes.current[paneId].viewInfo;
@@ -147,7 +155,7 @@ export function useWorkspaceNavigation({
       !retry
     ) {
       setViewerLoading(false);
-      setResolvedViewerIdentity(viewerIdentity);
+      resolveViewerSelection(viewerIdentity);
       return;
     }
     setViewerLoading(true);
@@ -197,7 +205,7 @@ export function useWorkspaceNavigation({
         currentIndex: gallery?.indexOf(path),
         sessionId: crypto.randomUUID(),
       });
-      setResolvedViewerIdentity(viewerIdentity);
+      resolveViewerSelection(viewerIdentity);
     })()
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setViewerError(error);
@@ -206,7 +214,7 @@ export function useWorkspaceNavigation({
         if (!controller.signal.aborted) setViewerLoading(false);
       });
     return () => controller.abort();
-  }, [viewerIdentity, ready, retry, connections, services]);
+  }, [viewerIdentity, location.key, viewerRequestRevision, ready, retry, connections, services]);
 
   return {
     navigateRoute,
@@ -236,7 +244,7 @@ export function useWorkspaceNavigation({
       else navigateRoute({ ...route, settings: route.settings === "main" ? undefined : "main" }, { replace: true });
     },
     viewerError,
-    viewerSelectionKey: `${location.key}:${viewerRequestRevision}`,
+    viewerSelectionKey: String(viewerSelectionRevision),
     viewerLoading: Boolean(viewer && (viewerLoading || resolvedViewerIdentity !== viewerIdentity)),
     retryViewer: () => setRetry((value) => value + 1),
   };
