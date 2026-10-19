@@ -625,6 +625,40 @@ describe("useFileBrowserPane", () => {
     expect(api.listLocalLinkTargets).toHaveBeenCalledTimes(2);
   });
 
+  it("does not recreate an invalidated directory cache while enriching local links", async () => {
+    const localDriveConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const targets = deferred<LocalLinkTargetListing>();
+    const linkEntry = {
+      name: "Archive.lnk",
+      path: "Links/Archive.lnk",
+      type: FileType.FILE,
+      is_readable: true,
+      is_hidden: false,
+      link_kind: "windows_shortcut" as const,
+    };
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => ({
+      path,
+      items: path === "Links" ? [linkEntry] : [],
+      total: path === "Links" ? 1 : 0,
+    }));
+    vi.mocked(api.listLocalLinkTargets).mockReturnValueOnce(targets.promise).mockResolvedValue({ items: [] });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: [localDriveConnection] }), { wrapper });
+    act(() => result.current.applyLocation("local-drive:c", "Links"));
+    await waitFor(() => expect(api.listLocalLinkTargets).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.handleDirectoryChanged({ connectionId: "local-drive:c", path: "Links" }, { invalidateOnly: true }));
+    await act(async () => {
+      targets.resolve({
+        items: [{ source_path: linkEntry.path, state: "resolved", target: { name: "Archive", type: "directory" } }],
+      });
+    });
+    expect(result.current.files[0]?.link_target?.state).toBe("resolved");
+
+    await act(async () => result.current.applyLocation("local-drive:c", "Elsewhere"));
+    await act(async () => result.current.applyLocation("local-drive:c", "Links"));
+    expect(api.listDirectory).toHaveBeenCalledTimes(3);
+  });
+
   it("ignores deferred link target metadata after navigating away", async () => {
     const localDriveConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
     const targets = deferred<LocalLinkTargetListing>();
@@ -1255,6 +1289,35 @@ describe("useFileBrowserPane", () => {
       await act(async () => vi.advanceTimersByTimeAsync(5_000));
       expect(api.listDirectory).toHaveBeenCalledTimes(3);
       expect(result.current.loading).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not reuse a stale snapshot after navigation cancels its trailing refresh", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toHaveLength(3));
+
+    const snapshot = deferred<typeof mockDirectoryListing>();
+    const newEntry = { ...mockDirectoryListing.items[2], name: "new-after-snapshot.txt", path: "new-after-snapshot.txt" };
+    const freshListing = { ...mockDirectoryListing, items: [...mockDirectoryListing.items, newEntry], total: 4 };
+    vi.mocked(api.listDirectory).mockResolvedValue(freshListing).mockReturnValueOnce(snapshot.promise);
+
+    vi.useFakeTimers();
+    try {
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      await act(async () => snapshot.resolve(mockDirectoryListing));
+      expect(api.listDirectory).toHaveBeenCalledTimes(2);
+
+      await act(async () => result.current.applyLocation("conn-1", "Documents"));
+      await act(async () => result.current.applyLocation("conn-1", ""));
+
+      expect(api.listDirectory).toHaveBeenCalledTimes(4);
+      expect(result.current.files.map((entry) => entry.name)).toContain(newEntry.name);
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(api.listDirectory).toHaveBeenCalledTimes(4);
     } finally {
       vi.useRealTimers();
     }

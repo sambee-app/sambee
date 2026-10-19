@@ -48,6 +48,8 @@ Each pane handles directory-change notifications independently. An automatic ref
 
 Notifications don't cancel an active listing request. Instead, the pane remembers that another refresh is needed and starts one follow-up request after the active request finishes. Automatic refreshes start at most once per second. Further notifications don't move an existing deadline, so continuous writes still produce periodic updates. Navigation and unmount cancel queued work.
 
+A listing with unprocessed change notifications can remain visible, but it isn't cached as fresh. Deferred link-target metadata only updates cache entries that are still valid, so cancelling a follow-up refresh can't make an outdated snapshot reusable on return.
+
 SMB file-list subscriptions watch immediate children rather than the whole subtree. The separate backend directory-search cache retains recursive directory-name monitoring. See [SMB Change Notification and Directory Freshness](../../backend-architecture/smb-change-notification-and-directory-freshness/) for watcher ownership and lifecycle.
 
 ## URL-Driven Workspace Navigation

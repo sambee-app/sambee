@@ -811,10 +811,12 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
               return linkTarget ? { ...item, entry: { ...item.entry, link_target: linkTarget } } : item;
             });
             const cached = directoryCache.current.get(cacheKey);
-            directoryCache.current.set(cacheKey, {
-              items: enrichedItems.map((item) => item.entry),
-              timestamp: cached?.timestamp ?? Date.now(),
-            });
+            if (cached) {
+              directoryCache.current.set(cacheKey, {
+                items: enrichedItems.map((item) => item.entry),
+                timestamp: cached.timestamp,
+              });
+            }
             return enrichedItems;
           });
         })
@@ -904,7 +906,9 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         }
 
         const items = listing.items.map((item) => item.entry);
-        directoryCache.current.set(cacheKey, { items, timestamp: now });
+        if (!realtimeRefreshPendingRef.current) {
+          directoryCache.current.set(cacheKey, { items, timestamp: now });
+        }
         hasPhysicalListingRef.current = true;
         setItems(listing.items);
         loadLocalLinkTargets(targetConnectionId, targetPath, items, requestId);
