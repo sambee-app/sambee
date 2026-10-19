@@ -30,6 +30,7 @@ import os
 import tempfile
 import threading
 import time
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -54,6 +55,7 @@ from smbprotocol.open import (
 from smbprotocol.open import (
     FileAttributes as SMBFileAttributes,
 )
+from smbprotocol.reparse_point import ReparseTags
 from smbprotocol.session import Session
 from smbprotocol.tree import TreeConnect
 
@@ -102,13 +104,62 @@ HIDDEN_DIRECTORY_PREFIX = "."
 CACHE_PERSIST_SUBDIR = "directory_cache"  # Default subdirectory under data_dir
 CACHE_FILE_EXTENSION = ".idx"
 CACHE_BACKUP_EXTENSION = ".bak"  # Backup kept alongside the main file
-CACHE_FILE_VERSION = 1
+CACHE_FILE_VERSION = 2
 
 
 def path_contains_dot_directory(path: str) -> bool:
     """Return True when any path segment is dot-prefixed."""
 
     return any(segment.startswith(HIDDEN_DIRECTORY_PREFIX) for segment in path.split(PATH_SEPARATOR) if segment)
+
+
+@dataclass(frozen=True)
+class _ScannedDirectory:
+    path: str
+    is_reparse_point: bool = False
+    is_dfs_referral: bool = False
+
+    @property
+    def can_descend(self) -> bool:
+        """Follow DFS referrals, but do not follow arbitrary directory links."""
+        return not self.is_reparse_point or self.is_dfs_referral
+
+
+@dataclass(frozen=True)
+class _DirectoryMutation:
+    action: int
+    path: str
+    new_path: Optional[str] = None
+
+    def invalidates_read(self, directory: str) -> bool:
+        """A concurrent removal or rename makes overlapping scan results ambiguous."""
+
+        if self.action == FileAction.FILE_ACTION_ADDED:
+            return False
+
+        return any(
+            path == directory or path.rpartition(PATH_SEPARATOR)[0] == directory or directory.startswith(path + PATH_SEPARATOR)
+            for path in (self.path, self.new_path)
+            if path is not None
+        )
+
+    def apply(self, directories: set[str]) -> set[str]:
+        """Apply the same path operation to a live index or a rescan snapshot."""
+
+        if self.action == FileAction.FILE_ACTION_ADDED:
+            directories.add(self.path)
+            return directories
+
+        prefix = self.path + PATH_SEPARATOR
+        if self.action == FileAction.FILE_ACTION_REMOVED:
+            return {path for path in directories if path != self.path and not path.startswith(prefix)}
+
+        if self.action == FileAction.FILE_ACTION_RENAMED_NEW_NAME and self.new_path:
+            return {
+                self.new_path + path[len(self.path) :] if path == self.path or path.startswith(prefix) else path for path in directories
+            }
+
+        raise ValueError(f"Invalid directory cache mutation: action={self.action}, path={self.path!r}")
 
 
 # ============================================================================
@@ -140,6 +191,7 @@ class ConnectionDirectoryCache:
         password: str,
         port: int = 445,
         path_prefix: str = "/",
+        source_revision: str = "",
     ) -> None:
         """Initialize a per-connection directory cache.
 
@@ -151,6 +203,7 @@ class ConnectionDirectoryCache:
             password: SMB password
             port: SMB port (default 445)
             path_prefix: Base path within the share (e.g. "/photos")
+            source_revision: Connection revision used to invalidate snapshots after edits
         """
 
         self.connection_id = connection_id
@@ -164,6 +217,14 @@ class ConnectionDirectoryCache:
         # Normalize path_prefix: strip slashes so "" means share root
         cleaned = (path_prefix or "/").replace("\\", "/").strip("/")
         self._path_prefix = cleaned  # e.g. "photos" or ""
+        self._source_identity = {
+            "host": host,
+            "share_name": share_name,
+            "port": port,
+            "path_prefix": cleaned,
+            "username": username,
+            "revision": source_revision,
+        }
         # Pre-compute the SMB base path (share root + prefix)
         share_base = f"\\\\{host}\\{share_name}"
         if cleaned:
@@ -175,6 +236,7 @@ class ConnectionDirectoryCache:
         # Root is represented as ""
         self._directories: set[str] = set()
         self._lock = threading.Lock()
+        self._rescan_changes: Optional[list[_DirectoryMutation]] = None
 
         # State tracking
         self._state = CacheState.EMPTY
@@ -185,6 +247,7 @@ class ConnectionDirectoryCache:
         # Background tasks
         self._scan_task: Optional[asyncio.Task[None]] = None
         self._rescan_task: Optional[asyncio.Task[None]] = None
+        self._verification_task: Optional[asyncio.Task[None]] = None
         self._watcher_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -324,10 +387,7 @@ class ConnectionDirectoryCache:
         if not normalized:
             return
 
-        with self._lock:
-            self._directories.add(normalized)
-            self._directory_count = len(self._directories)
-            self._dirty = True
+        self._apply_mutations([_DirectoryMutation(FileAction.FILE_ACTION_ADDED, normalized)])
 
     #
     # add_directories
@@ -343,10 +403,7 @@ class ConnectionDirectoryCache:
         if not normalized:
             return
 
-        with self._lock:
-            self._directories.update(normalized)
-            self._directory_count = len(self._directories)
-            self._dirty = True
+        self._apply_mutations([_DirectoryMutation(FileAction.FILE_ACTION_ADDED, path) for path in normalized])
 
     #
     # remove_directory
@@ -362,14 +419,7 @@ class ConnectionDirectoryCache:
         if not normalized:
             return
 
-        prefix = normalized + "/"
-
-        with self._lock:
-            # Remove exact match and all children
-            self._directories.discard(normalized)
-            self._directories = {d for d in self._directories if not d.startswith(prefix)}
-            self._directory_count = len(self._directories)
-            self._dirty = True
+        self._apply_mutations([_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, normalized)])
 
     #
     # rename_directory
@@ -388,20 +438,16 @@ class ConnectionDirectoryCache:
         if not old_normalized or not new_normalized:
             return
 
-        old_prefix = old_normalized + "/"
+        self._apply_mutations([_DirectoryMutation(FileAction.FILE_ACTION_RENAMED_NEW_NAME, old_normalized, new_normalized)])
+
+    def _apply_mutations(self, mutations: list[_DirectoryMutation]) -> None:
+        """Update the live index and retain changes for an active rescan."""
 
         with self._lock:
-            updated: set[str] = set()
-
-            for d in self._directories:
-                if d == old_normalized:
-                    updated.add(new_normalized)
-                elif d.startswith(old_prefix):
-                    updated.add(new_normalized + d[len(old_normalized) :])
-                else:
-                    updated.add(d)
-
-            self._directories = updated
+            for mutation in mutations:
+                self._directories = mutation.apply(self._directories)
+            if self._rescan_changes is not None:
+                self._rescan_changes.extend(mutations)
             self._directory_count = len(self._directories)
             self._dirty = True
 
@@ -421,7 +467,7 @@ class ConnectionDirectoryCache:
         exists even if the process is killed mid-write.
 
         File format (JSONL):
-            Line 1 (header): {"v":1,"connection_id":"...","ts":...,"count":...}
+            Line 1 (header): version, connection ID, source identity, timestamp, count
             Lines 2+:        {"p":"relative/dir/path"}
         """
 
@@ -444,6 +490,7 @@ class ConnectionDirectoryCache:
                     header = {
                         "v": CACHE_FILE_VERSION,
                         "connection_id": self.connection_id,
+                        "source": self._source_identity,
                         "ts": time.time(),
                         "count": len(dirs),
                     }
@@ -530,6 +577,10 @@ class ConnectionDirectoryCache:
                 # Connection ID check
                 if header.get("connection_id") != self.connection_id:
                     logger.warning(f"{label.capitalize()} connection_id mismatch for connection {self.connection_id}, ignoring")
+                    return False
+
+                if header.get("source") != self._source_identity:
+                    logger.info("Ignoring %s for connection %s: connection target or revision changed", label, self.connection_id)
                     return False
 
                 # Staleness check
@@ -711,11 +762,12 @@ class ConnectionDirectoryCache:
                             subdirs = await self._scan_directory_with_pool_lease(pool, smb_path, rel_path)
 
                             # Add discovered directories to cache and queue
-                            for subdir_path in subdirs:
-                                if subdir_path not in discovered:
-                                    discovered.add(subdir_path)
-                                    self.add_directory(subdir_path)
-                                    queue.append(subdir_path)
+                            for subdir in subdirs:
+                                if subdir.path not in discovered:
+                                    discovered.add(subdir.path)
+                                    self.add_directory(subdir.path)
+                                    if subdir.can_descend:
+                                        queue.append(subdir.path)
 
                             scanned_count += 1
                         except asyncio.TimeoutError:
@@ -766,7 +818,7 @@ class ConnectionDirectoryCache:
     #
     # _scan_single_directory
     #
-    def _scan_single_directory(self, smb_path: str, rel_path: str) -> list[str]:
+    def _scan_single_directory(self, smb_path: str, rel_path: str) -> list[_ScannedDirectory]:
         """Scan a single directory for subdirectories (runs in executor).
 
         Args:
@@ -774,10 +826,10 @@ class ConnectionDirectoryCache:
             rel_path: Relative path from share root
 
         Returns:
-            List of relative paths of subdirectories found
+            Relative directory paths and whether each entry is a reparse point
         """
 
-        subdirs: list[str] = []
+        subdirs: list[_ScannedDirectory] = []
 
         try:
             entries = smbclient.scandir(
@@ -798,16 +850,24 @@ class ConnectionDirectoryCache:
 
                     if is_dir:
                         child_path = f"{rel_path}/{entry.name}" if rel_path else entry.name
-                        subdirs.append(child_path)
+                        subdirs.append(
+                            _ScannedDirectory(
+                                child_path,
+                                is_reparse_point=bool(info.file_attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT),
+                                is_dfs_referral=bool(info.file_attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT)
+                                and info.ea_size == ReparseTags.IO_REPARSE_TAG_DFS,
+                            )
+                        )
                 except Exception as e:
                     logger.debug(f"Error processing entry '{entry.name}' in '{rel_path}': {e}")
+                    raise
         except Exception as e:
             logger.debug(f"Error scanning '{smb_path}': {type(e).__name__}: {e}")
             raise
 
         return subdirs
 
-    async def _scan_directory_with_pool_lease(self, pool: SMBConnectionPool, smb_path: str, rel_path: str) -> list[str]:
+    async def _scan_directory_with_pool_lease(self, pool: SMBConnectionPool, smb_path: str, rel_path: str) -> list[_ScannedDirectory]:
         """Run a blocking scan without releasing its pool lease prematurely."""
 
         future = asyncio.get_running_loop().run_in_executor(None, self._scan_single_directory, smb_path, rel_path)
@@ -827,13 +887,15 @@ class ConnectionDirectoryCache:
         (stale serving / eventual consistency).
         """
 
-        if self._state == CacheState.BUILDING:
-            return  # Don't rescan while initial scan is running
+        with self._lock:
+            if self._state in (CacheState.BUILDING, CacheState.UPDATING):
+                return
+            previous_state = self._state
+            self._state = CacheState.UPDATING
+            self._rescan_changes = []
 
         logger.info(f"Starting periodic rescan for connection {self.connection_id}")
 
-        previous_state = self._state
-        self._state = CacheState.UPDATING
         scan_start = time.monotonic()
         scanned_count = 0
         error_count = 0
@@ -844,6 +906,20 @@ class ConnectionDirectoryCache:
 
             # Build a new set — don't modify the live one yet
             new_directories: set[str] = set()
+            discovered: set[str] = set()
+            applied_changes = 0
+            read_directories: set[str] = set()
+
+            def apply_pending_changes() -> None:
+                """Called under the cache lock; delayed events make overlapping reads ambiguous."""
+                nonlocal new_directories, applied_changes
+                changes = self._rescan_changes or []
+                pending = changes[applied_changes:]
+                if any(mutation.invalidates_read(directory) for mutation in pending for directory in read_directories):
+                    raise RuntimeError("Directory namespace changed after an overlapping read started; keeping the existing index")
+                for mutation in pending:
+                    new_directories = mutation.apply(new_directories)
+                applied_changes = len(changes)
 
             async with pool.get_connection(
                 host=self.host,
@@ -871,11 +947,21 @@ class ConnectionDirectoryCache:
                             smb_path = base_path
 
                         try:
+                            with self._lock:
+                                apply_pending_changes()
+                                read_directories.add(rel_path)
+
                             subdirs = await self._scan_directory_with_pool_lease(pool, smb_path, rel_path)
 
-                            for subdir_path in subdirs:
-                                new_directories.add(subdir_path)
-                                queue.append(subdir_path)
+                            with self._lock:
+                                apply_pending_changes()
+
+                                for subdir in subdirs:
+                                    if subdir.path not in discovered:
+                                        discovered.add(subdir.path)
+                                        new_directories.add(subdir.path)
+                                        if subdir.can_descend:
+                                            queue.append(subdir.path)
 
                             scanned_count += 1
                         except asyncio.TimeoutError:
@@ -889,11 +975,22 @@ class ConnectionDirectoryCache:
 
                     await asyncio.sleep(0)
 
+            if error_count:
+                self._state = previous_state
+                self._scan_error = (
+                    f"Directory rescan incomplete: {error_count} directories could not be scanned; keeping the existing index."
+                )
+                logger.warning("%s Connection: %s", self._scan_error, self.connection_id)
+                return
+
             # Atomically replace the cache
             with self._lock:
+                apply_pending_changes()
                 self._directories = new_directories
                 self._directory_count = len(new_directories)
+                self._rescan_changes = None
 
+            self._scan_error = None
             self._last_scan_time = time.time()
             self._state = CacheState.READY
             elapsed = time.monotonic() - scan_start
@@ -907,14 +1004,21 @@ class ConnectionDirectoryCache:
             # Persist updated snapshot to disk
             self.save_to_disk()
 
+        except asyncio.CancelledError:
+            self._state = previous_state
+            raise
         except Exception as e:
             # Keep the old cache on failure
             self._state = previous_state
+            self._scan_error = f"{type(e).__name__}: {e}"
             elapsed = time.monotonic() - scan_start
             logger.error(
                 f"Periodic rescan failed for connection {self.connection_id} after {elapsed:.1f}s: {type(e).__name__}: {e}",
                 exc_info=True,
             )
+        finally:
+            with self._lock:
+                self._rescan_changes = None
 
     # ========================================================================
     # CHANGE_NOTIFY watcher
@@ -1224,6 +1328,9 @@ class ConnectionDirectoryCache:
         if self._rescan_task and not self._rescan_task.done():
             self._rescan_task.cancel()
 
+        if self._verification_task and not self._verification_task.done():
+            self._verification_task.cancel()
+
         if self._coalesce_task and not self._coalesce_task.done():
             self._coalesce_task.cancel()
 
@@ -1298,6 +1405,7 @@ class DirectoryCacheManager:
         password: str,
         port: int = 445,
         path_prefix: str = "/",
+        source_revision: str = "",
     ) -> ConnectionDirectoryCache:
         """Get or create a directory cache for a connection.
 
@@ -1313,6 +1421,7 @@ class DirectoryCacheManager:
             password: SMB password
             port: SMB port
             path_prefix: Base path within the share
+            source_revision: Connection revision used to validate persisted snapshots
 
         Returns:
             The cache instance (may still be building)
@@ -1330,6 +1439,7 @@ class DirectoryCacheManager:
                 password=password,
                 port=port,
                 path_prefix=path_prefix,
+                source_revision=source_revision,
             )
             self._caches[connection_id] = cache
 
@@ -1343,7 +1453,7 @@ class DirectoryCacheManager:
             cache._start_periodic_rescan()
             cache._start_coalesce_flush()
             # Also kick off a verification rescan immediately (non-blocking)
-            cache._rescan_task = asyncio.create_task(cache._run_rescan())
+            cache._verification_task = asyncio.create_task(cache._run_rescan())
         else:
             # No snapshot — do a full scan from scratch
             await cache.start_scan()

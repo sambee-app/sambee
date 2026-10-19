@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from typing import Dict, Optional
 
 from smbprotocol.change_notify import (
-    ChangeNotifyFlags,
     CompletionFilter,
     FileAction,
     FileSystemWatcher,
@@ -43,6 +42,7 @@ RETRY_JITTER_FACTOR = 0.1  # 10% jitter
 # Timeout configuration
 SMB_CONNECT_TIMEOUT = 30  # seconds for initial connection
 SMB_OPERATION_TIMEOUT = 60  # seconds for SMB operations
+DIRECTORY_ONLY_NOTIFY_FLAGS = 0
 
 
 class DirectoryMonitor:
@@ -499,9 +499,6 @@ class MonitoredDirectory:
                     | CompletionFilter.FILE_NOTIFY_CHANGE_LAST_WRITE
                 )
 
-                # Watch subdirectories too
-                flags = ChangeNotifyFlags.SMB2_WATCH_TREE
-
                 if self._watcher is None:
                     logger.warning(f"Watcher is None for {self.connection_id}:{self.path}, exiting loop")
                     break
@@ -509,7 +506,7 @@ class MonitoredDirectory:
                 # Start the watcher (this is a blocking call until change occurs)
                 self._watcher.start(
                     completion_filter=completion_filter,
-                    flags=flags,
+                    flags=DIRECTORY_ONLY_NOTIFY_FLAGS,
                     output_buffer_length=4096,
                     send=True,
                 )

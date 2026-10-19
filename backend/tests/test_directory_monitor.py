@@ -449,6 +449,26 @@ class TestMonitoredDirectoryLifecycle:
 class TestChangeNotifications:
     """Test change notification handling."""
 
+    def test_file_list_watcher_only_watches_immediate_children(self):
+        """Descendant writes must not invalidate the visible directory listing."""
+        monitored = MonitoredDirectory(
+            connection_id="conn-123",
+            path="/documents",
+            host="server.local",
+            share_name="share",
+            username="user",
+            password="pass",
+            port=445,
+        )
+        watcher = MagicMock()
+        watcher.wait.side_effect = lambda: monitored._stop_event.set()
+        monitored._watcher = watcher
+
+        monitored._monitor_loop()
+
+        watcher.start.assert_called_once()
+        assert watcher.start.call_args.kwargs["flags"] == 0
+
     def test_handle_change_result_rejects_non_list_result(self):
         """Watcher results must be parsed change-notify lists, not arbitrary mocks."""
         monitored = MonitoredDirectory(
