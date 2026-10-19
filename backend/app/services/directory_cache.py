@@ -55,6 +55,7 @@ from smbprotocol.open import (
 from smbprotocol.open import (
     FileAttributes as SMBFileAttributes,
 )
+from smbprotocol.reparse_point import ReparseTags
 from smbprotocol.session import Session
 from smbprotocol.tree import TreeConnect
 
@@ -116,6 +117,12 @@ def path_contains_dot_directory(path: str) -> bool:
 class _ScannedDirectory:
     path: str
     is_reparse_point: bool = False
+    is_dfs_referral: bool = False
+
+    @property
+    def can_descend(self) -> bool:
+        """Follow DFS referrals, but do not follow arbitrary directory links."""
+        return not self.is_reparse_point or self.is_dfs_referral
 
 
 @dataclass(frozen=True)
@@ -759,7 +766,7 @@ class ConnectionDirectoryCache:
                                 if subdir.path not in discovered:
                                     discovered.add(subdir.path)
                                     self.add_directory(subdir.path)
-                                    if not subdir.is_reparse_point:
+                                    if subdir.can_descend:
                                         queue.append(subdir.path)
 
                             scanned_count += 1
@@ -847,6 +854,8 @@ class ConnectionDirectoryCache:
                             _ScannedDirectory(
                                 child_path,
                                 is_reparse_point=bool(info.file_attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT),
+                                is_dfs_referral=bool(info.file_attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT)
+                                and info.ea_size == ReparseTags.IO_REPARSE_TAG_DFS,
                             )
                         )
                 except Exception as e:
@@ -899,6 +908,18 @@ class ConnectionDirectoryCache:
             new_directories: set[str] = set()
             discovered: set[str] = set()
             applied_changes = 0
+            read_directories: set[str] = set()
+
+            def apply_pending_changes() -> None:
+                """Called under the cache lock; delayed events make overlapping reads ambiguous."""
+                nonlocal new_directories, applied_changes
+                changes = self._rescan_changes or []
+                pending = changes[applied_changes:]
+                if any(mutation.invalidates_read(directory) for mutation in pending for directory in read_directories):
+                    raise RuntimeError("Directory namespace changed after an overlapping read started; keeping the existing index")
+                for mutation in pending:
+                    new_directories = mutation.apply(new_directories)
+                applied_changes = len(changes)
 
             async with pool.get_connection(
                 host=self.host,
@@ -927,24 +948,19 @@ class ConnectionDirectoryCache:
 
                         try:
                             with self._lock:
-                                read_change_count = len(self._rescan_changes or [])
+                                apply_pending_changes()
+                                read_directories.add(rel_path)
 
                             subdirs = await self._scan_directory_with_pool_lease(pool, smb_path, rel_path)
 
                             with self._lock:
-                                changes = self._rescan_changes or []
-                                if any(mutation.invalidates_read(rel_path) for mutation in changes[read_change_count:]):
-                                    raise RuntimeError("Directory was removed or renamed during its read; keeping the existing index")
-
-                                for mutation in changes[applied_changes:]:
-                                    new_directories = mutation.apply(new_directories)
-                                applied_changes = len(changes)
+                                apply_pending_changes()
 
                                 for subdir in subdirs:
                                     if subdir.path not in discovered:
                                         discovered.add(subdir.path)
                                         new_directories.add(subdir.path)
-                                        if not subdir.is_reparse_point:
+                                        if subdir.can_descend:
                                             queue.append(subdir.path)
 
                             scanned_count += 1
@@ -969,8 +985,7 @@ class ConnectionDirectoryCache:
 
             # Atomically replace the cache
             with self._lock:
-                for mutation in (self._rescan_changes or [])[applied_changes:]:
-                    new_directories = mutation.apply(new_directories)
+                apply_pending_changes()
                 self._directories = new_directories
                 self._directory_count = len(new_directories)
                 self._rescan_changes = None

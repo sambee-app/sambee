@@ -51,9 +51,9 @@ File list:
 Directory cache for instant navigation:
 
 - Quick directory navigation keeps its existing index when a background scan times out or fails.
-- Directory changes made during a background scan are no longer lost or applied twice, including when a deleted or renamed folder's name is reused.
+- Background scans keep the live directory index when a removal or rename overlaps a read, including when its notification arrives late. This prevents changes from being applied twice when a folder's name is reused.
 - Changing a connection's target or sign-in details no longer reuses directory suggestions from its old configuration.
-- Directory junctions remain searchable but are no longer followed recursively, preventing indexing loops.
+- Directory junctions remain searchable but are no longer followed recursively, preventing indexing loops. DFS referrals are still followed, keeping their subfolders searchable.
 - Startup verification and scheduled directory scans now stop cleanly when their cache is removed.
 
 #### Other Fixes

@@ -146,11 +146,11 @@ It watches directory-name changes across the tree because the cache only needs e
 
 A full rescan builds a replacement index while the current index continues to serve directory searches. If any directory read fails or times out, the replacement isn't published or persisted. The existing index remains available, and the scan error is recorded for diagnosis. A later successful rescan can replace it.
 
-While a rescan is running, directory additions, removals, and renames update the live index and are also recorded in order. Before merging each completed directory read, Sambee applies pending operations to paths already collected, under the cache lock. It doesn't apply those operations again to the fresh read, which may already reflect them. Any remaining operations are applied before publication.
+While a rescan is running, directory additions, removals, and renames update the live index and are also recorded in order. Under the cache lock, Sambee checks pending operations before and after each directory read and before publication. Additions are safe to merge. Removals and renames can only be merged when they don't overlap a read that's already started.
 
-If a removal or rename changes the directory being read, one of its ancestors, or an immediate child's name while the read is in flight, that read is ambiguous. The replacement index isn't published or persisted; the live index, including its recent changes, remains available. Only one rescan can run at a time, and cancellation discards pending reconciliation without discarding live updates.
+If a removal or rename changes a directory that's already been read, one being read, an ancestor of either, or an immediate child's name, the replacement is ambiguous. Notifications can arrive after a read already reflects the change, so replaying them could rename or remove fresh paths a second time. Sambee discards the replacement rather than publishing or persisting it; the live index, including its recent changes, remains available. Only one rescan can run at a time, and cancellation discards pending reconciliation without discarding live updates.
 
-Directory junctions and other directory reparse points are indexed as destinations, but scans don't descend into their targets. This prevents ancestor links from causing repeated traversal.
+Directory junctions, symbolic links, and unrecognized directory reparse points are indexed as destinations, but scans don't descend into their targets. This prevents ancestor links from causing repeated traversal. DFS referrals are identified by their reparse tag and remain traversable through the SMB client's referral support, so directories below DFS links stay searchable.
 
 ### Persisted Snapshots
 
