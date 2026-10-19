@@ -44,7 +44,7 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 
 - Sambee no longer watches the entire subtree for changes but only immediate children.
 - When changes happen, the file list is now refreshed in the background.
-- UI changes are now coalesced and rate-limited.
+- File list refreshes are now coalesced and rate-limited.
 
 #### Other Fixes
 
