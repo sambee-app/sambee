@@ -40,11 +40,16 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 - Interrupted SMB moves now release files safely, without leaving them open or interrupting work still in progress.
 - Pressing Enter after a transfer finishes no longer starts the same transfer again.
 
-#### SMB Change Monitoring
+#### SMB Change Monitoring Fixes
+
+File list:
 
 - File-list monitoring now watches only immediate children, so changes deeper in a folder don't trigger unnecessary refreshes.
 - When changes happen, the file list is now refreshed in the background.
 - File list refreshes are now coalesced and rate-limited.
+
+Directory cache for instant navigation:
+
 - Quick directory navigation keeps its existing index when a background scan times out or fails.
 - Directory changes made during a background scan are no longer lost when the scan finishes.
 - Changing a connection's target or sign-in details no longer reuses directory suggestions from its old configuration.
