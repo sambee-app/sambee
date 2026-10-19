@@ -3,12 +3,12 @@ pytest-asyncio==1.4.0
 pytest-cov==7.1.0
 pytest-xdist==3.8.0
 jsonschema==4.26.0
-black==26.10.0
-ruff==0.16.10
+black==26.10.1
+ruff==0.17.1
 mypy==2.4.0
 httpx==0.28.1
 httpx2==2.13.1
-faker==40.41.0
+faker==40.43.0
 ipython==9.17.1
 rich==15.0.0
 types-Authlib==1.8.0.20260911
