@@ -142,6 +142,22 @@ The directory-cache watcher is narrower by design.
 
 It watches directory-name changes across the tree because the cache only needs enough signal to update its directory index efficiently.
 
+## Directory-Index Consistency
+
+A full rescan builds a replacement index while the current index continues to serve directory searches. If any directory read fails or times out, the replacement isn't published or persisted. The existing index remains available, and the scan error is recorded for diagnosis. A later successful rescan can replace it.
+
+While a rescan is running, directory additions, removals, and renames update the live index and are also recorded in order. Before publishing a completed scan, Sambee replays those operations under the cache lock so the scan can't undo newer changes. Only one rescan can run at a time; cancellation discards its pending replay without discarding live updates.
+
+Directory junctions and other directory reparse points are indexed as destinations, but scans don't descend into their targets. This prevents ancestor links from causing repeated traversal.
+
+### Persisted Snapshots
+
+Version 2 snapshots are bound to the connection's host, port, share, normalized path prefix, username, and connection revision. The revision changes when the connection is edited, including credential changes. Passwords aren't stored in snapshot metadata.
+
+A snapshot with a different source identity is ignored, including when trying the backup file. Older version 1 snapshots are also ignored, so existing installations rebuild the directory index once after upgrading. Matching snapshots still provide immediate search results while background verification checks freshness.
+
+Startup verification and the periodic rescan loop have separate tracked tasks. Removing a cache or shutting down the application cancels both tasks, along with initial scanning and snapshot flushing.
+
 ## Recovery and Failure Handling
 
 The directory monitor treats connection failures as part of normal long-lived operation, not as impossible edge cases.

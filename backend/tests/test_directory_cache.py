@@ -8,10 +8,12 @@ Tests cover:
 - Module-level singleton and shutdown functions
 """
 
+import asyncio
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from smbclient._os import FileAttributes
 
 from app.services.directory_cache import (
     CHANGE_NOTIFY_BUFFER_SIZE,
@@ -22,6 +24,7 @@ from app.services.directory_cache import (
     CacheState,
     ConnectionDirectoryCache,
     DirectoryCacheManager,
+    _ScannedDirectory,
     get_directory_cache_manager,
     shutdown_directory_cache,
 )
@@ -675,6 +678,223 @@ class TestStartScan:
 
 
 # ============================================================================
+# ConnectionDirectoryCache — rescans
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestRescan:
+    """Rescans must preserve usable search data when SMB reads fail."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failed_path", ["", "documents"])
+    async def test_incomplete_rescan_preserves_live_index(self, populated_cache: ConnectionDirectoryCache, failed_path: str):
+        """A root or subtree timeout must not replace or persist a partial index."""
+        cache = populated_cache
+        cache._state = CacheState.READY
+        cache._last_scan_time = 123.0
+        previous_directories = set(cache._directories)
+        pool = MagicMock()
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            if rel_path == failed_path:
+                raise TimeoutError("SMB directory read timed out")
+            return [_ScannedDirectory("documents")] if not rel_path else []
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+
+        assert cache._directories == previous_directories
+        assert cache.state == CacheState.READY
+        assert cache.last_scan_time == 123.0
+        assert cache.scan_error is not None
+        save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unreadable_entry_does_not_publish_partial_rescan(self, populated_cache: ConnectionDirectoryCache):
+        """An entry metadata failure must not turn a partial listing into a complete index."""
+        cache = populated_cache
+        cache._state = CacheState.READY
+        previous_directories = cache._directories.copy()
+        readable_entry = MagicMock()
+        readable_entry.name = "fresh-directory"
+        readable_entry.smb_info.file_attributes = FileAttributes.FILE_ATTRIBUTE_DIRECTORY
+
+        class UnreadableEntry:
+            name = "unreadable-directory"
+
+            @property
+            def smb_info(self):
+                raise OSError("Entry metadata could not be read")
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=MagicMock()),
+            patch("app.services.directory_cache.smbclient.scandir", return_value=[readable_entry, UnreadableEntry()]),
+            patch.object(
+                cache,
+                "_scan_directory_with_pool_lease",
+                side_effect=lambda _pool, smb_path, rel_path: cache._scan_single_directory(smb_path, rel_path),
+            ),
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+
+        assert cache._directories == previous_directories
+        assert cache.scan_error is not None
+        save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_successful_rescan_replaces_index_after_failure(self, populated_cache: ConnectionDirectoryCache):
+        """Recovery must clear the error and remove paths absent from a complete scan."""
+        cache = populated_cache
+        cache._state = CacheState.READY
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            return [_ScannedDirectory("fresh-directory")] if not rel_path else []
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=MagicMock()),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=TimeoutError("Temporary failure")) as scan,
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+            assert cache.scan_error is not None
+            scan.side_effect = scan_directory
+            await cache._run_rescan()
+
+        assert cache._directories == {"fresh-directory"}
+        assert cache.scan_error is None
+        assert cache.state == CacheState.READY
+        save.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_rescan_discards_replay_without_losing_live_changes(self, populated_cache: ConnectionDirectoryCache):
+        """Cancellation must preserve live mutations and allow a later rescan."""
+        cache = populated_cache
+        cache._state = CacheState.READY
+        started = asyncio.Event()
+        blocked = asyncio.Event()
+
+        async def scan_directory(_pool, _smb_path, _rel_path):
+            started.set()
+            await blocked.wait()
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=MagicMock()),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            scan_task = asyncio.create_task(cache._run_rescan())
+            await started.wait()
+            cache.add_directory("created-during-rescan")
+            scan_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await scan_task
+
+        assert "created-during-rescan" in cache._directories
+        assert cache._rescan_changes is None
+        assert cache.state == CacheState.READY
+        save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_overlapping_rescan_does_not_replace_active_replay(self, cache: ConnectionDirectoryCache):
+        """Only one rescan may own the live-change journal at a time."""
+        cache._state = CacheState.UPDATING
+        replay = []
+        cache._rescan_changes = replay
+        with patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock) as get_pool:
+            await cache._run_rescan()
+
+        assert cache._rescan_changes is replay
+        get_pool.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["add", "remove", "rename"])
+    async def test_rescan_preserves_concurrent_mutations(self, cache: ConnectionDirectoryCache, action: str):
+        """Watcher updates must win over directory data read earlier by a rescan."""
+        cache._state = CacheState.READY
+        cache.add_directory("documents")
+        pool = MagicMock()
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            if not rel_path:
+                return [_ScannedDirectory("documents"), _ScannedDirectory("photos")]
+            if rel_path == "documents":
+                return [_ScannedDirectory("documents/work")]
+            if rel_path == "photos":
+                if action == "add":
+                    cache.add_directories(["new-directory", "new-directory/child"])
+                elif action == "remove":
+                    cache.remove_directory("documents")
+                else:
+                    cache.rename_directory("documents", "renamed")
+            return []
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(cache, "save_to_disk"),
+        ):
+            await cache._run_rescan()
+
+        expected = {
+            "add": {"documents", "documents/work", "photos", "new-directory", "new-directory/child"},
+            "remove": {"photos"},
+            "rename": {"renamed", "renamed/work", "photos"},
+        }
+        assert cache._directories == expected[action]
+        assert cache.directory_count == len(expected[action])
+        assert cache._rescan_changes is None
+        assert cache.state == CacheState.READY
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("initial_scan", [False, True])
+    async def test_scans_index_junctions_without_traversing_them(self, cache: ConnectionDirectoryCache, initial_scan: bool):
+        """A junction remains searchable without recursively visiting its target."""
+        cache._state = CacheState.READY
+        pool = MagicMock()
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            assert rel_path != "ancestor-junction", "Scanner descended into a directory junction"
+            if not rel_path:
+                return [_ScannedDirectory("ancestor-junction", is_reparse_point=True), _ScannedDirectory("ordinary")]
+            return []
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory) as scan,
+            patch.object(cache, "_start_watcher"),
+            patch.object(cache, "_start_periodic_rescan"),
+            patch.object(cache, "_start_coalesce_flush"),
+            patch.object(cache, "save_to_disk"),
+        ):
+            if initial_scan:
+                await cache._run_scan()
+            else:
+                await cache._run_rescan()
+
+        assert cache._directories == {"ancestor-junction", "ordinary"}
+        assert scan.await_count == 2
+
+    @pytest.mark.parametrize("is_reparse_point", [False, True])
+    def test_scan_reads_reparse_attribute(self, cache: ConnectionDirectoryCache, is_reparse_point: bool):
+        """Directory discovery preserves SMB's reparse-point attribute for traversal decisions."""
+        entry = MagicMock()
+        entry.name = "directory"
+        entry.smb_info.file_attributes = FileAttributes.FILE_ATTRIBUTE_DIRECTORY
+        if is_reparse_point:
+            entry.smb_info.file_attributes |= FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT
+        with patch("app.services.directory_cache.smbclient.scandir", return_value=[entry]):
+            result = cache._scan_single_directory("unused", "parent")
+
+        assert result == [_ScannedDirectory("parent/directory", is_reparse_point=is_reparse_point)]
+
+
+# ============================================================================
 # ConnectionDirectoryCache — stop
 # ============================================================================
 
@@ -721,6 +941,16 @@ class TestStop:
         cache._rescan_task = mock_task
 
         cache.stop()
+        mock_task.cancel.assert_called_once()
+
+    def test_stop_cancels_verification_task(self, cache: ConnectionDirectoryCache):
+        """Shutdown must also cancel the startup snapshot verification."""
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        cache._verification_task = mock_task
+
+        cache.stop()
+
         mock_task.cancel.assert_called_once()
 
 
