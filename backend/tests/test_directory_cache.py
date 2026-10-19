@@ -852,6 +852,148 @@ class TestRescan:
         assert cache.state == CacheState.READY
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["rename", "recreate"])
+    async def test_rescan_does_not_replay_changes_already_seen_by_scan(self, cache: ConnectionDirectoryCache, action: str):
+        """Changes before a directory read must not be applied twice to its results."""
+        cache._state = CacheState.READY
+        cache.add_directories(["alpha", "alpha/original", "incoming", "incoming/new-child"])
+
+        async def get_pool():
+            if action == "rename":
+                cache.rename_directory("alpha", "moved")
+                cache.rename_directory("incoming", "alpha")
+            else:
+                cache.remove_directory("alpha")
+                cache.add_directory("alpha")
+            return MagicMock()
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            directories = {
+                "": ["alpha", "moved" if action == "rename" else "incoming"],
+                "alpha": ["alpha/new-child"],
+                "moved": ["moved/original"],
+                "incoming": ["incoming/new-child"],
+            }
+            return [_ScannedDirectory(path) for path in directories.get(rel_path, [])]
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", side_effect=get_pool),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+
+        other = "moved" if action == "rename" else "incoming"
+        child = "original" if action == "rename" else "new-child"
+        assert cache._directories == {"alpha", "alpha/new-child", other, f"{other}/{child}"}
+        assert cache.directory_count == 4
+        assert cache.scan_error is None
+        save.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["rename", "recreate"])
+    @pytest.mark.parametrize("changed_during_read", ["", "alpha"])
+    async def test_rescan_keeps_live_index_when_read_is_ambiguous(
+        self, cache: ConnectionDirectoryCache, action: str, changed_during_read: str
+    ):
+        """A namespace change during a read must not replace a correct live index."""
+        cache._state = CacheState.READY
+        cache._last_scan_time = 123.0
+        cache.add_directories(["alpha", "alpha/original", "incoming", "incoming/new-child"])
+        live_after_changes = set()
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            nonlocal live_after_changes
+            if rel_path == changed_during_read:
+                if action == "rename":
+                    cache.rename_directory("alpha", "moved")
+                    cache.rename_directory("incoming", "alpha")
+                else:
+                    cache.remove_directory("alpha")
+                    cache.add_directory("alpha")
+                live_after_changes = cache._directories.copy()
+            directories = {"": ["alpha", "incoming"], "alpha": ["alpha/new-child"]}
+            return [_ScannedDirectory(path) for path in directories.get(rel_path, [])]
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=MagicMock()),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+
+        assert live_after_changes
+        assert cache._directories == live_after_changes
+        assert cache.last_scan_time == 123.0
+        assert cache.scan_error is not None
+        assert cache._rescan_changes is None
+        assert cache.state == CacheState.READY
+        save.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["add", "remove", "rename"])
+    async def test_rescan_applies_changes_after_last_directory_read(self, cache: ConnectionDirectoryCache, action: str):
+        """The final publication must still reconcile changes after all reads finish."""
+        cache._state = CacheState.READY
+        cache.add_directories(["documents", "documents/work"])
+        pool = MagicMock()
+
+        async def release_connection(*_args):
+            if action == "add":
+                cache.add_directory("new-directory")
+            elif action == "remove":
+                cache.remove_directory("documents")
+            else:
+                cache.rename_directory("documents", "renamed")
+            return False
+
+        pool.get_connection.return_value.__aexit__.side_effect = release_connection
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            directories = {"": ["documents"], "documents": ["documents/work"]}
+            return [_ScannedDirectory(path) for path in directories.get(rel_path, [])]
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+
+        expected = {
+            "add": {"documents", "documents/work", "new-directory"},
+            "remove": set(),
+            "rename": {"renamed", "renamed/work"},
+        }
+        assert cache._directories == expected[action]
+        assert cache.directory_count == len(expected[action])
+        assert cache.scan_error is None
+        save.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rescan_accepts_changes_below_listed_children(self, cache: ConnectionDirectoryCache):
+        """Removing a grandchild doesn't make an immediate-child listing ambiguous."""
+        cache._state = CacheState.READY
+        cache.add_directories(["documents", "documents/work", "documents/work/old"])
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            if not rel_path:
+                cache.remove_directory("documents/work/old")
+            directories = {"": ["documents"], "documents": ["documents/work"], "documents/work": ["documents/work/new"]}
+            return [_ScannedDirectory(path) for path in directories.get(rel_path, [])]
+
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=MagicMock()),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+
+        assert cache._directories == {"documents", "documents/work", "documents/work/new"}
+        assert cache.scan_error is None
+        save.assert_called_once()
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("initial_scan", [False, True])
     async def test_scans_index_junctions_without_traversing_them(self, cache: ConnectionDirectoryCache, initial_scan: bool):
         """A junction remains searchable without recursively visiting its target."""

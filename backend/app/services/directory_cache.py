@@ -124,6 +124,18 @@ class _DirectoryMutation:
     path: str
     new_path: Optional[str] = None
 
+    def invalidates_read(self, directory: str) -> bool:
+        """A concurrent removal or rename makes overlapping scan results ambiguous."""
+
+        if self.action == FileAction.FILE_ACTION_ADDED:
+            return False
+
+        return any(
+            path == directory or path.rpartition(PATH_SEPARATOR)[0] == directory or directory.startswith(path + PATH_SEPARATOR)
+            for path in (self.path, self.new_path)
+            if path is not None
+        )
+
     def apply(self, directories: set[str]) -> set[str]:
         """Apply the same path operation to a live index or a rescan snapshot."""
 
@@ -885,6 +897,8 @@ class ConnectionDirectoryCache:
 
             # Build a new set — don't modify the live one yet
             new_directories: set[str] = set()
+            discovered: set[str] = set()
+            applied_changes = 0
 
             async with pool.get_connection(
                 host=self.host,
@@ -912,13 +926,26 @@ class ConnectionDirectoryCache:
                             smb_path = base_path
 
                         try:
+                            with self._lock:
+                                read_change_count = len(self._rescan_changes or [])
+
                             subdirs = await self._scan_directory_with_pool_lease(pool, smb_path, rel_path)
 
-                            for subdir in subdirs:
-                                if subdir.path not in new_directories:
-                                    new_directories.add(subdir.path)
-                                    if not subdir.is_reparse_point:
-                                        queue.append(subdir.path)
+                            with self._lock:
+                                changes = self._rescan_changes or []
+                                if any(mutation.invalidates_read(rel_path) for mutation in changes[read_change_count:]):
+                                    raise RuntimeError("Directory was removed or renamed during its read; keeping the existing index")
+
+                                for mutation in changes[applied_changes:]:
+                                    new_directories = mutation.apply(new_directories)
+                                applied_changes = len(changes)
+
+                                for subdir in subdirs:
+                                    if subdir.path not in discovered:
+                                        discovered.add(subdir.path)
+                                        new_directories.add(subdir.path)
+                                        if not subdir.is_reparse_point:
+                                            queue.append(subdir.path)
 
                             scanned_count += 1
                         except asyncio.TimeoutError:
@@ -942,7 +969,7 @@ class ConnectionDirectoryCache:
 
             # Atomically replace the cache
             with self._lock:
-                for mutation in self._rescan_changes or []:
+                for mutation in (self._rescan_changes or [])[applied_changes:]:
                     new_directories = mutation.apply(new_directories)
                 self._directories = new_directories
                 self._directory_count = len(new_directories)
