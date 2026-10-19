@@ -325,6 +325,7 @@ class TestSearchDirectories:
         assert call_kwargs.kwargs["connection_id"] == str(test_connection.id)
         assert call_kwargs.kwargs["host"] == test_connection.host
         assert call_kwargs.kwargs["share_name"] == test_connection.share_name
+        assert call_kwargs.kwargs["source_revision"] == test_connection.updated_at.isoformat()
 
     def test_search_admin_user_also_works(
         self,

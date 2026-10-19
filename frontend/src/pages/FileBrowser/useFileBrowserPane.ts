@@ -85,6 +85,7 @@ const INCREMENTAL_SEARCH_RESET_DELAY_MS = 1_000;
  * reloads within this window are suppressed to avoid double-fetches.
  */
 const RELOAD_DEDUP_WINDOW_MS = 2_000;
+const REALTIME_REFRESH_INTERVAL_MS = 1_000;
 const DIRECTORY_LOAD_GENERIC_ERROR = "Failed to load directory contents. Please try again.";
 const DIRECTORY_LOAD_NETWORK_ERROR = "Failed to load files. Please check your connection settings.";
 const DIRECTORY_LOAD_TIMEOUT_ERROR = "Directory listing timed out. The remote share took too long to respond.";
@@ -565,6 +566,11 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   const loadMoreVirtualItemsRef = React.useRef<() => void>(() => {});
   const latestLoadRequestIdRef = React.useRef(0);
   const directoryLoadAbortRef = React.useRef<AbortController | null>(null);
+  const hasPhysicalListingRef = React.useRef(false);
+  const realtimeRefreshPendingRef = React.useRef(false);
+  const realtimeRefreshTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRealtimeRefreshRef = React.useRef<number | null>(null);
+  const scheduleRealtimeRefreshRef = React.useRef<() => void>(() => {});
   const latestLinkTargetLoadRequestIdRef = React.useRef(0);
   const linkTargetLoadAbortRef = React.useRef<AbortController | null>(null);
   const pendingLocationReloadRef = React.useRef<PendingLocationReload | null>(null);
@@ -675,6 +681,13 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
       const archiveChanged =
         connectionIdRef.current !== nextConnectionId || !archiveLocationsMatch(archiveLocationRef.current, nextArchiveLocation);
+      realtimeRefreshPendingRef.current = false;
+      if (realtimeRefreshTimerRef.current !== null) {
+        clearTimeout(realtimeRefreshTimerRef.current);
+        realtimeRefreshTimerRef.current = null;
+      }
+      lastRealtimeRefreshRef.current = null;
+      hasPhysicalListingRef.current = false;
       directoryLoadAbortRef.current?.abort();
       directoryLoadAbortRef.current = null;
       latestLoadRequestIdRef.current += 1;
@@ -798,10 +811,12 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
               return linkTarget ? { ...item, entry: { ...item.entry, link_target: linkTarget } } : item;
             });
             const cached = directoryCache.current.get(cacheKey);
-            directoryCache.current.set(cacheKey, {
-              items: enrichedItems.map((item) => item.entry),
-              timestamp: cached?.timestamp ?? Date.now(),
-            });
+            if (cached) {
+              directoryCache.current.set(cacheKey, {
+                items: enrichedItems.map((item) => item.entry),
+                timestamp: cached.timestamp,
+              });
+            }
             return enrichedItems;
           });
         })
@@ -849,6 +864,8 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
             return;
           }
           setItems(toPhysicalItems(targetConnectionId, targetPath, cached.items));
+          hasPhysicalListingRef.current = true;
+          directoryLoadAbortRef.current = null;
           setLoading(false);
           setError(null);
           loadLocalLinkTargets(targetConnectionId, targetPath, cached.items, requestId);
@@ -863,7 +880,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         directoryCache.current.delete(cacheKey);
       }
 
-      const shouldKeepVisibleContent = preserveVisibleContent && filesRef.current.length > 0;
+      const shouldKeepVisibleContent = preserveVisibleContent && hasPhysicalListingRef.current;
 
       if (physicalRequestOwnsLocation(requestId, targetConnectionId, targetPath)) {
         setLoading(!shouldKeepVisibleContent);
@@ -889,7 +906,10 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         }
 
         const items = listing.items.map((item) => item.entry);
-        directoryCache.current.set(cacheKey, { items, timestamp: now });
+        if (!realtimeRefreshPendingRef.current) {
+          directoryCache.current.set(cacheKey, { items, timestamp: now });
+        }
+        hasPhysicalListingRef.current = true;
         setItems(listing.items);
         loadLocalLinkTargets(targetConnectionId, targetPath, items, requestId);
         const pendingVisit = pendingRecentDirectoryVisitRef.current;
@@ -973,6 +993,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
         if (physicalRequestOwnsLocation(requestId, targetConnectionId, targetPath)) {
           setLoading(false);
+          scheduleRealtimeRefreshRef.current();
         }
       }
     },
@@ -1072,6 +1093,9 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         } else if (!append && ownsRequest) {
           setLoading(false);
         }
+        if (ownsRequest) {
+          scheduleRealtimeRefreshRef.current();
+        }
       }
     },
     [archiveRequestOwnsLocation, providerRegistry]
@@ -1107,6 +1131,32 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     [reloadCurrentLocationInternal]
   );
 
+  const scheduleRealtimeRefresh = useCallback(() => {
+    if (!realtimeRefreshPendingRef.current || directoryLoadAbortRef.current !== null || realtimeRefreshTimerRef.current !== null) {
+      return;
+    }
+
+    const elapsed = lastRealtimeRefreshRef.current === null ? REALTIME_REFRESH_INTERVAL_MS : Date.now() - lastRealtimeRefreshRef.current;
+    const delay = Math.max(0, REALTIME_REFRESH_INTERVAL_MS - elapsed);
+    if (delay > 0) {
+      realtimeRefreshTimerRef.current = setTimeout(() => {
+        realtimeRefreshTimerRef.current = null;
+        scheduleRealtimeRefreshRef.current();
+      }, delay);
+      return;
+    }
+
+    realtimeRefreshPendingRef.current = false;
+    lastRealtimeRefreshRef.current = Date.now();
+    void reloadCurrentLocationInternal({ forceRefresh: true, preserveVisibleContent: true }, false).catch((error: unknown) => {
+      logger.error("Automatic directory refresh failed", { error }, "browser");
+    });
+  }, [reloadCurrentLocationInternal]);
+
+  useEffect(() => {
+    scheduleRealtimeRefreshRef.current = scheduleRealtimeRefresh;
+  }, [scheduleRealtimeRefresh]);
+
   const seedDirectorySnapshot = useCallback((targetConnectionId: string, targetPath: string, items: FileEntry[]) => {
     if (!targetConnectionId) {
       return;
@@ -1120,6 +1170,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
     if (connectionIdRef.current === targetConnectionId && currentPathRef.current === targetPath) {
       if (archiveLocationRef.current === null) {
+        hasPhysicalListingRef.current = true;
         setItems(toPhysicalItems(connectionIdRef.current, currentPathRef.current, snapshot));
         setLoading(false);
         setError(null);
@@ -1147,6 +1198,11 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
   useEffect(() => {
     return () => {
+      realtimeRefreshPendingRef.current = false;
+      if (realtimeRefreshTimerRef.current !== null) {
+        clearTimeout(realtimeRefreshTimerRef.current);
+        realtimeRefreshTimerRef.current = null;
+      }
       directoryLoadAbortRef.current?.abort();
       directoryLoadAbortRef.current = null;
       linkTargetLoadAbortRef.current?.abort();
@@ -3065,18 +3121,10 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         return;
       }
 
-      const currentArchive = archiveLocationRef.current;
-      if (currentArchive) {
-        void reloadCurrentLocationInternal({ forceRefresh: true }, false);
-        return;
-      }
-
-      // Reload if this pane is currently viewing the affected directory
-      if (archiveLocationRef.current === null) {
-        void reloadCurrentLocationInternal({ forceRefresh: true }, false);
-      }
+      realtimeRefreshPendingRef.current = true;
+      scheduleRealtimeRefresh();
     },
-    [reloadCurrentLocationInternal]
+    [scheduleRealtimeRefresh]
   );
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -3208,6 +3256,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       setArchiveLocation(restoredArchiveLocation);
       setArchiveHasMore(false);
       setArchiveLoadingMore(false);
+      hasPhysicalListingRef.current = restoredArchiveLocation === null;
       setItems(restoredBrowserItems);
       setLoading(false);
       setError(null);

@@ -1062,6 +1062,7 @@ async def search_directories(
             password=decrypt_password(connection.password_encrypted),
             port=connection.port or 445,
             path_prefix=connection.path_prefix or "/",
+            source_revision=connection.updated_at.isoformat(),
         )
 
         results, total_matches = cache.search(q, include_dot_directories=include_dot_directories) if q else ([], 0)
