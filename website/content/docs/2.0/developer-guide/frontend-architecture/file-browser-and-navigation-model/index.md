@@ -109,6 +109,10 @@ The app uses a data router (`createBrowserRouter` and `RouterProvider`) for supp
 
 Edit bookmarks and history navigation back into editing acquire a fresh edit session after content and permission checks. Navigating away during acquisition invalidates the attempt and releases any late lock. Leaving editing releases its session once. The outgoing editor is read-only during cleanup, and re-entry waits for that cleanup to finish so an old release can't clear a new session. History restores navigation intent, not old file contents, discarded drafts, or saved locks. An edit URL doesn't grant permission.
 
+Full page reloads, including F5 and the update prompt, can resume the same edit lock. The shared storage edit-session layer keeps lock credentials separately in tab-scoped session storage, keyed by user, connection, and file. On reload it validates those credentials with a heartbeat before reusing them. Only a structured lost-lock response permits fresh acquisition; network and permission failures don't trigger replacement. Credentials follow replacement locks and are removed on successful release or logout. Unsaved text still uses the existing draft-recovery flow.
+
+Recovery requires session storage and the browser Web Locks API, available in secure contexts such as HTTPS and localhost. An exclusive Web Lock prevents another tab from using copied recovery credentials, even if that tab reloads. Without those capabilities, editing still works, but a reload may need to wait for the abandoned server lock to expire. Fresh navigations and history entries don't resume saved credentials, and no credentials appear in the URL or workspace recovery snapshot.
+
 Use router navigation for all mounted-route URL writes, including authentication fragment cleanup. `useRemoveLocationFragment` replaces the entry, removes only consumed fragment keys, and preserves the full query and application state. Never clear router-managed history state with `replaceState(null, ...)`: doing so can disable POP blocking.
 
 ## Keyboard and Command Model
