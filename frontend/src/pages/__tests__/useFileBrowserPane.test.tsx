@@ -1206,6 +1206,183 @@ describe("useFileBrowserPane", () => {
     expect(result.current.files.map((file) => file.name)).toEqual(["inside.txt"]);
   });
 
+  it.each([mockDirectoryListing, mockEmptyDirectory])(
+    "keeps a loaded directory visible during automatic refreshes ($total entries)",
+    async (listing) => {
+      vi.mocked(api.listDirectory).mockResolvedValueOnce(listing);
+      const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+      act(() => result.current.applyLocation("conn-1", ""));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      expect(result.current.files).toHaveLength(listing.items.length);
+
+      const refresh = deferred<typeof mockDirectoryListing>();
+      vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+
+      expect(api.listDirectory).toHaveBeenCalledTimes(2);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.files).toHaveLength(listing.items.length);
+
+      await act(async () => refresh.resolve(mockDirectoryListing));
+      expect(result.current.files).toHaveLength(mockDirectoryListing.items.length);
+    }
+  );
+
+  it("coalesces changes without aborting the active automatic refresh", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toHaveLength(3));
+
+    vi.useFakeTimers();
+    try {
+      const refresh = deferred<typeof mockDirectoryListing>();
+      vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      const signal = vi.mocked(api.listDirectory).mock.calls.at(-1)?.[2]?.signal;
+
+      act(() => {
+        for (let index = 0; index < 20; index++) {
+          result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" });
+        }
+      });
+      expect(api.listDirectory).toHaveBeenCalledTimes(2);
+      expect(signal?.aborted).toBe(false);
+      await act(async () => refresh.resolve(mockDirectoryListing));
+      expect(api.listDirectory).toHaveBeenCalledTimes(2);
+
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(api.listDirectory).toHaveBeenCalledTimes(3);
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(api.listDirectory).toHaveBeenCalledTimes(3);
+      expect(result.current.loading).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits for the initial listing before refreshing changes received while loading", async () => {
+    const initialListing = deferred<typeof mockDirectoryListing>();
+    const refresh = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockReturnValueOnce(initialListing.promise).mockReturnValueOnce(refresh.promise);
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    const initialSignal = vi.mocked(api.listDirectory).mock.calls[0][2]?.signal;
+
+    act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+    expect(api.listDirectory).toHaveBeenCalledTimes(1);
+    expect(initialSignal?.aborted).toBe(false);
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => initialListing.resolve(mockDirectoryListing));
+    expect(api.listDirectory).toHaveBeenCalledTimes(2);
+    expect(result.current.files).toHaveLength(3);
+    expect(result.current.loading).toBe(false);
+    await act(async () => refresh.resolve(mockDirectoryListing));
+  });
+
+  it("refreshes periodically during continuous notifications instead of postponing the deadline", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toHaveLength(3));
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      for (let index = 0; index < 10; index++) {
+        act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+        await act(async () => vi.advanceTimersByTimeAsync(200));
+      }
+      expect(api.listDirectory).toHaveBeenCalledTimes(4);
+      expect(result.current.loading).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("performs one trailing refresh after a slow listing without overlapping requests", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toHaveLength(3));
+
+    vi.useFakeTimers();
+    try {
+      const refresh = deferred<typeof mockDirectoryListing>();
+      vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(api.listDirectory).toHaveBeenCalledTimes(2);
+
+      await act(async () => refresh.resolve(mockDirectoryListing));
+      expect(api.listDirectory).toHaveBeenCalledTimes(3);
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(api.listDirectory).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["navigation", "unmount"])("discards queued refreshes on %s", async (action) => {
+    const { result, unmount } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toHaveLength(3));
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      expect(api.listDirectory).toHaveBeenCalledTimes(2);
+
+      if (action === "navigation") {
+        await act(async () => result.current.applyLocation("conn-1", "Documents"));
+      } else {
+        unmount();
+      }
+      const callsAfterLeaving = vi.mocked(api.listDirectory).mock.calls.length;
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      expect(api.listDirectory).toHaveBeenCalledTimes(callsAfterLeaving);
+      if (action === "navigation") {
+        expect(result.current.currentPath).toBe("Documents");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps selection, focus and scroll while automatically refreshing unchanged rows", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toHaveLength(3));
+    const list = document.createElement("div");
+    list.tabIndex = 0;
+    document.body.appendChild(list);
+    try {
+      act(() => {
+        result.current.listContainerRef(list);
+        result.current.parentRef.current = list;
+      });
+      list.focus();
+      act(() => result.current.handleEnd());
+      act(() => result.current.handleToggleSelection());
+      const selected = new Set(result.current.selectedFiles);
+      expect(selected.size).toBe(1);
+      const focusedIndex = result.current.focusedIndex;
+      list.scrollTop = 120;
+
+      const refresh = deferred<typeof mockDirectoryListing>();
+      vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      expect(result.current.loading).toBe(false);
+      await act(async () => refresh.resolve({ ...mockDirectoryListing, items: mockDirectoryListing.items.map((entry) => ({ ...entry })) }));
+
+      expect(result.current.selectedFiles).toEqual(selected);
+      expect(result.current.focusedIndex).toBe(focusedIndex);
+      expect(list.scrollTop).toBe(120);
+    } finally {
+      list.remove();
+    }
+  });
+
   it("reloads an open archive when its physical parent directory changes", async () => {
     const archive = { name: "backup.zip", path: "backup.zip", type: FileType.FILE, is_readable: true, is_hidden: false };
     vi.mocked(api.listArchiveDirectory)

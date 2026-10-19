@@ -40,6 +40,12 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 - Interrupted SMB moves now release files safely, without leaving them open or interrupting work still in progress.
 - Pressing Enter after a transfer finishes no longer starts the same transfer again.
 
+#### SMB Change Monitoring
+
+- Sambee no longer watches the entire subtree for changes but only immediate children.
+- When changes happen, the file list is now refreshed in the background.
+- UI changes are now coalesced and rate-limited.
+
 #### Other Fixes
 
 - Invalid file browser URLs no longer break the page or prevent the other pane from loading.
