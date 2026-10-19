@@ -18,6 +18,7 @@ Tests cover:
 - delete_persist_file (removes both .idx and .bak)
 """
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -209,8 +210,53 @@ class TestJSONLFormat:
 
         assert header["v"] == CACHE_FILE_VERSION
         assert header["connection_id"] == "persist-test-001"
+        assert header["source"] == populated_cache._source_identity
+        assert populated_cache.password not in json.dumps(header)
         assert isinstance(header["ts"], float)
         assert header["count"] == populated_cache.directory_count
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("host", "other-server"),
+            ("share_name", "other-share"),
+            ("username", "other-user"),
+            ("port", "1445"),
+            ("path_prefix", "/other-prefix"),
+            ("source_revision", "updated-connection"),
+        ],
+    )
+    def test_retargeted_snapshot_is_rejected(self, populated_cache: ConnectionDirectoryCache, tmp_path: Path, field: str, value: str):
+        """A snapshot must belong to the current target, account and connection revision."""
+        populated_cache.save_to_disk()
+        with patch("app.services.directory_cache.static") as mock_static:
+            mock_static.data_dir = tmp_path
+            fresh = ConnectionDirectoryCache(
+                connection_id=populated_cache.connection_id,
+                host=value if field == "host" else populated_cache.host,
+                share_name=value if field == "share_name" else populated_cache.share_name,
+                username=value if field == "username" else populated_cache.username,
+                password="replacement-password",
+                port=int(value) if field == "port" else populated_cache.port,
+                path_prefix=value if field == "path_prefix" else populated_cache._path_prefix,
+                source_revision=value if field == "source_revision" else "",
+            )
+
+        assert fresh.load_from_disk() is False
+        assert fresh.directory_count == 0
+
+    def test_legacy_snapshot_is_rejected(self, populated_cache: ConnectionDirectoryCache):
+        """Unbound version-one snapshots must trigger a new scan instead of being reused."""
+        populated_cache.save_to_disk()
+        header, entries = read_jsonl(populated_cache._persist_path)
+        header["v"] = 1
+        header.pop("source")
+        with populated_cache._persist_path.open("w", encoding="utf-8") as snapshot:
+            snapshot.write(json.dumps(header) + "\n")
+            for entry in entries:
+                snapshot.write(json.dumps(entry) + "\n")
+
+        assert populated_cache.load_from_disk() is False
 
     def test_entry_format(self, populated_cache: ConnectionDirectoryCache):
         """Each entry line should have a 'p' field with the directory path."""
@@ -267,6 +313,7 @@ class TestStaleness:
         header = {
             "v": CACHE_FILE_VERSION,
             "connection_id": "persist-test-001",
+            "source": populated_cache._source_identity,
             "ts": old_ts,
             "count": len(entries),
         }
@@ -796,6 +843,7 @@ class TestConfigDrivenSettings:
         header = {
             "v": CACHE_FILE_VERSION,
             "connection_id": "persist-test-001",
+            "source": populated_cache._source_identity,
             "ts": old_ts,
             "count": len(entries),
         }
@@ -863,6 +911,43 @@ class TestPersistenceConstants:
 class TestManagerLoadOnCreate:
     """Tests for DirectoryCacheManager.get_or_create_cache loading from disk."""
 
+    async def test_loaded_snapshot_keeps_both_scan_tasks_cancellable(self):
+        """Snapshot verification must not replace the periodic task's tracked handle."""
+        manager = DirectoryCacheManager()
+        verification_started = asyncio.Event()
+        periodic_started = asyncio.Event()
+        blocked = asyncio.Event()
+
+        async def verification():
+            verification_started.set()
+            await blocked.wait()
+
+        async def periodic():
+            periodic_started.set()
+            await blocked.wait()
+
+        with (
+            patch.object(ConnectionDirectoryCache, "load_from_disk", return_value=True),
+            patch.object(ConnectionDirectoryCache, "_start_watcher"),
+            patch.object(ConnectionDirectoryCache, "_start_coalesce_flush"),
+            patch.object(ConnectionDirectoryCache, "_run_rescan", side_effect=verification),
+            patch.object(ConnectionDirectoryCache, "_periodic_rescan_loop", side_effect=periodic),
+        ):
+            cache = await manager.get_or_create_cache("task-test", "host", "share", "user", "password")
+            await verification_started.wait()
+            await periodic_started.wait()
+            verification_task = cache._verification_task
+            periodic_task = cache._rescan_task
+            assert verification_task is not None
+            assert periodic_task is not None
+            assert verification_task is not periodic_task
+
+            cache._request_stop()
+            await asyncio.gather(verification_task, periodic_task, return_exceptions=True)
+
+        assert verification_task.cancelled()
+        assert periodic_task.cancelled()
+
     async def test_loads_snapshot_instead_of_scanning(self, tmp_path: Path):
         """When a valid snapshot exists, manager should load it and skip initial scan."""
 
@@ -876,6 +961,14 @@ class TestManagerLoadOnCreate:
         header = {
             "v": CACHE_FILE_VERSION,
             "connection_id": conn_id,
+            "source": {
+                "host": "server.local",
+                "share_name": "testshare",
+                "port": 445,
+                "path_prefix": "",
+                "username": "testuser",
+                "revision": "",
+            },
             "ts": time.time(),
             "count": 3,
         }
