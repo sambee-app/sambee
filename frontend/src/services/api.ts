@@ -2316,18 +2316,25 @@ class ApiService {
 
     const segment = getBrowseSegment(connectionId);
     const { client, extraConfig } = await this.getClientConfig(connectionId);
-    await client.post(
-      `/browse/${segment}/lock/heartbeat`,
-      {
-        operation_id: lockInfo.operation_id,
-        lock_id: lockInfo.lock_id,
-        lock_capability: lockInfo.lock_capability,
-      },
-      {
-        ...extraConfig,
-        params: { path },
+    try {
+      await client.post(
+        `/browse/${segment}/lock/heartbeat`,
+        {
+          operation_id: lockInfo.operation_id,
+          lock_id: lockInfo.lock_id,
+          lock_capability: lockInfo.lock_capability,
+        },
+        {
+          ...extraConfig,
+          params: { path },
+        }
+      );
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404 && isExpiredEditLockResponse(JSON.stringify(error.response.data))) {
+        throw new ExpiredEditLockError();
       }
-    );
+      throw error;
+    }
   }
 
   async releaseEditLock(connectionId: string, path: string, lockInfo: EditLockInfo): Promise<void> {

@@ -250,6 +250,87 @@ async function openMarkdownViewer(page: Page): Promise<void> {
   await page.getByRole("button", { name: `File: ${DEMO_PATH}` }).click();
 }
 
+test("edit sessions can reopen immediately after release", async ({ page }) => {
+  await mockMarkdownViewerApi(page, { initialMarkdown: "Immediate re-entry\n" });
+  await openMarkdownViewer(page);
+
+  await page.evaluate(async ({ connectionId, path }) => {
+    const modulePath = "/src/services/storageBackends.ts";
+    const { SambeeSmbBackend } = await import(modulePath);
+    const target = { kind: "smb", connectionId };
+    const source = {
+      target,
+      path,
+      resolvedTarget: {
+        target,
+        connection: { access_mode: "read_write" },
+        capabilitySnapshot: { companion: { status: "unavailable" } },
+      },
+    };
+    const backend = new SambeeSmbBackend();
+    const first = await backend.editing.begin(source);
+    if (first.kind !== "acquired") throw new Error("Expected the first edit session to be acquired");
+    await first.session.release();
+    const second = await backend.editing.begin(source);
+    if (second.kind !== "acquired") throw new Error("Expected immediate edit-session re-entry to succeed");
+    await second.session.release();
+  }, { connectionId: DEMO_CONNECTION_ID, path: DEMO_PATH });
+
+  await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("sambee:edit-lock:")))).toEqual([]);
+});
+
+for (const reloadKind of ["browser", "update"] as const) {
+  test(`${reloadKind} reload resumes the existing Markdown edit lock`, async ({ page }) => {
+    await mockMarkdownViewerApi(page, { initialMarkdown: "Reload recovery\n", existingFilePaths: [DEMO_PATH] });
+    let acquisitions = 0;
+    let heartbeats = 0;
+    await page.route((url) => url.pathname === `/api/browse/${DEMO_CONNECTION_ID}/lock`, async (route) => {
+      if (route.request().method() === "DELETE") {
+        await route.fulfill({ status: 204, body: "" });
+        return;
+      }
+      acquisitions += 1;
+      if (acquisitions > 1) {
+        await fulfillJson(route, { detail: "File is locked for editing by demo-admin" }, 409);
+        return;
+      }
+      await fulfillJson(route, {
+        lock_id: "reload-lock",
+        lock_capability: "reload-capability",
+        operation_id: "reload-operation",
+        file_path: DEMO_PATH,
+        locked_by: "demo-admin",
+        locked_at: "2026-10-19T12:00:00Z",
+      });
+    });
+    await page.route(`**/api/browse/${DEMO_CONNECTION_ID}/lock/heartbeat*`, async (route) => {
+      expect(route.request().postDataJSON()).toEqual({
+        lock_id: "reload-lock",
+        lock_capability: "reload-capability",
+        operation_id: "reload-operation",
+      });
+      heartbeats += 1;
+      await route.fulfill({ status: 204, body: "" });
+    });
+    await openMarkdownViewer(page);
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveAttribute("contenteditable", "true");
+    if (reloadKind === "browser") {
+      await page.reload();
+    } else {
+      await Promise.all([page.waitForEvent("domcontentloaded"), page.evaluate(() => window.location.reload())]);
+    }
+    await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveAttribute("contenteditable", "true");
+    await expect(page).toHaveURL(/mode=edit/);
+    expect(acquisitions).toBe(1);
+    expect(heartbeats).toBeGreaterThanOrEqual(1);
+    await expect(page.getByText(/Unable to enter edit mode/)).toHaveCount(0);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page).not.toHaveURL(/mode=edit/);
+    await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("sambee:edit-lock:")))).toEqual([]);
+  });
+}
+
 for (const layout of ["desktop", "compact"] as const) {
   test(`${layout} Ctrl+D downloads the focused file`, async ({ page }) => {
     if (layout === "compact") await page.setViewportSize({ width: 390, height: 780 });

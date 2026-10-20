@@ -1,5 +1,6 @@
 import { type EditLockInfo, isApiError } from "../types";
 import api, { ExpiredEditLockError } from "./api";
+import { claimEditLockRecovery } from "./editLockRecovery";
 import { assertLocalPreviewSupported } from "./previewPolicy";
 import type {
   ArchiveCreationOperations,
@@ -236,7 +237,28 @@ abstract class ApiStorageBackend implements StorageBackend {
       assertOwned(this.kind, item.resolvedTarget);
       if (!this.getCapabilities(item.resolvedTarget).canEditText) return { kind: "read-only" };
       const id = connectionId(item.target);
-      let lockInfo = await api.acquireEditLock(id, item.path);
+      const recovery = await claimEditLockRecovery(id, item.path);
+      let lockInfo: EditLockInfo;
+      try {
+        const saved = recovery.load();
+        if (saved) {
+          try {
+            await api.heartbeatEditLock(id, item.path, saved);
+            lockInfo = saved;
+          } catch (error) {
+            if (!(error instanceof ExpiredEditLockError)) throw error;
+            recovery.clear();
+            lockInfo = await api.acquireEditLock(id, item.path);
+          }
+        } else {
+          lockInfo = await api.acquireEditLock(id, item.path);
+        }
+        requireEditLockContext(lockInfo);
+        recovery.save(lockInfo);
+      } catch (error) {
+        await recovery.release();
+        throw error;
+      }
       let lockContext = requireEditLockContext(lockInfo);
       let released = false;
       return {
@@ -251,13 +273,19 @@ abstract class ApiStorageBackend implements StorageBackend {
 
               lockInfo = await api.acquireEditLock(id, item.path);
               lockContext = requireEditLockContext(lockInfo);
+              recovery.save(lockInfo);
               await api.writeTextWithEditLock(id, item.path, content, lockContext, { mimeType: options?.mimeType });
             }
           },
           release: async () => {
             if (released) return;
-            await api.releaseEditLock(id, item.path, lockInfo);
-            released = true;
+            try {
+              await api.releaseEditLock(id, item.path, lockInfo);
+              recovery.clear();
+              released = true;
+            } finally {
+              await recovery.release();
+            }
           },
         },
       };
