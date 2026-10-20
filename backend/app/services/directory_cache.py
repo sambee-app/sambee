@@ -915,7 +915,12 @@ class ConnectionDirectoryCache:
                 nonlocal new_directories, applied_changes
                 changes = self._rescan_changes or []
                 pending = changes[applied_changes:]
-                if any(mutation.invalidates_read(directory) for mutation in pending for directory in read_directories):
+                if any(
+                    mutation.invalidates_read(directory)
+                    for mutation in pending
+                    if mutation.action != FileAction.FILE_ACTION_ADDED
+                    for directory in read_directories
+                ):
                     raise RuntimeError("Directory namespace changed after an overlapping read started; keeping the existing index")
                 for mutation in pending:
                     new_directories = mutation.apply(new_directories)
