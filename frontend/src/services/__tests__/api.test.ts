@@ -2014,6 +2014,42 @@ describe("API Service", () => {
       );
     });
 
+    it.each(["nested", "top-level"])("classifies a lost heartbeat lock with a %s code", async (shape) => {
+      const detail = { code: "edit_lock_lost" };
+      mockAxiosInstance.post.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 404, data: shape === "nested" ? { detail } : detail },
+      });
+      await expect(
+        apiService.heartbeatEditLock("conn1", "/docs/readme.md", {
+          lock_id: "lock-1",
+          lock_capability: "cap-1",
+          operation_id: "op-1",
+          file_path: "/docs/readme.md",
+          locked_by: "alice",
+          locked_at: "2026-10-19T12:00:00Z",
+        })
+      ).rejects.toBeInstanceOf(ExpiredEditLockError);
+    });
+
+    it.each([
+      { isAxiosError: true, response: { status: 404, data: { detail: "Not found" } } },
+      { isAxiosError: true, response: { status: 403, data: { detail: "Context mismatch" } } },
+      new Error("Network unavailable"),
+    ])("preserves non-expiry heartbeat failures: %j", async (error) => {
+      mockAxiosInstance.post.mockRejectedValueOnce(error);
+      await expect(
+        apiService.heartbeatEditLock("conn1", "/docs/readme.md", {
+          lock_id: "lock-1",
+          lock_capability: "cap-1",
+          operation_id: "op-1",
+          file_path: "/docs/readme.md",
+          locked_by: "alice",
+          locked_at: "2026-10-19T12:00:00Z",
+        })
+      ).rejects.toEqual(error);
+    });
+
     it("releaseEditLock() releases the server-side lock", async () => {
       mockAxiosInstance.delete.mockResolvedValueOnce({ data: { status: "ok" } } as AxiosResponse);
 

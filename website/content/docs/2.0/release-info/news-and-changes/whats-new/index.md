@@ -116,7 +116,8 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 
 ### Text and Markdown Editors
 
-Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
+- Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
+- When reloading a browser tab with an editor, Sambee now recovers the file lock. This prevents the error `Unable to enter edit mode. File is locked for editing by <username>`.
 
 ### Password Login
 

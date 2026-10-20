@@ -65,6 +65,7 @@ echo -e "${BLUE}  Sambee - Test & Analysis Suite${NC}"
 echo -e "${BLUE}======================================${NC}\n"
 
 require_backend_venv
+run_check "Frontend dependencies are up to date" "Frontend dependency check failed" node "$REPO_ROOT/frontend/scripts/dependency-state.mjs" --check
 
 # ============================================
 # SETUP: Generate Test Images
