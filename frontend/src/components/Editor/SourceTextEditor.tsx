@@ -1,6 +1,8 @@
 import { Annotation, Compartment, EditorSelection, EditorState, type TransactionSpec } from "@codemirror/state";
 import { type Command, EditorView, type ViewUpdate } from "@codemirror/view";
+import { useTheme } from "@mui/material";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { getSyntaxVariables } from "../../theme/syntaxStyles";
 import { CODEMIRROR_EDITOR_HORIZONTAL_INSET_CSS_VARIABLE } from "../../theme/viewerStyles";
 import { getCodeMirrorHorizontalInset } from "./getCodeMirrorHorizontalInset";
 import type { SourceTextEditorHandle, SourceTextEditorProps } from "./sourceTextEditorTypes";
@@ -82,6 +84,7 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
     },
     ref
   ) => {
+    const muiTheme = useTheme();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
     const preservedSelectionRef = useRef<PreservedSelectionSnapshot | null>(null);
@@ -305,7 +308,7 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       [value]
     );
 
-    return <div ref={containerRef} className={className} />;
+    return <div ref={containerRef} className={className} style={getSyntaxVariables(muiTheme)} />;
   }
 );
 

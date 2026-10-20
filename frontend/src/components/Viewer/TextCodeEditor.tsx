@@ -1,8 +1,7 @@
-import { LanguageDescription } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
 import { findNext, findPrevious, replaceAll, replaceNext } from "@codemirror/search";
 import type { Extension } from "@codemirror/state";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { loadNativeLanguage, resolveFilename } from "../../utils/codeMirrorHighlighting";
 import { buildPassiveSearchHighlightExtension } from "../Editor/buildCodeMirrorSearchHighlights";
 import { buildCommonEditorExtensions } from "../Editor/buildCommonEditorExtensions";
 import { buildTextEditorTheme, type TextEditorThemeOptions } from "../Editor/buildTextEditorTheme";
@@ -96,7 +95,7 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
     } | null>(null);
     const extensions = useMemo(
       () => [
-        ...buildCommonEditorExtensions({ highlightSelectionMatches: false, lineWrapping }),
+        ...buildCommonEditorExtensions({ defaultSyntaxHighlighting: false, highlightSelectionMatches: false, lineWrapping }),
         ...buildTextEditorTheme(theme),
         buildPassiveSearchHighlightExtension(),
         ...languageExtensions,
@@ -105,15 +104,14 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
     );
     useEffect(() => {
       let cancelled = false;
-      const languageDescription = LanguageDescription.matchFilename(languages, filename);
+      const resolved = resolveFilename(filename);
 
-      if (!languageDescription) {
+      if (!("language" in resolved)) {
         setLanguageExtensions(EMPTY_EXTENSIONS);
         return;
       }
 
-      void languageDescription
-        .load()
+      void loadNativeLanguage(resolved.language)
         .then((support) => {
           if (cancelled) {
             return;

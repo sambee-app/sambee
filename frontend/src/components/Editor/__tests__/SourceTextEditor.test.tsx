@@ -560,6 +560,9 @@ describe("SourceTextEditor", () => {
 
     expect(window.getComputedStyle(editor).color).toBe(TEST_MARKDOWN_THEME.textColor);
     expect(window.getComputedStyle(activeLine).backgroundColor).toBe(TEST_MARKDOWN_THEME.activeLineBackground);
-    expect(window.getComputedStyle(linkToken).color).toBe(TEST_MARKDOWN_THEME.linkColor);
+    expect(linkToken).toHaveClass("sambee-syntax-link");
+    expect(window.getComputedStyle(editor.closest(".cm-editor")!).getPropertyValue("--sambee-syntax-link").replaceAll(" ", "")).toBe(
+      TEST_MARKDOWN_THEME.linkColor.replaceAll(" ", "")
+    );
   });
 });

@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -19,6 +20,38 @@ def complete_theme_definition() -> dict:
         raise AssertionError("Unknown color role")
 
     return {"name": "Test theme", "description": "Test", "mode": "dark", **colors(COLOR_SHAPE)}
+
+
+def test_legacy_theme_preserves_absent_syntax_group(client: TestClient, auth_headers_user: dict[str, str]) -> None:
+    definition = complete_theme_definition()
+    del definition["components"]["syntax"]
+    response = client.post("/api/themes", headers=auth_headers_user, json={"scope": "user", "definition": definition})
+    assert response.status_code == 201, response.text
+    assert "syntax" not in response.json()["definition"]["components"]
+    listing = client.get("/api/themes", headers=auth_headers_user)
+    assert "syntax" not in listing.json()["themes"][0]["definition"]["components"]
+
+
+@pytest.mark.parametrize("syntax", [None, {}, {"keyword": "#123456"}, {"unknown": "#123456"}, "#123456"])
+def test_supplied_syntax_requires_complete_palette(client: TestClient, auth_headers_user: dict[str, str], syntax: object) -> None:
+    definition = complete_theme_definition()
+    definition["components"]["syntax"] = syntax
+    response = client.post("/api/themes", headers=auth_headers_user, json={"scope": "user", "definition": definition})
+    assert response.status_code == 422, response.text
+    assert "syntax" in response.json()["detail"]
+
+
+def test_syntax_palette_round_trip_and_strict_values(client: TestClient, auth_headers_user: dict[str, str]) -> None:
+    definition = complete_theme_definition()
+    definition["components"]["syntax"]["keyword"] = "#aabbccdd"
+    response = client.post("/api/themes", headers=auth_headers_user, json={"scope": "user", "definition": definition})
+    assert response.status_code == 201, response.text
+    assert response.json()["definition"]["components"]["syntax"]["keyword"] == "#AABBCCDD"
+    definition["components"]["syntax"]["keyword"] = "red"
+    assert client.post("/api/themes", headers=auth_headers_user, json={"scope": "user", "definition": definition}).status_code == 422
+    definition["components"]["syntax"]["keyword"] = "#aabbccdd"
+    definition["components"]["syntax"]["unknown"] = "#123456"
+    assert client.post("/api/themes", headers=auth_headers_user, json={"scope": "user", "definition": definition}).status_code == 422
 
 
 def test_theme_rows_permissions_versions_and_deletion(

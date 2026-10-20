@@ -82,7 +82,8 @@ describe("ThemeContext", () => {
 
     await waitFor(() => expect(result.current.currentTheme).toMatchObject(customTheme));
     expect(result.current.muiTheme.palette.mode).toBe("dark");
-    expect(result.current.availableThemes).toContainEqual(customTheme);
+    expect(result.current.availableThemes).toContainEqual(expect.objectContaining(customTheme));
+    expect(result.current.muiTheme.palette.syntax).toEqual(result.current.currentTheme.components?.syntax);
     expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute("content", "#123456");
   });
 

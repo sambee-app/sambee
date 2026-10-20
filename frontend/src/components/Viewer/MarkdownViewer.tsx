@@ -6,13 +6,13 @@ import {
   type RefAttributes,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
-import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import {
   BROWSER_SHORTCUTS,
@@ -37,6 +37,7 @@ import { clearDraft, type DraftSnapshot, loadDraft, registerDraftSnapshot, saveD
 import { error as logError, info as logInfo } from "../../services/logger";
 import { useSambeeTheme } from "../../theme";
 import { getSearchHighlightColors } from "../../theme/commonStyles";
+import { getSyntaxVariables } from "../../theme/syntaxStyles";
 import {
   CODEMIRROR_EDITOR_CONTENT_PADDING,
   CODEMIRROR_EDITOR_HORIZONTAL_INSET_CSS_VARIABLE,
@@ -57,7 +58,9 @@ import {
 } from "../../utils/domTextSearch";
 import { openExternalUrl } from "../../utils/externalLinks";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
+import { highlightingService } from "../../utils/highlightingService";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
+import { collectMarkdownCodeBlocks, type PreparedMarkdownSyntax, rehypePreparedSyntax } from "../../utils/markdownSyntax";
 import { createShareFile, supportsNativeShare } from "../../utils/nativeShare";
 import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
 import { HelpMenu } from "../FileBrowser/HelpMenu";
@@ -85,7 +88,6 @@ import { useMarkdownEditSession } from "./useMarkdownEditSession";
 import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
 import { downloadViewerBlob } from "./viewerContent";
 import { createEditToolbarAction, createSaveToolbarAction } from "./viewerToolbarActions";
-import "highlight.js/styles/github.css";
 
 const MARKDOWN_SEARCH_ROOT_SELECTOR = '[data-markdown-search-root="true"]';
 const MARKDOWN_HASH_PREFIX = "#";
@@ -96,6 +98,50 @@ const MARKDOWN_VIEWER_EDIT_FOCUS_RETRY_DELAYS_MS = [
 ];
 
 type MarkdownRichEditorComponent = ForwardRefExoticComponent<MarkdownRichEditorProps & RefAttributes<MarkdownRichEditorHandle>>;
+
+const MarkdownPreview = memo(function MarkdownPreview({
+  content,
+  prepared,
+  onExternalLink,
+}: {
+  content: string;
+  prepared?: PreparedMarkdownSyntax;
+  onExternalLink: () => void;
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkRenderMarkdownTableCellLineBreaks]}
+      rehypePlugins={[[rehypePreparedSyntax, prepared]]}
+      components={{
+        a: ({ href, node: _node, ...props }) => {
+          if (typeof href !== "string") return <a {...props} />;
+          const resolvedHref = resolveMarkdownLinkHref(href);
+          if (!resolvedHref) return <span>{props.children}</span>;
+          const opensNewTab = !resolvedHref.startsWith(MARKDOWN_HASH_PREFIX);
+          return (
+            <a
+              {...props}
+              href={resolvedHref}
+              rel={opensNewTab ? "noopener noreferrer" : undefined}
+              target={opensNewTab ? "_blank" : undefined}
+              onClick={
+                opensNewTab
+                  ? (event) => {
+                      event.preventDefault();
+                      openExternalUrl(resolvedHref);
+                      onExternalLink();
+                    }
+                  : undefined
+              }
+            />
+          );
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
 
 function resolveMarkdownLinkHref(href: string): string | null {
   const trimmedHref = href.trim();
@@ -255,6 +301,26 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const unsavedChangesCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const editSessionRef = useRef<ContentEditSession | null>(null);
   const searchHighlightsRef = useRef<DomTextSearchMatch[]>([]);
+  const previewGenerationCounter = useRef(0);
+  const previewGeneration = useMemo(
+    () => ({
+      id: ++previewGenerationCounter.current,
+      requests: collectMarkdownCodeBlocks(content),
+    }),
+    [content]
+  );
+  const [committedPreview, setCommittedPreview] = useState<{
+    generation: typeof previewGeneration;
+    prepared: PreparedMarkdownSyntax;
+  } | null>(null);
+  const preparedSyntax = committedPreview?.generation === previewGeneration ? committedPreview.prepared : undefined;
+  const previewRevision = `${previewGeneration.id}:${preparedSyntax ? "highlighted" : "plain"}`;
+  const latestPreviewGeneration = useRef(previewGeneration);
+  latestPreviewGeneration.current = previewGeneration;
+  const activeMatchRef = useRef(currentSearchMatch);
+  activeMatchRef.current = currentSearchMatch;
+  const lastPreviewSearch = useRef<{ generation: number; query: string } | null>(null);
+  const preservedPreviewScroll = useRef<{ top: number; left: number } | null>(null);
   const editBaselineContentRef = useRef("");
   const isEditingRef = useRef(false);
   const editorLoadStateRef = useRef<EditorModuleLoadState>("idle");
@@ -688,7 +754,52 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   });
 
   useEffect(() => {
+    if (isEditing || loading || error || previewGeneration.requests.length === 0) return;
+    const controller = new AbortController();
+    let pending: PreparedMarkdownSyntax | null = null;
+    const publish = () => {
+      if (!pending || controller.signal.aborted || latestPreviewGeneration.current !== previewGeneration) return;
+      const root = contentRef.current?.querySelector(MARKDOWN_SEARCH_ROOT_SELECTOR);
+      const selection = document.getSelection();
+      if (root && selection && !selection.isCollapsed && selection.rangeCount > 0 && selection.getRangeAt(0).intersectsNode(root)) return;
+      if (contentRef.current) preservedPreviewScroll.current = { top: contentRef.current.scrollTop, left: contentRef.current.scrollLeft };
+      clearDomTextSearchHighlights(root ?? null);
+      searchHighlightsRef.current = [];
+      const prepared = pending;
+      pending = null;
+      setCommittedPreview({ generation: previewGeneration, prepared });
+    };
+    document.addEventListener("selectionchange", publish);
+    void highlightingService
+      .prepare(previewGeneration.requests, controller.signal)
+      .then((results) => {
+        pending = { requests: previewGeneration.requests, results };
+        publish();
+      })
+      .catch((failure: unknown) => {
+        if (!controller.signal.aborted)
+          logError(
+            "Markdown syntax preparation failed; retaining plain text",
+            { operation: "prepare" },
+            "MarkdownViewer",
+            failure instanceof Error ? failure : undefined
+          );
+      });
+    return () => {
+      controller.abort();
+      pending = null;
+      document.removeEventListener("selectionchange", publish);
+    };
+  }, [error, isEditing, loading, previewGeneration]);
+
+  useLayoutEffect(() => {
     const markdownRoot = contentRef.current?.querySelector(MARKDOWN_SEARCH_ROOT_SELECTOR);
+    if (markdownRoot?.getAttribute("data-markdown-preview-revision") !== previewRevision) return;
+    if (preservedPreviewScroll.current && contentRef.current) {
+      contentRef.current.scrollTop = preservedPreviewScroll.current.top;
+      contentRef.current.scrollLeft = preservedPreviewScroll.current.left;
+      preservedPreviewScroll.current = null;
+    }
     clearDomTextSearchHighlights(markdownRoot instanceof HTMLElement ? markdownRoot : null);
     searchHighlightsRef.current = [];
 
@@ -706,16 +817,20 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
     const highlights = applyDomTextSearchHighlights(markdownRoot, activeViewerSearchText);
     searchHighlightsRef.current = highlights;
-    const initialMatch = highlights.length > 0 ? 1 : 0;
+    const unchangedSearch =
+      lastPreviewSearch.current?.generation === previewGeneration.id && lastPreviewSearch.current.query === activeViewerSearchText;
+    const initialMatch =
+      highlights.length > 0 ? (unchangedSearch ? Math.max(1, Math.min(activeMatchRef.current, highlights.length)) : 1) : 0;
+    lastPreviewSearch.current = { generation: previewGeneration.id, query: activeViewerSearchText };
     setSearchMatches(highlights.length);
     setCurrentSearchMatch(initialMatch);
-    activateDomTextSearchMatch(highlights, initialMatch);
+    activateDomTextSearchMatch(highlights, initialMatch, !unchangedSearch);
 
     return () => {
       clearDomTextSearchHighlights(markdownRoot);
       searchHighlightsRef.current = [];
     };
-  }, [activeViewerSearchText, error, isEditing, loading]);
+  }, [activeViewerSearchText, error, isEditing, loading, previewGeneration.id, previewRevision]);
 
   useEffect(() => {
     activateDomTextSearchMatch(searchHighlightsRef.current, currentSearchMatch);
@@ -1968,7 +2083,10 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
               </Box>
             ) : (
               <Box
+                key={previewRevision}
                 data-markdown-search-root="true"
+                data-markdown-preview-revision={previewRevision}
+                style={getSyntaxVariables(muiTheme, linkColor)}
                 sx={{
                   ...getMarkdownContentStyles(viewerText, linkColor, linkHoverColor),
                   [`& ${DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR}`]: {
@@ -1981,51 +2099,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
                   },
                 }}
               >
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkRenderMarkdownTableCellLineBreaks]}
-                  rehypePlugins={[rehypeHighlight]}
-                  components={{
-                    // Destructure `node` (injected by react-markdown's passNode)
-                    // so it is not spread onto the native <a> DOM element.
-                    a: ({ href, node: _node, ...props }) => {
-                      if (typeof href !== "string") {
-                        return <a {...props} />;
-                      }
-
-                      const resolvedHref = resolveMarkdownLinkHref(href);
-
-                      if (!resolvedHref) {
-                        return <span>{props.children}</span>;
-                      }
-
-                      const opensNewTab = !resolvedHref.startsWith(MARKDOWN_HASH_PREFIX);
-
-                      const handleLinkClick = opensNewTab
-                        ? (event: React.MouseEvent) => {
-                            event.preventDefault();
-                            openExternalUrl(resolvedHref);
-
-                            // External links leave focus on the clicked anchor.
-                            // Restore focus to the viewer surface so single-key
-                            // shortcuts keep working when the user returns.
-                            focusViewerContent();
-                          }
-                        : undefined;
-
-                      return (
-                        <a
-                          {...props}
-                          href={resolvedHref}
-                          rel={opensNewTab ? "noopener noreferrer" : undefined}
-                          target={opensNewTab ? "_blank" : undefined}
-                          onClick={handleLinkClick}
-                        />
-                      );
-                    },
-                  }}
-                >
-                  {content}
-                </ReactMarkdown>
+                <MarkdownPreview content={content} prepared={preparedSyntax} onExternalLink={focusViewerContent} />
               </Box>
             )}
           </Box>

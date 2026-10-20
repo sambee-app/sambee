@@ -120,6 +120,51 @@ describe("ThemeEditorDialog", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("edits syntax through the existing picker, validation focus and copy workflow", async () => {
+    const user = userEvent.setup();
+    const create = vi.spyOn(api, "createTheme").mockResolvedValue({ id: "syntax-copy", version: 1, scope: "user", definition: theme });
+    const original = structuredClone(theme.components!.syntax);
+    renderEditor();
+    await user.click(screen.getByRole("button", { name: "Syntax" }));
+    await user.click(screen.getByRole("button", { name: "Choose Keyword color" }));
+    expect(document.querySelector(".react-colorful__alpha")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    const keyword = screen.getByRole("textbox", { name: "Keyword" });
+    await user.clear(keyword);
+    await user.type(keyword, "invalid");
+    await chooseCopyDestination(user);
+    await waitFor(() => expect(keyword).toHaveFocus());
+    expect(keyword).toHaveAttribute("aria-invalid", "true");
+    expect(create).not.toHaveBeenCalled();
+    await user.clear(keyword);
+    await user.type(keyword, "#12345678");
+    expect(theme.components!.syntax).toEqual(original);
+    await chooseCopyDestination(user);
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          components: expect.objectContaining({ syntax: { ...original, keyword: "#12345678" } }),
+        }),
+        "user"
+      )
+    );
+  });
+
+  it("discards syntax edits on Cancel without changing the active definition", async () => {
+    const user = userEvent.setup();
+    const create = vi.spyOn(api, "createTheme");
+    const { onClose } = renderEditor();
+    const original = structuredClone(theme.components!.syntax);
+    await user.click(screen.getByRole("button", { name: "Syntax" }));
+    const keyword = screen.getByRole("textbox", { name: "Keyword" });
+    await user.clear(keyword);
+    await user.type(keyword, "#123456");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(create).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(theme.components!.syntax).toEqual(original);
+  });
+
   it("offers an alpha picker and saves a copied built-in with a server-generated ID", async () => {
     const user = userEvent.setup();
     const created = vi.spyOn(api, "createTheme").mockResolvedValue({ id: "server-id", version: 1, scope: "user", definition: theme });

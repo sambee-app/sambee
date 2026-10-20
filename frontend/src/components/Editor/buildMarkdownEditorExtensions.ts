@@ -1,10 +1,10 @@
 import { defaultKeymap, historyKeymap } from "@codemirror/commands";
-import { markdown, markdownLanguage, pasteURLAsLink } from "@codemirror/lang-markdown";
-import { languages } from "@codemirror/language-data";
+import { pasteURLAsLink } from "@codemirror/lang-markdown";
 import { searchKeymap } from "@codemirror/search";
 import type { Extension } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { markdownTableAutocompleter, markdownTables } from "codemirror-markdown-tables";
+import { createMarkdownSupport } from "../../utils/codeMirrorHighlighting";
 import { buildPassiveSearchHighlightExtension } from "./buildCodeMirrorSearchHighlights";
 import { buildCommonEditorExtensions } from "./buildCommonEditorExtensions";
 import { EDITOR_SELECTION_RANGE_CLASS, getSelectionLineSegments, type SelectionLineSegment } from "./buildEditorSelectionLayer";
@@ -23,7 +23,7 @@ export type MarkdownSelectionLineSegment = SelectionLineSegment;
 export const getMarkdownSelectionLineSegments = getSelectionLineSegments;
 
 export function buildMarkdownEditorExtensions(theme: MarkdownEditorThemeOptions, lineWrapping: boolean = true): Extension[] {
-  const markdownLanguageSupport = markdown({ base: markdownLanguage, codeLanguages: languages });
+  const markdownLanguageSupport = createMarkdownSupport();
   const snippetAutocompleter = createMarkdownSnippetAutocompleter();
   const tableAutocompleter = markdownTableAutocompleter({ options: MARKDOWN_TABLE_AUTOCOMPLETE_OPTIONS });
   const markdownAutocompleteData = markdownLanguageSupport.language.data.of({

@@ -10,6 +10,8 @@ import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
+import { highlightingService } from "../../../utils/highlightingService";
+import type { PreparedCodeBlock } from "../../../utils/syntaxHighlighting";
 import MarkdownViewer from "../MarkdownViewer";
 import { normalizeMarkdownTableCellLineBreaks } from "../markdownTableCellLineBreaks";
 import { createViewerSearchTestDriver } from "./viewerSearchTestUtils";
@@ -551,6 +553,7 @@ describe("MarkdownViewer", () => {
     sessionStorage.clear();
     localStorage.setItem("access_token", "mock-token");
     vi.restoreAllMocks();
+    vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
     vi.spyOn(apiService, "writeTextWithEditLock").mockImplementation(async (connectionId, path, content, _lockInfo, options) => {
       await apiService.saveTextFile(connectionId, path, content, {
         filename: path.split("/").pop() ?? path,
@@ -605,6 +608,101 @@ describe("MarkdownViewer", () => {
       </SambeeThemeProvider>
     );
   }
+
+  it("commits prepared syntax once using the latest search and preserves the active logical match and scroll", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("```js\nconst x=1; const x=2;\n```");
+    let finish!: (results: readonly PreparedCodeBlock[]) => void;
+    const prepare = vi.spyOn(highlightingService, "prepare").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderViewer();
+    await screen.findByText("const x=1; const x=2;");
+    await waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
+    const search = await viewerSearch.openSearch("missing");
+    fireEvent.change(search, { target: { value: "const x" } });
+    await screen.findByText("1 / 2");
+    fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+    await screen.findByText("2 / 2");
+    const root = document.querySelector('[data-markdown-search-root="true"]')!;
+    const scroll = root.parentElement!;
+    scroll.scrollTop = 123;
+    const scrollIntoView = vi.fn();
+    const previousScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollIntoView");
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    try {
+      await act(async () =>
+        finish([
+          {
+            ranges: [
+              { from: 0, to: 5, categories: ["keyword"] },
+              { from: 11, to: 16, categories: ["keyword"] },
+            ],
+          },
+        ])
+      );
+      expect(document.querySelector('[data-markdown-search-root="true"]')).not.toBe(root);
+      expect(document.querySelectorAll(".sambee-syntax-keyword")).toHaveLength(2);
+      expect(screen.getByText("2 / 2")).toBeInTheDocument();
+      expect(scroll.scrollTop).toBe(123);
+      expect(scrollIntoView).not.toHaveBeenCalled();
+      expect(prepare).toHaveBeenCalledTimes(1);
+      fireEvent.change(search, { target: { value: "x=2" } });
+      expect(await screen.findByText("1 / 1")).toBeInTheDocument();
+    } finally {
+      if (previousScroll) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previousScroll);
+      else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
+  });
+
+  it("defers syntax publication until an intersecting native selection collapses", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("```js\nconst x=1;\n```");
+    let finish!: (results: readonly PreparedCodeBlock[]) => void;
+    vi.spyOn(highlightingService, "prepare").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderViewer();
+    await screen.findByText("const x=1;");
+    const root = document.querySelector('[data-markdown-search-root="true"]')!;
+    const range = document.createRange();
+    range.selectNodeContents(root.querySelector("code")!);
+    const selection = document.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    await act(async () => finish([{ ranges: [{ from: 0, to: 5, categories: ["keyword"] }] }]));
+    expect(document.querySelector('[data-markdown-search-root="true"]')).toBe(root);
+    expect(selection.toString()).toBe("const x=1;\n");
+    act(() => {
+      selection.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    expect(document.querySelector('[data-markdown-search-root="true"]')).not.toBe(root);
+    expect(document.querySelector(".sambee-syntax-keyword")).not.toBeNull();
+  });
+
+  it("aborts obsolete syntax preparation on unmount and ignores a late result", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("```js\nconst x=1;\n```");
+    let finish!: (results: readonly PreparedCodeBlock[]) => void;
+    const prepare = vi.spyOn(highlightingService, "prepare").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const { unmount } = renderViewer();
+    await screen.findByText("const x=1;");
+    await waitFor(() => expect(prepare).toHaveBeenCalledTimes(1));
+    const signal = prepare.mock.calls[0]![1]!;
+    unmount();
+    expect(signal.aborted).toBe(true);
+    await act(async () => finish([{ ranges: [{ from: 0, to: 5, categories: ["keyword"] }] }]));
+    expect(document.querySelector(".sambee-syntax-keyword")).toBeNull();
+  });
 
   it.each(["Back", "Close"])("leaves clean editing with %s and serializes rapid re-entry behind lock release", async (action) => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");

@@ -11,6 +11,8 @@ import {
   OVERLAY_SURFACE_CSS_VARIABLE,
   resolveThemePalette,
 } from "./palette";
+import { resolveSyntaxTheme } from "./resolveSyntaxTheme";
+import { syntaxTokenStyles } from "./syntaxStyles";
 import { builtInThemes, getDefaultTheme } from "./themes";
 import type { ThemeConfig } from "./types";
 
@@ -109,7 +111,7 @@ export function SambeeThemeProvider({ children }: ThemeProviderProps) {
 
   // All available themes (built-in + custom)
   const availableThemes = useMemo(
-    () => [...builtInThemes, ...storedThemes.map((stored) => ({ ...stored.definition, id: stored.id }))],
+    () => [...builtInThemes, ...storedThemes.map((stored) => resolveSyntaxTheme({ ...stored.definition, id: stored.id }))],
     [storedThemes]
   );
 
@@ -179,7 +181,9 @@ export function SambeeThemeProvider({ children }: ThemeProviderProps) {
         action,
         appBar,
         statusBar,
+        link,
         markdownDocument: currentTheme.components?.markdownViewer?.document,
+        syntax: currentTheme.components?.syntax,
       },
       typography: {
         fontFamily: ["-apple-system", "BlinkMacSystemFont", '"Segoe UI"', "Roboto", '"Helvetica Neue"', "Arial", "sans-serif"].join(","),
@@ -187,6 +191,7 @@ export function SambeeThemeProvider({ children }: ThemeProviderProps) {
       components: {
         MuiCssBaseline: {
           styleOverrides: {
+            ...syntaxTokenStyles,
             body: {
               scrollbarColor: `${scrollbarThumb} ${scrollbarTrack}`,
               "&::-webkit-scrollbar, & *::-webkit-scrollbar": {

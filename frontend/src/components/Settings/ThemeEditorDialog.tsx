@@ -17,6 +17,7 @@ import {
 import { type ChangeEvent, useRef, useState } from "react";
 import { HexAlphaColorPicker } from "react-colorful";
 import api, { getThemeRequestError, type StoredTheme } from "../../services/api";
+import { resolveSyntaxTheme } from "../../theme/resolveSyntaxTheme";
 import {
   COLOR_ROLES,
   colorAt,
@@ -44,12 +45,12 @@ interface ThemeEditorDialogProps {
   onSaved: (themeId: string, isCopy: boolean) => Promise<void>;
 }
 
-const GROUPS = ["Core", "Viewers", "Markdown", "Search", "Alerts"] as const;
+const GROUPS = ["Core", "Viewers", "Markdown", "Syntax", "Search", "Alerts"] as const;
 
 export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClose, onSaved }: ThemeEditorDialogProps) {
   const muiTheme = useTheme();
   const usesDesktopFormLayout = useMediaQuery(muiTheme.breakpoints.up("md"));
-  const [draft, setDraft] = useState<ThemeConfig>(() => structuredClone(theme));
+  const [draft, setDraft] = useState<ThemeConfig>(() => resolveSyntaxTheme(theme));
   const [inputColors, setInputColors] = useState<Record<string, string>>({});
   const [group, setGroup] = useState<string | null>("Core");
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);

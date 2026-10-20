@@ -1,6 +1,6 @@
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
-import { tags } from "@lezer/highlight";
+import { EditorView } from "@codemirror/view";
+import { nativeSyntaxHighlighting } from "../../utils/codeMirrorHighlighting";
 import { buildCodeMirrorSurfaceTheme } from "./buildCodeMirrorSurfaceTheme";
 import { buildSelectionLayerTheme } from "./buildEditorSelectionLayer";
 
@@ -43,6 +43,7 @@ export function buildMarkdownEditorTheme({
       textColor,
     }),
     buildSelectionLayerTheme({ selectionBackground, surfaceBackground }),
-    syntaxHighlighting(HighlightStyle.define([{ tag: [tags.labelName, tags.link, tags.string, tags.url], color: linkColor }])),
+    nativeSyntaxHighlighting,
+    EditorView.theme({ "&": { "--sambee-syntax-link": linkColor } }),
   ];
 }

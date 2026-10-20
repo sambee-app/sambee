@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activateDomTextSearchMatch,
   applyDomTextSearchHighlights,
+  buildHighlightSlices,
   clearDomTextSearchHighlights,
   DOM_TEXT_SEARCH_CURRENT_MATCH_ATTRIBUTE,
   DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR,
@@ -53,6 +54,44 @@ describe("domTextSearch", () => {
 
     expect(matches).toHaveLength(0);
     expect(container.querySelectorAll(DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR)).toHaveLength(0);
+  });
+
+  it.each(["const x", "x  =", "=\t1", "1;\nconst"])("preserves isolated code whitespace for %j", (query) => {
+    const container = document.createElement("div");
+    container.innerHTML = "<pre><code><span>const</span> <span>x</span>  <span>=</span>\t<span>1;</span>\n<span>const</span></code></pre>";
+    const original = container.textContent;
+    const matches = applyDomTextSearchHighlights(container, query);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].elements.map((element) => element.textContent).join("")).toBe(query);
+    clearDomTextSearchHighlights(container);
+    expect(container.textContent).toBe(original);
+    expect(applyDomTextSearchHighlights(container, query)).toHaveLength(1);
+  });
+
+  it("does not index prose layout indentation", () => {
+    const container = document.createElement("div");
+    container.innerHTML = "<p><span>sam</span>\n  <strong>bee</strong></p>";
+    expect(applyDomTextSearchHighlights(container, "sambee")).toHaveLength(1);
+  });
+
+  it("walks ordered segments proportionally to matches and emitted slices", () => {
+    let inspections = 0;
+    const repetitions = 6000;
+    const segments = Array.from({ length: repetitions * 2 }, (_, index) => ({
+      node: document.createTextNode(index % 2 === 0 ? "let" : " "),
+      get start() {
+        inspections += 1;
+        return Math.floor(index / 2) * 4 + (index % 2 === 0 ? 0 : 3);
+      },
+      get end() {
+        inspections += 1;
+        return Math.floor(index / 2) * 4 + (index % 2 === 0 ? 3 : 4);
+      },
+    }));
+    const matches = Array.from({ length: repetitions }, (_, index) => ({ id: index, start: index * 4, end: index * 4 + 3 }));
+    const slices = buildHighlightSlices({ fullText: "let ".repeat(repetitions), segments }, matches);
+    expect(slices.size).toBe(repetitions);
+    expect(inspections).toBeLessThan((segments.length + matches.length) * 8);
   });
 
   it("clears highlights and restores the original text content", () => {

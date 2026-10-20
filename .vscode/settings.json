@@ -172,7 +172,7 @@
     "npx vitest": true,
     "npx tsc": true,
     "npx biome": true,
-    "/^((\\.(\\.)?\\/|\\/workspace\\/)?node_modules\\/|\\.\\/)?\\.bin\\/biome\\s+(check|format)\\b/": true,
+    "/^((\\.(\\.)?\\/|\\/workspace\\/(frontend\\/)?)?node_modules\\/|\\.\\/)?\\.bin\\/biome\\s+(check|format)\\b/": true,
     "/^((\\.(\\.)?\\/|\\/workspace\\/)?node_modules\\/|\\.\\/)?\\.bin\\/tsc\\b/": true,
     // Frontend validation and builds
     "/^npm(\\s+--prefix\\s+\\/workspace\\/frontend)?\\s+run\\s+(?:build|check|docs\\:validate|format|info|lint|redirects\\:generate|search|test(\\:.+)?|typecheck|view)\\b/": true,
