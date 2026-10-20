@@ -175,7 +175,7 @@
     "/^((\\.(\\.)?\\/|\\/workspace\\/)?node_modules\\/|\\.\\/)?\\.bin\\/biome\\s+(check|format)\\b/": true,
     "/^((\\.(\\.)?\\/|\\/workspace\\/)?node_modules\\/|\\.\\/)?\\.bin\\/tsc\\b/": true,
     // Frontend validation and builds
-    "/^npm\\s+run\\s+(?:build|check|docs\\:validate|format|info|lint|redirects\\:generate|search|test|typecheck|view)\\b/": true,
+    "/^npm(\\s+--prefix\\s+\\/workspace\\/frontend)?\\s+run\\s+(?:build|check|docs\\:validate|format|info|lint|redirects\\:generate|search|test(\\:.+)?|typecheck|view)\\b/": true,
     // Rust validation and read-only inspection
     "rustfmt": true,
     "/^cargo\\s+(?:test|check|clippy|fmt|metadata|tree|doc)\\b/": true,

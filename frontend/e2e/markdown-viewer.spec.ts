@@ -250,6 +250,35 @@ async function openMarkdownViewer(page: Page): Promise<void> {
   await page.getByRole("button", { name: `File: ${DEMO_PATH}` }).click();
 }
 
+test("edit sessions can reopen immediately after release", async ({ page }) => {
+  await mockMarkdownViewerApi(page, { initialMarkdown: "Immediate re-entry\n" });
+  await openMarkdownViewer(page);
+
+  await page.evaluate(async ({ connectionId, path }) => {
+    const modulePath = "/src/services/storageBackends.ts";
+    const { SambeeSmbBackend } = await import(modulePath);
+    const target = { kind: "smb", connectionId };
+    const source = {
+      target,
+      path,
+      resolvedTarget: {
+        target,
+        connection: { access_mode: "read_write" },
+        capabilitySnapshot: { companion: { status: "unavailable" } },
+      },
+    };
+    const backend = new SambeeSmbBackend();
+    const first = await backend.editing.begin(source);
+    if (first.kind !== "acquired") throw new Error("Expected the first edit session to be acquired");
+    await first.session.release();
+    const second = await backend.editing.begin(source);
+    if (second.kind !== "acquired") throw new Error("Expected immediate edit-session re-entry to succeed");
+    await second.session.release();
+  }, { connectionId: DEMO_CONNECTION_ID, path: DEMO_PATH });
+
+  await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("sambee:edit-lock:")))).toEqual([]);
+});
+
 for (const reloadKind of ["browser", "update"] as const) {
   test(`${reloadKind} reload resumes the existing Markdown edit lock`, async ({ page }) => {
     await mockMarkdownViewerApi(page, { initialMarkdown: "Reload recovery\n", existingFilePaths: [DEMO_PATH] });

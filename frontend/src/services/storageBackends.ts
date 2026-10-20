@@ -256,7 +256,7 @@ abstract class ApiStorageBackend implements StorageBackend {
         requireEditLockContext(lockInfo);
         recovery.save(lockInfo);
       } catch (error) {
-        recovery.release();
+        await recovery.release();
         throw error;
       }
       let lockContext = requireEditLockContext(lockInfo);
@@ -284,7 +284,7 @@ abstract class ApiStorageBackend implements StorageBackend {
               recovery.clear();
               released = true;
             } finally {
-              recovery.release();
+              await recovery.release();
             }
           },
         },

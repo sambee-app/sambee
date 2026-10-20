@@ -23,23 +23,23 @@ export async function claimEditLockRecovery(connectionId: string, path: string) 
   const identityEpoch = authSession.getIdentity().epoch;
   const key = `${RECOVERY_PREFIX}${JSON.stringify([userId, connectionId, path])}`;
   let release = () => {};
+  let lockCompletion = Promise.resolve();
   let protectedTab = false;
   if (navigator.locks) {
     await new Promise<void>((resolve, reject) => {
-      void navigator.locks
-        .request(key, { ifAvailable: true }, async (lock) => {
-          if (!lock) throw new Error("File is already being edited in another tab");
-          protectedTab = true;
-          await new Promise<void>((unlock) => {
-            release = () => {
-              activeGuards.delete(release);
-              unlock();
-            };
-            activeGuards.add(release);
-            resolve();
-          });
-        })
-        .catch(reject);
+      lockCompletion = navigator.locks.request(key, { ifAvailable: true }, async (lock) => {
+        if (!lock) throw new Error("File is already being edited in another tab");
+        protectedTab = true;
+        await new Promise<void>((unlock) => {
+          release = () => {
+            activeGuards.delete(release);
+            unlock();
+          };
+          activeGuards.add(release);
+          resolve();
+        });
+      });
+      void lockCompletion.catch(reject);
     });
   }
 
@@ -51,7 +51,10 @@ export async function claimEditLockRecovery(connectionId: string, path: string) 
     }
   };
   return {
-    release,
+    async release(): Promise<void> {
+      release();
+      await lockCompletion;
+    },
     clear,
     load(): EditLockInfo | null {
       const navigation = performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined;
