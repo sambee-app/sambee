@@ -25,6 +25,7 @@ from app.services.directory_cache import (
     CacheState,
     ConnectionDirectoryCache,
     DirectoryCacheManager,
+    _DirectoryMutation,
     _ScannedDirectory,
     get_directory_cache_manager,
     shutdown_directory_cache,
@@ -1035,6 +1036,40 @@ class TestRescan:
         else:
             assert cache.scan_error is not None
             save.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("notification_point", ["read", "publication"])
+    async def test_rescan_skips_overlap_checks_for_additions(self, cache: ConnectionDirectoryCache, notification_point: str):
+        """Additions merge without comparing each path against previously read directories."""
+        cache._state = CacheState.READY
+        pool = MagicMock()
+        additions = ["documents", "new-directory", "new-directory/child"]
+
+        async def scan_directory(_pool, _smb_path, rel_path):
+            if rel_path == "documents" and notification_point == "read":
+                cache.add_directories(additions)
+            return [_ScannedDirectory("documents")] if not rel_path else []
+
+        async def release_connection(*_args):
+            if notification_point == "publication":
+                cache.add_directories(additions)
+            return False
+
+        pool.get_connection.return_value.__aexit__.side_effect = release_connection
+        with (
+            patch("app.services.directory_cache.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch.object(cache, "_scan_directory_with_pool_lease", side_effect=scan_directory),
+            patch.object(_DirectoryMutation, "invalidates_read", return_value=False) as overlap_check,
+            patch.object(cache, "save_to_disk") as save,
+        ):
+            await cache._run_rescan()
+
+        overlap_check.assert_not_called()
+        assert cache._directories == set(additions)
+        assert cache.directory_count == len(additions)
+        assert cache.state == CacheState.READY
+        assert cache.scan_error is None
+        save.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_rescan_accepts_changes_below_listed_children(self, cache: ConnectionDirectoryCache):
