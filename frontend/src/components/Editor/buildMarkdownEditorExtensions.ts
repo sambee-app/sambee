@@ -2,7 +2,7 @@ import { defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { pasteURLAsLink } from "@codemirror/lang-markdown";
 import { searchKeymap } from "@codemirror/search";
 import type { Extension } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { markdownTableAutocompleter, markdownTables } from "codemirror-markdown-tables";
 import { createMarkdownSupport } from "../../utils/codeMirrorHighlighting";
 import { buildPassiveSearchHighlightExtension } from "./buildCodeMirrorSearchHighlights";
@@ -22,7 +22,11 @@ export const MARKDOWN_SELECTION_RANGE_CLASS = EDITOR_SELECTION_RANGE_CLASS;
 export type MarkdownSelectionLineSegment = SelectionLineSegment;
 export const getMarkdownSelectionLineSegments = getSelectionLineSegments;
 
-export function buildMarkdownEditorExtensions(theme: MarkdownEditorThemeOptions, lineWrapping: boolean = true): Extension[] {
+export function buildMarkdownEditorExtensions(
+  theme: MarkdownEditorThemeOptions,
+  lineWrapping: boolean = true,
+  onNestedUpdate?: (update: ViewUpdate) => void
+): Extension[] {
   const markdownLanguageSupport = createMarkdownSupport();
   const snippetAutocompleter = createMarkdownSnippetAutocompleter();
   const tableAutocompleter = markdownTableAutocompleter({ options: MARKDOWN_TABLE_AUTOCOMPLETE_OPTIONS });
@@ -53,7 +57,7 @@ export function buildMarkdownEditorExtensions(theme: MarkdownEditorThemeOptions,
       selectionType: "codemirror",
       handlePosition: "inside",
       lineWrapping: "wrap",
-      extensions: [keymap.of(defaultKeymap)],
+      extensions: [keymap.of(defaultKeymap), ...(onNestedUpdate ? [EditorView.updateListener.of(onNestedUpdate)] : [])],
       globalKeyBindings: [...historyKeymap, ...searchKeymap],
       markdownConfig: {
         completeHTMLTags: true,

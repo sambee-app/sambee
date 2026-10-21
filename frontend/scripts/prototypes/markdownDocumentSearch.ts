@@ -1,5 +1,5 @@
-import type { DocumentSearchOptions } from "../../src/utils/markdownDocumentSearch";
-import { PREPARATION_SOURCE_CHUNK_UNITS } from "./markdownCodePreparation";
+export * from "../../src/utils/markdownDocumentSearchWorker";import type { DocumentSearchOptions } from "../../src/utils/markdownDocumentSearch";
+import { PREPARATION_SOURCE_CHUNK_UNITS } from "../../src/utils/markdownCodePreparationProtocol";
 
 export const DOCUMENT_SEARCH_WINDOW = 64;
 export const DOCUMENT_SEARCH_PROGRESS_MATCHES = 512;

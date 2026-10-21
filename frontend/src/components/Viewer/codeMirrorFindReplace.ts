@@ -1,5 +1,6 @@
 import { getSearchQuery, SearchQuery, setSearchQuery } from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
+import { findSelectedCodeMirrorSearchMatch, getCodeMirrorSearchMatches } from "../Editor/codeMirrorSearchMatches";
 
 export interface CodeMirrorFindReplaceRequest {
   caseSensitive: boolean;
@@ -25,15 +26,6 @@ export interface CodeMirrorFindReplaceOptions {
   wholeWord: boolean;
 }
 
-interface SearchMatchRange {
-  from: number;
-  to: number;
-}
-
-function rangeContainedInSelection(range: SearchMatchRange, selection: SearchMatchRange): boolean {
-  return selection.from <= range.from && selection.to >= range.to;
-}
-
 function resolveSearchMatchState(view: EditorView): CodeMirrorFindReplaceMetrics {
   const query = getSearchQuery(view.state);
   const searchText = query.search;
@@ -47,28 +39,9 @@ function resolveSearchMatchState(view: EditorView): CodeMirrorFindReplaceMetrics
     return { currentMatch: 0, isSearchable, isValid: false, matches: 0, searchText };
   }
 
-  const cursor = query.getCursor(view.state);
-  const mainSelection = view.state.selection.main;
-  const mainSelectionRange = { from: mainSelection.from, to: mainSelection.to };
-  let matches = 0;
-  let currentMatch = 0;
-  let containedMatchIndex = 0;
-
-  for (let nextMatch = cursor.next(); !nextMatch.done; nextMatch = cursor.next()) {
-    matches += 1;
-    const match = nextMatch.value;
-
-    if (match.from === mainSelection.from && match.to === mainSelection.to) {
-      currentMatch = matches;
-      continue;
-    }
-
-    if (containedMatchIndex === 0 && rangeContainedInSelection(match, mainSelectionRange)) {
-      containedMatchIndex = matches;
-    }
-  }
-
-  return { currentMatch: currentMatch || containedMatchIndex, isSearchable, isValid: true, matches, searchText };
+  const ranges = getCodeMirrorSearchMatches(view);
+  const currentMatch = findSelectedCodeMirrorSearchMatch(ranges, view.state.selection.main) + 1;
+  return { currentMatch, isSearchable, isValid: true, matches: ranges.length, searchText };
 }
 
 export function updateCodeMirrorFindReplaceQuery(view: EditorView | null | undefined, options: CodeMirrorFindReplaceOptions): void {

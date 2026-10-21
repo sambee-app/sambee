@@ -246,6 +246,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     clearPendingBaselineSync,
     handleEditorChange,
     handleEditorUserEdit,
+    getEditGeneration,
     markEditSessionPristine,
     requestRestoreEditingFocus,
   } = useMarkdownEditSession({
@@ -312,51 +313,51 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     };
   }, [connectionId, contentProviders, fetchWithRetry, isReadOnly, path, setEditBaselineContent, virtualSource]);
 
-  useEffect(() => {
-    if (!isEditing) {
+  const snapshotDraft = useCallback(() => {
+    if (!isEditingRef.current) {
       return;
     }
 
-    if (draftContent === editBaselineContentRef.current) {
-      clearDraft(connectionId, path, "text");
-      setDraftStorageWarning(null);
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      const result = saveDraft(connectionId, path, "text", editBaselineContentRef.current, draftContent);
-      if (result.saved || result.reason === "no-user") {
-        setDraftStorageWarning(null);
-        return;
-      }
-
-      setDraftStorageWarning(
-        result.reason === "too-large" ? t("viewer.edit.recovery.tooLargeWarning") : t("viewer.edit.recovery.storageUnavailableWarning")
-      );
-    }, DRAFT_SNAPSHOT_DEBOUNCE_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [connectionId, draftContent, isEditing, path, t]);
-
-  useEffect(() => {
-    const snapshot = () => {
-      if (!isEditingRef.current) {
-        return;
-      }
-
-      if (draftContent === editBaselineContentRef.current) {
+    try {
+      const editor = editorRef.current;
+      if (!editor) throw new Error("The text editor is not mounted");
+      const latestContent = editor.captureSnapshotSync().serialize();
+      if (latestContent === editBaselineContentRef.current) {
         clearDraft(connectionId, path, "text");
+        setDraftStorageWarning(null);
       } else {
-        saveDraft(connectionId, path, "text", editBaselineContentRef.current, draftContent);
+        const result = saveDraft(connectionId, path, "text", editBaselineContentRef.current, latestContent);
+        if (result.saved || result.reason === "no-user") {
+          setDraftStorageWarning(null);
+        } else {
+          setDraftStorageWarning(
+            result.reason === "too-large" ? t("viewer.edit.recovery.tooLargeWarning") : t("viewer.edit.recovery.storageUnavailableWarning")
+          );
+        }
       }
-    };
-    const unregister = registerDraftSnapshot(snapshot);
-    window.addEventListener("pagehide", snapshot);
+    } catch (error) {
+      logError("Text recovery snapshot failed; keep the editor open and save the file", { error, connectionId, path });
+    }
+  }, [connectionId, path, t]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    if (draftContent === editBaselineContentRef.current) {
+      snapshotDraft();
+      return;
+    }
+    const timeoutId = window.setTimeout(snapshotDraft, DRAFT_SNAPSHOT_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeoutId);
+  }, [draftContent, isEditing, snapshotDraft]);
+
+  useEffect(() => {
+    const unregister = registerDraftSnapshot(snapshotDraft);
+    window.addEventListener("pagehide", snapshotDraft);
     return () => {
       unregister();
-      window.removeEventListener("pagehide", snapshot);
+      window.removeEventListener("pagehide", snapshotDraft);
     };
-  }, [connectionId, draftContent, path]);
+  }, [snapshotDraft]);
 
   const releaseEditSession = useCallback(async () => {
     const session = editSessionRef.current;
@@ -590,27 +591,30 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       setIsSaving(true);
 
       try {
-        let savedContent = draftContent;
-        if (editorRef.current) {
-          await editorRef.current.flushPendingEdits();
-          savedContent = editorRef.current.getCanonicalText();
-        }
+        const editor = editorRef.current;
+        if (!editor) throw new Error("Text editor is no longer available for saving");
+        const saveGeneration = getEditGeneration();
+        const snapshot = await editor.captureSnapshot();
+        const savedContent = snapshot.serialize();
 
         if (!editSession) throw new Error("Edit session is no longer active");
         await editSession.writeText(savedContent);
+        const hasNewerEdits = getEditGeneration() !== saveGeneration && editor.getCanonicalText() !== savedContent;
         setContent(savedContent);
         setShareRevision((revision) => revision + 1);
-        setDraftContent(savedContent);
         setEditBaselineContent(savedContent);
         clearBaselineSyncWindow();
-        markEditSessionPristine();
-        clearDraft(connectionId, path, "text");
+        if (!hasNewerEdits) {
+          setDraftContent(savedContent);
+          markEditSessionPristine();
+          clearDraft(connectionId, path, "text");
+        }
 
-        if (afterSave === "cancel-edit") {
+        if (afterSave === "cancel-edit" && !hasNewerEdits) {
           await exitEditMode(savedContent);
         }
 
-        return true;
+        return !hasNewerEdits;
       } catch (err) {
         setEditError(getApiErrorMessage(err, t("viewer.text.saveFailed"), { includeOriginalMessage: true }));
         logError("Failed to save text file", { error: err, path, connectionId });
@@ -627,9 +631,9 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     [
       clearBaselineSyncWindow,
       connectionId,
-      draftContent,
       editSession,
       exitEditMode,
+      getEditGeneration,
       isEditing,
       isReadOnly,
       markEditSessionPristine,

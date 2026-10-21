@@ -270,8 +270,7 @@ function haveEquivalentMarkdownTables(previousMarkdown: string, nextMarkdown: st
   );
 }
 
-function removeRedundantTableCellEscapes(markdown: string): string {
-  const tree = markdownParser.parse(markdown) as Root;
+function removeRedundantTableCellEscapes(markdown: string, tree: Root): string {
   const escapeOffsetGroups: number[][] = [];
 
   visit(tree, "tableCell", (node) => {
@@ -320,8 +319,9 @@ function removeRedundantTableCellEscapes(markdown: string): string {
 }
 
 export function normalizeMarkdownTableCellLineBreaks(markdown: string): string {
-  const sourceMarkdown = removeRedundantTableCellEscapes(markdown);
-  const tree = markdownParser.parse(sourceMarkdown) as Root;
+  const sourceTree = markdownParser.parse(markdown) as Root;
+  const sourceMarkdown = removeRedundantTableCellEscapes(markdown, sourceTree);
+  const tree = sourceMarkdown === markdown ? sourceTree : (markdownParser.parse(sourceMarkdown) as Root);
   const replacements = new Map<string, MarkdownReplacement>();
 
   visit(tree, "tableCell", (node) => {

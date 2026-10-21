@@ -2,7 +2,7 @@ import type { Element, ElementContent, Root } from "hast";
 import type { Root as MarkdownRoot } from "mdast";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
-import { unified } from "unified";
+import { type Plugin, unified } from "unified";
 import { type CodeBlockRequest, type PreparedCodeBlock, tokenClasses } from "./syntaxHighlighting";
 
 export interface PreparedMarkdownSyntax {
@@ -10,14 +10,55 @@ export interface PreparedMarkdownSyntax {
   results: readonly PreparedCodeBlock[];
 }
 
+export function recordMarkdownPreparation(stage: string, start: number): void {
+  const name = `sambee:preview-preparation:${stage}`;
+  performance.clearMeasures?.(name);
+  performance.measure?.(name, { start, end: performance.now() });
+}
+
+export const remarkMeasureMarkdownPreparation: Plugin<[], MarkdownRoot> = function () {
+  const parser = this.parser;
+  if (parser) {
+    this.parser = (...args) => {
+      const start = performance.now();
+      try {
+        return parser(...args);
+      } finally {
+        recordMarkdownPreparation("render-parse", start);
+      }
+    };
+  }
+  return (_tree, file) => {
+    file.data["sambeeMarkdownTransformStart"] = performance.now();
+  };
+};
+
+export const rehypeMeasureMarkdownPreparation: Plugin<[(() => void)?], Root> = (onReady) => (_tree, file) => {
+  const start = file.data["sambeeMarkdownTransformStart"];
+  if (typeof start === "number") recordMarkdownPreparation("render-transform", start);
+  onReady?.();
+};
+
 export function collectMarkdownCodeBlocks(source: string): CodeBlockRequest[] {
+  const parseStart = performance.now();
   const tree = unified().use(remarkParse).use(remarkGfm).parse(source) as MarkdownRoot;
+  recordMarkdownPreparation("collection-parse", parseStart);
+  return collectMarkdownCodeBlocksFromTree(tree);
+}
+
+export const remarkCollectMarkdownCodeBlocks: Plugin<[(requests: CodeBlockRequest[]) => void], MarkdownRoot> = (onCollected) => (tree) => {
+  onCollected(collectMarkdownCodeBlocksFromTree(tree));
+};
+
+function collectMarkdownCodeBlocksFromTree(tree: MarkdownRoot): CodeBlockRequest[] {
+  const walkStart = performance.now();
   const blocks: CodeBlockRequest[] = [];
   const visit = (node: MarkdownRoot | MarkdownRoot["children"][number]) => {
     if (node.type === "code") blocks.push({ text: node.value, label: node.lang });
     if ("children" in node) for (const child of node.children) visit(child as MarkdownRoot["children"][number]);
   };
   visit(tree);
+  recordMarkdownPreparation("collection-walk", walkStart);
   return blocks;
 }
 

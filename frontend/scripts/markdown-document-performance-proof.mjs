@@ -81,6 +81,7 @@ export async function runMarkdownDocumentProof(page, report, width) {
       source: `# Unicode boundaries\n\n${"x".repeat(2_047)}\u{1f30d}${"x".repeat(2_047)}e\u0301\n\n\`\`\`text\n${"x".repeat(2_047)}\u{1f30d}\t end\n\`\`\``,
     },
     { name: "empty", source: "" },
+    { name: "canonical-normalization", source: "* first\n* second\n\n| Left | Right |\n| --- | --- |\n| a\\&b | first<BR>second&#10;third |\n\n```md\n* literal<BR>\n```\n" },
     { name: "unknown-language", source: "# Plain fallback\n\n```unknown-language-proof\nUnchanged source.\n```" },
     { name: "image", source: "# Image sizing\n\n![Visible fixture](/__markdown_preview_proof__/fixture.png)\n\nText after image." },
     {

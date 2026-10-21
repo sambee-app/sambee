@@ -3,13 +3,16 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
-import { remarkRenderMarkdownTableCellLineBreaks } from "../components/Viewer/markdownTableCellLineBreaks";
+import {
+  normalizeMarkdownTableCellLineBreaks,
+  remarkRenderMarkdownTableCellLineBreaks,
+} from "../components/Viewer/markdownTableCellLineBreaks";
 import { createCodePreviewModel } from "./markdownCodePreviewModel";
 import type { CodeBlockRequest, SyntaxRange } from "./syntaxHighlighting";
 
 export const DOCUMENT_RECORD_BATCH_ITEMS = 64;
 export const DOCUMENT_PUBLICATION_BATCH_ITEMS = 512;
-export const DOCUMENT_CODE_PUBLICATION_BATCH_ITEMS = 128;
+export const DOCUMENT_PUBLICATION_BATCH_UNITS = 16_384;
 export const DOCUMENT_TEXT_CHUNK_UNITS = 2_048;
 export const DOCUMENT_SYNTAX_CACHE_RANGES = 4_000;
 export const DOCUMENT_SYNTAX_WINDOW_PARTS = 40;
@@ -23,6 +26,7 @@ export type MarkdownDocumentRecord =
   | { kind: "fallback"; id: number; reason: string };
 
 export interface MarkdownDocumentModel {
+  source: string;
   tree: Root;
   codeBlocks: (CodeBlockRequest & { id: number })[];
 }
@@ -61,14 +65,18 @@ export function documentSyntaxPage(
   return { records, next: index < ranges.length && ranges[index].from < window.to ? index - low : null };
 }
 
-export async function createMarkdownDocumentModel(source: string): Promise<MarkdownDocumentModel> {
+export async function createMarkdownDocumentModel(
+  source: string,
+  options: { normalizeSource?: boolean } = {}
+): Promise<MarkdownDocumentModel> {
+  const normalizedSource = options.normalizeSource ? normalizeMarkdownTableCellLineBreaks(source) : source;
   const processor = unified()
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkRenderMarkdownTableCellLineBreaks)
     .use(remarkRehype, { allowDangerousHtml: true });
-  const tree = (await processor.run(processor.parse(source))) as Root;
-  return { tree, codeBlocks: [] };
+  const tree = (await processor.run(processor.parse(normalizedSource))) as Root;
+  return { source: normalizedSource, tree, codeBlocks: [] };
 }
 
 export function* markdownDocumentRecords(model: MarkdownDocumentModel): Generator<MarkdownDocumentRecord> {

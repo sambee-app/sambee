@@ -47,7 +47,12 @@ vi.mock("axios", () => {
 // Get reference to the mocked functions for assertions
 import axios from "axios";
 // Now import the API service (it will use the mocked axios.create)
-import apiService, { ExpiredEditLockError, OIDC_FINALIZATION_REQUEST_TIMEOUT_MS, setOidcExchangePending } from "../api";
+import apiService, {
+  ExpiredEditLockError,
+  OIDC_FINALIZATION_REQUEST_TIMEOUT_MS,
+  setOidcExchangePending,
+  startControlledReauthentication,
+} from "../api";
 import { AuthSessionError, authSession } from "../authSession";
 import { getBackendAvailabilitySnapshot, markBackendUnavailable, resetBackendAvailabilityForTests } from "../backendAvailability";
 import * as backendRouter from "../backendRouter";
@@ -283,6 +288,21 @@ describe("API Service", () => {
       expect(snapshotDrafts).toHaveBeenCalledOnce();
       expect(window.location.assign).toHaveBeenCalledWith("/login?return_path=%2F");
       expect(authSession.requestRefresh).not.toHaveBeenCalled();
+    });
+
+    it("attempts a synchronous snapshot before sign-in without requiring a storage acknowledgement", () => {
+      const snapshot = vi.fn(() => {
+        expect(window.location.assign).not.toHaveBeenCalled();
+        return { saved: false as const, reason: "storage-unavailable" as const };
+      });
+      const unregister = draftRecovery.registerDraftSnapshot(snapshot);
+      try {
+        startControlledReauthentication();
+        expect(snapshot).toHaveBeenCalledOnce();
+        expect(window.location.assign).toHaveBeenCalledOnce();
+      } finally {
+        unregister();
+      }
     });
 
     it("preserves drafts and the browse return path at a no-refresh deadline", async () => {

@@ -1,6 +1,7 @@
 import { getSearchQuery, searchPanelOpen } from "@codemirror/search";
 import { type Extension, RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type EditorView, ViewPlugin } from "@codemirror/view";
+import { findSelectedCodeMirrorSearchMatch, getCachedCodeMirrorSearchMatches } from "./codeMirrorSearchMatches";
 
 export const PASSIVE_SEARCH_MATCH_CLASS = "sambee-passive-search-match";
 export const PASSIVE_SELECTED_SEARCH_MATCH_CLASS = "sambee-passive-search-match-selected";
@@ -19,39 +20,11 @@ function rangeEquals(left: SearchMatchRange | null, right: SearchMatchRange): bo
   return left !== null && left.from === right.from && left.to === right.to;
 }
 
-function rangeContainedInSelection(range: SearchMatchRange, selection: SearchMatchRange): boolean {
-  return selection.from <= range.from && selection.to >= range.to;
-}
-
 function resolveCurrentSearchRange(view: EditorView): SearchMatchRange | null {
-  const query = getSearchQuery(view.state);
-
-  if (!query.search) {
-    return null;
-  }
-
-  const cursor = query.getCursor(view.state);
-  const mainSelection = view.state.selection.main;
-  const mainSelectionRange = { from: mainSelection.from, to: mainSelection.to };
-
-  let currentRange: SearchMatchRange | null = null;
-  let containedRange: SearchMatchRange | null = null;
-
-  for (let nextMatch = cursor.next(); !nextMatch.done; nextMatch = cursor.next()) {
-    const match = nextMatch.value;
-    const matchRange = { from: match.from, to: match.to };
-
-    if (match.from === mainSelection.from && match.to === mainSelection.to) {
-      currentRange = matchRange;
-      continue;
-    }
-
-    if (containedRange === null && rangeContainedInSelection(matchRange, mainSelectionRange)) {
-      containedRange = matchRange;
-    }
-  }
-
-  return currentRange ?? containedRange;
+  const ranges = getCachedCodeMirrorSearchMatches(view);
+  if (!ranges) return null;
+  const index = findSelectedCodeMirrorSearchMatch(ranges, view.state.selection.main);
+  return index < 0 ? null : ranges[index];
 }
 
 export function buildPassiveSearchHighlightExtension(): Extension {

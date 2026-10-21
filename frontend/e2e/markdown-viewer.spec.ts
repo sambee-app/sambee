@@ -1,4 +1,7 @@
-import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route, type TestInfo } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import { extname, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DEMO_CONNECTION_ID = "85610f49-ab40-4d96-8750-ddab3e8e8764";
 const DEMO_PATH = "note.md";
@@ -250,6 +253,536 @@ async function openMarkdownViewer(page: Page): Promise<void> {
   await page.getByRole("button", { name: `File: ${DEMO_PATH}` }).click();
 }
 
+async function serveProductionAssets(page: Page): Promise<void> {
+  const dist = resolve(fileURLToPath(new URL("../dist/", import.meta.url)));
+  await page.route("http://localhost:3000/**", async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.startsWith("/api/")) return route.fallback();
+    const path = request.isNavigationRequest() ? resolve(dist, "index.html") : resolve(dist, `.${pathname}`);
+    if (!path.startsWith(`${dist}${sep}`)) return route.abort();
+    const contentTypes: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".woff2": "font/woff2" };
+    try {
+      await route.fulfill({ body: await readFile(path), contentType: contentTypes[extname(path)] ?? "application/octet-stream" });
+    } catch {
+      await route.fulfill({ status: 404, body: "Production asset not found" });
+    }
+  });
+}
+
+async function captureViewerScheduling(page: Page, testInfo: TestInfo, action: () => Promise<void>): Promise<void> {
+  if (process.env.SAMBEE_E2E_TRACE !== "1" || testInfo.project.name !== "chromium") return action();
+  if (process.env.SAMBEE_E2E_MEMORY === "1") throw new Error("Run scheduling traces separately from controlled-GC memory trials");
+  const session = await page.context().newCDPSession(page);
+  let started = false;
+  try {
+    await session.send("Tracing.start", { categories: "-*,devtools.timeline,v8,blink.user_timing,toplevel,renderer.scheduler,disabled-by-default-devtools.timeline.frame,disabled-by-default-v8.cpu_profiler", transferMode: "ReturnAsStream" });
+    started = true;
+    await page.evaluate(() => performance.mark("sambee:viewer-trace:start"));
+    await action();
+  } finally {
+    try {
+      if (started) {
+        const completed = new Promise<{ stream?: string }>((resolve) => session.once("Tracing.tracingComplete", resolve));
+        await session.send("Tracing.end");
+        const { stream } = await completed;
+        if (!stream) throw new Error("Viewer scheduling trace returned no readable stream");
+        const chunks: string[] = [];
+        try {
+          for (;;) {
+            const response = await session.send("IO.read", { handle: stream });
+            chunks.push(response.base64Encoded ? Buffer.from(response.data, "base64").toString("utf8") : response.data);
+            if (response.eof) break;
+          }
+        } finally {
+          await session.send("IO.close", { handle: stream });
+        }
+        await testInfo.attach("viewer-scheduling-trace", { body: chunks.join(""), contentType: "application/json" });
+      }
+    } finally {
+      await session.detach();
+    }
+  }
+}
+
+test.describe("production syntax publication", () => {
+  const retainedRenderer = process.env.SAMBEE_E2E_RETAINED === "1";
+  const collectMemory = process.env.SAMBEE_E2E_MEMORY === "1";
+  test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
+  const fixtures = [
+    { name: "dense", blocks: 1, lines: 6_000 },
+    { name: "near-safeguard", blocks: 1, lines: 11_111 },
+    { name: "many-blocks", blocks: 600, lines: 101 },
+    { name: "long-line", blocks: 1, lines: 6_000 },
+  ];
+  const viewportRangeLimit = 4_000;
+
+  test("native viewer contracts retain semantic text, keyboard selection, links and print content", async ({ page }, testInfo) => {
+    const markdown = "# Viewer contract\n\nAlpha **bold** and *emphasis*.\n\n[External](https://example.org/contract) [Relative](child.md) [Hash](#tail) [Unsafe](javascript:alert(1))\n\n- [x] Complete\n- [ ] Pending\n\n| Name | Value |\n| --- | --- |\n| Alpha | beta |\n\n```javascript\nconst contract = 1;\nconsole.log(contract);\n```\n\n<script>globalThis.unsafePayload = true</script>\n\n## Tail\n\nOmega contract.\n";
+    await serveProductionAssets(page);
+    await mockMarkdownViewerApi(page, { initialMarkdown: markdown, existingFilePaths: [DEMO_PATH] });
+    await page.goto("/browse/smb/demo");
+    await page.getByRole("button", { name: "Later", exact: true }).click();
+    await page.getByRole("button").filter({ hasText: /^note\.md$/ }).click();
+    const root = page.locator('[data-markdown-search-root="true"]');
+    await expect(root.getByRole("heading", { name: "Viewer contract", exact: true })).toBeVisible();
+    if (retainedRenderer) await expect(root.locator('[data-markdown-retained-state="complete"]')).toBeVisible();
+    await expect(root.getByRole("table")).toHaveCount(1);
+    await expect(root.getByRole("checkbox", { checked: true })).toBeDisabled();
+    await expect(root.getByRole("checkbox", { checked: false })).toBeDisabled();
+    await expect(root.locator("pre code")).toHaveText("const contract = 1;\nconsole.log(contract);\n");
+    await expect(root.getByRole("link", { name: "External", exact: true })).toHaveAttribute("href", "https://example.org/contract");
+    await expect(root.getByRole("link", { name: "Relative", exact: true })).toHaveAttribute("href", "http://localhost:3000/browse/smb/child.md");
+    await expect(root.getByRole("link", { name: "Hash", exact: true })).toHaveAttribute("href", "#tail");
+    await expect(root.getByText("Unsafe", { exact: true })).not.toHaveAttribute("href");
+    await expect(root.locator("script")).toHaveCount(0);
+    expect(await page.evaluate(() => "unsafePayload" in globalThis)).toBe(false);
+    const viewport = root.locator("..");
+    await expect(viewport).toBeFocused();
+    await viewport.focus();
+    await page.keyboard.press("Tab");
+    await expect(root.getByRole("link", { name: "External", exact: true })).toBeFocused();
+    const text = await root.innerText();
+    await viewport.focus();
+    await page.keyboard.press("Control+a");
+    const selectAll = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+    expect(selectAll).toContain("Viewer contract");
+    expect(selectAll).toContain("Omega contract.");
+    const selectedCode = await root.evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element.querySelector("pre code")!);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      document.addEventListener("copy", () => { document.documentElement.dataset.contractCopy = window.getSelection()?.toString() ?? ""; }, { once: true });
+      return window.getSelection()?.toString() ?? "";
+    });
+    expect(selectedCode.trimEnd()).toBe("const contract = 1;\nconsole.log(contract);");
+    await page.keyboard.press("Control+c");
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.contractCopy)).toBe(selectedCode);
+    const selectedNode = await root.locator("pre code").evaluateHandle((element) => element.firstChild);
+    await root.locator("pre code").evaluate((element) => (element as HTMLElement).style.setProperty("--sambee-syntax-keyword", "rgb(1, 2, 3)"));
+    await expect.poll(() => root.locator("pre code").evaluate((element) => {
+      const name = [...CSS.highlights.keys()].find((name) => /^markdown-(?:syntax|retained)-/.test(name) && name.endsWith("-keyword"));
+      return name ? getComputedStyle(element, `::highlight(${name})`).color : null;
+    })).toBe("rgb(1, 2, 3)");
+    expect(await root.locator("pre code").evaluate((element, node) => element.firstChild === node, selectedNode)).toBe(true);
+    expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(selectedCode);
+    await selectedNode.dispose();
+    await root.locator("pre code").evaluate((element) => (element as HTMLElement).style.removeProperty("--sambee-syntax-keyword"));
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    const searchInput = page.getByPlaceholder("Search", { exact: true });
+    await searchInput.fill("contract");
+    await expect(page.getByText("1 / 4", { exact: true })).toBeVisible();
+    await searchInput.press("Enter");
+    await expect(page.getByText("2 / 4", { exact: true })).toBeVisible();
+    await expect(searchInput).toBeFocused();
+    const semantics = await root.ariaSnapshot();
+    expect(semantics).toContain('heading "Viewer contract" [level=1]');
+    expect(semantics).toContain('heading "Tail" [level=2]');
+    expect(semantics).toContain("table:");
+    if (testInfo.project.name === "chromium") {
+      await page.emulateMedia({ media: "print" });
+      await expect(root.getByRole("heading", { name: "Tail", exact: true })).toBeVisible();
+      expect(await root.innerText()).toBe(text);
+      const pdf = await page.pdf();
+      expect(pdf.byteLength).toBeGreaterThan(1_000);
+      await testInfo.attach("viewer-contract.pdf", { body: pdf, contentType: "application/pdf" });
+    }
+    await testInfo.attach("native-viewer-contracts.json", { body: JSON.stringify({ renderer: retainedRenderer ? "retained-test-only" : "react-markdown", text, selectAll, selectedCode, semantics, clipboardScope: "Trusted native copy event and exact selected text; OS clipboard payload and assistive-technology behavior remain manual gates." }, null, 2), contentType: "application/json" });
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(root).toHaveCount(0);
+  });
+
+  for (const width of [1543, 390]) {
+    for (const fixture of fixtures) {
+      test(`${fixture.name} at ${width}px preserves active search and selection`, async ({ page }, testInfo) => {
+        test.setTimeout(90_000);
+        const phases: { name: string; startTime: number; duration: number }[] = [];
+        const phase = async (name: string, action: () => Promise<unknown>) => {
+          const startTime = await page.evaluate(() => performance.now());
+          await action();
+          const endTime = await page.evaluate(() => new Promise<number>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(performance.now())))));
+          phases.push({ name, startTime, duration: endTime - startTime });
+        };
+        await page.setViewportSize({ width, height: 900 });
+        await serveProductionAssets(page);
+        await page.addInitScript(({ expectedBlocks }) => {
+          const OriginalWorker = window.Worker;
+          const pending: (() => void)[] = [];
+          let held = true;
+          let liveWorkers = 0;
+          const longTasks: { startTime: number; duration: number }[] = [];
+          const taskGaps: { startTime: number; duration: number }[] = [];
+          const searchStages: { name: string; startTime: number; duration: number }[] = [];
+          const syntaxStages: { name: string; startTime: number; duration: number }[] = [];
+          const preparationStages: { name: string; startTime: number; duration: number }[] = [];
+          const workerStages: { name: string; block: number; startTime: number; duration: number }[] = [];
+          const navigationFrames: { action: string; startTime: number; duration: number; firstFrameMs: number }[] = [];
+          const renderMilestones: { name: string; time: number }[] = [];
+          new PerformanceObserver((entries) => {
+            for (const entry of entries.getEntries()) {
+              const resource = entry as PerformanceResourceTiming;
+              if (/\/api\/viewer\/[^/]+\/file$/.test(new URL(resource.name).pathname)) {
+                renderMilestones.push({ name: "source-response-end", time: resource.responseEnd });
+              }
+            }
+          }).observe({ type: "resource", buffered: true });
+          const initialCommit = new MutationObserver(() => {
+            const root = document.querySelector('[data-markdown-search-root="true"]');
+            if (root?.querySelectorAll("pre > code").length !== expectedBlocks) return;
+            initialCommit.disconnect();
+            renderMilestones.push({ name: "dom-commit-observed", time: performance.now() });
+            requestAnimationFrame(() => {
+              renderMilestones.push({ name: "first-frame", time: performance.now() });
+              requestAnimationFrame(() => renderMilestones.push({ name: "second-frame", time: performance.now() }));
+            });
+          });
+          initialCommit.observe(document, { childList: true, subtree: true });
+          const keyboardFrames: { event: string; startTime: number; duration: number; firstFrameMs: number; eventAgeMs: number; value: string }[] = [];
+          new PerformanceObserver((entries) => {
+            for (const entry of entries.getEntries()) {
+              if (entry.name.startsWith("sambee:preview-search:")) searchStages.push({ name: entry.name, startTime: entry.startTime, duration: entry.duration });
+              if (entry.name.startsWith("sambee:preview-syntax:")) syntaxStages.push({ name: entry.name, startTime: entry.startTime, duration: entry.duration });
+              if (entry.name.startsWith("sambee:preview-preparation:")) preparationStages.push({ name: entry.name, startTime: entry.startTime, duration: entry.duration });
+            }
+          }).observe({ type: "measure", buffered: true });
+          document.addEventListener("click", (event) => {
+            const button = event.target instanceof Element ? event.target.closest("button") : null;
+            const action = button?.getAttribute("aria-label");
+            if (action !== "Next match" && action !== "Previous match") return;
+            const startTime = performance.now();
+            requestAnimationFrame(() => {
+              const firstFrameMs = performance.now() - startTime;
+              requestAnimationFrame(() => navigationFrames.push({ action, startTime, firstFrameMs, duration: performance.now() - startTime }));
+            });
+          }, true);
+          for (const eventName of ["keydown", "input"]) {
+            document.addEventListener(eventName, (event) => {
+              const target = event.target;
+              if (!(target instanceof HTMLInputElement) || target.placeholder !== "Search") return;
+              const startTime = performance.now();
+              const eventAgeMs = Math.max(0, startTime - event.timeStamp);
+              const value = target.value;
+              requestAnimationFrame(() => {
+                const firstFrameMs = performance.now() - startTime;
+                requestAnimationFrame(() => keyboardFrames.push({ event: eventName, startTime, firstFrameMs, eventAgeMs, duration: performance.now() - startTime, value }));
+              });
+            }, true);
+          }
+          const longTasksSupported = PerformanceObserver.supportedEntryTypes.includes("longtask");
+          if (longTasksSupported) {
+            new PerformanceObserver((entries) => {
+              for (const entry of entries.getEntries()) longTasks.push({ startTime: entry.startTime, duration: entry.duration });
+            }).observe({ type: "longtask", buffered: true });
+          }
+          let lastTask = performance.now();
+          setInterval(() => {
+            const now = performance.now();
+            taskGaps.push({ startTime: lastTask, duration: now - lastTask });
+            lastTask = now;
+          }, 10);
+          let heldNormalization = false;
+          const pendingNormalization: (() => void)[] = [];
+          let heldPublication = false;
+          const pendingPublication: (() => void)[] = [];
+          Object.assign(window, {
+            syntaxResources: () => ({ liveWorkers, heldMessages: pending.length, heldNormalizationMessages: pendingNormalization.length, heldPublicationMessages: pendingPublication.length }),
+            holdPublication: () => { heldPublication = true; },
+            releasePublication: () => { heldPublication = false; for (const send of pendingPublication.splice(0)) send(); },
+            holdNormalization: () => { heldNormalization = true; },
+            releaseNormalization: () => { heldNormalization = false; for (const send of pendingNormalization.splice(0)) send(); },
+            syntaxResponsiveness: () => ({ longTasksSupported, longTasks, taskGaps, searchStages, syntaxStages, preparationStages, workerStages, navigationFrames, renderMilestones, keyboardFrames, maximumTimerGapMs: Math.max(0, ...taskGaps.map((gap) => gap.duration)) }),
+            holdSyntax: () => { held = true; },
+            releaseSyntax: () => {
+              held = false;
+              for (const send of pending.splice(0)) send();
+            },
+          });
+          window.Worker = class extends OriginalWorker {
+            private disposed = false;
+            private syntaxWorker: boolean;
+            private documentWorker = false;
+            private blocks = new Map<number, { source: number; final?: number; firstResult?: number }>();
+            constructor(url: string | URL, options?: WorkerOptions) {
+              super(url, options);
+              this.syntaxWorker = String(url).includes("markdownSyntax.worker");
+              liveWorkers += 1;
+              this.addEventListener("message", (event) => {
+                const response = event.data as { type?: string; block?: number };
+                if (this.documentWorker && response.type === "complete") response.block = 0;
+                if (response.block === undefined) return;
+                const block = this.blocks.get(response.block);
+                if (!block) return;
+                const now = performance.now();
+                if ((response.type === "ranges" || response.type === "complete") && block.firstResult === undefined) {
+                  block.firstResult = now;
+                  workerStages.push({ name: "final-source-to-first-result", block: response.block, startTime: block.final ?? block.source, duration: now - (block.final ?? block.source) });
+                }
+                if (response.type === "complete") {
+                  workerStages.push({ name: "source-to-complete", block: response.block, startTime: block.source, duration: now - block.source });
+                  this.blocks.delete(response.block);
+                }
+              });
+            }
+            terminate() {
+              if (!this.disposed) liveWorkers -= 1;
+              this.disposed = true;
+              super.terminate();
+            }
+            postMessage(message: unknown, options?: StructuredSerializeOptions) {
+              const kind = message as { type?: string; document?: boolean };
+              if (kind.type === "prepare" && kind.document) this.documentWorker = true;
+              const send = () => {
+                if (this.disposed) return;
+                const request = message as { type?: string; block?: number; final?: boolean };
+                if ((this.syntaxWorker || this.documentWorker) && request.type === "source" && request.block !== undefined) {
+                  const block = this.blocks.get(request.block) ?? { source: performance.now() };
+                  if (request.final) block.final = performance.now();
+                  this.blocks.set(request.block, block);
+                }
+                super.postMessage(message, options);
+              };
+              if (held && ((this.syntaxWorker && kind.type === "source") || (this.documentWorker && kind.type === "syntax-window"))) pending.push(send);
+              else if (heldPublication && this.documentWorker && kind.type === "ack") pendingPublication.push(send);
+              else if (heldNormalization && !this.syntaxWorker && !this.documentWorker && kind.type === "source") pendingNormalization.push(send);
+              else send();
+            }
+          };
+        }, { expectedBlocks: fixture.blocks });
+        const text = fixture.name === "long-line" ? `${"let x=1; ".repeat(fixture.lines)}\n` : "let x=1;\n".repeat(fixture.lines);
+        const markdown = Array.from({ length: fixture.blocks }, () => `\`\`\`js\n${text}\`\`\``).join("\n\n");
+        await mockMarkdownViewerApi(page, { initialMarkdown: markdown });
+        const started = Date.now();
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        const heapSession = testInfo.project.name === "chromium" ? await page.context().newCDPSession(page) : null;
+        await heapSession?.send("Performance.enable");
+        if (collectMemory) await heapSession?.send("HeapProfiler.collectGarbage");
+        const sampleHeap = async () => heapSession ? await heapSession.send("Runtime.getHeapUsage") : null;
+        const sampleBrowserMetrics = async () => heapSession ? (await heapSession.send("Performance.getMetrics")).metrics.filter((metric) => ["LayoutDuration", "RecalcStyleDuration", "ScriptDuration", "Nodes"].includes(metric.name)) : null;
+        const browserMetrics = { beforeOpen: await sampleBrowserMetrics(), afterInitialRender: null as Awaited<ReturnType<typeof sampleBrowserMetrics>>, afterComplete: null as Awaited<ReturnType<typeof sampleBrowserMetrics>> };
+        const memory = { scope: "Chromium renderer heap only; excludes worker heaps and aggregate native/DOM memory. Firefox unsupported. GC runs are separate from responsiveness trials.", controlledGC: collectMemory, browserMetrics, documentStats: null as { elements: number; textNodes: number; retained: unknown } | null, beforeOpen: await sampleHeap(), afterComplete: null as Awaited<ReturnType<typeof sampleHeap>>, afterClose: null as Awaited<ReturnType<typeof sampleHeap>>, afterCompleteGC: null as Awaited<ReturnType<typeof sampleHeap>>, afterCloseGC: null as Awaited<ReturnType<typeof sampleHeap>> };
+        const root = page.locator('[data-markdown-search-root="true"]');
+        await captureViewerScheduling(page, testInfo, async () => {
+        await phase("initial-render-through-two-frames", async () => {
+          await (width < 600
+            ? page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })
+            : page.getByRole("button").filter({ hasText: /^note\.md$/ })).click();
+          await expect(root.locator("pre > code")).toHaveCount(fixture.blocks);
+          if (retainedRenderer) await expect(root.locator('[data-markdown-retained-state="complete"]')).toHaveCount(1);
+        });
+        const openMs = Date.now() - started;
+        browserMetrics.afterInitialRender = await sampleBrowserMetrics();
+        await page.getByRole("button", { name: "Search", exact: true }).click();
+        const searchControls = page.getByRole("button", { name: "Next match", exact: true }).locator("..");
+        const searchStarted = Date.now();
+        await phase("first-search-keyboard", async () => {
+          await page.getByPlaceholder("Search", { exact: true }).pressSequentially("let x");
+          await expect(searchControls.getByText(`1 / ${fixture.lines * fixture.blocks}`, { exact: true })).toBeVisible();
+          await expect.poll(() => page.evaluate(() => {
+            const current = [...CSS.highlights.entries()].find(([name]) => name.startsWith("markdown-search-") && name.endsWith("-current"));
+            return current ? [...current[1]][0]?.toString() : null;
+          })).toBe("let x");
+        });
+        const searchMs = Date.now() - searchStarted;
+        const before = await root.evaluate((element) => {
+          const code = element.querySelector("code")!;
+          const node = document.createTreeWalker(code, NodeFilter.SHOW_TEXT).nextNode()!;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          const selection = window.getSelection()!;
+          selection.removeAllRanges();
+          selection.addRange(range);
+          Object.assign(window, { selectedSyntaxNode: node });
+          return { selected: selection.toString(), text: element.textContent };
+        });
+        const publicationStarted = Date.now();
+        await phase("syntax-release-with-active-search", async () => {
+          await page.evaluate(() => (window as unknown as { releaseSyntax: () => void }).releaseSyntax());
+          await expect.poll(() => page.evaluate(() => [...CSS.highlights.entries()].filter(([name]) => /^markdown-(?:syntax|retained)-/.test(name)).reduce((count, [, ranges]) => count + ranges.size, 0))).toBeGreaterThan(0);
+        });
+        const publicationMs = Date.now() - publicationStarted;
+        const after = await root.evaluate((element) => ({
+          text: element.textContent,
+          selected: window.getSelection()!.toString(),
+          retainedNode: element.contains((window as unknown as { selectedSyntaxNode: Node }).selectedSyntaxNode),
+          ranges: [...CSS.highlights.entries()].filter(([name]) => /^markdown-(?:syntax|retained)-/.test(name)).reduce((count, [, ranges]) => count + ranges.size, 0),
+          tokenSpans: element.querySelectorAll('[class*="sambee-syntax-"]').length,
+          searchColors: [...CSS.highlights.keys()].filter((name) => name.startsWith("markdown-search-")).map((name) => ({
+            name,
+            background: getComputedStyle(element.querySelector("code")!, `::highlight(${name})`).backgroundColor,
+          })),
+        }));
+        expect(after.text).toBe(before.text);
+        expect(after.selected).toBe(before.selected);
+        expect(after.retainedNode).toBe(true);
+        expect(after.ranges).toBeLessThanOrEqual(viewportRangeLimit);
+        expect(after.tokenSpans).toBe(0);
+        expect(after.searchColors).toHaveLength(2);
+        expect(new Set(after.searchColors.map((entry) => entry.background)).size).toBe(2);
+        expect(after.searchColors.every((entry) => entry.background && entry.background !== "rgba(0, 0, 0, 0)")).toBe(true);
+        await expect(root.locator("mark")).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => [...CSS.highlights.entries()].filter(([name]) => name.startsWith("markdown-search-") && name.endsWith("-other")).reduce((count, [, ranges]) => count + ranges.size, 0))).toBeGreaterThan(0);
+        expect(await page.evaluate(() => [...CSS.highlights.entries()].filter(([name]) => name.startsWith("markdown-search-")).reduce((count, [, ranges]) => count + ranges.size, 0))).toBeLessThanOrEqual(1_001);
+        await expect(searchControls.getByText(`1 / ${fixture.lines * fixture.blocks}`, { exact: true })).toBeVisible();
+        await page.evaluate(() => window.getSelection()?.removeAllRanges());
+        await phase("next-match", async () => {
+          await page.getByRole("button", { name: "Next match", exact: true }).click();
+          await expect(searchControls.getByText(`2 / ${fixture.lines * fixture.blocks}`, { exact: true })).toBeVisible();
+        });
+        await phase("previous-match", async () => {
+          await page.getByRole("button", { name: "Previous match", exact: true }).click();
+          await expect(searchControls.getByText(`1 / ${fixture.lines * fixture.blocks}`, { exact: true })).toBeVisible();
+        });
+        await phase("last-match-wrap", async () => {
+          await page.getByRole("button", { name: "Previous match", exact: true }).click();
+          await expect(searchControls.getByText(`${fixture.lines * fixture.blocks} / ${fixture.lines * fixture.blocks}`, { exact: true })).toBeVisible();
+          const destination = await root.evaluate((element) => {
+            const entry = [...CSS.highlights.entries()].find(([name]) => name.startsWith("markdown-search-") && name.endsWith("-current"));
+            const range = entry ? [...entry[1]][0] as Range : null;
+            const rect = range?.getBoundingClientRect();
+            const viewport = element.parentElement!.getBoundingClientRect();
+            return { text: range?.toString(), visible: !!rect && rect.bottom >= viewport.top && rect.top <= viewport.bottom && rect.right >= viewport.left && rect.left <= viewport.right };
+          });
+          expect(destination).toEqual({ text: "let x", visible: true });
+        });
+        if (fixture.name === "long-line") {
+          await expect.poll(() => page.evaluate(() => {
+            const current = [...CSS.highlights.entries()].find(([name]) => name.startsWith("markdown-search-") && name.endsWith("-current"));
+            const active = current ? [...current[1]][0] as Range : null;
+            if (!active) return false;
+            return [...CSS.highlights.entries()].filter(([name]) => /^markdown-(?:syntax|retained)-/.test(name)).some(([, ranges]) => [...ranges].some((entry) => {
+              const range = entry as Range;
+                    return range.startContainer === active.startContainer && range.startOffset <= active.startOffset && range.endOffset > active.startOffset;
+            }));
+          })).toBe(true);
+          expect(await page.evaluate(() => [...CSS.highlights.entries()].filter(([name]) => /^markdown-(?:syntax|retained)-/.test(name)).reduce((total, [, ranges]) => total + ranges.size, 0))).toBeLessThan(500);
+        }
+        await phase("scroll-with-active-search", async () => {
+          await root.evaluate((element) => {
+            const viewport = element.parentElement!;
+            viewport.scrollTop = Math.max(0, viewport.scrollTop - viewport.clientHeight);
+          });
+          await expect(page.getByPlaceholder("Search", { exact: true })).toBeVisible();
+        });
+        await phase("changed-query", async () => {
+          await page.getByPlaceholder("Search", { exact: true }).fill("x=1");
+          await expect(searchControls.getByText(`1 / ${fixture.lines * fixture.blocks}`, { exact: true })).toBeVisible();
+          expect(await root.evaluate((element) => element.contains((window as unknown as { selectedSyntaxNode: Node }).selectedSyntaxNode))).toBe(true);
+        });
+        await phase("clear-query", async () => {
+          await page.getByPlaceholder("Search", { exact: true }).fill("");
+          await expect(root.locator("mark")).toHaveCount(0);
+          expect(await page.evaluate(() => [...CSS.highlights.keys()].filter((name) => name.startsWith("markdown-search-")).length)).toBe(0);
+        });
+        const responsiveness = await page.evaluate(() => (window as unknown as { syntaxResponsiveness: () => {
+          searchStages: { name: string; startTime: number; duration: number }[];
+          syntaxStages: { name: string; startTime: number; duration: number }[];
+                  preparationStages: { name: string; startTime: number; duration: number }[];
+          workerStages: { name: string; startTime: number; duration: number }[];
+          navigationFrames: { action: string; startTime: number; duration: number; firstFrameMs: number }[];
+          renderMilestones: { name: string; time: number }[];
+          keyboardFrames: { event: string; startTime: number; duration: number; firstFrameMs: number; eventAgeMs: number; value: string }[];
+        } }).syntaxResponsiveness());
+        Object.assign(responsiveness, { measurementVersion: "scoped-controls-v2", traceRequested: process.env.SAMBEE_E2E_TRACE === "1", traceSupported: testInfo.project.name === "chromium" });
+        for (const stage of ["capture", "matching", "presentation", "clear", "navigation-lookup", "navigation-publication", "navigation-geometry", "navigation-scroll"]) {
+          expect(responsiveness.searchStages.some((entry) => entry.name === `sambee:preview-search:${stage}`)).toBe(true);
+        }
+        for (const stage of retainedRenderer ? [] : ["task", "viewport-geometry", "block-geometry", "mapping", "offset-geometry", "ranges", "publication"]) {
+          expect(responsiveness.syntaxStages.some((entry) => entry.name === `sambee:preview-syntax:${stage}`)).toBe(true);
+        }
+        for (const stage of [
+          "decode-elapsed",
+          "load-normalization-elapsed",
+          ...(retainedRenderer ? ["retained-document-complete"] : ["collection-walk", "render-parse", "render-transform", "hast-ready-to-layout-effect"]),
+        ]) {
+          expect(responsiveness.preparationStages.some((entry) => entry.name === `sambee:preview-preparation:${stage}`)).toBe(true);
+        }
+        expect(responsiveness.preparationStages.some((entry) => entry.name === "sambee:preview-preparation:collection-parse")).toBe(false);
+        expect(responsiveness.workerStages.filter((entry) => entry.name === "source-to-complete")).toHaveLength(retainedRenderer ? 1 : fixture.blocks);
+        expect(responsiveness.navigationFrames).toHaveLength(3);
+        for (const milestone of ["source-response-end", "dom-commit-observed", "first-frame", "second-frame"]) {
+          expect(responsiveness.renderMilestones.filter((entry) => entry.name === milestone)).toHaveLength(1);
+        }
+        expect(responsiveness.searchStages.filter((entry) => entry.name === "sambee:preview-search:capture")).toHaveLength(1);
+        expect(responsiveness.searchStages.some((entry) => entry.name.endsWith(":markers") || entry.name.endsWith(":slices"))).toBe(false);
+        expect(responsiveness.keyboardFrames.some((entry) => entry.event === "keydown")).toBe(true);
+        expect(responsiveness.keyboardFrames.some((entry) => entry.event === "input" && entry.value === "let x")).toBe(true);
+        for (const entry of [...responsiveness.keyboardFrames, ...responsiveness.navigationFrames]) {
+          expect(Number.isFinite(entry.firstFrameMs) && entry.firstFrameMs >= 0 && entry.firstFrameMs <= entry.duration).toBe(true);
+        }
+        expect(responsiveness.keyboardFrames.every((entry) => Number.isFinite(entry.eventAgeMs) && entry.eventAgeMs >= 0)).toBe(true);
+        memory.documentStats = await root.evaluate((element) => {
+          const host = element.querySelector('[data-markdown-retained-root="true"]') as (HTMLElement & { retainedMarkdownStats?: () => unknown }) | null;
+          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+          let textNodes = 0;
+          while (walker.nextNode()) textNodes += 1;
+          return { elements: element.querySelectorAll("*").length, textNodes, retained: host?.retainedMarkdownStats?.() ?? null };
+        });
+        if (retainedRenderer) {
+          const stats = memory.documentStats.retained as { documentTimings: Record<string, number>; transportTimings: Record<string, number>; publicationRecords: number; batches: number; largestBatch: number; batchLimit: number; largestBatchUnits: number; batchUnitLimit: number; assemblyMs: number; largestAssemblyMs: number; frameWaitMs: number; viewportPaintMs: number; largestViewportPaintMs: number };
+          expect(stats.documentTimings.records).toBe(stats.publicationRecords);
+          expect(stats.documentTimings.batches).toBe(stats.batches);
+          expect(stats.largestBatch).toBeLessThanOrEqual(stats.batchLimit);
+          expect(stats.largestBatchUnits).toBeLessThanOrEqual(stats.batchUnitLimit);
+          for (const duration of [...Object.values(stats.documentTimings), ...Object.values(stats.transportTimings), stats.assemblyMs, stats.largestAssemblyMs, stats.frameWaitMs, stats.viewportPaintMs, stats.largestViewportPaintMs]) {
+            expect(Number.isFinite(duration) && duration >= 0).toBe(true);
+          }
+        }
+        browserMetrics.afterComplete = await sampleBrowserMetrics();
+        memory.afterComplete = await sampleHeap();
+        await page.evaluate(() => Reflect.deleteProperty(window, "selectedSyntaxNode"));
+        if (collectMemory) {
+          await heapSession?.send("HeapProfiler.collectGarbage");
+          memory.afterCompleteGC = await sampleHeap();
+        }
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(root).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => [...CSS.highlights.keys()].filter((name) => /^markdown-(?:syntax|retained)-/.test(name)).length)).toBe(0);
+        expect(await page.evaluate(() => [...CSS.highlights.keys()].filter((name) => name.startsWith("markdown-search-")).length)).toBe(0);
+        await expect.poll(() => page.evaluate(() => (window as unknown as { syntaxResources: () => { liveWorkers: number } }).syntaxResources().liveWorkers)).toBe(0);
+        memory.afterClose = await sampleHeap();
+        if (collectMemory) {
+          await heapSession?.send("HeapProfiler.collectGarbage");
+          memory.afterCloseGC = await sampleHeap();
+        }
+        await heapSession?.detach();
+        await page.evaluate(() => (window as unknown as { holdNormalization: () => void }).holdNormalization());
+        await (width < 600
+          ? page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })
+          : page.getByRole("button").filter({ hasText: /^note\.md$/ })).click();
+        await expect.poll(() => page.evaluate(() => (window as unknown as { syntaxResources: () => { heldNormalizationMessages: number } }).syntaxResources().heldNormalizationMessages)).toBeGreaterThan(0);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect.poll(() => page.evaluate(() => (window as unknown as { syntaxResources: () => { liveWorkers: number } }).syntaxResources().liveWorkers)).toBe(0);
+        await page.evaluate(() => (window as unknown as { releaseNormalization: () => void }).releaseNormalization());
+        await expect(root).toHaveCount(0);
+        await page.evaluate(() => (window as unknown as { holdSyntax: () => void }).holdSyntax());
+        await (width < 600
+          ? page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })
+          : page.getByRole("button").filter({ hasText: /^note\.md$/ })).click();
+        await expect.poll(() => page.evaluate(() => (window as unknown as { syntaxResources: () => { heldMessages: number } }).syntaxResources().heldMessages)).toBeGreaterThan(0);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect.poll(() => page.evaluate(() => (window as unknown as { syntaxResources: () => { liveWorkers: number } }).syntaxResources().liveWorkers)).toBe(0);
+        await page.evaluate(() => (window as unknown as { releaseSyntax: () => void }).releaseSyntax());
+        await expect(root).toHaveCount(0);
+        expect(await page.evaluate(() => [...CSS.highlights.keys()].filter((name) => /^markdown-(?:syntax|retained)-/.test(name)).length)).toBe(0);
+        if (retainedRenderer) {
+          await page.evaluate(() => (window as unknown as { holdPublication: () => void }).holdPublication());
+          await (width < 600 ? page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true }) : page.getByRole("button").filter({ hasText: /^note\.md$/ })).click();
+          await expect.poll(() => page.evaluate(() => (window as unknown as { syntaxResources: () => { heldPublicationMessages: number } }).syntaxResources().heldPublicationMessages)).toBeGreaterThan(0);
+          await expect(root.locator('[data-markdown-retained-state="pending"]')).toHaveCount(1);
+          await page.getByRole("button", { name: "Close", exact: true }).click();
+          await expect.poll(() => page.evaluate(() => (window as unknown as { syntaxResources: () => { liveWorkers: number } }).syntaxResources().liveWorkers)).toBe(0);
+          await page.evaluate(() => (window as unknown as { releasePublication: () => void }).releasePublication());
+          await expect(root).toHaveCount(0);
+        }
+        await testInfo.attach("publication-measurements", { body: JSON.stringify({ renderer: retainedRenderer ? "retained-test-only" : "react-markdown", fixture: fixture.name, width, openMs, searchMs, publicationMs, mountedRanges: after.ranges, phases, responsiveness, memory, timingScope: "Real viewer with production-built assets. Phases include Playwright synchronization and two frames. Search/syntax stages measure synchronous calls: geometry may force layout; publication does not include deferred paint. Load-normalization-elapsed and retained-document-complete include worker startup, transfer, parsing, acknowledgements, publication and scheduling; neither is main-thread CPU time. Default collection reuses the render tree and is included in render-transform time. Retained publication streams worker records without a second main-thread parse. Decode is asynchronous elapsed time. HAST-ready-to-layout-effect includes element construction, reconciliation, commit and scheduling, not isolated React CPU. Keyboard/navigation samples measure event-handler entry through two frames, not hardware input-to-visible-paint latency. Syntax worker round trips start after intentional holds and include transfer, scheduling, grammar loading and result acknowledgements, not isolated parser CPU.", }), contentType: "application/json", });
+        });
+      });
+    }
+  }
+});
+
 test("edit sessions can reopen immediately after release", async ({ page }) => {
   await mockMarkdownViewerApi(page, { initialMarkdown: "Immediate re-entry\n" });
   await openMarkdownViewer(page);
@@ -276,7 +809,7 @@ test("edit sessions can reopen immediately after release", async ({ page }) => {
     await second.session.release();
   }, { connectionId: DEMO_CONNECTION_ID, path: DEMO_PATH });
 
-  await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("sambee:edit-lock:")))).toEqual([]);
+  await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith("sambee:edit-lock:")))).toEqual([]);
 });
 
 for (const reloadKind of ["browser", "update"] as const) {
@@ -327,7 +860,7 @@ for (const reloadKind of ["browser", "update"] as const) {
     await expect(page.getByText(/Unable to enter edit mode/)).toHaveCount(0);
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await expect(page).not.toHaveURL(/mode=edit/);
-    await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("sambee:edit-lock:")))).toEqual([]);
+    await expect.poll(() => page.evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith("sambee:edit-lock:")))).toEqual([]);
   });
 }
 
@@ -604,7 +1137,7 @@ test(`${layout} upload resolves a conflict before publishing the next file`, asy
       if (path === "first.txt" && policy === "ask") {
         await fulfillJson(route, { detail: "Destination already exists" }, 409);
       } else {
-        await fulfillJson(route, { status: "completed", replaced: policy === "replace", effects: { source: "unchanged", destination: "mutated" } });
+        await fulfillJson(route, { status: "completed", replaced: policy === "replace", effects: { source: "unchanged", destination: "mutated" }, });
       }
     },
   });

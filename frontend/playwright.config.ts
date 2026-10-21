@@ -1,7 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const frontendE2ePort = 4173;
-const baseURL = `http://127.0.0.1:${frontendE2ePort}`;
+const productionProof = process.env.SAMBEE_E2E_PRODUCTION === "1";
+const baseURL = productionProof ? "http://localhost:3000" : `http://127.0.0.1:${frontendE2ePort}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -12,7 +13,7 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry",
   },
-  webServer: {
+  webServer: productionProof ? undefined : {
     command: `npm run dev -- --host 127.0.0.1 --port ${frontendE2ePort}`,
     url: baseURL,
     reuseExistingServer: true,

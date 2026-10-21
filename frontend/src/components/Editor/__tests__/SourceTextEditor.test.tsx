@@ -49,6 +49,89 @@ const TEST_TEXT_THEME: TextEditorThemeOptions = {
 };
 
 describe("SourceTextEditor", () => {
+  it("does not serialize again when a controlled parent echoes the latest edit", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    const { rerender } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Controlled editor" onChange={onChange} />);
+    const view = editorRef.current?.getView();
+    if (!view) throw new Error("Expected a mounted editor");
+    const transaction = view.state.update({ changes: { from: 7, insert: " updated" } });
+    const serialize = vi.spyOn(transaction.state.doc, "toString");
+    try {
+      view.dispatch(transaction);
+      expect(onChange).toHaveBeenLastCalledWith("initial updated", expect.anything());
+      expect(serialize).toHaveBeenCalledOnce();
+      serialize.mockClear();
+      rerender(<SourceTextEditor ref={editorRef} value="initial updated" ariaLabel="Controlled editor" onChange={onChange} />);
+      expect(serialize).not.toHaveBeenCalled();
+      expect(view.state.doc).toBe(transaction.state.doc);
+      rerender(<SourceTextEditor ref={editorRef} value="external" ariaLabel="Controlled editor" onChange={onChange} />);
+      expect(view.state.doc.toString()).toBe("external");
+      expect(onChange).toHaveBeenCalledOnce();
+    } finally {
+      serialize.mockRestore();
+    }
+  });
+
+  it("rejects snapshots throughout an active composition, including before its first change", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Composition editor" onChange={() => {}} />);
+    const handle = editorRef.current;
+    const view = handle?.getView();
+    if (!handle || !view) throw new Error("Expected a mounted source editor");
+    const original = handle.captureSnapshot();
+    view.contentDOM.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    expect(view.compositionStarted).toBe(true);
+    expect(view.composing).toBe(false);
+    expect(() => handle.captureSnapshot()).toThrow(/composition/);
+    view.dispatch({ changes: { from: view.state.doc.length, insert: " composed" }, userEvent: "input.type.compose" });
+    expect(() => handle.captureSnapshot()).toThrow(/composition/);
+    view.contentDOM.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "composed" }));
+
+    expect(view.compositionStarted).toBe(false);
+    expect(handle.captureSnapshot().serialize()).toBe("initial composed");
+    expect(original.serialize()).toBe("initial");
+  });
+
+  it("captures an immutable revision without serializing the source during capture", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const { unmount } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Snapshot editor" onChange={() => {}} />);
+    const handle = editorRef.current;
+    const view = handle?.getView();
+    if (!handle || !view) throw new Error("Expected a mounted editor");
+    const serialize = vi.spyOn(view.state.doc, "toString");
+    try {
+      const snapshot = handle.captureSnapshot();
+      expect(serialize).not.toHaveBeenCalled();
+      expect(snapshot.revision).toBe(0);
+      expect(Object.isFrozen(snapshot)).toBe(true);
+      view.dispatch({ changes: { from: view.state.doc.length, insert: " updated" } });
+      const latest = handle.captureSnapshot();
+      expect(latest.revision).toBeGreaterThan(snapshot.revision);
+      expect(snapshot.serialize()).toBe("initial");
+      expect(latest.serialize()).toBe("initial updated");
+      unmount();
+      expect(snapshot.serialize()).toBe("initial");
+      expect(() => handle.captureSnapshot()).toThrow(/disposed/);
+    } finally {
+      serialize.mockRestore();
+    }
+  });
+
+  it("includes external document replacements in snapshot revisions", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    const { rerender } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Snapshot editor" onChange={onChange} />);
+    const first = editorRef.current?.captureSnapshot();
+    rerender(<SourceTextEditor ref={editorRef} value="replacement" ariaLabel="Snapshot editor" onChange={onChange} />);
+    const latest = editorRef.current?.captureSnapshot();
+
+    expect(first?.serialize()).toBe("initial");
+    expect(latest?.serialize()).toBe("replacement");
+    expect(latest?.revision).toBeGreaterThan(first?.revision ?? -1);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("scrolls the viewport with Ctrl+Arrow keys without changing the selection", async () => {
     const editorRef = createRef<SourceTextEditorHandle>();
     const initialValue = "Editor content";

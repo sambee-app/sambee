@@ -1,12 +1,13 @@
 import { findNext, findPrevious, replaceAll, replaceNext } from "@codemirror/search";
-import { EditorSelection } from "@codemirror/state";
-import type { ViewUpdate } from "@codemirror/view";
+import { EditorSelection, type EditorState } from "@codemirror/state";
+import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { insertEmptyMarkdownTable } from "codemirror-markdown-tables";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { DRAFT_TRANSITION_FLUSH_MS } from "../../services/draftCheckpoint";
 import { buildMarkdownEditorExtensions } from "../Editor/buildMarkdownEditorExtensions";
 import type { MarkdownEditorThemeOptions } from "../Editor/buildMarkdownEditorTheme";
 import { SourceTextEditor } from "../Editor/SourceTextEditor";
-import type { SourceTextEditorHandle } from "../Editor/sourceTextEditorTypes";
+import type { SourceTextEditorHandle, SourceTextSnapshot } from "../Editor/sourceTextEditorTypes";
 import {
   getCodeMirrorFindReplaceMetrics,
   shouldAutoNavigateCodeMirrorFindReplace,
@@ -24,6 +25,8 @@ const insertDefaultMarkdownTable = insertEmptyMarkdownTable({
 
 export interface MarkdownRichEditorHandle {
   focus: () => void;
+  captureSnapshot: (signal?: AbortSignal) => Promise<SourceTextSnapshot>;
+  captureSnapshotSync: () => SourceTextSnapshot;
   flushPendingEdits: () => Promise<void>;
   getCanonicalMarkdown: () => string;
   getPrimarySelectionText: () => string;
@@ -79,6 +82,22 @@ interface NestedPublicationState {
   publishedGeneration: number;
   pendingPromise: Promise<void> | null;
   resolvePending: (() => void) | null;
+}
+
+interface NestedInput {
+  view: EditorView | null;
+  state: EditorState | null;
+  generation: number;
+  hadPendingPublication: boolean;
+  clipboardEvent: "paste" | "cut" | null;
+}
+
+interface NestedComposition {
+  view: EditorView;
+  doc: EditorState["doc"];
+  generation: number;
+  acknowledged: boolean;
+  data: string | null;
 }
 
 function normalizeTableCellBreaksIfNeeded(markdown: string): string {
@@ -279,7 +298,8 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       pendingPromise: null,
       resolvePending: null,
     });
-    const extensions = useMemo(() => buildMarkdownEditorExtensions(theme, lineWrapping), [lineWrapping, theme]);
+    const nestedInputRef = useRef<NestedInput | null>(null);
+    const nestedCompositionRef = useRef<NestedComposition | null>(null);
     const [editorMarkdown, setEditorMarkdown] = useState(() => prepareMarkdownTableCellLineBreaksForEditor(markdown));
 
     useEffect(() => {
@@ -307,26 +327,74 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
 
     const resolveNestedPublication = useCallback(() => {
       const publicationState = nestedPublicationStateRef.current;
+      const composition = nestedCompositionRef.current;
+      if (composition && composition.generation === publicationState.observedGeneration && composition.doc === composition.view.state.doc) {
+        composition.acknowledged = true;
+      }
 
       if (publicationState.observedGeneration <= publicationState.publishedGeneration) {
         return;
       }
 
       publicationState.publishedGeneration = publicationState.observedGeneration;
+      nestedInputRef.current = null;
       const resolvePending = publicationState.resolvePending;
       publicationState.pendingPromise = null;
       publicationState.resolvePending = null;
       resolvePending?.();
     }, []);
 
-    const flushNestedPublication = useCallback(async () => {
+    const handleNestedUpdate = useCallback(
+      (update: ViewUpdate) => {
+        if (!update.docChanged) return;
+        const input = nestedInputRef.current;
+        const publication = nestedPublicationStateRef.current;
+        const composition = nestedCompositionRef.current;
+        if (composition?.view === update.view) {
+          composition.doc = update.state.doc;
+          composition.generation = publication.observedGeneration;
+          composition.acknowledged = false;
+        }
+        if (
+          input?.view === update.view &&
+          input.generation === publication.observedGeneration &&
+          !input.hadPendingPublication &&
+          update.startState.doc.toString().trim() === update.state.doc.toString().trim()
+        ) {
+          resolveNestedPublication();
+        }
+      },
+      [resolveNestedPublication]
+    );
+    const extensions = useMemo(
+      () => buildMarkdownEditorExtensions(theme, lineWrapping, handleNestedUpdate),
+      [handleNestedUpdate, lineWrapping, theme]
+    );
+
+    const flushNestedPublication = useCallback(async (signal?: AbortSignal) => {
       const publicationState = nestedPublicationStateRef.current;
 
-      if (publicationState.observedGeneration <= publicationState.publishedGeneration) {
-        return;
+      while (publicationState.observedGeneration > publicationState.publishedGeneration) {
+        signal?.throwIfAborted();
+        const pending = publicationState.pendingPromise;
+        if (!pending) throw new Error("Nested Markdown publication is pending without a completion signal");
+        if (!signal) {
+          await pending;
+          continue;
+        }
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => {
+            signal.removeEventListener("abort", abort);
+            reject(signal.reason);
+          };
+          signal.addEventListener("abort", abort, { once: true });
+          void pending.then(() => {
+            signal.removeEventListener("abort", abort);
+            resolve();
+          });
+        });
       }
-
-      await publicationState.pendingPromise;
+      signal?.throwIfAborted();
     }, []);
 
     const handleChange = useCallback(
@@ -416,23 +484,85 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       const handlePotentialNestedEdit = (event: Event) => {
         const targetElement = getEventTargetElement(event.target);
 
-        if (!targetElement || !rootView.dom.contains(targetElement) || !targetElement.closest(".tbl-cell-editor")) {
+        if (
+          !(targetElement instanceof HTMLElement) ||
+          !rootView.dom.contains(targetElement) ||
+          !targetElement.closest(".tbl-cell-editor")
+        ) {
           return;
         }
 
+        const publication = nestedPublicationStateRef.current;
+        const view = EditorView.findFromDOM(targetElement);
+        const composition = nestedCompositionRef.current;
+        if (event.type === "compositionstart" && view && view !== rootView) {
+          nestedCompositionRef.current = {
+            view,
+            doc: view.state.doc,
+            generation: publication.observedGeneration,
+            acknowledged: publication.observedGeneration === publication.publishedGeneration,
+            data: "",
+          };
+          return;
+        }
+        if (event instanceof CompositionEvent && event.type === "compositionend") {
+          nestedCompositionRef.current = null;
+          if (
+            composition?.view === view &&
+            composition.acknowledged &&
+            composition.doc === view?.state.doc &&
+            composition.data === event.data &&
+            composition.generation === publication.publishedGeneration &&
+            publication.observedGeneration === publication.publishedGeneration
+          ) {
+            return;
+          }
+        }
+        const previousInput = nestedInputRef.current;
+        if (
+          event instanceof InputEvent &&
+          !event.isComposing &&
+          view &&
+          view !== rootView &&
+          previousInput?.view === view &&
+          previousInput.generation === publication.observedGeneration &&
+          previousInput.state?.doc === view.state.doc &&
+          ((previousInput.clipboardEvent === "paste" && event.inputType === "insertFromPaste") ||
+            (previousInput.clipboardEvent === "cut" && event.inputType === "deleteByCut"))
+        ) {
+          previousInput.clipboardEvent = null;
+          return;
+        }
+        const hadPendingPublication = publication.observedGeneration > publication.publishedGeneration;
         markNestedPublicationPending();
+        if (event instanceof InputEvent && event.isComposing && composition?.view === view) {
+          composition.data = event.data;
+          composition.generation = publication.observedGeneration;
+          composition.acknowledged = false;
+        }
+        nestedInputRef.current = {
+          view,
+          state: view?.state ?? null,
+          generation: publication.observedGeneration,
+          hadPendingPublication,
+          clipboardEvent: event.type === "paste" || event.type === "cut" ? event.type : null,
+        };
       };
 
       rootView.dom.addEventListener("beforeinput", handlePotentialNestedEdit, true);
+      rootView.dom.addEventListener("compositionstart", handlePotentialNestedEdit, true);
       rootView.dom.addEventListener("compositionend", handlePotentialNestedEdit, true);
       rootView.dom.addEventListener("paste", handlePotentialNestedEdit, true);
       rootView.dom.addEventListener("cut", handlePotentialNestedEdit, true);
 
       return () => {
         rootView.dom.removeEventListener("beforeinput", handlePotentialNestedEdit, true);
+        rootView.dom.removeEventListener("compositionstart", handlePotentialNestedEdit, true);
         rootView.dom.removeEventListener("compositionend", handlePotentialNestedEdit, true);
         rootView.dom.removeEventListener("paste", handlePotentialNestedEdit, true);
         rootView.dom.removeEventListener("cut", handlePotentialNestedEdit, true);
+        nestedInputRef.current = null;
+        nestedCompositionRef.current = null;
         nestedPublicationStateRef.current.resolvePending?.();
         nestedPublicationStateRef.current.pendingPromise = null;
         nestedPublicationStateRef.current.resolvePending = null;
@@ -440,12 +570,44 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       };
     }, [markNestedPublicationPending]);
 
+    const captureSnapshotSync = useCallback((): SourceTextSnapshot => {
+      const publication = nestedPublicationStateRef.current;
+      if (publication.observedGeneration > publication.publishedGeneration) {
+        throw new DOMException("Markdown edits have not finished publishing. Retry after the current edit finishes.", "InvalidStateError");
+      }
+      const editor = editorRef.current;
+      if (!editor) throw new Error("Cannot capture a snapshot after the Markdown editor is disposed");
+      const snapshot = editor.captureSnapshot();
+      const previousMarkdown = diffMarkdown ?? markdown;
+      return Object.freeze({
+        revision: snapshot.revision,
+        serialize: () => preserveUnchangedMarkdownTableSource(previousMarkdown, normalizeTableCellBreaksIfNeeded(snapshot.serialize())),
+      });
+    }, [diffMarkdown, markdown]);
+
     useImperativeHandle(
       ref,
       () => ({
         focus: () => {
           editorRef.current?.focus();
         },
+        captureSnapshot: async (signal) => {
+          const deadline = new AbortController();
+          const timeout = window.setTimeout(() => {
+            deadline.abort(
+              new DOMException("Markdown edits have not finished publishing. Retry saving after the current edit finishes.", "TimeoutError")
+            );
+          }, DRAFT_TRANSITION_FLUSH_MS);
+          const flushSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
+          try {
+            await flushNestedPublication(flushSignal);
+            flushSignal.throwIfAborted();
+            return captureSnapshotSync();
+          } finally {
+            window.clearTimeout(timeout);
+          }
+        },
+        captureSnapshotSync,
         flushPendingEdits: flushNestedPublication,
         getCanonicalMarkdown: () => getCurrentDoc(editorRef, diffMarkdown ?? markdown),
         getPrimarySelectionText: () => editorRef.current?.getPrimarySelectionText() ?? "",
@@ -510,7 +672,7 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
           reportSearchState();
         },
       }),
-      [diffMarkdown, flushNestedPublication, markdown, reportSearchState]
+      [captureSnapshotSync, diffMarkdown, flushNestedPublication, markdown, reportSearchState]
     );
 
     return (

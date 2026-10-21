@@ -6,7 +6,7 @@ import { buildPassiveSearchHighlightExtension } from "../Editor/buildCodeMirrorS
 import { buildCommonEditorExtensions } from "../Editor/buildCommonEditorExtensions";
 import { buildTextEditorTheme, type TextEditorThemeOptions } from "../Editor/buildTextEditorTheme";
 import { SourceTextEditor } from "../Editor/SourceTextEditor";
-import type { SourceTextEditorHandle } from "../Editor/sourceTextEditorTypes";
+import type { SourceTextEditorHandle, SourceTextSnapshot } from "../Editor/sourceTextEditorTypes";
 import {
   getCodeMirrorFindReplaceMetrics,
   shouldAutoNavigateCodeMirrorFindReplace,
@@ -15,6 +15,8 @@ import {
 
 export interface TextCodeEditorHandle {
   focus: () => void;
+  captureSnapshot: (signal?: AbortSignal) => Promise<SourceTextSnapshot>;
+  captureSnapshotSync: () => SourceTextSnapshot;
   flushPendingEdits: () => Promise<void>;
   getCanonicalText: () => string;
   getPrimarySelectionText: () => string;
@@ -194,12 +196,23 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
       searchWholeWord,
     ]);
 
+    const captureSnapshotSync = useCallback((): SourceTextSnapshot => {
+      const editor = editorRef.current;
+      if (!editor) throw new Error("Cannot capture a snapshot after the text editor is disposed");
+      return editor.captureSnapshot();
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
         focus: () => {
           editorRef.current?.focus();
         },
+        captureSnapshot: async (signal) => {
+          signal?.throwIfAborted();
+          return captureSnapshotSync();
+        },
+        captureSnapshotSync,
         flushPendingEdits: async () => {},
         getCanonicalText: () => editorRef.current?.getValue() ?? text,
         getPrimarySelectionText: () => editorRef.current?.getPrimarySelectionText() ?? "",
@@ -228,7 +241,7 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
           reportSearchState();
         },
       }),
-      [reportSearchState, text]
+      [captureSnapshotSync, reportSearchState, text]
     );
 
     return (

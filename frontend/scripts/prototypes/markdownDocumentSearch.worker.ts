@@ -1,7 +1,7 @@
-import { Text } from "@codemirror/state";
+import "../../src/utils/markdownDocumentSearch.worker";import { Text } from "@codemirror/state";
 import { createMarkdownDocumentModel, markdownDocumentRecords } from "../../src/utils/markdownDocumentPreviewModel";
 import { createDocumentSearchIndex, documentSearchMatches } from "../../src/utils/markdownDocumentSearch";
-import { PREPARATION_SOURCE_CHUNK_UNITS } from "./markdownCodePreparation";
+import { PREPARATION_SOURCE_CHUNK_UNITS } from "../../src/utils/markdownCodePreparationProtocol";
 import {
   DOCUMENT_SEARCH_PROGRESS_MATCHES,
   DOCUMENT_SEARCH_WINDOW,

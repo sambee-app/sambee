@@ -283,7 +283,6 @@ function getDevicePixelDimension(value: number | undefined): number | undefined 
 
 let controlledReauthenticationInProgress = false;
 let oidcExchangePending = window.location.pathname === "/login/oidc/callback";
-
 export function setOidcExchangePending(pending: boolean): void {
   oidcExchangePending = pending;
 }

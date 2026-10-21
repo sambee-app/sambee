@@ -9,6 +9,7 @@ import i18n from "../../../i18n";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
 import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
+import { loadDraft, snapshotRegisteredDrafts } from "../../../services/draftRecovery";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
 import { CODEMIRROR_FIND_HISTORY_STORAGE_KEY, CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY } from "../codeMirrorFindReplaceConstants";
@@ -68,11 +69,22 @@ vi.mock("../../../pages/FileBrowser/preferences", () => ({
 vi.mock("../TextCodeEditor", () => {
   const MockTextCodeEditor = forwardRef(function MockTextCodeEditor(props: MockTextCodeEditorProps, ref) {
     const latestTextRef = useRef(props.text);
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
     latestTextRef.current = props.text;
 
     useImperativeHandle(ref, () => ({
       focus: vi.fn(),
+      captureSnapshotSync: () => {
+        const editor = textareaRef.current;
+        if (!editor) throw new Error("Expected the mounted mock text editor");
+        const content = editor.value;
+        return { revision: 0, serialize: () => content };
+      },
+      captureSnapshot: async () => {
+        const content = latestTextRef.current;
+        return { revision: 0, serialize: () => content };
+      },
       flushPendingEdits: vi.fn().mockResolvedValue(undefined),
       getCanonicalText: () => latestTextRef.current,
       getPrimarySelectionText: () => "",
@@ -99,6 +111,7 @@ vi.mock("../TextCodeEditor", () => {
 
     return (
       <textarea
+        ref={textareaRef}
         aria-label={props.ariaLabel}
         className={props.className}
         readOnly={props.readOnly}
@@ -388,6 +401,41 @@ describe("TextViewer", () => {
     });
   });
 
+  it.each(["newer unsaved revision", "saved revision"])("acknowledges only saved content while the current draft is %s", async (latest) => {
+    vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
+    vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["saved revision"], { type: "text/plain" }));
+    let finishWrite: (() => void) | undefined;
+    vi.mocked(apiService.writeTextWithEditLock).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWrite = resolve;
+        })
+    );
+    renderViewer();
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "saved revision" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
+    expect(editor).not.toHaveAttribute("readonly");
+    fireEvent.change(editor, { target: { value: "newer unsaved revision" } });
+    if (latest === "saved revision") fireEvent.change(editor, { target: { value: latest } });
+    if (!finishWrite) throw new Error("Expected a pending file write");
+    await act(async () => {
+      finishWrite?.();
+    });
+
+    expect(editor).toHaveValue(latest);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    if (latest !== "saved revision") {
+      const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    } else {
+      expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+    }
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly"));
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue("saved revision");
+  });
+
   it("closes exactly once on Escape from the viewer dialog", async () => {
     const onClose = vi.fn();
     renderViewer({ onClose });
@@ -667,6 +715,29 @@ describe("TextViewer", () => {
         { mimeType: undefined }
       );
     });
+  });
+
+  it.each(["pagehide", "registered"])("captures current editor text before React publication on %s", async (trigger) => {
+    vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
+    renderViewer();
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "older React draft" } });
+    const storage = vi.spyOn(Storage.prototype, "setItem");
+    const draftKey = `sambee_oidc_draft:test-user:conn1:text:${encodeURIComponent("/docs/readme.txt")}`;
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+    if (!valueSetter) throw new Error("Expected the native textarea value setter");
+    valueSetter.call(editor, "latest editor revision");
+    act(() => {
+      if (trigger === "pagehide") window.dispatchEvent(new Event("pagehide"));
+      else snapshotRegisteredDrafts();
+    });
+    expect(loadDraft("conn1", "/docs/readme.txt", "text")).toMatchObject({ baseline: "hello world", content: "latest editor revision" });
+    await waitFor(() => expect(storage.mock.calls.filter(([key]) => key === draftKey).length).toBeGreaterThanOrEqual(2));
+    expect(
+      storage.mock.calls.filter(([key]) => key === draftKey).every(([, value]) => JSON.parse(value).content === "latest editor revision")
+    ).toBe(true);
+    expect(loadDraft("conn1", "/docs/readme.txt", "text")?.content).toBe("latest editor revision");
+    expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
   });
 
   it("clears the local draft when text returns to its saved baseline", async () => {

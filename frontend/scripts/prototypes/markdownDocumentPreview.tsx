@@ -1,8 +1,8 @@
-import { useLayoutEffect, useRef } from "react";
+export * from "../../src/utils/markdownDocumentPreview";import { useLayoutEffect, useRef } from "react";
 import type { Root } from "react-dom/client";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { remarkRenderMarkdownTableCellLineBreaks } from "../../src/components/Viewer/markdownTableCellLineBreaks";
+import { normalizeMarkdownTableCellLineBreaks, remarkRenderMarkdownTableCellLineBreaks } from "../../src/components/Viewer/markdownTableCellLineBreaks";
 import { yieldHighlightingTask } from "../../src/utils/codeMirrorHighlighting";
 import {
   DOCUMENT_PUBLICATION_BATCH_ITEMS,
@@ -66,7 +66,7 @@ function DocumentHost({ ready }: { ready: (element: HTMLDivElement) => (() => vo
   return <div ref={ref} data-markdown-document className="document-proof" style={{ height: 480, overflow: "auto" }} />;
 }
 
-export function mountMarkdownDocument(root: Root, signal: AbortSignal, source: string): Promise<DocumentView> {
+export function mountMarkdownDocument(root: Root | HTMLDivElement, signal: AbortSignal, source: string, options: { hostSearch?: boolean; hostSyntax?: boolean } = {}): Promise<DocumentView> {
   signal.throwIfAborted();
   const searchSession = createDocumentSearchSession(source);
   return new Promise((resolve, reject) => {
@@ -75,9 +75,7 @@ export function mountMarkdownDocument(root: Root, signal: AbortSignal, source: s
       reject(signal.reason);
     };
     signal.addEventListener("abort", abort, { once: true });
-    root.render(
-      <DocumentHost
-        ready={(container) => {
+    const ready = (container: HTMLDivElement) => {
           signal.removeEventListener("abort", abort);
           if (signal.aborted) {
             reject(signal.reason);
@@ -309,6 +307,7 @@ export function mountMarkdownDocument(root: Root, signal: AbortSignal, source: s
           const dispose = () => {
             if (disposed) return;
             disposed = true;
+            signal.removeEventListener("abort", dispose);
             searchRevision += 1;
             searchController?.abort();
             searchSession.dispose();
@@ -338,6 +337,7 @@ export function mountMarkdownDocument(root: Root, signal: AbortSignal, source: s
           container.addEventListener("scroll", schedule, { passive: true });
           container.addEventListener("load", schedule, true);
           document.fonts.addEventListener("loadingdone", schedule);
+          signal.addEventListener("abort", dispose, { once: true });
           resolve({
             async search(query, options = {}) {
               if (disposed) throw new DOMException("Document preview disposed", "AbortError");
@@ -390,7 +390,7 @@ export function mountMarkdownDocument(root: Root, signal: AbortSignal, source: s
                 fragment.append(node);
               };
               for (const record of records) {
-                const searchSegment = searchIndexer.append(record);
+                const searchSegment = options.hostSearch ? null : searchIndexer.append(record);
                 if (record.kind === "element") {
                   if (!ALLOWED_TAGS.has(record.tag) || !elements.has(record.parent) || elements.has(record.id))
                     throw new Error("Invalid Markdown element record");
@@ -449,7 +449,7 @@ export function mountMarkdownDocument(root: Root, signal: AbortSignal, source: s
               if (batches % PUBLICATION_BATCHES_PER_FRAME === 0) await yieldDocumentPublication(signal);
             },
             finish(wallMs, syntaxRanges, session) {
-              searchIndexer.finish();
+              if (!options.hostSearch) searchIndexer.finish();
               syntaxSession = session;
               workerSyntaxRanges = syntaxRanges;
               workerPipelineWallMs = wallMs;
@@ -487,9 +487,9 @@ export function mountMarkdownDocument(root: Root, signal: AbortSignal, source: s
             }),
           });
           return dispose;
-        }}
-      />
-    );
+    };
+    if (root instanceof HTMLDivElement) ready(root);
+    else root.render(<DocumentHost ready={ready} />);
   });
 }
 
@@ -504,7 +504,7 @@ export function renderMarkdownDocumentBaseline(root: Root, source: string): Prom
           if (element) resolve();
         }}
       >
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkRenderMarkdownTableCellLineBreaks]}>{source}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkRenderMarkdownTableCellLineBreaks]}>{normalizeMarkdownTableCellLineBreaks(source)}</ReactMarkdown>
       </div>
     )
   );

@@ -89,6 +89,35 @@ describe("markdownTableCellLineBreaks", () => {
     expect(normalizeMarkdownTableCellLineBreaks(markdown)).toBe(["| Value |", "| --- |", "| asterisk (*) and a&b |", ""].join("\n"));
   });
 
+  it("reparses changed escape offsets before normalizing later breaks and list markers", () => {
+    const markdown = [
+      "| Left | Right |",
+      "| --- | --- |",
+      "| a\\&b | foo<BR>bar |",
+      "",
+      "* item",
+      "",
+      "```md",
+      "* literal<BR>",
+      "```",
+      "",
+    ].join("\n");
+    const expected = [
+      "| Left | Right |",
+      "| --- | --- |",
+      "| a&b | foo<br />bar |",
+      "",
+      "- item",
+      "",
+      "```md",
+      "* literal<BR>",
+      "```",
+      "",
+    ].join("\n");
+    expect(normalizeMarkdownTableCellLineBreaks(markdown)).toBe(expected);
+    expect(normalizeMarkdownTableCellLineBreaks(expected)).toBe(expected);
+  });
+
   it("keeps table-cell escapes that preserve Markdown semantics", () => {
     const markdown = ["| Value |", "| --- |", "| \\*literal\\* and \\&copy; |", ""].join("\n");
 
