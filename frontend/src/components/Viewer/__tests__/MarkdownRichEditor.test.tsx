@@ -1,3 +1,5 @@
+import { undo } from "@codemirror/commands";
+import { getSearchQuery } from "@codemirror/search";
 import { EditorView } from "@codemirror/view";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -7,6 +9,7 @@ import { authSession } from "../../../services/authSession";
 import { createDraftCheckpointController, DRAFT_TRANSITION_FLUSH_MS } from "../../../services/draftCheckpoint";
 import { loadDraft } from "../../../services/draftRecovery";
 import type { MarkdownEditorThemeOptions } from "../../Editor/buildMarkdownEditorTheme";
+import { getCodeMirrorFindReplaceMetrics } from "../codeMirrorFindReplace";
 import MarkdownRichEditor, { type MarkdownRichEditorHandle, type MarkdownRichEditorSearchState } from "../MarkdownRichEditor";
 
 const TEST_MARKDOWN_THEME: MarkdownEditorThemeOptions = {
@@ -446,6 +449,54 @@ describe("MarkdownRichEditor", () => {
     unmount();
 
     await rejection;
+  });
+
+  it.each(["dark", "custom-alpha"])("preserves Markdown identity, search and undo across a %s theme change", async (variant) => {
+    const markdown = "# alpha\n\n".repeat(120);
+    const onChange = vi.fn();
+    const props = { ariaLabel: "Theme Markdown", markdown, theme: TEST_MARKDOWN_THEME, onChange, searchOpen: true, searchText: "alpha" };
+    const { rerender } = render(<MarkdownRichEditor {...props} />);
+    const editor = await screen.findByLabelText("Theme Markdown");
+    const view = EditorView.findFromDOM(editor);
+    if (!view) throw new Error("Expected a mounted Markdown editor");
+    await act(async () => {
+      view.dispatch({ changes: { from: markdown.length, insert: "draft" }, selection: { anchor: 2, head: 7 } });
+    });
+    const doc = view.state.doc;
+    const selection = view.state.selection;
+    const query = getSearchQuery(view.state);
+    const metrics = getCodeMirrorFindReplaceMetrics(view);
+    view.scrollDOM.scrollTop = 240;
+    view.scrollDOM.scrollLeft = 30;
+    onChange.mockClear();
+
+    rerender(
+      <MarkdownRichEditor
+        {...props}
+        markdown={doc.toString()}
+        theme={{
+          ...TEST_MARKDOWN_THEME,
+          isDarkMode: true,
+          textColor: "rgb(240, 242, 244)",
+          surfaceBackground: variant === "dark" ? "rgb(24, 26, 28)" : "rgba(24, 26, 28, 0.8)",
+          selectionBackground: "rgba(60, 180, 210, 0.4)",
+        }}
+      />
+    );
+
+    await waitFor(() => expect(view.state.facet(EditorView.darkTheme)).toBe(true));
+    expect(EditorView.findFromDOM(screen.getByLabelText("Theme Markdown"))).toBe(view);
+    expect(view.state.doc).toBe(doc);
+    expect(view.state.selection).toBe(selection);
+    expect(getSearchQuery(view.state)).toBe(query);
+    expect(getCodeMirrorFindReplaceMetrics(view)).toEqual(metrics);
+    expect(view.scrollDOM.scrollTop).toBe(240);
+    expect(view.scrollDOM.scrollLeft).toBe(30);
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => {
+      expect(undo(view)).toBe(true);
+    });
+    expect(view.state.doc.toString()).toBe(markdown);
   });
 
   it("reconfigures ordinary Markdown line wrapping", async () => {

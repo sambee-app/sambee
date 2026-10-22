@@ -22,10 +22,10 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
   const currentName = `${prefix}-current`;
   const registry = globalThis.CSS?.highlights;
   const HighlightType = globalThis.Highlight;
-  const supported = typeof HighlightType !== "undefined" && !!registry;
+  const supported = typeof HighlightType !== "undefined" && !!registry && typeof IntersectionObserver !== "undefined";
   const style = document.createElement("style");
-  style.textContent = `::highlight(${otherName}) { background-color: var(--sambee-search-other); }
-::highlight(${currentName}) { background-color: var(--sambee-search-current); }`;
+  style.textContent = `::highlight(${otherName}) { background-color: var(--sambee-search-other); color: var(--sambee-search-foreground); }
+::highlight(${currentName}) { background-color: var(--sambee-search-current); color: var(--sambee-search-foreground); }`;
   if (supported) document.head.append(style);
   let indexed: IndexedDomText | null = null;
   let indexedRevision = 0;
@@ -34,6 +34,9 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
   let frame: number | null = null;
   let disposed = false;
   let nextSegment = 0;
+  let pendingSegments: number[] = [];
+  const segmentIndices = new Map<Element, number[]>();
+  const visibleSegments = new Set<number>();
   let ranges: Range[] = [];
 
   const locate = (offset: number) => {
@@ -71,9 +74,9 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
     if (disposed || !supported || !indexed) return;
     measure("presentation", () => {
       const bounds = viewport.getBoundingClientRect();
-      const limit = Math.min(indexed!.segments.length, nextSegment + SEGMENTS_PER_FRAME);
+      const limit = Math.min(pendingSegments.length, nextSegment + SEGMENTS_PER_FRAME);
       for (; nextSegment < limit && ranges.length < MAX_VIEWPORT_SEARCH_RANGES; nextSegment += 1) {
-        const segment = indexed!.segments[nextSegment];
+        const segment = indexed!.segments[pendingSegments[nextSegment]];
         const parent = segment.node.parentElement;
         if (!parent) continue;
         const box = parent.getBoundingClientRect();
@@ -89,8 +92,8 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
           }
           return low;
         };
-        const from = offsetAt(bounds.top);
-        const to = Math.min(segment.end, offsetAt(bounds.bottom) + 1);
+        const from = box.top >= bounds.top ? segment.start : offsetAt(bounds.top);
+        const to = box.bottom <= bounds.bottom ? segment.end : Math.min(segment.end, offsetAt(bounds.bottom) + 1);
         const pre = parent.closest("pre");
         const horizontal =
           pre &&
@@ -98,13 +101,15 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
           getComputedStyle(pre).whiteSpace === "pre" &&
           getComputedStyle(pre).direction !== "rtl";
         const clip = horizontal ? pre.getBoundingClientRect() : bounds;
+        if (horizontal && (clip.right < bounds.left || clip.left > bounds.right)) continue;
         let lineStart = from;
         while (lineStart < to && ranges.length < MAX_VIEWPORT_SEARCH_RANGES) {
           const newline = horizontal ? segment.node.data.indexOf("\n", lineStart - segment.start) : -1;
           const lineEnd = newline < 0 ? to : Math.min(to, segment.start + newline + 1);
-          const columnAt = (edge: number) => {
-            let low = lineStart;
+          const columnAt = (edge: number, start = lineStart) => {
+            let low = start;
             let high = lineEnd;
+            if (low < high && rangeAt(low, low + 1)!.getBoundingClientRect().right >= edge) return low;
             while (low < high) {
               const middle = (low + high) >>> 1;
               if (rangeAt(middle, middle + 1)!.getBoundingClientRect().right < edge) low = middle + 1;
@@ -113,7 +118,7 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
             return low;
           };
           const visibleFrom = horizontal ? columnAt(Math.max(bounds.left, clip.left)) : lineStart;
-          const visibleTo = horizontal ? Math.min(lineEnd, columnAt(Math.min(bounds.right, clip.right)) + 1) : lineEnd;
+          const visibleTo = horizontal ? Math.min(lineEnd, columnAt(Math.min(bounds.right, clip.right), visibleFrom) + 1) : lineEnd;
           for (let index = firstMatchAt(visibleFrom); index < matches.length && ranges.length < MAX_VIEWPORT_SEARCH_RANGES; index += 1) {
             const match = matches[index];
             if (match.start >= visibleTo) break;
@@ -124,19 +129,52 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
         }
       }
       registry.set(otherName, new HighlightType(...ranges));
-      if (nextSegment < indexed!.segments.length && ranges.length < MAX_VIEWPORT_SEARCH_RANGES) frame = requestAnimationFrame(paint);
+      if (nextSegment < pendingSegments.length && ranges.length < MAX_VIEWPORT_SEARCH_RANGES) frame = requestAnimationFrame(paint);
     });
   };
   const refresh = () => {
     if (disposed) return;
-    if (frame !== null) cancelAnimationFrame(frame);
-    frame = null;
     ranges = [];
+    pendingSegments = [...visibleSegments].sort((left, right) => left - right);
     nextSegment = 0;
     if (supported) {
-      registry.delete(otherName);
-      if (matches.length) frame = requestAnimationFrame(paint);
+      if (!matches.length) {
+        registry.delete(otherName);
+        if (frame !== null) cancelAnimationFrame(frame);
+        frame = null;
+      } else if (frame === null) frame = requestAnimationFrame(paint);
     }
+  };
+  const intersections = supported
+    ? new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            for (const index of segmentIndices.get(entry.target) ?? []) {
+              if (entry.isIntersecting) visibleSegments.add(index);
+              else visibleSegments.delete(index);
+            }
+          }
+          refresh();
+        },
+        { root: viewport }
+      )
+    : null;
+  const resetVisibility = () => {
+    intersections?.disconnect();
+    segmentIndices.clear();
+    visibleSegments.clear();
+  };
+  const observeSegments = () => {
+    resetVisibility();
+    if (!supported || !indexed) return;
+    indexed.segments.forEach((segment, index) => {
+      const parent = segment.node.parentElement;
+      if (!parent) return;
+      const indices = segmentIndices.get(parent) ?? [];
+      indices.push(index);
+      segmentIndices.set(parent, indices);
+    });
+    for (const parent of segmentIndices.keys()) intersections?.observe(parent);
   };
   const activate = (match: number, scroll = true) => {
     if (disposed || current === match) return;
@@ -171,6 +209,7 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
   const invalidate = () => {
     if (disposed) return;
     indexed = null;
+    resetVisibility();
     matches = [];
     current = 0;
     if (supported) registry.delete(currentName);
@@ -193,13 +232,19 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
       if (mutations.takeRecords().length || indexedRevision !== revision) indexed = null;
       indexedRevision = revision;
       if (query.trim()) {
-        if (!indexed) indexed = measure("capture", () => createDomTextIndex(root));
+        if (!indexed) {
+          indexed = measure("capture", () => createDomTextIndex(root));
+          observeSegments();
+        }
         matches = measure("matching", () => findLogicalMatches(indexed!.fullText, query));
       } else {
         matches = [];
       }
       current = 0;
-      if (supported) registry.delete(currentName);
+      if (supported) {
+        registry.delete(currentName);
+        registry.delete(otherName);
+      }
       measure("clear", refresh);
       return matches.length;
     },
@@ -207,6 +252,7 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
     dispose() {
       if (disposed) return;
       disposed = true;
+      resetVisibility();
       mutations.disconnect();
       resize.disconnect();
       viewport.removeEventListener("scroll", refresh);

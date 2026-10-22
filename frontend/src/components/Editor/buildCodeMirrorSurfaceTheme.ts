@@ -52,6 +52,10 @@ export function buildCodeMirrorSurfaceTheme({
         [`.${PASSIVE_SELECTED_SEARCH_MATCH_CLASS}`]: {
           backgroundColor: currentSearchMatchBackground,
         },
+        [`.cm-content .cm-searchMatch, .cm-content .cm-searchMatch *, .cm-content .${PASSIVE_SEARCH_MATCH_CLASS}, .cm-content .${PASSIVE_SEARCH_MATCH_CLASS} *`]:
+          {
+            color: textColor,
+          },
         ".cm-cursor": {
           borderLeft: `2px solid ${textColor}`,
           marginLeft: 0,

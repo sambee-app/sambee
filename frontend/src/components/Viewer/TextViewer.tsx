@@ -101,6 +101,8 @@ function areTextEditorSearchStatesEqual(left: TextCodeEditorSearchState, right: 
     left.isSearchOpen === right.isSearchOpen &&
     left.isSearchable === right.isSearchable &&
     left.isValid === right.isValid &&
+    left.pending === right.pending &&
+    left.error === right.error &&
     left.viewMode === right.viewMode
   );
 }
@@ -744,22 +746,22 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   );
 
   const handleSearchNext = useCallback(() => {
-    if (searchMatches === 0) {
+    if (searchMatches === 0 && !editorSearchState.pending && !editorSearchState.error) {
       return;
     }
 
     editorRef.current?.focusCurrentSearchResult();
     editorRef.current?.nextSearchResult();
-  }, [searchMatches]);
+  }, [searchMatches, editorSearchState.pending, editorSearchState.error]);
 
   const handleSearchPrevious = useCallback(() => {
-    if (searchMatches === 0) {
+    if (searchMatches === 0 && !editorSearchState.pending && !editorSearchState.error) {
       return;
     }
 
     editorRef.current?.focusCurrentSearchResult();
     editorRef.current?.previousSearchResult();
-  }, [searchMatches]);
+  }, [searchMatches, editorSearchState.pending, editorSearchState.error]);
 
   const handleReplaceCurrent = useCallback(() => {
     if (!isEditing || isSaving) {
@@ -898,14 +900,24 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         handler: () => setWordWrapEnabled(!wordWrapEnabled),
         enabled: !loading && !error && !exceedsEditorLimit,
       },
-      { ...COMMON_SHORTCUTS.NEXT_MATCH, handler: handleSearchNext, enabled: isEditing && searchMatches > 0 },
-      { ...COMMON_SHORTCUTS.PREVIOUS_MATCH, handler: handleSearchPrevious, enabled: isEditing && searchMatches > 0 },
+      {
+        ...COMMON_SHORTCUTS.NEXT_MATCH,
+        handler: handleSearchNext,
+        enabled: isEditing && (searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error)),
+      },
+      {
+        ...COMMON_SHORTCUTS.PREVIOUS_MATCH,
+        handler: handleSearchPrevious,
+        enabled: isEditing && (searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error)),
+      },
       { ...COMMON_SHORTCUTS.SAVE, handler: () => void handleSave(), allowInInput: true, enabled: isEditing && !isSaving },
       { ...COMMON_SHORTCUTS.CLOSE, handler: handleEscape, allowInInput: false, enabled: isEditing && !unsavedChangesDialogOpen },
       { ...BROWSER_SHORTCUTS.SHOW_HELP_ALTERNATE, handler: () => setShowEditorHelp(true), enabled: isEditing },
     ],
     [
       editorSearchState.isSearchable,
+      editorSearchState.pending,
+      editorSearchState.error,
       error,
       exceedsEditorLimit,
       handleDownload,
@@ -1122,6 +1134,8 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
             focusTarget={searchFocusTarget}
             isReplaceMode={searchMode === "replace"}
             isSearchValid={editorSearchState.isValid}
+            searchPending={editorSearchState.pending}
+            searchError={editorSearchState.error}
             onCaseSensitiveChange={setSearchCaseSensitive}
             onClose={() => closeSearchPanel({ preserveQuery: true, restoreEditorFocus: true })}
             onFindNext={handleSearchNext}

@@ -27,3 +27,11 @@ If Sambee must send you through OIDC sign-in while you are editing, it saves an 
 Click the X icon or press <kbd>Esc</kbd> to leave the Markdown editor and return to the viewer. If there are unsaved changes, choose **Save** to save them and return to the viewer, **Discard** to return without saving, or **Cancel** to keep editing. If saving fails, the editor stays open with your changes.
 
 From the viewer, click the X icon again to return to the file list. The text editor uses the same two-step close sequence.
+
+## Print Or Save As PDF
+
+In the Markdown viewer, click the printer icon to open your browser's print dialog. Choose a printer or **Save as PDF** if your browser offers it. You can also use **Print** from the browser menu. Paper size, margins and headers/footers are controlled by that dialog.
+
+The output contains the rendered document, without Sambee's toolbar or file browser. Text prints black on white in both themes. Long code lines and table cells wrap to fit the page, and images are included. Printing doesn't modify the Markdown file.
+
+Print is available in the viewer, not the editor. To print your latest changes, save them and return to the viewer first. Closing or cancelling the print dialog leaves the viewer open.

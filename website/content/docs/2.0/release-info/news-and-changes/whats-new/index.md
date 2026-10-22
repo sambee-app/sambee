@@ -87,6 +87,12 @@ Sambee now uses a consolidated syntax highlighting system throughout all text an
 
 Text viewer/editor and Markdown editor performance was significantly boosted, especially for long documents. This was achieved through virtualization and viewport rendering.
 
+## Markdown Viewer
+
+### Print / Save as PDF
+
+When you print or save as PDF from the browser, the Markdown viewer reformats the full rendered document to fit the page, spanning multiple pages as needed. A new print icon in the top bar makes the new functionality discoverable.
+
 ### Other Changes
 
 - Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.

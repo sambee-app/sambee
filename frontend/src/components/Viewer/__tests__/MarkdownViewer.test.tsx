@@ -1,4 +1,5 @@
 import type { ViewUpdate } from "@codemirror/view";
+import { createTheme, ThemeProvider } from "@mui/material";
 import { act, configure, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, type ReactNode, useEffect, useImperativeHandle, useRef, useState } from "react";
@@ -9,12 +10,11 @@ import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/conte
 import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
 import { loadDraft, snapshotRegisteredDrafts } from "../../../services/draftRecovery";
-import * as logger from "../../../services/logger";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
+import { getDefaultTheme } from "../../../theme/themes";
 import { highlightingService } from "../../../utils/highlightingService";
 import * as markdownCodePreparation from "../../../utils/markdownCodePreparation";
-import * as markdownDocumentPreview from "../../../utils/markdownDocumentPreview";
 import * as markdownSyntaxPublication from "../../../utils/markdownSyntaxPublication";
 import type { PreparedCodeBlock } from "../../../utils/syntaxHighlighting";
 import MarkdownViewer from "../MarkdownViewer";
@@ -653,6 +653,13 @@ describe("MarkdownViewer", () => {
   function enableSearchHighlights() {
     vi.stubGlobal("CSS", { highlights: new Map<string, Set<Range>>() });
     vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe = vi.fn();
+        disconnect = vi.fn();
+      }
+    );
+    vi.stubGlobal(
       "Highlight",
       class extends Set<Range> {
         constructor(...ranges: Range[]) {
@@ -746,6 +753,76 @@ describe("MarkdownViewer", () => {
       </SambeeThemeProvider>
     );
   }
+
+  it("prints read-only previews and reports native dialog failures without changing content", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Printable preview");
+    const print = vi
+      .spyOn(window, "print")
+      .mockImplementationOnce(() => {
+        throw new Error("Printing blocked");
+      })
+      .mockImplementation(() => {});
+    renderViewerWithProps({ isReadOnly: true });
+    await screen.findByRole("heading", { name: "Printable preview" });
+    const button = screen.getByRole("button", { name: "Print", exact: true });
+    await userEvent.click(button);
+    expect(await screen.findByText("The print dialog couldn't open. Try Print from your browser menu.")).toBeInTheDocument();
+    await userEvent.click(button);
+    expect(print).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("The print dialog couldn't open. Try Print from your browser menu.")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Printable preview" })).toBeInTheDocument();
+  });
+
+  it("doesn't offer preview printing while editing", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Printable preview");
+    renderViewer();
+    await screen.findByRole("heading", { name: "Printable preview" });
+    await userEvent.click(screen.getByRole("button", { name: "Edit", exact: true }));
+    await screen.findByRole("button", { name: "Save", exact: true });
+    expect(screen.queryByRole("button", { name: "Print", exact: true })).not.toBeInTheDocument();
+  });
+
+  it("restores native print scroll and selection and releases its lifecycle listeners", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("```js\nconst printed = 1;\n```\n");
+    const { unmount } = renderViewer();
+    const code = await screen.findByText("const printed = 1;");
+    const viewport = screen.getByTestId("markdown-viewer-content");
+    const pre = code.closest("pre")!;
+    viewport.focus();
+    viewport.scrollTop = 120;
+    pre.scrollLeft = 48;
+    const selection = window.getSelection()!;
+    const range = new Range();
+    range.selectNodeContents(code);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const selected = selection.toString();
+    act(() => window.dispatchEvent(new Event("beforeprint")));
+    viewport.scrollTop = 0;
+    pre.scrollLeft = 0;
+    selection.removeAllRanges();
+    act(() => window.dispatchEvent(new Event("afterprint")));
+    await waitFor(() => {
+      expect(viewport.scrollTop).toBe(120);
+      expect(pre.scrollLeft).toBe(48);
+      expect(selection.toString()).toBe(selected);
+    });
+    unmount();
+    const frame = vi.spyOn(window, "requestAnimationFrame");
+    window.dispatchEvent(new Event("beforeprint"));
+    window.dispatchEvent(new Event("afterprint"));
+    expect(frame).not.toHaveBeenCalled();
+    selection.removeAllRanges();
+  });
+
+  it("reports a local normalization failure without blaming the server", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Preview");
+    vi.spyOn(markdownCodePreparation, "normalizeMarkdownSource").mockRejectedValue(new Error("Markdown worker initialization failed"));
+    renderViewer();
+
+    expect(await screen.findByText("Failed to load markdown file: Markdown worker initialization failed")).toBeInTheDocument();
+    expect(screen.queryByText(/Server is busy/)).not.toBeInTheDocument();
+  });
 
   it("prepares collected requests only after their semantic code blocks commit without a collection parse", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("> ```js title\n> const x=1;\n> ```\n\n```\nplain\n```\n");
@@ -854,6 +931,66 @@ describe("MarkdownViewer", () => {
       if (previousScroll) Object.defineProperty(HTMLElement.prototype, "scrollIntoView", previousScroll);
       else Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     }
+  });
+
+  it.each(["dark", "custom-alpha"])("changes %s preview colors without reprocessing content or resetting native state", async (variant) => {
+    const load = vi.spyOn(apiService, "getFileContent").mockResolvedValue("```js\nconst x=1; const x=2;\n```");
+    const prepare = vi.spyOn(highlightingService, "prepare").mockResolvedValue([{ ranges: [{ from: 0, to: 5, categories: ["keyword"] }] }]);
+    const dispose = vi.fn();
+    const publish = vi.spyOn(markdownSyntaxPublication, "publishMarkdownSyntax").mockReturnValue(dispose);
+    const onClose = vi.fn();
+    const tree = (theme: ReturnType<typeof createTheme>) => (
+      <SambeeThemeProvider>
+        <ThemeProvider theme={theme}>
+          <MarkdownViewer connectionId="conn1" path="/docs/readme.md" onClose={onClose} />
+        </ThemeProvider>
+      </SambeeThemeProvider>
+    );
+    const viewer = render(tree(createTheme()));
+    await screen.findByText("const x=1; const x=2;");
+    await waitFor(() => expect(publish).toHaveBeenCalledOnce());
+    const search = await viewerSearch.openSearch("const x");
+    await screen.findByText("1 / 2");
+    fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+    await screen.findByText("2 / 2");
+    const root = document.querySelector<HTMLElement>('[data-markdown-search-root="true"]')!;
+    const code = root.querySelector("code")!;
+    const node = code.firstChild;
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const scroll = root.parentElement!;
+    scroll.scrollTop = 123;
+    const keyword = variant === "dark" ? "#80cbc4" : "#12ab3478";
+
+    viewer.rerender(
+      tree(
+        createTheme({
+          palette: {
+            mode: "dark",
+            syntax: { ...getDefaultTheme("dark").components!.syntax!, keyword },
+          },
+        })
+      )
+    );
+
+    await waitFor(() => expect(root.style.getPropertyValue("--sambee-syntax-keyword")).toBe(keyword));
+    expect(document.querySelector('[data-markdown-search-root="true"]')).toBe(root);
+    expect(code.firstChild).toBe(node);
+    expect(selection.toString()).toBe("const x=1; const x=2;\n");
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(scroll.scrollTop).toBe(123);
+    expect(load).toHaveBeenCalledOnce();
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(publish).toHaveBeenCalledOnce();
+    expect(dispose).not.toHaveBeenCalled();
+    selection.removeAllRanges();
+    fireEvent.change(search, { target: { value: "x=2" } });
+    expect(await screen.findByText("1 / 1")).toBeInTheDocument();
+    viewer.unmount();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it("preserves native selection without replacing the preview when syntax becomes available", async () => {

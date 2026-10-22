@@ -108,6 +108,9 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     dedupe: ["react", "react-dom"],
+    alias: {
+      "decode-named-character-reference": WORKER_CHARACTER_DECODER,
+    },
   },
   server: {
     host: "0.0.0.0",

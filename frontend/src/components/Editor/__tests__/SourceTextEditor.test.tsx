@@ -311,6 +311,49 @@ describe("SourceTextEditor", () => {
     });
   });
 
+  it.each(["theme", "language"])("preserves the viewport and selection when %s extensions change", (change) => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onUpdate = vi.fn();
+    const onChange = vi.fn();
+    const value = "first\nsecond\nthird";
+    const { rerender } = render(
+      <SourceTextEditor
+        ref={editorRef}
+        value={value}
+        extensions={[]}
+        ariaLabel="Stable source editor"
+        onChange={onChange}
+        onUpdate={onUpdate}
+      />
+    );
+    const view = editorRef.current?.getView();
+    if (!view) throw new Error("Expected a mounted editor");
+    view.dispatch({ selection: EditorSelection.range(0, 5) });
+    const document = view.state.doc;
+    const selection = view.state.selection;
+    onUpdate.mockClear();
+
+    rerender(
+      <SourceTextEditor
+        ref={editorRef}
+        value={value}
+        extensions={change === "theme" ? buildTextEditorTheme(TEST_TEXT_THEME) : [markdown()]}
+        ariaLabel="Stable source editor"
+        onChange={onChange}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(editorRef.current?.getView()).toBe(view);
+    expect(view.state.doc).toBe(document);
+    expect(view.state.selection).toBe(selection);
+    expect(onUpdate).toHaveBeenCalled();
+    for (const [update] of onUpdate.mock.calls) {
+      expect(update.transactions.every((transaction: { scrollIntoView: boolean }) => !transaction.scrollIntoView)).toBe(true);
+    }
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("retains undo history across controlled value updates", async () => {
     const user = userEvent.setup();
     const editorRef = createRef<SourceTextEditorHandle>();

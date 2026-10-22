@@ -8,6 +8,13 @@ export const TOKEN_CATEGORIES = [
   "operator",
   "punctuation",
   "identifier",
+  "builtin",
+  "property",
+  "boolean",
+  "null",
+  "regexp",
+  "escape",
+  "metadata",
   "heading",
   "structure",
   "link",
@@ -18,6 +25,31 @@ export const TOKEN_CATEGORIES = [
 ] as const;
 
 export type TokenCategory = (typeof TOKEN_CATEGORIES)[number];
+export const TOKEN_COLOR_ROLES = {
+  keyword: "keyword",
+  string: "string",
+  number: "number",
+  comment: "comment",
+  type: "type",
+  function: "function",
+  operator: "operator",
+  punctuation: "punctuation",
+  identifier: "foreground",
+  builtin: "function",
+  property: "type",
+  boolean: "keyword",
+  null: "keyword",
+  regexp: "type",
+  escape: "operator",
+  metadata: "keyword",
+  heading: "keyword",
+  structure: "keyword",
+  link: "link",
+  inlineCode: "foreground",
+  emphasis: "emphasis",
+  strong: "strong",
+  strikethrough: "strikethrough",
+} as const satisfies Record<TokenCategory, string>;
 declare const languageId: unique symbol;
 export type LanguageId = string & { readonly [languageId]: true };
 export type PlainTextReason =

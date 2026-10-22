@@ -1,7 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   HighlightStyle,
-  type Language,
+  Language,
   LanguageDescription,
   type LanguageSupport,
   languageDataProp,
@@ -9,6 +9,7 @@ import {
 } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import type { Extension } from "@codemirror/state";
+import { NodeType, Parser, type PartialParse, Tree } from "@lezer/common";
 import { highlightTree, styleTags, type Tag, tags } from "@lezer/highlight";
 import {
   type HighlightingService,
@@ -48,15 +49,32 @@ const FENCE_ALIASES: Record<string, string> = {
   docker: "dockerfile",
   htm: "html",
   kt: "kotlin",
+  mssql: "ms sql",
+  mariadb: "mariadb sql",
 };
 const codeRules: { tag: Tag | readonly Tag[]; categories: readonly TokenCategory[] }[] = [
   { tag: tags.keyword, categories: ["keyword"] },
-  { tag: [tags.string, tags.regexp, tags.escape, tags.character], categories: ["string"] },
-  { tag: [tags.number, tags.bool, tags.null], categories: ["number"] },
+  { tag: [tags.string, tags.character], categories: ["string"] },
+  { tag: tags.regexp, categories: ["regexp"] },
+  { tag: tags.escape, categories: ["escape"] },
+  { tag: tags.number, categories: ["number"] },
+  { tag: tags.bool, categories: ["boolean"] },
+  { tag: tags.null, categories: ["null"] },
   { tag: tags.comment, categories: ["comment"] },
   { tag: [tags.typeName, tags.className, tags.namespace], categories: ["type"] },
-  { tag: [tags.name, tags.variableName, tags.propertyName], categories: ["identifier"] },
+  { tag: [tags.name, tags.variableName], categories: ["identifier"] },
+  { tag: tags.propertyName, categories: ["property"] },
   { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], categories: ["function"] },
+  {
+    tag: [
+      tags.standard(tags.variableName),
+      tags.standard(tags.propertyName),
+      tags.standard(tags.function(tags.variableName)),
+      tags.standard(tags.function(tags.propertyName)),
+    ],
+    categories: ["builtin"],
+  },
+  { tag: tags.meta, categories: ["metadata"] },
   { tag: tags.operator, categories: ["operator"] },
   { tag: [tags.punctuation, tags.bracket], categories: ["punctuation"] },
 ];
@@ -141,6 +159,58 @@ class PreparationFailure extends Error {
     super(reason);
   }
 }
+function isolateNestedParser(language: Language, id: LanguageId, report: SyntaxDiagnosticReporter, signal?: AbortSignal): Language {
+  const parser = new (class extends Parser {
+    createParse(...args: Parameters<Parser["createParse"]>): PartialParse {
+      const ranges = args[2];
+      const from = ranges[0].from;
+      const end = ranges[ranges.length - 1].to;
+      let partial: PartialParse | undefined;
+      let stoppedAt: number | null = null;
+      const fail = (error: unknown) => {
+        checkAbort(signal);
+        partial = undefined;
+        report(
+          "Nested syntax parsing failed; retaining plain text for this fence",
+          { language: id, operation: "parse" },
+          "syntaxHighlighting",
+          error instanceof Error ? error : undefined
+        );
+      };
+      try {
+        partial = language.parser.startParse(...args);
+      } catch (error) {
+        fail(error);
+      }
+      return {
+        advance() {
+          checkAbort(signal);
+          try {
+            if (partial) return partial.advance();
+          } catch (error) {
+            fail(error);
+          }
+          return new Tree(NodeType.none, [], [], Math.max(0, Math.min(end, stoppedAt ?? end) - from));
+        },
+        get parsedPos() {
+          return partial?.parsedPos ?? Math.min(end, stoppedAt ?? end);
+        },
+        get stoppedAt() {
+          return partial?.stoppedAt ?? stoppedAt;
+        },
+        stopAt(position) {
+          stoppedAt = position;
+          try {
+            partial?.stopAt(position);
+          } catch (error) {
+            fail(error);
+          }
+        },
+      };
+    }
+  })();
+  return new Language(language.data, parser, [], language.name);
+}
 async function prepareLanguage(
   text: string,
   id: LanguageId,
@@ -183,12 +253,19 @@ async function prepareLanguage(
     const nested = resolveFence(text.slice(info.from, info.to));
     if (!("language" in nested)) continue;
     await yieldHighlightingTask(signal);
-    await prepareLanguage(text.slice(code.from, code.to), nested.language, level + 1, preparedLanguages, report, signal);
+    try {
+      await prepareLanguage(text.slice(code.from, code.to), nested.language, level + 1, preparedLanguages, report, signal);
+    } catch (error) {
+      checkAbort(signal);
+      if (!(error instanceof PreparationFailure) || error.reason !== "loading-failure") throw error;
+    }
   } while (cursor.next());
   checkAbort(signal);
   const configured = createMarkdownSupport((label) => {
     const nested = resolveFence(label);
-    return "language" in nested ? (preparedLanguages.get(nested.language) ?? null) : null;
+    if (!("language" in nested)) return null;
+    const language = preparedLanguages.get(nested.language);
+    return language ? isolateNestedParser(language, nested.language, report, signal) : null;
   }).language;
   preparedLanguages.set(id, configured);
   return configured;

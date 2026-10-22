@@ -1,6 +1,7 @@
 import { getSearchQuery, type SearchQuery } from "@codemirror/search";
 import type { Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
+import { getSourceRegexSearch } from "./sourceRegexSearch";
 
 interface SearchMatchRange {
   from: number;
@@ -16,6 +17,7 @@ interface CachedSearchMatches {
 const matchCache = new WeakMap<EditorView, CachedSearchMatches>();
 
 export function getCachedCodeMirrorSearchMatches(view: EditorView): readonly SearchMatchRange[] | null {
+  if (getSearchQuery(view.state).regexp) return getSourceRegexSearch(view).ranges;
   const cached = matchCache.get(view);
   return cached?.document === view.state.doc && cached.query.eq(getSearchQuery(view.state)) ? cached.ranges : null;
 }

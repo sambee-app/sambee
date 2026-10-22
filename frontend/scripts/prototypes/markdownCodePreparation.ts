@@ -1,4 +1,4 @@
-export * from "../../src/utils/markdownCodePreparation";import type { CodePreviewFragment, CodePreviewModel } from "../../src/utils/markdownCodePreviewModel";
+import type { CodePreviewFragment, CodePreviewModel } from "../../src/utils/markdownCodePreviewModel";
 import {
   DOCUMENT_PUBLICATION_BATCH_ITEMS,
   DOCUMENT_RECORD_BATCH_ITEMS,

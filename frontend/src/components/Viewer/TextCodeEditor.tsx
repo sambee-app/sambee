@@ -1,4 +1,3 @@
-import { findNext, findPrevious, replaceAll, replaceNext } from "@codemirror/search";
 import type { Extension } from "@codemirror/state";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { loadNativeLanguage, resolveFilename } from "../../utils/codeMirrorHighlighting";
@@ -8,7 +7,11 @@ import { buildTextEditorTheme, type TextEditorThemeOptions } from "../Editor/bui
 import { SourceTextEditor } from "../Editor/SourceTextEditor";
 import type { SourceTextEditorHandle, SourceTextSnapshot } from "../Editor/sourceTextEditorTypes";
 import {
+  findNext,
+  findPrevious,
   getCodeMirrorFindReplaceMetrics,
+  replaceAll,
+  replaceNext,
   shouldAutoNavigateCodeMirrorFindReplace,
   updateCodeMirrorFindReplaceQuery,
 } from "./codeMirrorFindReplace";
@@ -30,6 +33,8 @@ export interface TextCodeEditorHandle {
 }
 
 export interface TextCodeEditorSearchState {
+  pending?: boolean;
+  error?: string;
   searchText: string;
   searchMatches: number;
   currentMatch: number;
@@ -139,6 +144,8 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
 
       const metrics = getCodeMirrorFindReplaceMetrics(editorRef.current?.getView());
       onSearchStateChange({
+        pending: metrics.pending,
+        error: metrics.error,
         searchText: searchOpen ? searchText : "",
         searchMatches: searchOpen ? metrics.matches : 0,
         currentMatch: searchOpen ? metrics.currentMatch : 0,

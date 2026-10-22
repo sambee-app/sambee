@@ -1,4 +1,3 @@
-import { findNext, findPrevious, replaceAll, replaceNext } from "@codemirror/search";
 import { EditorSelection, type EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { insertEmptyMarkdownTable } from "codemirror-markdown-tables";
@@ -9,7 +8,11 @@ import type { MarkdownEditorThemeOptions } from "../Editor/buildMarkdownEditorTh
 import { SourceTextEditor } from "../Editor/SourceTextEditor";
 import type { SourceTextEditorHandle, SourceTextSnapshot } from "../Editor/sourceTextEditorTypes";
 import {
+  findNext,
+  findPrevious,
   getCodeMirrorFindReplaceMetrics,
+  replaceAll,
+  replaceNext,
   shouldAutoNavigateCodeMirrorFindReplace,
   updateCodeMirrorFindReplaceQuery,
 } from "./codeMirrorFindReplace";
@@ -47,6 +50,8 @@ export interface MarkdownRichEditorHandle {
 }
 
 export interface MarkdownRichEditorSearchState {
+  pending?: boolean;
+  error?: string;
   searchText: string;
   searchMatches: number;
   currentMatch: number;
@@ -415,6 +420,8 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
 
       const metrics = getCodeMirrorFindReplaceMetrics(editorRef.current?.getView());
       onSearchStateChange({
+        pending: metrics.pending,
+        error: metrics.error,
         searchText: searchOpen ? searchText : "",
         searchMatches: searchOpen ? metrics.matches : 0,
         currentMatch: searchOpen ? metrics.currentMatch : 0,

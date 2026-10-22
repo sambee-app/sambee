@@ -1,0 +1,216 @@
+import { getSearchQuery, type SearchQuery } from "@codemirror/search";
+import { type ChangeSpec, StateEffect, type Text } from "@codemirror/state";
+import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import {
+  SOURCE_SEARCH_CHUNK_UNITS,
+  SOURCE_SEARCH_RANGE_BATCH,
+  SOURCE_SEARCH_TIMEOUT_MS,
+  type SourceSearchOperation,
+  type SourceSearchRange,
+  type SourceSearchRequest,
+  type SourceSearchResponse,
+} from "./sourceRegexSearchProtocol";
+
+export const sourceRegexSearchUpdated = StateEffect.define<null>();
+
+interface RegexSearchSession {
+  document: Text;
+  query: SearchQuery;
+  ranges: SourceSearchRange[];
+  pending: boolean;
+  error?: string;
+  cancel: () => void;
+}
+
+const sessions = new WeakMap<EditorView, RegexSearchSession>();
+
+export const sourceRegexSearchLifecycle = ViewPlugin.fromClass(
+  class {
+    constructor(private view: EditorView) {}
+
+    update(update: ViewUpdate) {
+      const session = sessions.get(this.view);
+      if (session && (update.docChanged || !session.query.eq(getSearchQuery(update.state)))) disposeSourceRegexSearch(this.view);
+    }
+
+    destroy() {
+      disposeSourceRegexSearch(this.view);
+    }
+  }
+);
+
+export function disposeSourceRegexSearch(view: EditorView): void {
+  sessions.get(view)?.cancel();
+  sessions.delete(view);
+}
+
+export function getSourceRegexSearch(view: EditorView): RegexSearchSession {
+  const query = getSearchQuery(view.state);
+  const existing = sessions.get(view);
+  if (existing?.document === view.state.doc && existing.query.eq(query)) return existing;
+  existing?.cancel();
+  const session: RegexSearchSession = { document: view.state.doc, query, ranges: [], pending: true, cancel: () => {} };
+  sessions.set(view, session);
+  if (query.valid && query.regexp) run(view, session, "count");
+  else session.pending = false;
+  return session;
+}
+
+export function runSourceRegexSearchCommand(view: EditorView, operation: Exclude<SourceSearchOperation, "count">): boolean {
+  if (!getSearchQuery(view.state).regexp) return false;
+  if (!getSearchQuery(view.state).valid) return true;
+  if ((operation === "replace-one" || operation === "replace-all") && view.state.readOnly) return true;
+  const session = getSourceRegexSearch(view);
+  session.cancel();
+  run(view, session, operation);
+  return true;
+}
+
+function run(view: EditorView, session: RegexSearchSession, operation: SourceSearchOperation): void {
+  const { document, query } = session;
+  const selection = view.state.selection;
+  let worker: Worker | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let sourceOffset = 0;
+  let stopped = false;
+  const ranges: SourceSearchRange[] = [];
+  const changes: { from: number; to: number; chunks: string[] }[] = [];
+  const announcements: string[][] = [];
+  session.pending = true;
+  session.error = undefined;
+  const current = () => sessions.get(view) === session && view.state.doc === document && query.eq(getSearchQuery(view.state));
+  const cancel = () => {
+    stopped = true;
+    clearTimeout(timer);
+    worker?.terminate();
+  };
+  session.cancel = cancel;
+  const notify = () => {
+    queueMicrotask(() => {
+      if (current()) view.dispatch({ effects: sourceRegexSearchUpdated.of(null) });
+    });
+  };
+  const fail = (message: string) => {
+    cancel();
+    if (!current()) return;
+    session.pending = false;
+    session.error = message;
+    notify();
+  };
+  const send = (message: SourceSearchRequest) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fail("Source search timed out. Simplify the expression or try again."), SOURCE_SEARCH_TIMEOUT_MS);
+    worker?.postMessage(message);
+  };
+  try {
+    worker = new Worker(new URL("./sourceRegexSearch.worker.ts", import.meta.url), { type: "module" });
+    worker.onerror = (event) => {
+      event.preventDefault();
+      fail("Source-search worker failed. Try the search again.");
+    };
+    worker.addEventListener("messageerror", () => fail("Source-search response could not be decoded. Try again."));
+    worker.onmessage = (event: MessageEvent<SourceSearchResponse>) => {
+      if (stopped) return;
+      if (!current() || (operation !== "count" && selection !== view.state.selection)) {
+        cancel();
+        if (current()) {
+          session.pending = false;
+          session.error = "Source search was cancelled because the selection changed. Try again.";
+          notify();
+        }
+        return;
+      }
+      try {
+        const message = event.data;
+        if (message.type === "ready") {
+          send({
+            type: "start",
+            operation,
+            query: {
+              wordChars: view.state.languageDataAt<string>("wordChars", selection.main.head).join(""),
+              search: query.search,
+              replace: query.replace,
+              literal: query.literal,
+              caseSensitive: query.caseSensitive,
+              wholeWord: query.wholeWord,
+            },
+            selection: { anchor: selection.main.anchor, head: selection.main.head },
+          });
+        } else if (message.type === "source-ack") {
+          const text = document.sliceString(sourceOffset, Math.min(document.length, sourceOffset + SOURCE_SEARCH_CHUNK_UNITS));
+          sourceOffset += text.length;
+          send({ type: "source", text, complete: sourceOffset === document.length });
+        } else if (message.type === "ranges") {
+          if (message.ranges.length > SOURCE_SEARCH_RANGE_BATCH) throw new Error("Source-search range batch exceeded its bound");
+          for (const range of message.ranges) {
+            if (
+              !Number.isInteger(range.from) ||
+              !Number.isInteger(range.to) ||
+              range.from < 0 ||
+              range.to < range.from ||
+              range.to > document.length
+            ) {
+              throw new Error("Source search returned an invalid match range");
+            }
+            ranges.push(range);
+          }
+          send({ type: "ack" });
+        } else if (message.type === "change") {
+          if (
+            message.insert.length > SOURCE_SEARCH_CHUNK_UNITS ||
+            message.from < 0 ||
+            message.to < message.from ||
+            message.to > document.length
+          ) {
+            throw new Error("Source search returned an invalid replacement chunk");
+          }
+          if (message.continued) {
+            const previous = changes.at(-1);
+            if (!previous || previous.from !== message.from || previous.to !== message.to)
+              throw new Error("Source-search replacement lost a chunk");
+            previous.chunks.push(message.insert);
+          } else changes.push({ from: message.from, to: message.to, chunks: [message.insert] });
+          send({ type: "ack" });
+        } else if (message.type === "announcement") {
+          if (message.text.length > SOURCE_SEARCH_CHUNK_UNITS) throw new Error("Source-search announcement exceeded its chunk bound");
+          if (message.continued) {
+            const previous = announcements.at(-1);
+            if (!previous) throw new Error("Source-search announcement lost a chunk");
+            previous.push(message.text);
+          } else announcements.push([message.text]);
+          send({ type: "ack" });
+        } else if (message.type === "error") fail(message.message);
+        else if (message.type === "complete") {
+          cancel();
+          session.pending = false;
+          if (operation === "count") {
+            session.ranges = ranges;
+            notify();
+          } else {
+            const plan: ChangeSpec[] = changes.map((change) => ({ from: change.from, to: change.to, insert: change.chunks.join("") }));
+            if (!current() || selection !== view.state.selection || (plan.length > 0 && view.state.readOnly)) return;
+            const commitStart = performance.now();
+            view.dispatch({
+              changes: plan,
+              selection: message.selection,
+              scrollIntoView: Boolean(message.selection),
+              effects: announcements.map((chunks) => EditorView.announce.of(chunks.join(""))),
+              userEvent: message.userEvent,
+            });
+            performance.clearMeasures("sambee:source-search:commit");
+            performance.measure("sambee:source-search:commit", {
+              start: commitStart,
+              detail: { operation, documentUnits: document.length, changes: plan.length },
+            });
+            if (current() && session.ranges.length === 0) run(view, session, "count");
+          }
+        } else throw new Error("Unexpected source-search worker response");
+      } catch (error) {
+        fail(error instanceof Error ? error.message : "Source-search response failed");
+      }
+    };
+    timer = setTimeout(() => fail("Source-search worker did not start. Try again."), SOURCE_SEARCH_TIMEOUT_MS);
+  } catch {
+    fail("Source search requires a working dedicated worker in this browser.");
+  }
+}

@@ -1,10 +1,29 @@
+import { createTheme } from "@mui/material/styles";
 import { describe, expect, it } from "vitest";
 import { resolveSyntaxTheme } from "../resolveSyntaxTheme";
-import { syntaxTokenStyles } from "../syntaxStyles";
+import { getSyntaxVariables, syntaxTokenStyles } from "../syntaxStyles";
 import { editableDefinition, parseThemeImport } from "../themeDefinition";
 import { getDefaultTheme } from "../themes";
 
 describe("syntax theme compatibility", () => {
+  it.each(["light", "dark"] as const)("reuses existing %s theme roles for richer token categories", (mode) => {
+    const palette = getDefaultTheme(mode).components!.syntax!;
+    const variables = getSyntaxVariables(createTheme({ palette: { mode, syntax: palette } }));
+    for (const [category, role] of [
+      ["builtin", "function"],
+      ["property", "type"],
+      ["boolean", "keyword"],
+      ["null", "keyword"],
+      ["regexp", "type"],
+      ["escape", "operator"],
+      ["metadata", "keyword"],
+    ] as const) {
+      expect(syntaxTokenStyles[`.sambee-syntax-${category}`]).toEqual({ color: `var(--sambee-syntax-${role})` });
+      expect(variables[`--sambee-syntax-${role}` as keyof typeof variables]).toBe(palette[role]);
+    }
+    expect(Object.keys(palette)).toHaveLength(8);
+    expect(syntaxTokenStyles[".sambee-syntax-identifier"]).toEqual({ color: "var(--sambee-syntax-foreground, inherit)" });
+  });
   it("does not let typography-only classes override combined heading or link colors", () => {
     for (const category of ["emphasis", "strong", "strikethrough"]) {
       expect(syntaxTokenStyles[`.sambee-syntax-${category}`]).not.toHaveProperty("color");

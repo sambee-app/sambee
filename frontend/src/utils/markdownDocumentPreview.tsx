@@ -7,7 +7,6 @@ import {
   remarkRenderMarkdownTableCellLineBreaks,
 } from "../components/Viewer/markdownTableCellLineBreaks";
 import { yieldHighlightingTask } from "./codeMirrorHighlighting";
-import type { createDocumentSyntaxSession } from "./markdownCodePreparation";
 import {
   DOCUMENT_PUBLICATION_BATCH_ITEMS,
   DOCUMENT_PUBLICATION_BATCH_UNITS,
@@ -31,11 +30,22 @@ const ALLOWED_TAGS = new Set(
   )
 );
 
+interface DocumentSyntaxSession {
+  dispose(): void;
+  page(
+    window: DocumentSyntaxWindow,
+    offset: number
+  ): Promise<{
+    records: Extract<MarkdownDocumentRecord, { kind: "syntax" }>[];
+    next: number | null;
+  }>;
+}
+
 interface DocumentView {
   search: (query: string, options?: DocumentSearchOptions) => Promise<DocumentSearchResult>;
   jump: (ordinal: number) => Promise<{ pending: boolean }>;
   consume: (records: readonly MarkdownDocumentRecord[]) => Promise<void>;
-  finish: (workerPipelineWallMs: number, syntaxRanges: number, session: ReturnType<typeof createDocumentSyntaxSession>) => void;
+  finish: (workerPipelineWallMs: number, syntaxRanges: number, session: DocumentSyntaxSession) => void;
   dispose: () => void;
   stats: () => Record<string, unknown>;
 }
@@ -157,7 +167,7 @@ export function mountMarkdownDocument(
       let decorationLimited = false;
       let mountedSpans = 0;
       let textUnits = 0;
-      let syntaxSession: ReturnType<typeof createDocumentSyntaxSession> | null = null;
+      let syntaxSession: DocumentSyntaxSession | null = null;
       let workerSyntaxRanges = 0;
       let cachedSyntaxRanges = 0;
       let peakCachedSyntaxRanges = 0;

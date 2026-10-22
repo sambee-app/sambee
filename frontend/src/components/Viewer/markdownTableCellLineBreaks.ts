@@ -318,7 +318,7 @@ function removeRedundantTableCellEscapes(markdown: string, tree: Root): string {
   return normalizedMarkdown;
 }
 
-export function normalizeMarkdownTableCellLineBreaks(markdown: string): string {
+export function normalizeMarkdownTableCellLineBreaks(markdown: string, onPrepared?: (source: string, tree: Root) => void): string {
   const sourceTree = markdownParser.parse(markdown) as Root;
   const sourceMarkdown = removeRedundantTableCellEscapes(markdown, sourceTree);
   const tree = sourceMarkdown === markdown ? sourceTree : (markdownParser.parse(sourceMarkdown) as Root);
@@ -332,7 +332,9 @@ export function normalizeMarkdownTableCellLineBreaks(markdown: string): string {
 
   collectListMarkerReplacements(sourceMarkdown, tree, replacements);
 
-  return applyMarkdownReplacements(sourceMarkdown, [...replacements.values()]);
+  const normalized = applyMarkdownReplacements(sourceMarkdown, [...replacements.values()]);
+  if (onPrepared) onPrepared(normalized, normalized === sourceMarkdown ? tree : (markdownParser.parse(normalized) as Root));
+  return normalized;
 }
 
 export function prepareMarkdownTableCellLineBreaksForEditor(markdown: string): string {

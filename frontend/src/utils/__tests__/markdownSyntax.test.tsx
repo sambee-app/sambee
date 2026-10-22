@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { render } from "@testing-library/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import { describe, expect, it, vi } from "vitest";
+import {
+  normalizeMarkdownTableCellLineBreaks,
+  remarkRenderMarkdownTableCellLineBreaks,
+} from "../../components/Viewer/markdownTableCellLineBreaks";
 import {
   PREPARATION_SOURCE_CHUNK_UNITS,
   type PreparationRequest,
@@ -12,13 +18,20 @@ import {
 } from "../markdownCodePreparation";
 import {
   createMarkdownDocumentModel,
-  DOCUMENT_PUBLICATION_BATCH_UNITS,
   DOCUMENT_RECORD_BATCH_ITEMS,
   DOCUMENT_TEXT_CHUNK_UNITS,
   documentSyntaxPage,
   markdownDocumentRecords,
 } from "../markdownDocumentPreviewModel";
 import { createDocumentSearchIndex, documentSearchMatches } from "../markdownDocumentSearch";
+import { rehypeMarkdownHeadingLinks } from "../markdownHeadingLinks";
+import {
+  createMarkdownTreeReceiver,
+  MARKDOWN_TREE_BATCH_UNITS,
+  MARKDOWN_TREE_TEXT_UNITS,
+  markdownTreeRecords,
+  remarkPreparedMarkdownTree,
+} from "../markdownPreparedTree";
 import {
   collectMarkdownCodeBlocks,
   rehypeMeasureMarkdownPreparation,
@@ -26,7 +39,7 @@ import {
   remarkCollectMarkdownCodeBlocks,
   remarkMeasureMarkdownPreparation,
 } from "../markdownSyntax";
-import { MAX_VIEWPORT_SYNTAX_RANGES, publishMarkdownSyntax } from "../markdownSyntaxPublication";
+import { MAX_VIEWPORT_SYNTAX_RANGES, publishMarkdownSyntax, visibleSyntaxColumnWindows } from "../markdownSyntaxPublication";
 import { prepareMarkdownSyntax } from "../markdownSyntaxWorker";
 import {
   SYNTAX_RESULT_PAGE_RANGES,
@@ -34,9 +47,140 @@ import {
   type SyntaxWorkerRequest,
   type SyntaxWorkerResponse,
 } from "../markdownSyntaxWorkerProtocol";
+import { TOKEN_COLOR_ROLES } from "../syntaxHighlighting";
+
+function mockSyntaxIntersections() {
+  let notify: IntersectionObserverCallback;
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(callback: IntersectionObserverCallback) {
+        notify = callback;
+      }
+      observe = vi.fn();
+      disconnect = disconnect;
+    }
+  );
+  return {
+    disconnect,
+    publish: (targets: Element[], isIntersecting = true) =>
+      notify(
+        targets.map((target) => ({ target, isIntersecting }) as IntersectionObserverEntry),
+        {} as IntersectionObserver
+      ),
+  };
+}
 
 describe("engine-neutral Markdown syntax adapter", () => {
-  it("isolates normalization and document workers, bounds results and cleans up success, cancellation, decode errors and timeouts", async () => {
+  it("creates safe, stable heading targets and resolves Unicode and duplicate fragments", () => {
+    const markdown =
+      "# Location\n\n## Café **déjà**\n\n## Repeat\n\n## Repeat\n\n[Unicode](#caf%C3%A9-d%C3%A9j%C3%A0) [Duplicate](#repeat-1) [Existing](#sambee-markdown-repeat)\n";
+    const first = render(<ReactMarkdown rehypePlugins={[rehypeMarkdownHeadingLinks]}>{markdown}</ReactMarkdown>);
+    const ids = [...first.container.querySelectorAll("h1,h2")].map((heading) => heading.id);
+    expect(ids).toEqual(["sambee-markdown-location", "sambee-markdown-café-déjà", "sambee-markdown-repeat", "sambee-markdown-repeat-1"]);
+    expect([...first.container.querySelectorAll("a")].map((link) => link.getAttribute("href"))).toEqual([
+      "#sambee-markdown-caf%C3%A9-d%C3%A9j%C3%A0",
+      "#sambee-markdown-repeat-1",
+      "#sambee-markdown-repeat",
+    ]);
+    first.unmount();
+    const second = render(<ReactMarkdown rehypePlugins={[rehypeMarkdownHeadingLinks]}>{markdown}</ReactMarkdown>);
+    expect([...second.container.querySelectorAll("h1,h2")].map((heading) => heading.id)).toEqual(ids);
+  });
+
+  it("leaves unknown, malformed and non-heading fragments and external links alone", () => {
+    const markdown =
+      "# Known\n\n[Missing](#absent) [Malformed](#%ZZ) [External](https://example.org/#known)\n\nFootnote[^note].\n\n[^note]: Note text.\n";
+    const { container } = render(
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeMarkdownHeadingLinks]}>
+        {markdown}
+      </ReactMarkdown>
+    );
+    expect([...container.querySelectorAll("a")].slice(0, 3).map((link) => link.getAttribute("href"))).toEqual([
+      "#absent",
+      "#%ZZ",
+      "https://example.org/#known",
+    ]);
+    const reference = container.querySelector("a[data-footnote-ref]")!;
+    expect(reference.getAttribute("href")).toBe("#user-content-fn-note");
+    expect(container.querySelector('[id="user-content-fn-note"]')).not.toBeNull();
+  });
+
+  it("keeps production normalization independent of retired preview proofs", () => {
+    for (const filename of ["markdownCodePreparation.ts", "markdownCodePreparation.worker.ts", "markdownCodePreparationProtocol.ts"]) {
+      const source = readFileSync(`src/utils/${filename}`, "utf8");
+      expect(source).not.toMatch(/markdown(?:CodePreviewModel|DocumentPreviewModel|DocumentSearch)|createStaticHighlighter|MATCH_QUERY/);
+    }
+  });
+
+  it.each([
+    "# Heading\n\nPlain **strong** [safe](https://example.com).\n\n<script>unsafe()</script>\n",
+    "* item\n\n| A | B |\n| - | - |\n| a\\&b | first<BR>second |\n\n```md\n* literal<BR>\n```\n",
+    `[link][ref]\n\n[ref]: https://example.com "title"\n\n![alt](image.png)\n\n~~~js meta\n${"const rocket = '🚀';\n".repeat(200)}~~~\n`,
+  ])("reuses an equivalent canonical tree without changing ReactMarkdown output (%#)", (source) => {
+    let tree: ReturnType<ReturnType<typeof createMarkdownTreeReceiver>["finish"]> | undefined;
+    const canonical = normalizeMarkdownTableCellLineBreaks(source, (_text, parsed) => {
+      tree = parsed;
+    });
+    expect(tree).toEqual(unified().use(remarkParse).use(remarkGfm).parse(canonical));
+    const receiver = createMarkdownTreeReceiver();
+    for (const record of markdownTreeRecords(tree!)) receiver.consume([record]);
+    const restored = receiver.finish();
+    expect(restored).toEqual(tree);
+    const baseline = render(
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkRenderMarkdownTableCellLineBreaks]}>{canonical}</ReactMarkdown>
+    );
+    const html = baseline.container.innerHTML;
+    baseline.unmount();
+    const prepared = render(
+      <ReactMarkdown remarkPlugins={[remarkGfm, [remarkPreparedMarkdownTree, restored], remarkRenderMarkdownTableCellLineBreaks]}>
+        {canonical}
+      </ReactMarkdown>
+    );
+    expect(prepared.container.innerHTML).toBe(html);
+    prepared.unmount();
+    expect(restored).toEqual(tree);
+  });
+
+  it("rejects malformed and oversized tree records", () => {
+    const receiver = createMarkdownTreeReceiver();
+    expect(() => receiver.finish()).toThrow("Incomplete");
+    expect(() => receiver.consume([{ kind: "node", id: 1, parent: null, node: { type: "text" }, children: false }])).toThrow("Invalid");
+    receiver.consume([{ kind: "node", id: 0, parent: null, node: { type: "root" }, children: true }]);
+    expect(() => receiver.consume([{ kind: "text", id: 0, key: "__proto__", value: "bad" }])).toThrow("Invalid");
+    expect(() => receiver.consume([{ kind: "text", id: 0, key: "value", value: "x".repeat(MARKDOWN_TREE_TEXT_UNITS + 1) }])).toThrow(
+      "Invalid"
+    );
+    expect(() =>
+      receiver.consume(
+        Array.from({ length: MARKDOWN_TREE_BATCH_UNITS / MARKDOWN_TREE_TEXT_UNITS + 1 }, () => ({
+          kind: "text" as const,
+          id: 0,
+          key: "value",
+          value: "x".repeat(MARKDOWN_TREE_TEXT_UNITS),
+        }))
+      )
+    ).toThrow("text bound");
+  });
+
+  it("chunks wide-table alignment metadata without imposing a column cutoff", () => {
+    const source = `|${" header |".repeat(600)}\n|${" :---: |".repeat(600)}\n|${" value |".repeat(600)}\n`;
+    const tree = unified().use(remarkParse).use(remarkGfm).parse(source);
+    const receiver = createMarkdownTreeReceiver();
+    for (const record of markdownTreeRecords(tree)) receiver.consume([record]);
+    expect(receiver.finish()).toEqual(tree);
+  });
+
+  it.each([
+    { type: "root", value: "unbounded inline text" },
+    { type: "root", align: Array(600).fill(null) },
+    { type: "root", position: { start: { line: 1, column: 1, offset: "unbounded metadata" }, end: { line: 1, column: 1, offset: 0 } } },
+  ])("rejects text and arrays outside the bounded field channel (%#)", (node) => {
+    expect(() => createMarkdownTreeReceiver().consume([{ kind: "node", id: 0, parent: null, node, children: true }])).toThrow("tree node");
+  });
+
+  it("isolates normalization workers, bounds results and cleans up success, cancellation, decode errors and timeouts", async () => {
     class PreparationWorker extends EventTarget {
       static instances: PreparationWorker[] = [];
       onmessage: ((event: MessageEvent<PreparationResponse>) => void) | null = null;
@@ -54,13 +198,11 @@ describe("engine-neutral Markdown syntax adapter", () => {
     const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
     try {
       const controller = new AbortController();
-      const pending = prepareCodePreviewInWorker(["* item"], 1, controller.signal, vi.fn(), undefined, { normalizeSourceOnly: true });
+      const pending = prepareCodePreviewInWorker(["* item"], 1, controller.signal, vi.fn());
       const worker = PreparationWorker.instances[0];
-      expect(worker.postMessage.mock.calls[0][0]).toMatchObject({ type: "prepare", normalizeSourceOnly: true });
+      expect(worker.postMessage.mock.calls[0][0]).toEqual({ type: "prepare", generation: 1, prepareTree: undefined });
       const cancelledController = new AbortController();
-      const cancelled = prepareCodePreviewInWorker(["new"], 2, cancelledController.signal, vi.fn(), undefined, {
-        normalizeSourceOnly: true,
-      });
+      const cancelled = prepareCodePreviewInWorker(["new"], 2, cancelledController.signal, vi.fn());
       const cancelledWorker = PreparationWorker.instances[1];
       expect(cancelledWorker).not.toBe(worker);
       worker.receive({ type: "source-ack", generation: 1, sequence: 0 });
@@ -68,10 +210,63 @@ describe("engine-neutral Markdown syntax adapter", () => {
       expect(worker.postMessage).toHaveBeenLastCalledWith({ type: "run", generation: 1 });
       worker.receive({ type: "normalized-source", generation: 1, sequence: 1, text: "- ", final: false });
       worker.receive({ type: "normalized-source", generation: 1, sequence: 2, text: "item", final: true });
-      worker.receive({ type: "complete", generation: 1, preparationMs: 1, indexingMs: 0 });
+      worker.receive({ type: "complete", generation: 1, preparationMs: 1 });
       expect((await pending).normalizedSource).toBe("- item");
       expect(worker.terminate).toHaveBeenCalledOnce();
       expect(worker.onmessage).toBeNull();
+      const treeJob = prepareCodePreviewInWorker([""], 20, new AbortController().signal, vi.fn(), { prepareTree: true });
+      const treeWorker = PreparationWorker.instances.at(-1)!;
+      treeWorker.receive({ type: "source-ack", generation: 20, sequence: 0 });
+      treeWorker.receive({ type: "source-ack", generation: 20, sequence: 1 });
+      treeWorker.receive({ type: "normalized-source", generation: 20, sequence: 1, text: "", final: true });
+      treeWorker.receive({
+        type: "tree-chunk",
+        generation: 20,
+        sequence: 1,
+        records: [{ kind: "node", id: 0, parent: null, node: { type: "root" }, children: true }],
+        final: true,
+      });
+      expect(treeWorker.postMessage).toHaveBeenLastCalledWith({ type: "ack", generation: 20 });
+      treeWorker.postMessage.mockClear();
+      expect(treeWorker.postMessage).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(treeWorker.postMessage).toHaveBeenCalledExactlyOnceWith({ type: "ack", generation: 20 }));
+      treeWorker.receive({ type: "complete", generation: 20, preparationMs: 1 });
+      expect((await treeJob).preparedTree).toEqual({ type: "root", children: [] });
+      expect(treeWorker.terminate).toHaveBeenCalledOnce();
+      PreparationWorker.instances.pop();
+      for (const mode of ["missing-final", "stale-then-cancel", "bad-sequence"] as const) {
+        const treeController = new AbortController();
+        const incomplete = prepareCodePreviewInWorker([""], 21, treeController.signal, vi.fn(), { prepareTree: true });
+        const incompleteWorker = PreparationWorker.instances.at(-1)!;
+        incompleteWorker.receive({ type: "source-ack", generation: 21, sequence: 0 });
+        incompleteWorker.receive({ type: "source-ack", generation: 21, sequence: 1 });
+        incompleteWorker.receive({ type: "normalized-source", generation: 21, sequence: 1, text: "", final: true });
+        const page = {
+          type: "tree-chunk" as const,
+          generation: 21,
+          sequence: 1,
+          records: [{ kind: "node" as const, id: 0, parent: null, node: { type: "root" }, children: true }],
+          final: false,
+        };
+        if (mode === "missing-final") {
+          incompleteWorker.receive(page);
+          incompleteWorker.receive({ type: "complete", generation: 21, preparationMs: 0 });
+          await expect(incomplete).rejects.toThrow("final tree chunk");
+        } else if (mode === "bad-sequence") {
+          incompleteWorker.receive({ ...page, sequence: 2 });
+          await expect(incomplete).rejects.toThrow("tree sequence");
+        } else {
+          incompleteWorker.receive({ ...page, generation: 22 });
+          incompleteWorker.receive(page);
+          const sends = incompleteWorker.postMessage.mock.calls.length;
+          treeController.abort();
+          await expect(incomplete).rejects.toMatchObject({ name: "AbortError" });
+          expect(incompleteWorker.postMessage.mock.calls).toHaveLength(sends);
+        }
+        expect(incompleteWorker.terminate).toHaveBeenCalledOnce();
+        expect(incompleteWorker.onmessage).toBeNull();
+        PreparationWorker.instances.pop();
+      }
       const late = cancelledWorker.onmessage;
       cancelledController.abort();
       await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
@@ -79,9 +274,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       expect(cancelledWorker.terminate).toHaveBeenCalledOnce();
       expect(cancelledWorker.onmessage).toBeNull();
 
-      const malformed = prepareCodePreviewInWorker(["bad"], 3, new AbortController().signal, vi.fn(), undefined, {
-        normalizeSourceOnly: true,
-      });
+      const malformed = prepareCodePreviewInWorker(["bad"], 3, new AbortController().signal, vi.fn());
       const malformedWorker = PreparationWorker.instances[2];
       malformedWorker.receive({ type: "source-ack", generation: 3, sequence: 0 });
       malformedWorker.receive({ type: "source-ack", generation: 3, sequence: 1 });
@@ -95,76 +288,40 @@ describe("engine-neutral Markdown syntax adapter", () => {
       await expect(malformed).rejects.toThrow("Invalid normalized Markdown source chunk");
       expect(malformedWorker.terminate).toHaveBeenCalledOnce();
 
-      const undecodable = prepareCodePreviewInWorker(["bad"], 4, new AbortController().signal, vi.fn(), undefined, {
-        normalizeSourceOnly: true,
-      });
+      const undecodable = prepareCodePreviewInWorker(["bad"], 4, new AbortController().signal, vi.fn());
       const undecodableWorker = PreparationWorker.instances[3];
       undecodableWorker.dispatchEvent(new Event("messageerror"));
       await expect(undecodable).rejects.toThrow("could not be decoded");
       expect(undecodableWorker.terminate).toHaveBeenCalledOnce();
 
       vi.useFakeTimers();
-      const stalled = prepareCodePreviewInWorker(["bad"], 5, new AbortController().signal, vi.fn(), undefined, {
-        normalizeSourceOnly: true,
-      });
+      const stalled = prepareCodePreviewInWorker(["bad"], 5, new AbortController().signal, vi.fn());
       const stalledWorker = PreparationWorker.instances[4];
       const rejection = expect(stalled).rejects.toThrow("made no progress");
       await vi.advanceTimersByTimeAsync(WORKER_PROGRESS_TIMEOUT_MS);
       await rejection;
       expect(stalledWorker.terminate).toHaveBeenCalledOnce();
+      vi.useRealTimers();
 
-      const documentJob = prepareCodePreviewInWorker(["canonical"], 6, new AbortController().signal, vi.fn(), vi.fn(), {
-        isolated: true,
-        canonicalSource: true,
-      });
-      const documentWorker = PreparationWorker.instances[5];
-      expect(documentWorker.postMessage.mock.calls[0][0]).toMatchObject({ type: "prepare", document: true, canonicalSource: true });
-      documentWorker.receive({ type: "source-ack", generation: 6, sequence: 0 });
-      documentWorker.receive({ type: "source-ack", generation: 6, sequence: 1 });
-      const documentTimings = { modelMs: 1, recordsMs: 2, acknowledgementWaitMs: 3, syntaxMs: 4, records: 5, batches: 1 };
-      documentWorker.receive({ type: "complete", generation: 6, preparationMs: 10, indexingMs: 0, documentTimings });
-      const documentResult = await documentJob;
-      expect(documentResult.documentTimings).toEqual(documentTimings);
-      expect(documentResult.transportTimings).toEqual({ startupToFirstAckMs: expect.any(Number), sourceTransferMs: expect.any(Number) });
-      const session = documentResult.syntaxSession!;
-      expect(documentWorker.terminate).not.toHaveBeenCalled();
-      const page = session.page({ id: 0, from: 0, to: 1 }, 0);
-      expect(documentWorker.postMessage).toHaveBeenLastCalledWith({
-        type: "syntax-window",
-        generation: 6,
-        requestId: 1,
-        window: { id: 0, from: 0, to: 1 },
-        offset: 0,
-      });
-      documentWorker.dispatchEvent(
-        new MessageEvent("message", { data: { type: "syntax-page", generation: 6, requestId: 1, records: [], next: null } })
-      );
-      await expect(page).resolves.toMatchObject({ type: "syntax-page", records: [] });
-      const pendingPage = session.page({ id: 0, from: 0, to: 1 }, 0);
-      const disposedPage = expect(pendingPage).rejects.toMatchObject({ name: "AbortError" });
-      session.dispose();
-      session.dispose();
-      await disposedPage;
-      expect(documentWorker.terminate).toHaveBeenCalledOnce();
-
-      const consume = vi.fn().mockResolvedValue(undefined);
-      const oversized = prepareCodePreviewInWorker(["canonical"], 7, new AbortController().signal, vi.fn(), consume, { isolated: true });
-      const oversizedWorker = PreparationWorker.instances[6];
-      const value = "x".repeat(DOCUMENT_TEXT_CHUNK_UNITS);
-      oversizedWorker.receive({
-        type: "document-chunk",
-        generation: 7,
-        records: Array.from({ length: DOCUMENT_PUBLICATION_BATCH_UNITS / value.length + 1 }, (_, id) => ({
-          kind: "text" as const,
-          id,
-          parent: 0,
-          from: id * value.length,
-          value,
-        })),
-      });
-      await expect(oversized).rejects.toThrow("Invalid Markdown document batch");
-      expect(consume).not.toHaveBeenCalled();
-      expect(oversizedWorker.terminate).toHaveBeenCalledOnce();
+      const source = "x".repeat(PREPARATION_SOURCE_CHUNK_UNITS * 2 + 1);
+      const chunked = prepareCodePreviewInWorker([source], 6, new AbortController().signal, vi.fn());
+      const chunkedWorker = PreparationWorker.instances.at(-1)!;
+      for (let sequence = 0; sequence <= 3; sequence += 1) {
+        chunkedWorker.receive({ type: "source-ack", generation: 6, sequence });
+      }
+      const sent = chunkedWorker.postMessage.mock.calls.map(([message]) => message).filter((message) => message.type === "source");
+      expect(sent.map((message) => message.text).join("")).toBe(source);
+      expect(sent.map((message) => message.text.length)).toEqual([PREPARATION_SOURCE_CHUNK_UNITS, PREPARATION_SOURCE_CHUNK_UNITS, 1]);
+      expect(sent.map((message) => message.final)).toEqual([false, false, true]);
+      expect(chunkedWorker.postMessage).toHaveBeenLastCalledWith({ type: "run", generation: 6 });
+      for (const [index, message] of sent.entries()) {
+        chunkedWorker.receive({ type: "normalized-source", generation: 6, sequence: index + 1, text: message.text, final: message.final });
+      }
+      chunkedWorker.receive({ type: "complete", generation: 6, preparationMs: 1 });
+      await expect(chunked).resolves.toMatchObject({ normalizedSource: source });
+      expect(chunkedWorker.terminate).toHaveBeenCalledOnce();
+      await expect(prepareCodePreviewInWorker([], 7, new AbortController().signal, vi.fn())).rejects.toThrow("one source document");
+      await expect(prepareCodePreviewInWorker(["a", "b"], 7, new AbortController().signal, vi.fn())).rejects.toThrow("one source document");
     } finally {
       vi.useRealTimers();
       location.mockRestore();
@@ -301,6 +458,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     }
   });
   it("bounds live syntax ranges without changing text or selection and cancels queued publication", () => {
+    const intersections = mockSyntaxIntersections();
     const frames = new Map<number, FrameRequestCallback>();
     let nextFrame = 0;
     const highlights = new Map<string, Set<Range>>();
@@ -352,17 +510,27 @@ describe("engine-neutral Markdown syntax adapter", () => {
         },
         controller.signal
       );
+      const style = [...document.head.querySelectorAll("style")].find((element) =>
+        element.textContent?.includes("::highlight(markdown-syntax-")
+      );
+      expect(style).toBeDefined();
+      for (const [category, role] of Object.entries(TOKEN_COLOR_ROLES)) {
+        expect(style!.textContent).toMatch(new RegExp(`-${category}\\) \\{ color: var\\(--sambee-syntax-${role}\\); \\}`));
+      }
       const runFrame = () => {
         const pending = [...frames.values()];
         frames.clear();
         for (const callback of pending) callback(0);
       };
+      intersections.publish([code]);
       runFrame();
+      expect(geometry).not.toHaveBeenCalled();
       for (const stage of ["task", "viewport-geometry", "block-geometry", "mapping", "offset-geometry", "ranges", "publication"]) {
         expect(measurements.mock.calls.some(([name]) => name === `sambee:preview-syntax:${stage}`)).toBe(true);
       }
       measurements.mockRestore();
       expect([...highlights.values()].reduce((total, ranges) => total + ranges.size, 0)).toBe(MAX_VIEWPORT_SYNTAX_RANGES);
+      expect([...highlights.values()].every((highlight) => (highlight as Set<Range> & { priority: number }).priority === -1)).toBe(true);
       expect(code.firstChild).toBe(node);
       expect(code.textContent).toBe(`${source}\n`);
       expect(selection.toString()).toBe(selected);
@@ -371,6 +539,8 @@ describe("engine-neutral Markdown syntax adapter", () => {
       controller.abort();
       expect(frames.size).toBe(0);
       expect(highlights.size).toBe(0);
+      expect(style!.isConnected).toBe(false);
+      expect(intersections.disconnect).toHaveBeenCalledOnce();
       dispose();
     } finally {
       controller.abort();
@@ -380,7 +550,53 @@ describe("engine-neutral Markdown syntax adapter", () => {
       unmount();
     }
   });
-  it("clips long-line syntax to visible columns and refreshes nested horizontal scroll", () => {
+  it.each([
+    [0, 5],
+    [5, 7],
+    [7, 9],
+    [9, 10],
+    [10, 10],
+    [11, 12],
+  ])("retains exact horizontal boundaries with nonuniform and coincident UTF-16 positions (%s/%s)", (left, right) => {
+    const text = "\tA\u{1f642}\u754ce\u0301";
+    const characterRights = [4, 5, 7, 7, 9, 10, 10];
+    const pre = document.createElement("pre");
+    pre.style.whiteSpace = "pre";
+    Object.defineProperties(pre, { scrollWidth: { value: 20 }, clientWidth: { value: 1 } });
+    const rect = vi.spyOn(pre, "getBoundingClientRect").mockReturnValue({ left, right } as DOMRect);
+    const rangeAt = (from: number) => ({ getBoundingClientRect: () => ({ right: characterRights[from] }) }) as Range;
+    const expected = (edge: number) => {
+      const index = characterRights.findIndex((position) => position >= edge);
+      return index < 0 ? text.length : index;
+    };
+    try {
+      expect(visibleSyntaxColumnWindows(text, rangeAt, { left, right }, 0, text.length, pre)).toEqual([
+        { from: expected(left), to: Math.min(text.length, expected(right) + 1) },
+      ]);
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it.each([
+    { left: -200, right: -100 },
+    { left: 100, right: 200 },
+  ])("skips character probes when the horizontal clip is outside the viewport (%#)", (clip) => {
+    const pre = document.createElement("pre");
+    pre.style.whiteSpace = "pre";
+    Object.defineProperties(pre, { scrollWidth: { value: 100 }, clientWidth: { value: 50 } });
+    const rect = vi.spyOn(pre, "getBoundingClientRect").mockReturnValue(clip as DOMRect);
+    const rangeAt = vi.fn();
+    try {
+      expect(visibleSyntaxColumnWindows("text", rangeAt, { left: 0, right: 50 }, 0, 4, pre)).toEqual([]);
+      expect(rangeAt).not.toHaveBeenCalled();
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it.each(["load", "loadingdone"])("refreshes clipped syntax after nested scroll and %s without changing text", (eventType) => {
+    const intersections = mockSyntaxIntersections();
     const frames = new Map<number, FrameRequestCallback>();
     const highlights = new Map<string, Set<Range>>();
     let nextFrame = 0;
@@ -408,8 +624,16 @@ describe("engine-neutral Markdown syntax adapter", () => {
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(rect);
     vi.spyOn(code, "getBoundingClientRect").mockReturnValue(rect);
     vi.spyOn(pre, "getBoundingClientRect").mockReturnValue(rect);
+    const fonts = new EventTarget();
+    const originalFonts = Object.getOwnPropertyDescriptor(document, "fonts");
+    Object.defineProperty(document, "fonts", { configurable: true, value: fonts });
+    const removeFontListener = vi.spyOn(fonts, "removeEventListener");
+    const removeRootListener = vi.spyOn(container, "removeEventListener");
+    const loadTarget = document.createElement("img");
+    container.append(loadTarget);
+    let characterWidth = 1;
     const geometry = vi.spyOn(Range.prototype, "getBoundingClientRect").mockImplementation(function (this: Range) {
-      return { ...rect, left: this.startOffset - pre.scrollLeft, right: this.endOffset - pre.scrollLeft };
+      return { ...rect, left: this.startOffset * characterWidth - pre.scrollLeft, right: this.endOffset * characterWidth - pre.scrollLeft };
     });
     const controller = new AbortController();
     const runFrame = () => {
@@ -429,23 +653,111 @@ describe("engine-neutral Markdown syntax adapter", () => {
         },
         controller.signal
       );
+      intersections.publish([code]);
       runFrame();
       const visible = () => [...highlights.values()].flatMap((ranges) => [...ranges]);
       expect(visible().length).toBeGreaterThan(0);
       expect(visible().length).toBeLessThan(100);
       expect(Math.max(...visible().map((range) => range.endOffset))).toBeLessThanOrEqual(102);
+      expect(geometry.mock.calls.length).toBeLessThan(20);
       pre.scrollLeft = 10_000;
       pre.dispatchEvent(new Event("scroll"));
       expect(frames.size).toBe(1);
       runFrame();
       expect(Math.min(...visible().map((range) => range.startOffset))).toBeGreaterThanOrEqual(9_999);
+      pre.scrollLeft = 0;
+      characterWidth = 0.5;
+      const target = eventType === "load" ? loadTarget : fonts;
+      target.dispatchEvent(new Event(eventType));
+      target.dispatchEvent(new Event(eventType));
+      expect(frames.size).toBe(1);
+      runFrame();
+      expect(Math.min(...visible().map((range) => range.startOffset))).toBe(0);
+      expect(Math.max(...visible().map((range) => range.endOffset))).toBeGreaterThan(190);
+      expect(Math.max(...visible().map((range) => range.endOffset))).toBeLessThanOrEqual(202);
       expect(code.textContent).toBe(`${source}\n`);
       controller.abort();
       expect(frames.size).toBe(0);
       expect(highlights.size).toBe(0);
+      expect(removeFontListener).toHaveBeenCalledWith("loadingdone", expect.any(Function));
+      expect(removeRootListener).toHaveBeenCalledWith("load", expect.any(Function), true);
+      target.dispatchEvent(new Event(eventType));
+      expect(frames.size).toBe(0);
+    } finally {
+      controller.abort();
+      if (originalFonts) Object.defineProperty(document, "fonts", originalFonts);
+      else Reflect.deleteProperty(document, "fonts");
+      removeFontListener.mockRestore();
+      removeRootListener.mockRestore();
+      geometry.mockRestore();
+      vi.unstubAllGlobals();
+      unmount();
+    }
+  });
+
+  it("publishes a late visible block during continuous scrolling without scanning off-screen blocks", () => {
+    const intersections = mockSyntaxIntersections();
+    const frames = new Map<number, FrameRequestCallback>();
+    const highlights = new Map<string, Set<Range>>();
+    let nextFrame = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    vi.stubGlobal("CSS", { highlights });
+    vi.stubGlobal(
+      "Highlight",
+      class extends Set<Range> {
+        constructor(...ranges: Range[]) {
+          super(ranges);
+        }
+      }
+    );
+    const { container, unmount } = render(<ReactMarkdown>{"```js\nx\n```\n\n".repeat(600)}</ReactMarkdown>);
+    const blocks = [...container.querySelectorAll("code")];
+    const destination = blocks[599];
+    const bounds = { top: 0, bottom: 20 } as DOMRect;
+    const geometry = vi.spyOn(Range.prototype, "getBoundingClientRect").mockReturnValue(bounds);
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(bounds);
+    const probes = blocks.map((block, index) =>
+      vi.spyOn(block, "getBoundingClientRect").mockReturnValue(index === 599 ? bounds : ({ top: -20, bottom: -10 } as DOMRect))
+    );
+    const controller = new AbortController();
+    try {
+      publishMarkdownSyntax(
+        container,
+        container,
+        {
+          requests: blocks.map(() => ({ text: "x", label: "js" })),
+          results: blocks.map(() => ({ ranges: [{ from: 0, to: 1, categories: ["keyword"] }] })),
+        },
+        controller.signal
+      );
+      intersections.publish([destination]);
+      for (let iteration = 0; iteration < 60; iteration += 1) {
+        container.dispatchEvent(new Event("scroll"));
+        const pending = [...frames.values()];
+        frames.clear();
+        for (const callback of pending) callback(0);
+        const ranges = [...highlights.values()].flatMap((collection) => [...collection]);
+        expect(ranges).toHaveLength(1);
+        expect(ranges[0].startContainer).toBe(destination.firstChild);
+      }
+      expect(probes.slice(0, -1).every((probe) => probe.mock.calls.length === 0)).toBe(true);
+      intersections.publish([destination], false);
+      const pending = [...frames.values()];
+      frames.clear();
+      for (const callback of pending) callback(0);
+      expect([...highlights.values()].every((collection) => collection.size === 0)).toBe(true);
+      controller.abort();
+      expect(intersections.disconnect).toHaveBeenCalledOnce();
+      expect(highlights.size).toBe(0);
+      expect(frames.size).toBe(0);
     } finally {
       controller.abort();
       geometry.mockRestore();
+      vi.restoreAllMocks();
       vi.unstubAllGlobals();
       unmount();
     }

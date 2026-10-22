@@ -1,5 +1,8 @@
+import { createTheme, getContrastRatio } from "@mui/material/styles";
+import { blend, decomposeColor } from "@mui/system/colorManipulator";
 import { describe, expect, it } from "vitest";
 import builtInThemeIds from "../../../../shared/built_in_theme_ids.json";
+import { getSearchHighlightColors } from "../commonStyles";
 import { resolveThemePalette } from "../palette";
 import { builtInThemes, getDefaultTheme, getThemeById } from "../themes";
 
@@ -8,6 +11,30 @@ import { builtInThemes, getDefaultTheme, getThemeById } from "../themes";
 //
 
 describe("Theme System - themes.ts", () => {
+  it.each(builtInThemes)("keeps all $id syntax roles readable on viewer and code backgrounds", (definition) => {
+    const document = definition.components!.markdownViewer!;
+    for (const foreground of Object.values(definition.components!.syntax!)) {
+      for (const background of [document.viewerBackground, document.document!.blockBackground]) {
+        expect(getContrastRatio(foreground, background)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it.each(builtInThemes)("keeps $id search text readable on viewer and code backgrounds", (definition) => {
+    const theme = createTheme({ palette: { mode: definition.mode } });
+    const document = definition.components!.markdownViewer!;
+    const highlights = getSearchHighlightColors(theme, definition);
+    for (const overlay of Object.values(highlights)) {
+      const opacity = Number(decomposeColor(overlay).values[3]);
+      for (const [foreground, background] of [
+        [document.viewerText, document.viewerBackground],
+        [document.document!.codeText, document.document!.blockBackground],
+      ]) {
+        expect(getContrastRatio(foreground, blend(background, overlay, opacity))).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   describe("builtInThemes", () => {
     it("should have at least 2 built-in themes", () => {
       expect(builtInThemes.length).toBeGreaterThanOrEqual(2);

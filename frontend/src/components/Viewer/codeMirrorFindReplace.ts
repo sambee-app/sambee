@@ -1,6 +1,20 @@
-import { getSearchQuery, SearchQuery, setSearchQuery } from "@codemirror/search";
+import {
+  getSearchQuery,
+  findNext as nativeFindNext,
+  findPrevious as nativeFindPrevious,
+  replaceAll as nativeReplaceAll,
+  replaceNext as nativeReplaceNext,
+  SearchQuery,
+  setSearchQuery,
+} from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
 import { findSelectedCodeMirrorSearchMatch, getCodeMirrorSearchMatches } from "../Editor/codeMirrorSearchMatches";
+import { getSourceRegexSearch, runSourceRegexSearchCommand } from "../Editor/sourceRegexSearch";
+
+export const findNext = (view: EditorView): boolean => runSourceRegexSearchCommand(view, "next") || nativeFindNext(view);
+export const findPrevious = (view: EditorView): boolean => runSourceRegexSearchCommand(view, "previous") || nativeFindPrevious(view);
+export const replaceNext = (view: EditorView): boolean => runSourceRegexSearchCommand(view, "replace-one") || nativeReplaceNext(view);
+export const replaceAll = (view: EditorView): boolean => runSourceRegexSearchCommand(view, "replace-all") || nativeReplaceAll(view);
 
 export interface CodeMirrorFindReplaceRequest {
   caseSensitive: boolean;
@@ -11,6 +25,8 @@ export interface CodeMirrorFindReplaceRequest {
 }
 
 export interface CodeMirrorFindReplaceMetrics {
+  pending: boolean;
+  error?: string;
   currentMatch: number;
   isSearchable: boolean;
   isValid: boolean;
@@ -32,16 +48,25 @@ function resolveSearchMatchState(view: EditorView): CodeMirrorFindReplaceMetrics
   const isSearchable = view.state.doc.length > 0;
 
   if (!searchText) {
-    return { currentMatch: 0, isSearchable, isValid: true, matches: 0, searchText };
+    return { currentMatch: 0, isSearchable, isValid: true, matches: 0, searchText, pending: false };
   }
 
   if (!query.valid) {
-    return { currentMatch: 0, isSearchable, isValid: false, matches: 0, searchText };
+    return { currentMatch: 0, isSearchable, isValid: false, matches: 0, searchText, pending: false };
   }
 
   const ranges = getCodeMirrorSearchMatches(view);
   const currentMatch = findSelectedCodeMirrorSearchMatch(ranges, view.state.selection.main) + 1;
-  return { currentMatch, isSearchable, isValid: true, matches: ranges.length, searchText };
+  const regex = query.regexp ? getSourceRegexSearch(view) : undefined;
+  return {
+    currentMatch,
+    isSearchable,
+    isValid: true,
+    matches: ranges.length,
+    searchText,
+    pending: regex?.pending ?? false,
+    error: regex?.error,
+  };
 }
 
 export function updateCodeMirrorFindReplaceQuery(view: EditorView | null | undefined, options: CodeMirrorFindReplaceOptions): void {
@@ -65,7 +90,7 @@ export function updateCodeMirrorFindReplaceQuery(view: EditorView | null | undef
 
 export function getCodeMirrorFindReplaceMetrics(view: EditorView | null | undefined): CodeMirrorFindReplaceMetrics {
   if (!view) {
-    return { currentMatch: 0, isSearchable: false, isValid: true, matches: 0, searchText: "" };
+    return { currentMatch: 0, isSearchable: false, isValid: true, matches: 0, searchText: "", pending: false };
   }
 
   return resolveSearchMatchState(view);

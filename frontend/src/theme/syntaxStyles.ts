@@ -1,12 +1,12 @@
 import type { Theme } from "@mui/material";
 import type { CSSProperties } from "react";
-import { TOKEN_CATEGORIES, tokenClasses } from "../utils/syntaxHighlighting";
+import { TOKEN_CATEGORIES, TOKEN_COLOR_ROLES, tokenClasses } from "../utils/syntaxHighlighting";
 import { getDefaultTheme } from "./themes";
 import { SYNTAX_COLOR_ROLES } from "./types";
 
 export const syntaxTokenStyles = Object.fromEntries(
   TOKEN_CATEGORIES.map((category) => {
-    const role = category === "heading" || category === "structure" ? "keyword" : category;
+    const role = TOKEN_COLOR_ROLES[category];
     const color =
       category === "identifier" || category === "inlineCode"
         ? "var(--sambee-syntax-foreground, inherit)"

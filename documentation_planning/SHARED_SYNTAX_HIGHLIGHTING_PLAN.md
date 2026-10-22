@@ -1,880 +1,806 @@
-# Shared Syntax Highlighting Plan
+# Shared Syntax Highlighting Completion Plan
 
-Updated: 2026-10-21. Core highlighting is integrated; acceptance and performance
-work remain. **Merge/rollout is blocked by whole-viewer responsiveness.**
-This document replaces the historical design, P1-P6 status tables and experiment
-log. The scope and acceptance requirements below are authoritative; completed
-implementation details belong in code, tests and developer documentation.
+Updated: 2026-10-22. **Merge and rollout remain blocked by responsiveness and
+open interaction acceptance.** Work through the remaining gates in dependency
+order: define acceptance, close correctness, check native constraints, then
+optimize measured costs. Mark items complete only with their relevant
+verification. Functional passes do not close performance or manual interaction
+gates. Reordering does not approve policy changes or relax existing targets.
 
-## Goal
+## Goal And Boundaries
 
-Use the same language resolution, parsers, token categories and theme colors in
-the text viewer/editor, rendered Markdown code blocks and Markdown editor.
-Highlight Markdown source structure as well as fenced code. Preserve source
-fidelity, editing, search, selection, copying, navigation, Save and recovery.
+Share language resolution, parsers, token categories and theme colors across
+the text viewer/editor, rendered Markdown fences and Markdown source editor.
+Highlight Markdown structure and embedded code. Preserve exact source, editing,
+search, selection, copy, navigation, Save and recovery.
 
-Keep CodeMirror behind the existing small application-owned highlighting
-contract. Do not replace the editor, embed editors in rendered code blocks or
-build a generic highlighting/search/worker framework. Editor replacement and
-parser replacement are separate future projects, not requirements here.
+Keep CodeMirror behind the small application-owned highlighting contract. Reuse
+the native editor, registry, token mapping, theme variables, lazy grammars and
+dedicated cancellable workers. ReactMarkdown is the only application
+whole-document renderer. Initial loads reuse the normalization worker's canonical
+tree, paired with its exact source/generation and cloned before remark transforms.
+Edited content without a matching tree keeps normal parsing.
 
-## Current State
+Do not add a renderer, parser stack, embedded preview editors, virtualizer,
+worker pool, provider registry, parallel theme store, generic scheduler or
+geometry cache without measured need and explicit scope approval. Retired
+renderer proofs are not deliverables. Recovery/authentication redesign and the
+experimental checkpoint scheduler remain out of scope.
 
-Implemented and covered by focused checks:
+## Current Status And Findings
 
-- Shared lazy language resolution, token mapping, Markdown source styling and
-  theme integration, including legacy-theme compatibility.
-- Live Markdown syntax preparation in a cancellable worker, bounded source/result
-  transfer and frame-paced CSS Highlights capped at 4,000 viewport ranges.
-  Highlighting does not replace preview text or restart its search.
-- Immutable editor snapshot handles used by Save; duplicate serialization on
-  controlled-value echoes removed. One full-string callback per edit remains.
-- Cached source-search metrics and shared binary active-match lookup;
-  selection/viewport decoration updates do not independently recount all matches.
-  DOM next/previous activation touches only the old and new match.
-- Bounded User Timing entries separate preview DOM capture, matching, slice mapping,
-  marker publication and clearing. Dense marker clearing coalesces text once per
-  parent instead of normalizing thousands of fragments with live syntax ranges;
-  this removes a reproducible Chromium changed-query hang after syntax publication.
-- Markdown preview search now retains the unchanged-content DOM index and logical
-  matches, with at most 1,000 viewport CSS search ranges plus one active range.
-  Query changes don't replace text nodes; syntax/theme updates don't recapture the
-  index. Text mutations invalidate it. PDF search keeps its existing marker path.
-- Syntax publication clips horizontally overflowing unwrapped code to visible
-  columns and refreshes on nested scrolling. DOM capture joins chunks once rather
-  than repeatedly inspecting a growing concatenated string. Navigation, syntax
-  stages, worker round trips and initial commit/frame milestones are measured.
-- Isolated retained-text whole-Markdown/model-search and source-regex worker
-  prototypes. Their successful proofs are not live-viewer acceptance.
-- The existing retained publisher is connected to the actual viewer only in
-  `test-preview` builds. Ordinary production/development builds retain
-  ReactMarkdown; this is an integration experiment, not a rollout.
+- **The shared foundation is sound.** Registry, token mapping, lazy grammars,
+  Markdown source styles and legacy theme compatibility are integrated.
+  Representative four-surface language parity now passes in production browsers;
+  grammar-readiness, failure isolation and theme/browser-state slices also pass.
+  Theme-dialog regressions now pass; wider native-interaction acceptance remains open.
+  Item 5's printing and heading implementations are complete. The independent
+  printing slice has 24 browser passes and 12 complete text/image PDF outputs;
+  item 5c's automated gate now passes all 12 cases and six PDF-content checks.
+  The user confirms 5d's manual checks are complete; all substeps 5a-5e and
+  item 5's representative native-constraint gate are complete.
+  Language-independent token enrichment is complete under 5e. Broader
+  interaction/device acceptance remains open under item 7.
+  Passing these subchecks
+  doesn't authorize unrelated layout optimization or establish rollout acceptance.
+  Configuration-only theme/grammar updates no longer
+  request caret reveal; four-surface browser selection/search/scroll preservation
+  is now verified without closing scrolling-performance acceptance.
+- **Progress is measurable, not rollout acceptance.** Canonical-tree reuse
+  removes repeated initial main-thread parsing. Viewport publication and local
+  geometry fast paths reduce work without replacing native text. The latest
+  matrix still fails 19/48 timing trials solely on the 50 ms timer-gap target;
+  the previous tree-reuse run failed 18. The latest step is not uniformly better.
+- **Publisher invalidation defect fixed locally.** Syntax now refreshes after
+  captured image loads and font loading, matching preview search. Tests cover
+  clipping, coalescing, unchanged text, listener removal and post-disposal
+  inactivity. This does not close broader image/font/width acceptance.
+- **Highlight readiness passes the approved fixture envelope.** Syntax publication waits for all
+  requested blocks, while current text-load timing deliberately holds syntax
+  preparation. Measure first visible syntax and full preparation before
+  considering incremental publication; that barrier is not yet proven slow.
+  A separate unheld four-fixture slice now has 48 passes with
+  approved readiness limits enforced. Many-block visible-syntax maxima are
+  898.8/1,378 ms Chromium/Firefox; this does not justify incremental publication.
+  Long-line coverage now includes horizontal clipping and exact UTF-16 offsets.
+  A separate real-HTTP run now passes 96 cold/cache samples with fresh workers,
+  measured cache reuse and no preloading. Item 4b is complete; this doesn't
+  close the independent timer-gap, memory, interaction or device gates.
+- **Nested load and parse failure isolation is verified.** A failed nested
+  grammar retains enclosing Markdown structure and successful sibling highlighting.
+  Static mixed parsing contains startup/advance errors within the failing fence,
+  without mutating cached grammars, retrying or adding another parse. Cancellation
+  and depth safeguards remain intact. All 36 production browser failure/nesting
+  cases pass across both engines/widths, including pending-load cancellation and
+  clean-generation recovery. This does not close the old timer-gap gate.
+- **Production preparation is normalization-only.** The host, worker and protocol
+  no longer import document-preview models or contain hard-coded search/syntax
+  proof branches. Historical proof transport and worker execution remain in the
+  existing prototypes area, independent of the live normalization path. This is
+  dependency cleanup, not a measured performance improvement.
+- **Source regex containment is integrated, not fully accepted.** Dedicated
+  worker counts/navigation/replacement, bounded delivery, stale-plan guards,
+  timeout/restart and visible feedback have functional coverage. Dense atomic
+  replacement, retained result memory and sustained typing remain open.
+- **Worker support policy is decided; native gates remain open.** The existing
+  pre-app capability gate now requires the Web Worker API and shows the existing
+  unsupported-browser screen without importing the app when it is absent.
+  Worker-less app operation isn't supported; helper fallbacks don't establish a
+  supported mode. Startup/crash/timeout handling remains required. Actual browser
+  Find, OS clipboard, assistive technology, printing and physical devices still
+  need acceptance.
 
-Latest affected-slice verification: 231 shared-search/syntax/normalization/Markdown/PDF unit tests,
-48 unchanged performance-matrix trials per renderer, and six final native-viewer
-contract trials per renderer passed. The final retained smoke matrix also passes
-all 18 cases, including partial-publication cancellation. An initial default
-Firefox native trial raced delayed autofocus; waiting for automatic focus before
-Tab resolved the harness race, and all six final default native trials pass.
-Frontend lint, touched-file diagnostics and both build modes pass. The existing
-build warning for chunks above 500 kB remains. Performance and manual interaction
-acceptance are incomplete.
+Latest recorded unchanged production matrix: three trials per fixture, width
+and engine; 48 complete timing reports plus six native-contract passes. All
+fixture trials reached functional checks and cleanup. These are prior results,
+  not a performance rerun for the invalidation or nested-failure fixes.
 
-### Performance Baseline To Beat
-
-The original development-build dense fixture (54,000 code units, 6,000 matches)
-blocked a high-priority task for approximately 518-539 ms during token publication.
-Keep that fixture; a production-build speedup alone is not architectural proof.
-
-After bounded syntax publication, real production-viewer functional checks pass,
-but the surrounding rendering/search work still stalls. In the latest single-run
-matrix at widths 1543/390:
-
-- Chromium's 600-block fixture had 892-1,003 ms maximum timer gaps and
-  867/981 ms long tasks.
-- Firefox's near-safeguard search action took 1,212-1,270 ms; maximum timer gaps
-  reached 1,165 ms. Its Long Tasks API is unavailable, not evidence of zero stalls.
-
-Action timings include Playwright synchronization; timer gaps include scheduling.
-Neither isolates a CPU stage or measures input-to-paint latency. Separate initial
-Markdown rendering, search indexing/application, clearing and syntax painting
-before choosing the next optimization.
-
-### Search Attribution Follow-Up
-
-The subsequent three-trial production matrix at both widths separates synchronous
-search work. Rounded-up worst stage times across widths/trials, in milliseconds:
-
-| Engine / Fixture | DOM Capture | Marker Publication | Clearing |
+| Browser-Side Timing | Chromium Maximum | Firefox Maximum | Target |
 | --- | --- | --- | --- |
-| Chromium dense | 1 | 269 | 7 |
-| Chromium near-safeguard | 1 | 701 | 25 |
-| Chromium many-blocks | 101 | 369 | 82 |
-| Firefox dense | 1 | 690 | 432 |
-| Firefox near-safeguard | 1 | 1,383 | 763 |
-| Firefox many-blocks | 6 | 738 | 296 |
-
-Matching remained at or below 18 ms and slice mapping at or below 19 ms. Prioritize
-the planned viewport-only search presentation and unchanged-content DOM-index cache
-before adding a matching worker. Linear clearing fixes the Chromium hang, not the
-remaining per-match marker insertion/removal costs or Firefox clearing budget.
-
-The browser check now covers real sequential keyboard entry, changed queries,
-next/previous and last-match wrap, viewport scrolling and active search during
-syntax preparation completion. It records per-phase windows, long tasks where
-supported, timer gaps and keyboard-event-to-two-frame samples. These samples are
-not hardware input-to-visible-paint latency: event queue delay and visible paint
-are not measured. Sequential entry performs several searches and is not directly
-comparable to the earlier single-fill search action.
-
-Many-block initial-render-through-two-frame windows reached 1,638 ms in Chromium
-and 2,577 ms in Firefox; those windows still include click/Playwright scheduling.
-Keyboard-to-two-frame p95 reached 1,884 ms; maximum timer gaps reached 1,932 ms.
-Performance acceptance therefore still fails. Initial parse/React commit, deferred
-layout and syntax painting are not yet isolated; syntax-release windows include
-worker preparation and must not be reported as paint-only measurements. The
-document-switching checks currently close/reopen with preparation held, not rapid
-switching between distinct documents. Keep those attribution/interaction gaps open.
-
-### Cached Viewport Search Follow-Up
-
-The next three-trial matrix retained the original fixtures, engines and widths, added
-a 6,000-match horizontal long-line fixture, and
-asserted one DOM capture across sequential typing, changed queries, navigation and
-syntax publication. No search markers were created; the original selected text
-node survived query changes, and last-match navigation revealed the indexed range.
-All 48 final functional trials passed without retries or flakes. Worst synchronous
-search-presentation tasks on the original fixtures were 4.6 ms in Chromium and
-2 ms in Firefox, replacing marker publication that reached 701/1,383 ms. The added
-long-line fixture reached 26.7/8 ms. Clearing was at most 1 ms; matching was at most
-10 ms. The browser check verifies distinct computed search colors and retained
-text-node identity, but isn't the full custom/light/dark theme acceptance matrix.
-
-At that checkpoint, capture reached 60.2 ms in Chromium's many-block fixture
-(4 ms in Firefox); the linear capture fix below supersedes the need for yielding
-in that measured envelope. The changed
-query's end-to-end two-frame phase reached 147.6/148 ms for many blocks; last-match
-navigation reached 180/199 ms. The worst per-trial dense and near-safeguard
-keyboard-to-two-frame p95 stayed below 50 ms, but many-block p95 reached 100.7/99 ms.
-Long-line navigation reached 1,426.5 ms in Chromium; its keyboard p95 reached
-187.5 ms (44 ms in Firefox). These remain proxies, not actual hardware
-input-to-visible-paint measurements.
-
-Initial rendering and syntax refresh are still unresolved: many-block initial
-windows reached 1,668.6/2,595 ms and syntax-release windows reached 878.6/910 ms.
-Firefox's long-line syntax-release window reached 1,922 ms; its timer gap reached
-1,815 ms. Keep rollout blocked; the bounded search
-presentation result isn't a whole-viewer budget pass. Isolate initial commit/layout
-and syntax refresh before choosing the next renderer change. Scoped colors and
-counts/navigation-only execution without CSS Highlights are implemented, but final
-browser-support policy, physical mobile and full theme/accessibility acceptance
-remain open.
-
-The added real-keyboard long-line check also exposed delayed preview autofocus
-stealing focus mid-query. The preview now honors an already focused search input,
-matching the editor's existing guard. A deterministic timer regression covers it;
-the browser check waits for active-range query identity, not an unchanged count.
-
-### Navigation And Syntax Attribution
-
-The following baseline and fix use three long-line trials per engine/width, then
-the full 48-trial matrix. Navigation lookup, registry publication, geometry and
-scroll calls were small (at most 3 ms in the final matrix). Don't treat the older
-Playwright action windows as time spent inside these calls.
-
-Firefox's long-line stall was native syntax registry publication: up to 1,167 ms
-before horizontal clipping, versus at most 3 ms afterward. Final long-line syntax
-tasks were at most 28.8 ms in Chromium and 4 ms in Firefox. Navigation click-to-two-
-frame maxima were 69/37 ms, versus 205.1/51 ms in the instrumented pre-fix baseline.
-These samples begin at the click handler, not hardware input arrival; registry
-publication timings exclude deferred rendering unless the browser performs it
-inside the call. The far-right destination is checked for actual syntax ranges,
-not just nonempty registry entries.
-
-Chunked index assembly reduced Chromium many-block capture from 60.2 ms to 1.3 ms;
-Firefox remained at 4 ms. Defer asynchronous capture for this envelope rather than
-introducing pending-count state unnecessarily; retain the requirement to yield if
-larger measured captures exceed the budget. Search matching remained at most 11 ms.
-
-Worker round trips start at actual source send, excluding the intentional test
-hold. They include transport, grammar loading, scheduling and result acknowledgements,
-not isolated parser CPU. Final near-safeguard per-block round trips reached
-94.8/109 ms; many-block preparation still includes 600 sequential block exchanges.
-
-The next controlling gap is initial content preparation/rendering: many-block
-source-response-to-commit-observer intervals reached 651.4/1,562 ms, followed by
-up to 115.3/71 ms through two frames. These intervals include source decoding,
-application preparation, Markdown parsing, rendering, commit and scheduling; they
-don't isolate React CPU or establish visible paint. Full initial action windows
-were 1,656.3/2,612 ms and maximum timer gaps were 730.4/810 ms. Changed-query and
-last-match action windows also still exceed 100 ms on some fixtures. Rollout remains
-blocked. Attribute the pre-commit work and compare the existing retained-text
-publisher before any renderer migration; keep native interaction acceptance gates.
-
-### Initial Preparation Attribution
-
-Bounded `sambee:preview-preparation:*` entries now distinguish asynchronous blob
-decoding elapsed time, synchronous load normalization, code-block collection
-parse/walk, ReactMarkdown parse/transforms and HAST-ready-to-layout-effect time.
-Unified plugin hooks measure the actual renderer parser and transforms without
-changing the rendered HTML. The final interval includes element construction,
-reconciliation, commit and scheduling; it isn't isolated React CPU or visible
-paint. Collection parsing includes processor setup. Each named entry retains only
-the latest measurement and contains no source text; the browser observer collects
-the individual samples across the test lifecycle.
-
-Three many-block trials per width/engine established the baseline. Normalization
-parsed twice even when escape cleanup left the source unchanged. It now reuses
-the first tree in that case, but reparses when cleanup changes offsets. Existing
-normalization, editing and Save tests remain intact, with an added offset-shift
-regression covering later table breaks and list markers.
-
-The same 48-case matrix passed without retries or flakes afterward. These are
-maxima across six trials per engine, not sums or paired-trial CPU totals:
-
-| Many-block interval | Chromium baseline / final | Firefox baseline / final |
-| --- | --- | --- |
-| Load normalization | 339.9 / 202.8 ms | 793 / 407 ms |
-| Collection parse | 137.7 / 156.5 ms | 360 / 428 ms |
-| Render parse | 160.6 / 138.7 ms | 394 / 369 ms |
-| Render transforms | 1.2 / 1.4 ms | 1 / 1 ms |
-| HAST ready to layout effect | 14.2 / 5.4 ms | 9 / 8 ms |
-| Source response to commit observer | 642.8 / 510.1 ms | 1,555 / 1,220 ms |
-| Maximum timer gap | 734.4 / 608.2 ms | 816 / 859 ms |
-
-Final many-block decode elapsed maxima were 16.1/36 ms and collection traversal
-was at most 0.2/1 ms. The redundant normalization parse is removed, but synchronous
-full-source parsing remains the main attributed pre-commit cost. Firefox's timer
-gap didn't improve, and initial action windows still reached 1,727/2,512 ms.
-Functional success is not responsiveness acceptance; rollout remains blocked.
-
-### Render-Tree Code Collection
-
-The live preview now collects syntax requests during ReactMarkdown's existing
-remark pass rather than reparsing source separately. The standalone collector
-remains for proof and test callers, sharing the same tree walk. Collection retains
-block order, language labels and exact UTF-16 code text, including nested,
-indented and unlabeled blocks. It doesn't modify the tree or rendered markup.
-
-Each generation owns a request ref populated by the preview's layout effect only
-after its DOM commits. The parent's passive syntax effect snapshots those requests
-before starting preparation. Cleanup aborts obsolete preparation, and the existing
-generation guard prevents late results from publishing into another document.
-Tests cover committed-DOM readiness and a replaced generation's late result as
-well as existing selection, search, unmount, editing, Save and recovery behavior.
-
-All 48 unchanged functional trials passed without retries or flakes, with an added
-assertion that the separate `collection-parse` stage is absent. The collection walk
-is now inside the measured render-transform interval, not additional time to sum.
-Many-block maxima before/after this change were:
-
-| Many-block interval | Chromium before / after | Firefox before / after |
-| --- | --- | --- |
-| Separate collection parse | 156.5 ms / removed | 428 ms / removed |
-| Collection walk | 0.2 / 0.1 ms | 1 / 1 ms |
-| Render parse | 138.7 / 158.2 ms | 369 / 410 ms |
-| Render transforms, now including collection | 1.4 / 1.9 ms | 1 / 2 ms |
-| Source response to commit observer | 510.1 / 361 ms | 1,220 / 841 ms |
-| Maximum timer gap | 608.2 / 450.1 ms | 859 / 488 ms |
-
-These are separate trial maxima, not paired CPU samples. Final normalization
-still reached 191.5/390 ms, initial action windows reached 1,556/2,161 ms and
-commit-to-two-frame intervals reached 109.1/70 ms. Dense and near-safeguard initial
-response-to-commit also improved, but long-line response-to-commit was essentially
-unchanged. The renderer, source normalization and Save/recovery contracts remain
-unchanged; responsiveness acceptance and rollout remain blocked.
-
-The next bounded integration should target the remaining normalization/render
-parses using the existing whole-Markdown worker/model/publisher, not another
-prototype or an unmeasured React rewrite. Retain native selection/copy, Select All,
-browser Find, focus, accessibility, print, GFM/link/safe-HTML and Save/recovery
-acceptance gates, then repeat the unchanged performance matrix.
-
-### Production Worker Normalization
-
-The existing preparation worker and transport now live in runtime utilities, with
-forwarding modules preserving the proof's imports. A DOM-free protocol module
-owns message types and transfer bounds. The worker uses the existing static
-highlighter core directly rather than importing browser logging. Worker-only Vite
-resolution selects the character decoder's non-DOM implementation without changing
-main-thread resolution or adding dependencies. Production startup and the existing
-development-server viewer/re-entry check pass in Chromium and Firefox.
-
-Only initial-load normalization is integrated into the live viewer in this slice.
-Each job owns its worker, transfers source and canonical results in acknowledged
-chunks of at most 16,384 UTF-16 units, and terminates on completion, cancellation,
-decode/sequence failure or progress timeout. Aborted jobs can't publish content.
-Worker startup and runtime failures reach the existing load-error path; they don't
-silently trigger synchronous retries. Environments without Web Workers retain the
-previous synchronous normalization with an explicit informational diagnostic.
-Editing, Save, recovery and ReactMarkdown rendering are unchanged.
-
-The document model also supports opt-in canonical normalization, and the existing
-whole-document worker uses it. Both retained-publisher proofs pass at widths
-1543/390 in Chromium/Firefox, including a new canonicalization fixture, exact
-text/native selection, layout/resize, safe HTML/links, footnote navigation,
-print-media visibility, syntax/search failures and partial-publication cleanup.
-These are proof-host checks, not live-publisher acceptance. Their interaction gate
-remains OPEN: actual browser Find reveal, assistive-technology behavior, real
-print/PDF output, physical/reference devices, aggregate memory and large-structure
-performance are not established. Don't replace the live renderer on this evidence.
-
-The final unchanged 48-trial live matrix passes without retries or flakes, now
-also closing during held normalization and verifying termination and no late DOM.
-Unit coverage includes isolated concurrent jobs, cancellation, oversized source
-results, decode failure and watchdog expiry, plus canonical source/model parity.
-Many-block maxima before/after this integration are:
-
-| Many-block interval | Chromium before / after | Firefox before / after |
-| --- | --- | --- |
-| Normalization | 191.5 ms synchronous / 233 ms elapsed | 390 ms synchronous / 440 ms elapsed |
-| Render parse, still synchronous | 158.2 / 178.8 ms | 410 / 397 ms |
-| Source response to commit observer | 361 / 428.7 ms | 841 / 881 ms |
-| Maximum timer gap | 450.1 / 290.4 ms | 488 / 483 ms |
-
-`load-normalization-elapsed` replaces the old synchronous timing stage and includes
-worker startup, transport, work, acknowledgements and scheduling. It isn't main-
-thread CPU time. Initial action windows still reached 1,838/2,193 ms; worker startup
-also adds latency on small fixtures. Moving this work off-thread doesn't claim
-faster document completion or whole-viewer performance acceptance. Rollout remains
-blocked. The next integration must address the remaining render parse and the
-publisher's host/native-interaction gates, reusing the existing publisher rather
-than creating another one.
-
-### Test-Only Real-Viewer Retained Integration
-
-`RetainedMarkdownPreview` hosts the existing document publisher inside the actual
-Markdown viewer when built with `npm run build -- --mode test-preview`. It isn't a
-user setting or a query flag. The promoted publisher/search modules retain proof
-forwarders rather than creating another implementation. Initial normalization
-still uses its isolated worker; an isolated document job parses the canonical
-source, streams acknowledged records and owns its syntax paging session. The
-canonical-source flag avoids another normalization pass. There is no document
-parse on the main thread in this path, and no main-thread retry on worker failure.
-
-The host reuses the viewer's viewport, DOM-search session, safe link resolver,
-focus behavior and scoped theme variables. Host-owned search doesn't build the
-proof's duplicate model index. Generation changes/close abort preparation, remove
-styles, listeners and highlights, dispose the publisher and terminate its owned
-syntax worker. Late sessions are disposed rather than published. Error messages
-are generation-scoped. The actual-viewer matrix additionally closes during held
-normalization, syntax-window requests and document-publication acknowledgements,
-then releases held work and verifies no late DOM or live worker remains.
-
-The original long-line destination assertion caught missing horizontal syntax
-clipping in the retained publisher. Both publishers now reuse the same column
-window calculation and observe nested code-block scrolling; the assertion and
-range cap weren't relaxed.
-
-In three native-contract trials per engine/renderer, rendered `innerText`, native
-Select All, selected code text and the semantic accessibility snapshot match
-exactly. Checks cover headings, GFM tables/tasks, raw HTML as safe text, unsafe URL
-rejection, resolved relative/hash/external links, automatic focus followed by Tab,
-shared Find/Enter navigation, and native copy events with exact selected text.
-Syntax theme-variable changes preserve selected text nodes and selection.
-Chromium print-media text remains unchanged and PDF bytes are generated. These
-checks don't establish OS clipboard payloads, browser-native Find reveal,
-assistive-technology behavior, visual pagination/full-document printing or
-physical/reference-device acceptance. Those gates remain OPEN.
-
-The unchanged repeated matrix uses 6,000-line dense, 11,111-line near-safeguard,
-600 x 101-line many-block and 6,000-match single-line fixtures, widths 1543/390,
-Chromium/Firefox and three trials. All 48 functional trials pass per renderer.
-For the many-block fixture, maxima across both widths and all three trials are:
-
-| Interval or observation | Chromium default / retained | Firefox default / retained |
-| --- | --- | --- |
-| Normalization elapsed | 232 / 227.3 ms | 430 / 433 ms |
-| Source response to code-container observer | 432.4 / 1,142.2 ms | 859 / 1,711 ms |
-| Retained document job completion | n/a / 1,101.6 ms | n/a / 1,556 ms |
-| Source response to retained completion | n/a / 1,341.6 ms | n/a / 2,015 ms |
-| Initial open action window | 1,806 / 2,489 ms | 2,162 / 3,222 ms |
-| Maximum timer gap | 299 / 243 ms | 469 / 166 ms |
-| Keyboard through two frames | 102.3 / 141.9 ms | 102 / 161 ms |
-| Navigation through two frames | 105.5 / 146.1 ms | 111 / 153 ms |
-| Observed renderer JS heap after interactions | 60.3 / 289.6 MiB | unsupported |
-
-These are independent maxima, not paired CPU samples. The code-container observer
-retains the existing expected-block-count condition and can fire before retained
-publication completes; it isn't a first-batch or document-complete measurement.
-The retained-completion stage includes worker startup, source transport, parsing,
-grammar work, acknowledged publication and scheduling, not main-thread CPU time.
-Action windows include browser-test synchronization. Two-frame samples aren't
-hardware input-to-visible-paint acceptance.
-
-Chromium heap samples are taken before open, after the completed interaction
-sequence and after close using `Runtime.getHeapUsage`, without forced GC. They
-exclude worker heaps and don't establish aggregate/native/DOM memory. Many-block
-after-close used-heap maxima are 66.2/302.3 MiB default/retained; these aren't
-post-GC survivors or leak evidence. Firefox has no corresponding heap samples.
-The retained path reduces the largest many-block task gap but worsens startup,
-completion, interaction windows and observed heap use. Its gaps still exceed
-50 ms, Firefox source-to-complete exceeds 1,500 ms, and warm navigation samples
-exceed 100 ms. Promotion remains BLOCKED.
-
-Reproduce the experiment without changing stored demo files:
-
-```bash
-cd frontend
-npm run build -- --mode test-preview
-SAMBEE_E2E_PRODUCTION=1 SAMBEE_E2E_RETAINED=1 npm run test:e2e:all -- --grep 'production syntax publication' --workers=1 --repeat-each=3
-npm run build
-SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production syntax publication' --workers=1 --repeat-each=3
-```
-
-### Retained Publication Attribution And Pacing
-
-The next slice adds bounded scalar attribution to the existing worker/transport,
-publisher and real-viewer check. It doesn't add another renderer or worker pool.
-Transport startup-to-first-ack and source-transfer intervals use the main-thread
-clock. Document model creation, record generation excluding acknowledgement waits,
-acknowledgement waits and syntax preparation use the worker clock. Syntax timing
-includes grammar loading/highlighting rather than claiming isolated parser CPU.
-The existing total `preparationMs` is elapsed pipeline time, including publication
-acknowledgements; it must not be described as worker CPU time.
-
-Publisher stats separate synchronous assembly, largest batch assembly, frame
-waits and record counts. Worker and publisher batch/record counts must match.
-Chromium browser counters separate initial-render from full-interaction layout,
-style and script totals; these cover the renderer interval, not just the publisher
-function. Firefox has no equivalent CDP counters. The many-block fixture retains
-5,401 elements and 4,799 text nodes in this renderer; the change doesn't reduce
-content or remove off-screen text.
-
-Three trials at each width/engine identified acknowledgement/frame pacing as the
-largest measured avoidable interval. The publisher previously waited a frame after
-every two batches regardless of their cost. It now yields after eight batches or
-4 ms of cumulative synchronous assembly, whichever comes first. Record/chunk,
-syntax-page and viewport-range bounds are unchanged. This is a yield threshold,
-not a preemption guarantee or a claimed layout/paint time budget.
-
-Many-block maxima across the same six trials per engine, before/after this change:
-
-| Interval | Chromium before / after | Firefox before / after |
-| --- | --- | --- |
-| Document job elapsed | 1,122.7 / 847 ms | 1,551 / 1,390 ms |
-| Acknowledgement waits | 726.8 / 440.7 ms | 817 / 654 ms |
-| Explicit frame waits | 486.9 / 88.3 ms | 348 / 115 ms |
-| Synchronous DOM assembly | 23.6 / 22.5 ms | 30 / 24 ms |
-| Largest assembly batch | 0.9 / 1.3 ms | 6 / 4 ms |
-| Maximum timer gap | 243.2 / 228.3 ms | 182 / 181 ms |
-| Initial open action window | 2,525 / 2,393 ms | 3,440 / 3,188 ms |
-
-Before the pacing edit, model creation reached 151.6/380 ms, syntax preparation
-201.8/309 ms, record-generation work 9.6/20 ms and transport startup 35.1/52 ms
-in Chromium/Firefox. Chromium layout across the complete interaction sequence
-reached 105.5/100.3 ms before/after; this isn't a per-task or publication-only
-duration. These are independent maxima, not times to add or paired CPU samples.
-The original structural/native document proofs pass in both engines after the
-change, including large-table/paragraph, selection, resize, failure and cleanup
-contracts. Proof-host passes still aren't production performance acceptance.
-
-Controlled memory runs use `SAMBEE_E2E_MEMORY=1` with the same many-block browser
-test, Chromium only, separately from responsiveness runs. They force collection
-before open, after interactions and after close. The harness releases its selected
-text-node reference before post-GC sampling. Before the pacing edit, retained used
-heap reached 19.9 MiB after interaction and 16 MiB after close; afterward it reached
-19.8/16.1 MiB. The earlier approximately 290 MiB uncollected observation therefore
-doesn't establish live retained memory or a leak. These samples still exclude
-worker/aggregate native memory and aren't a warmed repeated-close leak test.
-
-The equivalent six default-renderer controlled-memory trials reach 43.5 MiB after
-interaction and 16.3 MiB after close, versus 19.8/16.1 MiB retained. This narrows
-the live renderer comparison but doesn't measure total application memory or
-prove leak-free repeated use. Forced collection is excluded from the timing runs.
-
-Final verification passes 231 affected unit tests, frontend lint, touched-file
-diagnostics, both builds, documentation checks and both structural/native proofs.
-The unchanged repeated real-viewer matrix passes all 54 cases per renderer
-(48 fixture trials plus six native-contract trials), without retries or flakes;
-rendered text, Select All, selected code and semantic snapshots still match.
-Six controlled-GC trials per configuration (retained before/after, default) pass
-separately. In the final retained full matrix, many-block job maxima are
-873.3/1,308 ms and frame waits 92/110 ms in Chromium/Firefox, consistent with the
-focused improvement but not identical trial maxima. Initial-render Chromium
-layout reaches 92.8 ms across the renderer interval. Remaining timer gaps still
-reach 226.2/173 ms. The normal production build is restored and excludes the
-experimental retained host; default behavior remains unchanged.
-
-The largest remaining Chromium gaps in the focused after-run overlap first-search
-typing, while overlapping capture/matching stages reach only about 3/5 ms and no
-long-task entry explains the gap. Firefox's largest gaps overlap navigation or
-fall outside the named action windows; overlapping presentation is at most about
-1 ms. A timer-service gap isn't proof of one long CPU task. The next slice should
-separate browser scheduling, rendering and input-to-frame latency with a browser
-trace before changing the matcher or moving more small synchronous calls.
-
-The normal renderer remains ReactMarkdown. Reduced frame waits don't establish
-the responsiveness, aggregate-memory or manual interaction gates. Don't promote
-it or invent another publisher to bypass the failing measurements.
-
-### Input Scheduling Trace And Harness Correction
-
-The scheduling slice changes only the existing browser harness. With
-`SAMBEE_E2E_TRACE=1`, Chromium attaches a streamed CDP timeline and V8 CPU profile
-as `viewer-scheduling-trace`. Capture starts before opening the viewer and ends
-after its cancellation/re-entry checks; the session and stream close in cleanup.
-Firefox skips CDP capture. Tracing is diagnostic and adds overhead; it must run
-separately from acceptance timing and controlled-GC memory trials. The harness
-rejects combined tracing/forced-GC Chromium runs.
-
-The `sambee:viewer-trace:start` mark aligns browser `performance.now()` samples
-with trace timestamps. CPU profile chunks must be joined by renderer PID and
-profile ID, not thread ID: chunks can arrive on a different thread. Count each
-sample once when classifying stacks; recursive ancestor counts aren't CPU shares.
-
-The original many-block trace exposes injected Playwright `elementText`/`queryAll`
-work and repeated minor GC during typing/navigation. Exact match-count assertions
-used page-wide text queries, traversing and allocating across the large preview.
-They now query only the existing small counter/navigation container. Expected
-counts, real keyboard/click actions, range limits, off-screen destinations,
-selection identity and cleanup assertions are unchanged. No viewer, matcher,
-publisher, worker or production gate changed.
-
-In the same traced default desktop case, maximum keyboard handler-to-two-frame
-time fell from 102.2 to 29.1 ms, and navigation from 103.7 to 23.4 ms. The typing
-window's minor-GC duration fell from about 52 ms to zero; its largest main task
-fell from 76.9 to 23.5 ms. A separate pre-fix CPU-profile run and the scoped run
-also show injected-script samples falling from about 12% to 1% and GC samples
-from 25% to zero in that window. These diagnostic observations support the
-harness explanation; they aren't an application speedup or acceptance results.
-
-Portable keyboard/navigation samples now separate first and second animation
-frames. Keyboard samples also report event timestamp-to-handler age. The test
-checks that values are finite/nonnegative and the first frame doesn't follow
-the second. These start at synthetic DOM event handling, not hardware input or
-visible paint; event age doesn't prove OS input delivery time. Measurements are
-labelled `scoped-controls-v2` and include trace requested/supported flags. Don't
-compare old page-wide-query input figures as if the measurement were unchanged.
-
-The final untraced matrix repeats both widths three times in both engines.
-Many-block maxima below span six trials per engine; keyboard p95 pools those
-event samples rather than establishing physical-device input p95:
-
-| Measurement | Default Chromium / Firefox | Retained Chromium / Firefox |
-| --- | --- | --- |
-| Keyboard handler-to-first-frame maximum | 18.7 / 30 ms | 18.1 / 46 ms |
-| Keyboard handler-to-two-frame maximum | 33.1 / 40 ms | 29.1 / 77 ms |
-| Keyboard handler-to-two-frame pooled p95 | 31.4 / 39 ms | 27.7 / 63 ms |
-| Navigation handler-to-two-frame maximum | 24 / 47 ms | 23.4 / 28 ms |
-| Maximum timer-service gap | 283.4 / 467 ms | 136.1 / 88 ms |
-| Initial open action window | 1,793 / 2,178 ms | 2,361 / 3,030 ms |
-
-The default Chromium long-line pooled two-frame p95 also reaches 52.8 ms.
-Action windows still include Playwright synchronization; they aren't the handler
-samples above. Startup, timer-service and remaining typing tails still block
-rollout. The next bounded investigation should attribute retained startup and
-the Firefox many-block typing tail with the corrected harness, not optimize the
-matcher on the strength of the old contaminated samples.
-
-Both full matrices pass all 54 cases without retries/flakes. Exact text, Select
-All, selected code and accessibility snapshots match per engine across renderers.
-The additional 12 untraced many-block trials and four diagnostic Chromium traces
-pass. Both builds, frontend lint, touched-file diagnostics and documentation
-checks pass; ordinary production assets are restored. No new memory acceptance
-or manual native Find/clipboard/AT/print/device evidence is claimed.
-
-### Retained Startup Batching And Firefox Input Attribution
-
-The next bounded slice adds viewport-paint attribution and changes acknowledged
-document batching, not the renderer/search architecture. The proof's search
-session is lazy and starts no worker in host-search mode, so an unused search
-worker doesn't explain startup. Retained viewport paint now reports cumulative
-and largest durations plus one bounded latest User Timing entry; the browser
-observer captures individual events for overlap checks.
-
-In twelve corrected-harness baseline trials, the slow first-character Firefox
-frames don't overlap retained viewport painting. Chromium paint totals reach
-8.1 ms and largest paint 0.6 ms; Firefox totals reach 147 ms and largest paint
-19 ms. These include synchronous geometry/layout triggered by that callback,
-not all deferred browser layout or paint. They don't explain the input tail.
-
-The worker instead publishes 10,799 many-block records in 85 acknowledged
-round trips, because code fragments force the smaller 128-record batch limit.
-It now batches up to 512 records or 16,384 UTF-16 text/attribute units, flushing
-before a record would exceed the text bound. Individual text/attribute chunks
-remain at most 2,048 units. The transport rejects an oversized combined payload
-before publication and terminates its worker. The record-count limit, source
-transfer, syntax-page/cache bounds and publisher's eight-batch/4 ms assembly
-yield threshold are unchanged. This isn't an increase in the permitted content
-or a guarantee about deferred layout/paint. Tiny records share fewer messages;
-large text payloads have a separate explicit bound.
-
-The same twelve trials before/after this change give the following independent
-many-block maxima across six trials per engine:
-
-| Measurement | Chromium before / after | Firefox before / after |
-| --- | --- | --- |
-| Acknowledged document batches | 85 / 34 | 85 / 34 |
-| Worker acknowledgement waits | 450.3 / 270 ms | 616 / 354 ms |
-| Document job elapsed | 834.7 / 657.2 ms | 1,333 / 1,099 ms |
-| Initial open action window | 2,370 / 2,089 ms | 3,153 / 2,932 ms |
-| Largest synchronous assembly batch | 6.6 / 1.3 ms | 2 / 2 ms |
-
-The final unprofiled full matrix passes 54 cases without retries/flakes. Its
-many-block document jobs reach 670.7/1,036 ms and acknowledgement waits
-278.7/328 ms in Chromium/Firefox, with 34 batches and the same 10,799 records.
-Largest observed batches contain 320 records and 16,377 text units, within both
-bounds. Largest viewport paint reaches 0.7/22 ms. Overall load-through-two-frame
-windows still reach 1,817.1/2,532 ms; normalization reaches 228.6/421 ms, document
-model creation 153.1/350 ms and syntax preparation 203.2/309 ms. These maxima
-aren't paired timings to sum and don't remove overall completion failures.
-
-For Firefox diagnostics, the existing test can also run with
-`MOZ_PROFILER_STARTUP=1 MOZ_PROFILER_STARTUP_FILTERS=GeckoMain
-MOZ_PROFILER_STARTUP_FEATURES=js,stackwalk,leaf
-MOZ_PROFILER_SHUTDOWN=/tmp/sambee-firefox-retained-profile.json`, restricted to
-one many-block fixture/width and `--project=firefox`. Read the emitted profile's
-content-process User Timing markers to align search stages with the test samples;
-the browser/parent process alone won't contain them. Keep this separate from
-unprofiled acceptance and forced-GC runs. The diagnostic passes, but profiling
-adds overhead and its samples aren't performance acceptance.
-
-The aligned first-key window contains React input processing, layout and GC,
-including minor collection and major-GC marking, with no overlapping retained
-viewport paint. That doesn't establish matcher CPU as the cause or justify
-disabling animation/GC, warming away the first key or reducing the fixture.
-The final unprofiled Firefox many-block keyboard two-frame pooled p95 is 71 ms
-and maximum 76 ms; Chromium reaches 27.7/30.7 ms. Maximum timer gaps remain
-131/84 ms. Startup batching therefore improves startup, not proven input latency.
-The next investigation should separate normalization/model startup costs and
-Firefox's first-input React/layout/allocation work before changing either path.
-
-Verification passes 231 affected unit tests, the full 54-case retained matrix,
-both structural/native document proofs, all six native-contract comparisons
-against the unchanged corrected default baseline, lint and touched-file
-diagnostics. Two restored-normal-build browser smoke checks pass. Both builds
-and documentation checks pass; the existing large-chunk warning remains. Normal
-production assets are restored. No performance, aggregate-memory, physical-device
-or manual interaction gate is waived, and ReactMarkdown remains the default.
-
-## Constraints And Low-Cost Approach
-
-Preserve behavior and meet measured budgets. Prefer existing code and the smallest
-verified change; adopt prototype components only where simpler changes fail.
-Editing optimization is performance-driven: eliminating all per-keystroke
-serialization is not a separate acceptance requirement. This does not relax
-correctness, recovery, regex containment or the agreed performance budgets.
-
-- Preserve existing Save, discard and best-effort synchronous recovery, including
-  the current debounce, pagehide/pre-sign-in attempts, limits and warnings.
-  Authentication changes, recovery UI, checkpoint scheduling, stronger recovery
-  guarantees and lifecycle/journaling redesign are out of scope. Do not connect
-  the experimental checkpoint scheduler. Defer an optimization that needs it.
-- Retain the engine-neutral language/range/fallback contract: unchanged UTF-16
-  source offsets, ordered non-overlapping ranges, explicit plain-text outcomes,
-  cancellation and no engine objects or DOM in public prepared data.
-- Reuse the current parser registry, tag mapping, theme variables, native editor,
-  caches and dedicated workers. No second parser, regex Markdown parsing,
-  provider registry, worker pool or parallel theme store. Follow the dependency
-  workflow only if a measured gap actually requires a dependency change.
-- Keep the eight syntax roles in the existing theme system. Entirely absent
-  legacy syntax groups receive central mode defaults without mutation or writes;
-  supplied groups remain strictly validated. Theme changes must not reparse,
-  remount editors, replace token/text nodes or disturb search/selection/scroll.
-- Prefer fixes in the owning code and existing test/proof files. Stop extending
-  prototypes once the relevant uncertainty is resolved. A renderer migration is
-  justified by failing measurements, not by completing an architecture diagram.
-- Retained lightweight text DOM is the approved preview direction. Bound expensive
-  syntax/search presentation and layout; do not require strict off-screen text
-  removal. Whole-document text DOM/memory growth must still be measured.
-- No cumulative source/block cutoff, truncated content, silently disabled browser
-  interactions or fallback to the known blocking token-span publication path.
-  Changed behavior or relaxed acceptance needs explicit approval.
-
-## Remaining Work
-
-Begin with attribution, then choose the slice that addresses the measured
-bottleneck. The numbered sections are work areas, not a mandatory sequence:
-renderer work need not wait for unrelated editor/search changes. Validate each
-slice before widening scope; share existing machinery rather than creating
-separate infrastructure projects.
-
-### 1. Attribute The Remaining Viewer Stalls
-
-Extend the existing production-viewer check to separate initial render/commit,
-search indexing, marker application/clearing, layout and syntax refresh costs.
-Include search already active when preparation completes, changed queries,
-next/previous, scrolling and document switching. Measure real keyboard response,
-not only worker completion or timer servicing.
-
-Keep the current renderer and DOM-search indexing semantics initially. Separate
-logical matches from visual markers, then try viewport-only CSS Highlights instead
-of inserting/removing a DOM marker for every match. Cache the index while preview
-content is unchanged. Measure DOM capture separately from matching: capture must
-stay on the main thread and may need yielding; workers receive only text and
-numeric positions, never DOM nodes. Move matching to cancellable background work
-only if measurements require it.
-Adopt prototype mappings only where this smaller change fails. Integrate the
-streamed renderer in step 4 only if initial rendering/layout also misses budgets.
-Do not build another renderer prototype or rewrite working syntax publication.
-
-### 2. Meet Editing Budgets With The Smallest Safe Change
-
-Measure serialization, normalization and parent updates separately in text,
-Markdown source and nested table editing. Remove redundant work and cache unchanged
-results first. Per-edit full-string handoffs or normalization may remain where
-they meet the agreed typing budgets across the tested document/structure envelope.
-Measure growth with document size; a pass is not an arbitrary-size guarantee.
-
-Keep CodeMirror documents/transactions authoritative. If those costs cause a
-budget failure, replace the affected boundary with revisions/changes where safe.
-Debouncing a callback after `toString()` does not reduce serialization cost.
-
-Reuse existing immutable snapshots and flush handles at Save, recovery,
-preview-transition and draft download/share boundaries. Flush pending IME/table
-edits and serialize the required revision without losing unchanged-source or
-canonical table serialization behavior. Measure snapshot cost as well.
-
-Preserve dirty-state and baseline synchronization. A successful Save acknowledges
-only its revision; edits made during Save remain dirty. Recovery does not mark a
-file saved. Snapshot/worker failure must leave the live document usable. Defer
-any part that cannot preserve the synchronous recovery contract above.
-
-Gate: measured typing responsiveness within the agreed budgets/envelope, plus
-latest-edit Save, edits-during-Save, undo/redo, IME, table flush,
-preview/share/download, explicit discard and recovery failure/boundary regressions.
-
-### 3. Finish Search Without Another Search Framework
-
-Reuse the existing native-search cache and public CodeMirror commands. Make first
-counts asynchronous/cancellable, keyed by immutable document revision and full
-query/options identity. Pending counts must not look exact or block navigation.
-Keep selection-only and viewport-only work bounded even while metrics are pending.
-
-Promote the proven dedicated-worker boundary for every source regex path:
-counting, next/previous, active/visible decorations, replace-one and replace-all.
-Do not leave native synchronous regex commands exposed after moving only counts.
-Terminate/restart a stalled worker; an abort message cannot interrupt a running
-regex. Define timeout/cancellation feedback and bound source/result transfer.
-
-Before applying navigation or replacements, validate document, query and relevant
-selection identity. Bound replacement-plan delivery and main-thread application;
-cancelled/stale plans apply no partial edits. Preserve capture expansion,
-case/whole-word options, zero-length behavior and one-step replace-all undo.
-Reuse native matcher/replacement logic rather than copying it.
-
-Before completing worker integration, prove the final atomic replace-all commit
-meets budgets, including transaction processing and editor/parent updates.
-Worker preparation cannot bound that synchronous cost. Revalidate identity
-immediately before dispatching once. If it fails, resolve an explicitly approved
-policy before applying edits; do not silently cap replacements or apply partial
-changes to satisfy timing.
-
-For preview search, start with the existing DOM index and preserve its rendered-text
-semantics, not raw Markdown. Keep exact code whitespace, prose boundaries and
-cross-token/fragment matches. Separate logical match positions from visual markers;
-retain text-node/offset mappings for visible decoration and indexed navigation.
-Reuse the index across query changes; invalidate it on content generation changes
-or text-node replacement, not syntax/theme-only painting. Yield main-thread capture
-if needed and keep node mappings there; offload only worker-eligible computation.
-If indexing or result retention misses budgets, reuse the prototype's rendered-text
-index and bounded match windows rather than inventing another implementation.
-Reject stale query/document results. Neither path may require mounting a marker
-for every match, and retaining the DOM index is not a claim that it scales adequately.
-
-Gate: deterministic no-recount/viewport traversal tests, exact settled counts,
-pending navigation and stale replacement tests; actual catastrophic regex
-termination/restart during every affected operation with keyboard input serviced.
-
-### 4. Integrate Retained-Text Rendering Where Measurements Require It
-
-If step 1 confirms initial rendering/layout is a blocker, promote the existing
-whole-Markdown model, worker and publisher rather than introducing another
-virtualizer or generic document abstraction. Parse once per generation; retain
-stable semantic text nodes and publish in bounded, paced tasks. Keep React and
-imperative descendant ownership separate; never reconcile search-mutated text.
-
-Preserve GFM, table-cell line breaks, safe links/raw-HTML handling, exact whitespace
-and selection/copy semantics. Subdivide large code blocks, paragraphs, tables and
-exceptionally long lines without changing content or semantic structure. Bound
-layout/measurement as well as JavaScript; wrapping, width, images and fonts must
-invalidate heights/anchors correctly. Do not assume `content-visibility` preserves
-native selection across browsers; earlier Firefox checks disproved that.
-
-Reuse priority publication for navigation to unpublished destinations. Report
-partial versus complete publication honestly; retain selection, focus and scroll
-anchors while earlier content arrives. Theme changes update local variables
-without rebuilding the model or unchanged text.
-
-Workers need generation/revision checks, bounded delivery and retained data,
-startup/crash/decode failure handling, cancellation/termination and cleanup.
-Frame waits must handle hidden pages and cancellation. Unsupported worker/CSS
-Highlight execution needs an explicit safe plain-text or supported-environment
-outcome, not silent return to the known blocking path.
-
-Gate before replacing the live renderer: native selection across fragments,
-cross-block copy, Select All, actual browser Find/reveal, focus/keyboard reading,
-screen-reader reading, hash links and print/PDF output, plus image/font/width
-changes and rapid supersession. Snapshot/a11y-tree or print-media-only tests do
-not establish full assistive-technology or printing acceptance. Behavior changes
-require approval rather than hidden workarounds.
-
-### 5. Close Highlighting And Theme Acceptance
-
-Complete the remaining alias/dialect audit and actual four-surface parser/token
-parity for JavaScript/TypeScript, Python, SQL, shell and legacy modes. Check native
-nested Markdown trees, neutral prose/unknown fences and unchanged source geometry.
-Verify isolated cold/cached nested grammar readiness, depth/size guards,
-loading/parsing failures, late shared-load rejection, cancellation and unrelated
-block success. Static rendering/public exports must remain engine-neutral.
-
-Finish light/dark/custom-alpha palette checks across all surfaces: computed
-colors, search/selection contrast, neutral foreground, stable node/editor identity
-and independently scoped variables. Verify existing theme-dialog picker/layout,
-save/cancel/copy/validation/permissions at desktop/mobile widths; do not add a new
-theme preview subsystem. Retain legacy import/API round trips and strict supplied
-group validation. Follow the repository form/dialog pattern for any UI changes.
-
-Keep lazy grammar chunks and public package imports. Recheck the provisional
-100,000-UTF-16-unit per-block parsing safeguard using worker/resource measurements,
-separately from rendering limits; test at/below/above it. The independent nested
-Markdown depth limit is four levels. Neither value authorizes an aggregate cutoff
-or claims unlimited-size responsiveness.
-
-## Performance And Rollout Gates
-
-Retain the required 54,000-unit/6,000-match dense fixture, a block near the parsing
-safeguard and many eligible blocks exceeding 500,000 combined code units. Include
-long lines, large prose/tables, nested Markdown and sustained editing/search/
-navigation. Test production builds with fresh/cached grammars in Chromium and
-Firefox at widths 1543/390 through `http://localhost:3000/browse/smb/demo` only.
-Use response interception; do not modify stored demo files.
+| Text load through two frames | 450.9 ms | 629 ms | 1,500 ms |
+| First exact search | 33.9 ms | 59 ms | 1,000 ms |
+| Changed query | 47.8 ms | 40 ms | 100 ms |
+| Last-match navigation | 60.4 ms | 46 ms | 100 ms |
+| Viewer timer-service gap | 123.7 ms | 89 ms | 50 ms |
+
+Earlier single-renderer baseline gaps were 286.9/473 ms. Latest failures: 12
+many-block cases, five Chromium long-line cases and one near-safeguard case per
+engine. Chromium diagnostic traces attribute 83.2 ms of a many-block gap to native
+Layout for 60,600 code lines. This is not Firefox attribution or proof that all
+remaining gaps share that cause. Treat native layout separately; further geometry
+changes need evidence of material remaining geometry cost.
+
+Latest timing report: `/tmp/sambee-horizontal-geometry-final.json`; comparison:
+`/tmp/sambee-viewport-geometry-final.json`; diagnostic attribution:
+`/tmp/sambee-stall-attribution.json`. Temporary files are supplementary evidence,
+not required implementation artifacts. Tracing/GC runs are not timing acceptance.
+
+## Ordered Completion Checklist
+
+- [x] **1. Fix syntax publisher font/image invalidation.** Reuse the existing
+  refresh path, coalesce events and remove listeners on disposal. Both new
+  regressions failed before the fix and pass afterward; 83 affected syntax,
+  parser and DOM-search unit tests, frontend lint, touched-file diagnostics and
+  whitespace checks pass. A development-browser probe at the approved demo URL
+  confirms that simulated font-metric changes refresh clipping without a scroll,
+  preserve text and remove owned highlights on abort. No production timing gate
+  or real asynchronous font/image acceptance is closed by this local check.
+- [x] **2. Remove retired proof coupling from production preparation.** Production
+  preparation now handles only one canonical source and its optional tree;
+  historical proof execution is isolated in the existing scripts area. Shared
+  syntax workers and normalization/tree chunk bounds remain intact. Verification:
+  130 adapter/viewer tests, normal production build, frontend lint, touched-file
+  diagnostics and independent historical-entry compilation. All four unchanged
+  dense production cases pass in Chromium/Firefox at widths 1543/390, including
+  held-normalization cancellation, reopening and zero live workers/highlights
+  after close. These are functional checks, not a repeated timing matrix or a
+  claimed speedup. The existing large-chunk build warning remains.
+- [x] **3. Finalize missing acceptance definitions and support policy.** Defined
+  first usable text, first visible syntax/full preparation, peak/resource and
+  available-hardware/refresh-rate criteria before further responsiveness changes.
+  Worker-less app operation is now explicitly unsupported and blocked by the
+  existing pre-app gate, without a separate reduced-functionality mode. A size
+  guard or yield between blocks does not bound one main-thread parse, and a
+  timer cannot interrupt that parse.
+  Retain approved targets below. Record decisions requiring approval rather than
+  silently changing fallbacks or relaxing tests. Measurement can inform a policy
+  decision without requiring that policy to be implemented first.
+  **Completed by explicit approval:** Readiness, memory and scrolling limits
+  below are approved, alongside the implemented Worker requirement. Test on
+  available hardware and record its configuration; no prescribed models or
+  minimum hardware profiles are required. Helper fallbacks and existing timing
+  targets are unchanged. Measurement/enforcement and actual acceptance remain
+  in items 4b, 6 and 7; defining the criteria doesn't establish passing results.
+- [x] **4. Close four-surface language and theme correctness.** Audit aliases and
+  dialects, including `mssql` and `mariadb`, in the existing registry. Verify
+  JavaScript/TypeScript, Python, SQL, shell, legacy modes, nested Markdown and
+  neutral prose/unknown fences through actual surfaces. Cover cold/cached
+  grammars, load/parse failures, late rejection, cancellation and unrelated-block
+  success. Check light/dark/custom-alpha colors, selection/search contrast and
+  independent scopes. Theme/grammar changes must preserve document/editor
+  identity, selection, search and scroll without content reprocessing. Exercise
+  existing theme-dialog save/cancel/copy/validation/permissions at both widths;
+  follow the repository form/dialog pattern for any UI changes.
+  Close these slices independently; item 4 requires all four:
+  - [x] **4a. Failure isolation and nesting.** Keep successful siblings and
+    enclosing Markdown structure highlighted when a nested grammar fails to
+    load or parse. The review reproduced whole-parent fallback after a nested
+    Python load failure; nested load and static parse containment are now fixed.
+    Cancellation, stale-result rejection and the intentional four-level nesting
+    safeguard are preserved, with late-failure and recovery coverage.
+    **Verified local slice:** Both load-failure sibling-order regressions and both
+    parse-start sibling-order regressions failed before their fixes and pass now.
+    Tests also cover parser-advance errors in either order, a healthy later fence
+    using the same grammar, neutral failed code, retained structure and siblings,
+    independent top-level success, later recovery and source-private diagnostics.
+    Cancellation during parse or followed by late load rejection still propagates.
+    All 280 affected unit/component tests, 40 production language/theme cases,
+    frontend lint, normal production build and touched-file diagnostics pass.
+    **Browser completion:** All 36 production failure/nesting cases pass in
+    Chromium/Firefox at widths 1543/390. Test-only asset instrumentation injects
+    actual worker grammar-load, parser-start and parser-advance failures, in both
+    sibling orders at the four-level limit. Assertions require neutral failed
+    Python keywords, retained headings/JavaScript siblings, later healthy Python
+    after parse failure, exact text, unchanged text nodes and search counts.
+    Pending-load cases close and terminate the worker, then reopen without the
+    fault and require successful highlighting. Over-depth cases keep the guarded
+    block plain while independent JavaScript still highlights. Owned workers and
+    syntax highlights reach zero after close. All 71 parser/publication/worker
+    regressions also pass, including late rejection and obsolete-message guards.
+    No production injection hooks or alternate parser path were added. The
+    existing large-chunk build warning remains; no timing gate is closed here.
+  - [x] **4b. Grammar readiness.** Isolate cold/cached grammar conditions and
+    measure first visible syntax and full preparation against item 3 criteria.
+    Current text-load timing deliberately holds syntax preparation and does not
+    establish highlighting readiness. Change all-block publication only if its
+    measured cost warrants the added complexity.
+    **Enforced readiness slice:** The existing production-viewer harness now has
+    separate unheld dense, near-safeguard, many-block and long-line readiness
+    cases. All 48 trials pass at widths 1543/390
+    in Chromium/Firefox, three per combination, with exact source, complete token
+    coverage on initial fully visible lines or horizontally visible characters,
+    native selection, exact search counts
+    and highlight cleanup. All trials enforce usable text <=1,500 ms, visible
+    syntax <=1,500 ms and full preparation <=3,000 ms. The shared budget evaluator
+    rejects missing, invalid and over-budget samples; all 26 evaluator tests pass.
+    Forced-GC/tracing modes are rejected for this readiness slice, and attached
+    reports retain evidence before asserting the budget result.
+    **Cache completion:** `SAMBEE_E2E_HTTP_CACHE=1` uses an isolated loopback HTTP
+    proxy, not Playwright request routing. Browser navigation remains at the
+    approved demo URL; the existing dev server isn't reconfigured or stopped.
+    Existing API fixtures are shared with the proxy. Assets use explicit HTTP
+    cache headers; API and HTML responses remain uncached. All 48 paired tests
+    pass, producing 96 individually budget-checked reports: three cold/cache pairs
+    per fixture/width/engine. The first open uses a fresh context and fetches the
+    worker/grammar assets; reopening follows zero live workers, creates a fresh
+    syntax worker and makes zero JavaScript asset requests to the proxy. The
+    600-block fixture also exercises repeated grammar use within one worker job.
+    No preloading, retained worker or worker pool was introduced. The
+    many-block run records first-block and all-block receipt separately; all-block
+    publication currently meets the approved readiness limits, so no incremental
+    publication change is justified by these samples.
+  - [x] **4c. Theme and browser state.** Verify contrast and actual browser
+    selection, active search and scroll through theme/grammar changes, with no
+    content reprocessing. Node identity and computed colors alone are insufficient.
+    **Verified browser slice:** All 16 production cases pass in Chromium/Firefox
+    at widths 1543/390, with each of the four surfaces tested independently under
+    the unchanged 15-second timeout. Test-only instrumentation holds the actual
+    lazy JavaScript grammar until native selection, an active keyword search and
+    nonzero vertical/horizontal scroll are established. Releasing the grammar and
+    applying light/dark/custom-alpha themes preserve selection text and endpoints,
+    active-match ranges/counts, scroll offsets, surface identity and exact text.
+    Preview text nodes remain unchanged; cumulative render-stage observation and
+    worker requests reject repeated normalization or Markdown content processing.
+    State and alpha-composited contrast reports are attached to each browser case.
+    **Contrast corrections:** Dark ordinary search text failed at approximately
+    4.14:1, reproduced by a unit regression before the shared opacity fix.
+    Keyword/search overlap then failed at approximately 3.83:1. Search now uses
+    the viewer foreground over syntax; preview syntax priority -1 retains search
+    priorities 0/1. All measured keyword, selection and ordinary/current search
+    pairs pass 4.5:1, and unit tests cover all eight built-in syntax roles on
+    viewer/code backgrounds. The custom-alpha fixture is deliberately readable;
+    arbitrary custom colors aren't contrast-validated or silently rewritten.
+    Final reports contain 228 browser contrast samples, minimum 5.30:1, with
+    no skipped, retried or flaky browser cases. All 426 affected unit/component
+    tests, normal production build, frontend lint, touched-file diagnostics,
+    docs-content validation and whitespace checks pass. The existing large-chunk
+    build warning remains. Supplementary browser report:
+    `/tmp/sambee-4c-theme-browser-state.json`.
+    These are state/contrast checks, not performance, close/navigation, native
+    clipboard, physical-device or theme-dialog acceptance.
+  - [x] **4d. Theme-dialog regression.** Exercise existing save/cancel/copy,
+    validation and permissions at both widths without redesigning the dialog.
+    **Verified browser slice:** All 48 production cases pass in Chromium/Firefox
+    at 1543x900 and 390x600 under the unchanged 15-second timeout. Light/dark
+    personal and admin site themes preserve the original on Cancel, reject blank
+    names and invalid syntax without writes, and save exact alpha-inclusive
+    definitions with the original scope/version. The last Syntax field remains
+    above the visible footer actions in the short mobile drawer. Built-ins remain
+    read-only for everyone; ordinary users can't overwrite site themes or create
+    site copies. Copy validates collapsed Syntax fields, restores focus after
+    Escape, preserves the source and applied selection, and sends exactly one
+    correctly scoped create request. Rejected 403/409 saves retain the draft and
+    actionable server detail without changing the stored theme or selection.
+    The existing dialog needed no production change. API interception confines
+    theme writes to fixtures at the approved demo URL. All 106 existing focused
+    dialog/Appearance/theme tests and touched-file diagnostics pass. These checks
+    don't establish physical-phone, assistive-technology or wider native-viewer
+    acceptance; those gates remain in items 5-8.
+  **Verified slice:** `mssql` and `mariadb` resolve to the existing dialect
+  grammars, without changing `.sql` filename behavior. All 32 new production
+  correctness cases pass in Chromium/Firefox at widths 1543/390: JavaScript,
+  TypeScript, Python, SQL, shell and PowerShell through text viewing/editing,
+  rendered fences and Markdown source; SQL dialect fences through preview/source.
+  Checks cover exact categories/UTF-16 offsets, complete token coverage across
+  horizontally clipped preview windows, unchanged preview text nodes, Markdown
+  structure and neutral prose/unknown fences. All 104 affected unit tests,
+  normal build, lint and touched-file diagnostics pass.
+  **Theme and development follow-up:** Eight production cases pass across both
+  engines/widths for light/dark/custom-alpha colors, scoped overrides and stable
+  content/text-node identity through all four surfaces. Six mounted-component
+  regressions additionally preserve editor document/selection/search/scroll/undo
+  and preview selection/search/preparation ownership. Text and Markdown browser
+  cases are isolated; they don't certify cross-file close/navigation behavior.
+  Fixed the development normalization-worker crash by resolving the DOM-free
+  character decoder before dependency optimization, not only in worker builds.
+  Both development-browser entity-decoding cases pass; local preparation errors
+  now retain actionable details instead of claiming server overload. All 179
+  affected unit tests, build, lint and touched-file diagnostics pass. The default
+  browser-test timeout is 15 seconds; explicit longer proof overrides remain.
+  These earlier checks are supplemented by items 4c and 4d above; all item 4
+  language/theme correctness slices are complete, not rollout acceptance.
+  The existing large-chunk build warning remains.
+- [x] **5. Check representative native constraints before optimization.** On
+  representative multiline, long-line and nested Markdown documents, check
+  cross-block native selection/copy, actual browser Find/reveal, keyboard/focus
+  and real print/PDF output. These checks constrain layout-affecting changes;
+  rerun affected checks after such changes. Record any manual testing blockers.
+  They do not replace the full interaction/device acceptance in item 7. Do not
+  introduce a replacement renderer to evade measured native-layout costs.
+  - [x] **5a. Fix full-document printing.** Add scoped print-only styles to the
+    existing Markdown viewer: release viewport height/overflow constraints, hide
+    controls/background UI, paginate normally and wrap long code lines. Verify a
+    focused real PDF before running the full matrix; preserve screen layout,
+    document identity, selection and scroll after printing.
+    **Verified print implementation:** A preview-only Print icon opens the native
+    dialog, including its Save as PDF destination; failures leave the viewer usable
+    with actionable feedback. Scoped print styles release modal/scroll constraints,
+    hide controls/backing UI, wrap code/table cells and use black-on-white text in
+    both themes. Native print lifecycle handlers preserve focus, selection and
+    nested scroll and release listeners/frames on disposal. Fullscreen paper uses
+    its fixed container's dimensions rather than leaking print-page viewport units
+    back into screen layout. All 24 independent Chromium/Firefox print cases pass
+    across three fixtures, light/dark and widths 1543/390. All 12 actual Chromium
+    PDFs contain every expected non-whitespace text line and an embedded image;
+    first/last-page rasters were visually inspected for each output. The 13 PDF
+    checker tests and 207 affected component tests pass. Firefox checks print CSS
+    and action behavior, not actual Firefox PDF output or physical printing.
+  - [x] **5b. Fix heading targets.** Generate stable, safely prefixed heading IDs
+    in the existing render pipeline using a standard slugger. Resolve internal
+    fragments consistently, including Unicode and duplicate headings. Verify
+    keyboard target reveal without losing viewer identity or application state.
+    **Verified implementation slice:** `rehype-slug` assigns safely prefixed IDs
+    in the existing HAST pass; matching fragments resolve to those IDs. Focused
+    tests cover duplicate/stable IDs, Unicode, already-prefixed fragments and
+    unchanged malformed/unknown/external/footnote links. Desktop Chromium reaches
+    the target by keyboard and preserves the route path/query and preview node.
+    All 204 affected
+    viewer/Markdown/theme tests pass. The 5c rerun now verifies heading target/reveal,
+    route and preview identity in all 12 engine/fixture/width cases.
+  - [x] **5c. Enforce native regressions.** Replace observational hash checks
+    with target/reveal assertions. Require the 12-case browser matrix and all six
+    real PDF-content checks, plus focused regression tests and visual inspection.
+    Keep missing/duplicate/failed evidence fatal; PDF byte size isn't acceptance.
+    Printing is independently enforced by `production Markdown printing` and the
+    PDF checker's `--printing` mode, so native Find can't prevent print verification.
+    **Verified automated gate:** All 12 production cases pass in Chromium/Firefox
+    at widths 1543/390 without skips or retries. Heading navigation requires the
+    actual target ID/reveal, unchanged route path/query and preview identity.
+    Select All, cross-block selection and exact trusted keyboard clipboard
+    payloads pass. All six actual Chromium PDFs contain every expected
+    non-whitespace text line; first/last-page rasters for each were visually
+    inspected with no observed blank/clipped output. The aggregate PDF checker
+    passes and keeps missing/duplicate/failed evidence fatal. All 15 PDF-checker
+    regressions and 138 focused viewer/Markdown tests pass, as do touched-file
+    diagnostics and whitespace checks.
+    **Find verification correction:** The user reports that Chrome's actual
+    native Find works in the Markdown viewer. Chromium's `window.find` selects
+    but doesn't reveal even in an application-free scroller, so its reveal
+    geometry is now explicitly diagnostic-only, not native-toolbar acceptance.
+    Exact `window.find` selection remains required in both engines; Firefox
+    additionally requires complete match reveal inside the content viewport.
+    Reports retain bounds/scroll evidence and label the engine-specific assertion
+    policy. Actual browser-menu Find completion is recorded in 5d;
+    no application scrolling workaround or production layout change was added.
+    Supplementary evidence: `/tmp/sambee-5c-native-complete.json` and
+    `/tmp/sambee-5c-complete-pdf-review/`. This automated evidence closes 5c;
+    completed manual checks in 5d and syntax enrichment in 5e close item 5,
+    not rollout acceptance.
+  - [x] **5d. Obtain manual native evidence.** Check browser-menu Find rather
+    than app search or `window.find`; inspect Chromium/Firefox print previews and
+    output for multiline, long-line and nested fixtures. Record unavailable
+    physical-printer/device evidence explicitly without waiving acceptance.
+    **Manually completed on 2026-10-22:** The user confirms this manual-testing
+    substep is complete, supplementing the earlier confirmation that Chrome
+    native Find works as expected in the Markdown viewer. Accept this as manual
+    completion of 5d, not an administrative closure or transfer of unfinished
+    checks to item 7. Detailed browser versions, fixture/width results and
+    printer/device inventory weren't supplied; no specific results are inferred.
+    All substeps 5a-5e are complete, closing item 5's representative gate.
+    Item 7 retains its separate, broader interaction/device/resource acceptance.
+  - [x] **5e. Preserve language-independent syntax distinctions.** Map existing
+    grammar tags for built-ins, properties/keys, booleans, null, regular
+    expressions, escapes and metadata/directives to shared application token
+    categories. Reuse the eight existing theme color roles with one central
+    category-to-color mapping across editors and rendered fences; do not add
+    language-specific tokenizers, semantic analysis, document scans, dependencies
+    or theme schema changes. Preserve neutral identifiers and unknown fences,
+    exact source/UTF-16 offsets, nested Markdown, selection/search and cleanup.
+    Verify representative grammars, native/static parity, publication, light/dark
+    colors and legacy theme compatibility. This does not close responsiveness
+    or remaining item 7 native-interaction acceptance.
+    **Verified implementation:** The existing shared mapping now preserves
+    `builtin`, `property`, `boolean`, `null`, `regexp`, `escape` and `metadata`.
+    Editors and preview CSS Highlights reuse `TOKEN_COLOR_ROLES`: built-ins use
+    `function`; properties/keys and regexes use `type`; booleans, null and
+    metadata use `keyword`; escapes use `operator`. Neutral identifiers stay
+    neutral. No grammar overrides, additional parsing, new theme colors,
+    settings UI, dependencies or backend schema changes were introduced.
+    All 12 representative regressions failed before the mapping change and pass
+    afterward, with exact token offsets, native editor classes and nested
+    Markdown coverage. All 186 affected syntax/publication/worker/search/theme
+    tests pass. All 40 production four-surface correctness cases and all 16
+    independent theme-state cases pass in Chromium/Firefox at widths 1543/390,
+    including explicit new-category assertions, exact source, preview text-node
+    identity, search/selection/scroll preservation and theme contrast checks.
+    The combined browser run was interrupted by terminal reuse after 50 passes;
+    the complete 16-case theme slice was then rerun independently and passed.
+    Normal production build, frontend lint, docs-content validation and whitespace
+    checks pass. Existing large-chunk build warning and two strict-indexing
+    diagnostics on untouched nested-parser lines remain; the normal build passes.
+    Published developer docs describe the shared mapping and grammar-dependent
+    limitations. This is correctness evidence, not a new performance result or
+    closure of unavailable native/physical-device checks.
+  **Initial representative checks, not completion:** All 12 production probes passed in
+  Chromium/Firefox at widths 1543/390 for 120-line code, a horizontally overflowing
+  line and Markdown containing an inner JavaScript fence. Native cross-block
+  selections retain the full code, and trusted keyboard copy/paste reproduces the
+  exact selected payload in a temporary textarea. Keyboard Tab reaches the link;
+  Select All includes the distant tail. Narrow Select All can include surrounding
+  app text, so viewer-only selection scoping isn't certified. Native `window.find`
+  selected/revealed the off-screen tail, but isn't the browser Find toolbar.
+  These results predate the strengthened heading/navigation checks.
+  **Initial failed output/navigation gates:** All six original Chromium PDFs contained only
+  the scrolled viewport tail, omitting earlier prose/code. The repeatable PDF
+  checker exits nonzero on all six and compares extracted output with the rendered
+  document, not byte size or print-media DOM. Its 10 focused regression tests pass.
+  Original hash-link activation had no matching heading ID in all 12 probes.
+  The implementation and focused corrections are recorded under 5a/5b above;
+  the original six-failure PDF report isn't a rerun of the corrected build.
+  **Historical Find-proxy failure, corrected in 5c:** The earlier combined run
+  had six Firefox passes and six Chromium failures solely at `window.find`
+  reveal; all six PDF-content checks passed, but the aggregate correctly failed.
+  A minimal 200px-high native scroller with a 2,000px spacer reproduced Chromium
+  selection without scrolling after two frames; Firefox scrolled to 1,856px.
+  The user's later successful Chrome native-Find check distinguishes actual
+  browser behavior from this automated proxy. The corrected assertion policy and
+  complete passing rerun are recorded under 5c, without manufacturing reveal.
+  **Representative gate complete:** The user's manual completion confirmation
+  in 5d supersedes the earlier open manual-testing status. Together with 5a-5c
+  and 5e, this closes item 5. It doesn't establish broader item 7 acceptance,
+  universal physical-printer/device guarantees or passing responsiveness.
+  Rerun affected native checks after layout changes.
+  Supplementary reports: `/tmp/sambee-native-constraints.json`
+  (including PDFs) and `/tmp/sambee-native-pdf.json` (six explicit failures).
+  Corrected print evidence: `/tmp/sambee-markdown-printing.json`,
+  `/tmp/sambee-markdown-printing-pdf.json` and `/tmp/sambee-print-review/`.
+- [ ] **6. Finish measured existing-path responsiveness.** Extend the existing
+  production-viewer harness, not a new benchmark framework. Measure highlighting
+  readiness, fresh/cached grammars, large prose/tables, scrolling, source typing
+  and dense/long-line regex replacement. Exercise zero-length/case/word-boundary
+  parity, startup/crash/decode failures, cancellation during delivery and large
+  replacement output. Measure final atomic dispatch including parent updates
+  (`sambee:source-search:commit`) and result memory. Measure edit serialization,
+  normalization and parent updates before changing the remaining full-string
+  callback. Optimize one measured owner at a time. If native layout or atomic
+  commit cannot meet budgets within the architecture, present costs and obtain
+  an approved specific policy. Never silently truncate, cap or partially apply
+  replacements, or skip required work to pass a budget.
+- [ ] **7. Close native interaction, editing and resource acceptance.** Verify
+  cross-block copy, Select All, actual browser Find/reveal, keyboard/focus,
+  screen-reader reading, hash links and real print/PDF output. Exercise
+  image/font/width changes and rapid switching between distinct documents.
+  Validate latest-edit Save, edits during Save, undo/redo, IME/table flush,
+  preview/share/download, discard and recovery failures. Verify six warmed
+  close/reopen cycles and zero owned DOM/highlights/live workers. Include testing
+  on an available real phone and with assistive technology; narrow desktop viewports,
+  semantic snapshots and print-media text are not substitutes. Save/recovery
+  checks preserve existing contracts; they do not authorize redesign.
+  A supplemental 4c close probe didn't establish closed viewer/root state after
+  theme refresh. Its cause is unverified; close/navigation and full owned-resource
+  release remain open here and aren't counted as passing 4c evidence.
+- [ ] **8. Complete final acceptance and publish finalized contracts.** Run the
+  unchanged relevant production matrix with explicit pass/fail, then close all
+  gates or record approved policy decisions. Update published docs under
+  `website/content/docs/` using docs-update. Run backend theme tests if that
+  contract changes. A passing subset does not approve rollout. Stop when agreed
+  gates pass; additional renderer/recovery work is not a prerequisite.
+
+## Contracts And Acceptance Gates
+
+- Preserve GFM, canonical table-cell line breaks, safe links/raw HTML, exact
+  whitespace/UTF-16 offsets, native text/selection and scroll anchors. Prepared
+  data remains engine-neutral. Keep AST-based code collection and the
+  unchanged-content rendered-text search index.
+- Keep caps of 4,000 viewport syntax ranges and 1,000 preview-search ranges plus
+  one active search range. Missing highlight/visibility capabilities retain plain
+  syntax or search counts/navigation, not per-match DOM mutation.
+- Preserve acknowledged worker transfers: source/results at most 16,384 UTF-16
+  units; syntax pages at most 512 ranges. Canonical-tree batches allow at most
+  512 records and 16,384 string units, with fields split at 2,048. Preserve
+  generation guards, timeout/crash/decode handling and cleanup. Source regex has
+  a provisional 2,000 ms startup/per-response deadline and no synchronous fallback.
+- Keep the provisional 100,000-UTF-16-unit per-block parsing safeguard and
+  independent four-level Markdown nesting limit. Verify at/below/above the size
+  boundary with worker/resource evidence; neither is an aggregate content cutoff
+  or unlimited-size responsiveness claim.
+- Keep eight syntax color roles. Absent legacy groups get central mode defaults
+  without mutation/writes; supplied groups remain strictly validated.
+- Preserve immutable snapshots/flush handles at Save, recovery, preview and draft
+  export boundaries. Save acknowledges only its revision; newer edits stay dirty
+  and recovery never marks a file saved. Snapshot/worker failure leaves live
+  editing usable. Preserve best-effort synchronous recovery, debounce,
+  pagehide/pre-sign-in attempts, limits and warnings.
+
+Keep unchanged fixtures: 54,000 units/6,000 dense matches, a block near the
+parsing safeguard, many eligible blocks exceeding 500,000 combined code units,
+and a 6,000-match single line. Include large prose/tables and nested Markdown.
+Use response interception, never stored demo edits. Do not shrink fixtures,
+raise deadlines, truncate content or hide failures with development/production
+comparisons. Change dependencies only for measured need and follow the repository
+dependency workflow before changing pins/lockfiles.
 
 Approved provisional development-host envelope, tested separately: 24,000 code
 lines across four blocks, 4,000 short formatted paragraphs or 2,400 two-column
-table rows. These are representative fixtures, not a byte-size support guarantee
-or permission to truncate larger files. Larger probes (including 72,000 code
-lines and 4,800 table rows) still expose scaling failures.
+table rows. These are representative fixtures, not byte-size support guarantees.
+Larger probes still expose scaling failures; retain that distinction.
 
 | Metric | Approved Provisional Host Target |
 | --- | --- |
-| Document completion, load through two frames | At most 1,500 ms |
+| Text load through two frames | At most 1,500 ms |
 | First exact search including worker/index startup | At most 1,000 ms |
-| Changed query on warm index / last-match navigation | At most 100 ms each |
+| Warm changed query / last-match navigation | At most 100 ms each |
 | Maximum timer-service gap | At most 50 ms; scheduling proxy only |
-| Loaded renderer JS heap, Chromium | At most 64 MiB; not total/peak memory |
-| Shutdown growth across six warmed explicit-GC cycles | At most 1 MiB; zero owned DOM/highlights/live workers |
+| Loaded Chromium renderer JS heap | At most 64 MiB; not total/peak memory |
+| Six warmed explicit-GC shutdown cycles | At most 1 MiB growth; zero owned resources |
 
-Use three trials per fixture/width/engine; missing or invalid required measurements
-must fail rather than silently pass. Prototype budget passes do not establish
-live-viewer acceptance. Do not raise deadlines, select smaller fixtures or compare
-development with production to hide failures.
+Also require actual input-to-visible-response p95 below 50 ms, no
+application-controlled interaction-blocking task above 50 ms, and scrolling
+within the approved refresh-rate budget below. Item 3 defines the additional
+readiness and peak renderer/worker/native memory criteria; later items must
+measure and enforce them.
 
-Remaining acceptance also includes actual input-to-visible-response (target p95
-below 50 ms), no application-controlled interaction-blocking task above 50 ms,
-scrolling at the reference refresh-rate budget, timely first usable text and
-highlight completion, and peak renderer/worker/native memory. Finalize any still
-undefined completion/resource budgets and browser-support policy explicitly.
-Reference physical mid-range mobile and assistive-technology results remain
-unverified; a narrow desktop viewport is not mobile performance evidence.
+## Item 3 Acceptance Decisions
 
-Rerun affected editor/viewer/search/theme tests and frontend lint/build; run backend
-theme tests when that contract is affected. Update applicable published docs when
-behavior/contracts are finalized and remove obsolete proof-only paths after their
-replacement is accepted. Stop when the relevant correctness and performance gates
-pass; unrelated recovery experiments are not prerequisites.
+The definitions below guide the next harness extension; they are not new passing
+results. Readiness, memory and scrolling limits are approved provisional targets.
+The Worker support decision below is approved and implemented. The approved
+available-hardware policy replaces fixed reference-device profiles. Existing
+targets above remain in force. Item 3 is complete as a definitions/support-policy
+gate, not as readiness, resource or rollout acceptance.
 
-## Existing Verification Entry Points
+### Readiness Boundaries
 
-Use existing tooling, extending it only for missing evidence. Commands below are
-from the repository root unless a working directory is stated.
+Use the existing browser-side file-open event as the common start, not the API
+response, worker start or a Playwright round trip. Do not hold normalization or
+syntax, pre-load grammars or warm away first use in readiness trials. Record
+response-end, DOM commit, worker completion and publication as diagnostic
+milestones without subtracting their costs from the end-to-end result.
+
+| Measurement | Completion Boundary | Approved Provisional Limit |
+| --- | --- | --- |
+| First usable text | Exact expected rendered text is committed, loading no longer blocks the viewer, and selection/search controls are usable; observe two subsequent frames. Pair timing with successful selection and search assertions. | At most 1,500 ms from open; retain the existing text-load gate separately. |
+| First visible syntax | Expected token categories and offsets cover the initial visible eligible code window, within the existing range cap; observe two subsequent frames. An arbitrary first nonempty highlight is insufficient. | At most 1,500 ms from open. |
+| Full syntax preparation | Every requested block has settled to valid ranges or its expected plain-text outcome, the host has received all results, and the initial visible publication has reached two frames. Off-screen DOM highlights are not required. | At most 3,000 ms from open. |
+
+Plain/unknown/oversized fences are expected neutral outcomes, not highlighted
+successes. An injected failure can pass a functional fallback test but cannot
+count as successful highlighting in a healthy timing trial. A fixture with no
+eligible visible syntax reports that metric as not applicable and needs a
+separate eligible fixture; missing measurements for eligible fixtures fail.
+Frame callbacks remain scheduling proxies, not proof of hardware paint.
+
+Keep three trials per fixture/width/engine and evaluate every required sample,
+not only an average. Distinguish a fresh worker with cold browser module/cache
+state, a fresh worker with warm browser cache, and repeated grammar use within
+one worker job. A closed preview terminates its worker: reopening is not an
+in-memory grammar-cache hit. Record the cache setup; do not add persistent
+workers or a pool to manufacture a warm result.
+
+### Measured Readiness Slice
+
+The separate `production syntax readiness` slice reuses all four unchanged
+publication fixtures, without holding normalization or syntax. Three trials per
+fixture/engine/width produced 48 complete passing
+reports, with approved readiness limits enforced individually. The many-block
+fixture contains 600 blocks of 101 lines; every requested block must finish.
+Existing timing targets remain unchanged.
+The 26 evaluator tests cover exact targets, over-budget samples, missing/invalid
+measurements and diagnostic runs, for both existing timing and readiness limits.
+
+Each row below is the maximum across all six trials at widths 1543/390.
+
+| Fixture | Engine | Maximum Usable Text | Maximum Visible Syntax | Maximum Full Preparation |
+| --- | --- | --- | --- | --- |
+| Dense | Chromium | 163 ms | 279.6 ms | 279.6 ms |
+| Dense | Firefox | 215 ms | 395 ms | 395 ms |
+| Near-safeguard | Chromium | 179.9 ms | 344.9 ms | 344.9 ms |
+| Near-safeguard | Firefox | 246 ms | 447 ms | 447 ms |
+| Many-blocks | Chromium | 412.7 ms | 898.8 ms | 898.8 ms |
+| Many-blocks | Firefox | 635 ms | 1,378 ms | 1,378 ms |
+| Long-line | Chromium | 182.3 ms | 313.9 ms | 314 ms |
+| Long-line | Firefox | 180 ms | 313 ms | 313 ms |
+
+The probe records file-open in the browser, checks exact text and enabled search
+controls, and observes two frames. It verifies all five expected code categories
+and UTF-16 coverage on each initial fully visible line, not merely a nonempty
+registry. For long lines, expected coverage is clipped to fully visible characters
+inside the horizontal viewport, rather than requiring off-screen tokens.
+Native selection and exact search counts are checked afterward as
+functional evidence, not included as measured hardware input latency. Probe
+inspection/geometry costs remain in the measured intervals. Full preparation
+includes receipt of all block results and initial visible syntax through two
+frames. It nearly coincides with visible readiness because live syntax
+publication waits for all results. The many-block first/all-block worker receipt
+maxima are 430/813.8 ms Chromium and 676/1,303 ms Firefox. These are separately
+observed maxima, not paired intervals or isolated parsing CPU. The publication
+barrier still meets the approved readiness limit; these samples do not justify
+an incremental path or certify off-screen syntax publication.
+
+These earlier reports use fresh contexts/workers but routed assets, so they make
+no cold/warm-cache acceptance claim. The separate real-HTTP run below closes that
+specific gate without changing the running dev server.
+Highlight cleanup passes,
+but worker/memory/device acceptance and the previous timer-gap failures remain
+open. Frontend lint, touched-file diagnostics and whitespace checks pass. No
+application scheduling or publication behavior changed for this probe. This run
+uses production assets containing the nested parser failure fix. Supplementary report:
+`/tmp/sambee-syntax-readiness-four-fixtures.json`.
+
+### Isolated HTTP Cache Readiness
+
+The opt-in `SAMBEE_E2E_HTTP_CACHE=1` mode serves the production build and the
+existing API fixtures through a test-only, loopback-bound HTTP proxy. Browser
+navigation still uses `http://localhost:3000/browse/smb/demo`; no alternate
+connection or real demo contents are used. Each test owns and closes its proxy
+and browser context. Hashed build assets use `public, max-age=31536000, immutable`;
+HTML and API responses use `no-store`. Service workers are blocked and Playwright
+request routing isn't installed in these contexts.
+
+The first open starts with an empty browser context and no grammar preloading.
+After timing, exact selection/search and cleanup checks, the test closes the
+viewer and requires zero live workers/highlights. A second measured open in the
+same page creates a fresh syntax worker with the browser HTTP cache populated
+only by the first measured open. Worker URLs and server request records are
+attached: every cold sample fetches the worker and grammar assets, and every
+cached sample makes zero JavaScript asset requests. Successful syntax preparation
+in a new worker with no such requests distinguishes browser cache reuse from a
+retained worker or unresolved preparation. The many-block fixture additionally
+requires all 600 blocks to settle in one worker job.
+
+All 48 paired tests pass without skips, retries or flaky outcomes: 96 reports,
+three cold/cache pairs per fixture/width/engine. Every required measurement passes
+its unchanged target; no averaging or diagnostic exemptions are used. Each row
+below is the maximum across 24 samples covering all four fixtures and both widths.
+
+| Engine | Cache Condition | Maximum Usable Text | Maximum Visible Syntax | Maximum Full Preparation |
+| --- | --- | --- | --- | --- |
+| Chromium | Cold | 414.4 ms | 896.3 ms | 896.3 ms |
+| Chromium | Cached | 363.1 ms | 863.4 ms | 863.4 ms |
+| Firefox | Cold | 634 ms | 1,361 ms | 1,361 ms |
+| Firefox | Cached | 618 ms | 1,329 ms | 1,329 ms |
+
+Environment: Debian 13 dev container, Linux WSL2 kernel
+`6.18.33.2-microsoft-standard-WSL2`, Intel Core Ultra 9 285, 12 available logical
+CPUs and approximately 31 GiB reported RAM. Engines: Chromium 156.0.8078.4 and
+Firefox 157.0. Headless physical refresh rate and power mode are unverified.
+These are available-host, local-HTTP measurements with the stated cache policy,
+not a universal hardware/network guarantee or resource/native-input acceptance.
+Supplementary report: `/tmp/sambee-syntax-readiness-http-cache.json`.
+
+Fixture extraction also passes two direct transfer-stream request tests, including
+headers/body and the existing special callback. An attempted older upload UI
+regression test times out before sending a transfer: it expects the Upload button
+to open a file chooser directly, but the current UI opens a Files/Folder menu.
+That unrelated test mismatch is not repaired or counted as passing here.
+
+### Resource And Device Boundaries
+
+Retain the approved 64 MiB loaded Chromium renderer JS-heap ceiling and six
+warmed explicit-GC shutdown cycles with at most 1 MiB growth and zero owned
+resources. Measure those separately from timing, releasing harness references
+before GC. A missing memory capability is unmeasured, not a pass.
+
+For peak/resource acceptance, record the pre-open baseline, load/preparation,
+typing/replacement, loaded state and post-close state. Report renderer JS heap,
+worker JS heaps and process/native memory with their measurement method and
+sampling cadence. Process totals can already include workers and JS heaps:
+do not add them together or label renderer heap as total memory. Periodic samples
+are observed maxima, not proven peaks; worker termination or GC cannot erase an
+earlier high-water measurement.
+
+| Resource Measurement | Approved Provisional Ceiling |
+| --- | --- |
+| Loaded Chromium renderer JS heap | 64 MiB, unchanged |
+| Peak renderer JS heap | 128 MiB |
+| Peak combined worker JS heaps | 64 MiB |
+| Peak increase in aggregate renderer/worker private process memory over pre-open baseline | 256 MiB |
+
+The aggregate process measurement includes JS heaps: these are independent
+checks, not additive allowances. Include all processes owned by the measured
+viewer; record the accounting method so shared processes aren't counted twice.
+If reliable high-water measurements aren't available, label peak acceptance
+unverified rather than passing it from sparse samples or post-GC values. A
+measurement-tooling limitation doesn't silently waive a ceiling.
+
+**Approved available-hardware policy:** use the existing automated host for
+Chromium/Firefox at widths 1543/390, without prescribed device models or minimum
+CPU/RAM requirements. Record OS, browser versions, available CPU/RAM and display
+refresh information with the results; record power mode where available. If a
+headless/container environment doesn't expose a physical refresh rate, say so
+rather than treating animation callbacks as proof of a 60 Hz physical display.
+Results support claims only for the recorded environment, not universal
+hardware-performance guarantees.
+
+Use any available real phone for item 7's manual interaction checks; no specific
+model is required. Missing physical-phone or high-refresh coverage stays
+explicitly unverified under item 7 and doesn't reopen item 3's definitions.
+Desktop narrow viewports aren't physical-phone evidence. Test the actual native
+refresh rate before claiming high-refresh support.
+
+Approved provisional scrolling acceptance at 60 Hz is p95 frame interval at
+most 16.7 ms and no application-attributed interval above 33.3 ms. At an actual
+refresh rate R, one frame is 1,000/R ms; evaluate other refresh rates separately
+against one-frame p95 and two-frame application-attributed intervals. Report
+scrolling intervals and input-to-visible-response latency separately, with the
+measurement method and its limitations. Keep the existing input p95 below 50 ms
+and application-controlled blocking-task limit unchanged. Unavailable physical
+paint/refresh measurements remain unverified, not automatic passes. Approval of
+limits isn't evidence that the implementation meets them.
+
+### Worker-Less Support Decision
+
+**Approved decision:** browsers without Web Workers aren't supported. Reuse
+the existing pre-app compatibility check rather than build a separate reduced
+mode. The gate checks that Worker is callable, lists Web Workers among missing
+capabilities and doesn't import the app when the check fails. No new fallback
+editor, preview state or support-specific parsing path is needed.
+
+Four bootstrap regressions cover absent/invalid Worker APIs and supported
+startup; all 33 combined bootstrap/shared-highlighter tests pass. Development
+browser probes at the approved demo URL confirm that absent Workers show the
+compatibility reason without requesting the app entry, while supported startup
+requests that entry and removes the compatibility screen. Lint, production build,
+touched-file diagnostics, docs-content validation and whitespace checks pass.
+The existing large-chunk build warning remains. These checks don't establish
+worker execution or performance acceptance.
+
+The normalization and syntax helpers retain their existing defensive main-thread
+fallbacks, but they aren't reachable as a supported Worker-less app mode. Neither
+a 100,000-unit guard, a yield between blocks nor a timeout bounds a synchronous
+parse. API presence doesn't prove construction or execution succeeds: retain
+existing worker startup/crash/timeout/decode-error handling and never silently
+retry those failures synchronously. Save/recovery contracts remain unchanged.
+
+## Verification
+
+Run relevant slices after each bounded change. Use production Chromium/Firefox
+at widths 1543/390 through `http://localhost:3000/browse/smb/demo` only. Final
+timing acceptance uses three trials per fixture/width/engine; missing, invalid
+or over-budget required samples fail. Existing report status covers a subset,
+not all rollout criteria. Do not rerun an unchanged full matrix between every
+small edit.
+
+Commands run from `frontend/`:
 
 ```sh
-# Actual production viewer; run from frontend/.
+npm run test -- src/__tests__/browserBootstrap.test.ts
+npm run test -- src/utils/__tests__/markdownSyntax.test.tsx src/utils/__tests__/syntaxHighlighting.test.ts src/utils/__tests__/domTextSearch.test.ts
+npm run lint
 npm run build
-SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production syntax publication' --workers=1
 
-# Repeated attribution with inline stage/phase measurements retained in JSON.
-SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production syntax publication' --workers=1 --repeat-each=3 --reporter=json
+# Evaluator boundaries and invalid samples.
+npm run test:e2e -- viewer-performance-budgets.spec.ts --workers=1
 
-# Isolated syntax-publication comparison; excludes initial viewer rendering.
-node frontend/scripts/markdown-syntax-publication-proof.mjs
+# Functional language parity across actual application surfaces.
+SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production shared syntax correctness' --workers=1 --max-failures=1
 
-# Existing whole-Markdown prototype strict host gate; repeat with
-# SAMBEE_PREVIEW_PROOF_BROWSER=firefox for Firefox.
-SAMBEE_PREVIEW_PROOF_DOCUMENT=1 SAMBEE_PREVIEW_PROOF_SCALE=1 SAMBEE_PREVIEW_PROOF_BUDGETS=1 SAMBEE_KEEP_PREVIEW_PROOF=1 node frontend/scripts/markdown-preview-performance-proof.mjs
+# Worker failure injection, nesting safeguards, cancellation and recovery.
+SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production nested syntax failures' --workers=1 --max-failures=1
 
-# Source-regex worker feasibility; not live-editor containment acceptance.
-SAMBEE_SOURCE_SEARCH_PROOF_BROWSER=chromium,firefox node frontend/scripts/source-search-containment-proof.mjs
+# Four-surface theme/late-grammar state and alpha-composited contrast acceptance.
+SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production shared syntax theme identity' --workers=1 --max-failures=1
+
+# Unheld four-fixture readiness with approved limits enforced.
+PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/sambee-syntax-readiness-four-fixtures.json SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production syntax readiness' --workers=1 --repeat-each=3 --reporter=json
+
+# Real HTTP cold/cache pairs, with a fresh worker for each measured open.
+PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/sambee-syntax-readiness-http-cache.json SAMBEE_E2E_PRODUCTION=1 SAMBEE_E2E_HTTP_CACHE=1 npm run test:e2e:all -- --grep 'production syntax readiness' --workers=1 --repeat-each=3 --reporter=json
+
+# Development normalization worker; uses the running approved demo server.
+SAMBEE_E2E_DEVELOPMENT=1 npm run test:e2e:all -- --grep 'development Markdown worker' --workers=1 --max-failures=1
+
+# Final unchanged production matrix with explicit timing enforcement.
+PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/sambee-highlighting-final.json SAMBEE_E2E_PRODUCTION=1 SAMBEE_E2E_BUDGETS=1 npm run test:e2e:all -- --grep 'production syntax publication' --workers=1 --repeat-each=3 --reporter=json
+
+# Focused functional source regex containment; not dense-replacement acceptance.
+SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production source regex containment' --workers=1
+
+# Representative native selection/clipboard/focus and real PDF evidence.
+PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/sambee-native-constraints.json SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production native Markdown constraints' --workers=1 --reporter=json
 ```
+
+The combined native slice passes with Chromium `window.find` reveal recorded as
+diagnostic-only; exact selection remains required in both engines and Firefox
+reveal remains enforced. Actual browser Find has separate manual evidence under
+5d. Run the independent printing matrix from `frontend/`:
+
+```sh
+PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/sambee-markdown-printing.json SAMBEE_E2E_PRODUCTION=1 npm run test:e2e:all -- --grep 'production Markdown printing' --workers=1 --reporter=json
+```
+
+From the repository root, inspect actual PDF text/image content separately.
+Browser-probe passes alone don't establish complete output:
+
+```sh
+backend/.venv/bin/python -m scripts.check_native_markdown_pdf /tmp/sambee-native-constraints.json
+backend/.venv/bin/python -m scripts.check_native_markdown_pdf /tmp/sambee-markdown-printing.json --printing
+backend/.venv/bin/python -m pytest backend/tests/test_native_markdown_pdf_check.py
+```
+
+Keep `SAMBEE_E2E_MEMORY=1` Chromium controlled-GC runs separate from timing and
+`SAMBEE_E2E_TRACE=1` diagnostic traces. Release harness-held node references
+before GC. Timer gaps and frame callbacks are proxies, not hardware paint or
+CPU attribution; worker elapsed times include transfers/scheduling. Trace CPU
+samples must be counted once and Firefox attribution must use its content
+process. Do not sum overlapping intervals or count diagnostic runs as acceptance.

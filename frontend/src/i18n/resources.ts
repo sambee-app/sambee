@@ -15,6 +15,7 @@ export const EN_TRANSLATIONS = {
       edit: "Edit",
       logout: "Logout",
       move: "Move",
+      print: "Print",
       rename: "Rename",
       replace: "Replace",
       retry: "Retry",
@@ -1282,6 +1283,8 @@ export const EN_TRANSLATIONS = {
     },
   },
   viewer: {
+    printTitle: "Print / Save as PDF",
+    printError: "The print dialog couldn't open. Try Print from your browser menu.",
     helpTitles: {
       pdf: "PDF viewer shortcuts",
       image: "Image viewer shortcuts",

@@ -293,7 +293,8 @@ describe("codeMirrorFindReplace", () => {
     expect(getRootSearchMetrics(view)).toMatchObject({ isValid: true, matches: 1 });
 
     updateRootSearchQuery(view, { ...DEFAULT_SEARCH_OPTIONS, regexp: true, searchText: "alpha\\d" });
-    expect(getRootSearchMetrics(view)).toMatchObject({ isValid: true, matches: 1 });
+    expect(getRootSearchMetrics(view)).toMatchObject({ isValid: true, matches: 0 });
+    expect(getRootSearchMetrics(view).error).toMatch(/worker/i);
 
     updateRootSearchQuery(view, { ...DEFAULT_SEARCH_OPTIONS, regexp: true, searchText: "(" });
     expect(getRootSearchMetrics(view)).toMatchObject({ isValid: false, matches: 0 });

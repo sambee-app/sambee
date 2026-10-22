@@ -1,8 +1,9 @@
 import type { PreparedMarkdownSyntax } from "./markdownSyntax";
-import { TOKEN_CATEGORIES, type TokenCategory } from "./syntaxHighlighting";
+import { TOKEN_CATEGORIES, TOKEN_COLOR_ROLES, type TokenCategory } from "./syntaxHighlighting";
 
 export const MAX_VIEWPORT_SYNTAX_RANGES = 4_000;
 const BLOCKS_PER_FRAME = 16;
+const SYNTAX_HIGHLIGHT_PRIORITY = -1;
 let publicationId = 0;
 
 function measureSyntaxStage<Result>(stage: string, operation: () => Result): Result {
@@ -27,14 +28,16 @@ export function visibleSyntaxColumnWindows(
   if (!pre || pre.scrollWidth <= pre.clientWidth || getComputedStyle(pre).whiteSpace !== "pre" || getComputedStyle(pre).direction === "rtl")
     return [{ from, to }];
   const clip = pre.getBoundingClientRect();
+  if (clip.right < bounds.left || clip.left > bounds.right) return [];
   const windows: { from: number; to: number }[] = [];
   let lineStart = from;
   while (lineStart < to) {
     const newline = text.indexOf("\n", lineStart);
     const lineEnd = newline < 0 ? to : Math.min(to, newline + 1);
-    const columnAt = (edge: number) => {
-      let low = lineStart;
+    const columnAt = (edge: number, start = lineStart) => {
+      let low = start;
       let high = lineEnd;
+      if (low < high && rangeAt(low, low + 1).getBoundingClientRect().right >= edge) return low;
       while (low < high) {
         const middle = (low + high) >>> 1;
         if (rangeAt(middle, middle + 1).getBoundingClientRect().right < edge) low = middle + 1;
@@ -42,9 +45,10 @@ export function visibleSyntaxColumnWindows(
       }
       return low;
     };
+    const visibleFrom = columnAt(Math.max(bounds.left, clip.left));
     windows.push({
-      from: columnAt(Math.max(bounds.left, clip.left)),
-      to: Math.min(lineEnd, columnAt(Math.min(bounds.right, clip.right)) + 1),
+      from: visibleFrom,
+      to: Math.min(lineEnd, columnAt(Math.min(bounds.right, clip.right), visibleFrom) + 1),
     });
     lineStart = lineEnd;
   }
@@ -57,17 +61,20 @@ export function publishMarkdownSyntax(
   prepared: PreparedMarkdownSyntax,
   signal: AbortSignal
 ): () => void {
-  if (signal.aborted || typeof Highlight === "undefined" || !globalThis.CSS?.highlights) return () => {};
+  if (signal.aborted || typeof Highlight === "undefined" || !globalThis.CSS?.highlights || typeof IntersectionObserver === "undefined")
+    return () => {};
   const prefix = `markdown-syntax-${++publicationId}`;
   const names = new Map(TOKEN_CATEGORIES.map((category) => [category, `${prefix}-${category}`]));
   const style = document.createElement("style");
   style.textContent = TOKEN_CATEGORIES.map((category) => {
-    const role = category === "heading" || category === "structure" ? "keyword" : category;
-    const color = category === "identifier" || category === "inlineCode" ? "foreground" : role;
+    const color = TOKEN_COLOR_ROLES[category];
     return `::highlight(${names.get(category)}) { color: var(--sambee-syntax-${color}); }`;
   }).join("\n");
   document.head.append(style);
   const blocks = Array.from(root.querySelectorAll<HTMLElement>("pre > code"));
+  const blockIndices = new Map(blocks.map((block, index) => [block, index]));
+  const visibleBlocks = new Set<number>();
+  let pendingBlocks: number[] = [];
   let frame: number | null = null;
   let disposed = false;
   let nextBlock = 0;
@@ -79,11 +86,12 @@ export function publishMarkdownSyntax(
     frame = null;
     if (disposed || signal.aborted) return;
     const bounds = measureSyntaxStage("viewport-geometry", () => viewport.getBoundingClientRect());
-    const limit = Math.min(blocks.length, nextBlock + BLOCKS_PER_FRAME);
+    const limit = Math.min(pendingBlocks.length, nextBlock + BLOCKS_PER_FRAME);
     for (; nextBlock < limit && count < MAX_VIEWPORT_SYNTAX_RANGES; nextBlock += 1) {
-      const code = blocks[nextBlock];
-      const result = prepared.results[nextBlock];
-      const request = prepared.requests[nextBlock];
+      const index = pendingBlocks[nextBlock];
+      const code = blocks[index];
+      const result = prepared.results[index];
+      const request = prepared.requests[index];
       const rect = measureSyntaxStage("block-geometry", () => code.getBoundingClientRect());
       if (!request || !result || !("ranges" in result) || rect.bottom < bounds.top || rect.top > bounds.bottom) continue;
       const { nodes, length, valid } = measureSyntaxStage("mapping", () => {
@@ -127,8 +135,8 @@ export function publishMarkdownSyntax(
         return low;
       };
       const windows = measureSyntaxStage("offset-geometry", () => {
-        const from = offsetAt(bounds.top);
-        const to = Math.min(request.text.length, offsetAt(bounds.bottom) + 1);
+        const from = rect.top >= bounds.top ? 0 : offsetAt(bounds.top);
+        const to = rect.bottom <= bounds.bottom ? request.text.length : Math.min(request.text.length, offsetAt(bounds.bottom) + 1);
         return visibleSyntaxColumnWindows(request.text, rangeAt, bounds, from, to, code.closest("pre"));
       });
       measureSyntaxStage("ranges", () => {
@@ -156,32 +164,55 @@ export function publishMarkdownSyntax(
       });
     }
     measureSyntaxStage("publication", () => {
-      for (const [category, name] of names) CSS.highlights.set(name, new Highlight(...(categories.get(category) ?? [])));
+      for (const [category, name] of names) {
+        const highlight = new Highlight(...(categories.get(category) ?? []));
+        highlight.priority = SYNTAX_HIGHLIGHT_PRIORITY;
+        CSS.highlights.set(name, highlight);
+      }
     });
-    if (nextBlock < blocks.length && count < MAX_VIEWPORT_SYNTAX_RANGES) frame = requestAnimationFrame(paint);
+    if (nextBlock < pendingBlocks.length && count < MAX_VIEWPORT_SYNTAX_RANGES) frame = requestAnimationFrame(paint);
   };
   const refresh = () => {
     if (disposed || signal.aborted) return;
-    if (frame !== null) cancelAnimationFrame(frame);
+    pendingBlocks = [...visibleBlocks].sort((left, right) => left - right);
     nextBlock = 0;
     count = 0;
     categories.clear();
-    frame = requestAnimationFrame(paint);
+    if (frame === null) frame = requestAnimationFrame(paint);
   };
+  const intersections = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const index = blockIndices.get(entry.target as HTMLElement);
+        if (index === undefined) continue;
+        if (entry.isIntersecting) visibleBlocks.add(index);
+        else visibleBlocks.delete(index);
+      }
+      refresh();
+    },
+    { root: viewport }
+  );
+  for (const block of blocks) intersections.observe(block);
   const observer = new ResizeObserver(refresh);
   observer.observe(viewport);
   const mutations = new MutationObserver(refresh);
   mutations.observe(root, { subtree: true, childList: true, characterData: true });
   viewport.addEventListener("scroll", refresh, { passive: true });
   root.addEventListener("scroll", refresh, { capture: true, passive: true });
+  root.addEventListener("load", refresh, true);
+  const fonts = document.fonts;
+  fonts?.addEventListener("loadingdone", refresh);
   const dispose = () => {
     if (disposed) return;
     disposed = true;
     if (frame !== null) cancelAnimationFrame(frame);
+    intersections.disconnect();
     observer.disconnect();
     mutations.disconnect();
     viewport.removeEventListener("scroll", refresh);
     root.removeEventListener("scroll", refresh, true);
+    root.removeEventListener("load", refresh, true);
+    fonts?.removeEventListener("loadingdone", refresh);
     signal.removeEventListener("abort", dispose);
     for (const name of names.values()) CSS.highlights.delete(name);
     style.remove();
