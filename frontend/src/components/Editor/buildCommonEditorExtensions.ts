@@ -6,6 +6,7 @@ import type { Extension } from "@codemirror/state";
 import { drawSelection, EditorView, highlightActiveLine, keymap } from "@codemirror/view";
 import { buildSelectionLayerExtension } from "./buildEditorSelectionLayer";
 import { sourceRegexSearchLifecycle } from "./sourceRegexSearch";
+import { sourceReplacementFeedbackExtension } from "./sourceReplacementFeedback";
 
 interface CommonEditorExtensionsOptions {
   defaultSyntaxHighlighting?: boolean;
@@ -84,6 +85,7 @@ export function buildCommonEditorExtensions({
     bracketMatching(),
     search({ top: true }),
     sourceRegexSearchLifecycle,
+    sourceReplacementFeedbackExtension,
     ...(includeSelectionMatches ? [highlightSelectionMatches()] : []),
     highlightActiveLine(),
     ...(lineWrapping ? [EditorView.lineWrapping] : []),

@@ -80,6 +80,11 @@ export function buildCodeMirrorSurfaceTheme({
           border: `1px solid ${borderColor}`,
           color: textColor,
         },
+        ".sambee-source-replacement-feedback": {
+          backgroundColor: surfaceBackground,
+          border: `1px solid ${borderColor}`,
+          color: textColor,
+        },
         ".cm-tooltip-autocomplete ul li[aria-selected]": {
           backgroundColor: activeLineBackground,
           color: textColor,

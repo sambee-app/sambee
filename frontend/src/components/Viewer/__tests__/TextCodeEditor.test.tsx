@@ -1,6 +1,15 @@
-import { undo } from "@codemirror/commands";
-import { getSearchQuery, SearchQuery, search, setSearchQuery } from "@codemirror/search";
-import { EditorState, StateEffect } from "@codemirror/state";
+import { history, redo, undo } from "@codemirror/commands";
+import {
+  findNext,
+  findPrevious,
+  getSearchQuery,
+  replaceAll as nativeReplaceAll,
+  replaceNext,
+  SearchQuery,
+  search,
+  setSearchQuery,
+} from "@codemirror/search";
+import { EditorSelection, EditorState, StateEffect, Transaction, type TransactionSpec } from "@codemirror/state";
 import { EditorView, type ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
@@ -9,8 +18,19 @@ import { buildPassiveSearchHighlightExtension } from "../../Editor/buildCodeMirr
 import type { TextEditorThemeOptions } from "../../Editor/buildTextEditorTheme";
 import { findSelectedCodeMirrorSearchMatch } from "../../Editor/codeMirrorSearchMatches";
 import { runSourceRegexSearchCommand, sourceRegexSearchLifecycle } from "../../Editor/sourceRegexSearch";
-import { SOURCE_SEARCH_TIMEOUT_MS, type SourceSearchResponse } from "../../Editor/sourceRegexSearchProtocol";
-import { getCodeMirrorFindReplaceMetrics } from "../codeMirrorFindReplace";
+import {
+  SOURCE_SEARCH_CHUNK_UNITS,
+  SOURCE_SEARCH_TIMEOUT_MS,
+  type SourceSearchOperation,
+  type SourceSearchRequest,
+  type SourceSearchResponse,
+} from "../../Editor/sourceRegexSearchProtocol";
+import {
+  beginSourceReplacementFeedback,
+  isSourceReplacementPending,
+  SOURCE_REPLACEMENT_FEEDBACK_DELAY_MS,
+} from "../../Editor/sourceReplacementFeedback";
+import { getCodeMirrorFindReplaceMetrics, replaceAll } from "../codeMirrorFindReplace";
 import { TextCodeEditor, type TextCodeEditorHandle } from "../TextCodeEditor";
 
 const TEST_TEXT_THEME: TextEditorThemeOptions = {
@@ -29,10 +49,12 @@ function mockSearchWorkers() {
   const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
   const workers: MockWorker[] = [];
   class MockWorker {
-    onmessage?: (event: { data: SourceSearchResponse }) => void;
+    onmessage?: ((event: { data: SourceSearchResponse }) => void) | null;
+    onerror?: ((event: ErrorEvent) => void) | null;
     postMessage = vi.fn();
     terminate = vi.fn();
     addEventListener = vi.fn();
+    removeEventListener = vi.fn();
     constructor() {
       workers.push(this);
     }
@@ -51,6 +73,447 @@ function mockSearchWorkers() {
 }
 
 describe("TextCodeEditor", () => {
+  it("matches native search, replacement, positions and history after repeatable generated edits in the real worker", async () => {
+    const randomConfig = { seed: 0x5eed1234, multiplier: 1_664_525, increment: 1_013_904_223, steps: 16, maximumDeletion: 5 };
+    const tokens = ["alpha", "Alpha", "ALPHA", "alphabet", "alpha2", "_alpha", "-alpha-", "\n", "\uD83D\uDE80", "e\u0301", " "];
+    const replacements = ["", "$2:$1", "ALPHA\nalpha", "\uD83D\uDE80alpha"];
+    const operations: SourceSearchOperation[] = ["count", "next", "previous", "replace-one", "replace-all"];
+    const commands = { next: findNext, previous: findPrevious, "replace-one": replaceNext, "replace-all": nativeReplaceAll };
+    const responses: SourceSearchResponse[] = [];
+    const effectiveOperations = new Set<SourceSearchOperation>();
+    const selectionDirections = new Set<number>();
+    vi.stubGlobal("postMessage", (response: SourceSearchResponse) => responses.push(response));
+    vi.stubGlobal("onmessage", null);
+    try {
+      await import("../../Editor/sourceRegexSearch.worker");
+      expect(responses.splice(0)).toEqual([{ type: "ready" }]);
+      const handler = globalThis.onmessage!;
+      const send = (message: SourceSearchRequest) => handler.call(window, new MessageEvent("message", { data: message }));
+      for (const expression of ["(alpha)(\\d?)", "(?=alpha)"]) {
+        for (const caseSensitive of [false, true]) {
+          for (const wholeWord of [false, true]) {
+            for (const wordChars of ["", "-"]) {
+              let seed = randomConfig.seed;
+              const choose = (limit: number) => {
+                seed = (Math.imul(seed, randomConfig.multiplier) + randomConfig.increment) >>> 0;
+                return (seed >>> 8) % limit;
+              };
+              let state = EditorState.create({
+                doc: tokens.join(" "),
+                extensions: [search(), history(), EditorState.languageData.of(() => [{ wordChars }])],
+              });
+              for (let step = 0; step < randomConfig.steps; step += 1) {
+                const from = choose(state.doc.length + 1);
+                const to = from + choose(Math.min(randomConfig.maximumDeletion, state.doc.length - from) + 1);
+                state = state.update({ changes: { from, to, insert: tokens[choose(tokens.length)] }, userEvent: "input.type" }).state;
+                const anchor = choose(state.doc.length + 1);
+                const head = step % 3 === 0 ? anchor : choose(state.doc.length + 1);
+                selectionDirections.add(Math.sign(head - anchor));
+                const replace = replacements[step % replacements.length];
+                const query = new SearchQuery({ search: expression, replace, regexp: true, literal: true, caseSensitive, wholeWord });
+                state = state.update({ selection: EditorSelection.range(anchor, head), effects: setSearchQuery.of(query) }).state;
+                const operation = operations[step % operations.length];
+                const context = JSON.stringify({
+                  seed: randomConfig.seed,
+                  step,
+                  expression,
+                  caseSensitive,
+                  wholeWord,
+                  wordChars,
+                  operation,
+                });
+                const changes: { from: number; to: number; insert: string }[] = [];
+                const ranges: { from: number; to: number }[] = [];
+                let completion: Extract<SourceSearchResponse, { type: "complete" }> | undefined;
+                let sourceOffset = 0;
+                responses.length = 0;
+                send({
+                  type: "start",
+                  operation,
+                  query: { search: expression, replace, caseSensitive, wholeWord, wordChars, literal: true },
+                  selection: { anchor, head },
+                });
+                for (let responseIndex = 0; responseIndex < responses.length; responseIndex += 1) {
+                  const response = responses[responseIndex];
+                  if (response.type === "source-ack") {
+                    const text = state.doc.sliceString(sourceOffset, sourceOffset + SOURCE_SEARCH_CHUNK_UNITS);
+                    sourceOffset += text.length;
+                    send({ type: "source", text, complete: sourceOffset === state.doc.length });
+                  } else if (response.type === "ranges") {
+                    ranges.push(...response.ranges);
+                    send({ type: "ack" });
+                  } else if (response.type === "change") {
+                    if (response.continued) {
+                      expect(changes.at(-1), context).toMatchObject({ from: response.from, to: response.to });
+                      changes[changes.length - 1].insert += response.insert;
+                    } else changes.push({ from: response.from, to: response.to, insert: response.insert });
+                    send({ type: "ack" });
+                  } else if (response.type === "announcement") send({ type: "ack" });
+                  else if (response.type === "complete") completion = response;
+                  else throw new Error(`${context}: unexpected worker response ${JSON.stringify(response)}`);
+                }
+                expect(completion, context).toBeDefined();
+                if (operation === "count") {
+                  const expectedRanges = [];
+                  const cursor = query.getCursor(state);
+                  for (let match = cursor.next(); !match.done; match = cursor.next())
+                    expectedRanges.push({ from: match.value.from, to: match.value.to });
+                  expect(ranges, context).toEqual(expectedRanges);
+                  expect(changes, context).toEqual([]);
+                  if (ranges.length) effectiveOperations.add(operation);
+                  continue;
+                }
+                let expectedTransaction: Transaction | undefined;
+                commands[operation]({
+                  state,
+                  plugin: () => null,
+                  dispatch: (spec: TransactionSpec) => {
+                    expectedTransaction = state.update(spec);
+                  },
+                } as unknown as EditorView);
+                const expected = expectedTransaction?.state ?? state;
+                const replay = state.update({ changes, selection: completion!.selection, userEvent: completion!.userEvent });
+                expect(replay.state.doc.toString(), context).toBe(expected.doc.toString());
+                expect(replay.state.selection.toJSON(), context).toEqual(expected.selection.toJSON());
+                if (replay.docChanged || !replay.state.selection.eq(state.selection)) effectiveOperations.add(operation);
+                expect(completion!.userEvent, context).toBe(expectedTransaction?.annotation(Transaction.userEvent));
+                const expectedChanges = expectedTransaction?.changes ?? state.changes();
+                for (let position = 0; position <= state.doc.length; position += 1) {
+                  for (const association of [-1, 1])
+                    expect(replay.changes.mapPos(position, association), context).toBe(expectedChanges.mapPos(position, association));
+                }
+                let actualHistory = replay.state;
+                let expectedHistory = expected;
+                for (const historyCommand of [undo, redo]) {
+                  const actualResult = historyCommand({
+                    state: actualHistory,
+                    dispatch: (transaction) => {
+                      actualHistory = transaction.state;
+                    },
+                  });
+                  const expectedResult = historyCommand({
+                    state: expectedHistory,
+                    dispatch: (transaction) => {
+                      expectedHistory = transaction.state;
+                    },
+                  });
+                  expect(actualResult, context).toBe(expectedResult);
+                  expect(actualHistory.doc.toString(), context).toBe(expectedHistory.doc.toString());
+                  expect(actualHistory.selection.toJSON(), context).toEqual(expectedHistory.selection.toJSON());
+                }
+                state = replay.state;
+              }
+            }
+          }
+        }
+      }
+      expect([...effectiveOperations].sort()).toEqual([...operations].sort());
+      expect([...selectionDirections].sort()).toEqual([-1, 0, 1]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    { name: "case-sensitive", search: "alpha", caseSensitive: true, wholeWord: false },
+    { name: "whole-word", search: "alpha", caseSensitive: false, wholeWord: true },
+    { name: "case-sensitive whole-word", search: "alpha", caseSensitive: true, wholeWord: true },
+    { name: "zero-length", search: "(?=alpha)", caseSensitive: false, wholeWord: false },
+  ])("preserves native position mapping and history for $name worker replacements", ({ search: expression, ...options }) => {
+    const mock = mockSearchWorkers();
+    const source = "\uD83D\uDE80 Alpha alpha alphabet _alpha alpha_\nalpha tail";
+    const query = new SearchQuery({ ...options, search: expression, replace: "XY\nZ", regexp: true, literal: true });
+    const transactions: Transaction[] = [];
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: source,
+        selection: EditorSelection.range(source.length - 2, 3),
+        extensions: [
+          search(),
+          history(),
+          sourceRegexSearchLifecycle,
+          EditorView.updateListener.of((update) => {
+            transactions.push(...update.transactions.filter((transaction) => transaction.docChanged));
+          }),
+        ],
+      }),
+    });
+    const reference = new EditorView({
+      state: EditorState.create({ doc: source, selection: view.state.selection, extensions: [search(), history()] }),
+    });
+    try {
+      for (const editor of [view, reference]) editor.dispatch({ effects: setSearchQuery.of(query) });
+      const before = view.state;
+      let expectedTransaction: Transaction | undefined;
+      const dispatch = vi.spyOn(reference, "dispatch").mockImplementation((...specs) => {
+        expectedTransaction = reference.state.update(...specs);
+        reference.update([expectedTransaction]);
+      });
+      nativeReplaceAll(reference);
+      dispatch.mockRestore();
+      expect(expectedTransaction?.docChanged).toBe(true);
+      runSourceRegexSearchCommand(view, "replace-all");
+      const worker = mock.workers.at(-1)!;
+      expectedTransaction!.changes.iterChanges((from, to, _fromNew, _toNew, inserted) => {
+        worker.emit({ type: "change", from, to, insert: inserted.toString(), continued: false });
+      });
+      worker.emit({ type: "complete", announcements: [] });
+      expect(transactions).toHaveLength(1);
+      expect(view.state.doc.eq(reference.state.doc)).toBe(true);
+      expect(view.state.selection.toJSON()).toEqual(reference.state.selection.toJSON());
+      for (let position = 0; position <= source.length; position += 1) {
+        for (const association of [-1, 1]) {
+          expect(transactions[0].changes.mapPos(position, association)).toBe(expectedTransaction!.changes.mapPos(position, association));
+        }
+      }
+      expect(undo(view)).toBe(true);
+      expect(view.state.doc.eq(before.doc)).toBe(true);
+      expect(view.state.selection.toJSON()).toEqual(before.selection.toJSON());
+      expect(redo(view)).toBe(true);
+      expect(view.state.doc.eq(reference.state.doc)).toBe(true);
+      expect(view.state.selection.toJSON()).toEqual(reference.state.selection.toJSON());
+    } finally {
+      view.destroy();
+      reference.destroy();
+      mock.restore();
+    }
+  });
+
+  it("keeps quick literal replacements synchronous without busy feedback", () => {
+    const view = new EditorView({ state: EditorState.create({ doc: "alpha alpha", extensions: [search()] }) });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "alpha", replace: "done" })) });
+      replaceAll(view);
+      expect(view.state.doc.toString()).toBe("done done");
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      expect(isSourceReplacementPending(view)).toBe(false);
+    } finally {
+      view.destroy();
+    }
+  });
+
+  it("delays preparation feedback and removes it immediately on completion", async () => {
+    vi.useFakeTimers();
+    const view = new EditorView({ state: EditorState.create({ doc: "alpha", extensions: [search()] }) });
+    try {
+      const quick = beginSourceReplacementFeedback(view);
+      quick.apply(
+        () => {},
+        false,
+        () => {}
+      );
+      await vi.advanceTimersByTimeAsync(SOURCE_REPLACEMENT_FEEDBACK_DELAY_MS);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      const slow = beginSourceReplacementFeedback(view);
+      await vi.advanceTimersByTimeAsync(SOURCE_REPLACEMENT_FEEDBACK_DELAY_MS - 1);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(view.dom.querySelector('[role="status"]')).not.toBeNull();
+      slow.dispose();
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      expect(view.dom).not.toHaveAttribute("aria-busy");
+    } finally {
+      view.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("paints heavy literal feedback before applying once and cancels stale work", async () => {
+    vi.useFakeTimers();
+    const source = "alpha ".repeat(10_000);
+    const view = new EditorView({ state: EditorState.create({ doc: source, extensions: [search()] }) });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "alpha", replace: "done" })) });
+      replaceAll(view);
+      replaceAll(view);
+      expect(view.state.doc.toString()).toBe(source);
+      expect(view.dom.querySelector('[role="status"]')).not.toBeNull();
+      view.dispatch({ changes: { from: 0, insert: "new " } });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(view.state.doc.toString()).toBe(`new ${source}`);
+      expect(isSourceReplacementPending(view)).toBe(false);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+    } finally {
+      view.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps quick worker replacements free of feedback and delays slow preparation", async () => {
+    vi.useFakeTimers();
+    const mock = mockSearchWorkers();
+    const view = new EditorView({ state: EditorState.create({ doc: "aa aa", extensions: [search(), sourceRegexSearchLifecycle] }) });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", replace: "b", regexp: true })) });
+      runSourceRegexSearchCommand(view, "replace-all");
+      const quick = mock.workers.at(-1)!;
+      quick.emit({ type: "change", from: 0, to: 2, insert: "b", continued: false });
+      quick.emit({ type: "complete", announcements: [] });
+      expect(view.state.doc.toString()).toBe("b aa");
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      runSourceRegexSearchCommand(view, "replace-all");
+      const slow = mock.workers.at(-1)!;
+      await vi.advanceTimersByTimeAsync(SOURCE_REPLACEMENT_FEEDBACK_DELAY_MS - 1);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(view.dom.querySelector('[role="status"]')).not.toBeNull();
+      slow.emit({ type: "error", message: "Replacement failed; retry." });
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      expect(isSourceReplacementPending(view)).toBe(false);
+    } finally {
+      view.destroy();
+      mock.restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies a heavy literal plan once with native undo and redo", async () => {
+    vi.useFakeTimers();
+    const source = "alpha ".repeat(10_000);
+    let transactions = 0;
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: source,
+        extensions: [
+          search(),
+          history(),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) transactions += 1;
+          }),
+        ],
+      }),
+    });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "alpha", replace: "done" })) });
+      replaceAll(view);
+      replaceAll(view);
+      expect(view.state.doc.toString()).toBe(source);
+      expect(view.contentDOM).toHaveAttribute("aria-busy", "true");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(view.state.doc.toString()).toBe("done ".repeat(10_000));
+      expect(transactions).toBe(1);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      expect(view.contentDOM).not.toHaveAttribute("aria-busy");
+      undo(view);
+      expect(view.state.doc.toString()).toBe(source);
+      redo(view);
+      expect(view.state.doc.toString()).toBe("done ".repeat(10_000));
+    } finally {
+      view.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["selection", "query", "read-only", "destroy"])("cancels a deferred heavy replacement on %s", async (reason) => {
+    vi.useFakeTimers();
+    const source = "alpha ".repeat(10_000);
+    const view = new EditorView({ state: EditorState.create({ doc: source, extensions: [search()] }) });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "alpha", replace: "done" })) });
+      replaceAll(view);
+      if (reason === "selection") view.dispatch({ selection: { anchor: 2 } });
+      if (reason === "query") view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "other" })) });
+      if (reason === "read-only") view.dispatch({ effects: StateEffect.appendConfig.of(EditorState.readOnly.of(true)) });
+      if (reason === "destroy") view.destroy();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(view.state.doc.toString()).toBe(source);
+      expect(isSourceReplacementPending(view)).toBe(false);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+    } finally {
+      if (!view.destroyed) view.destroy();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps slow worker feedback through the paint boundary and clears pending on selection cancellation", async () => {
+    vi.useFakeTimers();
+    const mock = mockSearchWorkers();
+    const view = new EditorView({ state: EditorState.create({ doc: "aa aa", extensions: [search(), sourceRegexSearchLifecycle] }) });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", replace: "b", regexp: true })) });
+      runSourceRegexSearchCommand(view, "replace-all");
+      const worker = mock.workers.at(-1)!;
+      await vi.advanceTimersByTimeAsync(SOURCE_REPLACEMENT_FEEDBACK_DELAY_MS);
+      worker.emit({ type: "change", from: 0, to: 2, insert: "b", continued: false });
+      worker.emit({ type: "complete", announcements: [] });
+      expect(view.state.doc.toString()).toBe("aa aa");
+      view.dispatch({ selection: { anchor: 3 } });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(view.state.doc.toString()).toBe("aa aa");
+      expect(getCodeMirrorFindReplaceMetrics(view).pending).toBe(false);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+    } finally {
+      view.destroy();
+      mock.restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("completes heavy work in a hidden document and clears feedback after an application error", async () => {
+    vi.useFakeTimers();
+    const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+    const view = new EditorView({ state: EditorState.create({ doc: "alpha", extensions: [search()] }) });
+    try {
+      const action = vi.fn(() => {
+        throw new Error("Apply failed");
+      });
+      const failure = vi.fn();
+      beginSourceReplacementFeedback(view).apply(action, true, failure);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(action).toHaveBeenCalledOnce();
+      expect(failure).toHaveBeenCalledWith(expect.objectContaining({ message: "Apply failed" }));
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      expect(isSourceReplacementPending(view)).toBe(false);
+    } finally {
+      view.destroy();
+      hidden.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["timeout", "destroy"])("clears slow worker feedback on %s", async (reason) => {
+    vi.useFakeTimers();
+    const mock = mockSearchWorkers();
+    const view = new EditorView({ state: EditorState.create({ doc: "alpha", extensions: [search(), sourceRegexSearchLifecycle] }) });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a", regexp: true })) });
+      runSourceRegexSearchCommand(view, "replace-all");
+      const worker = mock.workers.at(-1)!;
+      await vi.advanceTimersByTimeAsync(SOURCE_REPLACEMENT_FEEDBACK_DELAY_MS);
+      expect(view.dom.querySelector('[role="status"]')).not.toBeNull();
+      if (reason === "destroy") view.destroy();
+      else await vi.advanceTimersByTimeAsync(SOURCE_SEARCH_TIMEOUT_MS);
+      expect(view.dom.querySelector('[role="status"]')).toBeNull();
+      expect(isSourceReplacementPending(view)).toBe(false);
+      expect(worker.terminate).toHaveBeenCalledOnce();
+    } finally {
+      if (!view.destroyed) view.destroy();
+      mock.restore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not animate replacement feedback when reduced motion is requested", async () => {
+    vi.useFakeTimers();
+    const view = new EditorView({ state: EditorState.create({ doc: "alpha", extensions: [search()] }) });
+    const matchMedia = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
+    const animate = vi.fn();
+    const previousAnimate = HTMLElement.prototype.animate;
+    HTMLElement.prototype.animate = animate;
+    try {
+      const feedback = beginSourceReplacementFeedback(view);
+      await vi.advanceTimersByTimeAsync(SOURCE_REPLACEMENT_FEEDBACK_DELAY_MS);
+      expect(view.dom.querySelector('[role="status"]')).not.toBeNull();
+      expect(animate).not.toHaveBeenCalled();
+      feedback.dispose();
+    } finally {
+      view.destroy();
+      HTMLElement.prototype.animate = previousAnimate;
+      matchMedia.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("retains an unchanged regex session when passive decorations are reconfigured", () => {
     const mock = mockSearchWorkers();
     const extensions = () => [search(), sourceRegexSearchLifecycle, buildPassiveSearchHighlightExtension()];
@@ -99,6 +562,32 @@ describe("TextCodeEditor", () => {
     } finally {
       cursor.mockRestore();
       view.destroy();
+      mock.restore();
+    }
+  });
+
+  it.each(["complete", "failure", "cancel", "destroy"])("releases regex worker callbacks after %s", async (reason) => {
+    const mock = mockSearchWorkers();
+    const view = new EditorView({
+      state: EditorState.create({ doc: "aa aa", extensions: [search(), sourceRegexSearchLifecycle] }),
+    });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
+      getCodeMirrorFindReplaceMetrics(view);
+      const worker = mock.workers[0];
+      const decode = worker.addEventListener.mock.calls.find(([type]) => type === "messageerror")?.[1];
+      expect(decode).toBeTypeOf("function");
+      if (reason === "complete") worker.emit({ type: "complete", announcements: [] });
+      else if (reason === "failure") worker.emit({ type: "error", message: "Search failed" });
+      else if (reason === "cancel") view.dispatch({ changes: { from: 0, insert: "new " } });
+      else view.destroy();
+      await Promise.resolve();
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(worker.onmessage).toBeNull();
+      expect(worker.onerror).toBeNull();
+      expect(worker.removeEventListener).toHaveBeenCalledWith("messageerror", decode);
+    } finally {
+      if (!view.destroyed) view.destroy();
       mock.restore();
     }
   });

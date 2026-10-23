@@ -1,13 +1,17 @@
 import { Annotation, Compartment, EditorSelection, EditorState, type TransactionSpec } from "@codemirror/state";
 import { type Command, EditorView, type ViewUpdate } from "@codemirror/view";
 import { useTheme } from "@mui/material";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { getSyntaxVariables } from "../../theme/syntaxStyles";
 import { CODEMIRROR_EDITOR_HORIZONTAL_INSET_CSS_VARIABLE } from "../../theme/viewerStyles";
 import { getCodeMirrorHorizontalInset } from "./getCodeMirrorHorizontalInset";
 import type { SourceTextEditorHandle, SourceTextEditorProps } from "./sourceTextEditorTypes";
 
 const EXTERNAL_SYNC_ANNOTATION = Annotation.define<boolean>();
+export const SOURCE_EDITOR_MEASURES = {
+  serialize: "sambee:source-editor:serialize",
+  publish: "sambee:source-editor:publish",
+} as const;
 
 const sourceTextEditorBaseTheme = EditorView.theme({
   "&": {
@@ -132,9 +136,16 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
         }
 
         onUserEditRef.current?.(viewUpdate);
+        const serializationStart = performance.now();
         const nextValue = viewUpdate.state.doc.toString();
+        const detail = { revision: revisionRef.current, documentUnits: nextValue.length };
+        performance.clearMeasures(SOURCE_EDITOR_MEASURES.serialize);
+        performance.measure(SOURCE_EDITOR_MEASURES.serialize, { start: serializationStart, detail });
         publishedValueRef.current = nextValue;
+        const publicationStart = performance.now();
         onChangeRef.current(nextValue, viewUpdate);
+        performance.clearMeasures(SOURCE_EDITOR_MEASURES.publish);
+        performance.measure(SOURCE_EDITOR_MEASURES.publish, { start: publicationStart, detail });
       });
 
       const initialState = EditorState.create({
@@ -209,7 +220,7 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       });
     }, [extensions]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       const view = viewRef.current;
 
       if (!view) {
@@ -295,14 +306,19 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
           }
 
           const clampedSnapshot = clampSelectionSnapshot(snapshot, view.state.doc.length);
-
-          view.dispatch({
-            selection: EditorSelection.fromJSON(clampedSnapshot.selection),
-            scrollIntoView: false,
-          });
-          view.focus();
-          view.scrollDOM.scrollTop = clampedSnapshot.scrollTop;
-          view.scrollDOM.scrollLeft = clampedSnapshot.scrollLeft;
+          const startedAt = performance.now();
+          try {
+            view.dispatch({
+              selection: EditorSelection.fromJSON(clampedSnapshot.selection),
+              scrollIntoView: false,
+            });
+            view.focus();
+            view.scrollDOM.scrollTop = clampedSnapshot.scrollTop;
+            view.scrollDOM.scrollLeft = clampedSnapshot.scrollLeft;
+          } finally {
+            performance.clearMeasures("sambee:source-editor:restore-selection");
+            performance.measure("sambee:source-editor:restore-selection", { start: startedAt });
+          }
 
           return view.hasFocus;
         },

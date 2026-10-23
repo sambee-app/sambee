@@ -47,6 +47,20 @@ describe("markdownTableCellLineBreaks", () => {
     expect(normalizeMarkdownTableCellLineBreaks(normalized)).toBe(normalized);
   });
 
+  it("assembles many table replacements without changing surrounding UTF-16 source", () => {
+    const rowCount = 2400;
+    const prefix = "Before \u{1F642} <BR> stays literal.\n\n| Left | Right |\n| --- | --- |\n";
+    const suffix = "\nAfter `literal<BR>` stays unchanged.\n";
+    const sourceRows = Array.from({ length: rowCount }, (_, index) => `| ${index}<BR>middle&#10;end<br><br> | text |\n`);
+    const expectedRows = Array.from({ length: rowCount }, (_, index) => `| ${index}<br />middle<br />end | text |\n`);
+    const expected = prefix + expectedRows.join("") + suffix;
+
+    expect(normalizeMarkdownTableCellLineBreaks(prefix + sourceRows.join("") + suffix)).toBe(expected);
+    expect(prepareMarkdownTableCellLineBreaksForEditor(expected)).toBe(
+      prefix + expectedRows.join("").replaceAll("<br />", "<br>") + suffix
+    );
+  });
+
   it("canonicalizes list markers while preserving list-like text in fenced code", () => {
     const markdown = [
       "* first",

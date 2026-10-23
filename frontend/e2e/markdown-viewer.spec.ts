@@ -1,4 +1,7 @@
 import { expect, test, type BrowserContext, type Locator, type Page, type Route, type TestInfo } from "@playwright/test";
+import { replaceAll as nativeReplaceAll, SearchQuery, search, setSearchQuery } from "@codemirror/search";
+import { EditorState, type TransactionSpec } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
@@ -7,13 +10,32 @@ import type { StoredTheme } from "../src/services/api";
 import { editableDefinition } from "../src/theme/themeDefinition";
 import { builtInThemes } from "../src/theme/themes";
 import { MARKDOWN_HEADING_ID_PREFIX } from "../src/utils/markdownHeadingLinks";
-import { evaluateViewerReadinessBudgets, evaluateViewerTimingBudgets, type ViewerTimingSamples } from "./viewer-performance-budgets";
+import { SOURCE_SEARCH_CHUNK_UNITS } from "../src/components/Editor/sourceRegexSearchProtocol";
+import { evaluateSourceResponsivenessBudgets, evaluateSourceTypingBudgets, evaluateViewerReadinessBudgets, evaluateViewerTimingBudgets, VIEWER_TIMING_TARGETS_MS, type ViewerTimingSamples } from "./viewer-performance-budgets";
 
 const DEMO_CONNECTION_ID = "85610f49-ab40-4d96-8750-ddab3e8e8764";
 const DEMO_PATH = "note.md";
 const DEMO_DIRECTORY = "Reports";
 const DEMO_ARCHIVE = "sample.zip";
 const DENSE_SYNTAX_LINE_COUNT = 6_000;
+const DENSE_EXPANSION_REPLACEMENT_UNITS = 128;
+const DENSE_EXPANSION_OUTPUT_UNITS = 780_000;
+const SOURCE_TYPING_PAYLOAD = "abcdefghijklmnopqrst0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst012345";
+const SOURCE_TYPING_KEY_DELAY_MS = 10;
+const PROSE_ENVELOPE_PARAGRAPHS = 4_000;
+const TABLE_ENVELOPE_ROWS = 2_400;
+const TABLE_EDIT_PAYLOAD = "table edit";
+const TABLE_EDIT_CASES = [
+  { name: "first", row: 1, action: "type" },
+  { name: "middle", row: TABLE_ENVELOPE_ROWS / 2, action: "type" },
+  { name: "last", row: TABLE_ENVELOPE_ROWS, action: "type" },
+  { name: "line-break", row: TABLE_ENVELOPE_ROWS / 2, action: "line-break" },
+  { name: "composition", row: TABLE_ENVELOPE_ROWS / 2, action: "composition" },
+  { name: "close-flush", row: TABLE_ENVELOPE_ROWS / 2, action: "close" },
+  { name: "composition-close", row: TABLE_ENVELOPE_ROWS / 2, action: "composition-close" },
+] as const;
+const SCROLL_PROBE_STEPS = 60;
+const NOMINAL_60HZ_SCROLL_TARGETS_MS = { p95: 16.7, maximum: 33.3 } as const;
 const THEME_STATE_LINE_COUNT = 60;
 const THEME_STATE_SCROLL = { top: 180, left: 36 };
 const MIN_TEXT_CONTRAST_RATIO = 4.5;
@@ -23,6 +45,7 @@ const PRODUCTION_ASSET_CONTENT_TYPES: Record<string, string> = { ".html": "text/
 const SYNTAX_PUBLICATION_FIXTURES = [
   { name: "dense", blocks: 1, lines: DENSE_SYNTAX_LINE_COUNT },
   { name: "near-safeguard", blocks: 1, lines: 11_111 },
+  { name: "host-envelope", blocks: 4, lines: DENSE_SYNTAX_LINE_COUNT },
   { name: "many-blocks", blocks: 600, lines: 101 },
   { name: "long-line", blocks: 1, lines: 6_000 },
 ] as const;
@@ -285,6 +308,7 @@ async function createCacheableViewerProxy(options: MockMarkdownViewerApiOptions)
   const dist = resolve(fileURLToPath(new URL("../dist/", import.meta.url)));
   const requests: string[] = [];
   const errors: string[] = [];
+  const uploads: { body: Buffer; contentType: string }[] = [];
   const server = createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url ?? "/", CACHE_PROOF_ORIGIN);
@@ -296,8 +320,12 @@ async function createCacheableViewerProxy(options: MockMarkdownViewerApiOptions)
       if (url.pathname.startsWith("/api/")) {
         const chunks: Buffer[] = [];
         for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const body = Buffer.concat(chunks);
+        if (url.pathname.endsWith("/upload") && request.method === "POST") {
+          uploads.push({ body, contentType: request.headers["content-type"] ?? "" });
+        }
         await handler({
-          request: () => ({ url: () => url.href, method: () => request.method ?? "GET", postDataBuffer: () => Buffer.concat(chunks) }),
+          request: () => ({ url: () => url.href, method: () => request.method ?? "GET", postDataBuffer: () => body }),
           fulfill: async (result = {}) => {
             if (result.path || result.response) throw new Error("Cache proxy fixtures require an explicit body");
             const headers = { ...result.headers, "Cache-Control": "no-store", ...(result.contentType ? { "Content-Type": result.contentType } : {}) };
@@ -333,7 +361,7 @@ async function createCacheableViewerProxy(options: MockMarkdownViewerApiOptions)
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Cache proof proxy has no TCP address");
   return {
-    url: `http://127.0.0.1:${address.port}`, requests, errors,
+    url: `http://127.0.0.1:${address.port}`, requests, errors, uploads,
     close: () => new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); }),
   };
 }
@@ -1347,12 +1375,12 @@ test.describe("production syntax readiness", () => {
       await page.getByRole("button", { name: "Search", exact: true }).click();
       await page.getByPlaceholder("Search", { exact: true }).fill("let x");
       await expect(page.getByRole("button", { name: "Next match", exact: true }).locator("..").getByText(`1 / ${fixture.lines * fixture.blocks}`, { exact: true })).toBeVisible();
-      await testInfo.attach("syntax-readiness.json", { body: JSON.stringify({ fixture: fixture.name, width, engine: testInfo.project.name, trial: testInfo.repeatEachIndex, ...report, budget, enforced: true, networkAssets, coldSyntaxRequests, cacheCondition: cacheProxy ? cycle === 0 ? "Fresh context and fresh syntax worker; ordinary HTTP with an initially empty browser cache, no preloading or request routing." : "Same page after close and zero live workers; fresh syntax worker with browser HTTP cache populated only by the measured first open." : "Fresh context and worker; routed assets disable normal HTTP caching. No cold/warm-cache acceptance claim.", scope: "Unheld file-open through exact text/control readiness and initial visible token coverage plus two frames. Functional selection/search follow timing, not hardware input/paint. Approved readiness limits enforced; no resource or full-rollout acceptance." }, null, 2), contentType: "application/json" });
+      await testInfo.attach("syntax-readiness.json", { body: JSON.stringify({ fixture: fixture.name, width, engine: testInfo.project.name, trial: testInfo.repeatEachIndex, surface: "markdown-preview", cacheState: cacheProxy ? cycle === 0 ? "cold" : "warm-http-fresh-workers" : "routed-no-cache", ...report, budget, enforced: true, networkAssets, coldSyntaxRequests, cacheCondition: cacheProxy ? cycle === 0 ? "Fresh context and fresh syntax worker; ordinary HTTP with an initially empty browser cache, no preloading or request routing." : "Same page after close and zero live workers; fresh syntax worker with browser HTTP cache populated only by the measured first open." : "Fresh context and worker; routed assets disable normal HTTP caching. No cold/warm-cache acceptance claim.", scope: "Unheld file-open through exact text/control readiness and initial visible token coverage plus two frames. Functional selection/search follow timing, not hardware input/paint. Approved readiness limits enforced; no resource or full-rollout acceptance." }, null, 2), contentType: "application/json" });
       await page.getByRole("button", { name: "Close", exact: true }).click();
       await expect(root).toHaveCount(0);
       await expect.poll(() => page.workers().length).toBe(0);
       await expect.poll(() => page.evaluate(() => [...CSS.highlights.keys()].filter(name => name.startsWith("markdown-syntax-")).length)).toBe(0);
-      expect(budget.status, JSON.stringify(budget.metrics.filter(metric => metric.status !== "pass"))).toBe("pass");
+      expect.soft(budget.status, JSON.stringify({ cacheState: cacheProxy ? cycle === 0 ? "cold" : "warm-http-fresh-workers" : "routed-no-cache", failures: budget.metrics.filter(metric => metric.status !== "pass") })).toBe("pass");
       expect(report.syntaxWorkerUrls).toHaveLength(cycle + 1);
       if (cacheProxy) {
         expect(cacheProxy.errors).toEqual([]);
@@ -1577,7 +1605,9 @@ test.describe("production syntax publication", () => {
     await expect(root.locator("pre code")).toHaveText("const contract = 1;\nconsole.log(contract);\n");
     await expect(root.getByRole("link", { name: "External", exact: true })).toHaveAttribute("href", "https://example.org/contract");
     await expect(root.getByRole("link", { name: "Relative", exact: true })).toHaveAttribute("href", "http://localhost:3000/browse/smb/child.md");
-    await expect(root.getByRole("link", { name: "Hash", exact: true })).toHaveAttribute("href", "#tail");
+    const expectedHeadingId = "sambee-markdown-tail";
+    await expect(root.getByRole("heading", { name: "Tail", exact: true })).toHaveAttribute("id", expectedHeadingId);
+    await expect(root.getByRole("link", { name: "Hash", exact: true })).toHaveAttribute("href", `#${expectedHeadingId}`);
     await expect(root.getByText("Unsafe", { exact: true })).not.toHaveAttribute("href");
     await expect(root.locator("script")).toHaveCount(0);
     expect(await page.evaluate(() => "unsafePayload" in globalThis)).toBe(false);
@@ -1626,11 +1656,15 @@ test.describe("production syntax publication", () => {
     expect(semantics).toContain("table:");
     if (testInfo.project.name === "chromium") {
       await page.emulateMedia({ media: "print" });
-      await expect(root.getByRole("heading", { name: "Tail", exact: true })).toBeVisible();
-      expect(await root.innerText()).toBe(text);
-      const pdf = await page.pdf();
-      expect(pdf.byteLength).toBeGreaterThan(1_000);
-      await testInfo.attach("viewer-contract.pdf", { body: pdf, contentType: "application/pdf" });
+      try {
+        await expect(root.getByRole("heading", { name: "Tail", exact: true })).toBeVisible();
+        expect(await root.innerText()).toBe(text);
+        const pdf = await page.pdf();
+        expect(pdf.byteLength).toBeGreaterThan(1_000);
+        await testInfo.attach("viewer-contract.pdf", { body: pdf, contentType: "application/pdf" });
+      } finally {
+        await page.emulateMedia({ media: null });
+      }
     }
     await testInfo.attach("native-viewer-contracts.json", { body: JSON.stringify({ renderer: "react-markdown", text, selectAll, selectedCode, semantics, clipboardScope: "Trusted native copy event and exact selected text; OS clipboard payload and assistive-technology behavior remain manual gates." }, null, 2), contentType: "application/json" });
     await page.getByRole("button", { name: "Close", exact: true }).click();
@@ -2489,6 +2523,990 @@ test(`${layout} upload cancellation stops the queue and reports an uncertain cur
 async function enterMarkdownEditMode(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByRole("textbox", { name: "Markdown editor" }).waitFor();
+}
+
+interface SourceResponsivenessProbe {
+  measures: { name: string; startTime: number; duration: number; detail: Record<string, unknown> }[];
+  jobs: { url: string; ranges: number; rangeBatches: number; changeChunks: number; changeUnits: number; maximumChunkUnits: number; terminated: boolean }[];
+  timerGaps: number[];
+  completionMs: number | null;
+  stop: () => void;
+}
+
+interface SourceTypingProbe {
+  inputs: { key: string; trusted: boolean; at: number; firstFrameMs: number | null; twoFrameMs: number | null }[];
+  measures: { name: string; startTime: number; duration: number; detail: { revision?: number; documentUnits: number } }[];
+  gaps: number[];
+  longTasks: { startTime: number; duration: number }[];
+  longTasksSupported: boolean;
+  stop: () => void;
+}
+
+for (const width of [1543, 390]) {
+  test(`production progressive Markdown loading cancellation at ${width}px`, async ({ browser }, testInfo) => {
+    test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+    const source = Array.from({ length: PROSE_ENVELOPE_PARAGRAPHS }, (_, index) => `Paragraph ${index + 1}: **formatted** needle and [link](https://example.com/).`).join("\n\n");
+    const proxy = await createCacheableViewerProxy({ initialMarkdown: source });
+    let context: BrowserContext | undefined;
+    try {
+      context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+      const page = await context.newPage();
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      await page.evaluate(() => {
+        const nativeFrame = window.requestAnimationFrame.bind(window);
+        const held: FrameRequestCallback[] = [];
+        const probe = { hold: true, held, release: () => { probe.hold = false; for (const callback of held.splice(0)) nativeFrame(callback); } };
+        (window as typeof window & { progressiveProbe: typeof probe }).progressiveProbe = probe;
+        window.requestAnimationFrame = (callback) => nativeFrame((time) => {
+          const stage = document.querySelector('[data-markdown-publication="loading"]');
+          const viewport = document.querySelector('[data-testid="markdown-viewer-content"]');
+          if (probe.hold && stage && viewport && stage.getBoundingClientRect().height >= viewport.clientHeight * 2) held.push(callback);
+          else callback(time);
+        });
+      });
+      const file = page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true }));
+      await file.click();
+      await page.waitForFunction(() => (window as typeof window & { progressiveProbe: { held: unknown[] } }).progressiveProbe.held.length > 0, undefined, { polling: 25 });
+      const preview = page.locator('[data-markdown-search-root="true"]');
+      expect(await preview.locator("p").count()).toBeLessThan(PROSE_ENVELOPE_PARAGRAPHS);
+      await expect(page.getByRole("button", { name: "Search", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "Print", exact: true })).toBeDisabled();
+      await expect(page.getByRole("status", { name: "Loading...", exact: true })).toBeVisible();
+      await expect(page.getByRole("status", { name: "Loading...", exact: true }).getByRole("progressbar")).toBeInViewport({ ratio: 1 });
+      await testInfo.attach("progressive-loading", { body: await page.screenshot(), contentType: "image/png" });
+      await page.emulateMedia({ media: "print" });
+      await expect(preview).toBeHidden();
+      await expect(page.getByText("The document is still loading. Close the print dialog and try again when loading finishes.", { exact: true })).toBeVisible();
+      await page.emulateMedia({ media: null });
+      await page.keyboard.press("Escape");
+      await expect(preview).toHaveCount(0);
+      await page.evaluate(() => (window as typeof window & { progressiveProbe: { release: () => void } }).progressiveProbe.release());
+      await file.click();
+      await expect(page.locator('[data-markdown-publication="complete"]')).toBeVisible();
+      await expect(preview.locator("p")).toHaveCount(PROSE_ENVELOPE_PARAGRAPHS);
+      await expect(page.getByRole("button", { name: "Search", exact: true })).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Print", exact: true })).toBeEnabled();
+      await expect(page.getByRole("status", { name: "Loading...", exact: true })).toHaveCount(0);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      expect(proxy.errors).toEqual([]);
+    } finally {
+      await context?.close();
+      await proxy.close();
+    }
+  });
+}
+
+for (const width of [1543, 390]) {
+  for (const fixture of ["prose", "table"] as const) {
+    test(`production prose table responsiveness ${fixture} at ${width}px`, async ({ browser }, testInfo) => {
+      test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+      const profiling = process.env.SAMBEE_E2E_TRACE === "1";
+      test.skip(profiling && testInfo.project.name !== "chromium", "Load CPU profiling requires Chromium CDP");
+      if (process.env.SAMBEE_E2E_MEMORY === "1" || (profiling && process.env.SAMBEE_E2E_BUDGETS === "1")) throw new Error("Document/scroll timing must run separately from GC and profiling");
+      const paragraphs = Array.from({ length: PROSE_ENVELOPE_PARAGRAPHS }, (_, index) => `Paragraph ${index + 1}: **formatted** needle and [link](https://example.com/).`);
+      const rows = Array.from({ length: TABLE_ENVELOPE_ROWS }, (_, index) => `| ${index + 1} | row ${index + 1} needle |`);
+      const source = fixture === "prose" ? `${paragraphs.join("\n\n")}\n` : `| Key | Value |\n| --- | --- |\n${rows.join("\n")}\n`;
+      const expectedBlocks = fixture === "prose" ? paragraphs.map((_, index) => `Paragraph ${index + 1}: formatted needle and link.`) : ["Key", "Value", ...rows.flatMap((_, index) => [`${index + 1}`, `row ${index + 1} needle`])];
+      const expectedItems = fixture === "prose" ? PROSE_ENVELOPE_PARAGRAPHS : TABLE_ENVELOPE_ROWS;
+      const proxy = await createCacheableViewerProxy({ initialMarkdown: source });
+      let context: BrowserContext | undefined;
+      try {
+        context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+        const page = await context.newPage();
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        await page.evaluate(({ fixture, expectedItems, profiling }) => {
+          const probe = { openAt: null as number | null, completedMs: null as number | null, firstViewportMs: null as number | null, firstViewportItems: null as number | null, maximumTimerGap: 0, stop: () => {} };
+          (window as typeof window & { proseTableProbe: typeof probe }).proseTableProbe = probe;
+          let previousTick: number | undefined;
+          let completing = false;
+          document.addEventListener("click", () => { probe.openAt = performance.now(); previousTick = probe.openAt; if (profiling) performance.mark("sambee:viewer-load:start"); }, { once: true, capture: true });
+          const timer = setInterval(() => {
+            if (previousTick === undefined || probe.completedMs !== null) return;
+            const now = performance.now();
+            probe.maximumTimerGap = Math.max(probe.maximumTimerGap, now - previousTick);
+            previousTick = now;
+          }, 0);
+          const observer = new MutationObserver(() => {
+            const root = document.querySelector('[data-markdown-search-root="true"]');
+            if (!root || completing || probe.openAt === null) return;
+            const count = root.querySelectorAll(fixture === "prose" ? "p" : "tbody tr").length;
+            const viewport = root.parentElement;
+            if (probe.firstViewportMs === null && viewport && root.getBoundingClientRect().height >= viewport.clientHeight * 2) {
+              probe.firstViewportMs = performance.now() - probe.openAt;
+              probe.firstViewportItems = count;
+            }
+            if (count !== expectedItems) return;
+            completing = true;
+            requestAnimationFrame(() => requestAnimationFrame(() => { probe.completedMs = performance.now() - (probe.openAt as number); if (profiling) performance.mark("sambee:viewer-load:complete"); }));
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+          probe.stop = () => { observer.disconnect(); clearInterval(timer); };
+        }, { fixture, expectedItems, profiling });
+        const profiler = profiling ? await context.newCDPSession(page) : undefined;
+        const traceEvents: unknown[] = [];
+        if (profiler) {
+          profiler.on("Tracing.dataCollected", event => traceEvents.push(...event.value));
+          await profiler.send("Profiler.enable");
+          await profiler.send("Profiler.start");
+          await profiler.send("Tracing.start", { categories: "devtools.timeline,blink.user_timing,v8", transferMode: "ReportEvents" });
+        }
+        await page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })).click();
+        await page.waitForFunction(() => (window as typeof window & { proseTableProbe: { completedMs: number | null } }).proseTableProbe.completedMs !== null);
+        if (profiler) {
+          const profile = await profiler.send("Profiler.stop");
+          const tracingComplete = new Promise<void>(resolve => profiler.once("Tracing.tracingComplete", () => resolve()));
+          await profiler.send("Tracing.end");
+          await tracingComplete;
+          expect(profile.profile.samples?.length ?? 0).toBeGreaterThan(0);
+          expect(traceEvents).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: "sambee:viewer-load:start", ph: "I" }),
+            expect.objectContaining({ name: "sambee:viewer-load:complete", ph: "I" }),
+          ]));
+          await testInfo.attach("viewer-load-cpu-profile", { contentType: "application/json", body: JSON.stringify(profile) });
+          await testInfo.attach("viewer-load-timeline", { contentType: "application/json", body: JSON.stringify({ traceEvents }) });
+          await profiler.detach();
+        }
+        const load = await page.evaluate(() => {
+          const probe = (window as typeof window & { proseTableProbe: { completedMs: number; firstViewportMs: number | null; firstViewportItems: number | null; maximumTimerGap: number; stop: () => void } }).proseTableProbe;
+          probe.stop();
+          return { documentCompletion: probe.completedMs, maximumTimerGap: probe.maximumTimerGap, firstViewportMs: probe.firstViewportMs, firstViewportItems: probe.firstViewportItems };
+        });
+        const preview = page.locator('[data-markdown-search-root="true"]');
+        const initialRenderedText = await preview.textContent();
+        expect(await preview.locator(fixture === "prose" ? "p" : "th, td").allTextContents()).toEqual(expectedBlocks);
+        await expect(page.getByRole("button", { name: "Search", exact: true })).toBeEnabled();
+        const scrolling = await preview.evaluate(async (root, steps) => {
+          const scroller = root.parentElement;
+          if (!(scroller instanceof HTMLElement) || scroller.scrollHeight <= scroller.clientHeight) throw new Error("Expected a scrollable full document");
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          const nodes: Node[] = [];
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node);
+          const intervals: number[] = [];
+          const offsets: number[] = [];
+          const start = performance.now();
+          let previous: number | undefined;
+          await new Promise<void>(resolve => {
+            const frame = (now: number) => {
+              if (previous !== undefined) intervals.push(now - previous);
+              if (offsets.length === steps) { resolve(); return; }
+              previous = now;
+              scroller.scrollTop = (scroller.scrollHeight - scroller.clientHeight) * offsets.length / (steps - 1);
+              offsets.push(scroller.scrollTop);
+              requestAnimationFrame(frame);
+            };
+            requestAnimationFrame(frame);
+          });
+          const after = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          const unchanged = nodes.every(node => after.nextNode() === node) && after.nextNode() === null;
+          const selection = window.getSelection();
+          if (!selection || !nodes.length) throw new Error("Expected native selectable document text");
+          const range = document.createRange();
+          range.selectNodeContents(root);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          const selected = selection.toString();
+          selection.removeAllRanges();
+          return { intervals, offsets, elapsedMs: performance.now() - start, unchangedTextNodes: unchanged, sameRoot: document.querySelector('[data-markdown-search-root="true"]') === root, selectedText: selected, physicalRefreshHz: null };
+        }, SCROLL_PROBE_STEPS);
+        const intervals = [...scrolling.intervals].sort((left, right) => left - right);
+        const p95 = intervals[Math.ceil(intervals.length * 0.95) - 1];
+        const frameProxy = { p95, maximumMs: Math.max(...intervals), nominal60HzP95TargetMs: NOMINAL_60HZ_SCROLL_TARGETS_MS.p95, nominal60HzMaximumTargetMs: NOMINAL_60HZ_SCROLL_TARGETS_MS.maximum, status: "diagnostic", physicalRefreshHz: null, p95ExceedsNominal: p95 > NOMINAL_60HZ_SCROLL_TARGETS_MS.p95 };
+        const budgets = { status: profiling ? "diagnostic" : load.documentCompletion <= VIEWER_TIMING_TARGETS_MS.documentCompletion && load.maximumTimerGap <= VIEWER_TIMING_TARGETS_MS.maximumTimerGap ? "pass" : "fail", documentCompletion: { observedMs: load.documentCompletion, targetMs: VIEWER_TIMING_TARGETS_MS.documentCompletion }, maximumTimerGap: { observedMs: load.maximumTimerGap, targetMs: VIEWER_TIMING_TARGETS_MS.maximumTimerGap } };
+        await testInfo.attach("prose-table-responsiveness", { contentType: "application/json", body: JSON.stringify({ fixture, width, engine: testInfo.project.name, trial: testInfo.repeatEachIndex, browserVersion: browser.version(), sourceUnits: source.length, expectedItems, load, budgets, scrolling: { ...scrolling, selectedText: undefined }, frameProxy, enforced: process.env.SAMBEE_E2E_BUDGETS === "1", limitations: ["Programmatic main-thread scroll and rAF intervals, not wheel/touch/compositor smoothness or hardware paint", "Physical refresh rate and power mode unverified; no physical 60 Hz acceptance", "No eligible fenced syntax in these fixtures; syntax readiness is not applicable", "No application/native CPU attribution is inferred from interval or timer gaps"] }) });
+        expect(scrolling.sameRoot && scrolling.unchangedTextNodes).toBe(true);
+        expect(scrolling.offsets).toHaveLength(SCROLL_PROBE_STEPS);
+        expect(scrolling.offsets[0]).toBe(0);
+        expect(scrolling.offsets.at(-1)).toBeGreaterThan(0);
+        expect(intervals).toHaveLength(SCROLL_PROBE_STEPS);
+        expect(intervals.every(value => Number.isFinite(value) && value > 0)).toBe(true);
+        expect(scrolling.selectedText).toContain(fixture === "prose" ? "Paragraph 1: formatted needle and link." : "row 1 needle");
+        expect(scrolling.selectedText).toContain(fixture === "prose" ? `Paragraph ${expectedItems}: formatted needle and link.` : `row ${expectedItems} needle`);
+        expect(await preview.textContent()).toBe(initialRenderedText);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(preview).toHaveCount(0);
+        expect(proxy.errors).toEqual([]);
+        expect(Number.isFinite(load.documentCompletion) && load.documentCompletion >= 0).toBe(true);
+        expect(Number.isFinite(load.maximumTimerGap) && load.maximumTimerGap >= 0).toBe(true);
+        if (process.env.SAMBEE_E2E_BUDGETS === "1") expect(budgets.status, JSON.stringify(budgets)).toBe("pass");
+      } finally {
+        await context?.close();
+        await proxy.close();
+      }
+    });
+  }
+}
+
+for (const width of [1543, 390]) {
+  for (const fixture of ["dense", "long-line"] as const) {
+    test(`production source typing ${fixture} at ${width}px`, async ({ browser }, testInfo) => {
+      test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+      if (process.env.SAMBEE_E2E_MEMORY === "1" || process.env.SAMBEE_E2E_TRACE === "1") throw new Error("Typing timing must run separately from GC and profiling");
+      const initialMarkdown = `abc 123;${fixture === "dense" ? "\n" : " "}`.repeat(DENSE_SYNTAX_LINE_COUNT);
+      const proxy = await createCacheableViewerProxy({ initialMarkdown, wordWrapEnabled: false });
+      let context: BrowserContext | undefined;
+      try {
+        context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+        const page = await context.newPage();
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        await page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })).click();
+        await enterMarkdownEditMode(page);
+        const editor = page.getByRole("textbox", { name: "Markdown editor" });
+        await editor.click();
+        await page.keyboard.press("Control+End");
+        await editor.evaluate(async element => {
+          await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+          const probe: SourceTypingProbe = { inputs: [], measures: [], gaps: [], longTasks: [], longTasksSupported: PerformanceObserver.supportedEntryTypes.includes("longtask"), stop: () => {} };
+          (window as typeof window & { sourceTypingProbe: SourceTypingProbe }).sourceTypingProbe = probe;
+          let previousTick: number | undefined;
+          const timer = setInterval(() => {
+            if (previousTick === undefined) return;
+            const now = performance.now();
+            probe.gaps.push(now - previousTick);
+            previousTick = now;
+          }, 0);
+          const keydown = (event: Event) => {
+            if (!(event instanceof KeyboardEvent) || event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
+            const sample = { key: event.key, trusted: event.isTrusted, at: performance.now(), firstFrameMs: null as number | null, twoFrameMs: null as number | null };
+            previousTick ??= sample.at;
+            probe.inputs.push(sample);
+            requestAnimationFrame(() => {
+              sample.firstFrameMs = performance.now() - sample.at;
+              requestAnimationFrame(() => { sample.twoFrameMs = performance.now() - sample.at; });
+            });
+          };
+          element.addEventListener("keydown", keydown, true);
+          const measures = new PerformanceObserver(list => {
+            for (const entry of list.getEntries()) {
+              if (!entry.name.startsWith("sambee:source-editor:")) continue;
+              const measure = entry as PerformanceMeasure;
+              probe.measures.push({ name: measure.name, startTime: measure.startTime, duration: measure.duration, detail: measure.detail });
+            }
+          });
+          measures.observe({ type: "measure" });
+          const longTasks = probe.longTasksSupported ? new PerformanceObserver(list => {
+            for (const entry of list.getEntries()) probe.longTasks.push({ startTime: entry.startTime, duration: entry.duration });
+          }) : undefined;
+          longTasks?.observe({ type: "longtask" });
+          probe.stop = () => { clearInterval(timer); measures.disconnect(); longTasks?.disconnect(); element.removeEventListener("keydown", keydown, true); };
+        });
+        await page.keyboard.type(SOURCE_TYPING_PAYLOAD, { delay: SOURCE_TYPING_KEY_DELAY_MS });
+        await page.waitForFunction(expected => {
+          const probe = (window as typeof window & { sourceTypingProbe: SourceTypingProbe }).sourceTypingProbe;
+          return probe.inputs.length === expected && probe.inputs.every(sample => sample.twoFrameMs !== null) && probe.measures.filter(entry => entry.name === "sambee:source-editor:publish").length === expected;
+        }, SOURCE_TYPING_PAYLOAD.length);
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+        const evidence = await page.evaluate(() => {
+          const probe = (window as typeof window & { sourceTypingProbe: SourceTypingProbe }).sourceTypingProbe;
+          probe.stop();
+          return { inputs: probe.inputs, measures: probe.measures, gaps: probe.gaps, longTasks: probe.longTasks, longTasksSupported: probe.longTasksSupported };
+        });
+        const frames = evidence.inputs.map(sample => sample.twoFrameMs ?? Number.NaN).sort((left, right) => left - right);
+        const maximumStage = (name: string) => { const stages = evidence.measures.filter(entry => entry.name === name); return stages.length ? Math.max(...stages.map(entry => entry.duration)) : null; };
+        const budgets = evaluateSourceTypingBudgets({ keyboardTwoFrameP95: frames[Math.ceil(frames.length * 0.95) - 1], maximumTimerGap: evidence.gaps.length ? Math.max(...evidence.gaps) : null, serialization: maximumStage("sambee:source-editor:serialize"), synchronousPublication: maximumStage("sambee:source-editor:publish") });
+        await testInfo.attach("source-typing", { contentType: "application/json", body: JSON.stringify({ fixture, width, engine: testInfo.project.name, trial: testInfo.repeatEachIndex, browserVersion: browser.version(), sourceUnits: initialMarkdown.length, inputCount: SOURCE_TYPING_PAYLOAD.length, keyDelayMs: SOURCE_TYPING_KEY_DELAY_MS, evidence, budgets, enforced: process.env.SAMBEE_E2E_BUDGETS === "1", limitations: ["Browser keydown-to-two-frame scheduling proxy, not hardware input or physical paint", "Long Task entries are whole-renderer observations, not isolated application CPU attribution", "Missing Long Tasks support is unmeasured, not a pass"] }) });
+        expect(evidence.inputs.map(sample => sample.key).join("")).toBe(SOURCE_TYPING_PAYLOAD);
+        expect(evidence.inputs.every(sample => sample.trusted)).toBe(true);
+        for (const name of ["serialize", "publish", "normalize", "parent-update"]) {
+          const stages = evidence.measures.filter(entry => entry.name === `sambee:source-editor:${name}`);
+          expect(stages).toHaveLength(SOURCE_TYPING_PAYLOAD.length);
+          expect(stages.map(entry => entry.detail.documentUnits)).toEqual(Array.from({ length: SOURCE_TYPING_PAYLOAD.length }, (_, index) => initialMarkdown.length + index + 1));
+        }
+        expect(budgets.metrics.filter(metric => metric.status === "invalid")).toEqual([]);
+        await page.getByRole("button", { name: "Save", exact: true }).click();
+        await expect.poll(() => proxy.uploads.length).toBe(1);
+        const upload = proxy.uploads[0];
+        const form = await new Response(upload.body, { headers: { "Content-Type": upload.contentType } }).formData();
+        const files = [...form.values()].filter((value): value is File => typeof value !== "string");
+        expect(files).toHaveLength(1);
+        expect(await files[0].text()).toBe(`${initialMarkdown}${SOURCE_TYPING_PAYLOAD}`);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveCount(0);
+        expect(proxy.errors).toEqual([]);
+        if (process.env.SAMBEE_E2E_BUDGETS === "1") expect(budgets.status, JSON.stringify(budgets)).toBe("pass");
+      } finally {
+        await context?.close();
+        await proxy.close();
+      }
+    });
+  }
+}
+
+const SOURCE_REGEX_PARITY_FIXTURES = [
+  { name: "zero-length", source: "alpha beta\nalpha\n", query: "(?=alpha)", replacement: "!", caseSensitive: false, wholeWord: false },
+  { name: "case-sensitive", source: "Alpha alpha ALPHA alphabet alpha2\nalpha\n", query: "alpha", replacement: "done", caseSensitive: true, wholeWord: false },
+  { name: "whole-word", source: "Alpha alpha alphabet alpha2 _alpha alpha_\nalpha\n", query: "alpha", replacement: "done", caseSensitive: false, wholeWord: true },
+  { name: "large-output", source: "alpha\ntail\n", query: "alpha", replacement: "x".repeat(SOURCE_SEARCH_CHUNK_UNITS * 2 + 1), caseSensitive: false, wholeWord: false },
+] as const;
+
+function nativeSourceRegexOutcome(fixture: typeof SOURCE_REGEX_PARITY_FIXTURES[number]) {
+  const query = new SearchQuery({ search: fixture.query, replace: fixture.replacement, regexp: true, literal: true, caseSensitive: fixture.caseSensitive, wholeWord: fixture.wholeWord });
+  let state = EditorState.create({ doc: fixture.source, extensions: [search()] });
+  state = state.update({ effects: setSearchQuery.of(query) }).state;
+  const cursor = query.getCursor(state);
+  let count = 0;
+  for (let match = cursor.next(); !match.done; match = cursor.next()) count += 1;
+  nativeReplaceAll({ get state() { return state; }, plugin: () => null, dispatch: (spec: TransactionSpec) => { state = state.update(spec).state; } } as unknown as EditorView);
+  return { count, output: state.doc.toString() };
+}
+
+for (const width of [1543, 390]) {
+  for (const fixture of SOURCE_REGEX_PARITY_FIXTURES) {
+    test(`production source regex parity ${fixture.name} at ${width}px`, async ({ browser }, testInfo) => {
+      test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+      const expected = nativeSourceRegexOutcome(fixture);
+      expect(expected.count).toBeGreaterThan(0);
+      expect(expected.output).not.toBe(fixture.source);
+      const proxy = await createCacheableViewerProxy({ initialMarkdown: fixture.source, wordWrapEnabled: false });
+      let context: BrowserContext | undefined;
+      try {
+        context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+        await context.addInitScript(() => {
+          const jobs: { url: string; terminated: boolean; changeChunks: number; continuedChunks: number; maximumChunkUnits: number; insertedUnits: number }[] = [];
+          (window as typeof window & { sourceParityJobs: typeof jobs }).sourceParityJobs = jobs;
+          const NativeWorker = window.Worker;
+          window.Worker = class extends NativeWorker {
+            private job: typeof jobs[number];
+            constructor(url: string | URL, options?: WorkerOptions) {
+              super(url, options);
+              this.job = { url: String(url), terminated: false, changeChunks: 0, continuedChunks: 0, maximumChunkUnits: 0, insertedUnits: 0 };
+              jobs.push(this.job);
+              this.addEventListener("message", event => {
+                const message = event.data;
+                if (message?.type !== "change") return;
+                this.job.changeChunks += 1;
+                this.job.continuedChunks += Number(message.continued);
+                this.job.insertedUnits += message.insert.length;
+                this.job.maximumChunkUnits = Math.max(this.job.maximumChunkUnits, message.insert.length);
+              });
+            }
+            terminate() { this.job.terminated = true; super.terminate(); }
+          };
+        });
+        const page = await context.newPage();
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        await page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })).click();
+        await enterMarkdownEditMode(page);
+        await page.getByRole("textbox", { name: "Markdown editor" }).click();
+        await page.keyboard.press("Control+h");
+        const controls = page.getByRole("search");
+        await controls.getByRole("button", { name: "Use regular expression", exact: true }).click();
+        if (fixture.caseSensitive) await controls.getByRole("button", { name: "Match case", exact: true }).click();
+        if (fixture.wholeWord) await controls.getByRole("button", { name: "Match whole word", exact: true }).click();
+        await controls.getByRole("textbox", { name: "Find", exact: true }).fill(fixture.query);
+        await controls.getByRole("textbox", { name: "Replace", exact: true }).fill(fixture.replacement);
+        await expect(controls.getByText(`0 / ${expected.count}`, { exact: true })).toBeVisible();
+        await page.mouse.move(0, 0);
+        await expect(page.getByRole("tooltip")).toHaveCount(0);
+        await controls.getByRole("button", { name: "Replace all", exact: true }).click();
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+        await expect(controls.getByRole("alert")).toHaveCount(0);
+        await controls.getByRole("button", { name: "Close", exact: true }).click();
+        await page.getByRole("button", { name: "Save", exact: true }).click();
+        await expect.poll(() => proxy.uploads.length).toBe(1);
+        const upload = proxy.uploads[0];
+        const form = await new Response(upload.body, { headers: { "Content-Type": upload.contentType } }).formData();
+        const files = [...form.values()].filter((value): value is File => typeof value !== "string");
+        expect(files).toHaveLength(1);
+        expect(await files[0].text()).toBe(expected.output);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => (window as typeof window & { sourceParityJobs: { terminated: boolean }[] }).sourceParityJobs.filter(job => !job.terminated).length)).toBe(0);
+        const jobs = await page.evaluate(() => (window as typeof window & { sourceParityJobs: unknown[] }).sourceParityJobs);
+        const replacements = (jobs as { changeChunks: number; continuedChunks: number; maximumChunkUnits: number; insertedUnits: number }[]).filter(job => job.changeChunks > 0);
+        expect(replacements).toHaveLength(1);
+        expect(replacements[0].maximumChunkUnits).toBeLessThanOrEqual(SOURCE_SEARCH_CHUNK_UNITS);
+        if (fixture.name === "large-output") {
+          expect(replacements[0].changeChunks).toBe(3);
+          expect(replacements[0].continuedChunks).toBe(2);
+          expect(replacements[0].insertedUnits).toBe(fixture.replacement.length);
+        }
+        await testInfo.attach("source-regex-parity", { contentType: "application/json", body: JSON.stringify({ fixture: fixture.name, width, count: expected.count, sourceUnits: fixture.source.length, outputUnits: expected.output.length, jobs, policy: "Functional parity with native CodeMirror commands; not timing or memory acceptance" }) });
+        expect(proxy.errors).toEqual([]);
+      } finally {
+        await context?.close();
+        await proxy.close();
+      }
+    });
+  }
+}
+
+for (const width of [1543, 390]) {
+  for (const fault of ["startup", "crash", "decode", "timeout", "delivery-cancel"] as const) {
+    test(`production source regex lifecycle ${fault} at ${width}px`, async ({ browser }, testInfo) => {
+      test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+      const initialMarkdown = "abc 123;\n".repeat(DENSE_SYNTAX_LINE_COUNT);
+      const proxy = await createCacheableViewerProxy({ initialMarkdown, wordWrapEnabled: false });
+      let context: BrowserContext | undefined;
+      try {
+        context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+        await context.addInitScript((fault) => {
+          const probe = { injected: 0, deliveredChanges: 0, jobs: [] as { sourceSearch: boolean; terminated: boolean }[], replay: () => {} };
+          (window as typeof window & { sourceLifecycleProbe: typeof probe }).sourceLifecycleProbe = probe;
+          const NativeWorker = window.Worker;
+          window.Worker = class extends NativeWorker {
+            private job: typeof probe.jobs[number];
+            constructor(url: string | URL, options?: WorkerOptions) {
+              const sourceSearch = String(url).includes("sourceRegexSearch.worker");
+              if (sourceSearch && fault === "startup" && probe.injected === 0) {
+                probe.injected += 1;
+                throw new Error("Injected source-search construction failure");
+              }
+              super(url, options);
+              this.job = { sourceSearch, terminated: false };
+              probe.jobs.push(this.job);
+              this.addEventListener("message", event => {
+                if (!sourceSearch || probe.injected > 0) return;
+                if (fault === "delivery-cancel") {
+                  if (event.data?.type !== "change") return;
+                  if (probe.deliveredChanges++ === 0) return;
+                  event.stopImmediatePropagation();
+                  probe.injected += 1;
+                  const stale = event.data;
+                  probe.replay = () => {
+                    this.dispatchEvent(new MessageEvent("message", { data: stale }));
+                    this.dispatchEvent(new MessageEvent("message", { data: { type: "complete", announcements: [], userEvent: "input.replace.all" } }));
+                  };
+                } else if (event.data?.type === "ready") {
+                  event.stopImmediatePropagation();
+                  probe.injected += 1;
+                  if (fault === "crash") this.dispatchEvent(new ErrorEvent("error", { message: "Injected source-search execution failure", cancelable: true }));
+                  if (fault === "decode") this.dispatchEvent(new MessageEvent("messageerror"));
+                }
+              }, { capture: true });
+            }
+            terminate() { this.job.terminated = true; super.terminate(); }
+          };
+        }, fault);
+        const page = await context.newPage();
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        await page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })).click();
+        await enterMarkdownEditMode(page);
+        const editor = page.getByRole("textbox", { name: "Markdown editor" });
+        await editor.click();
+        await page.keyboard.press("Control+h");
+        const controls = page.getByRole("search");
+        await controls.getByRole("button", { name: "Use regular expression", exact: true }).click();
+        await controls.getByRole("textbox", { name: "Find", exact: true }).fill("abc (123)");
+        if (fault === "delivery-cancel") {
+          await controls.getByRole("textbox", { name: "Replace", exact: true }).fill("replaced-$1");
+          await expect(controls.getByText(`0 / ${DENSE_SYNTAX_LINE_COUNT}`, { exact: true })).toBeVisible();
+          await page.mouse.move(0, 0);
+          await expect(page.getByRole("tooltip")).toHaveCount(0);
+          await controls.getByRole("button", { name: "Replace all", exact: true }).click();
+          await page.waitForFunction(() => (window as typeof window & { sourceLifecycleProbe: { injected: number } }).sourceLifecycleProbe.injected === 1);
+          await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+        } else {
+          const messages = { startup: /requires a working dedicated worker/, crash: /worker failed/, decode: /could not be decoded/, timeout: /did not start/ };
+          await expect(controls.getByRole("alert")).toContainText(messages[fault]);
+          await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+          await page.mouse.move(0, 0);
+          await expect(page.getByRole("tooltip")).toHaveCount(0);
+          await controls.getByRole("button", { name: "Next match", exact: true }).click();
+          await expect(controls.getByText(new RegExp(`^\\d+ / ${DENSE_SYNTAX_LINE_COUNT}$`))).toBeVisible();
+          await expect(controls.getByRole("alert")).toHaveCount(0);
+        }
+        await editor.focus();
+        await page.keyboard.press("Control+End");
+        await page.keyboard.type("!");
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+        if (fault === "delivery-cancel") await page.evaluate(() => (window as typeof window & { sourceLifecycleProbe: { replay: () => void } }).sourceLifecycleProbe.replay());
+        await controls.getByRole("button", { name: "Close", exact: true }).click();
+        await page.getByRole("button", { name: "Save", exact: true }).click();
+        await expect.poll(() => proxy.uploads.length).toBe(1);
+        const upload = proxy.uploads[0];
+        const form = await new Response(upload.body, { headers: { "Content-Type": upload.contentType } }).formData();
+        const files = [...form.values()].filter((value): value is File => typeof value !== "string");
+        expect(files).toHaveLength(1);
+        expect(await files[0].text()).toBe(`${initialMarkdown}!`);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => (window as typeof window & { sourceLifecycleProbe: { jobs: { terminated: boolean }[] } }).sourceLifecycleProbe.jobs.filter(job => !job.terminated).length)).toBe(0);
+        const evidence = await page.evaluate(() => {
+          const probe = (window as typeof window & { sourceLifecycleProbe: { injected: number; deliveredChanges: number; jobs: { sourceSearch: boolean; terminated: boolean }[] } }).sourceLifecycleProbe;
+          return { injected: probe.injected, deliveredChanges: probe.deliveredChanges, jobs: probe.jobs };
+        });
+        expect(evidence.injected).toBe(1);
+        expect(evidence.jobs.filter(job => job.sourceSearch).length).toBeGreaterThan(1);
+        if (fault === "delivery-cancel") expect(evidence.deliveredChanges).toBe(2);
+        await testInfo.attach("source-regex-lifecycle", { contentType: "application/json", body: JSON.stringify({ fault, width, evidence, policy: "Test-only constructor/event/ready-message injection; functional recovery and stale-delivery rejection, not timing or memory acceptance" }) });
+        expect(proxy.errors).toEqual([]);
+      } finally {
+        await context?.close();
+        await proxy.close();
+      }
+    });
+  }
+}
+
+interface ReplacementFeedbackProbe {
+  hold: boolean;
+  additions: number;
+  frames: { width: number; height: number; original: boolean; animation: string }[];
+  release: () => void;
+}
+
+for (const width of [1543, 390]) {
+  for (const regexp of [false, true]) {
+    test(`production replacement feedback ${regexp ? "regex keyboard" : "literal toolbar"} at ${width}px`, async ({ browser }, testInfo) => {
+      test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+      const initialMarkdown = `${"abc 123;\n".repeat(DENSE_SYNTAX_LINE_COUNT)}tail`;
+      const replacement = "x".repeat(DENSE_EXPANSION_REPLACEMENT_UNITS);
+      const expected = `${`${replacement};\n`.repeat(DENSE_SYNTAX_LINE_COUNT)}tail`;
+      const proxy = await createCacheableViewerProxy({ initialMarkdown, wordWrapEnabled: false });
+      let context: BrowserContext | undefined;
+      try {
+        context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+        await context.addInitScript(() => {
+          const nativeFrame = window.requestAnimationFrame.bind(window);
+          const held: FrameRequestCallback[] = [];
+          const probe: ReplacementFeedbackProbe = { hold: false, additions: 0, frames: [], release: () => {
+            probe.hold = false;
+            for (const callback of held.splice(0)) nativeFrame(callback);
+          } };
+          (window as typeof window & { replacementFeedbackProbe: ReplacementFeedbackProbe }).replacementFeedbackProbe = probe;
+          window.requestAnimationFrame = callback => nativeFrame(time => {
+            if (probe.hold && document.querySelector(".sambee-source-replacement-feedback")) held.push(callback);
+            else callback(time);
+          });
+          new MutationObserver(records => {
+            for (const record of records) for (const node of record.addedNodes) {
+              if (!(node instanceof HTMLElement) || !node.matches(".sambee-source-replacement-feedback")) continue;
+              probe.additions += 1;
+              nativeFrame(() => {
+                const rect = node.getBoundingClientRect();
+                probe.frames.push({ width: rect.width, height: rect.height, original: Boolean(document.querySelector(".cm-content")?.textContent?.includes("abc 123")), animation: node.querySelector("span")?.getAnimations()[0]?.playState ?? "unavailable" });
+              });
+            }
+          }).observe(document, { childList: true, subtree: true });
+        });
+        const page = await context.newPage();
+        const errors: string[] = [];
+        page.on("pageerror", error => errors.push(error.message));
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        await page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })).click();
+        await enterMarkdownEditMode(page);
+        const editor = page.getByRole("textbox", { name: "Markdown editor" });
+        await editor.click();
+        await page.keyboard.press("Control+h");
+        const controls = page.getByRole("search");
+        if (regexp) await controls.getByRole("button", { name: "Use regular expression", exact: true }).click();
+        const find = controls.getByRole("textbox", { name: "Find", exact: true });
+        const replace = controls.getByRole("textbox", { name: "Replace", exact: true });
+        await find.fill("tail");
+        await replace.fill("done");
+        await expect(controls.getByText(/^[01] \/ 1$/)).toBeVisible();
+        await page.mouse.move(0, 0);
+        await controls.getByRole("button", { name: "Replace all", exact: true }).click();
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+        expect(await page.evaluate(() => (window as typeof window & { replacementFeedbackProbe: ReplacementFeedbackProbe }).replacementFeedbackProbe.additions)).toBe(0);
+        await editor.focus();
+        await page.keyboard.press("Control+z");
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+        await find.fill("abc 123");
+        await replace.fill(replacement);
+        await expect(controls.getByText(`0 / ${DENSE_SYNTAX_LINE_COUNT}`, { exact: true })).toBeVisible();
+        await page.evaluate(() => { (window as typeof window & { replacementFeedbackProbe: ReplacementFeedbackProbe }).replacementFeedbackProbe.hold = true; });
+        if (regexp) { await replace.focus(); await replace.press("Control+Alt+Enter"); }
+        else await controls.getByRole("button", { name: "Replace all", exact: true }).click();
+        const feedback = page.locator(".sambee-source-replacement-feedback");
+        await expect(feedback).toBeVisible();
+        await expect(feedback).toHaveAttribute("role", "status");
+        await expect(editor).toHaveAttribute("aria-busy", "true");
+        await expect.poll(() => page.evaluate(() => (window as typeof window & { replacementFeedbackProbe: ReplacementFeedbackProbe }).replacementFeedbackProbe.frames.length)).toBeGreaterThan(0);
+        await testInfo.attach("replacement-feedback.png", { body: await page.screenshot(), contentType: "image/png" });
+        const frames = await page.evaluate(() => (window as typeof window & { replacementFeedbackProbe: ReplacementFeedbackProbe }).replacementFeedbackProbe.frames);
+        expect(frames.every(frame => frame.width > 0 && frame.height > 0 && frame.original && frame.animation === "running")).toBe(true);
+        await page.evaluate(() => (window as typeof window & { replacementFeedbackProbe: ReplacementFeedbackProbe }).replacementFeedbackProbe.release());
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+        await expect(feedback).toHaveCount(0);
+        await expect(editor).not.toHaveAttribute("aria-busy");
+        await editor.focus();
+        await page.keyboard.press("Control+z");
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+        await page.keyboard.press("Control+Shift+Z");
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+        await controls.getByRole("button", { name: "Close", exact: true }).click();
+        await page.getByRole("button", { name: "Save", exact: true }).click();
+        await expect.poll(() => proxy.uploads.length).toBe(1);
+        const upload = proxy.uploads[0];
+        const form = await new Response(upload.body, { headers: { "Content-Type": upload.contentType } }).formData();
+        const files = [...form.values()].filter((value): value is File => typeof value !== "string");
+        expect(files).toHaveLength(1);
+        expect(await files[0].text()).toBe(expected);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(editor).toHaveCount(0);
+        await expect(feedback).toHaveCount(0);
+        expect(errors).toEqual([]);
+        expect(proxy.errors).toEqual([]);
+        await testInfo.attach("replacement-feedback", { contentType: "application/json", body: JSON.stringify({ width, regexp, frames, exactSaveUnits: expected.length, policy: "Functional feedback/paint and atomic-history check with held animation frames; not timing acceptance." }) });
+      } finally {
+        await context?.close();
+        await proxy.close();
+      }
+    });
+  }
+}
+
+for (const width of [1543, 390]) {
+  for (const fixture of ["dense", "long-line"] as const) {
+    for (const expansion of [false, true]) {
+    test(`production source ${expansion ? "dense expansion" : "responsiveness"} ${fixture} at ${width}px`, async ({ browser }, testInfo) => {
+      test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+      const profiling = process.env.SAMBEE_E2E_TRACE === "1";
+      const memoryMode = process.env.SAMBEE_E2E_MEMORY === "1";
+      const diagnostic = profiling || memoryMode;
+      test.skip(diagnostic && testInfo.project.name !== "chromium", "Source memory/CPU diagnostics require Chromium CDP");
+      if ((memoryMode && profiling) || (diagnostic && process.env.SAMBEE_E2E_BUDGETS === "1")) throw new Error("Source timing, GC and tracing must run separately");
+      const initialMarkdown = `abc 123;${fixture === "dense" ? "\n" : " "}`.repeat(DENSE_SYNTAX_LINE_COUNT);
+      const replacement = expansion ? "x".repeat(DENSE_EXPANSION_REPLACEMENT_UNITS) : "replaced-$1";
+      const expectedMarkdown = initialMarkdown.replace(/abc (123)/g, replacement);
+      if (expansion) {
+        expect(initialMarkdown).toHaveLength(54_000);
+        expect(expectedMarkdown).toHaveLength(DENSE_EXPANSION_OUTPUT_UNITS);
+      }
+      const proxy = await createCacheableViewerProxy({ initialMarkdown, wordWrapEnabled: false });
+      let context: BrowserContext | undefined;
+      try {
+        context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+        await context.addInitScript(() => {
+          const probe: SourceResponsivenessProbe = { measures: [], jobs: [], timerGaps: [], completionMs: null, stop: () => {} };
+          (window as typeof window & { sourceResponsivenessProbe: SourceResponsivenessProbe }).sourceResponsivenessProbe = probe;
+          const NativeWorker = window.Worker;
+          window.Worker = class extends NativeWorker {
+            private job: SourceResponsivenessProbe["jobs"][number];
+            constructor(url: string | URL, options?: WorkerOptions) {
+              super(url, options);
+              this.job = { url: String(url), ranges: 0, rangeBatches: 0, changeChunks: 0, changeUnits: 0, maximumChunkUnits: 0, terminated: false };
+              probe.jobs.push(this.job);
+              this.addEventListener("message", event => {
+                const message = event.data;
+                if (message?.type === "ranges") { this.job.ranges += message.ranges.length; this.job.rangeBatches += 1; }
+                if (message?.type === "change") { this.job.changeChunks += 1; this.job.changeUnits += message.insert.length; this.job.maximumChunkUnits = Math.max(this.job.maximumChunkUnits, message.insert.length); }
+              });
+            }
+            terminate() { this.job.terminated = true; super.terminate(); }
+          };
+          let commandStart: number | undefined;
+          let previousTick: number | undefined;
+          const timer = window.setInterval(() => {
+            if (commandStart === undefined || probe.completionMs !== null) return;
+            const now = performance.now();
+            if (previousTick !== undefined) probe.timerGaps.push(now - previousTick);
+            previousTick = now;
+          }, 0);
+          document.addEventListener("click", event => {
+            if (!(event.target instanceof Element) || !event.target.closest('button[aria-label="Replace all"]')) return;
+            commandStart = performance.now();
+            previousTick = commandStart;
+          }, true);
+          const observer = new PerformanceObserver(list => {
+            for (const entry of list.getEntries()) {
+              if (!entry.name.startsWith("sambee:source-")) continue;
+              const measure = entry as PerformanceMeasure;
+              probe.measures.push({ name: measure.name, startTime: measure.startTime, duration: measure.duration, detail: measure.detail });
+              if (measure.name === "sambee:source-search:commit" && measure.detail.operation === "replace-all") {
+                const start = commandStart;
+                if (start === undefined) continue;
+                const observeParentUpdate = () => {
+                  if (!document.querySelector('[role="status"][aria-label="Unsaved changes"]')) {
+                    requestAnimationFrame(observeParentUpdate);
+                    return;
+                  }
+                  requestAnimationFrame(() => requestAnimationFrame(() => { probe.completionMs = performance.now() - start; }));
+                };
+                requestAnimationFrame(observeParentUpdate);
+              }
+            }
+          });
+          observer.observe({ type: "measure" });
+          probe.stop = () => { observer.disconnect(); clearInterval(timer); };
+        });
+        const page = await context.newPage();
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        const memorySession = memoryMode ? await context.newCDPSession(page) : undefined;
+        const memorySamples: { stage: string; usedSize: number; totalSize: number }[] = [];
+        const sampleMemory = async (stage: string) => {
+          if (!memorySession) return;
+          await memorySession.send("HeapProfiler.collectGarbage");
+          const heap = await memorySession.send("Runtime.getHeapUsage");
+          memorySamples.push({ stage, usedSize: heap.usedSize, totalSize: heap.totalSize });
+        };
+        await sampleMemory("pre-open");
+        await page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })).click();
+        await enterMarkdownEditMode(page);
+        const editor = page.getByRole("textbox", { name: "Markdown editor" });
+        await editor.click();
+        await page.keyboard.press("Control+h");
+        const search = page.getByRole("search");
+        await search.getByRole("button", { name: "Use regular expression", exact: true }).click();
+        await search.getByRole("textbox", { name: "Find", exact: true }).fill("abc (123)");
+        await search.getByRole("textbox", { name: "Replace", exact: true }).fill(replacement);
+        await expect(search.getByText(`0 / ${DENSE_SYNTAX_LINE_COUNT}`, { exact: true })).toBeVisible();
+        await sampleMemory("counted-results");
+        await page.mouse.move(0, 0);
+        await expect(page.getByRole("tooltip")).toHaveCount(0);
+        const profiler = profiling ? await context.newCDPSession(page) : undefined;
+        if (profiler) {
+          await profiler.send("Profiler.enable");
+          await profiler.send("Profiler.start");
+        }
+        await search.getByRole("button", { name: "Replace all", exact: true }).click();
+        await page.waitForFunction(() => (window as typeof window & { sourceResponsivenessProbe: SourceResponsivenessProbe }).sourceResponsivenessProbe.completionMs !== null);
+        await expect(search.getByText("0 / 0", { exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+        await sampleMemory("post-replacement");
+        const evidence = await page.evaluate(() => {
+          const probe = (window as typeof window & { sourceResponsivenessProbe: SourceResponsivenessProbe }).sourceResponsivenessProbe;
+          probe.stop();
+          return { measures: probe.measures, jobs: probe.jobs, completionMs: probe.completionMs, maximumTimerGap: probe.timerGaps.length ? Math.max(...probe.timerGaps) : null };
+        });
+        if (profiler) {
+          const profile = await profiler.send("Profiler.stop");
+          await testInfo.attach("source-dispatch-cpu-profile", { contentType: "application/json", body: JSON.stringify(profile) });
+          await profiler.detach();
+        }
+        const commit = evidence.measures.filter(entry => entry.name === "sambee:source-search:commit" && entry.detail.operation === "replace-all");
+        const serialization = evidence.measures.filter(entry => entry.name === "sambee:source-editor:serialize");
+        const publication = evidence.measures.filter(entry => entry.name === "sambee:source-editor:publish");
+        const budgets = evaluateSourceResponsivenessBudgets({ atomicCommit: commit[0]?.duration, serialization: serialization[0]?.duration, synchronousPublication: publication[0]?.duration, maximumTimerGap: evidence.maximumTimerGap }, diagnostic);
+        await testInfo.attach("source-responsiveness", { contentType: "application/json", body: JSON.stringify({ fixture, width, engine: testInfo.project.name, trial: testInfo.repeatEachIndex, operation: expansion ? "dense-expansion" : "original", surface: "markdown-source", cacheState: "fresh-context/fresh-workers", sourceUnits: initialMarkdown.length, outputUnits: expectedMarkdown.length, evidence, budgets, enforced: process.env.SAMBEE_E2E_BUDGETS === "1", command: `SAMBEE_E2E_PRODUCTION=1 SAMBEE_E2E_BUDGETS=1 npm run test:e2e:all -- --grep 'production source ${expansion ? "dense expansion" : "responsiveness"}' --workers=1 --repeat-each=3 --reporter=json`, limitations: ["Two animation frames are a scheduling proxy, not hardware paint or isolated React CPU", "Transfer counts are not retained/peak heap measurements", "Synchronous publication includes normalization and the parent callback, not deferred React work"] }) });
+        expect(commit).toHaveLength(1);
+        expect(serialization).toHaveLength(1);
+        expect(publication).toHaveLength(1);
+        expect(evidence.measures.filter(entry => entry.name === "sambee:source-editor:normalize")).toHaveLength(1);
+        expect(evidence.measures.filter(entry => entry.name === "sambee:source-editor:parent-update")).toHaveLength(1);
+        expect(budgets.metrics.filter(metric => metric.status === "invalid")).toEqual([]);
+        expect(commit[0].detail).toMatchObject({ documentUnits: initialMarkdown.length, changes: DENSE_SYNTAX_LINE_COUNT });
+        expect(serialization[0].detail.documentUnits).toBe(expectedMarkdown.length);
+        expect(evidence.jobs.some(job => job.ranges === DENSE_SYNTAX_LINE_COUNT && job.rangeBatches > 1)).toBe(true);
+        const replacementJobs = evidence.jobs.filter(job => job.changeChunks > 0);
+        expect(replacementJobs).toHaveLength(1);
+        expect(replacementJobs[0].changeUnits).toBe((expansion ? DENSE_EXPANSION_REPLACEMENT_UNITS : "replaced-123".length) * DENSE_SYNTAX_LINE_COUNT);
+        expect(replacementJobs[0].maximumChunkUnits).toBeLessThanOrEqual(SOURCE_SEARCH_CHUNK_UNITS);
+        await search.getByRole("button", { name: "Close", exact: true }).click();
+        await editor.focus();
+        await page.keyboard.press("Control+z");
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+        await page.keyboard.press("Control+h");
+        await search.getByRole("textbox", { name: "Find", exact: true }).fill("abc (123)");
+        await expect(search.getByText(`0 / ${DENSE_SYNTAX_LINE_COUNT}`, { exact: true })).toBeVisible();
+        await search.getByRole("button", { name: "Close", exact: true }).click();
+        await editor.focus();
+        await page.keyboard.press("Control+Shift+z");
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Save", exact: true }).click();
+        await expect.poll(() => proxy.uploads.length).toBe(1);
+        const upload = proxy.uploads[0];
+        const form = await new Response(upload.body, { headers: { "Content-Type": upload.contentType } }).formData();
+        const files = [...form.values()].filter((value): value is File => typeof value !== "string");
+        expect(files).toHaveLength(1);
+        expect(await files[0].text()).toBe(expectedMarkdown);
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveCount(0);
+        await expect.poll(() => page.evaluate(() => (window as typeof window & { sourceResponsivenessProbe: SourceResponsivenessProbe }).sourceResponsivenessProbe.jobs.filter(job => !job.terminated).length)).toBe(0);
+        await sampleMemory("post-close");
+        if (memorySession) {
+          const loadedRendererHeapCeilingBytes = 64 * 1024 * 1024;
+          await testInfo.attach("source-renderer-memory", { contentType: "application/json", body: JSON.stringify({ fixture, width, browserVersion: browser.version(), method: "Chromium CDP Runtime.getHeapUsage after HeapProfiler.collectGarbage at named boundaries", samples: memorySamples, loadedRendererHeapCeilingBytes, limitations: ["Observed post-GC renderer heap, not peak/worker/native/private-process memory", "Counted-results includes the whole loaded viewer, not isolated match-range bytes", "One close isn't six warmed close/reopen growth acceptance"] }) });
+          expect(memorySamples.map(sample => sample.stage)).toEqual(["pre-open", "counted-results", "post-replacement", "post-close"]);
+          for (const sample of memorySamples) expect(Number.isFinite(sample.usedSize) && sample.usedSize > 0).toBe(true);
+          for (const sample of memorySamples.filter(sample => sample.stage === "counted-results" || sample.stage === "post-replacement")) expect(sample.usedSize).toBeLessThanOrEqual(loadedRendererHeapCeilingBytes);
+          await memorySession.detach();
+        }
+        expect(proxy.errors).toEqual([]);
+        if (process.env.SAMBEE_E2E_BUDGETS === "1") expect(budgets.status, JSON.stringify(budgets)).toBe("pass");
+      } finally {
+        await context?.close();
+        await proxy.close();
+      }
+    });
+    }
+  }
+}
+
+for (const width of [1543, 390]) {
+  for (const fixture of TABLE_EDIT_CASES) {
+    test(`production large table editing ${fixture.name} at ${width}px`, async ({ browser }, testInfo) => {
+      test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the normal production build");
+      const profiling = process.env.SAMBEE_E2E_TRACE === "1";
+      if (process.env.SAMBEE_E2E_MEMORY === "1" || (profiling && process.env.SAMBEE_E2E_BUDGETS === "1")) throw new Error("Table editing timing must run separately from GC and profiling");
+      if (profiling && testInfo.project.name !== "chromium" && (process.env.MOZ_PROFILER_STARTUP !== "1" || !process.env.MOZ_PROFILER_SHUTDOWN)) throw new Error("Firefox table diagnostics require native startup profiling and a shutdown profile path");
+      const startedAt = performance.now();
+      const lifecycle: { stage: string; elapsedMs: number }[] = [];
+      const recordStage = (stage: string) => lifecycle.push({ stage, elapsedMs: performance.now() - startedAt });
+      const pageErrors: string[] = [];
+      const rows = Array.from({ length: TABLE_ENVELOPE_ROWS }, (_, index) => `| ${index + 1} | row ${index + 1} needle |`);
+      const source = `| Key | Value |\n| --- | --- |\n${rows.join("\n")}\n`;
+      const cellWidth = Math.max(String(TABLE_ENVELOPE_ROWS).length, String(fixture.row).length + (fixture.action === "line-break" ? "<br>".length : 0) + TABLE_EDIT_PAYLOAD.length);
+      const valueWidth = `row ${TABLE_ENVELOPE_ROWS} needle`.length;
+      const expectedRows = rows.map((_, index) => {
+        const value = `${index + 1}${index + 1 === fixture.row ? `${fixture.action === "line-break" ? "<br>" : ""}${TABLE_EDIT_PAYLOAD}` : ""}`;
+        return `| ${value.padEnd(cellWidth)} | ${`row ${index + 1} needle`.padEnd(valueWidth)} |`;
+      });
+      const expected = `\n| ${"Key".padEnd(cellWidth)} | ${"Value".padEnd(valueWidth)} |\n| ${"-".repeat(cellWidth)} | ${"-".repeat(valueWidth)} |\n${expectedRows.join("\n")}\n`.replace("<br>", "<br />");
+      const proxy = await createCacheableViewerProxy({ initialMarkdown: source });
+      let context: BrowserContext | undefined;
+      try {
+        context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+        const page = await context.newPage();
+        page.on("pageerror", error => pageErrors.push(error.stack ?? error.message));
+        const markPhase = async (phase: string) => {
+          if (profiling) await page.evaluate(name => performance.mark(`sambee:table-phase:${name}`), phase);
+        };
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        await page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true })).click();
+        await enterMarkdownEditModeWithTable(page);
+        await expect(page.locator(".tbl-data-cell")).toHaveCount(TABLE_ENVELOPE_ROWS * 2);
+        const cell = page.locator(".tbl-data-cell .tbl-cell-view").nth((fixture.row - 1) * 2);
+        const nested = await activateCellEditor(cell);
+        await expect(nested).toHaveText(String(fixture.row));
+        await page.keyboard.press("End");
+        recordStage("cell-ready");
+        await page.evaluate(() => {
+          const probe = { content: document.activeElement, measures: [] as { name: string; duration: number; startTime: number; detail: unknown }[], inputs: [] as number[], gaps: [] as number[], events: [] as { type: string; phase: string; contentId: number | null; connected: boolean; trusted: boolean; key?: string; data?: string | null; inputType?: string; isComposing?: boolean; text: string | null; nested: boolean; prevented: boolean; activeText: string | null; selectionText: string | null }[], stop: () => {} };
+          (window as typeof window & { tableEditProbe: typeof probe }).tableEditProbe = probe;
+          let previous: number | undefined;
+          const input = () => {
+            const start = performance.now();
+            previous ??= start;
+            requestAnimationFrame(() => requestAnimationFrame(() => probe.inputs.push(performance.now() - start)));
+          };
+          document.addEventListener("beforeinput", input, true);
+          const contentIds = new WeakMap<Element, number>();
+          let nextContentId = 0;
+          const observeInput = (event: Event) => {
+            if (!(event.target instanceof Element) || probe.events.length >= 256) return;
+            const content = event.target.closest(".cm-content");
+            if (content && !contentIds.has(content)) contentIds.set(content, ++nextContentId);
+            const record = (phase: string) => {
+              if (probe.events.length >= 256) return;
+              const selection = document.getSelection();
+              probe.events.push({ type: event.type, phase, contentId: content ? contentIds.get(content) ?? null : null, connected: content?.isConnected ?? false, trusted: event.isTrusted, key: event instanceof KeyboardEvent ? event.key : undefined, data: event instanceof InputEvent || event instanceof CompositionEvent ? event.data : undefined, inputType: event instanceof InputEvent ? event.inputType : undefined, isComposing: event instanceof InputEvent ? event.isComposing : undefined, text: content?.closest(".tbl-cell-editor") ? content.textContent : null, nested: Boolean(content?.closest(".tbl-cell-editor")), prevented: event.defaultPrevented, activeText: document.activeElement?.closest(".tbl-cell-editor")?.textContent ?? null, selectionText: selection?.anchorNode?.textContent ?? null });
+            };
+            record("capture");
+            queueMicrotask(() => record("after-event"));
+          };
+          const eventTypes = ["keydown", "beforeinput", "input", "compositionstart", "compositionend", "focusin", "focusout"];
+          for (const type of eventTypes) document.addEventListener(type, observeInput, true);
+          const timer = setInterval(() => {
+            if (previous === undefined) return;
+            const now = performance.now();
+            probe.gaps.push(now - previous);
+            previous = now;
+          }, 0);
+          const observer = new PerformanceObserver(list => {
+            for (const entry of list.getEntries()) if (entry.name.startsWith("sambee:source-editor:") || entry.name.startsWith("sambee:edit-preparation:")) probe.measures.push({ name: entry.name, duration: entry.duration, startTime: entry.startTime, detail: entry instanceof PerformanceMeasure ? entry.detail : null });
+          });
+          observer.observe({ type: "measure" });
+          probe.stop = () => { observer.disconnect(); clearInterval(timer); document.removeEventListener("beforeinput", input, true); for (const type of eventTypes) document.removeEventListener(type, observeInput, true); };
+        });
+        await captureViewerScheduling(page, testInfo, async () => {
+        await markPhase("typing-start");
+        let compositionMethod: string | null = null;
+        const composing = fixture.action === "composition" || fixture.action === "composition-close";
+        const saveOnClose = fixture.action === "close" || fixture.action === "composition-close";
+          if (fixture.action === "line-break") await page.keyboard.press("Shift+Enter");
+          if (composing && testInfo.project.name === "chromium") {
+            compositionMethod = "Chromium CDP composition and commit with untrusted composition-end event; not physical IME";
+            const session = await context.newCDPSession(page);
+            try {
+              await session.send("Input.imeSetComposition", { text: TABLE_EDIT_PAYLOAD, selectionStart: TABLE_EDIT_PAYLOAD.length, selectionEnd: TABLE_EDIT_PAYLOAD.length });
+              await session.send("Input.insertText", { text: TABLE_EDIT_PAYLOAD });
+            } finally { await session.detach(); }
+          } else if (composing) {
+            compositionMethod = "Firefox browser composition from Playwright text insertion; not physical IME acceptance";
+            await page.keyboard.insertText(TABLE_EDIT_PAYLOAD);
+          } else await page.keyboard.type(TABLE_EDIT_PAYLOAD, { delay: SOURCE_TYPING_KEY_DELAY_MS });
+        recordStage("input-complete");
+        await markPhase("typing-complete");
+        await expect(nested).toBeFocused();
+        await markPhase("save-start");
+        if (saveOnClose) {
+          await page.getByRole("button", { name: "Close", exact: true }).click();
+          await page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Unsaved changes", exact: true }) }).getByRole("button", { name: "Save", exact: true }).click();
+        } else await page.getByRole("button", { name: "Save", exact: true }).click();
+        recordStage("save-clicked");
+        await testInfo.attach("large-table-input", { contentType: "application/json", body: JSON.stringify(await page.evaluate(() => (window as typeof window & { tableEditProbe: { events: unknown[] } }).tableEditProbe.events)) });
+        await expect.poll(() => proxy.uploads.length).toBe(1);
+        if (composing) {
+          const compositionEvents = await page.evaluate(() => (window as typeof window & { tableEditProbe: { events: { type: string; trusted: boolean; phase: string; isComposing?: boolean }[] } }).tableEditProbe.events.filter(event => event.phase === "capture"));
+          expect(compositionEvents.some(event => event.type === "compositionstart" && event.trusted)).toBe(true);
+          expect(compositionEvents.some(event => event.type === "beforeinput" && event.isComposing && event.trusted)).toBe(true);
+          expect(compositionEvents.some(event => event.type === "compositionend" && (event.trusted || testInfo.project.name === "chromium")), JSON.stringify(compositionEvents)).toBe(true);
+        }
+        const upload = proxy.uploads[0];
+        const form = await new Response(upload.body, { headers: { "Content-Type": upload.contentType } }).formData();
+        const files = [...form.values()].filter((value): value is File => typeof value !== "string");
+        expect(files).toHaveLength(1);
+        const saved = await files[0].text();
+        await testInfo.attach("large-table-save.txt", { contentType: "text/plain", body: saved });
+        expect(saved === expected, `Exact canonical Save mismatch: expected ${expected.length} units, received ${saved.length}`).toBe(true);
+        recordStage("save-verified");
+        await markPhase("save-verified");
+        const evidence = await page.evaluate(async () => {
+          await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+          const probe = (window as typeof window & { tableEditProbe: { content: Element | null; measures: { name: string; duration: number }[]; inputs: number[]; gaps: number[]; stop: () => void } }).tableEditProbe;
+          probe.stop();
+          return { measures: probe.measures, inputs: probe.inputs, gaps: probe.gaps, retainedCell: probe.content?.isConnected ?? false, cellFocused: document.activeElement === probe.content };
+        });
+        const frames = [...evidence.inputs].sort((left, right) => left - right);
+        const maximumStage = (name: string) => { const stages = evidence.measures.filter(entry => entry.name === name); return stages.length ? Math.max(...stages.map(entry => entry.duration)) : null; };
+        const budgets = evaluateSourceTypingBudgets({ keyboardTwoFrameP95: frames[Math.ceil(frames.length * 0.95) - 1], maximumTimerGap: evidence.gaps.length ? Math.max(...evidence.gaps) : null, serialization: maximumStage("sambee:source-editor:serialize"), synchronousPublication: maximumStage("sambee:source-editor:publish") });
+        await testInfo.attach("large-table-editing", { contentType: "application/json", body: JSON.stringify({ fixture: fixture.name, row: fixture.row, rows: TABLE_ENVELOPE_ROWS, width, engine: testInfo.project.name, trial: testInfo.repeatEachIndex, surface: "markdown-table", cacheState: "fresh-context/fresh-workers", sourceUnits: source.length, outputUnits: expected.length, payload: TABLE_EDIT_PAYLOAD, compositionMethod, saveOnClose, evidence, budgets, diagnostic: profiling, enforced: process.env.SAMBEE_E2E_BUDGETS === "1", limitations: ["Beforeinput-to-two-frame scheduling proxy, not physical input/paint", "Final native dispatch is not independently attributed", "Physical IME remains a separate gate"] }) });
+        for (const stage of ["serialize", "publish", "normalize", "parent-update"]) expect(evidence.measures.some(entry => entry.name === `sambee:source-editor:${stage}`)).toBe(true);
+        expect(budgets.metrics.filter(metric => metric.status === "invalid")).toEqual([]);
+        if (!saveOnClose) {
+          expect(evidence.retainedCell).toBe(true);
+          expect(evidence.cellFocused).toBe(true);
+        }
+        if (saveOnClose) await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveCount(0);
+        recordStage("before-clean-check");
+        await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+        if (fixture.action === "line-break") {
+          const savedCellText = await nested.textContent();
+          const renderedCellText = `${fixture.row}\n${TABLE_EDIT_PAYLOAD}`;
+          await page.keyboard.type("!");
+          await expect(nested).toHaveText(`${savedCellText}!`);
+          await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+          await page.keyboard.press("Control+z");
+          await expect(cell).toHaveText(renderedCellText);
+          await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+          await page.keyboard.press("Control+Shift+Z");
+          await expect(cell).toHaveText(`${renderedCellText}!`);
+          await expect(page.getByLabel("Unsaved changes", { exact: true })).toBeVisible();
+          await page.keyboard.press("Control+z");
+          await expect(cell).toHaveText(renderedCellText);
+          await expect(page.getByLabel("Unsaved changes", { exact: true })).toHaveCount(0);
+          recordStage("post-save-history-verified");
+        }
+        recordStage("before-close");
+        await markPhase("close-start");
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+        recordStage("close-clicked");
+        await expect(page.getByRole("textbox", { name: "Markdown editor" })).toHaveCount(0);
+        await expect.poll(() => page.workers().length).toBe(0);
+        recordStage("closed");
+        await markPhase("closed");
+        expect(pageErrors).toEqual([]);
+        expect(proxy.errors).toEqual([]);
+        if (process.env.SAMBEE_E2E_BUDGETS === "1") expect(budgets.status, JSON.stringify(budgets)).toBe("pass");
+        });
+      } finally {
+        await testInfo.attach("large-table-lifecycle", { contentType: "application/json", body: JSON.stringify({ lifecycle, pageErrors }) });
+        await context?.close();
+        await proxy.close();
+      }
+    });
+  }
 }
 
 async function enterMarkdownEditModeWithTable(page: Page): Promise<void> {

@@ -10,6 +10,7 @@ import {
   type SourceSearchRequest,
   type SourceSearchResponse,
 } from "./sourceRegexSearchProtocol";
+import { beginSourceReplacementFeedback, isHeavySourceReplacement, isSourceReplacementPending } from "./sourceReplacementFeedback";
 
 export const sourceRegexSearchUpdated = StateEffect.define<null>();
 
@@ -60,6 +61,7 @@ export function runSourceRegexSearchCommand(view: EditorView, operation: Exclude
   if (!getSearchQuery(view.state).regexp) return false;
   if (!getSearchQuery(view.state).valid) return true;
   if ((operation === "replace-one" || operation === "replace-all") && view.state.readOnly) return true;
+  if ((operation === "replace-one" || operation === "replace-all") && isSourceReplacementPending(view)) return true;
   const session = getSourceRegexSearch(view);
   session.cancel();
   run(view, session, operation);
@@ -79,10 +81,37 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
   session.pending = true;
   session.error = undefined;
   const current = () => sessions.get(view) === session && view.state.doc === document && query.eq(getSearchQuery(view.state));
-  const cancel = () => {
+  const releaseReplacementBuffers = () => {
+    changes.length = 0;
+    announcements.length = 0;
+  };
+  const stopTransport = () => {
+    if (stopped) return;
     stopped = true;
     clearTimeout(timer);
-    worker?.terminate();
+    if (worker) {
+      worker.onmessage = null;
+      worker.onerror = null;
+      worker.removeEventListener("messageerror", decodeFailure);
+      worker.terminate();
+      worker = undefined;
+    }
+  };
+  const feedback =
+    operation === "replace-all"
+      ? beginSourceReplacementFeedback(view, () => {
+          stopTransport();
+          releaseReplacementBuffers();
+          if (session.pending && current() && selection !== view.state.selection) {
+            session.error = "Source search was cancelled because the selection changed. Try again.";
+          }
+          session.pending = false;
+        })
+      : undefined;
+  const cancel = () => {
+    stopTransport();
+    feedback?.dispose();
+    releaseReplacementBuffers();
   };
   session.cancel = cancel;
   const notify = () => {
@@ -97,18 +126,20 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
     session.error = message;
     notify();
   };
+  const decodeFailure = () => fail("Source-search response could not be decoded. Try again.");
   const send = (message: SourceSearchRequest) => {
     clearTimeout(timer);
     timer = setTimeout(() => fail("Source search timed out. Simplify the expression or try again."), SOURCE_SEARCH_TIMEOUT_MS);
     worker?.postMessage(message);
   };
+  if (operation !== "count") notify();
   try {
     worker = new Worker(new URL("./sourceRegexSearch.worker.ts", import.meta.url), { type: "module" });
     worker.onerror = (event) => {
       event.preventDefault();
       fail("Source-search worker failed. Try the search again.");
     };
-    worker.addEventListener("messageerror", () => fail("Source-search response could not be decoded. Try again."));
+    worker.addEventListener("messageerror", decodeFailure);
     worker.onmessage = (event: MessageEvent<SourceSearchResponse>) => {
       if (stopped) return;
       if (!current() || (operation !== "count" && selection !== view.state.selection)) {
@@ -181,28 +212,46 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
           send({ type: "ack" });
         } else if (message.type === "error") fail(message.message);
         else if (message.type === "complete") {
-          cancel();
-          session.pending = false;
+          stopTransport();
           if (operation === "count") {
+            session.pending = false;
             session.ranges = ranges;
             notify();
           } else {
             const plan: ChangeSpec[] = changes.map((change) => ({ from: change.from, to: change.to, insert: change.chunks.join("") }));
-            if (!current() || selection !== view.state.selection || (plan.length > 0 && view.state.readOnly)) return;
-            const commitStart = performance.now();
-            view.dispatch({
-              changes: plan,
-              selection: message.selection,
-              scrollIntoView: Boolean(message.selection),
-              effects: announcements.map((chunks) => EditorView.announce.of(chunks.join(""))),
-              userEvent: message.userEvent,
-            });
-            performance.clearMeasures("sambee:source-search:commit");
-            performance.measure("sambee:source-search:commit", {
-              start: commitStart,
-              detail: { operation, documentUnits: document.length, changes: plan.length },
-            });
-            if (current() && session.ranges.length === 0) run(view, session, "count");
+            const commit = () => {
+              session.pending = false;
+              if (!current() || selection !== view.state.selection || (plan.length > 0 && view.state.readOnly)) return;
+              const commitStart = performance.now();
+              view.dispatch({
+                changes: plan,
+                selection: message.selection,
+                scrollIntoView: Boolean(message.selection),
+                effects: announcements.map((chunks) => EditorView.announce.of(chunks.join(""))),
+                userEvent: message.userEvent,
+              });
+              performance.clearMeasures("sambee:source-search:commit");
+              performance.measure("sambee:source-search:commit", {
+                start: commitStart,
+                detail: { operation, documentUnits: document.length, changes: plan.length },
+              });
+              if (current() && session.ranges.length === 0) run(view, session, "count");
+            };
+            if (feedback) {
+              const insertedUnits = changes.reduce(
+                (total, change) => total + change.chunks.reduce((units, chunk) => units + chunk.length, 0),
+                0
+              );
+              feedback.apply(commit, isHeavySourceReplacement(document.length, changes.length, insertedUnits), (error) =>
+                fail(error instanceof Error ? error.message : "Source replacement failed. Try Replace All again.")
+              );
+            } else {
+              try {
+                commit();
+              } finally {
+                releaseReplacementBuffers();
+              }
+            }
           }
         } else throw new Error("Unexpected source-search worker response");
       } catch (error) {

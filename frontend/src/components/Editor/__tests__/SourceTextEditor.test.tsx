@@ -6,7 +6,7 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef, useState } from "react";
+import { createRef, useLayoutEffect, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { buildCommonEditorExtensions } from "../buildCommonEditorExtensions";
 import { getSelectionLineSegments, resolveOpaqueSelectionBackground } from "../buildEditorSelectionLayer";
@@ -18,7 +18,7 @@ import {
 import { buildMarkdownEditorExtensions } from "../buildMarkdownEditorExtensions";
 import type { MarkdownEditorThemeOptions } from "../buildMarkdownEditorTheme";
 import { buildTextEditorTheme, type TextEditorThemeOptions } from "../buildTextEditorTheme";
-import { SourceTextEditor } from "../SourceTextEditor";
+import { SOURCE_EDITOR_MEASURES, SourceTextEditor } from "../SourceTextEditor";
 import type { SourceTextEditorHandle } from "../sourceTextEditorTypes";
 
 const TEST_MARKDOWN_THEME: MarkdownEditorThemeOptions = {
@@ -49,6 +49,33 @@ const TEST_TEXT_THEME: TextEditorThemeOptions = {
 };
 
 describe("SourceTextEditor", () => {
+  it("measures serialization and synchronous parent publication without retaining source or repeating controlled echoes", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    const measure = vi.spyOn(performance, "measure");
+    const clearMeasures = vi.spyOn(performance, "clearMeasures");
+    try {
+      const { rerender } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Measured editor" onChange={onChange} />);
+      const view = editorRef.current?.getView();
+      if (!view) throw new Error("Expected a mounted editor");
+      view.dispatch({ changes: { from: view.state.doc.length, insert: " updated" } });
+      for (const name of Object.values(SOURCE_EDITOR_MEASURES)) {
+        expect(clearMeasures).toHaveBeenCalledWith(name);
+        expect(measure).toHaveBeenCalledWith(name, {
+          start: expect.any(Number),
+          detail: { revision: 1, documentUnits: "initial updated".length },
+        });
+      }
+      expect(onChange).toHaveBeenCalledOnce();
+      measure.mockClear();
+      rerender(<SourceTextEditor ref={editorRef} value="initial updated" ariaLabel="Measured editor" onChange={onChange} />);
+      expect(measure).not.toHaveBeenCalled();
+    } finally {
+      measure.mockRestore();
+      clearMeasures.mockRestore();
+    }
+  });
+
   it("does not serialize again when a controlled parent echoes the latest edit", () => {
     const editorRef = createRef<SourceTextEditorHandle>();
     const onChange = vi.fn();
@@ -71,6 +98,27 @@ describe("SourceTextEditor", () => {
     } finally {
       serialize.mockRestore();
     }
+  });
+
+  it("does not replay a controlled echo over an edit delivered before passive effects", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    function ControlledEditor({ value }: { value: string }) {
+      useLayoutEffect(() => {
+        if (value !== "initial updated") return;
+        const view = editorRef.current?.getView();
+        if (!view) throw new Error("Expected a mounted controlled editor");
+        view.dispatch({ changes: { from: view.state.doc.length, insert: " next" } });
+      }, [value]);
+      return <SourceTextEditor ref={editorRef} value={value} ariaLabel="Rapid controlled editor" onChange={onChange} />;
+    }
+    const { rerender } = render(<ControlledEditor value="initial" />);
+    const view = editorRef.current?.getView();
+    if (!view) throw new Error("Expected a mounted controlled editor");
+    view.dispatch({ changes: { from: view.state.doc.length, insert: " updated" } });
+    rerender(<ControlledEditor value="initial updated" />);
+    expect(view.state.doc.toString()).toBe("initial updated next");
+    expect(onChange).toHaveBeenCalledTimes(2);
   });
 
   it("rejects snapshots throughout an active composition, including before its first change", () => {

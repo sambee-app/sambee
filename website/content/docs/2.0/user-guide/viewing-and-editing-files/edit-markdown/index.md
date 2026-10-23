@@ -20,6 +20,8 @@ Existing complete themes without a Syntax group use the built-in palette matchin
 
 A small indicator next to the file name shows whether the document has unsaved changes. Click the save icon or press <kbd>Ctrl</kbd> + <kbd>S</kbd> at any time to save the current state of the document.
 
+Finish any input-method composition before saving. Sambee waits for table-cell edits to reach the document before capturing the saved text. If that can't finish, the editor stays open with your changes rather than saving an incomplete cell. Retry Save after the edit finishes.
+
 If Sambee must send you through OIDC sign-in while you are editing, it saves an eligible unsaved Markdown draft in this browser tab before leaving the page. See [Recover Unsaved In-Browser Edits](../recover-unsaved-edits/) for how recovery works.
 
 ## Leaving Edit Mode

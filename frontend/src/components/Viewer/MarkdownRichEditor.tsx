@@ -1,8 +1,10 @@
 import { EditorSelection, type EditorState } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 import { insertEmptyMarkdownTable } from "codemirror-markdown-tables";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DRAFT_TRANSITION_FLUSH_MS } from "../../services/draftCheckpoint";
+import { error as logError } from "../../services/logger";
+import { createMarkdownEditNormalization } from "../../utils/markdownCodePreparation";
 import { buildMarkdownEditorExtensions } from "../Editor/buildMarkdownEditorExtensions";
 import type { MarkdownEditorThemeOptions } from "../Editor/buildMarkdownEditorTheme";
 import { SourceTextEditor } from "../Editor/SourceTextEditor";
@@ -16,15 +18,17 @@ import {
   shouldAutoNavigateCodeMirrorFindReplace,
   updateCodeMirrorFindReplaceQuery,
 } from "./codeMirrorFindReplace";
-import {
-  normalizeMarkdownTableCellLineBreaks,
-  prepareMarkdownTableCellLineBreaksForEditor,
-  preserveUnchangedMarkdownTableSource,
-} from "./markdownTableCellLineBreaks";
+import { needsMarkdownTableSourceComparison, prepareMarkdownTableCellLineBreaksForEditor } from "./markdownTableCellLineBreaks";
 
 const insertDefaultMarkdownTable = insertEmptyMarkdownTable({
   size: { rows: 2, cols: 2 },
 });
+const SNAPSHOT_FLUSH_MEASURE = "sambee:edit-preparation:snapshot-flush";
+
+export const MARKDOWN_SOURCE_MEASURES = {
+  normalize: "sambee:source-editor:normalize",
+  parentUpdate: "sambee:source-editor:parent-update",
+} as const;
 
 export interface MarkdownRichEditorHandle {
   focus: () => void;
@@ -66,6 +70,7 @@ export interface MarkdownRichEditorProps {
   diffMarkdown?: string;
   onChange: (markdown: string) => void;
   onUserEdit?: (viewUpdate?: ViewUpdate) => void;
+  onNormalizationStateChange?: (pending: boolean, error?: Error) => void;
   ariaLabel: string;
   theme: MarkdownEditorThemeOptions;
   autoFocus?: boolean;
@@ -103,14 +108,7 @@ interface NestedComposition {
   generation: number;
   acknowledged: boolean;
   data: string | null;
-}
-
-function normalizeTableCellBreaksIfNeeded(markdown: string): string {
-  return markdown.includes("<br") ? normalizeMarkdownTableCellLineBreaks(markdown) : markdown;
-}
-
-function getCurrentDoc(editorRef: React.RefObject<SourceTextEditorHandle | null>, previousMarkdown: string): string {
-  return preserveUnchangedMarkdownTableSource(previousMarkdown, normalizeTableCellBreaksIfNeeded(editorRef.current?.getValue() ?? ""));
+  acknowledgedInput?: { doc: EditorState["doc"]; generation: number; data: string | null };
 }
 
 function getEventTargetElement(target: EventTarget | null): Element | null {
@@ -271,6 +269,7 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       diffMarkdown,
       onChange,
       onUserEdit,
+      onNormalizationStateChange,
       ariaLabel,
       theme,
       autoFocus = false,
@@ -305,21 +304,57 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
     });
     const nestedInputRef = useRef<NestedInput | null>(null);
     const nestedCompositionRef = useRef<NestedComposition | null>(null);
+    const preservedNestedSelectionRef = useRef<{
+      view: EditorView;
+      state: EditorState;
+      scrollTop: number;
+      scrollLeft: number;
+    } | null>(null);
     const [editorMarkdown, setEditorMarkdown] = useState(() => prepareMarkdownTableCellLineBreaksForEditor(markdown));
+    const normalizationRef = useRef<ReturnType<typeof createMarkdownEditNormalization> | null>(null);
+    const normalizationEpochRef = useRef(0);
+    const normalizationFailureRef = useRef<Error | null>(null);
+    const normalizationRequestRef = useRef<{ baseline: string; preserveOnly: boolean } | null>(null);
+    const canonicalRef = useRef({ source: editorMarkdown, markdown });
+    const callbacksRef = useRef({ onChange, onNormalizationStateChange, baseline: diffMarkdown ?? markdown });
 
-    useEffect(() => {
+    useLayoutEffect(() => {
+      callbacksRef.current = { onChange, onNormalizationStateChange, baseline: diffMarkdown ?? markdown };
+    }, [diffMarkdown, markdown, onChange, onNormalizationStateChange]);
+
+    useLayoutEffect(() => {
       if (markdown === lastPublishedCanonicalMarkdownRef.current) {
         return;
       }
 
-      setEditorMarkdown(prepareMarkdownTableCellLineBreaksForEditor(markdown));
+      normalizationRef.current?.dispose();
+      normalizationEpochRef.current += 1;
+      normalizationRef.current = null;
+      normalizationFailureRef.current = null;
+      normalizationRequestRef.current = null;
+      preservedNestedSelectionRef.current = null;
+      const source = prepareMarkdownTableCellLineBreaksForEditor(markdown);
+      canonicalRef.current = { source, markdown };
+      setEditorMarkdown(source);
       lastPublishedCanonicalMarkdownRef.current = null;
+      callbacksRef.current.onNormalizationStateChange?.(false);
     }, [markdown]);
+
+    useLayoutEffect(
+      () => () => {
+        normalizationEpochRef.current += 1;
+        normalizationRef.current?.dispose();
+        normalizationRef.current = null;
+        preservedNestedSelectionRef.current = null;
+      },
+      []
+    );
 
     const markNestedPublicationPending = useCallback(() => {
       const publicationState = nestedPublicationStateRef.current;
 
       publicationState.observedGeneration += 1;
+      callbacksRef.current.onNormalizationStateChange?.(true);
 
       if (publicationState.pendingPromise) {
         return;
@@ -335,6 +370,7 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       const composition = nestedCompositionRef.current;
       if (composition && composition.generation === publicationState.observedGeneration && composition.doc === composition.view.state.doc) {
         composition.acknowledged = true;
+        composition.acknowledgedInput = { doc: composition.doc, generation: composition.generation, data: composition.data };
       }
 
       if (publicationState.observedGeneration <= publicationState.publishedGeneration) {
@@ -347,6 +383,9 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       publicationState.pendingPromise = null;
       publicationState.resolvePending = null;
       resolvePending?.();
+      if (!normalizationRef.current && canonicalRef.current.source === editorRef.current?.getValue()) {
+        callbacksRef.current.onNormalizationStateChange?.(false);
+      }
     }, []);
 
     const handleNestedUpdate = useCallback(
@@ -402,15 +441,77 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       signal?.throwIfAborted();
     }, []);
 
+    const publishCanonical = useCallback((source: string, canonicalMarkdown: string) => {
+      canonicalRef.current = { source, markdown: canonicalMarkdown };
+      lastPublishedCanonicalMarkdownRef.current = canonicalMarkdown;
+      const parentUpdateStart = performance.now();
+      callbacksRef.current.onChange(canonicalMarkdown);
+      callbacksRef.current.onNormalizationStateChange?.(
+        nestedPublicationStateRef.current.observedGeneration > nestedPublicationStateRef.current.publishedGeneration
+      );
+      performance.clearMeasures(MARKDOWN_SOURCE_MEASURES.parentUpdate);
+      performance.measure(MARKDOWN_SOURCE_MEASURES.parentUpdate, {
+        start: parentUpdateStart,
+        detail: { documentUnits: source.length, canonicalUnits: canonicalMarkdown.length },
+      });
+    }, []);
+
+    const requestNormalization = useCallback(
+      (source: string, preserveOnly = false) => {
+        normalizationFailureRef.current = null;
+        callbacksRef.current.onNormalizationStateChange?.(true);
+        if (!normalizationRef.current) {
+          normalizationRef.current = createMarkdownEditNormalization(
+            (diagnostic) => logError(diagnostic.message, diagnostic.context, diagnostic.component),
+            (snapshot) => publishCanonical(snapshot.source, snapshot.normalizedSource),
+            (error) => {
+              normalizationFailureRef.current = error;
+              callbacksRef.current.onNormalizationStateChange?.(true, error);
+              logError("Markdown edit normalization failed; keep the editor open and retry saving", { error }, "MarkdownRichEditor");
+            }
+          );
+        }
+        const baseline = callbacksRef.current.baseline;
+        normalizationRequestRef.current = { baseline, preserveOnly };
+        normalizationRef.current.request(source, baseline, preserveOnly);
+      },
+      [publishCanonical]
+    );
+
+    useLayoutEffect(() => {
+      const baseline = diffMarkdown ?? markdown;
+      const source = editorRef.current?.getValue();
+      if (
+        source !== undefined &&
+        needsMarkdownTableSourceComparison(baseline, canonicalRef.current.markdown) &&
+        normalizationRequestRef.current?.baseline !== baseline
+      ) {
+        requestNormalization(source, normalizationRequestRef.current?.preserveOnly ?? true);
+      }
+    }, [diffMarkdown, markdown, requestNormalization]);
+
     const handleChange = useCallback(
       (nextValue: string) => {
         resolveNestedPublication();
         setEditorMarkdown(nextValue);
-        const canonicalMarkdown = normalizeTableCellBreaksIfNeeded(nextValue);
-        lastPublishedCanonicalMarkdownRef.current = canonicalMarkdown;
-        onChange(canonicalMarkdown);
+        const normalizationStart = performance.now();
+        if (nextValue.includes("<br")) {
+          requestNormalization(nextValue);
+        } else if (needsMarkdownTableSourceComparison(callbacksRef.current.baseline, nextValue)) {
+          publishCanonical(nextValue, nextValue);
+          requestNormalization(nextValue, true);
+        } else {
+          normalizationRef.current?.dispose();
+          normalizationRef.current = null;
+          normalizationFailureRef.current = null;
+          normalizationRequestRef.current = null;
+          publishCanonical(nextValue, nextValue);
+        }
+        const detail = { documentUnits: nextValue.length, canonicalUnits: nextValue.includes("<br") ? null : nextValue.length };
+        performance.clearMeasures(MARKDOWN_SOURCE_MEASURES.normalize);
+        performance.measure(MARKDOWN_SOURCE_MEASURES.normalize, { start: normalizationStart, detail });
       },
-      [onChange, resolveNestedPublication]
+      [publishCanonical, requestNormalization, resolveNestedPublication]
     );
 
     const reportSearchState = useCallback(() => {
@@ -481,6 +582,16 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       searchWholeWord,
     ]);
 
+    const preserveNestedSelection = useCallback((target: EventTarget | null) => {
+      const root = editorRef.current?.getView();
+      if (!root || !(target instanceof HTMLElement) || !root.dom.contains(target)) return;
+      const nested = EditorView.findFromDOM(target);
+      preservedNestedSelectionRef.current =
+        nested && nested !== root
+          ? { view: nested, state: nested.state, scrollTop: root.scrollDOM.scrollTop, scrollLeft: root.scrollDOM.scrollLeft }
+          : null;
+    }, []);
+
     useEffect(() => {
       const rootView = editorRef.current?.getView();
 
@@ -488,6 +599,7 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
         return;
       }
 
+      const handleEditorFocus = (event: FocusEvent) => preserveNestedSelection(event.target);
       const handlePotentialNestedEdit = (event: Event) => {
         const targetElement = getEventTargetElement(event.target);
 
@@ -514,6 +626,27 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
         }
         if (event instanceof CompositionEvent && event.type === "compositionend") {
           nestedCompositionRef.current = null;
+          const acknowledged = composition?.acknowledgedInput;
+          const input = nestedInputRef.current;
+          if (
+            composition &&
+            view &&
+            acknowledged &&
+            input &&
+            composition.view === view &&
+            acknowledged.doc === view.state.doc &&
+            acknowledged.data === event.data &&
+            acknowledged.generation === publication.publishedGeneration &&
+            input.view === view &&
+            input.state?.doc === acknowledged.doc &&
+            input.generation === publication.observedGeneration &&
+            !input.hadPendingPublication &&
+            Array.from(view.contentDOM.querySelectorAll(".cm-line"), (line) => line.textContent ?? "").join("\n") ===
+              view.state.doc.toString()
+          ) {
+            resolveNestedPublication();
+            return;
+          }
           if (
             composition?.view === view &&
             composition.acknowledged &&
@@ -556,6 +689,8 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
         };
       };
 
+      rootView.dom.addEventListener("focusin", handleEditorFocus, true);
+      rootView.dom.addEventListener("focusout", handleEditorFocus, true);
       rootView.dom.addEventListener("beforeinput", handlePotentialNestedEdit, true);
       rootView.dom.addEventListener("compositionstart", handlePotentialNestedEdit, true);
       rootView.dom.addEventListener("compositionend", handlePotentialNestedEdit, true);
@@ -563,6 +698,8 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       rootView.dom.addEventListener("cut", handlePotentialNestedEdit, true);
 
       return () => {
+        rootView.dom.removeEventListener("focusin", handleEditorFocus, true);
+        rootView.dom.removeEventListener("focusout", handleEditorFocus, true);
         rootView.dom.removeEventListener("beforeinput", handlePotentialNestedEdit, true);
         rootView.dom.removeEventListener("compositionstart", handlePotentialNestedEdit, true);
         rootView.dom.removeEventListener("compositionend", handlePotentialNestedEdit, true);
@@ -575,7 +712,91 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
         nestedPublicationStateRef.current.resolvePending = null;
         nestedPublicationStateRef.current.publishedGeneration = nestedPublicationStateRef.current.observedGeneration;
       };
-    }, [markNestedPublicationPending]);
+    }, [markNestedPublicationPending, preserveNestedSelection, resolveNestedPublication]);
+
+    const getCanonicalMarkdown = useCallback(() => {
+      const source = editorRef.current?.getValue();
+      if (source === undefined) throw new Error("Cannot read Markdown after the editor is disposed");
+      const prepared = normalizationRef.current?.captureSnapshotSync();
+      if (canonicalRef.current.source !== source) {
+        throw new DOMException(
+          "Markdown normalization has not finished publishing. Retry after the current edit finishes.",
+          "InvalidStateError"
+        );
+      }
+      if (
+        needsMarkdownTableSourceComparison(callbacksRef.current.baseline, canonicalRef.current.markdown) &&
+        prepared?.baseline !== callbacksRef.current.baseline
+      ) {
+        throw new DOMException(
+          "Markdown source preservation has not finished publishing. Retry after the current edit finishes.",
+          "InvalidStateError"
+        );
+      }
+      return canonicalRef.current.markdown;
+    }, []);
+
+    const flushPendingEdits = useCallback(
+      async (signal?: AbortSignal) => {
+        const epoch = normalizationEpochRef.current;
+        const assertCurrentDocument = () => {
+          if (!editorRef.current) throw new Error("Cannot capture a snapshot after the Markdown editor is disposed");
+          if (normalizationEpochRef.current !== epoch) {
+            throw new DOMException("Markdown document changed while its snapshot was being prepared", "AbortError");
+          }
+        };
+        if (normalizationFailureRef.current) {
+          const source = editorRef.current?.getValue();
+          if (source === undefined) throw new Error("Cannot retry normalization after the Markdown editor is disposed");
+          requestNormalization(source);
+        }
+        do {
+          await flushNestedPublication(signal);
+          assertCurrentDocument();
+          if (
+            !normalizationRef.current ||
+            normalizationRequestRef.current?.preserveOnly ||
+            normalizationRequestRef.current?.baseline !== callbacksRef.current.baseline
+          ) {
+            const source = editorRef.current?.getValue();
+            if (source === undefined) throw new Error("Cannot normalize Markdown after the editor is disposed");
+            requestNormalization(source);
+          }
+          const normalization = normalizationRef.current;
+          try {
+            await normalization?.flush(signal);
+          } catch (error) {
+            signal?.throwIfAborted();
+            assertCurrentDocument();
+            if (normalization !== normalizationRef.current && editorRef.current) continue;
+            throw error;
+          }
+          signal?.throwIfAborted();
+          assertCurrentDocument();
+        } while (
+          !normalizationRef.current ||
+          normalizationRequestRef.current?.preserveOnly ||
+          normalizationRequestRef.current?.baseline !== callbacksRef.current.baseline ||
+          nestedPublicationStateRef.current.observedGeneration > nestedPublicationStateRef.current.publishedGeneration
+        );
+      },
+      [flushNestedPublication, requestNormalization]
+    );
+
+    const captureSnapshotSync = useCallback((): SourceTextSnapshot => {
+      const publication = nestedPublicationStateRef.current;
+      if (publication.observedGeneration > publication.publishedGeneration) {
+        throw new DOMException("Markdown edits have not finished publishing. Retry after the current edit finishes.", "InvalidStateError");
+      }
+      const editor = editorRef.current;
+      if (!editor) throw new Error("Cannot capture a snapshot after the Markdown editor is disposed");
+      const snapshot = editor.captureSnapshot();
+      const canonicalMarkdown = getCanonicalMarkdown();
+      return Object.freeze({
+        revision: snapshot.revision,
+        serialize: () => canonicalMarkdown,
+      });
+    }, [getCanonicalMarkdown]);
 
     const captureSnapshotSync = useCallback((): SourceTextSnapshot => {
       const publication = nestedPublicationStateRef.current;
@@ -599,6 +820,7 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
           editorRef.current?.focus();
         },
         captureSnapshot: async (signal) => {
+          const startedAt = performance.now();
           const deadline = new AbortController();
           const timeout = window.setTimeout(() => {
             deadline.abort(
@@ -607,21 +829,40 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
           }, DRAFT_TRANSITION_FLUSH_MS);
           const flushSignal = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
           try {
-            await flushNestedPublication(flushSignal);
+            await flushPendingEdits(flushSignal);
             flushSignal.throwIfAborted();
             return captureSnapshotSync();
           } finally {
             window.clearTimeout(timeout);
+            performance.clearMeasures(SNAPSHOT_FLUSH_MEASURE);
+            performance.measure(SNAPSHOT_FLUSH_MEASURE, { start: startedAt, detail: { documentEpoch: normalizationEpochRef.current } });
           }
         },
         captureSnapshotSync,
-        flushPendingEdits: flushNestedPublication,
-        getCanonicalMarkdown: () => getCurrentDoc(editorRef, diffMarkdown ?? markdown),
+        flushPendingEdits,
+        getCanonicalMarkdown,
         getPrimarySelectionText: () => editorRef.current?.getPrimarySelectionText() ?? "",
         preserveSelection: () => {
           editorRef.current?.preserveSelection();
+          const root = editorRef.current?.getView();
+          preserveNestedSelection(root?.root.activeElement ?? null);
         },
-        restorePreservedSelection: () => editorRef.current?.restorePreservedSelection() ?? false,
+        restorePreservedSelection: () => {
+          const root = editorRef.current?.getView();
+          const preserved = preservedNestedSelectionRef.current;
+          if (root && preserved?.view.dom.isConnected && root.dom.contains(preserved.view.dom)) {
+            const nested = preserved.view;
+            if (nested.hasFocus) return true;
+            if (nested.state.doc === preserved.state.doc && !nested.state.selection.eq(preserved.state.selection)) {
+              nested.dispatch({ selection: preserved.state.selection, scrollIntoView: false });
+            }
+            nested.focus();
+            root.scrollDOM.scrollTop = preserved.scrollTop;
+            root.scrollDOM.scrollLeft = preserved.scrollLeft;
+            return nested.hasFocus;
+          }
+          return editorRef.current?.restorePreservedSelection() ?? false;
+        },
         focusCurrentSearchResult: () => {
           const view = editorRef.current?.getView();
 
@@ -679,7 +920,7 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
           reportSearchState();
         },
       }),
-      [captureSnapshotSync, diffMarkdown, flushNestedPublication, markdown, reportSearchState]
+      [captureSnapshotSync, flushPendingEdits, getCanonicalMarkdown, preserveNestedSelection, reportSearchState]
     );
 
     return (

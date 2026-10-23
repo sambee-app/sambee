@@ -17,6 +17,149 @@ export {
 } from "./markdownCodePreparationProtocol";
 
 const NORMALIZATION_GENERATION = 0;
+const EDIT_PREPARATION_PREFIX = "sambee:edit-preparation";
+
+function measureEditPreparation(stage: string, start: number, detail: Record<string, number | boolean | null>): void {
+  const name = `${EDIT_PREPARATION_PREFIX}:${stage}`;
+  performance.clearMeasures(name);
+  performance.measure(name, { start, detail });
+}
+
+export interface MarkdownEditNormalizationSnapshot {
+  readonly generation: number;
+  readonly source: string;
+  readonly baseline?: string;
+  readonly preserveOnly?: boolean;
+  readonly normalizedSource: string;
+}
+
+export function createMarkdownEditNormalization(
+  onDiagnostic: (diagnostic: Extract<PreparationResponse, { type: "diagnostic" }>) => void,
+  onNormalized?: (snapshot: MarkdownEditNormalizationSnapshot) => void,
+  onFailure?: (error: Error) => void
+) {
+  type Request = { generation: number; source: string; baseline?: string; preserveOnly?: boolean; requestedAt: number };
+  type Job = { controller: AbortController; done: Promise<void> };
+  let generation = NORMALIZATION_GENERATION;
+  let latest: Request | null = null;
+  let pending: Request | null = null;
+  let active: Job | null = null;
+  let snapshot: MarkdownEditNormalizationSnapshot | null = null;
+  let failure: Error | null = null;
+  let disposed = false;
+
+  const assertLive = () => {
+    if (disposed) throw new DOMException("Markdown edit normalization was disposed", "AbortError");
+  };
+
+  const startPending = () => {
+    if (disposed || active || !pending) return;
+    const request = pending;
+    pending = null;
+    const startedAt = performance.now();
+    const detail = {
+      generation: request.generation,
+      sourceUnits: request.source.length,
+      baselineUnits: request.baseline?.length ?? 0,
+      preserveOnly: request.preserveOnly === true,
+    };
+    measureEditPreparation("queue", request.requestedAt, detail);
+    const controller = new AbortController();
+    const job: Job = { controller, done: Promise.resolve() };
+    active = job;
+    job.done = (async () => {
+      try {
+        const result = await prepareCodePreviewInWorker(
+          [request.source],
+          request.generation,
+          controller.signal,
+          (diagnostic) => {
+            if (!disposed && latest === request) onDiagnostic(diagnostic);
+          },
+          { preserveTableSource: request.baseline, preserveOnly: request.preserveOnly }
+        );
+        if (!disposed && latest === request) {
+          const { requestedAt: _requestedAt, ...identity } = request;
+          snapshot = Object.freeze({ ...identity, normalizedSource: result.normalizedSource });
+          onNormalized?.(snapshot);
+        }
+      } catch (error) {
+        if (!disposed && latest === request) {
+          failure = error instanceof Error ? error : new Error(String(error));
+          onFailure?.(failure);
+        }
+      } finally {
+        measureEditPreparation("job", startedAt, { ...detail, current: latest === request, disposed });
+        active = null;
+        startPending();
+      }
+    })();
+  };
+
+  const captureSnapshotSync = (): MarkdownEditNormalizationSnapshot => {
+    assertLive();
+    if (failure) throw failure;
+    if (!snapshot || snapshot.generation !== latest?.generation) {
+      throw new DOMException(
+        "Markdown normalization has not finished publishing. Retry after the current edit finishes.",
+        "InvalidStateError"
+      );
+    }
+    return snapshot;
+  };
+
+  return {
+    request(source: string, baseline?: string, preserveOnly = false): number {
+      assertLive();
+      latest = {
+        source,
+        generation: ++generation,
+        requestedAt: performance.now(),
+        ...(baseline === undefined ? {} : { baseline }),
+        ...(preserveOnly ? { preserveOnly } : {}),
+      };
+      pending = latest;
+      snapshot = null;
+      failure = null;
+      startPending();
+      return generation;
+    },
+    captureSnapshotSync,
+    async flush(signal?: AbortSignal): Promise<MarkdownEditNormalizationSnapshot> {
+      signal?.throwIfAborted();
+      assertLive();
+      while (active) {
+        const completion = active.done;
+        if (!signal) await completion;
+        else {
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => {
+              signal.removeEventListener("abort", abort);
+              reject(signal.reason);
+            };
+            signal.addEventListener("abort", abort, { once: true });
+            void completion.then(() => {
+              signal.removeEventListener("abort", abort);
+              resolve();
+            });
+          });
+        }
+        signal?.throwIfAborted();
+        assertLive();
+      }
+      return captureSnapshotSync();
+    },
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      latest = null;
+      pending = null;
+      snapshot = null;
+      failure = null;
+      active?.controller.abort();
+    },
+  };
+}
 
 export async function normalizeMarkdownSource(source: string, signal: AbortSignal, onPrepared?: (tree: Root) => void): Promise<string> {
   signal.throwIfAborted();
@@ -55,13 +198,18 @@ export function prepareCodePreviewInWorker(
   generation: number,
   signal: AbortSignal,
   onDiagnostic: (diagnostic: Extract<PreparationResponse, { type: "diagnostic" }>) => void,
-  options: { prepareTree?: boolean } = {}
+  options: { prepareTree?: boolean; preserveTableSource?: string; preserveOnly?: boolean } = {}
 ): Promise<{ normalizedSource: string; preparedTree?: Root; preparationMs: number }> {
   if (signal.aborted) return Promise.reject(new DOMException("Preparation cancelled", "AbortError"));
   if (blocks.length !== 1) return Promise.reject(new Error("Markdown normalization requires one source document"));
+  if (options.prepareTree && options.preserveTableSource !== undefined)
+    return Promise.reject(new Error("Source-preserving edit preparation cannot also prepare a preview tree"));
+  if (options.preserveOnly && options.preserveTableSource === undefined)
+    return Promise.reject(new Error("Source-preservation-only preparation requires a baseline"));
   if (typeof Worker === "undefined")
     return Promise.reject(new Error("Worker preparation is unavailable; no main-thread fallback was used"));
   return new Promise((resolve, reject) => {
+    const startedAt = performance.now();
     let current: Worker;
     try {
       current = new Worker(new URL("./markdownCodePreparation.worker.ts", import.meta.url), { type: "module" });
@@ -69,7 +217,18 @@ export function prepareCodePreviewInWorker(
       reject(error);
       return;
     }
-    const source = blocks[0];
+    const sources = options.preserveTableSource === undefined ? blocks : [blocks[0], options.preserveTableSource];
+    const measured = options.preserveTableSource !== undefined;
+    const detail = {
+      generation,
+      sourceUnits: blocks[0].length,
+      baselineUnits: options.preserveTableSource?.length ?? 0,
+      preserveOnly: options.preserveOnly === true,
+    };
+    let transferStartedAt = startedAt;
+    let runAt = startedAt;
+    let resultStartedAt: number | undefined;
+    let sourceBlock = 0;
     let sourceOffset = 0;
     let sourceSequence = 0;
     let sourceFinal = false;
@@ -148,6 +307,10 @@ export function prepareCodePreviewInWorker(
             (!response.final && !response.text.length)
           )
             throw new Error("Invalid normalized Markdown source chunk");
+          if (resultStartedAt === undefined) {
+            resultStartedAt = performance.now();
+            if (measured) measureEditPreparation("run-to-result", runAt, detail);
+          }
           normalizedParts.push(response.text);
           normalizedFinal = response.final;
           current.postMessage({ type: "ack", generation } satisfies PreparationRequest);
@@ -155,11 +318,23 @@ export function prepareCodePreviewInWorker(
         }
         if (response.type === "source-ack") {
           if (sourceComplete || response.sequence !== sourceSequence) throw new Error("Invalid source acknowledgement");
-          if (sourceFinal) {
-            sourceComplete = true;
-            current.postMessage({ type: "run", generation } satisfies PreparationRequest);
-            return;
+          if (response.sequence === 0) {
+            if (measured) measureEditPreparation("startup", startedAt, detail);
+            transferStartedAt = performance.now();
           }
+          if (sourceFinal) {
+            if (measured) measureEditPreparation(sourceBlock === 0 ? "source-transfer" : "baseline-transfer", transferStartedAt, detail);
+            if (sourceBlock === sources.length - 1) {
+              sourceComplete = true;
+              runAt = performance.now();
+              current.postMessage({ type: "run", generation } satisfies PreparationRequest);
+              return;
+            }
+            sourceBlock += 1;
+            sourceOffset = 0;
+            transferStartedAt = performance.now();
+          }
+          const source = sources[sourceBlock];
           const text = source.slice(sourceOffset, sourceOffset + PREPARATION_SOURCE_CHUNK_UNITS);
           sourceOffset += text.length;
           sourceFinal = sourceOffset === source.length;
@@ -168,7 +343,7 @@ export function prepareCodePreviewInWorker(
             type: "source",
             generation,
             sequence: sourceSequence,
-            block: 0,
+            block: sourceBlock,
             text,
             final: sourceFinal,
           } satisfies PreparationRequest);
@@ -186,6 +361,17 @@ export function prepareCodePreviewInWorker(
         if (!normalizedFinal) throw new Error("Markdown normalization completed before its final source chunk");
         if (treeReceiver && !treeFinal) throw new Error("Markdown normalization completed before its final tree chunk");
         const preparedTree = treeReceiver?.finish();
+        if (measured) {
+          if (resultStartedAt !== undefined) measureEditPreparation("result-delivery", resultStartedAt, detail);
+          measureEditPreparation("transport", startedAt, {
+            ...detail,
+            sourceChunks: sourceSequence,
+            resultChunks: normalizedParts.length,
+            workerPreparationMs: response.preparationMs,
+            workerNormalizationMs: response.normalizationMs ?? null,
+            workerPreservationMs: response.preservationMs ?? null,
+          });
+        }
         settled = true;
         cleanup();
         resolve({ normalizedSource: normalizedParts.join(""), preparedTree, preparationMs: response.preparationMs });
@@ -195,7 +381,13 @@ export function prepareCodePreviewInWorker(
     };
     armWatchdog();
     try {
-      current.postMessage({ type: "prepare", generation, prepareTree: options.prepareTree } satisfies PreparationRequest);
+      current.postMessage({
+        type: "prepare",
+        generation,
+        prepareTree: options.prepareTree,
+        ...(options.preserveTableSource === undefined ? {} : { preserveTableSource: true }),
+        ...(options.preserveOnly ? { preserveOnly: true } : {}),
+      } satisfies PreparationRequest);
     } catch (error) {
       fail(error);
     }

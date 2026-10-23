@@ -1,5 +1,10 @@
 # TODO
 
+## Bugs
+
+- Search in Markdown editor:
+   - Search terms aren't added to the search history
+
 ## To improve soon
 
 - Vite production-build warning: one or more generated JavaScript chunks exceed 500 kB before gzip compression.

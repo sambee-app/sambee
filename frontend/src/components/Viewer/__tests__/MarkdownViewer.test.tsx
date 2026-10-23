@@ -89,6 +89,7 @@ const mockMarkdownEditorBehavior = {
   lastSearchText: "",
   lastRestoredScrollTop: null as number | null,
   moveCaretToEndOnMarkdownPropChangeWhenFocused: false,
+  onNormalizationStateChange: null as ((pending: boolean) => void) | null,
   preserveSelectionCalls: 0,
   restorePreservedSelectionCalls: 0,
   skipUserEdit: false,
@@ -145,6 +146,7 @@ const MockMarkdownRichEditor = forwardRef<
     markdown: string;
     onChange: (markdown: string) => void;
     onUserEdit?: (viewUpdate?: ViewUpdate) => void;
+    onNormalizationStateChange?: (pending: boolean, error?: Error) => void;
     ariaLabel: string;
     autoFocus?: boolean;
     readOnly?: boolean;
@@ -172,6 +174,7 @@ const MockMarkdownRichEditor = forwardRef<
       markdown,
       onChange,
       onUserEdit,
+      onNormalizationStateChange,
       ariaLabel,
       readOnly = false,
       className,
@@ -189,6 +192,7 @@ const MockMarkdownRichEditor = forwardRef<
     mockMarkdownEditorBehavior.lastSearchOpen = searchOpen;
     mockMarkdownEditorBehavior.lastSearchText = searchText;
     mockMarkdownEditorBehavior.lastSearchAutoNavigate = searchAutoNavigate;
+    mockMarkdownEditorBehavior.onNormalizationStateChange = onNormalizationStateChange ?? null;
 
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const toolbarButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -334,7 +338,9 @@ const MockMarkdownRichEditor = forwardRef<
       },
       captureSnapshot: async () => {
         if (mockMarkdownEditorBehavior.flushRejectError) throw mockMarkdownEditorBehavior.flushRejectError;
-        const content = mockMarkdownEditorBehavior.canonicalMarkdownOverride ?? latestMarkdownRef.current;
+        const content = normalizeMarkdownTableCellLineBreaks(
+          mockMarkdownEditorBehavior.canonicalMarkdownOverride ?? latestMarkdownRef.current
+        );
         await mockMarkdownEditorBehavior.pendingSnapshot;
         return {
           revision: 0,
@@ -725,6 +731,7 @@ describe("MarkdownViewer", () => {
     mockMarkdownEditorBehavior.lastSearchText = "";
     mockMarkdownEditorBehavior.lastRestoredScrollTop = null;
     mockMarkdownEditorBehavior.moveCaretToEndOnMarkdownPropChangeWhenFocused = false;
+    mockMarkdownEditorBehavior.onNormalizationStateChange = null;
     mockMarkdownEditorBehavior.preserveSelectionCalls = 0;
     mockMarkdownEditorBehavior.restorePreservedSelectionCalls = 0;
     mockMarkdownEditorBehavior.skipUserEdit = false;
@@ -842,46 +849,40 @@ describe("MarkdownViewer", () => {
     expect(measure.mock.calls.some(([name]) => name === "sambee:preview-preparation:collection-parse")).toBe(false);
   });
 
-  it("aborts a replaced generation and publishes only its replacement requests after a late result", async () => {
-    vi.spyOn(apiService, "getFileContent")
-      .mockResolvedValueOnce("```js\nconst old=1;\n```")
-      .mockResolvedValueOnce("```python\nprint(2)\n```");
-    let finishOld!: (results: readonly PreparedCodeBlock[]) => void;
-    let finishNew!: (results: readonly PreparedCodeBlock[]) => void;
-    const prepare = vi
-      .spyOn(highlightingService, "prepare")
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            finishOld = resolve;
-          })
-      )
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            finishNew = resolve;
-          })
-      );
+  it.each([2, 3])("publishes only the latest of %s documents after obsolete results arrive", async (documentCount) => {
+    const documents = [
+      { path: "/docs/readme.md", label: "js", text: "const old=1;" },
+      { path: "/docs/replacement.md", label: "python", text: "print(2)" },
+      { path: "/docs/latest.md", label: "rust", text: "let latest = 3;" },
+    ].slice(0, documentCount);
+    const load = vi.spyOn(apiService, "getFileContent");
+    for (const document of documents) load.mockResolvedValueOnce(`\`\`\`${document.label}\n${document.text}\n\`\`\``);
+    const completions: ((results: readonly PreparedCodeBlock[]) => void)[] = [];
+    const prepare = vi.spyOn(highlightingService, "prepare").mockImplementation(() => new Promise((resolve) => completions.push(resolve)));
     const publish = vi.spyOn(markdownSyntaxPublication, "publishMarkdownSyntax").mockReturnValue(vi.fn());
     const viewer = renderViewer();
-    await screen.findByText("const old=1;");
-    await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
-    const oldSignal = prepare.mock.calls[0]![1]!;
-    viewer.rerender(
-      <SambeeThemeProvider>
-        <MarkdownViewer connectionId="conn1" path="/docs/replacement.md" onClose={() => {}} />
-      </SambeeThemeProvider>
-    );
-    await screen.findByText("print(2)");
-    await waitFor(() => expect(prepare).toHaveBeenCalledTimes(2));
-    expect(oldSignal.aborted).toBe(true);
-    expect(prepare.mock.calls[1]![0]).toEqual([{ text: "print(2)", label: "python" }]);
-    await act(async () => finishOld([{ ranges: [] }]));
+    for (const [index, document] of documents.entries()) {
+      if (index > 0)
+        viewer.rerender(
+          <SambeeThemeProvider>
+            <MarkdownViewer connectionId="conn1" path={document.path} onClose={() => {}} />
+          </SambeeThemeProvider>
+        );
+      await screen.findByText(document.text);
+      await waitFor(() => expect(prepare).toHaveBeenCalledTimes(index + 1));
+      expect(prepare.mock.calls[index]![0]).toEqual([{ text: document.text, label: document.label }]);
+    }
+    for (let index = documents.length - 2; index >= 0; index -= 1) {
+      expect(prepare.mock.calls[index]![1]!.aborted).toBe(true);
+      await act(async () => completions[index]!([{ ranges: [] }]));
+    }
     expect(publish).not.toHaveBeenCalled();
-    await act(async () => finishNew([{ ranges: [] }]));
+    const latest = documents[documents.length - 1]!;
+    expect(prepare.mock.calls[documents.length - 1]![1]!.aborted).toBe(false);
+    await act(async () => completions[documents.length - 1]!([{ ranges: [] }]));
     expect(publish).toHaveBeenCalledOnce();
-    expect(publish.mock.calls[0]![2].requests).toEqual([{ text: "print(2)", label: "python" }]);
-    expect(publish.mock.calls[0]![0].querySelector("code")?.textContent).toBe("print(2)\n");
+    expect(publish.mock.calls[0]![2].requests).toEqual([{ text: latest.text, label: latest.label }]);
+    expect(publish.mock.calls[0]![0].querySelector("code")?.textContent).toBe(`${latest.text}\n`);
   });
 
   it("preserves the semantic DOM, active logical match and scroll when syntax becomes available", async () => {
@@ -1292,6 +1293,51 @@ describe("MarkdownViewer", () => {
       snapshotRegisteredDrafts();
     });
     expect(loadDraft("conn1", "/docs/readme.md", "markdown")?.content).toBe("# Newer draft\n");
+  });
+
+  it("retries recovery after normalization completes without changing the published draft", async () => {
+    authSession.setAuthenticated({ access_token: "mock-token", token_type: "bearer", user_id: "test-user", username: "test-user" }, false);
+    vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
+    vi.spyOn(authSession, "refreshIfNeeded").mockResolvedValue("mock-token");
+    vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
+    vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["# Readme\n"], { type: "text/markdown" }));
+    vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    vi.spyOn(apiService, "saveTextFile").mockResolvedValue();
+    const { unmount } = renderViewer();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Acknowledged draft\n" } });
+    act(() => snapshotRegisteredDrafts());
+    const acknowledged = loadDraft("conn1", "/docs/readme.md", "markdown");
+    expect(acknowledged?.content).toBe("# Acknowledged draft\n");
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        mockMarkdownEditorBehavior.flushRejectError = new DOMException("Normalization pending", "InvalidStateError");
+        mockMarkdownEditorBehavior.onNormalizationStateChange?.(true);
+        fireEvent.change(editor, { target: { value: "# Latest | draft\n" } });
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      expect(loadDraft("conn1", "/docs/readme.md", "markdown")).toEqual(acknowledged);
+
+      act(() => {
+        mockMarkdownEditorBehavior.flushRejectError = null;
+        mockMarkdownEditorBehavior.onNormalizationStateChange?.(false);
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(249));
+      expect(loadDraft("conn1", "/docs/readme.md", "markdown")).toEqual(acknowledged);
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(loadDraft("conn1", "/docs/readme.md", "markdown")).toMatchObject({
+        baseline: "# Readme\n",
+        content: "# Latest | draft\n",
+      });
+      expect(editor).toHaveValue("# Latest | draft\n");
+      expect(apiService.saveTextFile).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("clears the local draft when Markdown returns to its saved baseline", async () => {
@@ -1999,7 +2045,11 @@ describe("MarkdownViewer", () => {
     expect(editor).toHaveValue("# Updated\n");
   });
 
-  it.each(["# Newer unsaved\n", "# Saved\n"])("acknowledges Markdown Save without losing current draft %j", async (latest) => {
+  it.each([
+    { latest: "# Newer unsaved\n", pending: false },
+    { latest: "# Saved\n", pending: false },
+    { latest: "# Newer unsaved\n", pending: true },
+  ])("acknowledges Markdown Save without losing current draft $latest with normalization pending $pending", async ({ latest, pending }) => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
     vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
     vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["# Saved\n"], { type: "text/markdown" }));
@@ -2021,12 +2071,14 @@ describe("MarkdownViewer", () => {
     expect(editor).not.toHaveAttribute("readonly");
     fireEvent.change(editor, { target: { value: "# Newer unsaved\n" } });
     if (latest === "# Saved\n") fireEvent.change(editor, { target: { value: latest } });
+    if (pending) mockMarkdownEditorBehavior.flushRejectError = new DOMException("Normalization pending", "InvalidStateError");
     if (!finishWrite) throw new Error("Expected a pending Markdown write");
     await act(async () => {
       finishWrite?.();
     });
 
     expect(editor).toHaveValue(latest);
+    expect(screen.queryByText(/Failed to save markdown changes/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     if (latest !== "# Saved\n") {
       const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
@@ -2035,6 +2087,48 @@ describe("MarkdownViewer", () => {
       expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
     }
     expect(await screen.findByRole("heading", { name: "Saved" })).toBeInTheDocument();
+  });
+
+  it("preserves newer edits after a delayed write fails and retries the latest snapshot", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
+    const release = vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    let failWrite: ((reason: Error) => void) | undefined;
+    const save = vi
+      .spyOn(apiService, "saveTextFile")
+      .mockResolvedValue()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            failWrite = reject;
+          })
+      );
+    renderViewer();
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# First snapshot\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[2]).toBe("# First snapshot\n");
+    fireEvent.change(editor, { target: { value: "# Newer unsaved\n" } });
+    const rejectWrite = failWrite;
+    if (!rejectWrite) throw new Error("Expected a pending Markdown write");
+    await act(async () => rejectWrite(new Error("Disk full")));
+    expect(await screen.findByText("Failed to save markdown changes.: Disk full")).toBeInTheDocument();
+    expect(editor).toHaveValue("# Newer unsaved\n");
+    expect(editor).not.toHaveAttribute("readonly");
+    expect(release).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1]?.[2]).toBe("# Newer unsaved\n");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(await screen.findByRole("heading", { name: "Newer unsaved" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
   });
 
   it("fails closed when canonical markdown export throws before save", async () => {

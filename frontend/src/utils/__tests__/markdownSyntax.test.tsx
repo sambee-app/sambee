@@ -10,6 +10,7 @@ import {
   remarkRenderMarkdownTableCellLineBreaks,
 } from "../../components/Viewer/markdownTableCellLineBreaks";
 import {
+  createMarkdownEditNormalization,
   PREPARATION_SOURCE_CHUNK_UNITS,
   type PreparationRequest,
   type PreparationResponse,
@@ -48,6 +49,20 @@ import {
   type SyntaxWorkerResponse,
 } from "../markdownSyntaxWorkerProtocol";
 import { TOKEN_COLOR_ROLES } from "../syntaxHighlighting";
+
+class PreparationWorker extends EventTarget {
+  static instances: PreparationWorker[] = [];
+  onmessage: ((event: MessageEvent<PreparationResponse>) => void) | null = null;
+  postMessage = vi.fn<(message: PreparationRequest) => void>();
+  terminate = vi.fn();
+  constructor() {
+    super();
+    PreparationWorker.instances.push(this);
+  }
+  receive(response: PreparationResponse) {
+    this.onmessage?.(new MessageEvent("message", { data: response }));
+  }
+}
 
 function mockSyntaxIntersections() {
   let notify: IntersectionObserverCallback;
@@ -181,19 +196,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
   });
 
   it("isolates normalization workers, bounds results and cleans up success, cancellation, decode errors and timeouts", async () => {
-    class PreparationWorker extends EventTarget {
-      static instances: PreparationWorker[] = [];
-      onmessage: ((event: MessageEvent<PreparationResponse>) => void) | null = null;
-      postMessage = vi.fn<(message: PreparationRequest) => void>();
-      terminate = vi.fn();
-      constructor() {
-        super();
-        PreparationWorker.instances.push(this);
-      }
-      receive(response: PreparationResponse) {
-        this.onmessage?.(new MessageEvent("message", { data: response }));
-      }
-    }
+    PreparationWorker.instances = [];
     vi.stubGlobal("Worker", PreparationWorker);
     const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
     try {
@@ -324,6 +327,289 @@ describe("engine-neutral Markdown syntax adapter", () => {
       await expect(prepareCodePreviewInWorker(["a", "b"], 7, new AbortController().signal, vi.fn())).rejects.toThrow("one source document");
     } finally {
       vi.useRealTimers();
+      location.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["", "baseline".repeat(PREPARATION_SOURCE_CHUNK_UNITS)])(
+    "transfers a source-preservation baseline in acknowledged bounded chunks (%#. case)",
+    async (baseline) => {
+      PreparationWorker.instances = [];
+      vi.stubGlobal("Worker", PreparationWorker);
+      const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+      const edits = createMarkdownEditNormalization(vi.fn());
+      const measure = vi.spyOn(performance, "measure");
+      try {
+        const source = "source\uD83D\uDE00";
+        const generation = edits.request(source, baseline);
+        const worker = PreparationWorker.instances[0];
+        expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ preserveTableSource: true }));
+        const transferred = ["", ""];
+        let sequence = 0;
+        while (true) {
+          worker.receive({ type: "source-ack", generation, sequence });
+          const message = worker.postMessage.mock.calls.at(-1)![0];
+          if (message.type === "run") break;
+          if (message.type !== "source") throw new Error("Expected an acknowledged source chunk");
+          expect(message.text.length).toBeLessThanOrEqual(PREPARATION_SOURCE_CHUNK_UNITS);
+          transferred[message.block] += message.text;
+          expect(message.sequence).toBe(++sequence);
+        }
+        expect(transferred).toEqual([source, baseline]);
+        worker.receive({ type: "normalized-source", generation, sequence: 1, text: "prepared snapshot", final: true });
+        worker.receive({ type: "complete", generation, preparationMs: 1, normalizationMs: 0.25, preservationMs: 0.75 });
+        await expect(edits.flush()).resolves.toEqual({ generation, source, baseline, normalizedSource: "prepared snapshot" });
+        expect(worker.terminate).toHaveBeenCalledOnce();
+        const timings = measure.mock.calls.filter(([name]) => name.startsWith("sambee:edit-preparation:"));
+        for (const [, options] of timings) {
+          expect(options).toHaveProperty("start", expect.any(Number));
+          for (const value of Object.values((options as PerformanceMeasureOptions).detail)) {
+            expect(value === null || typeof value === "number" || typeof value === "boolean").toBe(true);
+          }
+        }
+        expect(measure).toHaveBeenCalledWith("sambee:edit-preparation:transport", {
+          start: expect.any(Number),
+          detail: {
+            generation,
+            sourceUnits: source.length,
+            baselineUnits: baseline.length,
+            preserveOnly: false,
+            sourceChunks: sequence,
+            resultChunks: 1,
+            workerPreparationMs: 1,
+            workerNormalizationMs: 0.25,
+            workerPreservationMs: 0.75,
+          },
+        });
+      } finally {
+        edits.dispose();
+        measure.mockRestore();
+        location.mockRestore();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
+  it("rejects a result received before its complete baseline transfer", async () => {
+    PreparationWorker.instances = [];
+    vi.stubGlobal("Worker", PreparationWorker);
+    const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+    try {
+      const pending = prepareCodePreviewInWorker(["source"], 1, new AbortController().signal, vi.fn(), { preserveTableSource: "baseline" });
+      const worker = PreparationWorker.instances[0];
+      worker.receive({ type: "source-ack", generation: 1, sequence: 0 });
+      worker.receive({ type: "source-ack", generation: 1, sequence: 1 });
+      worker.receive({ type: "normalized-source", generation: 1, sequence: 1, text: "too early", final: true });
+      await expect(pending).rejects.toThrow("Invalid normalized Markdown source chunk");
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      await expect(
+        prepareCodePreviewInWorker(["source"], 2, new AbortController().signal, vi.fn(), { preserveOnly: true })
+      ).rejects.toThrow("requires a baseline");
+      await expect(
+        prepareCodePreviewInWorker(["source"], 2, new AbortController().signal, vi.fn(), {
+          prepareTree: true,
+          preserveTableSource: "baseline",
+        })
+      ).rejects.toThrow("cannot also prepare a preview tree");
+    } finally {
+      location.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("binds coalesced snapshot bytes to the latest baseline and normalization policy", async () => {
+    PreparationWorker.instances = [];
+    vi.stubGlobal("Worker", PreparationWorker);
+    const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+    const published = vi.fn();
+    const edits = createMarkdownEditNormalization(vi.fn(), published);
+    const complete = (worker: PreparationWorker, generation: number, text: string) => {
+      for (const sequence of [0, 1, 2]) worker.receive({ type: "source-ack", generation, sequence });
+      worker.receive({ type: "normalized-source", generation, sequence: 1, text, final: true });
+      worker.receive({ type: "complete", generation, preparationMs: 1 });
+    };
+    try {
+      const old = edits.request("same source", "old baseline", true);
+      const latest = edits.request("same source", "new baseline");
+      expect(PreparationWorker.instances).toHaveLength(1);
+      expect(PreparationWorker.instances[0].postMessage).toHaveBeenCalledWith(expect.objectContaining({ preserveOnly: true }));
+      const flushed = edits.flush();
+      complete(PreparationWorker.instances[0], old, "obsolete preserved bytes");
+      await vi.waitFor(() => expect(PreparationWorker.instances).toHaveLength(2));
+      expect(published).not.toHaveBeenCalled();
+      expect(() => edits.captureSnapshotSync()).toThrow(/not finished/);
+      complete(PreparationWorker.instances[1], latest, "current normalized bytes");
+      const snapshot = await flushed;
+      expect(snapshot).toEqual({
+        generation: latest,
+        source: "same source",
+        baseline: "new baseline",
+        normalizedSource: "current normalized bytes",
+      });
+      expect(Object.isFrozen(snapshot)).toBe(true);
+      expect(published).toHaveBeenCalledExactlyOnceWith(snapshot);
+    } finally {
+      edits.dispose();
+      location.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["success", "failure"])("bounds edit normalization and suppresses stale %s with immutable snapshots", async (outcome) => {
+    PreparationWorker.instances = [];
+    vi.stubGlobal("Worker", PreparationWorker);
+    const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+    const diagnostic = vi.fn();
+    const published = vi.fn();
+    const failed = vi.fn();
+    const edits = createMarkdownEditNormalization(diagnostic, published, failed);
+    const complete = (worker: PreparationWorker, generation: number, text: string) => {
+      worker.receive({ type: "source-ack", generation, sequence: 0 });
+      worker.receive({ type: "source-ack", generation, sequence: 1 });
+      worker.receive({ type: "normalized-source", generation, sequence: 1, text, final: true });
+      worker.receive({ type: "complete", generation, preparationMs: 1 });
+    };
+    try {
+      const first = edits.request("first<BR>edit");
+      const firstWorker = PreparationWorker.instances[0];
+      for (let index = 0; index < 100; index += 1) edits.request(`intermediate ${index}`);
+      const latest = edits.request("latest<BR>edit");
+      expect(PreparationWorker.instances).toHaveLength(1);
+      expect(() => edits.captureSnapshotSync()).toThrow(/not finished/);
+      const flushed = edits.flush();
+      firstWorker.receive({ type: "diagnostic", generation: first, message: "obsolete" });
+      if (outcome === "success") complete(firstWorker, first, "obsolete normalized text");
+      else firstWorker.receive({ type: "error", generation: first, message: "obsolete failure" });
+      await vi.waitFor(() => expect(PreparationWorker.instances).toHaveLength(2));
+      expect(diagnostic).not.toHaveBeenCalled();
+      expect(published).not.toHaveBeenCalled();
+      expect(failed).not.toHaveBeenCalled();
+      expect(() => edits.captureSnapshotSync()).toThrow(/not finished/);
+      expect(firstWorker.terminate).toHaveBeenCalledOnce();
+      const currentWorker = PreparationWorker.instances[1];
+      expect(currentWorker.postMessage).toHaveBeenCalledExactlyOnceWith({ type: "prepare", generation: latest, prepareTree: undefined });
+      complete(currentWorker, latest, "latest<br />edit");
+      const captured = await flushed;
+      expect(captured).toEqual({ generation: latest, source: "latest<BR>edit", normalizedSource: "latest<br />edit" });
+      expect(Object.isFrozen(captured)).toBe(true);
+      expect(published).toHaveBeenCalledExactlyOnceWith(captured);
+      expect(edits.captureSnapshotSync()).toBe(captured);
+      expect(currentWorker.terminate).toHaveBeenCalledOnce();
+      const next = edits.request("next");
+      expect(() => edits.captureSnapshotSync()).toThrow(/not finished/);
+      expect(captured.normalizedSource).toBe("latest<br />edit");
+      complete(PreparationWorker.instances[2], next, "next");
+      await expect(edits.flush()).resolves.toMatchObject({ generation: next, normalizedSource: "next" });
+      expect(captured.normalizedSource).toBe("latest<br />edit");
+    } finally {
+      edits.dispose();
+      location.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("preserves edit normalization failures, allows explicit retry and aborts flush without cancelling current content", async () => {
+    PreparationWorker.instances = [];
+    vi.stubGlobal("Worker", PreparationWorker);
+    const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+    const edits = createMarkdownEditNormalization(vi.fn());
+    try {
+      const failed = edits.request("unchanged draft");
+      const failure = expect(edits.flush()).rejects.toThrow("worker failed");
+      PreparationWorker.instances[0].receive({ type: "error", generation: failed, message: "worker failed" });
+      await failure;
+      expect(() => edits.captureSnapshotSync()).toThrow("worker failed");
+      await expect(edits.flush()).rejects.toThrow("worker failed");
+      expect(PreparationWorker.instances).toHaveLength(1);
+      const retry = edits.request("unchanged draft");
+      const controller = new AbortController();
+      const cancelled = expect(edits.flush(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+      controller.abort();
+      await cancelled;
+      const worker = PreparationWorker.instances[1];
+      expect(worker.terminate).not.toHaveBeenCalled();
+      worker.receive({ type: "source-ack", generation: retry, sequence: 0 });
+      worker.receive({ type: "source-ack", generation: retry, sequence: 1 });
+      worker.receive({ type: "normalized-source", generation: retry, sequence: 1, text: "unchanged draft", final: true });
+      worker.receive({ type: "complete", generation: retry, preparationMs: 1 });
+      await expect(edits.flush()).resolves.toMatchObject({ normalizedSource: "unchanged draft" });
+      await expect(edits.flush(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      edits.dispose();
+      location.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(["construction", "execution", "decode", "timeout", "no-worker"] as const)(
+    "rejects edit normalization %s failure without a synchronous fallback or automatic retry",
+    async (mode) => {
+      PreparationWorker.instances = [];
+      vi.stubGlobal("Worker", PreparationWorker);
+      if (mode === "construction") {
+        vi.stubGlobal(
+          "Worker",
+          class {
+            constructor() {
+              throw new Error("worker startup failed");
+            }
+          }
+        );
+      } else if (mode === "no-worker") vi.stubGlobal("Worker", undefined);
+      if (mode === "timeout") vi.useFakeTimers();
+      const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+      const edits = createMarkdownEditNormalization(vi.fn());
+      try {
+        const generation = edits.request("| A |\n| - |\n| first<BR>second |\n");
+        const expected = /startup failed|execution failed|could not be decoded|made no progress|unavailable/;
+        const rejected = expect(edits.flush()).rejects.toThrow(expected);
+        const worker = PreparationWorker.instances[0];
+        if (mode === "execution") worker.receive({ type: "error", generation, message: "worker execution failed" });
+        else if (mode === "decode") worker.dispatchEvent(new Event("messageerror"));
+        else if (mode === "timeout") await vi.advanceTimersByTimeAsync(WORKER_PROGRESS_TIMEOUT_MS);
+        await rejected;
+        expect(() => edits.captureSnapshotSync()).toThrow(expected);
+        await expect(edits.flush()).rejects.toThrow(expected);
+        expect(PreparationWorker.instances).toHaveLength(mode === "construction" || mode === "no-worker" ? 0 : 1);
+        if (worker) {
+          expect(worker.terminate).toHaveBeenCalledOnce();
+          expect(worker.onmessage).toBeNull();
+        }
+      } finally {
+        edits.dispose();
+        location.mockRestore();
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    }
+  );
+
+  it("disposes active and queued edits without publishing late worker messages", async () => {
+    PreparationWorker.instances = [];
+    vi.stubGlobal("Worker", PreparationWorker);
+    const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+    const diagnostic = vi.fn();
+    const edits = createMarkdownEditNormalization(diagnostic);
+    try {
+      const generation = edits.request("active draft");
+      edits.request("queued draft");
+      const worker = PreparationWorker.instances[0];
+      const lateMessage = worker.onmessage;
+      const disposed = expect(edits.flush()).rejects.toMatchObject({ name: "AbortError" });
+      edits.dispose();
+      edits.dispose();
+      lateMessage?.(new MessageEvent("message", { data: { type: "diagnostic", generation, message: "late" } }));
+      await disposed;
+      expect(diagnostic).not.toHaveBeenCalled();
+      expect(PreparationWorker.instances).toHaveLength(1);
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(worker.onmessage).toBeNull();
+      expect(() => edits.request("after close")).toThrow(/disposed/);
+      expect(() => edits.captureSnapshotSync()).toThrow(/disposed/);
+      await expect(edits.flush()).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      edits.dispose();
       location.mockRestore();
       vi.unstubAllGlobals();
     }

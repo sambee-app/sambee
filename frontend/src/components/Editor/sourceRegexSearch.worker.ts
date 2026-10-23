@@ -55,7 +55,7 @@ function* execute(): Generator<SourceSearchResponse> {
   const changes: { from: number; to: number; inserted: Text }[] = [];
   transaction.changes.iterChanges((from, to, _fromNew, _toNew, inserted) => {
     changes.push({ from, to, inserted });
-  });
+  }, true);
   for (const { from, to, inserted } of changes) {
     for (let offset = 0; offset < inserted.length || offset === 0; offset += SOURCE_SEARCH_CHUNK_UNITS) {
       yield {

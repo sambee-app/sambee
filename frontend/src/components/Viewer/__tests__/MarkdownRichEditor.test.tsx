@@ -3,14 +3,68 @@ import { getSearchQuery } from "@codemirror/search";
 import { EditorView } from "@codemirror/view";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { createRef, useLayoutEffect } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../../services/authSession";
 import { createDraftCheckpointController, DRAFT_TRANSITION_FLUSH_MS } from "../../../services/draftCheckpoint";
 import { loadDraft } from "../../../services/draftRecovery";
+import type { PreparationRequest, PreparationResponse } from "../../../utils/markdownCodePreparation";
 import type { MarkdownEditorThemeOptions } from "../../Editor/buildMarkdownEditorTheme";
 import { getCodeMirrorFindReplaceMetrics } from "../codeMirrorFindReplace";
-import MarkdownRichEditor, { type MarkdownRichEditorHandle, type MarkdownRichEditorSearchState } from "../MarkdownRichEditor";
+import MarkdownRichEditor, {
+  MARKDOWN_SOURCE_MEASURES,
+  type MarkdownRichEditorHandle,
+  type MarkdownRichEditorSearchState,
+} from "../MarkdownRichEditor";
+import { normalizeMarkdownTableCellLineBreaks, preserveUnchangedMarkdownTableSource } from "../markdownTableCellLineBreaks";
+
+class EditNormalizationWorker extends EventTarget {
+  static instances: EditNormalizationWorker[] = [];
+  static hold = false;
+  onmessage: ((event: MessageEvent<PreparationResponse>) => void) | null = null;
+  source = "";
+  baseline = "";
+  preserveTableSource = false;
+  preserveOnly = false;
+  generation = 0;
+  terminated = false;
+  constructor() {
+    super();
+    EditNormalizationWorker.instances.push(this);
+  }
+  postMessage(message: PreparationRequest) {
+    queueMicrotask(() => {
+      if (this.terminated) return;
+      this.generation = message.generation;
+      if (message.type === "prepare") {
+        this.preserveTableSource = message.preserveTableSource === true;
+        this.preserveOnly = message.preserveOnly === true;
+        this.receive({ type: "source-ack", generation: this.generation, sequence: 0 });
+      } else if (message.type === "source") {
+        if (message.block === 0) this.source += message.text;
+        else this.baseline += message.text;
+        this.receive({ type: "source-ack", generation: this.generation, sequence: message.sequence });
+      } else if (message.type === "run" && !EditNormalizationWorker.hold) this.complete();
+    });
+  }
+  receive(response: PreparationResponse) {
+    this.onmessage?.(new MessageEvent("message", { data: response }));
+  }
+  complete() {
+    const normalized = this.preserveOnly ? this.source : normalizeMarkdownTableCellLineBreaks(this.source);
+    this.receive({
+      type: "normalized-source",
+      generation: this.generation,
+      sequence: 1,
+      text: this.preserveTableSource ? preserveUnchangedMarkdownTableSource(this.baseline, normalized) : normalized,
+      final: true,
+    });
+    this.receive({ type: "complete", generation: this.generation, preparationMs: 1 });
+  }
+  terminate() {
+    this.terminated = true;
+  }
+}
 
 const TEST_MARKDOWN_THEME: MarkdownEditorThemeOptions = {
   activeLineBackground: "rgba(244, 196, 48, 0.18)",
@@ -54,6 +108,229 @@ function signalClipboardPreflight(nested: HTMLElement, clipboardEvent: string): 
 }
 
 describe("MarkdownRichEditor", () => {
+  let location: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    EditNormalizationWorker.instances = [];
+    EditNormalizationWorker.hold = false;
+    vi.stubGlobal("Worker", EditNormalizationWorker);
+    location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+  });
+  afterEach(() => {
+    location.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps edits pending until only the latest worker revision is published and flushed", async () => {
+    EditNormalizationWorker.hold = true;
+    const editorRef = createRef<MarkdownRichEditorHandle>();
+    const onChange = vi.fn();
+    const onNormalizationStateChange = vi.fn();
+    render(
+      <MarkdownRichEditor
+        ref={editorRef}
+        markdown="start"
+        ariaLabel="Worker Markdown"
+        theme={TEST_MARKDOWN_THEME}
+        onChange={onChange}
+        onNormalizationStateChange={onNormalizationStateChange}
+      />
+    );
+    const view = EditorView.findFromDOM(screen.getByLabelText("Worker Markdown"));
+    const handle = editorRef.current;
+    if (!view || !handle) throw new Error("Expected a mounted Markdown editor");
+    act(() =>
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "| A |\n| - |\n| first<br>second |\n" }, userEvent: "input" })
+    );
+    await waitFor(() => expect(EditNormalizationWorker.instances[0].source).toContain("first<br>second"));
+    expect(onNormalizationStateChange).toHaveBeenLastCalledWith(true);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(() => handle.captureSnapshotSync()).toThrow(/normalization/);
+    const captured = handle.captureSnapshot();
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "latest" }, userEvent: "input" }));
+    await act(async () => EditNormalizationWorker.instances[0].complete());
+    await waitFor(() => expect(EditNormalizationWorker.instances[1].source).toContain("latest"));
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => EditNormalizationWorker.instances[1].complete());
+    const snapshot = await captured;
+    expect(snapshot.serialize()).toContain("first<br />second");
+    expect(snapshot.serialize()).toContain("latest");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onNormalizationStateChange).toHaveBeenLastCalledWith(false);
+    expect(view.state.doc.toString()).toContain("first<br>second");
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: " newer" }, userEvent: "input" }));
+    expect(snapshot.serialize()).not.toContain("newer");
+    expect(() => handle.captureSnapshotSync()).toThrow(/normalization/);
+  });
+
+  it("keeps failed normalization dirty and retries only on an explicit snapshot request", async () => {
+    EditNormalizationWorker.hold = true;
+    const editorRef = createRef<MarkdownRichEditorHandle>();
+    const onChange = vi.fn();
+    const onNormalizationStateChange = vi.fn();
+    render(
+      <MarkdownRichEditor
+        ref={editorRef}
+        markdown="start"
+        ariaLabel="Failed worker"
+        theme={TEST_MARKDOWN_THEME}
+        onChange={onChange}
+        onNormalizationStateChange={onNormalizationStateChange}
+      />
+    );
+    const view = EditorView.findFromDOM(screen.getByLabelText("Failed worker"));
+    const handle = editorRef.current;
+    if (!view || !handle) throw new Error("Expected the Markdown editor");
+    act(() => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "first<br>second" }, userEvent: "input" }));
+    await waitFor(() => expect(EditNormalizationWorker.instances[0].source).toContain("first<br>second"));
+    const worker = EditNormalizationWorker.instances[0];
+    await act(async () => worker.receive({ type: "error", generation: worker.generation, message: "normalization unavailable" }));
+    expect(onNormalizationStateChange).toHaveBeenLastCalledWith(true, expect.objectContaining({ message: "normalization unavailable" }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(() => handle.captureSnapshotSync()).toThrow("normalization unavailable");
+    expect(EditNormalizationWorker.instances).toHaveLength(1);
+    const retry = handle.captureSnapshot();
+    await waitFor(() => expect(EditNormalizationWorker.instances[1].source).toContain("first<br>second"));
+    await act(async () => EditNormalizationWorker.instances[1].complete());
+    expect((await retry).serialize()).toBe("first<br>second");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(view.state.doc.toString()).toContain("first<br>second");
+  });
+
+  it("cancels held normalization on an external document update without replaying a late result", async () => {
+    EditNormalizationWorker.hold = true;
+    const editorRef = createRef<MarkdownRichEditorHandle>();
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <MarkdownRichEditor ref={editorRef} markdown="first" ariaLabel="Switching worker" theme={TEST_MARKDOWN_THEME} onChange={onChange} />
+    );
+    const view = EditorView.findFromDOM(screen.getByLabelText("Switching worker"));
+    if (!view) throw new Error("Expected the Markdown editor");
+    act(() =>
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "| A |\n| - |\n| first<br>second |\n" }, userEvent: "input" })
+    );
+    await waitFor(() => expect(EditNormalizationWorker.instances[0].source).toContain("first<br>second"));
+    const worker = EditNormalizationWorker.instances[0];
+    const late = worker.onmessage;
+    const cancelled = expect(editorRef.current?.captureSnapshot()).rejects.toMatchObject({ name: "AbortError" });
+    rerender(
+      <MarkdownRichEditor
+        ref={editorRef}
+        markdown="different document"
+        ariaLabel="Switching worker"
+        theme={TEST_MARKDOWN_THEME}
+        onChange={onChange}
+      />
+    );
+    await cancelled;
+    expect(worker.terminated).toBe(true);
+    await act(async () =>
+      late?.(new MessageEvent("message", { data: { type: "error", generation: worker.generation, message: "obsolete" } }))
+    );
+    expect(onChange).not.toHaveBeenCalled();
+    expect(view.state.doc.toString()).toBe("different document");
+    expect(editorRef.current?.captureSnapshotSync().serialize()).toBe("different document");
+  });
+
+  it("prepares immutable source-preserving bytes again when only the baseline changes", async () => {
+    const editorRef = createRef<MarkdownRichEditorHandle>();
+    const markdown = "Intro\n\n| A |\n| - |\n| foo |\n";
+    const oldBaseline = "Before\n\n| A |\n| --- |\n| foo |\n";
+    const newBaseline = "Before\n\n| A |\n| ----- |\n| foo |\n";
+    const { rerender } = render(
+      <MarkdownRichEditor
+        ref={editorRef}
+        markdown={markdown}
+        diffMarkdown={oldBaseline}
+        ariaLabel="Baseline snapshot"
+        theme={TEST_MARKDOWN_THEME}
+        onChange={() => {}}
+      />
+    );
+    const handle = editorRef.current;
+    if (!handle) throw new Error("Expected the Markdown editor");
+    const original = await handle.captureSnapshot();
+    expect(original.serialize()).toBe(preserveUnchangedMarkdownTableSource(oldBaseline, markdown));
+    EditNormalizationWorker.hold = true;
+    rerender(
+      <MarkdownRichEditor
+        ref={editorRef}
+        markdown={markdown}
+        diffMarkdown={newBaseline}
+        ariaLabel="Baseline snapshot"
+        theme={TEST_MARKDOWN_THEME}
+        onChange={() => {}}
+      />
+    );
+    expect(() => handle.captureSnapshotSync()).toThrow(/normalization/);
+    await waitFor(() => expect(EditNormalizationWorker.instances.at(-1)?.baseline).toBe(newBaseline));
+    await act(async () => EditNormalizationWorker.instances.at(-1)?.complete());
+    expect(handle.captureSnapshotSync().serialize()).toBe(preserveUnchangedMarkdownTableSource(newBaseline, markdown));
+    expect(original.serialize()).toBe(preserveUnchangedMarkdownTableSource(oldBaseline, markdown));
+  });
+
+  it("normalizes whole-document Save snapshots through the worker after the typing fast path", async () => {
+    const editorRef = createRef<MarkdownRichEditorHandle>();
+    render(
+      <MarkdownRichEditor ref={editorRef} markdown="start" ariaLabel="Canonical Save" theme={TEST_MARKDOWN_THEME} onChange={() => {}} />
+    );
+    const view = EditorView.findFromDOM(screen.getByLabelText("Canonical Save"));
+    if (!view) throw new Error("Expected the Markdown editor");
+    act(() =>
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: "* first\n* second\n\n1. first\n2. second\n" },
+        userEvent: "input",
+      })
+    );
+    const snapshot = await editorRef.current?.captureSnapshot();
+    expect(snapshot?.serialize()).toBe("- first\n- second\n\n1. first\n1. second\n");
+    expect(EditNormalizationWorker.instances).toHaveLength(1);
+    expect(EditNormalizationWorker.instances[0].terminated).toBe(true);
+  });
+
+  it("does not replay a canonical echo over an edit delivered before passive effects", () => {
+    const onChange = vi.fn();
+    function ControlledEditor({ markdown }: { markdown: string }) {
+      useLayoutEffect(() => {
+        if (markdown !== "initial updated") return;
+        const view = EditorView.findFromDOM(screen.getByRole("textbox", { name: "Rapid canonical editor" }));
+        if (!view) throw new Error("Expected a mounted Markdown editor");
+        view.dispatch({ changes: { from: view.state.doc.length, insert: " next" } });
+      }, [markdown]);
+      return <MarkdownRichEditor markdown={markdown} ariaLabel="Rapid canonical editor" theme={TEST_MARKDOWN_THEME} onChange={onChange} />;
+    }
+    const { rerender } = render(<ControlledEditor markdown="initial" />);
+    const view = EditorView.findFromDOM(screen.getByRole("textbox", { name: "Rapid canonical editor" }));
+    if (!view) throw new Error("Expected a mounted Markdown editor");
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: " updated" } }));
+    rerender(<ControlledEditor markdown="initial updated" />);
+    expect(view.state.doc.toString()).toBe("initial updated next");
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("measures normalization and synchronous parent updates without retaining document content", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const measure = vi.spyOn(performance, "measure");
+    const clearMeasures = vi.spyOn(performance, "clearMeasures");
+    try {
+      render(<MarkdownRichEditor markdown="alpha" ariaLabel="Measured Markdown" theme={TEST_MARKDOWN_THEME} onChange={onChange} />);
+      await user.click(await screen.findByLabelText("Measured Markdown"));
+      await user.keyboard("!");
+      const canonical = onChange.mock.calls.at(-1)?.[0];
+      expect(canonical).toContain("!");
+      for (const name of Object.values(MARKDOWN_SOURCE_MEASURES)) {
+        expect(clearMeasures).toHaveBeenCalledWith(name);
+        expect(measure).toHaveBeenCalledWith(name, {
+          start: expect.any(Number),
+          detail: { documentUnits: canonical.length, canonicalUnits: canonical.length },
+        });
+      }
+    } finally {
+      measure.mockRestore();
+      clearMeasures.mockRestore();
+    }
+  });
+
   it.each([true, false])("captures only final composition text with publication before compositionend %s", async (publishedBeforeEnd) => {
     const user = userEvent.setup();
     const editorRef = createRef<MarkdownRichEditorHandle>();
@@ -102,6 +379,58 @@ describe("MarkdownRichEditor", () => {
     expect((await snapshot).serialize()).toContain("finished");
     expect((await snapshot).serialize()).not.toContain("intermediate");
     expect(handle.captureSnapshotSync().serialize()).toContain("finished");
+  });
+
+  it.each([false, true])("flushes an identical composition commit only without unpublished DOM text %s", async (unpublishedDom) => {
+    const user = userEvent.setup();
+    const editorRef = createRef<MarkdownRichEditorHandle>();
+    render(
+      <MarkdownRichEditor
+        ref={editorRef}
+        markdown={"| A |\n| - |\n| foo |"}
+        ariaLabel="Repeated composition"
+        theme={TEST_MARKDOWN_THEME}
+        onChange={() => {}}
+      />
+    );
+    await user.click(await screen.findByText("foo"));
+    await waitFor(() => expect(document.querySelector(".tbl-cell-editor .cm-content")).not.toBeNull());
+    const nested = document.querySelector<HTMLElement>(".tbl-cell-editor .cm-content");
+    const view = nested && EditorView.findFromDOM(nested);
+    const handle = editorRef.current;
+    if (!nested || !view || !handle) throw new Error("Expected a mounted nested composition editor");
+    nested.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    const input = () =>
+      nested.dispatchEvent(
+        new InputEvent("beforeinput", { bubbles: true, inputType: "insertCompositionText", data: "finished", isComposing: true })
+      );
+    input();
+    await act(async () => {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "finished" }, userEvent: "input.type.compose" });
+    });
+    await waitFor(() => expect(handle.getCanonicalMarkdown()).toContain("finished"));
+    input();
+    const root = nested.closest(".tbl-table-widget")?.closest<HTMLElement>(".cm-editor");
+    const rootView = root && EditorView.findFromDOM(root);
+    if (!rootView) throw new Error("Expected the root Markdown editor");
+    const dispatch = unpublishedDom ? vi.spyOn(rootView, "dispatch").mockImplementation(() => {}) : null;
+    if (unpublishedDom) {
+      const line = nested.querySelector(".cm-line");
+      if (!line) throw new Error("Expected nested editor text");
+      line.textContent = "not published";
+    }
+    nested.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "finished" }));
+    try {
+      if (unpublishedDom) {
+        const controller = new AbortController();
+        const pending = handle.captureSnapshot(controller.signal);
+        const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+        controller.abort();
+        await rejected;
+      } else expect((await handle.captureSnapshot()).serialize()).toContain("finished");
+    } finally {
+      dispatch?.mockRestore();
+    }
   });
 
   it("does not acknowledge a finished composition while its root publication is stalled", async () => {
@@ -414,6 +743,95 @@ describe("MarkdownRichEditor", () => {
       controller.dispose();
       authSession.clear();
       sessionStorage.clear();
+    }
+  });
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])(
+    "restores the same nested cell without focusing the root after pending edit %s and capture after blur %s",
+    async (editAfterCapture, captureAfterBlur) => {
+      const user = userEvent.setup();
+      const editorRef = createRef<MarkdownRichEditorHandle>();
+      render(
+        <MarkdownRichEditor
+          ref={editorRef}
+          markdown={"| A |\n| - |\n| foo |\n"}
+          ariaLabel="Preserved table focus"
+          theme={TEST_MARKDOWN_THEME}
+          onChange={() => {}}
+        />
+      );
+      const root = EditorView.findFromDOM(screen.getByLabelText("Preserved table focus"));
+      await user.click(await screen.findByText("foo"));
+      const content = document.querySelector<HTMLElement>(".tbl-cell-editor .cm-content");
+      const nested = content && EditorView.findFromDOM(content);
+      const handle = editorRef.current;
+      if (!root || !nested || !handle) throw new Error("Expected root and nested Markdown editors");
+      expect(root).not.toBe(nested);
+      const rootFocus = vi.spyOn(root, "focus");
+      await waitFor(() => expect(nested.hasFocus).toBe(true));
+      await act(async () => nested.dispatch({ selection: { anchor: 1, head: 2 } }));
+      const capturedSelection = nested.state.selection;
+      if (!captureAfterBlur) handle.preserveSelection();
+      const button = document.createElement("button");
+      document.body.append(button);
+      try {
+        button.focus();
+        if (captureAfterBlur) handle.preserveSelection();
+        if (editAfterCapture) {
+          await act(async () => nested.dispatch({ changes: { from: nested.state.doc.length, insert: "!" }, selection: { anchor: 4 } }));
+        } else {
+          await act(async () => nested.dispatch({ selection: { anchor: 0 } }));
+        }
+        const expectedSelection = editAfterCapture ? nested.state.selection : capturedSelection;
+        rootFocus.mockClear();
+        act(() => expect(handle.restorePreservedSelection()).toBe(true));
+        expect(nested.hasFocus).toBe(true);
+        expect(nested.state.selection.eq(expectedSelection)).toBe(true);
+        expect(rootFocus).not.toHaveBeenCalled();
+        expect(document.querySelector(".tbl-cell-editor .cm-content")).toBe(content);
+      } finally {
+        rootFocus.mockRestore();
+        button.remove();
+      }
+    }
+  );
+
+  it.each([false, true])("forgets nested focus after external document replacement %s or root focus", async (replaceDocument) => {
+    const user = userEvent.setup();
+    const editorRef = createRef<MarkdownRichEditorHandle>();
+    const props = { ref: editorRef, ariaLabel: "Root focus fallback", theme: TEST_MARKDOWN_THEME, onChange: () => {} };
+    const { rerender } = render(<MarkdownRichEditor {...props} markdown={"| A |\n| - |\n| foo |\n\nparagraph"} />);
+    const root = EditorView.findFromDOM(screen.getByLabelText("Root focus fallback"));
+    await user.click(await screen.findByText("foo"));
+    const content = document.querySelector<HTMLElement>(".tbl-cell-editor .cm-content");
+    const nested = content && EditorView.findFromDOM(content);
+    const handle = editorRef.current;
+    if (!root || !nested || !handle) throw new Error("Expected root and nested Markdown editors");
+    await waitFor(() => expect(nested.hasFocus).toBe(true));
+    handle.preserveSelection();
+    if (replaceDocument) rerender(<MarkdownRichEditor {...props} markdown="replacement" />);
+    else
+      await act(async () => {
+        root.dispatch({ selection: { anchor: root.state.doc.length } });
+        root.focus();
+      });
+    const nestedFocus = vi.spyOn(nested, "focus");
+    const button = document.createElement("button");
+    document.body.append(button);
+    try {
+      button.focus();
+      handle.preserveSelection();
+      act(() => expect(handle.restorePreservedSelection()).toBe(true));
+      expect(root.hasFocus).toBe(true);
+      expect(nestedFocus).not.toHaveBeenCalled();
+    } finally {
+      nestedFocus.mockRestore();
+      button.remove();
     }
   });
 

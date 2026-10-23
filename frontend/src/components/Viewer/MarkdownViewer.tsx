@@ -15,7 +15,6 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   BROWSER_SHORTCUTS,
@@ -91,6 +90,7 @@ import {
 } from "./markdownEditorConstants";
 import { areMarkdownSearchStatesEqual } from "./markdownSearchState";
 import { normalizeMarkdownTableCellLineBreaks, remarkRenderMarkdownTableCellLineBreaks } from "./markdownTableCellLineBreaks";
+import { PROGRESSIVE_MARKDOWN_MIN_UNITS, ProgressiveMarkdown } from "./ProgressiveMarkdown";
 import { RecoveredDraftDialog } from "./RecoveredDraftDialog";
 import { RetainedMarkdownPreview } from "./RetainedMarkdownPreview";
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
@@ -119,9 +119,15 @@ interface MarkdownPreviewGeneration {
 const MarkdownPreview = memo(function MarkdownPreview({
   generation,
   onExternalLink,
+  onPending,
+  onReady,
+  onFailure,
 }: {
   generation: MarkdownPreviewGeneration;
   onExternalLink: () => void;
+  onPending: (generation: MarkdownPreviewGeneration) => void;
+  onReady: (generation: MarkdownPreviewGeneration) => void;
+  onFailure: (generation: MarkdownPreviewGeneration, error: unknown) => void;
 }) {
   const content = generation.source;
   const preparation = useMemo(() => ({ source: content, hastReady: 0, requests: [] as CodeBlockRequest[] }), [content]);
@@ -131,7 +137,10 @@ const MarkdownPreview = memo(function MarkdownPreview({
       recordMarkdownPreparation("hast-ready-to-layout-effect", preparation.hastReady);
   }, [content, generation, preparation]);
   return (
-    <ReactMarkdown
+    <ProgressiveMarkdown
+      onPending={() => onPending(generation)}
+      onReady={() => onReady(generation)}
+      onFailure={(error) => onFailure(generation, error)}
       remarkPlugins={[
         remarkGfm,
         remarkMeasureMarkdownPreparation,
@@ -180,7 +189,7 @@ const MarkdownPreview = memo(function MarkdownPreview({
       }}
     >
       {content}
-    </ReactMarkdown>
+    </ProgressiveMarkdown>
   );
 });
 
@@ -299,6 +308,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const [printError, setPrintError] = useState(false);
   const [shareRevision, setShareRevision] = useState(0);
   const [draftStorageWarning, setDraftStorageWarning] = useState<string | null>(null);
+  const [normalizationPending, setNormalizationPending] = useState(false);
   const [recoveryDraft, setRecoveryDraft] = useState<DraftSnapshot | null>(null);
   const [isResumingRecoveryDraft, setIsResumingRecoveryDraft] = useState(false);
   const [resumedRecoveryDraft, setResumedRecoveryDraft] = useState(false);
@@ -358,6 +368,25 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const previewRevision = `${previewGeneration.id}:plain`;
   const latestPreviewGeneration = useRef(previewGeneration);
   latestPreviewGeneration.current = previewGeneration;
+  const [readyPreviewGeneration, setReadyPreviewGeneration] = useState<MarkdownPreviewGeneration | null>(null);
+  const previewReady = content.length < PROGRESSIVE_MARKDOWN_MIN_UNITS || readyPreviewGeneration === previewGeneration;
+  const handlePreviewPending = useCallback((generation: MarkdownPreviewGeneration) => {
+    if (latestPreviewGeneration.current === generation) setReadyPreviewGeneration(null);
+  }, []);
+  const handlePreviewReady = useCallback((generation: MarkdownPreviewGeneration) => {
+    if (latestPreviewGeneration.current === generation) setReadyPreviewGeneration(generation);
+  }, []);
+  const handlePreviewFailure = useCallback(
+    (generation: MarkdownPreviewGeneration, failure: unknown) => {
+      if (latestPreviewGeneration.current !== generation) return;
+      logError("Unable to finish rendering Markdown; close and reopen the file to retry", { error: failure });
+      setError(t("viewer.renderingFailed"));
+    },
+    [t]
+  );
+  useEffect(() => {
+    if (isEditing) setReadyPreviewGeneration(null);
+  }, [isEditing]);
   const activeMatchRef = useRef(currentSearchMatch);
   activeMatchRef.current = currentSearchMatch;
   const lastPreviewSearch = useRef<{ generation: number; query: string } | null>(null);
@@ -684,18 +713,19 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         connectionId,
         path,
       });
+      if (editorRef.current) setDraftStorageWarning(t("viewer.edit.recovery.storageUnavailableWarning"));
     }
   }, [connectionId, path, t]);
 
   useEffect(() => {
-    if (!isEditing) return;
+    if (!isEditing || normalizationPending) return;
     if (draftContent === editBaselineContentRef.current) {
       snapshotDraft();
       return;
     }
     const timeoutId = window.setTimeout(snapshotDraft, DRAFT_SNAPSHOT_DEBOUNCE_MS);
     return () => window.clearTimeout(timeoutId);
-  }, [draftContent, isEditing, snapshotDraft]);
+  }, [draftContent, isEditing, normalizationPending, snapshotDraft]);
 
   useEffect(() => {
     const unregister = registerDraftSnapshot(snapshotDraft);
@@ -755,7 +785,11 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     }
   }, [isEditing]);
 
-  const hasUnsavedChanges = isEditing && draftContent !== editBaselineContent;
+  const handleNormalizationStateChange = useCallback((pending: boolean, error?: Error) => {
+    setNormalizationPending(pending);
+    if (error) setEditError(error.message);
+  }, []);
+  const hasUnsavedChanges = isEditing && (normalizationPending || draftContent !== editBaselineContent);
   const unsavedChangesIndicator = hasUnsavedChanges ? (
     <Box
       component="span"
@@ -861,7 +895,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   useEffect(() => {
     const requests = previewGeneration.requests.current;
-    if (isEditing || loading || error || !requests?.length) return;
+    if (isEditing || loading || !previewReady || error || !requests?.length) return;
     const controller = new AbortController();
     let dispose: (() => void) | undefined;
     void prepareMarkdownSyntax(requests, controller.signal)
@@ -886,12 +920,12 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       controller.abort();
       dispose?.();
     };
-  }, [error, isEditing, loading, previewGeneration]);
+  }, [error, isEditing, loading, previewGeneration, previewReady]);
 
   useLayoutEffect(() => {
     const viewport = contentRef.current;
     const markdownRoot = viewport?.querySelector(MARKDOWN_SEARCH_ROOT_SELECTOR);
-    if (isEditing || loading || error || !viewport || !(markdownRoot instanceof HTMLElement)) return;
+    if (isEditing || loading || !previewReady || error || !viewport || !(markdownRoot instanceof HTMLElement)) return;
     if (markdownRoot?.getAttribute("data-markdown-preview-revision") !== previewRevision) return;
     const search = createViewportDomTextSearch(markdownRoot, viewport, () => setPreviewSearchRevision((revision) => revision + 1));
     previewSearchRef.current = search;
@@ -904,7 +938,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       search.dispose();
       if (previewSearchRef.current === search) previewSearchRef.current = null;
     };
-  }, [error, isEditing, loading, previewRevision]);
+  }, [error, isEditing, loading, previewRevision, previewReady]);
 
   useLayoutEffect(() => {
     const search = previewSearchRef.current;
@@ -1000,7 +1034,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const handleEnterEditMode = useCallback(
     async (initialDraft = content): Promise<boolean> => {
       if (editSessionRef.current || isAcquiring) return Boolean(editSessionRef.current);
-      if (isReadOnly || loading || error) {
+      if (isReadOnly || loading || !previewReady || error) {
         return false;
       }
 
@@ -1058,6 +1092,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       isReadOnly,
       isAcquiring,
       loading,
+      previewReady,
       markEditSessionPristine,
       path,
       searchPanelOpen,
@@ -1090,7 +1125,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     isEditing,
     isSaving,
     isAcquiring,
-    loading,
+    loading: loading || (!isEditing && !previewReady),
     dirty: hasUnsavedChanges,
     enterEdit: handleEnterEditMode,
     exitEdit: exitEditMode,
@@ -1159,7 +1194,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         emitMarkdownDebugTrace("MarkdownViewer", "persistDraft:flush-start");
         const snapshot = await editor.captureSnapshot();
         emitMarkdownDebugTrace("MarkdownViewer", "persistDraft:flush-resolved");
-        const savedContent = normalizeMarkdownTableCellLineBreaks(snapshot.serialize());
+        const savedContent = snapshot.serialize();
         emitMarkdownDebugTrace("MarkdownViewer", "persistDraft:getCanonicalMarkdown", {
           savedContentLength: savedContent.length,
           revision: snapshot.revision,
@@ -1170,8 +1205,18 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         emitMarkdownDebugTrace("MarkdownViewer", "persistDraft:save-resolved", {
           savedContentLength: savedContent.length,
         });
-        const hasNewerEdits =
-          getEditGeneration() !== saveGeneration && normalizeMarkdownTableCellLineBreaks(editor.getCanonicalMarkdown()) !== savedContent;
+        let hasNewerEdits = getEditGeneration() !== saveGeneration;
+        if (hasNewerEdits) {
+          try {
+            hasNewerEdits = editor.captureSnapshotSync().serialize() !== savedContent;
+          } catch (error) {
+            logInfo(
+              "Markdown Save completed; newer edits remain dirty because their snapshot is not ready",
+              { error, path, connectionId },
+              "MarkdownViewer"
+            );
+          }
+        }
         clearPendingBaselineSync();
         if (hasNewerEdits) clearBaselineSyncWindow();
         else beginBaselineSyncWindow();
@@ -1384,7 +1429,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   const handleOpenSearch = useCallback(
     (_event?: KeyboardEvent) => {
-      if (loading || error || (isEditing && !editorSearchState.isSearchable)) {
+      if (loading || error || (!isEditing && !previewReady) || (isEditing && !editorSearchState.isSearchable)) {
         return;
       }
 
@@ -1400,7 +1445,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
       setSearchPanelOpen(true);
     },
-    [editorSearchState.isSearchable, error, isEditing, loading]
+    [editorSearchState.isSearchable, error, isEditing, loading, previewReady]
   );
 
   const handleOpenReplace = useCallback(() => {
@@ -1436,6 +1481,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   const handleSearchPanelToggle = useCallback(
     (open: boolean) => {
+      if (open && !isEditing && !previewReady) return;
       if (open) {
         if (isEditing) {
           setEditorSearchText("");
@@ -1448,7 +1494,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
       closeSearchPanel({ preserveQuery: isEditing, restoreEditorFocus: false });
     },
-    [closeSearchPanel, isEditing]
+    [closeSearchPanel, isEditing, previewReady]
   );
 
   const handleSearchClose = useCallback(
@@ -1847,7 +1893,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   const isSearchable = isEditing
     ? !editorFailed && editorLoadState === "loaded" && !editorLoadError && editorSearchState.isSearchable
-    : !loading && !error && content.trim().length > 0;
+    : !loading && previewReady && !error && content.trim().length > 0;
 
   useKeyboardShortcuts({
     active: !showViewerHelp && !showEditorHelp,
@@ -1872,7 +1918,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
             createPrintToolbarAction({
               id: "print-markdown",
               isMobile,
-              disabled: loading || !!error,
+              disabled: loading || !previewReady || !!error,
               onClick: () => {
                 setPrintError(false);
                 try {
@@ -1892,11 +1938,23 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
                       void handleEnterEditMode();
                     },
                     isMobile,
-                    disabled: loading || !!error,
+                    disabled: loading || !previewReady || !!error,
                   }),
                 ]),
           ],
-    [editorLoadError, editorLoadState, error, handleEnterEditMode, handleSave, isEditing, isMobile, isReadOnly, isSaving, loading]
+    [
+      editorLoadError,
+      editorLoadState,
+      error,
+      handleEnterEditMode,
+      handleSave,
+      isEditing,
+      isMobile,
+      isReadOnly,
+      isSaving,
+      loading,
+      previewReady,
+    ]
   );
 
   // Log when markdown viewer opens
@@ -2023,11 +2081,16 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
                 <ViewerShareMenu
                   onFile={nativeSharing.shareFile}
                   onText={() =>
-                    nativeSharing.shareText(() => (isEditing ? (editorRef.current?.getCanonicalMarkdown() ?? draftContent) : content))
+                    nativeSharing.shareText(() => {
+                      if (!isEditing) return content;
+                      const editor = editorRef.current;
+                      if (!editor) throw new Error("The Markdown editor is not mounted for sharing");
+                      return editor.captureSnapshotSync().serialize();
+                    })
                   }
                   fileDisabled={!nativeSharing.ready || isSaving}
                   filePreparing={nativeSharing.preparing}
-                  textDisabled={loading || Boolean(error)}
+                  textDisabled={loading || Boolean(error) || (isEditing && normalizationPending)}
                   disabled={nativeSharing.sharing}
                 />
               }
@@ -2196,6 +2259,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
                       lineWrapping={wordWrapEnabled}
                       onChange={handleEditorChange}
                       onUserEdit={handleEditorUserEdit}
+                      onNormalizationStateChange={handleNormalizationStateChange}
                       ariaLabel={t("viewer.edit.editorLabel")}
                       autoFocus={true}
                       readOnly={editorShouldBeReadOnly || routedEditing.isExiting}
@@ -2216,16 +2280,29 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
                 key={previewRevision}
                 data-markdown-search-root="true"
                 data-markdown-preview-revision={previewRevision}
+                onClickCapture={(event) => {
+                  if (!previewReady && event.target instanceof Element && event.target.closest('a[href^="#"]')) event.preventDefault();
+                }}
                 style={getSyntaxVariables(muiTheme, linkColor)}
                 sx={{
                   ...getMarkdownContentStyles(viewerText, linkColor, linkHoverColor),
+                  ...(!previewReady ? { "@media print": { display: "none !important" } } : {}),
                   "--sambee-search-other": searchHighlightColors.otherMatches,
                   "--sambee-search-current": searchHighlightColors.currentMatch,
                   "--sambee-search-foreground": viewerText,
                 }}
               >
-                <MarkdownPreview generation={previewGeneration} onExternalLink={focusViewerContent} />
+                <MarkdownPreview
+                  generation={previewGeneration}
+                  onExternalLink={focusViewerContent}
+                  onPending={handlePreviewPending}
+                  onReady={handlePreviewReady}
+                  onFailure={handlePreviewFailure}
+                />
               </Box>
+            )}
+            {!isEditing && !loading && !error && !previewReady && (
+              <Box sx={{ display: "none", "@media print": { display: "block" } }}>{t("viewer.renderingPrintPending")}</Box>
             )}
           </Box>
         </Box>
