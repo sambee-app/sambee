@@ -14,6 +14,8 @@ Do not use the form pattern for a confirmation or destructive-action dialog. Tho
 
 ## Settings Page Layout and Actions
 
+`SettingsCategoryContent` loads each settings page on demand. Keep page implementations behind its lazy imports rather than importing them into the application shell. Its local loading and error boundaries leave settings navigation available while a page loads or fails. Permission checks run before an admin page renders or its module starts loading. Changing categories must keep navigation focus aligned and prevent a late module from replacing the newly selected page.
+
 Compose settings pages with `SettingsPage`, `SettingsSectionList`, and `SettingsGroup`. Use `FormSurface` for the subdued background of an action section, not an additional bordered card. For action sections, put the description or metadata on the left and controls on the right in a `FormRow`: the columns stack below `md` and share the row at `md` and above. Right-align actions on desktop, allow them to wrap, and keep result notices below the row. An informational section such as Local Drives' Current status can keep its own layout; don't force it into an action row.
 
 Choose button styling by the action's role, not by whether its MUI variant is `outlined` or `contained`:

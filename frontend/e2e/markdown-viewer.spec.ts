@@ -449,6 +449,30 @@ async function captureViewerScheduling(page: Page, testInfo: TestInfo, action: (
   }
 }
 
+test.describe("production bundle loading", () => {
+  test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
+
+  for (const width of [1543, 390]) {
+    test(`loads settings categories at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      const errors: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      await serveProductionAssets(page);
+      await mockMarkdownViewerApi(page, { initialMarkdown: "# Preview\n" });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      if (width === 390) await page.getByRole("button", { name: "Open menu", exact: true }).click();
+      await page.getByRole("button", { name: "Open settings", exact: true }).click();
+      await page.getByText("Account", { exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Your identity", exact: true })).toBeVisible();
+      await page.goBack();
+      await page.getByText("Account", { exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Your identity", exact: true })).toBeVisible();
+      expect(errors).toEqual([]);
+    });
+  }
+});
+
 test.describe("production shared syntax correctness", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
   const fixtures = [

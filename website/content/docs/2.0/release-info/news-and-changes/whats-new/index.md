@@ -158,6 +158,7 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 
 - The backend's Python environment was upgraded from 3.13 to 3.14.
 - Fixed the container startup warning: `AuthlibDeprecationWarning: The httpx module is deprecated; please use httpx2 instead.`
+- Reduced the Frontend's JavaScript chunk size.
 
 ### Dependency Security
 

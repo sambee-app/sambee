@@ -1,18 +1,33 @@
-import { AboutSettings } from "../../pages/AboutSettings";
-import { AccountSettings } from "../../pages/AccountSettings";
-import { AdvancedSettings } from "../../pages/AdvancedSettings";
-import { AuthenticationSettings } from "../../pages/AuthenticationSettings";
-import { ConnectionsSettings } from "../../pages/ConnectionsSettings";
-import { FileBrowserSettings } from "../../pages/FileBrowserSettings";
-import { FileSearchSettings } from "../../pages/FileSearchSettings";
-import { LocalDrivesSettings } from "../../pages/LocalDrivesSettings";
-import { NetworkSettings } from "../../pages/NetworkSettings";
-import { AppearanceSettings } from "../../pages/PreferencesSettings";
-import { SmbSettings } from "../../pages/SmbSettings";
-import { TextEditorSettings } from "../../pages/TextEditorSettings";
-import { UserManagementSettings } from "../../pages/UserManagementSettings";
+import { Box, CircularProgress } from "@mui/material";
+import { lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
+import ErrorBoundary from "../ErrorBoundary";
 import { SettingsCategoryDescription } from "./SettingsCategoryDescription";
 import { getSettingsNavItemLabel, type SettingsNavItem } from "./settingsNavigation";
+
+const AboutSettings = lazy(() => import("../../pages/AboutSettings").then((module) => ({ default: module.AboutSettings })));
+const AccountSettings = lazy(() => import("../../pages/AccountSettings").then((module) => ({ default: module.AccountSettings })));
+const AdvancedSettings = lazy(() => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })));
+const AuthenticationSettings = lazy(() =>
+  import("../../pages/AuthenticationSettings").then((module) => ({ default: module.AuthenticationSettings }))
+);
+const ConnectionsSettings = lazy(() =>
+  import("../../pages/ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings }))
+);
+const FileBrowserSettings = lazy(() =>
+  import("../../pages/FileBrowserSettings").then((module) => ({ default: module.FileBrowserSettings }))
+);
+const FileSearchSettings = lazy(() => import("../../pages/FileSearchSettings").then((module) => ({ default: module.FileSearchSettings })));
+const LocalDrivesSettings = lazy(() =>
+  import("../../pages/LocalDrivesSettings").then((module) => ({ default: module.LocalDrivesSettings }))
+);
+const NetworkSettings = lazy(() => import("../../pages/NetworkSettings").then((module) => ({ default: module.NetworkSettings })));
+const AppearanceSettings = lazy(() => import("../../pages/PreferencesSettings").then((module) => ({ default: module.AppearanceSettings })));
+const SmbSettings = lazy(() => import("../../pages/SmbSettings").then((module) => ({ default: module.SmbSettings })));
+const TextEditorSettings = lazy(() => import("../../pages/TextEditorSettings").then((module) => ({ default: module.TextEditorSettings })));
+const UserManagementSettings = lazy(() =>
+  import("../../pages/UserManagementSettings").then((module) => ({ default: module.UserManagementSettings }))
+);
 
 interface SettingsCategoryContentProps {
   item: SettingsNavItem;
@@ -23,7 +38,25 @@ interface SettingsCategoryContentProps {
   setMobileBackHandler?: (handler: (() => void) | null) => void;
 }
 
-export function SettingsCategoryContent({
+export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
+  const { t } = useTranslation();
+
+  return (
+    <ErrorBoundary key={props.item}>
+      <Suspense
+        fallback={
+          <Box role="status" aria-label={t("app.loading")} sx={{ display: "flex", justifyContent: "center", p: 3 }}>
+            <CircularProgress size={24} />
+          </Box>
+        }
+      >
+        <SettingsCategoryPage {...props} />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+function SettingsCategoryPage({
   item,
   isAdmin,
   onConnectionsChanged,
