@@ -45,6 +45,7 @@ import { prepareMarkdownSyntax } from "../markdownSyntaxWorker";
 import {
   SYNTAX_RESULT_PAGE_RANGES,
   SYNTAX_SOURCE_CHUNK_UNITS,
+  SYNTAX_WORKER_PROGRESS_TIMEOUT_MS,
   type SyntaxWorkerRequest,
   type SyntaxWorkerResponse,
 } from "../markdownSyntaxWorkerProtocol";
@@ -61,6 +62,19 @@ class PreparationWorker extends EventTarget {
   }
   receive(response: PreparationResponse) {
     this.onmessage?.(new MessageEvent("message", { data: response }));
+  }
+}
+
+class SyntaxWorker extends EventTarget {
+  static instances: SyntaxWorker[] = [];
+  postMessage = vi.fn<(message: SyntaxWorkerRequest) => void>();
+  terminate = vi.fn();
+  constructor() {
+    super();
+    SyntaxWorker.instances.push(this);
+  }
+  receive(response: SyntaxWorkerResponse) {
+    this.dispatchEvent(new MessageEvent("message", { data: response }));
   }
 }
 
@@ -683,18 +697,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
   });
 
   it("bounds worker transfer, acknowledges result pages asynchronously and cancels pending work", async () => {
-    class SyntaxWorker extends EventTarget {
-      static instances: SyntaxWorker[] = [];
-      postMessage = vi.fn<(message: SyntaxWorkerRequest) => void>();
-      terminate = vi.fn();
-      constructor() {
-        super();
-        SyntaxWorker.instances.push(this);
-      }
-      receive(response: SyntaxWorkerResponse) {
-        this.dispatchEvent(new MessageEvent("message", { data: response }));
-      }
-    }
+    SyntaxWorker.instances = [];
     vi.stubGlobal("Worker", SyntaxWorker);
     const locationString = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
     vi.useFakeTimers();
@@ -743,6 +746,96 @@ describe("engine-neutral Markdown syntax adapter", () => {
       vi.unstubAllGlobals();
     }
   });
+  it.each([
+    ["construction", "Construction failed"],
+    ["crash", "Syntax worker failed"],
+    ["decode", "could not be decoded"],
+    ["timeout", "made no progress"],
+    ["send", "Delivery failed"],
+    ["ack-send", "Delivery failed"],
+    ["worker-error", "Preparation failed"],
+    ["wrong-block", "Invalid syntax result page"],
+    ["oversized-page", "Invalid syntax result page"],
+    ["invalid-offset", "Invalid syntax result offsets"],
+    ["obsolete-completion", "Obsolete syntax block result"],
+  ])("cleans up syntax %s failures and permits a fresh request", async (fault, message) => {
+    SyntaxWorker.instances = [];
+    let failConstruction = fault === "construction";
+    vi.stubGlobal(
+      "Worker",
+      class extends SyntaxWorker {
+        constructor() {
+          if (failConstruction) throw new Error("Construction failed");
+          super();
+          if (fault === "send" && SyntaxWorker.instances.length === 1)
+            this.postMessage.mockImplementationOnce(() => {
+              throw new Error("Delivery failed");
+            });
+        }
+      }
+    );
+    vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const removeAbort = vi.spyOn(controller.signal, "removeEventListener");
+    try {
+      const pending = prepareMarkdownSyntax([{ text: "const x = 1", label: "js" }], controller.signal);
+      const rejection = expect(pending).rejects.toThrow(message);
+      const worker = SyntaxWorker.instances[0];
+      if (worker && fault !== "send") {
+        const removeListener = vi.spyOn(worker, "removeEventListener");
+        const range = { from: 0, to: 5, categories: ["keyword"] as const };
+        worker.receive({ type: "ranges", block: 0, ranges: [range] });
+        if (fault === "crash") {
+          const event = new ErrorEvent("error", { message: "Execution failed", cancelable: true });
+          worker.dispatchEvent(event);
+          expect(event.defaultPrevented).toBe(true);
+        } else if (fault === "decode") worker.dispatchEvent(new Event("messageerror"));
+        else if (fault === "timeout") await vi.advanceTimersByTimeAsync(SYNTAX_WORKER_PROGRESS_TIMEOUT_MS);
+        else if (fault === "ack-send") {
+          worker.postMessage.mockImplementationOnce(() => {
+            throw new Error("Delivery failed");
+          });
+          await vi.advanceTimersByTimeAsync(0);
+        } else if (fault === "worker-error") worker.receive({ type: "error", message: "Preparation failed" });
+        else if (fault === "wrong-block") worker.receive({ type: "ranges", block: 1, ranges: [] });
+        else if (fault === "oversized-page")
+          worker.receive({ type: "ranges", block: 0, ranges: Array(SYNTAX_RESULT_PAGE_RANGES + 1).fill(range) });
+        else if (fault === "invalid-offset") worker.receive({ type: "ranges", block: 0, ranges: [range] });
+        else if (fault === "obsolete-completion") worker.receive({ type: "complete", block: 1 });
+        await rejection;
+        for (const event of ["message", "error", "messageerror"]) expect(removeListener).toHaveBeenCalledWith(event, expect.any(Function));
+      } else await rejection;
+
+      if (worker) {
+        expect(worker.terminate).toHaveBeenCalledOnce();
+        expect(removeAbort).toHaveBeenCalledWith("abort", expect.any(Function));
+        const sent = worker.postMessage.mock.calls.length;
+        worker.receive({ type: "source-ack" });
+        worker.receive({ type: "complete", block: 0 });
+        controller.abort();
+        await vi.runAllTimersAsync();
+        expect(worker.postMessage).toHaveBeenCalledTimes(sent);
+        expect(worker.terminate).toHaveBeenCalledOnce();
+      }
+      expect(vi.getTimerCount()).toBe(0);
+
+      failConstruction = false;
+      const retried = prepareMarkdownSyntax([{ text: "retry", label: "js" }], new AbortController().signal);
+      const fresh = SyntaxWorker.instances.at(-1)!;
+      expect(fresh).not.toBe(worker);
+      fresh.receive({ type: "complete", block: 0 });
+      await expect(retried).resolves.toEqual([{ ranges: [] }]);
+      expect(fresh.terminate).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      controller.abort();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
   it("bounds live syntax ranges without changing text or selection and cancels queued publication", () => {
     const intersections = mockSyntaxIntersections();
     const frames = new Map<number, FrameRequestCallback>();

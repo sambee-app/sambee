@@ -18,6 +18,7 @@ import { highlightingService } from "../../../utils/highlightingService";
 import * as markdownCodePreparation from "../../../utils/markdownCodePreparation";
 import * as markdownDocumentPreview from "../../../utils/markdownDocumentPreview";
 import * as markdownSyntaxPublication from "../../../utils/markdownSyntaxPublication";
+import * as markdownSyntaxWorker from "../../../utils/markdownSyntaxWorker";
 import type { PreparedCodeBlock } from "../../../utils/syntaxHighlighting";
 import MarkdownViewer from "../MarkdownViewer";
 import { MARKDOWN_VIEWER_CONTENT_AUTOFOCUS_DELAY_MS } from "../markdownEditorConstants";
@@ -849,6 +850,49 @@ describe("MarkdownViewer", () => {
     await screen.findByText("const x=1;");
     await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
     expect(measure.mock.calls.some(([name]) => name === "sambee:preview-preparation:collection-parse")).toBe(false);
+  });
+
+  it("keeps plain text, selection and search usable when syntax preparation fails", async () => {
+    enableSearchHighlights();
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Preview\n\n```js\nconst x=1; const x=2;\n```\n");
+    let rejectPreparation!: (error: Error) => void;
+    const prepare = vi.spyOn(markdownSyntaxWorker, "prepareMarkdownSyntax").mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectPreparation = reject;
+        })
+    );
+    const publish = vi.spyOn(markdownSyntaxPublication, "publishMarkdownSyntax");
+    renderViewer();
+    const code = await screen.findByText("const x=1; const x=2;");
+    await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    await viewerSearch.openSearch("const x");
+    await screen.findByText("1 / 2");
+    const root = document.querySelector('[data-markdown-search-root="true"]');
+    const viewport = screen.getByTestId("markdown-viewer-content");
+    viewport.scrollTop = 123;
+    const selection = window.getSelection()!;
+    const range = document.createRange();
+    range.selectNodeContents(code);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const selected = selection.toString();
+    try {
+      await act(async () => rejectPreparation(new Error("Syntax worker response could not be decoded")));
+      expect(document.querySelector('[data-markdown-search-root="true"]')).toBe(root);
+      expect(root?.querySelector("code")).toBe(code);
+      expect(code.textContent).toBe("const x=1; const x=2;\n");
+      expect(selection.toString()).toBe(selected);
+      expect(viewport.scrollTop).toBe(123);
+      expect(screen.getByRole("heading", { name: "Preview" })).toBeInTheDocument();
+      expect(screen.queryByText(/Failed to load markdown file/)).not.toBeInTheDocument();
+      expect(publish).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+      expect(await screen.findByText("2 / 2")).toBeInTheDocument();
+      expect(prepare).toHaveBeenCalledOnce();
+    } finally {
+      selection.removeAllRanges();
+    }
   });
 
   it.each([2, 3])("publishes only the latest of %s documents after obsolete results arrive", async (documentCount) => {
