@@ -191,20 +191,14 @@ export default defineConfig({
     exclude: OPTIMIZE_DEPS_EXCLUDE,
   },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks(id) {
-          // Avoid forcing React and MUI into separate chunks because their
-          // runtime linkage can create circular chunks in production builds.
-          if (id.includes("react-markdown") || id.includes("remark-gfm") || id.includes("rehype-highlight")) {
-            return "markdown";
-          }
-
-          if (id.includes("react-pdf")) {
-            return "pdf";
-          }
-
-          return undefined;
+        codeSplitting: {
+          groups: [
+            { name: "preload-helper", test: /^\0vite[\\/]preload-helper\.js$/ },
+            { name: "pdf-core", test: /[\\/]node_modules[\\/]pdfjs-dist[\\/]build[\\/]pdf\.mjs$/ },
+            { name: "pdf-viewer", test: /[\\/]node_modules[\\/]pdfjs-dist[\\/]web[\\/]pdf_viewer\.mjs$/ },
+          ],
         },
       },
     },

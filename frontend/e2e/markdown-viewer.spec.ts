@@ -449,6 +449,61 @@ async function captureViewerScheduling(page: Page, testInfo: TestInfo, action: (
   }
 }
 
+test.describe("development settings focus", () => {
+  test.skip(process.env.SAMBEE_E2E_DEVELOPMENT !== "1", "Requires the development server and approved demo route");
+
+  test("keeps the category list focused after Strict Mode modal effects and page loading", async ({ page }) => {
+    await page.setViewportSize({ width: 1543, height: 900 });
+    await page.addLocatorHandler(page.getByRole("dialog", { name: "Update available" }), async dialog => {
+      await dialog.getByRole("button", { name: "Later", exact: true }).click();
+    });
+    await mockMarkdownViewerApi(page, { initialMarkdown: "# Preview\n" });
+    await page.goto("/browse/smb/demo");
+    await page.getByRole("button", { name: "Open settings", exact: true }).click();
+    await expect(page.getByRole("status", { name: /loading/i })).toHaveCount(0);
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(page.getByRole("option", { name: "Appearance", exact: true })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("heading", { name: "Your identity", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Account", exact: true })).toBeFocused();
+  });
+});
+
+test.describe("production bundle loading", () => {
+  test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
+
+  for (const width of [1543, 390]) {
+    test(`loads settings categories at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      const errors: string[] = [];
+      const accountRequests: string[] = [];
+      page.on("pageerror", error => errors.push(error.message));
+      page.on("request", request => {
+        if (/\/assets\/AccountSettings-[^/]+\.js$/.test(new URL(request.url()).pathname)) accountRequests.push(request.url());
+      });
+      await serveProductionAssets(page);
+      await mockMarkdownViewerApi(page, { initialMarkdown: "# Preview\n" });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      if (width === 390) await page.getByRole("button", { name: "Open menu", exact: true }).click();
+      await page.getByRole("button", { name: "Open settings", exact: true }).click();
+      if (width === 1543) {
+        await expect(page.getByRole("status", { name: /loading/i })).toHaveCount(0);
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await expect(page.getByRole("option", { name: "Appearance", exact: true })).toBeFocused();
+      }
+      await expect.poll(() => accountRequests.length).toBe(1);
+      await page.getByText("Account", { exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Your identity", exact: true })).toBeVisible();
+      await page.goBack();
+      await page.getByText("Account", { exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Your identity", exact: true })).toBeVisible();
+      expect(accountRequests).toHaveLength(1);
+      expect(errors).toEqual([]);
+    });
+  }
+});
+
 test.describe("production shared syntax correctness", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
   const fixtures = [

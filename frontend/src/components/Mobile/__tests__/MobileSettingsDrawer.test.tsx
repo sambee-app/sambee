@@ -9,6 +9,11 @@ vi.mock("../../Settings/settingsDataSources", () => ({
   prefetchSettingsDataForItems: vi.fn(),
 }));
 
+vi.mock("../../Settings/settingsPageLoaders", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../Settings/settingsPageLoaders")>()),
+  scheduleSettingsPagePrefetch: vi.fn(),
+}));
+
 const mockUseSettingsAccess = vi.fn(() => ({ isAdmin: false }));
 
 vi.mock("../../Settings/useSettingsAccess", () => ({
@@ -53,7 +58,7 @@ describe("MobileSettingsDrawer", () => {
 
     await user.click(screen.getByText(/^Local Drives$/i));
 
-    expect(screen.getByText("Local Drives Content: Local Drives")).toBeInTheDocument();
+    expect(await screen.findByText("Local Drives Content: Local Drives")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /go back/i }));
 
@@ -81,7 +86,7 @@ describe("MobileSettingsDrawer", () => {
 
     await user.click(screen.getByText(/^Account$/i));
 
-    expect(screen.getByText("Account Settings Content")).toBeInTheDocument();
+    expect(await screen.findByText("Account Settings Content")).toBeInTheDocument();
   });
 
   it("adds breathing room above the mobile section headers", () => {
