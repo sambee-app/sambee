@@ -49,6 +49,9 @@ function SettingsCategoryFocus({
 }) {
   const initialized = useRef(false);
   useLayoutEffect(() => {
+    if (open) initialized.current = false;
+  }, [open]);
+  useLayoutEffect(() => {
     if (!open) {
       initialized.current = false;
       return;

@@ -1,33 +1,24 @@
 import { Box, CircularProgress } from "@mui/material";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import ErrorBoundary from "../ErrorBoundary";
 import { SettingsCategoryDescription } from "./SettingsCategoryDescription";
-import { getSettingsNavItemLabel, type SettingsNavItem } from "./settingsNavigation";
+import { getSettingsNavItemLabel, getVisibleSettingsNavItems, type SettingsNavItem } from "./settingsNavigation";
+import { SETTINGS_PAGE_LOADERS, scheduleSettingsPagePrefetch } from "./settingsPageLoaders";
 
-const AboutSettings = lazy(() => import("../../pages/AboutSettings").then((module) => ({ default: module.AboutSettings })));
-const AccountSettings = lazy(() => import("../../pages/AccountSettings").then((module) => ({ default: module.AccountSettings })));
-const AdvancedSettings = lazy(() => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })));
-const AuthenticationSettings = lazy(() =>
-  import("../../pages/AuthenticationSettings").then((module) => ({ default: module.AuthenticationSettings }))
-);
-const ConnectionsSettings = lazy(() =>
-  import("../../pages/ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings }))
-);
-const FileBrowserSettings = lazy(() =>
-  import("../../pages/FileBrowserSettings").then((module) => ({ default: module.FileBrowserSettings }))
-);
-const FileSearchSettings = lazy(() => import("../../pages/FileSearchSettings").then((module) => ({ default: module.FileSearchSettings })));
-const LocalDrivesSettings = lazy(() =>
-  import("../../pages/LocalDrivesSettings").then((module) => ({ default: module.LocalDrivesSettings }))
-);
-const NetworkSettings = lazy(() => import("../../pages/NetworkSettings").then((module) => ({ default: module.NetworkSettings })));
-const AppearanceSettings = lazy(() => import("../../pages/PreferencesSettings").then((module) => ({ default: module.AppearanceSettings })));
-const SmbSettings = lazy(() => import("../../pages/SmbSettings").then((module) => ({ default: module.SmbSettings })));
-const TextEditorSettings = lazy(() => import("../../pages/TextEditorSettings").then((module) => ({ default: module.TextEditorSettings })));
-const UserManagementSettings = lazy(() =>
-  import("../../pages/UserManagementSettings").then((module) => ({ default: module.UserManagementSettings }))
-);
+const AboutSettings = lazy(SETTINGS_PAGE_LOADERS["admin-about"]);
+const AccountSettings = lazy(SETTINGS_PAGE_LOADERS.account);
+const AdvancedSettings = lazy(SETTINGS_PAGE_LOADERS["admin-system"]);
+const AuthenticationSettings = lazy(SETTINGS_PAGE_LOADERS["admin-authentication"]);
+const ConnectionsSettings = lazy(SETTINGS_PAGE_LOADERS.connections);
+const FileBrowserSettings = lazy(SETTINGS_PAGE_LOADERS["file-browser"]);
+const FileSearchSettings = lazy(SETTINGS_PAGE_LOADERS["admin-file-search"]);
+const LocalDrivesSettings = lazy(SETTINGS_PAGE_LOADERS["local-drives"]);
+const NetworkSettings = lazy(SETTINGS_PAGE_LOADERS["admin-network"]);
+const AppearanceSettings = lazy(SETTINGS_PAGE_LOADERS.appearance);
+const SmbSettings = lazy(SETTINGS_PAGE_LOADERS["admin-smb"]);
+const TextEditorSettings = lazy(SETTINGS_PAGE_LOADERS["text-editor"]);
+const UserManagementSettings = lazy(SETTINGS_PAGE_LOADERS["admin-users"]);
 
 interface SettingsCategoryContentProps {
   item: SettingsNavItem;
@@ -63,6 +54,10 @@ function SettingsCategoryPage({
   dialogSafeHeader = false,
   forceDesktopLayout = false,
 }: SettingsCategoryContentProps) {
+  useEffect(() => {
+    return scheduleSettingsPagePrefetch(getVisibleSettingsNavItems(isAdmin).filter((category) => category !== item));
+  }, [isAdmin, item]);
+
   switch (item) {
     case "appearance":
       return <AppearanceSettings />;

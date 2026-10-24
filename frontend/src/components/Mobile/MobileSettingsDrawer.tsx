@@ -19,6 +19,7 @@ import { SettingsCategoryContent } from "../Settings/SettingsCategoryContent";
 import { SettingsCategoryList } from "../Settings/SettingsCategoryList";
 import { prefetchSettingsDataForItems } from "../Settings/settingsDataSources";
 import { getSettingsViewTitle, getVisibleSettingsSections, type MobileSettingsView } from "../Settings/settingsNavigation";
+import { scheduleSettingsPagePrefetch } from "../Settings/settingsPageLoaders";
 import { settingsCompactTypographyScopeSx } from "../Settings/settingsTypographyStyles";
 import { useSettingsAccess } from "../Settings/useSettingsAccess";
 
@@ -62,6 +63,11 @@ export const MobileSettingsDrawer: React.FC<MobileSettingsDrawerProps> = ({
       prefetchSettingsDataForItems(getVisibleSettingsSections(isAdmin).flatMap((section) => section.categories));
     }
   }, [initialView, isAdmin, open, view]);
+
+  useEffect(() => {
+    if (!open || currentView !== "main") return;
+    return scheduleSettingsPagePrefetch(getVisibleSettingsSections(isAdmin).flatMap((section) => section.categories));
+  }, [currentView, isAdmin, open]);
 
   const handleBack = () => {
     if (onBack) {

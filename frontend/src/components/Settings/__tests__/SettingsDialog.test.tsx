@@ -1,12 +1,14 @@
 import { Dialog } from "@mui/material";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SambeeThemeProvider } from "../../../theme";
 import { SettingsCategoryContent } from "../SettingsCategoryContent";
 import SettingsDialog from "../SettingsDialog";
 import type { SettingsCategory } from "../settingsCategories";
+import { scheduleSettingsPagePrefetch } from "../settingsPageLoaders";
 
 const networkModule = vi.hoisted(() => {
   let resolve!: () => void;
@@ -24,6 +26,11 @@ vi.mock("../../../pages/NetworkSettings", async () => {
 
 vi.mock("../settingsDataSources", () => ({
   prefetchSettingsDataForItems: vi.fn(),
+}));
+
+vi.mock("../settingsPageLoaders", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../settingsPageLoaders")>()),
+  scheduleSettingsPagePrefetch: vi.fn(),
 }));
 
 // Mock the API module
@@ -288,6 +295,17 @@ describe("SettingsDialog Component", () => {
     expect(await screen.findByRole("option", { name: /^account$/i })).toHaveFocus();
   });
 
+  it("keeps initial category focus when Strict Mode replays modal effects", async () => {
+    renderWithTheme(
+      <StrictMode>
+        <SettingsDialog open={true} onClose={mockOnClose} initialCategory="connections" />
+      </StrictMode>
+    );
+
+    expect(await screen.findByText("Connections Settings Content")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^connections$/i })).toHaveFocus();
+  });
+
   it("synchronizes controlled category focus without waiting for a timer", async () => {
     const { rerender } = renderWithTheme(
       <SettingsDialog open={true} onClose={mockOnClose} initialCategory="connections" category="connections" />
@@ -487,6 +505,17 @@ describe("SettingsDialog Component", () => {
 
     expect(await screen.findByText("Appearance Settings Content")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /appearance/i })).toHaveFocus();
+  });
+
+  it("prefetches only permitted categories after the selected page renders, during idle time", async () => {
+    const cancel = vi.fn();
+    vi.mocked(scheduleSettingsPagePrefetch).mockReturnValueOnce(cancel);
+    const { unmount } = renderWithTheme(<SettingsDialog open={true} onClose={mockOnClose} />);
+    await screen.findByText("Appearance Settings Content");
+    expect(scheduleSettingsPagePrefetch).toHaveBeenCalledOnce();
+    expect(scheduleSettingsPagePrefetch).toHaveBeenCalledWith(["account", "file-browser", "text-editor", "connections", "local-drives"]);
+    unmount();
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("does not load an admin-only category for a non-admin user", () => {
