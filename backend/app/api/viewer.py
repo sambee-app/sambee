@@ -243,7 +243,7 @@ async def stream_archive_member(
         inspection_projection = presentation.project_member(inspection_member)
         if inspection_projection.delivery == "preview_unavailable":
             raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Archive member exceeds the inline preview size limit"
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Archive member exceeds the inline preview size limit"
             )
         member_name = inspection_member.path.rsplit("/", 1)[-1]
 
@@ -528,7 +528,7 @@ async def create_normalized_pdf_response_for_source(
     max_source_size = get_integer_setting_value(SystemSettingKey.PDF_NORMALIZER_MAX_SOURCE_SIZE_BYTES)
     if metadata_revision.size is not None and metadata_revision.size > max_source_size:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="This PDF exceeds the configured compatibility-processing size limit.",
         )
 
@@ -585,7 +585,7 @@ async def create_normalized_pdf_response_for_source(
     pdf_bytes, revision = await read_source()
     if len(pdf_bytes) > max_source_size:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail="This PDF exceeds the configured compatibility-processing size limit.",
         )
 
@@ -783,7 +783,7 @@ async def create_converted_image_response(
         file_size_mb = exc.file_size / (1024 * 1024)
         max_file_size_mb = exc.max_file_size / (1024 * 1024)
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail={
                 "code": "image_preview_too_large",
                 "message": f"This image is too large to preview ({file_size_mb:.0f} MB; maximum {max_file_size_mb:.0f} MB).",
