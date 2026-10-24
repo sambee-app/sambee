@@ -115,7 +115,7 @@ export function getSecondaryActionStripStyle(theme: Theme) {
   };
 }
 
-export const secondaryActionStripSx: SxProps<Theme> = (theme) => getSecondaryActionStripStyle(theme);
+export const secondaryActionStripSx = ((theme: Theme) => getSecondaryActionStripStyle(theme)) satisfies SxProps<Theme>;
 
 export function getSecondaryToolbarMenuPaperStyle(theme: Theme) {
   const colors = getSecondaryToolbarSurfaceColors(theme);

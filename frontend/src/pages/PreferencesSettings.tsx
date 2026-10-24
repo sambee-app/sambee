@@ -5,6 +5,7 @@ import StarIcon from "@mui/icons-material/Star";
 import { Box, Button, FormControl, InputLabel, MenuItem, Radio, Select, Typography } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material/Select";
 import axios from "axios";
+import type { TFunction } from "i18next";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CompactBadge as Chip } from "../components/CompactBadge";
@@ -41,7 +42,7 @@ const REGIONAL_LOCALE_LABEL_KEYS = {
 } as const satisfies Record<(typeof REGIONAL_LOCALE_OPTIONS)[number], string>;
 const PREVIEW_DATE = new Date("2026-03-22T14:35:00Z");
 
-function getLanguageOptionLabel(t: ReturnType<typeof useTranslation>["t"], language: string): string {
+function getLanguageOptionLabel(t: TFunction, language: string): string {
   return language === PSEUDO_LANGUAGE
     ? t("settings.appearancePage.pseudoLanguageOption")
     : t("settings.appearancePage.englishLanguageOption");

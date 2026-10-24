@@ -222,15 +222,10 @@ jobs:
       if: steps.source-ci.outputs.frontend != 'true'
       run: cd frontend && npm ci --prefer-offline
 
-    - name: Run frontend type checks
+    - name: Verify frontend type correctness
       if: steps.source-ci.outputs.frontend != 'true'
       id: frontend-types
-      continue-on-error: true
       run: cd frontend && npm run typecheck
-
-    - name: Report existing TypeScript debt
-      if: steps.frontend-types.outcome == 'failure'
-      run: echo '::warning::Frontend type checking is advisory until the recorded application/test type debt is resolved.'
 
     - name: Run frontend tests
       if: steps.source-ci.outputs.frontend != 'true'

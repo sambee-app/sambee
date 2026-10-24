@@ -138,7 +138,8 @@ export function mountMarkdownDocument(
           let high = searchNodes.length;
           while (low < high) {
             const middle = low + Math.floor((high - low) / 2);
-            if (searchNodes[middle].to < offset) low = middle + 1;
+            const node = searchNodes[middle];
+            if (node && node.to < offset) low = middle + 1;
             else high = middle;
           }
           return searchNodes[low];
@@ -253,10 +254,14 @@ export function mountMarkdownDocument(
         for (const id of visible) {
           if (inspectedFragments++ === DOCUMENT_SYNTAX_WINDOW_PARTS || windows.length === DOCUMENT_SYNTAX_WINDOW_PARTS) break;
           const collection = parts.get(id) ?? [];
+          const codeId = fragmentCodes.get(id);
+          if (codeId === undefined) continue;
           const rectFor = (index: number) => {
             geometryProbes += 1;
+            const part = collection[index];
+            if (!part) throw new Error("Missing visible Markdown text fragment");
             const range = new Range();
-            range.selectNodeContents(collection[index].node);
+            range.selectNodeContents(part.node);
             return range.getBoundingClientRect();
           };
           let low = 0;
@@ -270,6 +275,7 @@ export function mountMarkdownDocument(
           for (let index = low; index < collection.length && windows.length < DOCUMENT_SYNTAX_WINDOW_PARTS; index += 1) {
             if (rectFor(index).top > viewport.bottom + (options.viewport ?? container).clientHeight) break;
             const part = collection[index];
+            if (!part) continue;
             const pre = part.node.parentElement?.closest("pre") ?? null;
             const rangeAt = (from: number, to: number) => {
               const range = new Range();
@@ -281,7 +287,7 @@ export function mountMarkdownDocument(
             selected.push(part);
             for (const window of clipped) {
               if (window.to <= window.from || windows.length === DOCUMENT_SYNTAX_WINDOW_PARTS) continue;
-              windows.push({ id: fragmentCodes.get(id)!, from: part.from + window.from, to: part.from + window.to });
+              windows.push({ id: codeId, from: part.from + window.from, to: part.from + window.to });
             }
           }
           viewportParts.set(id, selected);
@@ -302,17 +308,20 @@ export function mountMarkdownDocument(
         highlightRanges = 0;
         decorationLimited = false;
         for (const [id, selected] of viewportParts) {
-          const ranges = tokens.get(fragmentCodes.get(id)!) ?? [];
+          const codeId = fragmentCodes.get(id);
+          const ranges = codeId === undefined ? [] : (tokens.get(codeId) ?? []);
           for (const part of selected) {
             let low = 0;
             let high = ranges.length;
             while (low < high) {
               const middle = low + Math.floor((high - low) / 2);
-              if (ranges[middle].to <= part.from) low = middle + 1;
+              const range = ranges[middle];
+              if (range && range.to <= part.from) low = middle + 1;
               else high = middle;
             }
-            for (let index = low; index < ranges.length && ranges[index].from < part.to; index += 1) {
+            for (let index = low; index < ranges.length; index += 1) {
               const token = ranges[index];
+              if (!token || token.from >= part.to) break;
               for (const category of token.categories) {
                 if (highlightRanges === MAX_DECORATION_RANGES) {
                   decorationLimited = true;
@@ -354,7 +363,7 @@ export function mountMarkdownDocument(
       const observer = new IntersectionObserver(
         (entries) => {
           for (const entry of entries) {
-            const id = Number((entry.target as HTMLElement).dataset.documentFragment);
+            const id = Number((entry.target as HTMLElement).dataset["documentFragment"]);
             if (entry.isIntersecting) visible.add(id);
             else visible.delete(id);
           }
@@ -462,7 +471,7 @@ export function mountMarkdownDocument(
               const element = document.createElement(record.tag);
               if (record.tag === "span") mountedSpans += 1;
               if (record.fragment) {
-                element.dataset.documentFragment = String(record.id);
+                element.dataset["documentFragment"] = String(record.id);
                 element.className = "document-code-fragment";
                 fragmentCodes.set(record.id, record.parent);
                 observer.observe(element);

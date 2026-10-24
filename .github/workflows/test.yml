@@ -181,14 +181,9 @@ jobs:
     - name: Install dependencies
       run: cd frontend && npm ci --prefer-offline
 
-    - name: TypeScript type check
+    - name: Verify frontend type correctness
       id: frontend-types
-      continue-on-error: true
       run: cd frontend && npm run typecheck
-
-    - name: Report existing TypeScript debt
-      if: steps.frontend-types.outcome == 'failure'
-      run: echo '::warning::The real frontend type check reports existing errors. It is advisory until the recorded application/test type debt is resolved; browser and unit correctness remain required.'
 
     - name: Run tests
       run: cd frontend && npm run test:ci

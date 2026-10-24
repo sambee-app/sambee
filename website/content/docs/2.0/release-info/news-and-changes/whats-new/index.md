@@ -165,6 +165,11 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 - Pinned all third-party GitHub Actions workflows to commit SHAs.
 - Frontend: removed `patch-package` to get rid of vulnerable transisitve dependency `braces`.
 
+### Frontend Type Correctness
+
+Type correctness of frontend code and tests is now enforced. As part of this implementation, 1,152 diagnostics across 162 files were fixed: 840 in tests, 311 in application code,
+and one in an imported browser-test helper.
+
 ## Internals
 
 - Companion build for Windows: Authenticode signing was removed from PR check builds and only remains on release workflows.

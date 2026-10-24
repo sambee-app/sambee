@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockAuthToken } from "../../test/fixtures/users";
 
 const { useCurrentUserSettingMock, getThemesMock, getCurrentUserMock, refreshSettingsMock } = vi.hoisted(() => ({
   useCurrentUserSettingMock: vi.fn(),
@@ -117,13 +118,13 @@ describe("ThemeContext", () => {
   it("reloads themes and user settings once for a same-user login, not for a token refresh", async () => {
     const { unmount } = renderHook(() => useSambeeTheme(), { wrapper: createWrapper() });
     await waitFor(() => expect(getThemesMock).toHaveBeenCalledTimes(1));
-    authSession.setAuthenticated({ access_token: "a", token_type: "bearer", user_id: "same-user" }, true);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "a", token_type: "bearer", user_id: "same-user" }), true);
     await waitFor(() => expect(getThemesMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(refreshSettingsMock).toHaveBeenCalledTimes(2));
-    authSession.setAuthenticated({ access_token: "refreshed", token_type: "bearer", user_id: "same-user" }, true);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "refreshed", token_type: "bearer", user_id: "same-user" }), true);
     expect(getThemesMock).toHaveBeenCalledTimes(2);
     expect(refreshSettingsMock).toHaveBeenCalledTimes(2);
-    authSession.setAuthenticated({ access_token: "b", token_type: "bearer", user_id: "same-user" }, true);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "b", token_type: "bearer", user_id: "same-user" }), true);
     authSession.notifyNewLogin();
     await waitFor(() => expect(getThemesMock).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(refreshSettingsMock).toHaveBeenCalledTimes(3));
@@ -147,14 +148,16 @@ describe("ThemeContext", () => {
           rejectUser = reject;
         })
     );
-    authSession.setAuthenticated({ access_token: "a", token_type: "bearer", user_id: "same-user" }, true);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "a", token_type: "bearer", user_id: "same-user" }), true);
     const tracing = vi.spyOn(logger, "initializeBackendTracing").mockResolvedValue(undefined);
     const { result, unmount } = renderHook(() => useSambeeTheme(), { wrapper: createWrapper() });
     await waitFor(() => expect(getThemesMock).toHaveBeenCalledTimes(1));
     getThemesMock.mockResolvedValue({ themes: [], site_default_id: "sambee-dark" });
     getCurrentUserMock.mockResolvedValue({ role: "admin" });
     await act(async () => {
-      await completeAuthentication({ access_token: "b", token_type: "bearer", user_id: "same-user", return_path: "/browse" });
+      await completeAuthentication(
+        createMockAuthToken({ access_token: "b", token_type: "bearer", user_id: "same-user", return_path: "/browse" })
+      );
     });
     await waitFor(() => expect(result.current.currentTheme.id).toBe("sambee-dark"));
     await act(async () => {

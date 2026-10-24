@@ -179,7 +179,12 @@ abstract class ApiStorageBackend implements StorageBackend {
       return { status: "removed" };
     } catch (error) {
       const detail = isApiError(error) ? error.response?.data?.detail : null;
-      if (error.response?.status === 409 && typeof detail === "string" && detail.startsWith("Directory is not empty:")) {
+      if (
+        isApiError(error) &&
+        error.response?.status === 409 &&
+        typeof detail === "string" &&
+        detail.startsWith("Directory is not empty:")
+      ) {
         return { status: "not_empty" };
       }
       throw error;

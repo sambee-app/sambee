@@ -8,7 +8,9 @@ import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { getBackendAvailabilitySnapshot, resetBackendAvailabilityForTests } from "../../services/backendAvailability";
 import { logger } from "../../services/logger";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
+import { requireTestValue } from "../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import FileBrowser from "../FileBrowser";
 
@@ -107,8 +109,9 @@ function renderBrowserWithNavigator(initialPath: string) {
         throw new Error("navigate function was not initialized");
       }
 
+      const navigate = navigateFn;
       act(() => {
-        navigateFn(path);
+        navigate(path);
       });
     },
   };
@@ -127,7 +130,7 @@ describe("FileBrowser WebSocket behavior", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetBackendAvailabilityForTests();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     InspectableWebSocket.instances = [];
     Object.defineProperty(globalThis, "WebSocket", {
       configurable: true,
@@ -245,7 +248,7 @@ describe("FileBrowser WebSocket behavior", () => {
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
       backendSocket?.open();
-      fireEvent.click(screen.getByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       await waitFor(() => expect(finishUpload).toBeDefined());
 
@@ -275,7 +278,7 @@ describe("FileBrowser WebSocket behavior", () => {
     vi.mocked(api.publishBrowserFile).mockImplementation(
       (_file, _connectionId, _path, _policy, options) =>
         new Promise((resolve) => {
-          options.signal?.addEventListener(
+          requireTestValue(options).signal?.addEventListener(
             "abort",
             () => resolve({ status: "cancelled", replaced: false, effects: { source: "unchanged", destination: "unchanged" } }),
             { once: true }
@@ -293,7 +296,7 @@ describe("FileBrowser WebSocket behavior", () => {
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
       backendSocket?.open();
-      fireEvent.click(screen.getByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       await waitFor(() => expect(api.publishBrowserFile).toHaveBeenCalledOnce());
 
@@ -303,7 +306,7 @@ describe("FileBrowser WebSocket behavior", () => {
         );
       });
       expect(api.listDirectory).toHaveBeenCalledTimes(1);
-      fireEvent.click(await screen.findByRole("button", { name: "Cancel", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(2));
     } finally {
       pickerClick.mockRestore();

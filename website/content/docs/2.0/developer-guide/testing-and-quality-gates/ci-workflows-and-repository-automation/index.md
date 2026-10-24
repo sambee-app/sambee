@@ -62,15 +62,17 @@ The workflow ends with a single gate job so branch protection can depend on one 
 
 In the backend job, regular tests run under `pytest-xdist` for throughput, while `@performance` tests run in a separate serial pass so wall-clock assertions are not distorted by parallel worker contention.
 
-The `frontend` job runs Vitest, builds normal production assets, installs version-matched Playwright Chromium/Firefox binaries and their Linux dependencies, then runs `npm run test:browser:ci`. Both engines run on frontend pull requests, pushes, and manual dispatch. The same browser command runs in release fallback when successful source CI cannot be reused.
+The `frontend` job requires a clean TypeScript check, runs Vitest, builds normal production assets, installs version-matched Playwright Chromium/Firefox binaries and their Linux dependencies, then runs `npm run test:browser:ci`. Both engines run on frontend pull requests, pushes, and manual dispatch. The same required checks run in release fallback when successful source CI cannot be reused.
 
 The browser command requires exactly 16 production cases: four scenarios at desktop and narrow widths in each engine. They protect real normalization/syntax workers, entity decoding, native selection/focus/heading links/search, regex replacement with undo/redo and exact Save content, and cancellation/reopen cleanup with stale-result replay. Two additional development-worker cases exercise Vite's dependency-resolution path. Browser APIs and workers are real; backend responses are mocked at `http://localhost:3000/browse/smb/demo`. This isn't full-stack SMB E2E or evidence of physical printing, browser-menu Find, hardware IME, or assistive-technology behavior.
 
 The correctness reporter rejects missing, duplicate, skipped, failed, and retried cases. Browser cases run with one worker and no retries. Reports and retained failure traces/screenshots are uploaded for seven days. Timing budgets, profiling, heap measurements, alternate renderers, and repeated cache/performance matrices remain separate opt-in diagnostics.
 
-`npm run typecheck` now checks the application and configuration projects explicitly. It is advisory in CI and release fallback while the existing application/test type errors are addressed; compiler strictness hasn't been reduced. The old root `tsc --noEmit` command checked no input files. Unit tests, production builds, and browser correctness are required independently of the advisory type result.
+`npm run typecheck` runs `tsc -b --noEmit` across the application, test/helper, and Node configuration projects. Browser code uses browser types; tests add Vitest and Node types; configuration tooling uses Node types. All source and declaration files remain checked with strict null/index and unused-code diagnostics enabled. The ES2023 library declarations describe existing APIs; the emitted target remains ES2020, and declarations don't provide runtime polyfills.
 
-The required gate rejects an unexpectedly skipped selected job. Only unrelated, unselected areas may be skipped. Superseded pull-request test/lint runs are cancelled; main-branch validation runs aren't cancelled by that policy. Release reuse requires the exact source commit's successful frontend job and its successful browser-correctness step, so a legacy frontend-only run isn't enough.
+Type correctness is mandatory in routine CI, release fallback, ordinary `npm run build`, `./scripts/test`, and the VS Code frontend validation task. The old root `tsc --noEmit` command checked no input files and mustn't be used as a substitute. Regression tests protect required command wiring, strict options, separate environments, and complete source coverage. Unit and browser correctness remain independent required gates.
+
+The required gate rejects an unexpectedly skipped selected job. Only unrelated, unselected areas may be skipped. Superseded pull-request test/lint runs are cancelled; main-branch validation runs aren't cancelled by that policy. Release reuse requires the exact source commit's successful frontend job, its successful browser-correctness step, and the new required `Verify frontend type correctness` step. Missing, skipped, or failed steps and legacy advisory type-check runs don't qualify.
 
 The current companion test job does not call `./scripts/test`.
 It runs explicit steps for Node install, companion TypeScript type checking, and the archive topology conformance script, including Rust tests, formatting, and Clippy.
@@ -112,6 +114,7 @@ For frontend work, that usually means:
 
 - `cd frontend && npm run test` for the default Vitest suite
 - `cd frontend && npm run test:ci` for runner-aware Vitest concurrency
+- `cd frontend && npm run typecheck` for the complete strict compiler check
 - `cd frontend && npm run build` followed by `npm run test:browser:ci` for the exact production/development browser contract
 - `cd frontend && npm run test:e2e:install -- --with-deps` to install the matching browsers and Linux dependencies
 

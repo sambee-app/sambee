@@ -297,9 +297,9 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         }
 
         if (checkIsTransientError(err)) {
-          setError(getTransientErrorMessage(err, translationRef.current("errors.failedToLoadFile")));
+          setError(getTransientErrorMessage());
         } else {
-          setError(getApiErrorMessage(err, translationRef.current("errors.failedToLoadFile"), { includeOriginalMessage: true }));
+          setError(getApiErrorMessage(err, translationRef.current("viewer.text.loadFailed"), { includeOriginalMessage: true }));
         }
       } finally {
         if (!abortController.signal.aborted) {
@@ -417,7 +417,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     loadFile: loadShareFile,
   });
 
-  const handleDownload = useCallback(async () => {
+  const handleDownload = useCallback(async (): Promise<void> => {
     try {
       if (virtualSource) {
         downloadViewerBlob(await readVirtualContent(virtualSource, path, { download: true }, contentProviders), filename);
@@ -832,7 +832,11 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       },
       { ...COMMON_SHORTCUTS.NEXT_MATCH, handler: handleSearchNext, enabled: !isEditing && searchMatches > 0 },
       { ...COMMON_SHORTCUTS.PREVIOUS_MATCH, handler: handleSearchPrevious, enabled: !isEditing && searchMatches > 0 },
-      { ...COMMON_SHORTCUTS.EDIT, handler: () => void handleEnterEditMode(), enabled: !isEditing && !isReadOnly && !exceedsEditorLimit },
+      {
+        ...COMMON_SHORTCUTS.EDIT,
+        handler: (): void => void handleEnterEditMode(),
+        enabled: !isEditing && !isReadOnly && !exceedsEditorLimit,
+      },
       { ...VIEWER_SHORTCUTS.FULLSCREEN, handler: handleToggleFullscreen, enabled: !isEditing },
       { ...COMMON_SHORTCUTS.CLOSE, handler: handleEscape, allowInInput: false, enabled: !isEditing && !unsavedChangesDialogOpen },
       { ...BROWSER_SHORTCUTS.SHOW_HELP, handler: () => setShowViewerHelp(true), enabled: !isEditing },
@@ -910,7 +914,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         handler: handleSearchPrevious,
         enabled: isEditing && (searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error)),
       },
-      { ...COMMON_SHORTCUTS.SAVE, handler: () => void handleSave(), allowInInput: true, enabled: isEditing && !isSaving },
+      { ...COMMON_SHORTCUTS.SAVE, handler: (): void => void handleSave(), allowInInput: true, enabled: isEditing && !isSaving },
       { ...COMMON_SHORTCUTS.CLOSE, handler: handleEscape, allowInInput: false, enabled: isEditing && !unsavedChangesDialogOpen },
       { ...BROWSER_SHORTCUTS.SHOW_HELP_ALTERNATE, handler: () => setShowEditorHelp(true), enabled: isEditing },
     ],

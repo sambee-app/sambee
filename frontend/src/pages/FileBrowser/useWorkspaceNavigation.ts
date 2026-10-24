@@ -150,8 +150,9 @@ export function useWorkspaceNavigation({
         existingVirtual.path === virtual.virtualPath
       : !existingVirtual;
     if (
+      existing &&
       sameVirtual &&
-      existing?.connectionId === target?.connectionId &&
+      existing.connectionId === target?.connectionId &&
       existing.path === path &&
       existing.viewerId === viewer.viewerId &&
       retry === resolvedRetry.current

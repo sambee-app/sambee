@@ -1386,6 +1386,7 @@ export const EN_TRANSLATIONS = {
       redo: "Redo",
     },
     text: {
+      loadFailed: "Failed to load file.",
       lockFailed: "Unable to enter text edit mode. {{message}}",
       lockFailedReason: "Failed to acquire edit lock.",
       saveFailed: "Failed to save text file changes.",

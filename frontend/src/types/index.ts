@@ -762,10 +762,15 @@ export interface OidcMappingValidationDetail {
 }
 
 // API Error type for axios errors
+export interface ImagePreviewTooLargeError {
+  code: "image_preview_too_large";
+  message: string;
+}
+
 export interface ApiError {
   response?: {
     data?: {
-      detail?: string | ConflictInfo | OidcMappingValidationDetail | RecentFileValidationError;
+      detail?: string | ConflictInfo | OidcMappingValidationDetail | RecentFileValidationError | ImagePreviewTooLargeError;
       code?: string;
     };
     status?: number;

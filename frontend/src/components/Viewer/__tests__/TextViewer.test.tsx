@@ -57,7 +57,9 @@ const { mockSetWordWrapEnabled, mockTextEditorCommands, useTextEditorMaxFileSize
       replaceAllSearchResults: vi.fn(),
       replaceCurrentSearchResult: vi.fn(),
     },
-    useTextEditorMaxFileSizeBytesPreferenceMock: vi.fn(() => [52_428_800, vi.fn()] as const),
+    useTextEditorMaxFileSizeBytesPreferenceMock: vi.fn<
+      typeof import("../../../pages/FileBrowser/preferences").useTextEditorMaxFileSizeBytesPreference
+    >(() => [52_428_800, vi.fn()]),
     useTextEditorWordWrapPreferenceMock: vi.fn(() => [false, mockSetWordWrapEnabled] as const),
   }));
 
@@ -99,10 +101,10 @@ vi.mock("../TextCodeEditor", () => {
 
     useEffect(() => {
       props.onSearchStateChange?.({
-        searchText: props.searchText,
+        searchText: props.searchText ?? "",
         searchMatches: props.searchText ? 2 : 0,
         currentMatch: props.searchText ? 1 : 0,
-        isSearchOpen: props.searchOpen,
+        isSearchOpen: props.searchOpen ?? false,
         isSearchable: true,
         isValid: true,
         viewMode: "source",

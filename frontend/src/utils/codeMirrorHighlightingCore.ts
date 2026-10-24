@@ -163,8 +163,8 @@ function isolateNestedParser(language: Language, id: LanguageId, report: SyntaxD
   const parser = new (class extends Parser {
     createParse(...args: Parameters<Parser["createParse"]>): PartialParse {
       const ranges = args[2];
-      const from = ranges[0].from;
-      const end = ranges[ranges.length - 1].to;
+      const from = ranges[0]?.from ?? 0;
+      const end = ranges.at(-1)?.to ?? from;
       let partial: PartialParse | undefined;
       let stoppedAt: number | null = null;
       const fail = (error: unknown) => {

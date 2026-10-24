@@ -15,7 +15,9 @@ COMPONENTS = ("backend", "frontend")
 CI_WORKFLOW = "test.yml"
 API_TIMEOUT_SECONDS = 10
 JOBS_PER_PAGE = 100
-FRONTEND_REQUIRED_STEPS = frozenset({"Run browser correctness contracts"})
+FRONTEND_REQUIRED_STEPS = frozenset(
+    {"Run browser correctness contracts", "Verify frontend type correctness"}
+)
 
 
 def github_get(url: str, token: str) -> dict[str, Any]:
@@ -64,10 +66,7 @@ def reusable_jobs(api_url: str, repository: str, sha: str, token: str) -> set[st
     successful: set[str] = set()
     page = 1
     while True:
-        jobs_url = (
-            f"{api_url}/repos/{repository}/actions/runs/{run_id}/jobs?"
-            f"filter=latest&per_page={JOBS_PER_PAGE}&page={page}"
-        )
+        jobs_url = f"{api_url}/repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page={JOBS_PER_PAGE}&page={page}"
         jobs = github_get(jobs_url, token).get("jobs")
         if not isinstance(jobs, list):
             raise ValueError("CI workflow jobs response is missing jobs")

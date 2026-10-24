@@ -2,15 +2,15 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
-import type { FileEntry } from "../../../types";
+import { type FileEntry, FileType } from "../../../types";
 import { StatusBar } from "../StatusBar";
 
 const baseFile: FileEntry = {
   name: "notes.txt",
   path: "/notes.txt",
-  type: "file",
+  type: FileType.FILE,
   size: 1024,
-  modified_at: null,
+  modified_at: undefined,
   is_readable: true,
   is_hidden: false,
 };

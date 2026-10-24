@@ -26,6 +26,10 @@ FRONTEND_JOB = {
     "conclusion": "success",
     "steps": [{"name": name, "conclusion": "success"} for name in reuse_ci.FRONTEND_REQUIRED_STEPS],
 }
+FRONTEND_COMMANDS = {
+    "Run browser correctness contracts": "cd frontend && npm run test:browser:ci",
+    "Verify frontend type correctness": "cd frontend && npm run typecheck",
+}
 
 
 def run_lookup(monkeypatch: pytest.MonkeyPatch, responses: list[dict[str, Any]]) -> set[str]:
@@ -65,8 +69,24 @@ def test_skipped_or_failed_jobs_are_not_reused(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.parametrize("conclusion", ["skipped", "failure", "cancelled", None])
-def test_frontend_reuse_requires_successful_browser_step(monkeypatch: pytest.MonkeyPatch, conclusion: str | None) -> None:
-    job = {**FRONTEND_JOB, "steps": [{"name": name, "conclusion": conclusion} for name in reuse_ci.FRONTEND_REQUIRED_STEPS]}
+@pytest.mark.parametrize("required_step", FRONTEND_COMMANDS)
+def test_frontend_reuse_requires_each_successful_gate(monkeypatch: pytest.MonkeyPatch, conclusion: str | None, required_step: str) -> None:
+    job = {
+        **FRONTEND_JOB,
+        "steps": [{"name": name, "conclusion": conclusion if name == required_step else "success"} for name in FRONTEND_COMMANDS],
+    }
+    assert run_lookup(monkeypatch, [{"workflow_runs": [RUN]}, {"jobs": [job]}]) == set()
+
+
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
+def test_legacy_advisory_type_check_is_not_release_evidence(monkeypatch: pytest.MonkeyPatch, conclusion: str) -> None:
+    job = {
+        **FRONTEND_JOB,
+        "steps": [
+            {"name": "Run browser correctness contracts", "conclusion": "success"},
+            {"name": "TypeScript type check", "conclusion": conclusion},
+        ],
+    }
     assert run_lookup(monkeypatch, [{"workflow_runs": [RUN]}, {"jobs": [job]}]) == set()
 
 
@@ -76,11 +96,12 @@ def test_legacy_frontend_job_without_browser_checks_is_not_reused(monkeypatch: p
 
 @pytest.mark.parametrize("name,job", [("test.yml", "frontend"), ("docker-image-preview-publish.yml", "validate-tests")])
 def test_ci_and_release_require_the_same_browser_contract(name: str, job: str) -> None:
+    assert reuse_ci.FRONTEND_REQUIRED_STEPS == FRONTEND_COMMANDS.keys()
     source = Path(__file__).resolve().parents[2] / ".github/workflows" / name
     steps = yaml.safe_load(source.read_text())["jobs"][job]["steps"]
     browser_steps = [step for step in steps if step.get("name") in reuse_ci.FRONTEND_REQUIRED_STEPS]
     assert len(browser_steps) == len(reuse_ci.FRONTEND_REQUIRED_STEPS)
-    assert all(step["run"] == "cd frontend && npm run test:browser:ci" and not step.get("continue-on-error") for step in browser_steps)
+    assert all(step["run"] == FRONTEND_COMMANDS[step["name"]] and not step.get("continue-on-error") for step in browser_steps)
     commands = [step.get("run") for step in steps]
     assert "cd frontend && npm run build" in commands
     assert "cd frontend && npm run test:e2e:install -- --with-deps" in commands

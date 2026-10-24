@@ -2,17 +2,33 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { error as logError } from "../../services/logger";
 import { syntaxTokenStyles } from "../../theme/syntaxStyles";
 import { openExternalUrl } from "../../utils/externalLinks";
-import { prepareCodePreviewInWorker } from "../../utils/markdownCodePreparation";
+import type { PreparationResponse } from "../../utils/markdownCodePreparation";
 import { mountMarkdownDocument } from "../../utils/markdownDocumentPreview";
 import { recordMarkdownPreparation } from "../../utils/markdownSyntax";
 
-interface RetainedMarkdownPreviewProps {
+type DocumentView = Awaited<ReturnType<typeof mountMarkdownDocument>>;
+
+interface RetainedDocumentPreparation {
+  syntaxSession: Parameters<DocumentView["finish"]>[2];
+  syntaxRanges: number;
+  documentTimings?: unknown;
+  transportTimings?: unknown;
+}
+
+export interface RetainedMarkdownPreviewProps {
   generation: { id: number; source: string };
   onExternalLink: () => void;
   resolveLink: (href: string) => string | null;
+  prepareDocument: (request: {
+    source: string;
+    generation: number;
+    signal: AbortSignal;
+    onRecords: DocumentView["consume"];
+    onDiagnostic: (diagnostic: Extract<PreparationResponse, { type: "diagnostic" }>) => void;
+  }) => Promise<RetainedDocumentPreparation>;
 }
 
-export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLink }: RetainedMarkdownPreviewProps) {
+export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLink, prepareDocument }: RetainedMarkdownPreviewProps) {
   const host = useRef<HTMLDivElement>(null);
   const [failure, setFailure] = useState<{ generation: number; message: string } | null>(null);
   useLayoutEffect(() => {
@@ -21,8 +37,8 @@ export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLin
     if (!element || !viewport) return;
     const controller = new AbortController();
     const prefix = `markdown-retained-${generation.id}`;
-    let view: Awaited<ReturnType<typeof mountMarkdownDocument>> | undefined;
-    let syntaxSession: Awaited<ReturnType<typeof prepareCodePreviewInWorker>>["syntaxSession"];
+    let view: DocumentView | undefined;
+    let syntaxSession: RetainedDocumentPreparation["syntaxSession"] | undefined;
     const style = document.createElement("style");
     style.textContent = Object.entries(syntaxTokenStyles)
       .map(
@@ -31,7 +47,7 @@ export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLin
       )
       .join("\n");
     document.head.append(style);
-    element.dataset.markdownRetainedState = "pending";
+    element.dataset["markdownRetainedState"] = "pending";
     const configureLink = (anchor: HTMLAnchorElement, href: string) => {
       const resolved = resolveLink(href);
       if (!resolved) {
@@ -57,17 +73,19 @@ export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLin
     element.addEventListener("click", click);
     const start = performance.now();
     void (async () => {
-      view = await mountMarkdownDocument(element, controller.signal, generation.source, {
+      const mountedView = await mountMarkdownDocument(element, controller.signal, generation.source, {
         hostSearch: true,
         viewport,
         highlightPrefix: prefix,
         configureLink,
       });
-      const result = await prepareCodePreviewInWorker(
-        [generation.source],
-        generation.id,
-        controller.signal,
-        (diagnostic) => {
+      view = mountedView;
+      controller.signal.throwIfAborted();
+      const result = await prepareDocument({
+        source: generation.source,
+        generation: generation.id,
+        signal: controller.signal,
+        onDiagnostic: (diagnostic) => {
           logError(
             diagnostic.message,
             diagnostic.context,
@@ -75,9 +93,8 @@ export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLin
             diagnostic.error ? new Error(diagnostic.error.message) : undefined
           );
         },
-        (records) => view!.consume(records),
-        { isolated: true, canonicalSource: true }
-      );
+        onRecords: (records) => mountedView.consume(records),
+      });
       syntaxSession = result.syntaxSession;
       controller.signal.throwIfAborted();
       if (!syntaxSession) throw new Error("Retained Markdown preparation returned no syntax session");
@@ -87,12 +104,12 @@ export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLin
         configurable: true,
         value: () => ({ ...view?.stats(), documentTimings: result.documentTimings, transportTimings: result.transportTimings }),
       });
-      element.dataset.markdownRetainedState = "complete";
+      element.dataset["markdownRetainedState"] = "complete";
     })().catch((error: unknown) => {
       syntaxSession?.dispose();
-      if (controller.signal.aborted) return;
       view?.dispose();
-      element.dataset.markdownRetainedState = "failed";
+      if (controller.signal.aborted) return;
+      element.dataset["markdownRetainedState"] = "failed";
       logError(
         "Retained Markdown preview failed",
         { operation: "prepare-document" },
@@ -109,7 +126,7 @@ export function RetainedMarkdownPreview({ generation, onExternalLink, resolveLin
       style.remove();
       Reflect.deleteProperty(element, "retainedMarkdownStats");
     };
-  }, [generation, onExternalLink, resolveLink]);
+  }, [generation, onExternalLink, resolveLink, prepareDocument]);
   return (
     <>
       <div ref={host} data-markdown-retained-root="true" />

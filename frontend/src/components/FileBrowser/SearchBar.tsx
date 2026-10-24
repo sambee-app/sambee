@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 interface SearchBarProps {
   value: string;
   onChange: (value: string) => void;
-  inputRef?: React.RefObject<HTMLInputElement>;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
   useCompactLayout?: boolean;
   /** Called when ESC is pressed on an empty search field */
   onBlurToFileList?: () => void;

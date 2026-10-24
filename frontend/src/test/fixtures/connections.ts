@@ -8,7 +8,7 @@ import type { Connection } from "../../types";
 /**
  * Standard test connections for general use
  */
-export const mockConnections: Connection[] = [
+export const mockConnections: [Connection, Connection] = [
   {
     id: "conn-1",
     name: "Test Server 1",

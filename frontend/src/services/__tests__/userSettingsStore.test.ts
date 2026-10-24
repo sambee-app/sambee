@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockAuthToken } from "../../test/fixtures/users";
 
 const { getCurrentUserSettingsMock, updateCurrentUserSettingsMock } = vi.hoisted(() => ({
   getCurrentUserSettingsMock: vi.fn(),
@@ -65,7 +66,7 @@ const settings = {
 
 async function authenticateAndLoad() {
   getCurrentUserSettingsMock.mockResolvedValue(settings);
-  authSession.setAuthenticated({ access_token: "token", token_type: "bearer", user_id: "user-1" }, false);
+  authSession.setAuthenticated(createMockAuthToken({ access_token: "token", token_type: "bearer", user_id: "user-1" }), false);
   await refreshCurrentUserSettings();
   await refreshCurrentUserSettings();
 }
@@ -98,7 +99,7 @@ describe("userSettingsStore", () => {
   });
 
   it("keeps a canonical field response when the initial settings snapshot is unavailable", async () => {
-    authSession.setAuthenticated({ access_token: "token", token_type: "bearer", user_id: "user-1" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "token", token_type: "bearer", user_id: "user-1" }), false);
     const result = { field: "appearance.theme_id", value: "sambee-dark" } as const;
     updateCurrentUserSettingsMock.mockResolvedValue(result);
 
@@ -125,7 +126,7 @@ describe("userSettingsStore", () => {
       ...settings,
       appearance: { ...settings.appearance, has_theme_override: false },
     });
-    authSession.setAuthenticated({ access_token: "token", token_type: "bearer", user_id: "user-1" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "token", token_type: "bearer", user_id: "user-1" }), false);
     await refreshCurrentUserSettings();
     await refreshCurrentUserSettings();
     updateCurrentUserSettingsMock.mockResolvedValue({ field: "appearance.theme_id", value: "sambee-light" });

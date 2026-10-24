@@ -30,7 +30,7 @@ function scrollEditorViewport(
   const scrollDelta = nextScrollTop - previousScrollTop;
 
   const selection = view.state.selection.main;
-  const cursorCoords = selection.empty ? view.coordsAtPos(selection.head, selection.assoc) : null;
+  const cursorCoords = selection.empty ? view.coordsAtPos(selection.head, selection.assoc === 0 ? undefined : selection.assoc) : null;
   const scrollerRect = scrollDOM.getBoundingClientRect();
   const caretMovement =
     cursorCoords && direction === EDITOR_VIEWPORT_SCROLL_DIRECTION.DOWN

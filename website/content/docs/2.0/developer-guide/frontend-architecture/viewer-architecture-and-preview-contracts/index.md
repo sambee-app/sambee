@@ -619,7 +619,7 @@ When you change viewer or file-type behavior, usually run:
 
 ```bash
 cd frontend && npm test
-cd frontend && npx tsc --noEmit
+cd frontend && npm run typecheck
 cd frontend && npm run lint
 cd backend && pytest -v
 ```

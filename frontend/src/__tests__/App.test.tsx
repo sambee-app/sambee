@@ -90,7 +90,7 @@ vi.mock("../pages/FileBrowser", () => ({
           onKeyDown={(event) => {
             if (event.key !== "ArrowDown") return;
             void navigate({ search: "?settings=account" }, { flushSync: true });
-            event.currentTarget.dataset.committedSearch = screen.getByTestId("mock-file-browser-location").textContent ?? "";
+            event.currentTarget.dataset["committedSearch"] = screen.getByTestId("mock-file-browser-location").textContent ?? "";
           }}
         >
           Next settings category

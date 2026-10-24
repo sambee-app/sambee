@@ -22,6 +22,8 @@ import { SOURCE_EDITOR_MEASURES, SourceTextEditor } from "../SourceTextEditor";
 import type { SourceTextEditorHandle } from "../sourceTextEditorTypes";
 
 const TEST_MARKDOWN_THEME: MarkdownEditorThemeOptions = {
+  currentSearchMatchBackground: "rgba(244, 196, 48, 0.32)",
+  otherSearchMatchBackground: "rgba(244, 196, 48, 0.18)",
   activeLineBackground: "rgba(244, 196, 48, 0.18)",
   borderColor: "rgba(31, 38, 43, 0.16)",
   isDarkMode: false,

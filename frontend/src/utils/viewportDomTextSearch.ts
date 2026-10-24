@@ -40,12 +40,14 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
   let ranges: Range[] = [];
 
   const locate = (offset: number) => {
-    const segments = indexed!.segments;
+    if (!indexed) return undefined;
+    const segments = indexed.segments;
     let low = 0;
     let high = segments.length - 1;
     while (low < high) {
       const middle = (low + high) >>> 1;
-      if (segments[middle].end <= offset) low = middle + 1;
+      const segment = segments[middle];
+      if (segment && segment.end <= offset) low = middle + 1;
       else high = middle;
     }
     return segments[low];
@@ -64,7 +66,8 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
     let high = matches.length;
     while (low < high) {
       const middle = (low + high) >>> 1;
-      if (matches[middle].end <= offset) low = middle + 1;
+      const match = matches[middle];
+      if (match && match.end <= offset) low = middle + 1;
       else high = middle;
     }
     return low;
@@ -76,7 +79,10 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
       const bounds = viewport.getBoundingClientRect();
       const limit = Math.min(pendingSegments.length, nextSegment + SEGMENTS_PER_FRAME);
       for (; nextSegment < limit && ranges.length < MAX_VIEWPORT_SEARCH_RANGES; nextSegment += 1) {
-        const segment = indexed!.segments[pendingSegments[nextSegment]];
+        const index = pendingSegments[nextSegment];
+        if (index === undefined) continue;
+        const segment = indexed?.segments[index];
+        if (!segment) continue;
         const parent = segment.node.parentElement;
         if (!parent) continue;
         const box = parent.getBoundingClientRect();
@@ -121,7 +127,7 @@ export function createViewportDomTextSearch(root: HTMLElement, viewport: HTMLEle
           const visibleTo = horizontal ? Math.min(lineEnd, columnAt(Math.min(bounds.right, clip.right), visibleFrom) + 1) : lineEnd;
           for (let index = firstMatchAt(visibleFrom); index < matches.length && ranges.length < MAX_VIEWPORT_SEARCH_RANGES; index += 1) {
             const match = matches[index];
-            if (match.start >= visibleTo) break;
+            if (!match || match.start >= visibleTo) break;
             const range = rangeAt(Math.max(visibleFrom, match.start), Math.min(visibleTo, match.end));
             if (range) ranges.push(range);
           }

@@ -53,7 +53,12 @@ export function* markdownTreeRecords(tree: Root): Generator<MarkdownTreeRecord> 
       for (let offset = 0; offset < Math.max(1, value.length); offset += MARKDOWN_TREE_TEXT_UNITS)
         yield { kind: "text", id, key, value: value.slice(offset, offset + MARKDOWN_TREE_TEXT_UNITS) };
     }
-    if (children) for (let index = children.length - 1; index >= 0; index -= 1) pending.push({ node: children[index], parent: id });
+    if (children) {
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const child = children[index];
+        if (child) pending.push({ node: child, parent: id });
+      }
+    }
   }
 }
 
@@ -70,21 +75,21 @@ export function createMarkdownTreeReceiver() {
         if (record.kind === "node") {
           if (
             record.id !== nodes.length ||
-            typeof record.node.type !== "string" ||
-            record.node.type.length > MARKDOWN_TREE_TEXT_UNITS ||
-            (record.id === 0 ? record.parent !== null || record.node.type !== "root" : record.parent === null) ||
+            typeof record.node["type"] !== "string" ||
+            record.node["type"].length > MARKDOWN_TREE_TEXT_UNITS ||
+            (record.id === 0 ? record.parent !== null || record.node["type"] !== "root" : record.parent === null) ||
             typeof record.children !== "boolean" ||
             !validNodeMetadata(record.node)
           )
             throw new Error("Invalid Markdown tree node");
           const node = { ...record.node, ...(record.children ? { children: [] } : {}) };
           if (record.parent !== null) {
-            const children = nodes[record.parent]?.children;
+            const children = nodes[record.parent]?.["children"];
             if (!Number.isSafeInteger(record.parent) || !Array.isArray(children)) throw new Error("Invalid Markdown tree parent");
             children.push(node);
           }
           nodes.push(node);
-          units += record.node.type.length;
+          units += record.node["type"].length;
         } else if (record.kind === "text") {
           if (
             !nodes[record.id] ||
@@ -104,18 +109,21 @@ export function createMarkdownTreeReceiver() {
       if (units > MARKDOWN_TREE_BATCH_UNITS) throw new Error("Markdown tree batch exceeded its text bound");
     },
     finish(): Root {
-      if (finished || nodes[0]?.type !== "root" || !Array.isArray(nodes[0]?.children)) throw new Error("Incomplete Markdown tree");
+      if (finished || nodes[0]?.["type"] !== "root" || !Array.isArray(nodes[0]?.["children"])) throw new Error("Incomplete Markdown tree");
       finished = true;
-      for (const [id, nodeFields] of fields)
+      for (const [id, nodeFields] of fields) {
+        const node = nodes[id];
+        if (!node) throw new Error("Missing Markdown tree node for text fields");
         for (const [key, chunks] of nodeFields) {
           const text = chunks.join("");
           if (key === "align") {
             const alignment: unknown = JSON.parse(text);
             if (!Array.isArray(alignment) || alignment.some((value) => value !== null && !["left", "right", "center"].includes(value)))
               throw new Error("Invalid Markdown table alignment");
-            nodes[id][key] = alignment;
-          } else nodes[id][key] = text;
+            node[key] = alignment;
+          } else node[key] = text;
         }
+      }
       fields.clear();
       return nodes[0] as unknown as Root;
     },

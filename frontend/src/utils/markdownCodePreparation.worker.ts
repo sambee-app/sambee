@@ -68,7 +68,7 @@ async function normalizeSource(source: string, generation: number, baseline?: st
       });
     };
     for (const record of markdownTreeRecords(tree)) {
-      const size = record.kind === "text" ? record.value.length : String(record.node.type).length;
+      const size = record.kind === "text" ? record.value.length : String(record.node["type"]).length;
       if (records.length === MARKDOWN_TREE_BATCH_RECORDS || units + size > MARKDOWN_TREE_BATCH_UNITS) await flush(false);
       records.push(record);
       units += size;

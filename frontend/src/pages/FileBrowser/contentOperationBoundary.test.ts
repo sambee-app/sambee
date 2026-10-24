@@ -54,23 +54,23 @@ function findForbiddenTransportImports(sourceFilePath: string, ast: unknown): st
     }
 
     const node = value as Record<string, unknown>;
-    const type = node.type;
-    const source = node.source as Record<string, unknown> | undefined;
-    const firstArgument = (node.arguments as unknown[] | undefined)?.[0] as Record<string, unknown> | undefined;
-    const typeImportArgument = node.argument as Record<string, unknown> | undefined;
+    const type = node["type"];
+    const source = node["source"] as Record<string, unknown> | undefined;
+    const firstArgument = (node["arguments"] as unknown[] | undefined)?.[0] as Record<string, unknown> | undefined;
+    const typeImportArgument = node["argument"] as Record<string, unknown> | undefined;
     const moduleSpecifier =
-      typeof source?.value === "string"
-        ? source.value
+      typeof source?.["value"] === "string"
+        ? source["value"]
         : type === "CallExpression" &&
-            (node.callee as Record<string, unknown> | undefined)?.type === "Import" &&
-            typeof firstArgument?.value === "string"
-          ? firstArgument.value
+            (node["callee"] as Record<string, unknown> | undefined)?.["type"] === "Import" &&
+            typeof firstArgument?.["value"] === "string"
+          ? firstArgument["value"]
           : type === "CallExpression" &&
-              (node.callee as Record<string, unknown> | undefined)?.name === "require" &&
-              typeof firstArgument?.value === "string"
-            ? firstArgument.value
-            : type === "TSImportType" && typeof typeImportArgument?.value === "string"
-              ? typeImportArgument.value
+              (node["callee"] as Record<string, unknown> | undefined)?.["name"] === "require" &&
+              typeof firstArgument?.["value"] === "string"
+            ? firstArgument["value"]
+            : type === "TSImportType" && typeof typeImportArgument?.["value"] === "string"
+              ? typeImportArgument["value"]
               : null;
     if (typeof moduleSpecifier === "string" && isForbiddenTransportSpecifier(sourceFilePath, moduleSpecifier)) {
       forbiddenImports.push(`${sourceFilePath}: ${moduleSpecifier}`);
@@ -82,9 +82,9 @@ function findForbiddenTransportImports(sourceFilePath: string, ast: unknown): st
 }
 
 function getPropertyName(node: Record<string, unknown>): string | null {
-  const key = node.key as Record<string, unknown> | undefined;
-  if (key?.type === "Identifier" && typeof key.name === "string") return key.name;
-  if (key?.type === "StringLiteral" && typeof key.value === "string") return key.value;
+  const key = node["key"] as Record<string, unknown> | undefined;
+  if (key?.["type"] === "Identifier" && typeof key["name"] === "string") return key["name"];
+  if (key?.["type"] === "StringLiteral" && typeof key["value"] === "string") return key["value"];
   return null;
 }
 
@@ -100,13 +100,13 @@ function findForbiddenListingLoaderAccess(sourceFilePath: string, ast: unknown):
     }
 
     const node = value as Record<string, unknown>;
-    const type = node.type;
-    const property = node.property as Record<string, unknown> | undefined;
+    const type = node["type"];
+    const property = node["property"] as Record<string, unknown> | undefined;
     const propertyName = getPropertyName(node);
-    const memberName = property?.type === "Identifier" && typeof property.name === "string" ? property.name : null;
+    const memberName = property?.["type"] === "Identifier" && typeof property["name"] === "string" ? property["name"] : null;
     if (
       (type === "MemberExpression" || type === "OptionalMemberExpression") &&
-      !node.computed &&
+      !node["computed"] &&
       memberName !== null &&
       privateListingLoaderNames.has(memberName)
     ) {

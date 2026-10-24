@@ -38,7 +38,9 @@ export function findSelectedCodeMirrorSearchMatch(ranges: readonly SearchMatchRa
   let high = ranges.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
-    if (ranges[middle].from < selection.from) low = middle + 1;
+    const range = ranges[middle];
+    if (!range) return -1;
+    if (range.from < selection.from) low = middle + 1;
     else high = middle;
   }
   const match = ranges[low];

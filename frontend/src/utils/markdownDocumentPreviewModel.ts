@@ -55,14 +55,19 @@ export function documentSyntaxPage(
   let high = ranges.length;
   while (low < high) {
     const middle = low + Math.floor((high - low) / 2);
-    if (ranges[middle].to <= window.from) low = middle + 1;
+    const range = ranges[middle];
+    if (range && range.to <= window.from) low = middle + 1;
     else high = middle;
   }
   const records: Extract<MarkdownDocumentRecord, { kind: "syntax" }>[] = [];
   let index = low + offset;
-  for (; index < ranges.length && ranges[index].from < window.to && records.length < DOCUMENT_RECORD_BATCH_ITEMS; index += 1)
-    records.push({ kind: "syntax", id: window.id, range: ranges[index] });
-  return { records, next: index < ranges.length && ranges[index].from < window.to ? index - low : null };
+  for (; index < ranges.length && records.length < DOCUMENT_RECORD_BATCH_ITEMS; index += 1) {
+    const range = ranges[index];
+    if (!range || range.from >= window.to) break;
+    records.push({ kind: "syntax", id: window.id, range });
+  }
+  const nextRange = ranges[index];
+  return { records, next: nextRange && nextRange.from < window.to ? index - low : null };
 }
 
 export async function createMarkdownDocumentModel(
@@ -118,8 +123,8 @@ export function* markdownDocumentRecords(model: MarkdownDocumentModel): Generato
     }
     if (node.tagName === "code" && entry.parentTag === "pre" && node.children.every((child) => child.type === "text")) {
       const text = node.children.map((child) => (child.type === "text" ? child.value : "")).join("");
-      const label = Array.isArray(node.properties.className)
-        ? node.properties.className.find((name) => String(name).startsWith("language-"))
+      const label = Array.isArray(node.properties["className"])
+        ? node.properties["className"].find((name) => String(name).startsWith("language-"))
         : undefined;
       model.codeBlocks.push({ id, text, label: label ? String(label).slice("language-".length) : null });
       for (const fragment of [...createCodePreviewModel(text, []).fragments].reverse()) {

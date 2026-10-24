@@ -25,7 +25,7 @@ export async function fetchVersionInfo(): Promise<VersionInfo | null> {
 
   try {
     // Use absolute URL for tests (required by MSW), relative for production
-    const baseURL = import.meta.env.VITE_API_URL || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
+    const baseURL = import.meta.env["VITE_API_URL"] || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
     const response = await fetch(`${baseURL}/version`, { signal: abortController.signal });
     if (!response.ok) {
       logger.warn("Failed to fetch version info", { status: response.statusText }, "api");

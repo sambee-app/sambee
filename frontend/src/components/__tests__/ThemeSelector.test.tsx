@@ -192,7 +192,7 @@ describe("ThemeSelector Component", () => {
       await user.click(screen.getByText(/Sambee dark/i).closest("button")!);
 
       expect(screen.getByRole("status", { name: "Saving setting" })).toBeInTheDocument();
-      expect(screen.getAllByRole("button").filter((button) => button.closest(".MuiCard-root"))).toSatisfy((cards) =>
+      expect(screen.getAllByRole("button").filter((button) => button.closest(".MuiCard-root"))).toSatisfy((cards: HTMLElement[]) =>
         cards.every((card) => card.hasAttribute("disabled"))
       );
     });

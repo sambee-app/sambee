@@ -198,7 +198,7 @@ function createGroupedProvider(onSelect: SearchProvider["onSelect"]): SearchProv
 function createRemovableGroupedProvider(): SearchProvider {
   let hasRemovedRecent = false;
 
-  const getResults = () => [
+  const getResults = (): Awaited<ReturnType<SearchProvider["fetchResults"]>> => [
     { kind: "group-header" as const, id: "recent", value: "", label: "Recent files" },
     ...(!hasRemovedRecent
       ? [
@@ -218,7 +218,7 @@ function createRemovableGroupedProvider(): SearchProvider {
       icon: "recent-file" as const,
       primaryText: "Second recent file",
     },
-    { kind: "group-header" as const, id: "current", value: "", label: "Current directory" },
+    { kind: "group-header" as const, id: "current", value: "" as const, label: "Current directory" },
     {
       kind: "result" as const,
       id: "current-file",

@@ -130,7 +130,7 @@ cd "$REPO_ROOT/frontend" || exit 1
 
 # TypeScript - Type checking
 echo -e "${BLUE}Running TypeScript compiler (type checking)...${NC}"
-run_check "TypeScript type check passed" "TypeScript type check failed" npx tsc --noEmit
+run_check "TypeScript type check passed" "TypeScript type check failed" npm run typecheck
 
 echo -e "${BLUE}Running Biome lint...${NC}"
 run_check "Frontend lint passed" "Frontend lint failed" npm run lint

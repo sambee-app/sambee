@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../../services/authSession";
 import { createDraftCheckpointController, DRAFT_TRANSITION_FLUSH_MS } from "../../../services/draftCheckpoint";
 import { loadDraft } from "../../../services/draftRecovery";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import type { PreparationRequest, PreparationResponse } from "../../../utils/markdownCodePreparation";
 import type { MarkdownEditorThemeOptions } from "../../Editor/buildMarkdownEditorTheme";
 import { getCodeMirrorFindReplaceMetrics } from "../codeMirrorFindReplace";
@@ -67,6 +68,8 @@ class EditNormalizationWorker extends EventTarget {
 }
 
 const TEST_MARKDOWN_THEME: MarkdownEditorThemeOptions = {
+  currentSearchMatchBackground: "rgba(244, 196, 48, 0.32)",
+  otherSearchMatchBackground: "rgba(244, 196, 48, 0.18)",
   activeLineBackground: "rgba(244, 196, 48, 0.18)",
   borderColor: "rgba(31, 38, 43, 0.16)",
   isDarkMode: false,
@@ -141,16 +144,16 @@ describe("MarkdownRichEditor", () => {
     act(() =>
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "| A |\n| - |\n| first<br>second |\n" }, userEvent: "input" })
     );
-    await waitFor(() => expect(EditNormalizationWorker.instances[0].source).toContain("first<br>second"));
+    await waitFor(() => expect(requireTestValue(EditNormalizationWorker.instances[0]).source).toContain("first<br>second"));
     expect(onNormalizationStateChange).toHaveBeenLastCalledWith(true);
     expect(onChange).not.toHaveBeenCalled();
     expect(() => handle.captureSnapshotSync()).toThrow(/normalization/);
     const captured = handle.captureSnapshot();
     act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: "latest" }, userEvent: "input" }));
-    await act(async () => EditNormalizationWorker.instances[0].complete());
-    await waitFor(() => expect(EditNormalizationWorker.instances[1].source).toContain("latest"));
+    await act(async () => requireTestValue(EditNormalizationWorker.instances[0]).complete());
+    await waitFor(() => expect(requireTestValue(EditNormalizationWorker.instances[1]).source).toContain("latest"));
     expect(onChange).not.toHaveBeenCalled();
-    await act(async () => EditNormalizationWorker.instances[1].complete());
+    await act(async () => requireTestValue(EditNormalizationWorker.instances[1]).complete());
     const snapshot = await captured;
     expect(snapshot.serialize()).toContain("first<br />second");
     expect(snapshot.serialize()).toContain("latest");
@@ -181,16 +184,16 @@ describe("MarkdownRichEditor", () => {
     const handle = editorRef.current;
     if (!view || !handle) throw new Error("Expected the Markdown editor");
     act(() => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "first<br>second" }, userEvent: "input" }));
-    await waitFor(() => expect(EditNormalizationWorker.instances[0].source).toContain("first<br>second"));
-    const worker = EditNormalizationWorker.instances[0];
+    await waitFor(() => expect(requireTestValue(EditNormalizationWorker.instances[0]).source).toContain("first<br>second"));
+    const worker = requireTestValue(EditNormalizationWorker.instances[0]);
     await act(async () => worker.receive({ type: "error", generation: worker.generation, message: "normalization unavailable" }));
     expect(onNormalizationStateChange).toHaveBeenLastCalledWith(true, expect.objectContaining({ message: "normalization unavailable" }));
     expect(onChange).not.toHaveBeenCalled();
     expect(() => handle.captureSnapshotSync()).toThrow("normalization unavailable");
     expect(EditNormalizationWorker.instances).toHaveLength(1);
     const retry = handle.captureSnapshot();
-    await waitFor(() => expect(EditNormalizationWorker.instances[1].source).toContain("first<br>second"));
-    await act(async () => EditNormalizationWorker.instances[1].complete());
+    await waitFor(() => expect(requireTestValue(EditNormalizationWorker.instances[1]).source).toContain("first<br>second"));
+    await act(async () => requireTestValue(EditNormalizationWorker.instances[1]).complete());
     expect((await retry).serialize()).toBe("first<br>second");
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(view.state.doc.toString()).toContain("first<br>second");
@@ -208,8 +211,8 @@ describe("MarkdownRichEditor", () => {
     act(() =>
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "| A |\n| - |\n| first<br>second |\n" }, userEvent: "input" })
     );
-    await waitFor(() => expect(EditNormalizationWorker.instances[0].source).toContain("first<br>second"));
-    const worker = EditNormalizationWorker.instances[0];
+    await waitFor(() => expect(requireTestValue(EditNormalizationWorker.instances[0]).source).toContain("first<br>second"));
+    const worker = requireTestValue(EditNormalizationWorker.instances[0]);
     const late = worker.onmessage;
     const cancelled = expect(editorRef.current?.captureSnapshot()).rejects.toMatchObject({ name: "AbortError" });
     rerender(
@@ -284,7 +287,7 @@ describe("MarkdownRichEditor", () => {
     const snapshot = await editorRef.current?.captureSnapshot();
     expect(snapshot?.serialize()).toBe("- first\n- second\n\n1. first\n1. second\n");
     expect(EditNormalizationWorker.instances).toHaveLength(1);
-    expect(EditNormalizationWorker.instances[0].terminated).toBe(true);
+    expect(requireTestValue(EditNormalizationWorker.instances[0]).terminated).toBe(true);
   });
 
   it("does not replay a canonical echo over an edit delivered before passive effects", () => {

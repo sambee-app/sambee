@@ -89,7 +89,7 @@ describe("ThemeEditorDialog", () => {
     const user = userEvent.setup();
     const create = vi.spyOn(api, "createTheme");
     const { onClose } = renderEditor();
-    expect(screen.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 
     await user.clear(screen.getByDisplayValue(theme.primary.main));
     await user.type(screen.getByRole("textbox", { name: /Main/ }), "#bad");
@@ -222,7 +222,7 @@ describe("ThemeEditorDialog", () => {
 
     await user.clear(screen.getByDisplayValue("Writable"));
     await user.type(screen.getByRole("textbox", { name: /Name/ }), "Updated");
-    await user.click(screen.getByRole("button", { name: "Save", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(update).toHaveBeenCalledWith(stored, expect.objectContaining({ name: "Updated" })));
     expect(onSaved).toHaveBeenCalledWith(stored.id, false);
@@ -356,7 +356,7 @@ describe("ThemeEditorDialog", () => {
     );
 
     expect(screen.queryByRole("combobox", { name: "Storage" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     await chooseCopyDestination(user);
 
     await waitFor(() => expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: "Site theme" }), "user"));

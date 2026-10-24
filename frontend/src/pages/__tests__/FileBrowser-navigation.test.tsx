@@ -1,3 +1,5 @@
+import { createMockAuthToken } from "../../test/fixtures/users";
+import { requireTestValue, uninitializedTestCallback } from "../../test/helpers/assertions";
 /**
  * Browser Component - Navigation Tests
  * Tests for directory navigation, breadcrumbs, URL handling, and connection switching
@@ -9,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { type ApiMock, createMarkdownViewerMock, createSettingsDialogMock, setupNavigationApiMocks } from "../../test/helpers";
+import { createMockCurrentUserSettings } from "../../test/helpers/mockFactories";
 import type { FileInfo } from "../../types";
 import { FileType } from "../../types";
 import { mockDirectoryListing, renderBrowser } from "./FileBrowser.test.utils";
@@ -27,7 +30,7 @@ const createDirectoryEntry = (name: string, path: string): FileInfo => ({
   name,
   path,
   type: FileType.DIRECTORY,
-  size: null,
+  size: undefined,
   modified_at: "2024-01-12T10:00:00Z",
   is_readable: true,
   is_hidden: false,
@@ -55,7 +58,7 @@ vi.mock("@tanstack/react-virtual", () => import("../../__mocks__/@tanstack/react
 describe("Browser Component - Navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     localStorage.removeItem("selectedConnectionId");
 
     // Use navigation mock factory for directory navigation tests
@@ -101,7 +104,7 @@ describe("Browser Component - Navigation", () => {
 
     // Click on Documents folder - get the button role to be more specific
     const documentsFolders = screen.getAllByRole("button", { name: /documents/i });
-    await user.click(documentsFolders[0]);
+    await user.click(requireTestValue(documentsFolders[0]));
 
     // Should load files from Documents directory
     await waitFor(() => {
@@ -245,7 +248,7 @@ describe("Browser Component - Navigation", () => {
       },
     ];
 
-    let resolveSubfolder: ((value: { items: FileInfo[]; path: string; total: number }) => void) | null = null;
+    let resolveSubfolder: (value: { items: FileInfo[]; path: string; total: number }) => void = uninitializedTestCallback;
 
     vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
       if (path === "Documents") {
@@ -262,7 +265,7 @@ describe("Browser Component - Navigation", () => {
     expect(await screen.findByText("readme.txt")).toBeInTheDocument();
 
     const documentsFolders = screen.getAllByRole("button", { name: /documents/i });
-    await user.click(documentsFolders[0]);
+    await user.click(requireTestValue(documentsFolders[0]));
 
     await waitFor(() => {
       expectDirectoryLoad("conn-1", "Documents");
@@ -353,20 +356,24 @@ describe("Browser Component - Navigation", () => {
   });
 
   it("uses the persisted user setting for the default connection when no URL param", async () => {
-    vi.mocked(api.getCurrentUserSettings).mockResolvedValue({
-      appearance: { theme_id: "sambee-light", custom_themes: [] },
-      localization: {
-        language: "browser",
-        regional_locale: "browser",
-      },
-      browser: {
-        quick_nav_include_dot_directories: false,
-        file_browser_view_mode: "list",
-        pane_mode: "single",
-        selected_connection_id: "conn-1",
-        viewer_associations: {},
-      },
-    });
+    vi.mocked(api.getCurrentUserSettings).mockResolvedValue(
+      createMockCurrentUserSettings({
+        appearance: { theme_id: "sambee-light", custom_themes: [] },
+        localization: {
+          language: "browser",
+          regional_locale: "browser",
+        },
+        browser: {
+          quick_bar_shortcut_hint_visibility: "auto",
+          touch_friendly_file_selection: "auto",
+          quick_nav_include_dot_directories: false,
+          file_browser_view_mode: "list",
+          pane_mode: "single",
+          selected_connection_id: "conn-1",
+          viewer_associations: {},
+        },
+      })
+    );
 
     renderBrowser("/browse");
 
@@ -431,8 +438,8 @@ describe("Browser Component - Navigation", () => {
   it("ignores stale directory responses after switching connections", async () => {
     const user = userEvent.setup();
 
-    let resolveConn1: ((value: typeof mockDirectoryListing) => void) | null = null;
-    let resolveConn2: ((value: { items: FileInfo[]; path: string; total: number }) => void) | null = null;
+    let resolveConn1: (value: typeof mockDirectoryListing) => void = uninitializedTestCallback;
+    let resolveConn2: (value: { items: FileInfo[]; path: string; total: number }) => void = uninitializedTestCallback;
 
     const conn2Files: FileInfo[] = [
       {

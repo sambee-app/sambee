@@ -2,6 +2,7 @@ import { createTheme, getContrastRatio } from "@mui/material/styles";
 import { blend, decomposeColor } from "@mui/system/colorManipulator";
 import { describe, expect, it } from "vitest";
 import builtInThemeIds from "../../../../shared/built_in_theme_ids.json";
+import { requireTestValue } from "../../test/helpers/assertions";
 import { getSearchHighlightColors } from "../commonStyles";
 import { resolveThemePalette } from "../palette";
 import { builtInThemes, getDefaultTheme, getThemeById } from "../themes";
@@ -30,7 +31,9 @@ describe("Theme System - themes.ts", () => {
         [document.viewerText, document.viewerBackground],
         [document.document!.codeText, document.document!.blockBackground],
       ]) {
-        expect(getContrastRatio(foreground, blend(background, overlay, opacity))).toBeGreaterThanOrEqual(4.5);
+        expect(
+          getContrastRatio(requireTestValue(foreground), blend(requireTestValue(background), overlay, opacity))
+        ).toBeGreaterThanOrEqual(4.5);
       }
     }
   });

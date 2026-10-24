@@ -10,6 +10,7 @@ const FEEDBACK_CLASS = "sambee-source-replacement-feedback";
 const feedbackUpdated = StateEffect.define<null>();
 
 const pending = new WeakMap<EditorView, SourceReplacementFeedback>();
+const feedbackViews = new WeakSet<EditorView>();
 
 const feedbackTheme = EditorView.baseTheme({
   [`& .${FEEDBACK_CLASS}`]: {
@@ -40,7 +41,9 @@ const feedbackTheme = EditorView.baseTheme({
 
 const feedbackLifecycle = ViewPlugin.fromClass(
   class {
-    constructor(private view: EditorView) {}
+    constructor(private view: EditorView) {
+      feedbackViews.add(view);
+    }
 
     update() {
       const feedback = pending.get(this.view);
@@ -48,6 +51,7 @@ const feedbackLifecycle = ViewPlugin.fromClass(
     }
 
     destroy() {
+      feedbackViews.delete(this.view);
       pending.get(this.view)?.dispose();
     }
   }
@@ -97,7 +101,7 @@ class SourceReplacementFeedback {
   current(): boolean {
     return (
       !this.disposed &&
-      !this.view.destroyed &&
+      feedbackViews.has(this.view) &&
       this.view.state.doc === this.document &&
       this.view.state.selection === this.selection &&
       this.query.eq(getSearchQuery(this.view.state)) &&
@@ -107,7 +111,7 @@ class SourceReplacementFeedback {
 
   notify(): void {
     queueMicrotask(() => {
-      if (!this.view.destroyed) this.view.dispatch({ effects: feedbackUpdated.of(null) });
+      if (feedbackViews.has(this.view)) this.view.dispatch({ effects: feedbackUpdated.of(null) });
     });
   }
 

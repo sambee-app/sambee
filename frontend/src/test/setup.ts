@@ -37,19 +37,20 @@ Object.defineProperty(window, "location", {
 // Start MSW server before all tests
 beforeAll(() => {
   server.listen({
-    onUnhandledRequest(request, print) {
+    onUnhandledFrame({ frame, defaults }) {
       // Ignore WebSocket connection attempts - they're mocked separately
-      if (request.url.includes("/api/ws") || request.url.startsWith("ws://")) {
+      if (frame.protocol === "ws") {
         return;
       }
+      const request = frame.data && typeof frame.data === "object" && "request" in frame.data ? frame.data.request : null;
       // Ignore companion background health probes triggered by FileBrowser.
       // These requests are expected during test startup and their failures are
       // already handled by the hook as a normal "companion unavailable" path.
-      if (request.url === "http://localhost:21549/api/health") {
+      if (request instanceof Request && (request.url.includes("/api/ws") || request.url === "http://localhost:21549/api/health")) {
         return;
       }
       // Warn about other unhandled requests
-      print.warning();
+      defaults.warn();
     },
   });
 });
@@ -149,7 +150,7 @@ Object.defineProperty(window, "localStorage", {
   value: localStorageMock,
 });
 
-if (typeof globalThis.Iterator === "undefined") {
+if (typeof Reflect.get(globalThis, "Iterator") === "undefined") {
   class IteratorHelperPolyfill<TValue> {
     private readonly values: TValue[];
 

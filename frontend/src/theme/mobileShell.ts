@@ -15,7 +15,7 @@ export const MOBILE_VIEWPORT_HEIGHT = "100dvh";
  * This prevents iOS Safari and Chrome mobile browser UI changes from dragging
  * the entire app surface under hardware cutouts or browser chrome.
  */
-export function getMobileViewportShellSx(lockToViewport = false): SxProps<Theme> {
+export function getMobileViewportShellSx(lockToViewport = false) {
   return {
     display: "flex",
     flexDirection: "column",
@@ -32,7 +32,7 @@ export function getMobileViewportShellSx(lockToViewport = false): SxProps<Theme>
           inset: { xs: 0 },
         }
       : {}),
-  };
+  } satisfies SxProps<Theme>;
 }
 
 export const mobileSafeAreaAppBarSx: SxProps<Theme> = {
@@ -59,15 +59,15 @@ export const mobileScrollableContentSx: SxProps<Theme> = {
   WebkitOverflowScrolling: "touch",
 };
 
-export const mobileFullscreenDrawerPaperSx: SxProps<Theme> = {
+export const mobileFullscreenDrawerPaperSx = {
   width: "100%",
   height: MOBILE_VIEWPORT_HEIGHT,
   maxHeight: MOBILE_VIEWPORT_HEIGHT,
   overflow: "hidden",
-};
+} satisfies SxProps<Theme>;
 
 /** Compact typography policy for the main navigation drawer. */
-export const mobileNavigationDrawerTypographySx: SxProps<Theme> = (theme) => ({
+export const mobileNavigationDrawerTypographySx = ((theme: Theme) => ({
   [theme.breakpoints.down("sm")]: {
     "& .MuiTypography-h6": {
       fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_TITLE_PX}px`,
@@ -76,4 +76,4 @@ export const mobileNavigationDrawerTypographySx: SxProps<Theme> = (theme) => ({
       fontSize: `${COMPACT_LAYOUT_SIZE.MENU_TEXT_PX}px`,
     },
   },
-});
+})) satisfies SxProps<Theme>;

@@ -35,7 +35,7 @@ export const replaceAll = (view: EditorView): boolean => {
     () => nativeReplaceAll(view),
     true,
     (error) => {
-      logger.error("Atomic replacement failed; retry Replace All.", error);
+      logger.error("Atomic replacement failed; retry Replace All.", { error });
       view.dispatch({ effects: EditorView.announce.of(t("viewer.edit.replacementFailed")) });
     }
   );

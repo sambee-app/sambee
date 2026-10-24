@@ -26,6 +26,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockConnection } from "../../test/fixtures/connections";
 import type { Connection, FileEntry } from "../../types";
 import { FileType } from "../../types";
+import { physicalLocation } from "../FileBrowser/contentProviders";
 import { FileBrowserPane, type FileBrowserPaneProps } from "../FileBrowser/FileBrowserPane";
 import type { UseFileBrowserPaneReturn } from "../FileBrowser/types";
 
@@ -105,7 +106,7 @@ vi.mock("@tanstack/react-virtual", () => import("../../__mocks__/@tanstack/react
 
 const TEST_CONNECTION_ID = "conn-1";
 
-const testConnections: Connection[] = [
+const testConnections: [Connection, Connection] = [
   createMockConnection({ id: TEST_CONNECTION_ID, name: "My NAS" }),
   createMockConnection({ id: "conn-2", name: "Backup Server" }),
 ];
@@ -141,6 +142,21 @@ function createMockPane(overrides: Partial<UseFileBrowserPaneReturn> = {}): UseF
     connectionId: TEST_CONNECTION_ID,
     setConnectionId: vi.fn(),
     currentPath: "some/path",
+    currentLocation: physicalLocation(TEST_CONNECTION_ID, "some/path"),
+    contentCapabilities: { browse: true, read: true, download: true, extract: true, mutate: true, openInNativeApp: true },
+    companionPairingError: null,
+    removeSelectedPaths: vi.fn(),
+    selectItem: vi.fn(),
+    toggleItemSelection: vi.fn(),
+    selectItemFromIcon: vi.fn(),
+    getItemsByPaths: vi.fn().mockReturnValue([]),
+    handleOpenFileAtPath: vi.fn().mockResolvedValue(undefined),
+    navigateToPath: vi.fn(),
+    handleDeleteForFile: vi.fn(),
+    seedDirectorySnapshot: vi.fn(),
+    applyLocation: vi.fn(),
+    captureRecoverySnapshot: vi.fn().mockReturnValue(null),
+    restoreRecoverySnapshot: vi.fn(),
     setCurrentPath: vi.fn(),
     archiveLocation: null,
     archiveHasMore: false,
@@ -189,7 +205,7 @@ function createMockPane(overrides: Partial<UseFileBrowserPaneReturn> = {}): UseF
 
     // Dialog state
     deleteDialogOpen: false,
-    deleteTarget: null,
+    deleteTargets: [],
     isDeleting: false,
     renameDialogOpen: false,
     renameTarget: null,
@@ -287,6 +303,7 @@ function defaultProps(overrides: Partial<FileBrowserPaneProps> = {}): FileBrowse
     useCompactLayout: false,
     isUsingKeyboard: false,
     onPaneFocus: vi.fn(),
+    searchProvider: createMockPane().directorySearchProvider,
     ...overrides,
   };
 }
@@ -374,7 +391,7 @@ describe("FileBrowserPane", () => {
 
     it("renders an archive location in the existing breadcrumb trail", () => {
       const pane = createMockPane({
-        archiveLocation: { archivePath: "some/path/backup.zip", virtualPath: "nested" },
+        archiveLocation: { providerId: "zip", archivePath: "some/path/backup.zip", virtualPath: "nested" },
       });
       render(<FileBrowserPane {...defaultProps({ pane })} />);
 

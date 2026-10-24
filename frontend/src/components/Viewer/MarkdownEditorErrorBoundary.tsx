@@ -43,7 +43,7 @@ class MarkdownEditorErrorBoundary extends Component<MarkdownEditorErrorBoundaryP
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2, py: 2 }}>
         <Alert severity="error">
-          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
             {this.props.title}
           </Typography>
           <Typography variant="body2">{this.props.description}</Typography>

@@ -100,10 +100,10 @@ export function clearDomTextSearchHighlights(container: ParentNode | null): void
 
 function clearHighlights(container: ParentNode): void {
   const highlights = container.querySelectorAll(DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR);
-  const parents = new Set<Node>();
+  const parents = new Set<Element | Document | DocumentFragment>();
   for (const highlight of highlights) {
     const parent = highlight.parentNode;
-    if (parent) parents.add(parent);
+    if (parent instanceof Element || parent instanceof Document || parent instanceof DocumentFragment) parents.add(parent);
   }
   for (const parent of parents) {
     const fragment = document.createDocumentFragment();
@@ -141,7 +141,7 @@ function indexTextNode(node: Text, indexedText: DomTextIndexBuilder): void {
   const start = indexedText.length;
   indexedText.chunks.push(text);
   indexedText.length += text.length;
-  indexedText.lastCharacter = text[text.length - 1];
+  indexedText.lastCharacter = text.slice(-1);
   indexedText.segments.push({
     node,
     start,
@@ -228,12 +228,14 @@ export function buildHighlightSlices(indexedText: IndexedDomText, matches: Logic
   let segmentIndex = 0;
 
   for (const match of matches) {
-    while (segmentIndex < indexedText.segments.length && indexedText.segments[segmentIndex].end <= match.start) {
+    while (segmentIndex < indexedText.segments.length) {
+      const segment = indexedText.segments[segmentIndex];
+      if (!segment || segment.end > match.start) break;
       segmentIndex += 1;
     }
     for (let overlapIndex = segmentIndex; overlapIndex < indexedText.segments.length; overlapIndex += 1) {
       const segment = indexedText.segments[overlapIndex];
-      if (segment.start >= match.end) break;
+      if (!segment || segment.start >= match.end) break;
 
       const overlappingStart = Math.max(match.start, segment.start);
       const overlappingEnd = Math.min(match.end, segment.end);

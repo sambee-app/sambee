@@ -63,7 +63,13 @@ export function prepareMarkdownSyntax(blocks: readonly CodeBlockRequest[], signa
     };
     const source = () => {
       if (settled) return;
-      while (block < blocks.length && blocks[block].text.length > MAX_STATIC_BLOCK_LENGTH) {
+      while (block < blocks.length) {
+        const request = blocks[block];
+        if (!request) {
+          fail(new Error("Missing syntax source block"));
+          return;
+        }
+        if (request.text.length <= MAX_STATIC_BLOCK_LENGTH) break;
         results.push({ reason: "block-too-large" });
         block += 1;
       }
@@ -74,6 +80,10 @@ export function prepareMarkdownSyntax(blocks: readonly CodeBlockRequest[], signa
         return;
       }
       const request = blocks[block];
+      if (!request) {
+        fail(new Error("Missing syntax source block"));
+        return;
+      }
       const text = request.text.slice(offset, offset + SYNTAX_SOURCE_CHUNK_UNITS);
       offset += text.length;
       send({ type: "source", block: workerBlock, text, label: request.label, final: offset === request.text.length });
@@ -89,10 +99,11 @@ export function prepareMarkdownSyntax(blocks: readonly CodeBlockRequest[], signa
         } else if (response.type === "source-ack") {
           source();
         } else if (response.type === "ranges") {
-          if (response.block !== workerBlock || response.ranges.length > SYNTAX_RESULT_PAGE_RANGES)
+          const request = blocks[block];
+          if (!request || response.block !== workerBlock || response.ranges.length > SYNTAX_RESULT_PAGE_RANGES)
             throw new Error("Invalid syntax result page");
           for (const range of response.ranges) {
-            if (range.from < (ranges.at(-1)?.to ?? 0) || range.to <= range.from || range.to > blocks[block].text.length)
+            if (range.from < (ranges.at(-1)?.to ?? 0) || range.to <= range.from || range.to > request.text.length)
               throw new Error("Invalid syntax result offsets");
             ranges.push(range);
           }

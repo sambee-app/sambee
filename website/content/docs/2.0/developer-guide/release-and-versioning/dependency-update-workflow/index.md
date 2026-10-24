@@ -110,7 +110,7 @@ Common examples:
 ```bash
 cd backend && pytest -v
 cd backend && mypy app
-cd frontend && npx tsc --noEmit && npm run lint
+cd frontend && npm run typecheck && npm run lint
 cd companion && npx tsc --noEmit && npm run lint
 ```
 

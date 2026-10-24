@@ -36,11 +36,11 @@ export const COLOR_ROLES: ColorRole[] = [
   ...collectColors(THEME_SCHEMA["components"]!.fields!["syntax"]!, "components.syntax", "Syntax"),
   ...["primary", "background", "text", "action"].flatMap((key) => collectColors(THEME_SCHEMA[key]!, key, "Core")),
   ...["pdfViewer", "imageViewer", "markdownViewer"].flatMap((key) =>
-    collectColors(THEME_SCHEMA.components!.fields![key]!, `components.${key}`, key === "markdownViewer" ? "Markdown" : "Viewers")
+    collectColors(THEME_SCHEMA["components"]!.fields![key]!, `components.${key}`, key === "markdownViewer" ? "Markdown" : "Viewers")
   ),
   ...["link", "search", "alert"].flatMap((key) =>
     collectColors(
-      THEME_SCHEMA.components!.fields![key]!,
+      THEME_SCHEMA["components"]!.fields![key]!,
       `components.${key}`,
       key === "link" ? "Core" : key === "search" ? "Search" : "Alerts"
     )
@@ -103,15 +103,18 @@ export function parseThemeImport(source: string): ThemeConfig {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Import a versioned theme definition.");
   const exportFile = parsed as Record<string, unknown>;
   if (
-    exportFile.version !== THEME_DEFINITION_VERSION ||
-    !exportFile.definition ||
-    typeof exportFile.definition !== "object" ||
-    Array.isArray(exportFile.definition)
+    exportFile["version"] !== THEME_DEFINITION_VERSION ||
+    !exportFile["definition"] ||
+    typeof exportFile["definition"] !== "object" ||
+    Array.isArray(exportFile["definition"])
   ) {
     throw new Error("Unsupported theme format or version.");
   }
-  const definition = exportFile.definition as Record<string, unknown>;
-  if (typeof definition.name !== "string" || (definition.description !== undefined && typeof definition.description !== "string")) {
+  const definition = exportFile["definition"] as Record<string, unknown>;
+  if (
+    typeof definition["name"] !== "string" ||
+    (definition["description"] !== undefined && typeof definition["description"] !== "string")
+  ) {
     throw new Error("Theme name and description must be text.");
   }
   const allowedPaths = new Set(["id", "name", "description", "mode"]);
@@ -127,7 +130,7 @@ export function parseThemeImport(source: string): ThemeConfig {
     }
   };
   checkPaths(definition);
-  const theme = resolveSyntaxTheme({ ...(exportFile.definition as ThemeConfig), id: "draft" });
+  const theme = resolveSyntaxTheme({ ...(exportFile["definition"] as ThemeConfig), id: "draft" });
   for (const role of COLOR_ROLES) {
     const value = colorAt(theme, role.path);
     if (!HEX_COLOR_PATTERN.test(value ?? "")) {

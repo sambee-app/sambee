@@ -6,6 +6,7 @@ import { loadAuthenticationSettingsData, SETTINGS_DATA_CACHE_KEYS } from "../../
 import { clearCachedAsyncData, getCachedAsyncData, primeCachedAsyncData } from "../../hooks/useCachedAsyncData";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
+import { uninitializedTestCallback } from "../../test/helpers/assertions";
 import type { OidcAdminConfigurationRead, OidcReviewedPolicy, OidcTestedIdentity, RedactedOidcConfiguration } from "../../types";
 import { AuthenticationSettings } from "../AuthenticationSettings";
 
@@ -268,6 +269,7 @@ describe("Authentication settings", () => {
     const activated = configuration("Activated Provider");
     vi.mocked(api.getOidcConfiguration).mockResolvedValueOnce(response(active)).mockResolvedValueOnce(response(activated));
     vi.mocked(api.getOidcTestResult).mockResolvedValue({
+      refresh_token_returned: true,
       flow_id: "test-flow",
       candidate: tested,
       replacement_mappings: [],
@@ -322,6 +324,7 @@ describe("Authentication settings", () => {
     window.location.hash = "";
     vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Active Provider")));
     vi.mocked(api.getOidcTestResult).mockResolvedValue({
+      refresh_token_returned: true,
       flow_id: "stored-flow",
       candidate: configuration("Stored Provider"),
       replacement_mappings: [],
@@ -658,6 +661,7 @@ describe("Authentication settings", () => {
     window.location.hash = "flow=test-flow";
     vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Active Provider")));
     vi.mocked(api.getOidcTestResult).mockResolvedValue({
+      refresh_token_returned: true,
       flow_id: "test-flow",
       candidate: configuration("Tested Provider"),
       replacement_mappings: [],
@@ -688,6 +692,7 @@ describe("Authentication settings", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Old Provider")));
     vi.mocked(api.getOidcTestResult).mockResolvedValue({
+      refresh_token_returned: true,
       flow_id: "test-flow",
       candidate: configuration("New Provider"),
       replacement_mappings: [
@@ -1236,7 +1241,7 @@ describe("Authentication settings", () => {
 
   it("keeps active group drafts unchanged when a policy preview resolves", async () => {
     const user = userEvent.setup();
-    let resolvePreview: (identity: OidcTestedIdentity) => void;
+    let resolvePreview: (identity: OidcTestedIdentity) => void = uninitializedTestCallback;
     const previewResult = new Promise<OidcTestedIdentity>((resolve) => {
       resolvePreview = resolve;
     });

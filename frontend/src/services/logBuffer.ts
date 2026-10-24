@@ -38,7 +38,7 @@ export class LogBuffer {
   private flushCallback: FlushCallback;
   private maxLogs: number;
   private flushIntervalMs: number;
-  private flushTimer: NodeJS.Timeout | null = null;
+  private flushTimer: ReturnType<typeof setInterval> | null = null;
   private isEnabled = false;
 
   /**

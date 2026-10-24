@@ -19,7 +19,7 @@ import { CONFIRM_DELETE_STRINGS } from "../confirmDeleteDialogStrings";
 describe("ConfirmDeleteDialog", () => {
   const defaultProps = {
     open: true,
-    items: [{ name: "readme.txt", path: "readme.txt", type: FileType.FILE, size: 0, modified_at: "", is_readable: true }],
+    items: [{ name: "readme.txt", path: "readme.txt", type: FileType.FILE, size: 0, modified_at: "", is_readable: true, is_hidden: false }],
     isDeleting: false,
     onClose: vi.fn(),
     onConfirm: vi.fn(),

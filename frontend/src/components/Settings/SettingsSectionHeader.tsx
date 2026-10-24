@@ -35,7 +35,7 @@ export function SettingsSectionHeader({
     <Box sx={resolvedSx}>
       <Box sx={{ minWidth: 0 }}>
         {showTitle && (
-          <Typography variant="h5" fontWeight="medium">
+          <Typography variant="h5" sx={{ fontWeight: "medium" }}>
             {title}
           </Typography>
         )}

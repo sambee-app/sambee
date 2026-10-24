@@ -89,11 +89,13 @@ export function publishMarkdownSyntax(
     const limit = Math.min(pendingBlocks.length, nextBlock + BLOCKS_PER_FRAME);
     for (; nextBlock < limit && count < MAX_VIEWPORT_SYNTAX_RANGES; nextBlock += 1) {
       const index = pendingBlocks[nextBlock];
+      if (index === undefined) continue;
       const code = blocks[index];
       const result = prepared.results[index];
       const request = prepared.requests[index];
+      if (!code || !request || !result || !("ranges" in result)) continue;
       const rect = measureSyntaxStage("block-geometry", () => code.getBoundingClientRect());
-      if (!request || !result || !("ranges" in result) || rect.bottom < bounds.top || rect.top > bounds.bottom) continue;
+      if (rect.bottom < bounds.top || rect.top > bounds.bottom) continue;
       const { nodes, length, valid } = measureSyntaxStage("mapping", () => {
         const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
         const nodes: { node: Text; from: number; to: number }[] = [];
@@ -111,7 +113,8 @@ export function publishMarkdownSyntax(
         let high = nodes.length - 1;
         while (low < high) {
           const middle = (low + high) >>> 1;
-          if (nodes[middle].to <= offset) low = middle + 1;
+          const node = nodes[middle];
+          if (node && node.to <= offset) low = middle + 1;
           else high = middle;
         }
         return nodes[low];
@@ -119,6 +122,7 @@ export function publishMarkdownSyntax(
       const rangeAt = (from: number, to: number) => {
         const start = locate(from);
         const end = locate(to);
+        if (!start || !end) throw new Error("Cannot map syntax range to document text");
         const range = new Range();
         range.setStart(start.node, Math.min(start.node.length, from - start.from));
         range.setEnd(end.node, Math.min(end.node.length, to - end.from));
@@ -145,12 +149,13 @@ export function publishMarkdownSyntax(
           let high = result.ranges.length;
           while (low < high) {
             const middle = (low + high) >>> 1;
-            if (result.ranges[middle].to <= from) low = middle + 1;
+            const token = result.ranges[middle];
+            if (token && token.to <= from) low = middle + 1;
             else high = middle;
           }
           for (let index = low; index < result.ranges.length && count < MAX_VIEWPORT_SYNTAX_RANGES; index += 1) {
             const token = result.ranges[index];
-            if (token.from >= to) break;
+            if (!token || token.from >= to) break;
             const range = rangeAt(Math.max(from, token.from), Math.min(to, token.to));
             for (const category of token.categories) {
               if (count === MAX_VIEWPORT_SYNTAX_RANGES) break;

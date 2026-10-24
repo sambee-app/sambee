@@ -12,6 +12,7 @@ import {
   VIEWER_READINESS_TARGETS_MS,
   VIEWER_TIMING_TARGETS_MS,
 } from "../../../e2e/viewer-performance-budgets";
+import { requireTestValue } from "../../test/helpers/assertions";
 
 describe("viewer acceptance report", () => {
   const attachment = {
@@ -47,9 +48,9 @@ describe("viewer acceptance report", () => {
 
   test("reads trial identity from attachments in the real Playwright JSON schema", () => {
     const realSchema = report();
-    for (const spec of realSchema.suites[0].specs)
+    for (const spec of requireTestValue(realSchema.suites[0]).specs)
       for (const entry of spec.tests) {
-        entry.results[0].attachments[0].body = Buffer.from(
+        requireTestValue(requireTestValue(entry.results[0]).attachments[0]).body = Buffer.from(
           JSON.stringify({
             trial: entry.repeatEachIndex,
             enforced: true,
@@ -63,7 +64,7 @@ describe("viewer acceptance report", () => {
 
   test("rejects a passing subset and a missing report", () => {
     const subset = report();
-    subset.suites[0].specs.pop();
+    requireTestValue(subset.suites[0]).specs.pop();
     expect(evaluateViewerAcceptanceReport("dense-expansion", subset).status).toBe("fail");
     expect(evaluateViewerAcceptanceReport("dense-expansion", { suites: [] }).status).toBe("fail");
   });
@@ -77,7 +78,8 @@ describe("viewer acceptance report", () => {
       [{ ...attachment, body: Buffer.from(JSON.stringify({ enforced: true, budgets: { status: "fail" } })).toString("base64") }],
     ]) {
       const invalid = report();
-      invalid.suites[0].specs[0].tests[0].results[0].attachments = attachments;
+      requireTestValue(requireTestValue(requireTestValue(requireTestValue(invalid.suites[0]).specs[0]).tests[0]).results[0]).attachments =
+        attachments;
       expect(evaluateViewerAcceptanceReport("dense-expansion", invalid).status).toBe("fail");
     }
   });
@@ -89,7 +91,7 @@ describe("viewer acceptance report", () => {
       [...evaluateSourceResponsivenessBudgets(SOURCE_RESPONSIVENESS_TARGETS_MS).metrics, { metric: "atomicCommit", observedMs: 0 }],
     ]) {
       const invalid = report();
-      invalid.suites[0].specs[0].tests[0].results[0].attachments = [
+      requireTestValue(requireTestValue(requireTestValue(requireTestValue(invalid.suites[0]).specs[0]).tests[0]).results[0]).attachments = [
         { ...attachment, body: Buffer.from(JSON.stringify({ enforced: true, budgets: { status: "pass", metrics } })).toString("base64") },
       ];
       expect(evaluateViewerAcceptanceReport("dense-expansion", invalid).status).toBe("fail");
@@ -98,27 +100,32 @@ describe("viewer acceptance report", () => {
 
   test("rejects skips, retries, repeated trials and report errors", () => {
     const skipped = report();
-    skipped.suites[0].specs[0].tests[0].results[0].status = "skipped";
+    requireTestValue(requireTestValue(requireTestValue(requireTestValue(skipped.suites[0]).specs[0]).tests[0]).results[0]).status =
+      "skipped";
     expect(evaluateViewerAcceptanceReport("dense-expansion", skipped).status).toBe("fail");
     const retried = report();
-    retried.suites[0].specs[0].tests[0].results[0].retry = 1;
+    requireTestValue(requireTestValue(requireTestValue(requireTestValue(retried.suites[0]).specs[0]).tests[0]).results[0]).retry = 1;
     expect(evaluateViewerAcceptanceReport("dense-expansion", retried).status).toBe("fail");
     const duplicate = report();
-    duplicate.suites[0].specs[0].tests.push(duplicate.suites[0].specs[0].tests[0]);
+    requireTestValue(requireTestValue(duplicate.suites[0]).specs[0]).tests.push(
+      requireTestValue(requireTestValue(requireTestValue(duplicate.suites[0]).specs[0]).tests[0])
+    );
     expect(evaluateViewerAcceptanceReport("dense-expansion", duplicate).status).toBe("fail");
     expect(evaluateViewerAcceptanceReport("dense-expansion", { ...report(), errors: ["interrupted"] }).status).toBe("fail");
   });
 });
 
 describe("viewer acceptance coverage", () => {
-  const expected = ["chromium/1543/dense/cold/1", "firefox/390/dense/cold/1"];
+  const expected = ["chromium/1543/dense/cold/1", "firefox/390/dense/cold/1"] as const;
   const samples = expected.map((identity) => ({ identity, status: "pass", retry: 0 }));
+  const firstSample = requireTestValue(samples[0]);
+  const secondSample = requireTestValue(samples[1]);
 
   test("requires every expected identity exactly once", () => {
     expect(evaluateViewerAcceptanceCoverage(expected, samples).status).toBe("pass");
     expect(evaluateViewerAcceptanceCoverage(expected, samples.slice(1)).missing).toEqual([expected[0]]);
-    expect(evaluateViewerAcceptanceCoverage(expected, [...samples, samples[0]]).duplicate).toEqual([expected[0]]);
-    expect(evaluateViewerAcceptanceCoverage(expected, [...samples, { ...samples[0], identity: "unexpected" }]).unexpected).toEqual([
+    expect(evaluateViewerAcceptanceCoverage(expected, [...samples, firstSample]).duplicate).toEqual([expected[0]]);
+    expect(evaluateViewerAcceptanceCoverage(expected, [...samples, { ...firstSample, identity: "unexpected" }]).unexpected).toEqual([
       "unexpected",
     ]);
   });
@@ -130,12 +137,12 @@ describe("viewer acceptance coverage", () => {
 
   for (const status of ["fail", "invalid", "skipped", "diagnostic", "unverified"]) {
     test(`rejects ${status} samples`, () => {
-      expect(evaluateViewerAcceptanceCoverage(expected, [{ ...samples[0], status }, samples[1]]).status).toBe("fail");
+      expect(evaluateViewerAcceptanceCoverage(expected, [{ ...firstSample, status }, secondSample]).status).toBe("fail");
     });
   }
 
   test("rejects retries even when the final result passes", () => {
-    expect(evaluateViewerAcceptanceCoverage(expected, [{ ...samples[0], retry: 1 }, samples[1]]).status).toBe("fail");
+    expect(evaluateViewerAcceptanceCoverage(expected, [{ ...firstSample, retry: 1 }, secondSample]).status).toBe("fail");
   });
 });
 

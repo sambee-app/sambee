@@ -53,7 +53,6 @@ import { isApiError } from "../../types";
 import { getApiErrorMessage } from "../../utils/apiErrors";
 import { openExternalUrl } from "../../utils/externalLinks";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
-import { highlightingService } from "../../utils/highlightingService";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
 import { normalizeMarkdownSource } from "../../utils/markdownCodePreparation";
 import { rehypeMarkdownHeadingLinks } from "../../utils/markdownHeadingLinks";
@@ -92,14 +91,12 @@ import { areMarkdownSearchStatesEqual } from "./markdownSearchState";
 import { normalizeMarkdownTableCellLineBreaks, remarkRenderMarkdownTableCellLineBreaks } from "./markdownTableCellLineBreaks";
 import { PROGRESSIVE_MARKDOWN_MIN_UNITS, ProgressiveMarkdown } from "./ProgressiveMarkdown";
 import { RecoveredDraftDialog } from "./RecoveredDraftDialog";
-import { RetainedMarkdownPreview } from "./RetainedMarkdownPreview";
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
 import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
 import { downloadViewerBlob } from "./viewerContent";
 import { createEditToolbarAction, createPrintToolbarAction, createSaveToolbarAction } from "./viewerToolbarActions";
 
 const MARKDOWN_SEARCH_ROOT_SELECTOR = '[data-markdown-search-root="true"]';
-const USE_RETAINED_MARKDOWN_PREVIEW = import.meta.env.MODE === "test-preview";
 const MARKDOWN_HASH_PREFIX = "#";
 const MARKDOWN_SUPPORTED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 const MARKDOWN_VIEWER_EDIT_FOCUS_RETRY_DELAYS_MS = [

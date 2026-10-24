@@ -1,16 +1,17 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import {
   type ApiMock,
   createFakeContentProviderRegistry,
   createStorageBackedTestContentProviderRegistry,
   setupSuccessfulApiMocks,
 } from "../../test/helpers";
+import { requireTestValue } from "../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType, type LocalLinkTargetListing } from "../../types";
 import type { ContentProviderRegistry } from "../FileBrowser/contentProviders";
@@ -72,7 +73,7 @@ describe("useFileBrowserPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCurrentUserSettingsStoreForTests();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     setupSuccessfulApiMocks(api as unknown as ApiMock);
     vi.mocked(getPreferredViewerId).mockResolvedValue(null);
     vi.mocked(setPreferredViewerId).mockResolvedValue();
@@ -83,32 +84,34 @@ describe("useFileBrowserPane", () => {
     act(() => result.current.applyLocation("conn-1", ""));
     await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
 
-    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[0], 0, false, false));
-    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[2], 2, true, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(result.current.sortedFiles[0]), 0, false, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(result.current.sortedFiles[2]), 2, true, false));
     expect([...result.current.selectedFiles]).toEqual(result.current.sortedFiles.map((file) => file.path));
 
-    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[1], 1, false, false));
-    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[0], 0, true, true));
+    act(() => result.current.selectItemFromIcon(requireTestValue(result.current.sortedFiles[1]), 1, false, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(result.current.sortedFiles[0]), 0, true, true));
     expect(result.current.selectedFiles.size).toBe(3);
 
     act(() => result.current.handleClearSelection());
-    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[2], 2, true, false));
-    expect([...result.current.selectedFiles]).toEqual([result.current.sortedFiles[2].path]);
+    act(() => result.current.selectItemFromIcon(requireTestValue(result.current.sortedFiles[2]), 2, true, false));
+    expect([...result.current.selectedFiles]).toEqual([requireTestValue(result.current.sortedFiles[2]).path]);
   });
 
   it("keeps earlier selections when extending a mouse range without Ctrl", async () => {
-    const entries = ["A", "B", "C", "D", "E"].map((name) => ({ ...mockDirectoryListing.items[2], name, path: name }));
+    const entries = ["A", "B", "C", "D", "E"].map((name) => ({ ...requireTestValue(mockDirectoryListing.items[2]), name, path: name }));
     vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: entries, total: entries.length });
     const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
     act(() => result.current.applyLocation("conn-1", ""));
     await waitFor(() => expect(result.current.sortedFiles).toHaveLength(5));
 
     const [first, , middle, , last] = result.current.sortedFiles;
-    act(() => result.current.selectItemFromIcon(first, 0, false, false));
-    act(() => result.current.selectItemFromIcon(middle, 2, false, false));
-    act(() => result.current.selectItemFromIcon(last, 4, true, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(first), 0, false, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(middle), 2, false, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(last), 4, true, false));
 
-    expect(result.current.selectedFiles).toEqual(new Set([first.path, ...result.current.sortedFiles.slice(2).map((file) => file.path)]));
+    expect(result.current.selectedFiles).toEqual(
+      new Set([requireTestValue(first).path, ...result.current.sortedFiles.slice(2).map((file) => file.path)])
+    );
   });
 
   it("adds a clicked item after a refresh removes the range anchor", async () => {
@@ -117,18 +120,22 @@ describe("useFileBrowserPane", () => {
     await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
 
     const [first, middle, last] = result.current.sortedFiles;
-    act(() => result.current.selectItemFromIcon(first, 0, false, false));
-    act(() => result.current.selectItemFromIcon(last, 2, false, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(first), 0, false, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(last), 2, false, false));
 
-    vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: [first, middle], total: 2 });
+    vi.mocked(api.listDirectory).mockResolvedValue({
+      ...mockDirectoryListing,
+      items: [requireTestValue(first), requireTestValue(middle)],
+      total: 2,
+    });
     act(() => result.current.handleRefresh());
     await waitFor(() => {
       expect(result.current.sortedFiles).toHaveLength(2);
-      expect(result.current.selectedFiles).toEqual(new Set([first.path]));
+      expect(result.current.selectedFiles).toEqual(new Set([requireTestValue(first).path]));
     });
 
-    act(() => result.current.selectItemFromIcon(middle, 1, true, true));
-    expect(result.current.selectedFiles).toEqual(new Set([first.path, middle.path]));
+    act(() => result.current.selectItemFromIcon(requireTestValue(middle), 1, true, true));
+    expect(result.current.selectedFiles).toEqual(new Set([requireTestValue(first).path, requireTestValue(middle).path]));
   });
 
   it("uses a keyboard selection as the anchor for an icon range", async () => {
@@ -143,7 +150,7 @@ describe("useFileBrowserPane", () => {
     list.focus();
     act(() => result.current.handleToggleSelection());
     expect(result.current.selectedFiles.size).toBe(1);
-    act(() => result.current.selectItemFromIcon(result.current.sortedFiles[2], 2, true, false));
+    act(() => result.current.selectItemFromIcon(requireTestValue(result.current.sortedFiles[2]), 2, true, false));
     expect([...result.current.selectedFiles]).toEqual(result.current.sortedFiles.map((file) => file.path));
     list.remove();
   });
@@ -420,7 +427,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "Archives/backup.zip", size: 1 },
       path: "docs",
       items: [{ ...archiveMember, state: "readable" }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -475,7 +482,7 @@ describe("useFileBrowserPane", () => {
 
   it("normalizes same-drive absolute Windows paths for local-drive panes", async () => {
     const localDriveConnection = {
-      ...mockConnections[0],
+      ...requireTestValue(mockConnections[0]),
       id: "local-drive:d",
       slug: "d",
       type: "local",
@@ -503,7 +510,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("enriches a current local directory with deferred link target metadata", async () => {
-    const localDriveConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localDriveConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const linksListing = {
       path: "Links",
       total: 1,
@@ -558,7 +565,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("enriches cached local links when an earlier metadata request was interrupted", async () => {
-    const localDriveConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localDriveConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const linksListing = {
       path: "Links",
       total: 1,
@@ -583,7 +590,7 @@ describe("useFileBrowserPane", () => {
         },
       ],
     };
-    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) =>
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") =>
       path === "Links" ? linksListing : { path, total: 0, items: [] }
     );
     vi.mocked(api.listLocalLinkTargets)
@@ -626,7 +633,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("does not recreate an invalidated directory cache while enriching local links", async () => {
-    const localDriveConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localDriveConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const targets = deferred<LocalLinkTargetListing>();
     const linkEntry = {
       name: "Archive.lnk",
@@ -636,7 +643,7 @@ describe("useFileBrowserPane", () => {
       is_hidden: false,
       link_kind: "windows_shortcut" as const,
     };
-    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => ({
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") => ({
       path,
       items: path === "Links" ? [linkEntry] : [],
       total: path === "Links" ? 1 : 0,
@@ -660,9 +667,9 @@ describe("useFileBrowserPane", () => {
   });
 
   it("ignores deferred link target metadata after navigating away", async () => {
-    const localDriveConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localDriveConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const targets = deferred<LocalLinkTargetListing>();
-    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) =>
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") =>
       path === "Links"
         ? {
             path,
@@ -735,7 +742,7 @@ describe("useFileBrowserPane", () => {
 
   it("records a local directory only after Companion confirms its type", async () => {
     const localDriveConnection = {
-      ...mockConnections[0],
+      ...requireTestValue(mockConnections[0]),
       id: "local-drive:d",
       slug: "d",
       type: "local",
@@ -795,8 +802,8 @@ describe("useFileBrowserPane", () => {
   });
 
   it("navigates to a directory resolved from a local link on another drive", async () => {
-    const sourceConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
-    const targetConnection = { ...mockConnections[0], id: "local-drive:d", slug: "d", type: "local", name: "Drive D" };
+    const sourceConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
+    const targetConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:d", slug: "d", type: "local", name: "Drive D" };
     const link = {
       name: "Archive.lnk",
       path: "Archive.lnk",
@@ -845,7 +852,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("opens a local ZIP as a virtual pane location instead of resolving a native file", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const archive = {
       name: "backup.zip",
       path: "backup.zip",
@@ -897,7 +904,7 @@ describe("useFileBrowserPane", () => {
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "first.txt", path: "first.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 2,
+
         page_size: 1,
         next_cursor: "page-two",
       })
@@ -905,7 +912,7 @@ describe("useFileBrowserPane", () => {
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "second.txt", path: "second.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 2,
+
         page_size: 1,
         next_cursor: null,
       });
@@ -957,20 +964,13 @@ describe("useFileBrowserPane", () => {
       is_readable: true,
       is_hidden: false,
     };
-    const pendingAppend = deferred<{
-      archive: { path: string; size: number };
-      path: string;
-      items: Array<{ name: string; path: string; type: FileType; state: string; is_hidden: boolean }>;
-      total: number;
-      page_size: number;
-      next_cursor: string | null;
-    }>();
+    const pendingAppend = deferred<Awaited<ReturnType<typeof api.listArchiveDirectory>>>();
     vi.mocked(api.listArchiveDirectory)
       .mockResolvedValueOnce({
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "first.txt", path: "first.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 3,
+
         page_size: 1,
         next_cursor: "page-two",
       })
@@ -979,7 +979,7 @@ describe("useFileBrowserPane", () => {
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "refreshed.txt", path: "refreshed.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 2,
+
         page_size: 1,
         next_cursor: "page-two",
       })
@@ -987,7 +987,7 @@ describe("useFileBrowserPane", () => {
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "second.txt", path: "second.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 2,
+
         page_size: 1,
         next_cursor: null,
       });
@@ -1053,7 +1053,7 @@ describe("useFileBrowserPane", () => {
       ],
       total: 2,
     });
-    vi.mocked(api.listArchiveDirectory).mockImplementation((_connectionId, _archivePath, virtualPath) =>
+    vi.mocked(api.listArchiveDirectory).mockImplementation((_connectionId, _archivePath, virtualPath = "") =>
       Promise.resolve({
         archive: { path: "Archives/backup.zip", size: 1 },
         path: virtualPath,
@@ -1133,7 +1133,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "notes.txt", path: "notes.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1172,7 +1172,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "Archives/backup.zip", size: 1 },
       path: "",
       items: [{ name: "notes.txt", path: "notes.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1212,7 +1212,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1300,9 +1300,9 @@ describe("useFileBrowserPane", () => {
     await waitFor(() => expect(result.current.files).toHaveLength(3));
 
     const snapshot = deferred<typeof mockDirectoryListing>();
-    const newEntry = { ...mockDirectoryListing.items[2], name: "new-after-snapshot.txt", path: "new-after-snapshot.txt" };
+    const newEntry = { ...requireTestValue(mockDirectoryListing.items[2]), name: "new-after-snapshot.txt", path: "new-after-snapshot.txt" };
     const freshListing = { ...mockDirectoryListing, items: [...mockDirectoryListing.items, newEntry], total: 4 };
-    vi.mocked(api.listDirectory).mockResolvedValue(freshListing).mockReturnValueOnce(snapshot.promise);
+    vi.mocked(api.listDirectory).mockResolvedValue(requireTestValue(freshListing)).mockReturnValueOnce(snapshot.promise);
 
     vi.useFakeTimers();
     try {
@@ -1329,7 +1329,7 @@ describe("useFileBrowserPane", () => {
     vi.mocked(api.listDirectory).mockReturnValueOnce(initialListing.promise).mockReturnValueOnce(refresh.promise);
     const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
     act(() => result.current.applyLocation("conn-1", ""));
-    const initialSignal = vi.mocked(api.listDirectory).mock.calls[0][2]?.signal;
+    const initialSignal = requireTestValue(vi.mocked(api.listDirectory).mock.calls[0])[2]?.signal;
 
     act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
     expect(api.listDirectory).toHaveBeenCalledTimes(1);
@@ -1453,14 +1453,14 @@ describe("useFileBrowserPane", () => {
         archive: { path: "Archives/backup.zip", size: 1 },
         path: "",
         items: [{ name: "before.txt", path: "before.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       })
       .mockResolvedValueOnce({
         archive: { path: "Archives/backup.zip", size: 1 },
         path: "",
         items: [{ name: "after.txt", path: "after.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
 
@@ -1492,14 +1492,14 @@ describe("useFileBrowserPane", () => {
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "before.txt", path: "before.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       })
       .mockResolvedValueOnce({
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "after.txt", path: "after.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
 
@@ -1522,12 +1522,12 @@ describe("useFileBrowserPane", () => {
 
   it("exits an archive before switching connections", async () => {
     const archive = { name: "backup.zip", path: "backup.zip", type: FileType.FILE, is_readable: true, is_hidden: false };
-    const otherConnection = { ...mockConnections[0], id: "conn-2", name: "Other Server", slug: "other-server" };
+    const otherConnection = { ...requireTestValue(mockConnections[0]), id: "conn-2", name: "Other Server", slug: "other-server" };
     vi.mocked(api.listArchiveDirectory).mockResolvedValue({
       archive: { path: "Archives/backup.zip", size: 1 },
       path: "",
       items: [{ name: "notes.txt", path: "notes.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1565,14 +1565,14 @@ describe("useFileBrowserPane", () => {
         archive: { path: "Archives/backup.zip", size: 1 },
         path: "",
         items: [{ name: "notes.txt", path: "notes.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       })
       .mockResolvedValueOnce({
         archive: { path: "Archives/backup.zip", size: 1 },
         path: "",
         items: [{ name: "notes.txt", path: "notes.txt", type: FileType.FILE, state: "blocked", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
 
@@ -1618,7 +1618,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "report.txt", path: "report.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1669,7 +1669,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "inside.png", path: "images/inside.png", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1729,7 +1729,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name, path, type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1784,7 +1784,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "inside.sss", path: "files/inside.sss", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1828,7 +1828,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "nested.zip", path: "archives/nested.zip", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -1869,7 +1869,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "readme.md", path: "docs/readme.md", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
     vi.mocked(getPreferredViewerId).mockResolvedValueOnce(null).mockResolvedValueOnce("text");
@@ -1935,7 +1935,7 @@ describe("useFileBrowserPane", () => {
       archive: { path: "backup.zip", size: 1 },
       path: "",
       items: [{ name: "readme.md", path: "docs/readme.md", type: FileType.FILE, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
     vi.mocked(getPreferredViewerId).mockResolvedValue(null);
@@ -1989,7 +1989,7 @@ describe("useFileBrowserPane", () => {
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "first.png", path: "images/first.png", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 2,
+
         page_size: 1,
         next_cursor: "page-two",
       })
@@ -1997,7 +1997,7 @@ describe("useFileBrowserPane", () => {
         archive: { path: "backup.zip", size: 1 },
         path: "",
         items: [{ name: "second.png", path: "images/second.png", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 2,
+
         page_size: 1,
         next_cursor: null,
       });
@@ -2039,7 +2039,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("opens the resolved local file rather than its link source", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const link = {
       name: "Report.lnk",
       path: "Report.lnk",
@@ -2090,7 +2090,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("opens a resolved local link target with the native app", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const link = {
       name: "Report.lnk",
       path: "Report.lnk",
@@ -2135,7 +2135,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("shows a link-resolution error without opening the source file", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const link = {
       name: "Missing.lnk",
       path: "Missing.lnk",
@@ -2175,7 +2175,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("ignores a local activation result after navigation supersedes it", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const link = {
       name: "Report.lnk",
       path: "Report.lnk",
@@ -2238,7 +2238,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("ignores deferred viewer selection for a superseded local activation", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const link = {
       name: "Report.lnk",
       path: "Report.lnk",
@@ -2304,8 +2304,8 @@ describe("useFileBrowserPane", () => {
   });
 
   it("lets a non-local recent file supersede a pending local link activation", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
-    const remoteConnection = { ...mockConnections[0], id: "conn-2", slug: "archive", name: "Archive" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
+    const remoteConnection = { ...requireTestValue(mockConnections[0]), id: "conn-2", slug: "archive", name: "Archive" };
     const link = {
       name: "Report.lnk",
       path: "Report.lnk",
@@ -2615,7 +2615,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("removes a local recent record only when Companion confirms its target is missing", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     vi.mocked(api.resolveLocalActivation).mockRejectedValue({
       response: { data: { code: "local_link_target_missing" }, status: 404 },
     });
@@ -2640,7 +2640,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("preserves a local recent record when Companion is unavailable", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     vi.mocked(api.resolveLocalActivation).mockRejectedValue({
       response: { data: { detail: "Unknown drive" }, status: 404 },
     });
@@ -2666,7 +2666,7 @@ describe("useFileBrowserPane", () => {
     ["recent_file_native_launch_failed", "Failed to launch the native application."],
     ["recent_file_target_not_file", "Not a file: Documents/report.txt"],
   ])("removes a local recent record after a classified %s native-open failure", async (code, detail) => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     vi.mocked(api.resolveLocalActivation).mockResolvedValue({
       drive_id: "c",
       path: "Documents/report.txt",
@@ -2705,7 +2705,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("opens a local recent shortcut at its resolved file target", async () => {
-    const sourceConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const sourceConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     vi.mocked(api.resolveLocalActivation).mockResolvedValue({
       drive_id: "d",
       path: "Reports/quarterly.pdf",
@@ -2742,7 +2742,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("navigates to a directory resolved from a local recent shortcut", async () => {
-    const sourceConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const sourceConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     const onNavigateDirectory = vi.fn();
     vi.mocked(api.resolveLocalActivation).mockResolvedValue({
       drive_id: "d",
@@ -2775,7 +2775,7 @@ describe("useFileBrowserPane", () => {
   });
 
   it("ignores a recent local activation result after navigation supersedes it", async () => {
-    const localConnection = { ...mockConnections[0], id: "local-drive:c", slug: "c", type: "local" };
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     let resolveActivation!: (value: Awaited<ReturnType<typeof api.resolveLocalActivation>>) => void;
     vi.mocked(api.resolveLocalActivation).mockImplementation(
       () =>
@@ -2831,7 +2831,10 @@ describe("useFileBrowserPane", () => {
   });
 
   it("opens an image recent outside the active pane without reusing its gallery", async () => {
-    const viewerConnections = [mockConnections[0], { ...mockConnections[0], id: "conn-2", name: "Archive", slug: "archive" }];
+    const viewerConnections = [
+      requireTestValue(mockConnections[0]),
+      { ...requireTestValue(mockConnections[0]), id: "conn-2", name: "Archive", slug: "archive" },
+    ];
     vi.mocked(api.validateRecentFileTarget).mockResolvedValue({
       name: "outside.png",
       path: "outside.png",

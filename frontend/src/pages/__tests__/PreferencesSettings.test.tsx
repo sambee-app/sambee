@@ -259,7 +259,7 @@ describe("AppearanceSettings", () => {
     render(<AppearanceSettings />);
 
     act(() => screen.getByRole("radio", { name: "Sambee dark" }).focus());
-    await user.click(screen.getByRole("button", { name: "Delete", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(within(screen.getByRole("dialog", { name: "Delete theme?" })).getByRole("button", { name: "Delete" }));
 
     await waitFor(() => expect(themeContextState.refreshThemes).toHaveBeenCalledOnce());

@@ -201,7 +201,9 @@ export function prepareCodePreviewInWorker(
   options: { prepareTree?: boolean; preserveTableSource?: string; preserveOnly?: boolean } = {}
 ): Promise<{ normalizedSource: string; preparedTree?: Root; preparationMs: number }> {
   if (signal.aborted) return Promise.reject(new DOMException("Preparation cancelled", "AbortError"));
-  if (blocks.length !== 1) return Promise.reject(new Error("Markdown normalization requires one source document"));
+  const initialSource = blocks[0];
+  if (blocks.length !== 1 || initialSource === undefined)
+    return Promise.reject(new Error("Markdown normalization requires one source document"));
   if (options.prepareTree && options.preserveTableSource !== undefined)
     return Promise.reject(new Error("Source-preserving edit preparation cannot also prepare a preview tree"));
   if (options.preserveOnly && options.preserveTableSource === undefined)
@@ -217,11 +219,11 @@ export function prepareCodePreviewInWorker(
       reject(error);
       return;
     }
-    const sources = options.preserveTableSource === undefined ? blocks : [blocks[0], options.preserveTableSource];
+    const sources = options.preserveTableSource === undefined ? [initialSource] : [initialSource, options.preserveTableSource];
     const measured = options.preserveTableSource !== undefined;
     const detail = {
       generation,
-      sourceUnits: blocks[0].length,
+      sourceUnits: initialSource.length,
       baselineUnits: options.preserveTableSource?.length ?? 0,
       preserveOnly: options.preserveOnly === true,
     };
@@ -335,6 +337,7 @@ export function prepareCodePreviewInWorker(
             transferStartedAt = performance.now();
           }
           const source = sources[sourceBlock];
+          if (source === undefined) throw new Error("Markdown worker requested an unavailable source block");
           const text = source.slice(sourceOffset, sourceOffset + PREPARATION_SOURCE_CHUNK_UNITS);
           sourceOffset += text.length;
           sourceFinal = sourceOffset === source.length;

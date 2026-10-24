@@ -12,6 +12,7 @@ import { authSession } from "../../../services/authSession";
 import { loadDraft, snapshotRegisteredDrafts } from "../../../services/draftRecovery";
 import { logger } from "../../../services/logger";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
+import { requireTestElement, requireTestValue, uninitializedTestCallback } from "../../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../../theme";
 import { getDefaultTheme } from "../../../theme/themes";
 import { highlightingService } from "../../../utils/highlightingService";
@@ -23,7 +24,7 @@ import type { PreparedCodeBlock } from "../../../utils/syntaxHighlighting";
 import MarkdownViewer from "../MarkdownViewer";
 import { MARKDOWN_VIEWER_CONTENT_AUTOFOCUS_DELAY_MS } from "../markdownEditorConstants";
 import { normalizeMarkdownTableCellLineBreaks } from "../markdownTableCellLineBreaks";
-import { RetainedMarkdownPreview } from "../RetainedMarkdownPreview";
+import { RetainedMarkdownPreview, type RetainedMarkdownPreviewProps } from "../RetainedMarkdownPreview";
 import { createViewerSearchTestDriver } from "./viewerSearchTestUtils";
 
 const contentProviders = createStorageBackedTestContentProviderRegistry();
@@ -528,7 +529,7 @@ describe("test-only retained Markdown host", () => {
     const result = createResult();
     vi.spyOn(markdownDocumentPreview, "mountMarkdownDocument").mockResolvedValue(view);
     let complete!: (value: typeof result) => void;
-    const prepare = vi.spyOn(markdownCodePreparation, "prepareCodePreviewInWorker").mockImplementation(
+    const prepare = vi.fn<RetainedMarkdownPreviewProps["prepareDocument"]>().mockImplementation(
       () =>
         new Promise((resolve) => {
           complete = resolve;
@@ -537,15 +538,18 @@ describe("test-only retained Markdown host", () => {
     const host = render(
       <div>
         <div>
-          <RetainedMarkdownPreview {...props} generation={{ id: 10, source: "canonical" }} />
+          <RetainedMarkdownPreview {...props} prepareDocument={prepare} generation={{ id: 10, source: "canonical" }} />
         </div>
       </div>
     );
     await waitFor(() => expect(prepare).toHaveBeenCalledOnce());
-    expect(prepare.mock.calls[0][5]).toEqual({ isolated: true, canonicalSource: true });
+    const request = requireTestValue(prepare.mock.calls[0])[0];
+    expect(request).toEqual(expect.objectContaining({ source: "canonical", generation: 10 }));
+    await request.onRecords([{ kind: "text", id: 1, parent: 0, value: "canonical", from: 0 }]);
+    expect(view.consume).toHaveBeenCalledWith([{ kind: "text", id: 1, parent: 0, value: "canonical", from: 0 }]);
     expect(document.head.textContent).toContain("markdown-retained-10");
     host.unmount();
-    expect(prepare.mock.calls[0][2].aborted).toBe(true);
+    expect(request.signal.aborted).toBe(true);
     expect(view.dispose).toHaveBeenCalledOnce();
     await act(async () => complete(result));
     expect(result.syntaxSession.dispose).toHaveBeenCalledOnce();
@@ -558,13 +562,14 @@ describe("test-only retained Markdown host", () => {
     const result = createResult();
     vi.spyOn(logger, "error").mockImplementation(() => {});
     vi.spyOn(markdownDocumentPreview, "mountMarkdownDocument").mockResolvedValue(view);
-    vi.spyOn(markdownCodePreparation, "prepareCodePreviewInWorker")
+    const prepare = vi
+      .fn<RetainedMarkdownPreviewProps["prepareDocument"]>()
       .mockRejectedValueOnce(new Error("document failed"))
       .mockResolvedValueOnce(result);
     const host = render(
       <div>
         <div>
-          <RetainedMarkdownPreview {...props} generation={{ id: 11, source: "first" }} />
+          <RetainedMarkdownPreview {...props} prepareDocument={prepare} generation={{ id: 11, source: "first" }} />
         </div>
       </div>
     );
@@ -572,7 +577,7 @@ describe("test-only retained Markdown host", () => {
     host.rerender(
       <div>
         <div>
-          <RetainedMarkdownPreview {...props} generation={{ id: 12, source: "second" }} />
+          <RetainedMarkdownPreview {...props} prepareDocument={prepare} generation={{ id: 12, source: "second" }} />
         </div>
       </div>
     );
@@ -710,7 +715,7 @@ describe("MarkdownViewer", () => {
     vi.spyOn(apiService, "writeTextWithEditLock").mockImplementation(async (connectionId, path, content, _lockInfo, options) => {
       await apiService.saveTextFile(connectionId, path, content, {
         filename: path.split("/").pop() ?? path,
-        mimeType: options.mimeType,
+        mimeType: requireTestValue(options).mimeType,
       });
     });
     vi.spyOn(apiService, "acquireEditLock").mockResolvedValue(mockEditLockInfo);
@@ -774,7 +779,7 @@ describe("MarkdownViewer", () => {
       .mockImplementation(() => {});
     renderViewerWithProps({ isReadOnly: true });
     await screen.findByRole("heading", { name: "Printable preview" });
-    const button = screen.getByRole("button", { name: "Print", exact: true });
+    const button = screen.getByRole("button", { name: "Print" });
     await userEvent.click(button);
     expect(await screen.findByText("The print dialog couldn't open. Try Print from your browser menu.")).toBeInTheDocument();
     await userEvent.click(button);
@@ -787,9 +792,9 @@ describe("MarkdownViewer", () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Printable preview");
     renderViewer();
     await screen.findByRole("heading", { name: "Printable preview" });
-    await userEvent.click(screen.getByRole("button", { name: "Edit", exact: true }));
-    await screen.findByRole("button", { name: "Save", exact: true });
-    expect(screen.queryByRole("button", { name: "Print", exact: true })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("button", { name: "Save" });
+    expect(screen.queryByRole("button", { name: "Print" })).not.toBeInTheDocument();
   });
 
   it("restores native print scroll and selection and releases its lifecycle listeners", async () => {
@@ -1036,7 +1041,7 @@ describe("MarkdownViewer", () => {
     selection.removeAllRanges();
     fireEvent.change(search, { target: { value: "x=2" } });
     expect(await screen.findByText("1 / 1")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledOnce();
     viewer.unmount();
     expect(dispose).toHaveBeenCalledOnce();
@@ -1298,7 +1303,7 @@ describe("MarkdownViewer", () => {
 
   it.each(["capture", "serialization", "storage"])("preserves the last recovery checkpoint on %s failure", async (failure) => {
     vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
-    vi.spyOn(authSession, "refreshIfNeeded").mockResolvedValue("mock-token");
+    vi.spyOn(authSession, "refreshIfNeeded").mockResolvedValue(undefined);
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
     vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
     vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["# Readme\n"], { type: "text/markdown" }));
@@ -1347,7 +1352,7 @@ describe("MarkdownViewer", () => {
     const token = { access_token: "mock-token", token_type: "bearer", user_id: "test-user", username: "test-user" };
     authSession.setAuthenticated(token, false);
     vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
-    vi.spyOn(authSession, "refreshIfNeeded").mockResolvedValue("mock-token");
+    vi.spyOn(authSession, "refreshIfNeeded").mockResolvedValue(undefined);
     vi.spyOn(authSession, "requestRefresh").mockResolvedValue(token);
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
     vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["# Readme\n"], { type: "text/markdown" }));
@@ -1891,7 +1896,7 @@ describe("MarkdownViewer", () => {
       locked_by: "alice",
       locked_at: "2026-03-23T12:00:00Z",
     });
-    let resolveSave: (() => void) | null = null;
+    let resolveSave: () => void = uninitializedTestCallback;
     const saveSpy = vi.spyOn(apiService, "saveTextFile").mockImplementation(
       () =>
         new Promise<void>((resolve) => {
@@ -2287,7 +2292,7 @@ describe("MarkdownViewer", () => {
   it("does not steal search focus when delayed preview autofocus runs", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("alpha beta\n");
     const callbacks: (() => void)[] = [];
-    const originalTimeout = window.setTimeout.bind(window);
+    const originalTimeout = setTimeout;
     const timer = vi.spyOn(window, "setTimeout").mockImplementation((callback, delay, ...args) => {
       if (delay === MARKDOWN_VIEWER_CONTENT_AUTOFOCUS_DELAY_MS && typeof callback === "function") {
         callbacks.push(() => callback(...args));
@@ -2378,7 +2383,7 @@ describe("MarkdownViewer", () => {
     });
 
     const current = [...CSS.highlights.entries()].find(([name]) => name.startsWith("markdown-search-") && name.endsWith("-current"));
-    expect([...current![1]][0].toString()).toBe("sambee");
+    expect(requireTestValue([...current![1]][0]).toString()).toBe("sambee");
     expect(document.querySelectorAll('mark[data-text-search-highlight="true"]')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Next match" }));
@@ -3196,7 +3201,7 @@ describe("MarkdownViewer", () => {
     await screen.findByText("Alpha");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    const editor = requireTestElement(await screen.findByRole("textbox", { name: "Markdown editor" }), HTMLTextAreaElement);
     const selectionStart = editor.value.indexOf("beta");
     const selectionEnd = selectionStart + "beta".length;
 
@@ -3222,7 +3227,7 @@ describe("MarkdownViewer", () => {
     await screen.findByText("Alpha");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    const editor = requireTestElement(await screen.findByRole("textbox", { name: "Markdown editor" }), HTMLTextAreaElement);
     const betaStart = editor.value.indexOf("beta");
     const betaEnd = betaStart + "beta".length;
 
@@ -3268,7 +3273,7 @@ describe("MarkdownViewer", () => {
     await screen.findByText("Alpha");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
-    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    const editor = requireTestElement(await screen.findByRole("textbox", { name: "Markdown editor" }), HTMLTextAreaElement);
     const betaStart = editor.value.indexOf("beta");
     const betaEnd = betaStart + "beta".length;
 

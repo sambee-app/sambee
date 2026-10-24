@@ -159,7 +159,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
         backdrop: {
           sx: (theme) => {
             const surfaces = getOverlaySurfaceTokens(theme.palette.background.default, theme.palette.mode);
-            return surfaces.backdrop ? { bgcolor: surfaces.backdrop } : undefined;
+            return surfaces.backdrop ? { bgcolor: surfaces.backdrop } : {};
           },
         },
         paper: {

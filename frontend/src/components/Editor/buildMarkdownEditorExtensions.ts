@@ -1,3 +1,4 @@
+import type { CompletionContext } from "@codemirror/autocomplete";
 import { defaultKeymap, historyKeymap } from "@codemirror/commands";
 import { pasteURLAsLink } from "@codemirror/lang-markdown";
 import { searchKeymap } from "@codemirror/search";
@@ -31,7 +32,7 @@ export function buildMarkdownEditorExtensions(
   const snippetAutocompleter = createMarkdownSnippetAutocompleter();
   const tableAutocompleter = markdownTableAutocompleter({ options: MARKDOWN_TABLE_AUTOCOMPLETE_OPTIONS });
   const markdownAutocompleteData = markdownLanguageSupport.language.data.of({
-    autocomplete: (context) => snippetAutocompleter(context) ?? tableAutocompleter(context),
+    autocomplete: (context: CompletionContext) => snippetAutocompleter(context) ?? tableAutocompleter(context),
   });
   const markdownTableTheme = buildMarkdownTableTheme(theme);
 

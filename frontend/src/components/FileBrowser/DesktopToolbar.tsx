@@ -10,7 +10,7 @@ interface DesktopToolbarProps {
   searchProvider: SearchProvider;
   searchActivationToken?: number;
   searchRefreshToken?: number;
-  searchInputRef?: React.RefObject<HTMLInputElement>;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
   showSearch: boolean;
   onOpenHelp: () => void;
   onOpenDocumentation: () => void;

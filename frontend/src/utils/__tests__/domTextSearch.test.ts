@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requireTestValue } from "../../test/helpers/assertions";
 import {
   activateDomTextSearchMatch,
   applyDomTextSearchHighlights,
@@ -126,7 +127,11 @@ describe("domTextSearch", () => {
     const original = container.textContent;
     const matches = applyDomTextSearchHighlights(container, query);
     expect(matches).toHaveLength(1);
-    expect(matches[0].elements.map((element) => element.textContent).join("")).toBe(query);
+    expect(
+      requireTestValue(matches[0])
+        .elements.map((element) => element.textContent)
+        .join("")
+    ).toBe(query);
     clearDomTextSearchHighlights(container);
     expect(container.textContent).toBe(original);
     expect(applyDomTextSearchHighlights(container, query)).toHaveLength(1);
@@ -384,7 +389,7 @@ describe("viewport DOM search", () => {
   it("paints late-document matches during continuous scrolling without traversing off-screen segments", () => {
     root.innerHTML = "<p>alpha</p>".repeat(600);
     const paragraphs = [...root.querySelectorAll("p")];
-    const destination = paragraphs[599];
+    const destination = requireTestValue(paragraphs[599]);
     const probes = paragraphs.map((paragraph, index) => {
       const probe = vi.fn(() => (index === 599 ? { top: 0, bottom: 120 } : { top: -20, bottom: -10 }) as DOMRect);
       Object.defineProperty(paragraph, "getBoundingClientRect", { configurable: true, value: probe });
@@ -392,8 +397,17 @@ describe("viewport DOM search", () => {
     });
     session = createViewportDomTextSearch(root, viewport, vi.fn());
     expect(session.setQuery("alpha")).toBe(600);
+    const intersectionEntry = (target: Element, isIntersecting: boolean): IntersectionObserverEntry => ({
+      target,
+      isIntersecting,
+      boundingClientRect: new DOMRect(),
+      intersectionRect: new DOMRect(),
+      intersectionRatio: isIntersecting ? 1 : 0,
+      rootBounds: null,
+      time: 0,
+    });
     notifyIntersections(
-      paragraphs.map((target) => ({ target, isIntersecting: target === destination }) as IntersectionObserverEntry),
+      paragraphs.map((target) => intersectionEntry(target, target === destination)),
       {} as IntersectionObserver
     );
     const measure = vi.spyOn(performance, "measure");
@@ -407,12 +421,12 @@ describe("viewport DOM search", () => {
       for (const callback of pending) callback(0);
       const ranges = [...highlights.values()].flatMap((collection) => [...collection]);
       expect(ranges).toHaveLength(1);
-      expect(ranges[0].startContainer).toBe(destination.firstChild);
-      expect(ranges[0].toString()).toBe("alpha");
+      expect(requireTestValue(ranges[0]).startContainer).toBe(destination.firstChild);
+      expect(requireTestValue(ranges[0]).toString()).toBe("alpha");
     }
     expect(probes.slice(0, -1).every((probe) => probe.mock.calls.length === 0)).toBe(true);
     expect(measure.mock.calls.some(([name]) => name.endsWith(":capture") || name.endsWith(":matching"))).toBe(false);
-    notifyIntersections([{ target: destination, isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+    notifyIntersections([intersectionEntry(destination, false)], {} as IntersectionObserver);
     flushFrames();
     expect([...highlights.values()].every((collection) => collection.size === 0)).toBe(true);
     session.dispose();

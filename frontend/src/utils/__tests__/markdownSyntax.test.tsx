@@ -9,6 +9,7 @@ import {
   normalizeMarkdownTableCellLineBreaks,
   remarkRenderMarkdownTableCellLineBreaks,
 } from "../../components/Viewer/markdownTableCellLineBreaks";
+import { requireTestValue } from "../../test/helpers/assertions";
 import {
   createMarkdownEditNormalization,
   PREPARATION_SOURCE_CHUNK_UNITS,
@@ -216,11 +217,11 @@ describe("engine-neutral Markdown syntax adapter", () => {
     try {
       const controller = new AbortController();
       const pending = prepareCodePreviewInWorker(["* item"], 1, controller.signal, vi.fn());
-      const worker = PreparationWorker.instances[0];
-      expect(worker.postMessage.mock.calls[0][0]).toEqual({ type: "prepare", generation: 1, prepareTree: undefined });
+      const worker = requireTestValue(PreparationWorker.instances[0]);
+      expect(requireTestValue(worker.postMessage.mock.calls[0])[0]).toEqual({ type: "prepare", generation: 1, prepareTree: undefined });
       const cancelledController = new AbortController();
       const cancelled = prepareCodePreviewInWorker(["new"], 2, cancelledController.signal, vi.fn());
-      const cancelledWorker = PreparationWorker.instances[1];
+      const cancelledWorker = requireTestValue(PreparationWorker.instances[1]);
       expect(cancelledWorker).not.toBe(worker);
       worker.receive({ type: "source-ack", generation: 1, sequence: 0 });
       worker.receive({ type: "source-ack", generation: 1, sequence: 1 });
@@ -292,7 +293,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       expect(cancelledWorker.onmessage).toBeNull();
 
       const malformed = prepareCodePreviewInWorker(["bad"], 3, new AbortController().signal, vi.fn());
-      const malformedWorker = PreparationWorker.instances[2];
+      const malformedWorker = requireTestValue(PreparationWorker.instances[2]);
       malformedWorker.receive({ type: "source-ack", generation: 3, sequence: 0 });
       malformedWorker.receive({ type: "source-ack", generation: 3, sequence: 1 });
       malformedWorker.receive({
@@ -306,14 +307,14 @@ describe("engine-neutral Markdown syntax adapter", () => {
       expect(malformedWorker.terminate).toHaveBeenCalledOnce();
 
       const undecodable = prepareCodePreviewInWorker(["bad"], 4, new AbortController().signal, vi.fn());
-      const undecodableWorker = PreparationWorker.instances[3];
+      const undecodableWorker = requireTestValue(PreparationWorker.instances[3]);
       undecodableWorker.dispatchEvent(new Event("messageerror"));
       await expect(undecodable).rejects.toThrow("could not be decoded");
       expect(undecodableWorker.terminate).toHaveBeenCalledOnce();
 
       vi.useFakeTimers();
       const stalled = prepareCodePreviewInWorker(["bad"], 5, new AbortController().signal, vi.fn());
-      const stalledWorker = PreparationWorker.instances[4];
+      const stalledWorker = requireTestValue(PreparationWorker.instances[4]);
       const rejection = expect(stalled).rejects.toThrow("made no progress");
       await vi.advanceTimersByTimeAsync(WORKER_PROGRESS_TIMEOUT_MS);
       await rejection;
@@ -357,7 +358,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       try {
         const source = "source\uD83D\uDE00";
         const generation = edits.request(source, baseline);
-        const worker = PreparationWorker.instances[0];
+        const worker = requireTestValue(PreparationWorker.instances[0]);
         expect(worker.postMessage).toHaveBeenCalledWith(expect.objectContaining({ preserveTableSource: true }));
         const transferred = ["", ""];
         let sequence = 0;
@@ -411,7 +412,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
     try {
       const pending = prepareCodePreviewInWorker(["source"], 1, new AbortController().signal, vi.fn(), { preserveTableSource: "baseline" });
-      const worker = PreparationWorker.instances[0];
+      const worker = requireTestValue(PreparationWorker.instances[0]);
       worker.receive({ type: "source-ack", generation: 1, sequence: 0 });
       worker.receive({ type: "source-ack", generation: 1, sequence: 1 });
       worker.receive({ type: "normalized-source", generation: 1, sequence: 1, text: "too early", final: true });
@@ -447,13 +448,15 @@ describe("engine-neutral Markdown syntax adapter", () => {
       const old = edits.request("same source", "old baseline", true);
       const latest = edits.request("same source", "new baseline");
       expect(PreparationWorker.instances).toHaveLength(1);
-      expect(PreparationWorker.instances[0].postMessage).toHaveBeenCalledWith(expect.objectContaining({ preserveOnly: true }));
+      expect(requireTestValue(PreparationWorker.instances[0]).postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ preserveOnly: true })
+      );
       const flushed = edits.flush();
-      complete(PreparationWorker.instances[0], old, "obsolete preserved bytes");
+      complete(requireTestValue(PreparationWorker.instances[0]), old, "obsolete preserved bytes");
       await vi.waitFor(() => expect(PreparationWorker.instances).toHaveLength(2));
       expect(published).not.toHaveBeenCalled();
       expect(() => edits.captureSnapshotSync()).toThrow(/not finished/);
-      complete(PreparationWorker.instances[1], latest, "current normalized bytes");
+      complete(requireTestValue(PreparationWorker.instances[1]), latest, "current normalized bytes");
       const snapshot = await flushed;
       expect(snapshot).toEqual({
         generation: latest,
@@ -486,7 +489,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     };
     try {
       const first = edits.request("first<BR>edit");
-      const firstWorker = PreparationWorker.instances[0];
+      const firstWorker = requireTestValue(PreparationWorker.instances[0]);
       for (let index = 0; index < 100; index += 1) edits.request(`intermediate ${index}`);
       const latest = edits.request("latest<BR>edit");
       expect(PreparationWorker.instances).toHaveLength(1);
@@ -501,7 +504,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       expect(failed).not.toHaveBeenCalled();
       expect(() => edits.captureSnapshotSync()).toThrow(/not finished/);
       expect(firstWorker.terminate).toHaveBeenCalledOnce();
-      const currentWorker = PreparationWorker.instances[1];
+      const currentWorker = requireTestValue(PreparationWorker.instances[1]);
       expect(currentWorker.postMessage).toHaveBeenCalledExactlyOnceWith({ type: "prepare", generation: latest, prepareTree: undefined });
       complete(currentWorker, latest, "latest<br />edit");
       const captured = await flushed;
@@ -513,7 +516,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       const next = edits.request("next");
       expect(() => edits.captureSnapshotSync()).toThrow(/not finished/);
       expect(captured.normalizedSource).toBe("latest<br />edit");
-      complete(PreparationWorker.instances[2], next, "next");
+      complete(requireTestValue(PreparationWorker.instances[2]), next, "next");
       await expect(edits.flush()).resolves.toMatchObject({ generation: next, normalizedSource: "next" });
       expect(captured.normalizedSource).toBe("latest<br />edit");
     } finally {
@@ -531,7 +534,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     try {
       const failed = edits.request("unchanged draft");
       const failure = expect(edits.flush()).rejects.toThrow("worker failed");
-      PreparationWorker.instances[0].receive({ type: "error", generation: failed, message: "worker failed" });
+      requireTestValue(PreparationWorker.instances[0]).receive({ type: "error", generation: failed, message: "worker failed" });
       await failure;
       expect(() => edits.captureSnapshotSync()).toThrow("worker failed");
       await expect(edits.flush()).rejects.toThrow("worker failed");
@@ -541,7 +544,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       const cancelled = expect(edits.flush(controller.signal)).rejects.toMatchObject({ name: "AbortError" });
       controller.abort();
       await cancelled;
-      const worker = PreparationWorker.instances[1];
+      const worker = requireTestValue(PreparationWorker.instances[1]);
       expect(worker.terminate).not.toHaveBeenCalled();
       worker.receive({ type: "source-ack", generation: retry, sequence: 0 });
       worker.receive({ type: "source-ack", generation: retry, sequence: 1 });
@@ -579,8 +582,8 @@ describe("engine-neutral Markdown syntax adapter", () => {
         const expected = /startup failed|execution failed|could not be decoded|made no progress|unavailable/;
         const rejected = expect(edits.flush()).rejects.toThrow(expected);
         const worker = PreparationWorker.instances[0];
-        if (mode === "execution") worker.receive({ type: "error", generation, message: "worker execution failed" });
-        else if (mode === "decode") worker.dispatchEvent(new Event("messageerror"));
+        if (mode === "execution") requireTestValue(worker).receive({ type: "error", generation, message: "worker execution failed" });
+        else if (mode === "decode") requireTestValue(worker).dispatchEvent(new Event("messageerror"));
         else if (mode === "timeout") await vi.advanceTimersByTimeAsync(WORKER_PROGRESS_TIMEOUT_MS);
         await rejected;
         expect(() => edits.captureSnapshotSync()).toThrow(expected);
@@ -608,7 +611,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     try {
       const generation = edits.request("active draft");
       edits.request("queued draft");
-      const worker = PreparationWorker.instances[0];
+      const worker = requireTestValue(PreparationWorker.instances[0]);
       const lateMessage = worker.onmessage;
       const disposed = expect(edits.flush()).rejects.toMatchObject({ name: "AbortError" });
       edits.dispose();
@@ -708,8 +711,8 @@ describe("engine-neutral Markdown syntax adapter", () => {
         [{ text, label: "js" }, { text: "x".repeat(100_001) }, { text: "end", label: "py" }],
         controller.signal
       );
-      const worker = SyntaxWorker.instances[0];
-      expect(worker.postMessage.mock.calls[0][0]).toEqual({
+      const worker = requireTestValue(SyntaxWorker.instances[0]);
+      expect(requireTestValue(worker.postMessage.mock.calls[0])[0]).toEqual({
         type: "source",
         block: 0,
         text: text.slice(0, SYNTAX_SOURCE_CHUNK_UNITS),
@@ -718,7 +721,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       });
       worker.receive({ type: "source-ack" });
       worker.receive({ type: "source-ack" });
-      expect(worker.postMessage.mock.calls[2][0]).toMatchObject({ text: "x", final: true });
+      expect(requireTestValue(worker.postMessage.mock.calls[2])[0]).toMatchObject({ text: "x", final: true });
       const ranges = Array.from({ length: SYNTAX_RESULT_PAGE_RANGES }, (_, index) => ({
         from: index,
         to: index + 1,
@@ -727,9 +730,15 @@ describe("engine-neutral Markdown syntax adapter", () => {
       worker.receive({ type: "ranges", block: 0, ranges });
       expect(worker.postMessage).toHaveBeenCalledTimes(3);
       await vi.advanceTimersByTimeAsync(0);
-      expect(worker.postMessage.mock.calls[3][0]).toEqual({ type: "ack" });
+      expect(requireTestValue(worker.postMessage.mock.calls[3])[0]).toEqual({ type: "ack" });
       worker.receive({ type: "complete", block: 0 });
-      expect(worker.postMessage.mock.calls[4][0]).toEqual({ type: "source", block: 1, text: "end", label: "py", final: true });
+      expect(requireTestValue(worker.postMessage.mock.calls[4])[0]).toEqual({
+        type: "source",
+        block: 1,
+        text: "end",
+        label: "py",
+        final: true,
+      });
       worker.receive({ type: "complete", block: 1, reason: "unknown-language" });
       await expect(pending).resolves.toEqual([{ ranges }, { reason: "block-too-large" }, { reason: "unknown-language" }]);
       expect(worker.terminate).toHaveBeenCalledOnce();
@@ -737,7 +746,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       const rejection = expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
       controller.abort();
       await rejection;
-      expect(SyntaxWorker.instances[1].terminate).toHaveBeenCalledOnce();
+      expect(requireTestValue(SyntaxWorker.instances[1]).terminate).toHaveBeenCalledOnce();
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       controller.abort();
@@ -1095,7 +1104,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     );
     const { container, unmount } = render(<ReactMarkdown>{"```js\nx\n```\n\n".repeat(600)}</ReactMarkdown>);
     const blocks = [...container.querySelectorAll("code")];
-    const destination = blocks[599];
+    const destination = requireTestValue(blocks[599]);
     const bounds = { top: 0, bottom: 20 } as DOMRect;
     const geometry = vi.spyOn(Range.prototype, "getBoundingClientRect").mockReturnValue(bounds);
     vi.spyOn(container, "getBoundingClientRect").mockReturnValue(bounds);
@@ -1121,7 +1130,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
         for (const callback of pending) callback(0);
         const ranges = [...highlights.values()].flatMap((collection) => [...collection]);
         expect(ranges).toHaveLength(1);
-        expect(ranges[0].startContainer).toBe(destination.firstChild);
+        expect(requireTestValue(ranges[0]).startContainer).toBe(destination.firstChild);
       }
       expect(probes.slice(0, -1).every((probe) => probe.mock.calls.length === 0)).toBe(true);
       intersections.publish([destination], false);
@@ -1177,7 +1186,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     ]);
     expect([...documentSearchMatches("🌍", "(?=.)", { regexp: true })].length).toBeGreaterThan(0);
     expect(() => [...documentSearchMatches("text", "[", { regexp: true })]).toThrow("Invalid document search expression");
-    const match = [...documentSearchMatches(index.text, "🌍 end")][0];
+    const match = requireTestValue([...documentSearchMatches(index.text, "🌍 end")][0]);
     expect(index.segments.filter((segment) => segment.to > match.from && segment.from < match.to)).toHaveLength(2);
   });
   it("streams semantic whole-Markdown records with bounded text and source-ordered parents", async () => {

@@ -1,7 +1,8 @@
+import type { ParseKeys } from "i18next";
 import { translate } from "../../i18n";
 import type { SortField } from "../../pages/FileBrowser/types";
 
-const SORT_FIELD_KEYS: Record<SortField, string> = {
+const SORT_FIELD_KEYS: Record<SortField, ParseKeys> = {
   name: "fileBrowser.chrome.sort.fields.name",
   size: "fileBrowser.chrome.sort.fields.size",
   modified: "fileBrowser.chrome.sort.fields.modified",

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../../i18n";
 import type { FileOperationAction } from "../../../pages/FileBrowser/fileOperationActions";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import { CompactCreateMenu } from "../CompactCreateMenu";
 
 const actions: FileOperationAction[] = [
@@ -41,7 +42,7 @@ describe("CompactCreateMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create new item" }));
 
     fireEvent.click(screen.getByRole("menuitem", { name: "New folder" }));
-    expect(actions[0].onClick).toHaveBeenCalledOnce();
+    expect(requireTestValue(actions[0]).onClick).toHaveBeenCalledOnce();
 
     fireEvent.click(screen.getByRole("button", { name: "Create new item" }));
     expect(screen.getByRole("menuitem", { name: "New file" })).toHaveAttribute("aria-disabled", "true");

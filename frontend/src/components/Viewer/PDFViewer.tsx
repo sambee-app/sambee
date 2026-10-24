@@ -1528,7 +1528,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
           {/* Error state */}
           {error && (
-            <Box p={2}>
+            <Box sx={{ p: 2 }}>
               <Alert
                 severity="error"
                 action={
@@ -1617,7 +1617,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                 onPassword={handleDocumentPassword}
                 loading={null}
                 error={
-                  <Box p={2}>
+                  <Box sx={{ p: 2 }}>
                     <Alert severity="error">Failed to load PDF document</Alert>
                   </Box>
                 }

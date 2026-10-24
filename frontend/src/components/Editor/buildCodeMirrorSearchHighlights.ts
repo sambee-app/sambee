@@ -31,7 +31,7 @@ function resolveCurrentSearchRange(view: EditorView): SearchMatchRange | null {
     return match.done ? null : { from: match.value.from, to: match.value.to };
   }
   const index = findSelectedCodeMirrorSearchMatch(ranges, selection);
-  return index < 0 ? null : ranges[index];
+  return index < 0 ? null : (ranges[index] ?? null);
 }
 
 export function buildPassiveSearchHighlightExtension(): Extension {
@@ -96,11 +96,14 @@ export function buildPassiveSearchHighlightExtension(): Extension {
             let high = ranges.length;
             while (low < high) {
               const middle = (low + high) >>> 1;
-              if (ranges[middle].from < visible.from) low = middle + 1;
+              const range = ranges[middle];
+              if (!range) break;
+              if (range.from < visible.from) low = middle + 1;
               else high = middle;
             }
-            for (let index = low; index < ranges.length && ranges[index].from <= visible.to; index += 1) {
+            for (let index = low; index < ranges.length; index += 1) {
               const match = ranges[index];
+              if (!match || match.from > visible.to) break;
               if (match.from === match.to) continue;
               builder.add(match.from, match.to, rangeEquals(currentRange, match) ? passiveSelectedSearchMatchMark : passiveSearchMatchMark);
             }

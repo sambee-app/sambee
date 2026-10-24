@@ -477,7 +477,7 @@ export const THEME_SCHEMA: Record<string, ThemeFieldSchema> = {
           (["info", "success", "warning", "error"] as const).map((kind) => [
             kind,
             {
-              label: kind[0].toUpperCase() + kind.slice(1),
+              label: kind.charAt(0).toUpperCase() + kind.slice(1),
               description: `${kind} message colors`,
               type: "color",
               required: true,

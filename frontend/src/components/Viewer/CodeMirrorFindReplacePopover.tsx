@@ -48,7 +48,7 @@ export interface CodeMirrorFindReplacePopoverProps {
 }
 
 function navigateHistory(
-  event: ReactKeyboardEvent<HTMLInputElement>,
+  event: ReactKeyboardEvent<HTMLElement>,
   history: string[],
   historyIndexRef: MutableRefObject<number | null>,
   historyDraftRef: MutableRefObject<string>,
@@ -77,11 +77,14 @@ function navigateHistory(
 
   if (event.key === "ArrowUp") {
     const nextHistoryIndex = historyIndex === null ? 0 : Math.min(historyIndex + 1, history.length - 1);
+    const entry = history[nextHistoryIndex];
+    if (entry === undefined) return;
     historyIndexRef.current = nextHistoryIndex;
-    onValueChange(history[nextHistoryIndex]);
+    onValueChange(entry);
     return;
   }
 
+  if (historyIndex === null) return;
   const nextHistoryIndex = historyIndex - 1;
   if (nextHistoryIndex < 0) {
     historyIndexRef.current = null;
@@ -89,8 +92,10 @@ function navigateHistory(
     return;
   }
 
+  const entry = history[nextHistoryIndex];
+  if (entry === undefined) return;
   historyIndexRef.current = nextHistoryIndex;
-  onValueChange(history[nextHistoryIndex]);
+  onValueChange(entry);
 }
 
 export function CodeMirrorFindReplacePopover({
@@ -231,10 +236,10 @@ export function CodeMirrorFindReplacePopover({
     const lastFocusableElementIndex = focusableElements.length - 1;
     if (!event.shiftKey && activeElementIndex === lastFocusableElementIndex) {
       event.preventDefault();
-      focusableElements[0].focus();
+      focusableElements[0]?.focus();
     } else if (event.shiftKey && activeElementIndex === 0) {
       event.preventDefault();
-      focusableElements[lastFocusableElementIndex].focus();
+      focusableElements[lastFocusableElementIndex]?.focus();
     }
   };
 

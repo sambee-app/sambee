@@ -14,6 +14,7 @@ import { EditorView, type ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import { buildPassiveSearchHighlightExtension } from "../../Editor/buildCodeMirrorSearchHighlights";
 import type { TextEditorThemeOptions } from "../../Editor/buildTextEditorTheme";
 import { findSelectedCodeMirrorSearchMatch } from "../../Editor/codeMirrorSearchMatches";
@@ -109,10 +110,10 @@ describe("TextCodeEditor", () => {
                 const anchor = choose(state.doc.length + 1);
                 const head = step % 3 === 0 ? anchor : choose(state.doc.length + 1);
                 selectionDirections.add(Math.sign(head - anchor));
-                const replace = replacements[step % replacements.length];
+                const replace = requireTestValue(replacements[step % replacements.length]);
                 const query = new SearchQuery({ search: expression, replace, regexp: true, literal: true, caseSensitive, wholeWord });
                 state = state.update({ selection: EditorSelection.range(anchor, head), effects: setSearchQuery.of(query) }).state;
-                const operation = operations[step % operations.length];
+                const operation = requireTestValue(operations[step % operations.length]);
                 const context = JSON.stringify({
                   seed: randomConfig.seed,
                   step,
@@ -134,7 +135,7 @@ describe("TextCodeEditor", () => {
                   selection: { anchor, head },
                 });
                 for (let responseIndex = 0; responseIndex < responses.length; responseIndex += 1) {
-                  const response = responses[responseIndex];
+                  const response = requireTestValue(responses[responseIndex]);
                   if (response.type === "source-ack") {
                     const text = state.doc.sliceString(sourceOffset, sourceOffset + SOURCE_SEARCH_CHUNK_UNITS);
                     sourceOffset += text.length;
@@ -145,7 +146,7 @@ describe("TextCodeEditor", () => {
                   } else if (response.type === "change") {
                     if (response.continued) {
                       expect(changes.at(-1), context).toMatchObject({ from: response.from, to: response.to });
-                      changes[changes.length - 1].insert += response.insert;
+                      requireTestValue(changes[changes.length - 1]).insert += response.insert;
                     } else changes.push({ from: response.from, to: response.to, insert: response.insert });
                     send({ type: "ack" });
                   } else if (response.type === "announcement") send({ type: "ack" });
@@ -175,7 +176,7 @@ describe("TextCodeEditor", () => {
                 const replay = state.update({ changes, selection: completion!.selection, userEvent: completion!.userEvent });
                 expect(replay.state.doc.toString(), context).toBe(expected.doc.toString());
                 expect(replay.state.selection.toJSON(), context).toEqual(expected.selection.toJSON());
-                if (replay.docChanged || !replay.state.selection.eq(state.selection)) effectiveOperations.add(operation);
+                if (replay.docChanged || !replay.state.selection.eq(state.selection)) effectiveOperations.add(requireTestValue(operation));
                 expect(completion!.userEvent, context).toBe(expectedTransaction?.annotation(Transaction.userEvent));
                 const expectedChanges = expectedTransaction?.changes ?? state.changes();
                 for (let position = 0; position <= state.doc.length; position += 1) {
@@ -241,7 +242,7 @@ describe("TextCodeEditor", () => {
             } as unknown as EditorView);
             let completion: Extract<SourceSearchResponse, { type: "complete" }> | undefined;
             for (let responseIndex = 0; responseIndex < responses.length; responseIndex += 1) {
-              const response = responses[responseIndex];
+              const response = requireTestValue(responses[responseIndex]);
               if (response.type === "announcement") send({ type: "ack" });
               else if (response.type === "complete") completion = response;
               else throw new Error(`Unexpected navigation response ${JSON.stringify(response)}`);
@@ -310,7 +311,9 @@ describe("TextCodeEditor", () => {
       expect(view.state.selection.toJSON()).toEqual(reference.state.selection.toJSON());
       for (let position = 0; position <= source.length; position += 1) {
         for (const association of [-1, 1]) {
-          expect(transactions[0].changes.mapPos(position, association)).toBe(expectedTransaction!.changes.mapPos(position, association));
+          expect(requireTestValue(transactions[0]).changes.mapPos(position, association)).toBe(
+            expectedTransaction!.changes.mapPos(position, association)
+          );
         }
       }
       expect(undo(view)).toBe(true);
@@ -455,6 +458,7 @@ describe("TextCodeEditor", () => {
     vi.useFakeTimers();
     const source = "alpha ".repeat(10_000);
     const view = new EditorView({ state: EditorState.create({ doc: source, extensions: [search()] }) });
+    const destroyView = vi.spyOn(view, "destroy");
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "alpha", replace: "done" })) });
       replaceAll(view);
@@ -467,7 +471,7 @@ describe("TextCodeEditor", () => {
       expect(isSourceReplacementPending(view)).toBe(false);
       expect(view.dom.querySelector('[role="status"]')).toBeNull();
     } finally {
-      if (!view.destroyed) view.destroy();
+      if (!(destroyView.mock.calls.length > 0)) view.destroy();
       vi.useRealTimers();
     }
   });
@@ -522,6 +526,7 @@ describe("TextCodeEditor", () => {
     vi.useFakeTimers();
     const mock = mockSearchWorkers();
     const view = new EditorView({ state: EditorState.create({ doc: "alpha", extensions: [search(), sourceRegexSearchLifecycle] }) });
+    const destroyView = vi.spyOn(view, "destroy");
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a", regexp: true })) });
       runSourceRegexSearchCommand(view, "replace-all");
@@ -534,7 +539,7 @@ describe("TextCodeEditor", () => {
       expect(isSourceReplacementPending(view)).toBe(false);
       expect(worker.terminate).toHaveBeenCalledOnce();
     } finally {
-      if (!view.destroyed) view.destroy();
+      if (!(destroyView.mock.calls.length > 0)) view.destroy();
       mock.restore();
       vi.useRealTimers();
     }
@@ -570,12 +575,12 @@ describe("TextCodeEditor", () => {
       view.dispatch({ effects: StateEffect.reconfigure.of(extensions()) });
       expect(getCodeMirrorFindReplaceMetrics(view).pending).toBe(true);
       expect(mock.workers).toHaveLength(1);
-      expect(mock.workers[0].terminate).not.toHaveBeenCalled();
+      expect(requireTestValue(mock.workers[0]).terminate).not.toHaveBeenCalled();
     } finally {
       view.destroy();
       mock.restore();
     }
-    expect(mock.workers[0].terminate).toHaveBeenCalledOnce();
+    expect(requireTestValue(mock.workers[0]).terminate).toHaveBeenCalledOnce();
   });
 
   it("publishes exact regex counts only after the final worker batch without recounting selection changes", async () => {
@@ -587,7 +592,7 @@ describe("TextCodeEditor", () => {
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
       expect(getCodeMirrorFindReplaceMetrics(view).pending).toBe(true);
-      const worker = mock.workers[0];
+      const worker = requireTestValue(mock.workers[0]);
       worker.emit({ type: "ready" });
       expect(worker.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ query: expect.objectContaining({ wordChars: "" }) }));
       worker.emit({ type: "source-ack" });
@@ -618,10 +623,11 @@ describe("TextCodeEditor", () => {
     const view = new EditorView({
       state: EditorState.create({ doc: "aa aa", extensions: [search(), sourceRegexSearchLifecycle] }),
     });
+    const destroyView = vi.spyOn(view, "destroy");
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
       getCodeMirrorFindReplaceMetrics(view);
-      const worker = mock.workers[0];
+      const worker = requireTestValue(mock.workers[0]);
       const decode = worker.addEventListener.mock.calls.find(([type]) => type === "messageerror")?.[1];
       expect(decode).toBeTypeOf("function");
       if (reason === "complete") worker.emit({ type: "complete", announcements: [] });
@@ -634,7 +640,7 @@ describe("TextCodeEditor", () => {
       expect(worker.onerror).toBeNull();
       expect(worker.removeEventListener).toHaveBeenCalledWith("messageerror", decode);
     } finally {
-      if (!view.destroyed) view.destroy();
+      if (!(destroyView.mock.calls.length > 0)) view.destroy();
       mock.restore();
     }
   });
@@ -647,14 +653,14 @@ describe("TextCodeEditor", () => {
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
       getCodeMirrorFindReplaceMetrics(view);
-      mock.workers[0].emit({
+      requireTestValue(mock.workers[0]).emit({
         type: "ranges",
         ranges: [0, 3, 6, 9].map((from) => ({ from, to: from + 2 })),
       });
-      mock.workers[0].emit({ type: "complete", announcements: [] });
+      requireTestValue(mock.workers[0]).emit({ type: "complete", announcements: [] });
       for (let index = 0; index < 3; index += 1) runSourceRegexSearchCommand(view, "next");
       expect(mock.workers).toHaveLength(2);
-      const worker = mock.workers[1];
+      const worker = requireTestValue(mock.workers[1]);
       expect(worker.terminate).not.toHaveBeenCalled();
       for (const from of [0, 3, 6]) {
         worker.emit({ type: "complete", selection: { anchor: from, head: from + 2 }, announcements: [] });
@@ -713,6 +719,7 @@ describe("TextCodeEditor", () => {
     vi.useFakeTimers();
     const mock = mockSearchWorkers();
     const view = new EditorView({ state: EditorState.create({ doc: "aa aa", extensions: [search(), sourceRegexSearchLifecycle] }) });
+    const destroyView = vi.spyOn(view, "destroy");
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
       runSourceRegexSearchCommand(view, "next");
@@ -731,7 +738,7 @@ describe("TextCodeEditor", () => {
       expect(worker.terminate).toHaveBeenCalledOnce();
       expect(worker.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "navigate" }));
     } finally {
-      if (!view.destroyed) view.destroy();
+      if (!(destroyView.mock.calls.length > 0)) view.destroy();
       mock.restore();
       vi.useRealTimers();
     }
@@ -745,8 +752,8 @@ describe("TextCodeEditor", () => {
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
       expect(runSourceRegexSearchCommand(view, "next")).toBe(true);
-      expect(mock.workers[0].terminate).toHaveBeenCalledOnce();
-      mock.workers[1].emit({ type: "complete", selection: { anchor: 0, head: 2 }, announcements: [] });
+      expect(requireTestValue(mock.workers[0]).terminate).toHaveBeenCalledOnce();
+      requireTestValue(mock.workers[1]).emit({ type: "complete", selection: { anchor: 0, head: 2 }, announcements: [] });
       expect(view.state.selection.main.to).toBe(2);
       runSourceRegexSearchCommand(view, "replace-all");
       const worker = mock.workers.at(-1)!;
@@ -772,11 +779,11 @@ describe("TextCodeEditor", () => {
     });
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "(a+)+$", regexp: true })) });
-      mock.workers[0].emit({ type: "ready" });
+      requireTestValue(mock.workers[0]).emit({ type: "ready" });
       await vi.advanceTimersByTimeAsync(SOURCE_SEARCH_TIMEOUT_MS);
       expect(getCodeMirrorFindReplaceMetrics(view)).toMatchObject({ pending: false, matches: 0 });
       expect(getCodeMirrorFindReplaceMetrics(view).error).toMatch(/timed out/);
-      expect(mock.workers[0].terminate).toHaveBeenCalledOnce();
+      expect(requireTestValue(mock.workers[0]).terminate).toHaveBeenCalledOnce();
       runSourceRegexSearchCommand(view, "next");
       expect(mock.workers).toHaveLength(2);
       expect(getCodeMirrorFindReplaceMetrics(view)).toMatchObject({ pending: true, error: undefined });
@@ -825,8 +832,8 @@ describe("TextCodeEditor", () => {
     });
     try {
       view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "alpha", regexp: true, wholeWord: true })) });
-      mock.workers[0].emit({ type: "ready" });
-      expect(mock.workers[0].postMessage).toHaveBeenLastCalledWith(
+      requireTestValue(mock.workers[0]).emit({ type: "ready" });
+      expect(requireTestValue(mock.workers[0]).postMessage).toHaveBeenLastCalledWith(
         expect.objectContaining({ query: expect.objectContaining({ wordChars: "$" }) })
       );
     } finally {
