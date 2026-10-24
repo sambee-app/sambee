@@ -10,11 +10,13 @@ import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/conte
 import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
 import { loadDraft, snapshotRegisteredDrafts } from "../../../services/draftRecovery";
+import { logger } from "../../../services/logger";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
 import { getDefaultTheme } from "../../../theme/themes";
 import { highlightingService } from "../../../utils/highlightingService";
 import * as markdownCodePreparation from "../../../utils/markdownCodePreparation";
+import * as markdownDocumentPreview from "../../../utils/markdownDocumentPreview";
 import * as markdownSyntaxPublication from "../../../utils/markdownSyntaxPublication";
 import type { PreparedCodeBlock } from "../../../utils/syntaxHighlighting";
 import MarkdownViewer from "../MarkdownViewer";
@@ -990,6 +992,8 @@ describe("MarkdownViewer", () => {
     selection.removeAllRanges();
     fireEvent.change(search, { target: { value: "x=2" } });
     expect(await screen.findByText("1 / 1")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Close", exact: true }));
+    expect(onClose).toHaveBeenCalledOnce();
     viewer.unmount();
     expect(dispose).toHaveBeenCalledOnce();
   });
@@ -2087,6 +2091,42 @@ describe("MarkdownViewer", () => {
       expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
     }
     expect(await screen.findByRole("heading", { name: "Saved" })).toBeInTheDocument();
+  });
+
+  it("keeps edits made during snapshot preparation dirty after saving the captured revision", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
+    vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["# Captured\n"], { type: "text/markdown" }));
+    const release = vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    const save = vi.spyOn(apiService, "saveTextFile").mockResolvedValue();
+    let finishSnapshot!: () => void;
+    mockMarkdownEditorBehavior.pendingSnapshot = new Promise<void>((resolve) => {
+      finishSnapshot = resolve;
+    });
+    renderViewer();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Captured\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(save).not.toHaveBeenCalled();
+    expect(editor).not.toHaveAttribute("readonly");
+    fireEvent.change(editor, { target: { value: "# Newer while preparing\n" } });
+    await act(async () => {
+      finishSnapshot();
+    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    expect(save).toHaveBeenCalledExactlyOnceWith("conn1", "/docs/readme.md", "# Captured\n", {
+      filename: "readme.md",
+      mimeType: "text/markdown;charset=utf-8",
+    });
+    expect(editor).toHaveValue("# Newer while preparing\n");
+    expect(screen.getByRole("status", { name: /unsaved changes/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    expect(release).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    expect(await screen.findByRole("heading", { name: "Captured" })).toBeInTheDocument();
+    expect(save).toHaveBeenCalledOnce();
   });
 
   it("preserves newer edits after a delayed write fails and retries the latest snapshot", async () => {

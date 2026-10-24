@@ -1,7 +1,8 @@
 # Shared Syntax Highlighting Completion Plan
 
-Updated: 2026-10-23. **Items 1-6 are fully done. Merge and rollout
-remain blocked by the unfinished checks in items 7-8.**
+Updated: 2026-10-24. **Items 1-7 are fully done. Final verification,
+documentation reconciliation and a separate merge/rollout decision remain
+under item 8. No release approval is implied.**
 
 The user accepts large atomic Replace All latency with visible feedback (D5),
 the recorded progressive Markdown preview-loading pauses (D6), the existing
@@ -12,14 +13,15 @@ by user confirmation; its additional image/font/resize coverage was removed as
 unnecessary. These are scoped decisions, not passing
 performance measurements or release approval. Keep original thresholds and raw
 failures unchanged. Item 5 is fully done by user instruction; item 6's scoped
-resource investigation is now complete. Broader editing/recovery checks remain
-under item 7, not duplicated as prerequisites for item 5's closure.
+resource investigation and item 7's editing/recovery/native acceptance are also
+complete. The user confirmed the remaining manual print checks were performed
+on 2026-10-24. This is user-confirmed completion, not a new automated run.
 
-Remaining work: finish editing/recovery and the remaining native correctness
-checks under item 7, obtain the remaining
-physical-device/input evidence, reconcile published contracts, and make a
-separate release decision under item 8. Do not restart declined
+Remaining work: complete item 8's final verification and published-contract
+reconciliation, then record a separate release decision. Do not restart declined
 experiments or repeat completed work merely to close an accepted limitation.
+Real-phone and physical keyboard/IME acceptance checks were removed as
+unnecessary by user decision (D12), not completed or passed.
 
 ## Goal And Boundaries
 
@@ -65,7 +67,15 @@ renderer or editor solely to satisfy a benchmark.
 All approvals below were given by the user on 2026-10-23. D10 records item 4's
 explicit closure and scope reduction. Other correctness, resource, manual and
 overall release requirements remain unchanged except for D11's resource-scope
-reduction below.
+reduction and D12's device/input-scope reduction below.
+
+**Item 7 closure (user confirmation, 2026-10-24):** the remaining manual
+checks, including actual Firefox PDF output and desktop/physical printing,
+have been performed. Together with the recorded automated verification, this
+fully closes item 7. Detailed browser/OS/printer settings and new measurements
+were not supplied; none are inferred. This confirmation supersedes earlier
+statements that these manual checks were outstanding. It does not restore
+checks removed under D12, waive demonstrated regressions or approve release.
 
 **Item 5 closure (user instruction, 2026-10-23):** dense-output and large-table
 implementation, fixed workloads and functional verification are fully done.
@@ -82,6 +92,7 @@ or measurements nor waives those independent checks or approves release.
 | D9 | Accept the ten recorded Firefox many-block syntax-colour samples at 1,511-1,579 ms against the 1,500 ms target. | Readiness and item 1 fully done. All 120 cold/warm samples were collected; 110 meet the target, text is usable within 863 ms and full syntax preparation within 1,579 ms. Longer future delays, other workloads and interaction pauses are not covered. |
 | D10 | Accept the four recorded Firefox desktop code-display gaps of 51-59 ms; remove additional delayed-image/font/resize and scroll-anchor coverage as unnecessary; mark item 4's browser-menu Find/reveal, clipboard, assistive-technology and physical-scrolling checks finished. | Item 4 fully done by user decision/confirmation. Keep the four raw timing failures and the 50 ms limit. No further optimization, removed coverage or repeat of these completed checks is required solely for closure. No new automated measurements or device/AT details are claimed. Remaining editing/IME, phone, print, resources and release gates are independent. |
 | D11 | Remove item 6's staged memory measurements, peak-memory acceptance and fixed six-cycle shutdown protocol as unnecessary. | Item 6 covers only investigating and fixing memory/resource leaks; that scoped work is now complete as recorded below. Removed measurements, numerical memory ceilings and cycle counts are no longer release gates; do not reinstate them elsewhere or report them as passed. No exhaustive leak-free result or release approval is implied. |
+| D12 | Remove the remaining real-phone and physical keyboard/IME acceptance checks as unnecessary, including phone print UI and physical input-response measurements. | These checks are no longer release gates, not passing evidence. Retain automated keyboard/composition, editing/Save/recovery and desktop native/print correctness checks. Earlier references to outstanding phone or physical-input evidence are superseded only within this scope; physical printing and the separate release decision remain independent. Do not claim verified device support or ignore demonstrated regressions. |
 
 The asynchronous preview-preparation integration was **declined**. Do not resume
 its feasibility spike or implementation without a new scope decision. Retain
@@ -105,7 +116,8 @@ Superseded tuning runs and investigation logs are not part of this active plan.
 
 | Check | Current Evidence | Remaining Limitation |
 | --- | --- | --- |
-| Production functionality | 264/264 cases across Chromium/Firefox and widths 1543/390, plus 2/2 semantic/native cases at the default viewport; no skips/retries. Language/theme, nested failures/safeguards, worker failures, source regex/lifecycle, printing, cancellation, dense expansion and all seven table actions covered. | Broader recovery/native combinations, physical input and resources remain independent. |
+| Item 7 correctness and manual acceptance (2026-10-24) | 241/241 affected viewer/editor/route tests and 7/7 adjacent gallery tests; 16/16 extended theme/Close browser cases; 12/12 existing native cases; 24/24 existing printing cases and 2/2 semantic/native cases. No browser skips/retries/flaky cases. All 12 printing PDFs and six native PDFs pass actual content checks. The user confirms remaining Firefox PDF and desktop/physical print checks were performed; item 7 is fully done. | Overlaps earlier matrices; do not add totals. Manual completion is user-confirmed, not a new automated run or a detailed support matrix. Three existing unused-declaration lint warnings in unchanged MarkdownViewer code and the Vite large-chunk advisory remain. |
+| Production functionality | 264/264 cases across Chromium/Firefox and widths 1543/390, plus 2/2 semantic/native cases at the default viewport; no skips/retries. Language/theme, nested failures/safeguards, worker failures, source regex/lifecycle, printing, cancellation, dense expansion and all seven table actions covered. | Item 7's automated and required manual acceptance are complete. Item 8's final verification and release decision remain independent. Physical-input acceptance was removed under D12. |
 | Readiness | 60/60 trial identities, 120 cold/warm samples; 54 trials pass, six fail. Ten samples exceed 1,500 ms as specified in D9; all meet 3,000 ms full preparation. | Accepted under D9; raw failures remain failures. |
 | Code publication | 56/60 timing passes; all complete within 861 ms. Four Firefox desktop gaps: host-envelope trials 0/1 at 53/51 ms, long-line trial 0 at 59 ms, many-blocks trial 1 at 55 ms. | Accepted under D10; raw failures remain failures and item 4 is fully done. |
 | Item 4 native checks and scrolling | Browser-menu Find/reveal, OS clipboard, assistive-technology and physical-scrolling checks marked finished by the user on 2026-10-23. Additional image/font/resize coverage removed as unnecessary. | User-confirmed completion, not a new automated run. Device, refresh-rate, AT and detailed fixture results were not supplied; do not infer a broader support matrix. |
@@ -113,12 +125,12 @@ Superseded tuning runs and investigation logs are not part of this active plan.
 | Source typing | 24/24 timing passes; keyboard two-frame p95 <=36 ms, gap <=39.9 ms, serialization <=1 ms, synchronous publication <=2 ms. Exact Save verified. | Browser scheduling probes do not establish physical input/paint response. |
 | Source responsiveness | 24 trials complete exact output/history/Save/disposal; raw timing 1 pass/23 failures. Atomic apply <=333.4 ms, gap <=348.4 ms; 18 atomic and 23 gap measurements fail. Serialization <=2.2 ms, synchronous publication <=0.7 ms. | D5 accepts atomic application latency only, not unrelated gaps or new attribution. |
 | Replacement correctness/feedback | 70 affected tests and 16 production regex parity cases pass after preserving individual adjacent-change boundaries. Includes 256 deterministic actual-worker edit/search steps, all case/whole-word settings, custom word characters, mapped positions and undo/redo. Eight production feedback cases verify visible pre-apply feedback and cleanup. | Item 2 complete; not blanket editing, physical-input or resource acceptance. |
-| Dense expansion | Fixed functional cases verify exact output, bounded transport, one native operation/history, undo/redo and multipart Save. All 24 enforced timing trials fail. Item 5 fully done by user instruction. | D5 accepts atomic application latency, not unrelated timing. Independent resource checks belong to item 6; remaining recovery/native correctness belongs to item 7. |
-| Large-table editing | All 28 fixed functional cases pass, preserving exact Save, focus, clean state and editor/worker disposal. Latest 12 enforced line-break trials all fail; 248 focused tests pass at that checkpoint. Item 5 fully done by user instruction. | D8 accepts component responsiveness. Item 6 owns remaining resource/disposal acceptance; item 7 owns broader editing/recovery and physical-input checks. No new run is claimed. |
+| Dense expansion | Fixed functional cases verify exact output, bounded transport, one native operation/history, undo/redo and multipart Save. All 24 enforced timing trials fail. Item 5 fully done by user instruction. | D5 accepts atomic application latency, not unrelated timing. Independent resource and recovery/native checks are complete under items 6 and 7. |
+| Large-table editing | All 28 fixed functional cases pass, preserving exact Save, focus, clean state and editor/worker disposal. Latest 12 enforced line-break trials all fail; 248 focused tests pass at that checkpoint. Item 5 fully done by user instruction. | D8 accepts component responsiveness. Item 6's scoped cleanup and item 7's broader editing/recovery and automated input checks are complete. Physical-input acceptance was removed under D12. No new run is claimed. |
 | Composition and close flush | Four composition Save and eight immediate Close-to-Save browser cases pass. Focused coverage includes failed/delayed writes with newer edits and out-of-order results across three documents. | Chromium composition-end is untrusted; Firefox browser text insertion emits its own composition lifecycle. Neither is physical IME evidence. |
-| Print/PDF | 24 printing and 12 native browser cases pass; 12 Chromium printing PDFs contain complete text/images and six native PDFs complete text. Representative first/last pages visually inspected. | Actual Firefox PDF, physical output, phone print UI and remaining manual checks are unverified. Visual checks do not cover every page. |
+| Print/PDF | 24 printing and 12 native browser cases pass; 12 Chromium printing PDFs contain complete text/images and six native PDFs complete text. Representative first/last pages visually inspected. Remaining actual Firefox PDF and desktop/physical printing checks are user-confirmed performed on 2026-10-24. | No outstanding item 7 print check. No new automated PDF output, page-by-page visual coverage or detailed browser/printer matrix is claimed. Phone print UI acceptance was removed under D12. |
 | Regression/build checks | 418 tests in 13 existing unit/component files and 50 evaluator regressions pass at the item 1 checkpoint. Later item 2 verification passes its 70 affected tests/16 browser cases. Normal production build, frontend lint, docs and whitespace validation pass. | Not one combined test total or a claim that a separate stricter app-project TypeScript invocation is clean. Existing Vite large-chunk advisory remains. |
-| Resources/remaining manual acceptance | Item 6's ownership investigation and source-regex cleanup fixes are complete: 310 tests across seven existing unit/component files and 24 production browser cases pass. Item 4 manual checks are user-confirmed complete. | No exhaustive heap-retention proof is claimed. Peak/growth measurements and fixed-cycle acceptance were removed under D11, not passed. Remaining phone, physical typing/IME, editing and printing evidence stays open; do not reopen item 4's completed checks. |
+| Resources/manual acceptance | Item 6's ownership investigation and source-regex cleanup fixes are complete: 310 tests across seven existing unit/component files and 24 production browser cases pass. Item 4 and remaining item 7 manual checks are user-confirmed complete. | No exhaustive heap-retention proof is claimed. Peak/growth measurements and fixed-cycle acceptance were removed under D11, not passed. Phone and physical keyboard/IME acceptance was removed under D12. Do not reopen completed checks solely for closure. |
 
 Current evidence references:
 
@@ -147,8 +159,9 @@ do not establish physical-device, display-refresh or power-mode measurements.
 
 **Fully done.** Test registrations, report-identity enforcement, resource/manual
 inventory and available current-build verification are complete. Readiness is
-accepted under D9. Missing resource/manual evidence belongs to the remaining
-items, not a reopening of this inventory.
+accepted under D9. Resource/manual acceptance is now complete under items 6
+and 7; final verification and release remain under item 8, not a reopening of
+this inventory.
 
 ### 2. Provide Atomic Replacement Busy Feedback
 
@@ -201,8 +214,9 @@ Coverage includes complete references/headings, safe HTML/links, Unicode, one
 transform, stable earlier DOM, table/code subdivision, ordinary documents, Strict
 Mode, hidden tabs, source/configuration changes, cancellation, failures, pending
 controls and complete printing. Item 4's separate code pauses and native/scrolling
-checks are now closed under D10, not D6. Remaining resource, physical-input,
-editing, phone, printing and release checks stay independent.
+checks are now closed under D10, not D6. Item 6's scoped resource work and item 7's
+editing/native/printing acceptance are complete; item 8 remains independent.
+Phone and physical keyboard/IME acceptance was removed under D12.
 
 ### 4. Resolve Native Layout And Scrolling Costs
 
@@ -228,8 +242,10 @@ Manual completion is recorded from the user's instruction, not a new automated
 run; no device, refresh-rate or AT measurements are invented. Item 7 must not
 reopen these completed checks without an affected change or new failure.
 No offscreen-rendering experiment is required or approved; D7 still needs fresh
-evidence and explicit approval. Resource, remaining editing/input/phone/printing
-checks and release approval remain independent.
+evidence and explicit approval. Item 7's independent editing/automated-input and
+desktop/physical printing acceptance is complete; release approval remains
+separate under item 8.
+Phone and physical keyboard/IME acceptance was removed under D12.
 
 ### 5. Cover Dense Output And Large-Table Editing
 
@@ -255,13 +271,12 @@ table-performance optimization is optional separate work.
 
 Cross-cutting acceptance has one owner per checklist: item 6 covers memory and
 resource leaks, including dense replacement and table editing; item 7 covers
-remaining editing/recovery/native correctness and physical IME. Those checks
-are complete under item 6 and remain open under item 7, not as duplicate
-unfinished work here. Closing item 5 does
+broader editing/recovery/native correctness and automated composition. Both
+items are fully done, not duplicate unfinished work here. Closing item 5 does
 not claim new measurements, accept lost input or stale Save, establish leak-free
 cleanup, or approve release. D11 separately removes quantitative memory gates.
-Do not repeat completed replacement or fixed table
-coverage merely because item 7 remains open.
+Do not repeat completed replacement or fixed table coverage solely for closure
+or because item 8 remains open.
 
 ### 6. Investigate Memory And Resource Leaks
 
@@ -318,33 +333,97 @@ discarded to reduce memory use. No published user-facing contract changes.
 
 ### 7. Finish Editing And Native Interaction Acceptance
 
-This item owns remaining editing/recovery/native-input acceptance, including
-large-table and dense-replacement combinations not established by existing
-evidence. Item 5 is closed; identify actual gaps without reopening its completed
-implementation, fixed functional cases or item 2's replacement coverage.
+**Fully done (2026-10-24).** Automated editing/recovery/native-interaction
+verification is complete. The user confirms the remaining manual checks,
+including actual Firefox PDF output and desktop/physical printing, have been
+performed. No further item 7 implementation or manual acceptance is required.
+This completion neither claims new automated measurements nor approves release.
 
-- [ ] Reproduce and resolve the unverified close-after-theme-refresh observation;
+This item owns the cross-cutting editing/recovery/native acceptance, including
+large-table and dense-replacement combinations. Retain the recorded evidence
+without duplicating item 5's fixed functional cases or item 2's replacement
+coverage.
+
+- [x] Reproduce and resolve the unverified close-after-theme-refresh observation;
   test rapid switching between distinct documents and late worker completions.
-- [ ] Complete remaining latest-edit Save, edits during delayed Save, failed
+- [x] Complete remaining latest-edit Save, edits during delayed Save, failed
   Save, undo/redo, table/IME flush, preview/share/download, discard and
   recovery/snapshot failure combinations. Reuse existing passing cases and
   deterministic delayed responses; do not reopen completed replacement coverage.
 - [x] Complete browser-menu Find/reveal, OS clipboard and assistive-technology
   checks covered by item 4, by user confirmation under D10. Do not duplicate them
   as open work here.
-- [ ] Finish remaining native cross-block selection/Select All, editing
+- [x] Finish remaining native cross-block selection/Select All, editing
   keyboard/focus, headings and complete print/PDF combinations not established
   by existing evidence or item 4's confirmed checks. Retest completed native/AT
   behavior only after an affected change or new failure.
-- [ ] Complete remaining real-phone and physical keyboard/IME checks; record
-  hardware, OS/browser and power mode where applicable. Item 4's physical
-  scrolling and accessibility checks are finished, not pending device tasks.
+  Automated combinations are verified below; the remaining actual Firefox PDF
+  and desktop/physical printing checks are user-confirmed performed on
+  2026-10-24. Detailed browser/OS/printer settings were not supplied.
 
-**Done when:** all required automated/manual interactions are evidenced; failures
-leave editing usable and newer edits dirty. Preserve completed representative
+**Implementation and gap audit (2026-10-24):**
+
+- Extended the existing theme identity matrix, rather than adding a second
+  matrix: after late grammar readiness and light/dark/custom theme refresh,
+  exit editing, Close the viewer, require the browse route/file row and zero
+  remaining workers. The new checks reproduced stuck viewer/editor transitions.
+  Synchronously commit viewer Close and mode changes through the existing
+  router option, matching settings navigation; do not change editor disposal,
+  document identity or worker ownership. All 16 engine/width/surface cases pass
+  with the original timeouts and no retries. Temporary probes and unsuccessful
+  route-render/layout/blocker experiments were removed.
+- Extended the two existing Markdown unit theme cases with Close. Existing
+  distinct-document and unmount tests already hold worker completions and
+  require obsolete results to be ignored; no duplicate tests were added.
+- Added one missing Save regression: hold snapshot preparation, edit again,
+  finish Save, require only the captured bytes to be written, preserve the newer
+  dirty draft, then discard to the saved revision. Existing delayed/failed-write,
+  snapshot/serialization/storage failure, recovery freshness, canonical sharing,
+  saved-file attachment/download, preview/discard, history and actual nested
+  table/composition tests cover the other requested contracts. Reuse those
+  tests rather than multiply equivalent combinations or rerun accepted timing.
+- Removed a duplicate legacy synchronous snapshot callback that prevented the
+  production build, retaining the worker-backed canonical snapshot callback.
+  Restored two missing imports needed by existing retained-preview cleanup
+  tests. All 241 tests in MarkdownViewer, MarkdownRichEditor, TextViewer and
+  FileBrowser URL routing pass; all seven adjacent gallery route tests also pass.
+- Reused the 12 native cases for complete fenced text, native Select All,
+  cross-block Range selection, exact trusted keyboard clipboard round-trip,
+  focus and heading navigation; the two semantic/native cases also pass.
+  Browser Select All includes surrounding page text and native block separators;
+  do not equate its payload with preview `innerText()` or change native scope
+  just to satisfy a test. Existing keyboard/history/table focus/composition
+  regressions supply editor coverage. No redundant permanent cases were added.
+- Reused all 24 light/dark, width and fixture printing cases. The content checker
+  accepts all 12 Chromium print PDFs (complete text/images) and six native PDFs.
+  This run does not supply actual Firefox print-dialog/PDF output, new page-by-page
+  visual inspection or physical-printer evidence. Preserve earlier representative
+  visual evidence. The remaining manual print checks are separately closed by
+  the user's 2026-10-24 confirmation, not by this automated run.
+
+Local evidence: `/tmp/sambee-item7-unit.log`,
+`/tmp/sambee-item7-theme-close.json`, `/tmp/sambee-item7-native.json`,
+`/tmp/sambee-item7-print.json`, its printing-only derived slice
+`/tmp/sambee-item7-print-only.json`, and the corresponding
+`/tmp/sambee-item7-{native,print}-pdf.log` content-check verdicts.
+Normal build passes; frontend lint has no errors and reports only the three
+pre-existing unused declarations in unchanged MarkdownViewer code. These are
+bug fixes within existing documented behavior, not a new published contract;
+item 8's separate documentation reconciliation and release decision remain open.
+
+Real-phone and physical keyboard/IME acceptance checks, including phone print UI
+and hardware input-response measurements, were removed as unnecessary by user
+decision on 2026-10-23 (D12). They are not outstanding tasks or passing results.
+Automated composition/flush, keyboard/focus and editing correctness remain
+required. Item 4's physical scrolling and accessibility checks stay finished.
+
+**Closure:** required automated interactions are verified and remaining manual
+interactions are user-confirmed complete. Failure-path tests require editing to
+remain usable and newer edits dirty. Preserve completed representative
 manual evidence unless an affected change or new failure requires retesting.
 `window.find`, Range selection, narrow desktop viewports and semantic snapshots
-do not substitute for browser-toolbar, clipboard, phone or AT acceptance.
+do not establish browser-toolbar, clipboard, real-phone or AT evidence. D12
+removes phone/physical-input acceptance rather than supplying that evidence.
 Chromium proxy Find reveal remains diagnostic-only; exact selection remains
 required in both engines and Firefox proxy reveal remains enforced.
 
@@ -352,11 +431,14 @@ required in both engines and Firefox proxy reveal remains enforced.
 
 - [ ] After fixes, run the affected unchanged production matrix and missing
   correctness/theme/worker, timing, leak/cleanup and native checks. Accepted results
-  need no rerun solely because items 1-6 are marked complete. Do not reinstate
+  need no rerun solely because items 1-7 are marked complete. Do not reinstate
   image/font/resize coverage removed under D10 or quantitative memory/fixed-cycle
   checks removed under D11.
 - [x] Check actual Chromium PDF text/images and representative first/last pages.
-  Actual Firefox output, phone print UI and physical printing remain unverified.
+  Remaining actual Firefox PDF and desktop/physical printing checks are
+  user-confirmed performed on 2026-10-24 under item 7. No new automated or detailed
+  printer/browser evidence is claimed. Phone print UI acceptance was removed
+  under D12, not passed.
 - [x] Run the recorded focused unit/component tests, normal production build,
   lint, documentation and whitespace checks. Later code fixes need fresh affected
   checks; run backend theme tests only if that contract changes.
@@ -398,6 +480,8 @@ only within their recorded scope; accepted failed measurements remain failed.
 D10 removes additional invalidation coverage and records item 4's manual
 completion. D11 removes quantitative memory and fixed-cycle acceptance; item 6
 retains only leak investigation and verification of demonstrated cleanup fixes.
+D12 removes real-phone and physical keyboard/IME acceptance, including hardware
+input-response measurements, without changing automated typing limits.
 
 | Metric | Required Limit |
 | --- | --- |
@@ -408,7 +492,7 @@ retains only leak investigation and verification of demonstrated cleanup fixes.
 | Warm changed query / last-match navigation | <=100 ms each, from user action through exact readiness/visible reveal and two frames. |
 | Timer-service gap / source atomic dispatch | <=50 ms each; scheduling proxies do not establish CPU ownership. Apply scoped D5/D6/D8/D10 exceptions without rewriting results. |
 | Serialization / synchronous publication | <=50 ms each; overlapping stages are not additive. |
-| Typing proxy / physical input-to-visible-response | Per-trial p95 strictly below 50 ms; proxy passes do not establish hardware response. |
+| Typing proxy | Per-trial p95 strictly below 50 ms; proxy passes do not establish hardware response. Separate physical input-to-visible-response acceptance was removed under D12, not passed. |
 | Application-controlled interaction-blocking task | No task above 50 ms, subject only to explicit scoped acceptance decisions. |
 | Physical scrolling at refresh rate R | One-frame p95; no application-attributed interval above two frames (16.7/33.3 ms at 60 Hz). Item 4 checks finished by user confirmation under D10; no new measurements claimed. |
 | Memory/resource leaks | Investigate unwanted retention and verify fixes under item 6. No staged/peak-memory ceilings, fixed cycle count or quantitative shutdown-growth gate under D11. |
@@ -427,19 +511,22 @@ samples. Dropped input/incomplete actions fail correctness, not sample exclusion
 ## Owners And Tool Limitations
 
 Automated execution owner: **Copilot**, using the existing frontend harness.
-Remaining physical-device/input execution owner: **unassigned**; no phone or
-physical IME session has been supplied to the automated owner. Item 4's native,
+Real-phone and physical keyboard/IME acceptance was removed under D12; no device
+session or hardware response result is claimed. Item 4's native,
 assistive-technology and physical-scrolling checks are user-confirmed finished
-under D10; detailed device/AT measurements were not supplied. Other missing
-capabilities remain unverified and release-blocking unless specifically accepted.
+under D10; detailed device/AT measurements were not supplied. The remaining
+item 7 manual print checks are user-confirmed performed on 2026-10-24, without
+new browser/OS/printer details. No scoped interaction acceptance remains open;
+item 8's final verification, documentation and release decision remain separate.
+Future unavailable evidence is not automatically waived by these confirmations.
 
 | Gate | Available Capability | Outstanding Evidence |
 | --- | --- | --- |
 | Memory/resource leaks | Ownership review, fixed lifecycle assertions and 24 production browser cleanup cases complete under item 6; Chromium CDP/heap inspection and OS process tools remain available for concrete future diagnosis. | No outstanding scoped item 6 check. No exhaustive heap proof is claimed; unavailable peak/GC tools do not create standalone release gates. Release harness references before attributing future retention to the viewer. |
-| Native/manual interactions | Automated focus/ARIA/heading/selection and fixed browser tests; item 4 Find/reveal, clipboard and AT checks finished by user confirmation. | Remaining editing focus/IME, selection, phone and print combinations under item 7. Do not invent a version/fixture support matrix or reopen confirmed checks merely because detail was not supplied. |
+| Native/manual interactions | Automated focus/ARIA/heading/selection and fixed browser tests; item 7's affected automated combinations verified on 2026-10-24. Item 4 Find/reveal, clipboard and AT checks and remaining item 7 manual printing are user-confirmed complete. | No outstanding item 7 check. Real-phone and physical keyboard/IME acceptance was removed under D12. Do not invent a version/fixture support matrix or reopen confirmed checks merely because detail was not supplied. |
 | Scrolling | Existing scripted checks; physical-scrolling completion confirmed by the user under D10. | No outstanding item 4 check. Additional image/font/resize and scroll-anchor coverage was removed as unnecessary; demonstrated regressions still require correction. |
-| Print/PDF | Complete Chromium PDF text/image checks and representative page inspection. | Actual Firefox PDF, remaining visual/manual matrix, phone print UI and physical output. Preserve representative manual print evidence. |
-| Save/recovery | Fixed source/table/history tests, delayed/failed writes, composition and immediate Close-to-Save. | Remaining item 7 combinations and physical IME. Chromium CDP start/input is trusted but composition-end is untrusted; retain this tooling limitation, not a correctness or physical-IME waiver. |
+| Print/PDF | Complete Chromium PDF text/image checks and representative page inspection; remaining actual Firefox PDF and desktop/physical print checks user-confirmed performed on 2026-10-24. | No outstanding scoped print check. Detailed browser/OS/printer settings were not supplied; no new automated output or broader support guarantee is claimed. Phone print UI acceptance was removed under D12. Preserve representative manual print evidence. |
+| Save/recovery | Fixed source/table/history tests, delayed/failed writes, composition and immediate Close-to-Save; item 7's gap audit and held-snapshot Save regression complete on 2026-10-24. | No outstanding requested automated combination. Chromium CDP start/input is trusted but composition-end is untrusted; retain this tooling limitation. D12 removes physical IME acceptance, not automated composition/flush correctness. |
 
 Continue bounded authorized implementation and available verification without
 waiting for unavailable hardware. Do not build custom infrastructure solely to
@@ -498,8 +585,8 @@ node scripts/source-search-containment-proof.mjs --native-atomic
   small edit. Do not fix unrelated failures or change dependencies without the
   repository's dependency workflow.
 
-**Closure:** items 1-6 require no further implementation or approval. Finish
-items 7-8 without resuming declined work, duplicating completed item 5 coverage
+**Closure:** items 1-7 require no further implementation or acceptance approval.
+Finish item 8 without resuming declined work, duplicating completed item 5 coverage
 or reinstating removed coverage.
 Merge/rollout requires its own explicit
 decision after the remaining gates pass or named exceptions are approved.

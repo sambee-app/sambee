@@ -700,7 +700,8 @@ test.describe("production shared syntax theme identity", () => {
         await dialog.getByRole("button", { name: "Later", exact: true }).click();
       });
       await page.goto("/browse/smb/demo");
-      await page.getByRole("button").filter({ has: page.getByText(filePath, { exact: true }) }).click();
+      const file = page.getByRole("button", { name: filePath, exact: true }).or(page.getByRole("button", { name: `File: ${filePath}`, exact: true }));
+      await file.click();
       if (editing) await page.getByRole("button", { name: "Edit", exact: true }).click();
 
       const checkThemes = async (surface: Locator, preview: boolean) => {
@@ -873,12 +874,25 @@ test.describe("production shared syntax theme identity", () => {
         await node.dispose();
         await original?.dispose();
         if (preview) await page.getByRole("button", { name: "Close search", exact: true }).click();
-        else await searchControls.getByRole("button", { name: "Close", exact: true }).click();
+        else {
+          await searchControls.getByRole("button", { name: "Close", exact: true }).click();
+          await expect(searchControls).toBeHidden();
+        }
       };
 
       const preview = kind === "markdown" && !editing;
       const surface = preview ? page.locator('[data-markdown-search-root="true"]') : page.getByRole("textbox", { name: kind === "text" ? "Text editor" : "Markdown editor" });
       await checkThemes(surface, preview);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      if (editing) {
+        await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+        await page.getByRole("button", { name: "Close", exact: true }).click();
+      }
+      await expect(surface).toHaveCount(0);
+      await expect(page).toHaveURL("/browse/smb/demo");
+      await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeHidden();
+      await expect(file).toBeVisible();
+      await expect.poll(() => page.workers().length).toBe(0);
     });
     }
     }

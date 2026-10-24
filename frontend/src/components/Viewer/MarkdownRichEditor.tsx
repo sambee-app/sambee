@@ -798,21 +798,6 @@ const MarkdownRichEditor = forwardRef<MarkdownRichEditorHandle, MarkdownRichEdit
       });
     }, [getCanonicalMarkdown]);
 
-    const captureSnapshotSync = useCallback((): SourceTextSnapshot => {
-      const publication = nestedPublicationStateRef.current;
-      if (publication.observedGeneration > publication.publishedGeneration) {
-        throw new DOMException("Markdown edits have not finished publishing. Retry after the current edit finishes.", "InvalidStateError");
-      }
-      const editor = editorRef.current;
-      if (!editor) throw new Error("Cannot capture a snapshot after the Markdown editor is disposed");
-      const snapshot = editor.captureSnapshot();
-      const previousMarkdown = diffMarkdown ?? markdown;
-      return Object.freeze({
-        revision: snapshot.revision,
-        serialize: () => preserveUnchangedMarkdownTableSource(previousMarkdown, normalizeTableCellBreaksIfNeeded(snapshot.serialize())),
-      });
-    }, [diffMarkdown, markdown]);
-
     useImperativeHandle(
       ref,
       () => ({
