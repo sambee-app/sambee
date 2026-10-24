@@ -153,7 +153,7 @@ describe("Browser - Image View Integration", () => {
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
     const { router } = renderBrowser();
-    fireEvent.click(await screen.findByRole("button", { name: "File: one.jpg" }));
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }));
     expect(await screen.findByTestId("image-view")).toHaveAttribute("data-path", "one.jpg");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     recordFilename.mockClear();
@@ -195,7 +195,7 @@ describe("Browser - Image View Integration", () => {
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
     const { router } = renderBrowser();
-    fireEvent.click(await screen.findByRole("button", { name: "File: one.jpg" }));
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }));
     await screen.findByTestId("image-view");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     let backNavigation: Promise<void> | undefined;

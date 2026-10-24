@@ -4,6 +4,7 @@
     "types": [
       "vite/client",
       "vitest/globals",
+      "@testing-library/jest-dom/vitest",
       "node"
     ],
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo"
