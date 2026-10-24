@@ -51,18 +51,18 @@ describe("viewerStyles markdown regressions", () => {
     const inlineCodeStyles = styles["& code:not(pre code)"] as Record<string, unknown>;
     const preCodeStyles = styles["& pre code, & pre code.hljs"] as Record<string, unknown>;
 
-    expect(resolveThemeValue(preStyles.backgroundColor, darkTheme)).toBe("#1f1914");
-    expect(resolveThemeValue(preStyles.color, darkTheme)).toBe("#ebe8e2");
-    expect(resolveThemeValue(preStyles.border, darkTheme)).toBe("1px solid #504535");
-    expect(preStyles.padding).toBe("1.25rem");
+    expect(resolveThemeValue(preStyles["backgroundColor"], darkTheme)).toBe("#1f1914");
+    expect(resolveThemeValue(preStyles["color"], darkTheme)).toBe("#ebe8e2");
+    expect(resolveThemeValue(preStyles["border"], darkTheme)).toBe("1px solid #504535");
+    expect(preStyles["padding"]).toBe("1.25rem");
 
-    expect(preCodeStyles.display).toBe("block");
-    expect(preCodeStyles.padding).toBe(0);
-    expect(preCodeStyles.backgroundColor).toBe("transparent");
+    expect(preCodeStyles["display"]).toBe("block");
+    expect(preCodeStyles["padding"]).toBe(0);
+    expect(preCodeStyles["backgroundColor"]).toBe("transparent");
 
-    expect(resolveThemeValue(inlineCodeStyles.backgroundColor, darkTheme)).toBe("#2b2925");
-    expect(resolveThemeValue(inlineCodeStyles.color, darkTheme)).toBe("#ebe8e2");
-    expect(resolveThemeValue(inlineCodeStyles.border, darkTheme)).toBe("1px solid #3b3935");
+    expect(resolveThemeValue(inlineCodeStyles["backgroundColor"], darkTheme)).toBe("#2b2925");
+    expect(resolveThemeValue(inlineCodeStyles["color"], darkTheme)).toBe("#ebe8e2");
+    expect(resolveThemeValue(inlineCodeStyles["border"], darkTheme)).toBe("1px solid #3b3935");
   });
 
   it("keeps markdown tables naturally sized but horizontally scrollable", () => {
@@ -71,19 +71,19 @@ describe("viewerStyles markdown regressions", () => {
 
     const tableStyles = styles["& table"] as Record<string, unknown>;
 
-    expect(tableStyles.display).toBe("block");
-    expect(tableStyles.width).toBe("max-content");
-    expect(tableStyles.maxWidth).toBe("100%");
-    expect(tableStyles.overflowX).toBe("auto");
-    expect(tableStyles.border).toBe(0);
-    expect(resolveThemeValue(tableStyles.boxShadow, lightTheme)).toBe("inset 0 0 0 1px #d4c4ae");
-    expect(resolveThemeValue(tableStyles.backgroundColor, lightTheme)).toBe("#fbf9f4");
+    expect(tableStyles["display"]).toBe("block");
+    expect(tableStyles["width"]).toBe("max-content");
+    expect(tableStyles["maxWidth"]).toBe("100%");
+    expect(tableStyles["overflowX"]).toBe("auto");
+    expect(tableStyles["border"]).toBe(0);
+    expect(resolveThemeValue(tableStyles["boxShadow"], lightTheme)).toBe("inset 0 0 0 1px #d4c4ae");
+    expect(resolveThemeValue(tableStyles["backgroundColor"], lightTheme)).toBe("#fbf9f4");
   });
 
   it("keeps end padding outside the shrunk Markdown content", () => {
     const styles = getMarkdownContentStyles("#1f262b", "#c24400", "#ff5900") as Record<string, unknown>;
 
-    expect(styles.flexShrink).toBe(0);
-    expect(styles.pb).toEqual(VIEWER_SCROLL_END_PADDING);
+    expect(styles["flexShrink"]).toBe(0);
+    expect(styles["pb"]).toEqual(VIEWER_SCROLL_END_PADDING);
   });
 });

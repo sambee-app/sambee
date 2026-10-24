@@ -1,5 +1,9 @@
 import type { PaletteMode } from "@mui/material";
 
+export const SYNTAX_COLOR_ROLES = ["keyword", "string", "number", "comment", "type", "function", "operator", "punctuation"] as const;
+export const HEX_COLOR_PATTERN = /^#[\da-fA-F]{6}(?:[\da-fA-F]{2})?$/;
+export type SyntaxPalette = Record<(typeof SYNTAX_COLOR_ROLES)[number], string>;
+
 //
 // Theme types
 //
@@ -47,6 +51,7 @@ export interface ThemeConfig {
   };
   /** Component-specific semantic colors */
   components?: {
+    syntax?: SyntaxPalette;
     /** Link colors */
     link?: {
       /** Default link color */
@@ -294,6 +299,23 @@ export const THEME_SCHEMA: Record<string, ThemeFieldSchema> = {
     type: "color",
     required: false,
     fields: {
+      syntax: {
+        label: "Syntax",
+        description: "Shared code foreground colors",
+        type: "color",
+        required: false,
+        fields: Object.fromEntries(
+          SYNTAX_COLOR_ROLES.map((role) => [
+            role,
+            {
+              label: `${role.charAt(0).toUpperCase()}${role.slice(1)}`,
+              description: `Code ${role} foreground`,
+              type: "color" as const,
+              required: true,
+            },
+          ])
+        ),
+      },
       link: {
         label: "Links",
         description: "Colors for links and their hover state",
@@ -455,7 +477,7 @@ export const THEME_SCHEMA: Record<string, ThemeFieldSchema> = {
           (["info", "success", "warning", "error"] as const).map((kind) => [
             kind,
             {
-              label: kind[0].toUpperCase() + kind.slice(1),
+              label: kind.charAt(0).toUpperCase() + kind.slice(1),
               description: `${kind} message colors`,
               type: "color",
               required: true,

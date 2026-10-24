@@ -25,7 +25,8 @@ const BACKSLASH = "\\";
 export const CONNECTION_TYPE_LOCAL = "local";
 
 /** Base URL for the primary Sambee backend API. */
-export const SERVER_API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
+export const SERVER_API_BASE_URL =
+  import.meta.env["VITE_API_URL"] || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
 
 // ── Drive ↔ Connection Mapping ───────────────────────────────────────────────
 
@@ -45,6 +46,9 @@ export function driveToConnection(drive: DriveInfo): Connection {
     port: 21549,
     share_name: drive.id,
     username: "",
+    scope: "private",
+    access_mode: "read_write",
+    can_manage: false,
     created_at: "",
     updated_at: "",
   };

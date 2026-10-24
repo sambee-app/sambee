@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { createMockConnection } from "../../../test/fixtures/connections";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import { SecondaryActionStrip } from "../SecondaryActionStrip";
 
@@ -34,7 +35,7 @@ describe("SecondaryActionStrip", () => {
       <SambeeThemeProvider>
         <SecondaryActionStrip
           connections={[
-            {
+            createMockConnection({
               id: "demo-conn",
               name: "Demo",
               type: "smb",
@@ -44,7 +45,7 @@ describe("SecondaryActionStrip", () => {
               username: "demo-user",
               created_at: "2026-03-11T00:00:00Z",
               updated_at: "2026-03-11T00:00:00Z",
-            },
+            }),
           ]}
           selectedConnectionId="demo-conn"
           onConnectionChange={vi.fn()}
@@ -86,7 +87,7 @@ describe("SecondaryActionStrip", () => {
       <SambeeThemeProvider>
         <SecondaryActionStrip
           connections={[
-            {
+            createMockConnection({
               id: "demo-conn",
               name: "Demo",
               type: "smb",
@@ -96,7 +97,7 @@ describe("SecondaryActionStrip", () => {
               username: "demo-user",
               created_at: "2026-03-11T00:00:00Z",
               updated_at: "2026-03-11T00:00:00Z",
-            },
+            }),
           ]}
           selectedConnectionId="demo-conn"
           onConnectionChange={vi.fn()}
@@ -131,7 +132,7 @@ describe("SecondaryActionStrip", () => {
       <SambeeThemeProvider>
         <SecondaryActionStrip
           connections={[
-            {
+            createMockConnection({
               id: "demo-conn",
               name: "Demo",
               type: "smb",
@@ -141,7 +142,7 @@ describe("SecondaryActionStrip", () => {
               username: "demo-user",
               created_at: "2026-03-11T00:00:00Z",
               updated_at: "2026-03-11T00:00:00Z",
-            },
+            }),
           ]}
           selectedConnectionId="demo-conn"
           onConnectionChange={vi.fn()}

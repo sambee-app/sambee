@@ -25,7 +25,7 @@ interface FileListProps {
   onIconClick?: (file: FileEntry, index: number, extend: boolean, additive: boolean) => void;
   onClearSelection?: () => void;
   rowVirtualizer: Virtualizer<HTMLDivElement, Element>;
-  parentRef: React.RefObject<HTMLDivElement>;
+  parentRef: React.RefObject<HTMLDivElement | null>;
   listContainerRef: (node: HTMLDivElement | null) => void;
   fileRowStyles: {
     iconBox: Record<string, unknown>;
@@ -67,7 +67,7 @@ export const FileList = React.memo(
     const { t } = useTranslation();
     const listElementRef = useRef<HTMLDivElement>(null);
     const [itemMenu, setItemMenu] = useState<{
-      actions: CompactItemAction[];
+      actions: readonly CompactItemAction[];
       anchorPosition: { top: number; left: number };
       triggerElement: HTMLElement;
     } | null>(null);
@@ -99,7 +99,7 @@ export const FileList = React.memo(
 
     return (
       <Box
-        ref={(node) => {
+        ref={(node: HTMLDivElement | null) => {
           listElementRef.current = node;
           listContainerRef(node);
         }}

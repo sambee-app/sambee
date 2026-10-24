@@ -7,7 +7,7 @@ export const settingsListItemTitleSx: SxProps<Theme> = {
 };
 
 /** Compact typography policy for the full-page settings shells only. */
-export const settingsCompactTypographyScopeSx: SxProps<Theme> = (theme) => ({
+export const settingsCompactTypographyScopeSx = ((theme: Theme) => ({
   [theme.breakpoints.down("sm")]: {
     "& .MuiAppBar-root .MuiTypography-h6": {
       fontSize: `${COMPACT_LAYOUT_SIZE.SETTINGS_APP_BAR_TITLE_PX}px`,
@@ -35,4 +35,4 @@ export const settingsCompactTypographyScopeSx: SxProps<Theme> = (theme) => ({
       fontSize: `${COMPACT_LAYOUT_SIZE.SETTINGS_METADATA_TEXT_PX}px`,
     },
   },
-});
+})) satisfies SxProps<Theme>;

@@ -1,3 +1,6 @@
+import { createMockConnection } from "../../test/fixtures/connections";
+import { createMockAuthToken } from "../../test/fixtures/users";
+import { requireTestValue } from "../../test/helpers/assertions";
 /**
  * Browser Component - PDF Viewer Integration Tests
  * Tests for PDF file viewing workflows
@@ -14,6 +17,8 @@ import { authSession } from "../../services/authSession";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType } from "../../types";
 import FileBrowser from "../FileBrowser";
+
+const FILE_LIST_READY_TIMEOUT_MS = 5000;
 
 // Mock the API service
 vi.mock("../../services/api");
@@ -86,13 +91,16 @@ vi.mock("react-pdf", () => ({
  * Handles the case where filename appears in both file list and status bar
  */
 async function getFileButton(filename: string): Promise<HTMLElement> {
-  await waitFor(() => {
-    const elements = screen.getAllByText(filename);
-    expect(elements.length).toBeGreaterThan(0);
-  });
+  await waitFor(
+    () => {
+      const elements = screen.getAllByText(filename);
+      expect(elements.length).toBeGreaterThan(0);
+    },
+    { timeout: FILE_LIST_READY_TIMEOUT_MS }
+  );
   // Get the button that contains the filename (file list, not status bar)
   const buttons = screen.getAllByRole("button", { name: new RegExp(filename, "i") });
-  return buttons[0];
+  return requireTestValue(buttons[0]);
 }
 
 // Mock ResizeObserver
@@ -160,11 +168,11 @@ describe("Browser - PDF Viewer Integration", () => {
     vi.clearAllMocks();
 
     // Set up authentication
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
 
     // Mock successful API responses
     mockedApi.getConnections.mockResolvedValue([
-      {
+      createMockConnection({
         id: "conn-1",
         name: "Test Server",
         slug: "test-server-1",
@@ -175,7 +183,7 @@ describe("Browser - PDF Viewer Integration", () => {
         username: "user",
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-      },
+      }),
     ]);
 
     // Mock PDF blob response

@@ -29,6 +29,7 @@ COLOR_SHAPE: dict[str, Any] = {
     "text": ("primary", "secondary"),
     "action": ("selected",),
     "components": {
+        "syntax": ("keyword", "string", "number", "comment", "type", "function", "operator", "punctuation"),
         "link": ("main", "hover"),
         "search": ("otherMatch", "currentMatch"),
         "pdfViewer": ("viewerBackground", "toolbarBackground", "toolbarText"),
@@ -71,6 +72,8 @@ def _validate_colors(value: Any, shape: Any, path: str = "") -> None:
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain all color roles")
     for key, child_shape in shape.items():
+        if path == "components" and key == "syntax" and key not in value:
+            continue
         if key not in value:
             raise ValueError(f"Missing color role: {path}.{key}".lstrip("."))
         _validate_colors(value[key], child_shape, f"{path}.{key}".lstrip("."))

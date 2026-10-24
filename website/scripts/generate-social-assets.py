@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generate committed social preview assets for the website.
 
 This script keeps social media preview images out of Hugo's ``resources/_gen``

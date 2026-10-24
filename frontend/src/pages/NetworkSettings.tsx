@@ -75,9 +75,9 @@ export function NetworkSettings() {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
           disabled={persistence.isPending("public_url")}
-          error={Boolean(persistence.fieldErrors.public_url)}
+          error={Boolean(persistence.fieldErrors["public_url"])}
           helperText={
-            persistence.fieldErrors.public_url ??
+            persistence.fieldErrors["public_url"] ??
             "The externally reachable HTTPS origin, without a path. Changing it cancels incomplete OIDC sign-ins."
           }
           slotProps={{
@@ -114,9 +114,9 @@ export function NetworkSettings() {
             })
           }
           disabled={persistence.isPending("trusted_proxy_cidrs")}
-          error={Boolean(persistence.fieldErrors.trusted_proxy_cidrs)}
+          error={Boolean(persistence.fieldErrors["trusted_proxy_cidrs"])}
           helperText={
-            persistence.fieldErrors.trusted_proxy_cidrs ??
+            persistence.fieldErrors["trusted_proxy_cidrs"] ??
             "One CIDR per line. Leave empty unless a reverse proxy you operate forwards client IP addresses."
           }
           slotProps={{

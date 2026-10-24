@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requireTestValue } from "../test/helpers/assertions";
 import api, { ExpiredEditLockError } from "./api";
 import { authSession } from "./authSession";
 import { clearEditLockRecovery } from "./editLockRecovery";
@@ -240,7 +241,7 @@ describe("SambeeSmbBackend archive reads", () => {
         destination_path: "archives/selected.zip",
       })
     );
-    expect(JSON.parse(vi.mocked(api.prepareArchiveOperation).mock.calls[0]![0].plan_json)).toEqual({
+    expect(JSON.parse(requireTestValue(vi.mocked(api.prepareArchiveOperation).mock.calls[0]![0].plan_json))).toEqual({
       source_paths: ["archives/source.zip"],
     });
     await expect(

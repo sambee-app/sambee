@@ -18,7 +18,7 @@ export function isConnectionWritable(connection: Connection | undefined): boolea
 }
 
 export function canOpenFileInApp(connection: Connection | undefined): boolean {
-  return Boolean(connection) && (isLocalDrive(connection.id) || !isConnectionReadOnly(connection));
+  return connection !== undefined && (isLocalDrive(connection.id) || !isConnectionReadOnly(connection));
 }
 
 export function canCopyToConnection(sourceConnection: Connection | undefined, destinationConnection: Connection | undefined): boolean {

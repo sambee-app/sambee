@@ -10,6 +10,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # ─────────────────────────────────────────────────────────────────────
   # Detect which components changed
@@ -42,6 +46,8 @@ jobs:
         }
         backend_extras = {
           "Dockerfile",
+          ".github/workflows/lint.yml",
+          "scripts/test",
           "scripts/verify-backend-lockfiles.py",
           "scripts/verify-python-runtime-image.py",
           ".github/actions/setup-runtime-python/action.yml",
@@ -117,7 +123,7 @@ jobs:
         else:
             raise SystemExit(f"Unsupported event for change detection: {event_name}")
 
-        backend = any(name.startswith("backend/") or name in backend_extras for name in filenames)
+        backend = any(name.startswith("backend/") or name.endswith(".py") or name in backend_extras for name in filenames)
         frontend = any(name.startswith("frontend/") or name in frontend_extras for name in filenames)
         companion = any(name.startswith("companion/") or name in companion_extras for name in filenames)
 
@@ -151,6 +157,9 @@ jobs:
 
     - name: Ruff check
       run: cd backend && ruff check app tests/test_verify_backend_lockfiles_script.py ../scripts/verify-backend-lockfiles.py
+
+    - name: Ruff executable-script check
+      run: python -m ruff check --select EXE . .github
 
     - name: Ruff format check
       run: cd backend && ruff format --check app tests/test_verify_backend_lockfiles_script.py ../scripts/verify-backend-lockfiles.py

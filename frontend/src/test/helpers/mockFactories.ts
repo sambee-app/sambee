@@ -5,8 +5,40 @@
 
 import type { Mock } from "vitest";
 import { vi } from "vitest";
+import type { LocalArchiveExecution } from "../../services/api";
 import type { Connection, CurrentUserSettings, DirectoryListing, User } from "../../types";
 import { mockConnections, mockDirectoryListing, mockEmptyDirectory, mockNestedDirectory } from "../fixtures";
+
+export function createMockCurrentUserSettings(overrides: Partial<CurrentUserSettings> = {}): CurrentUserSettings {
+  return {
+    appearance: { theme_id: "sambee-light", custom_themes: [] },
+    localization: { language: "browser", regional_locale: "browser" },
+    browser: {
+      quick_nav_include_dot_directories: false,
+      quick_bar_shortcut_hint_visibility: "auto",
+      touch_friendly_file_selection: "auto",
+      file_browser_view_mode: "list",
+      pane_mode: "single",
+      selected_connection_id: null,
+      viewer_associations: {},
+    },
+    text_editor: { max_file_size_bytes: 52428800, word_wrap_enabled: null },
+    ...overrides,
+  };
+}
+
+export function createMockLocalArchiveExecution(overrides: Partial<LocalArchiveExecution> = {}): LocalArchiveExecution {
+  return {
+    contract_version: "v2",
+    execution_id: "test-execution",
+    kind: "extract",
+    phase: "streaming",
+    revision: 1,
+    progress: { completedMembers: 0, skippedMembers: 0, failedMembers: 0 },
+    cancellation_requested: false,
+    ...overrides,
+  };
+}
 
 /**
  * API Mock Factory Interface
@@ -67,6 +99,7 @@ export function setupSuccessfulApiMocks(api: ApiMock): void {
     },
     text_editor: {
       max_file_size_bytes: 52428800,
+      word_wrap_enabled: null,
     },
   };
 
@@ -180,6 +213,7 @@ export function setupNavigationApiMocks(api: ApiMock): void {
     },
     text_editor: {
       max_file_size_bytes: 52428800,
+      word_wrap_enabled: null,
     },
   };
 
@@ -250,6 +284,8 @@ export function createMockApi(): ApiMock {
   return {
     getConnections: vi.fn(),
     listDirectory: vi.fn(),
+    listArchiveDirectory: vi.fn(),
+    listLocalLinkTargets: vi.fn(),
     getCurrentUser: vi.fn(),
     getCurrentUserSettings: vi.fn(),
     testConnection: vi.fn(),

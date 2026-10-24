@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockConnection } from "../../../test/fixtures/connections";
+import { uninitializedTestCallback } from "../../../test/helpers/assertions";
 import type { Connection } from "../../../types";
 import ConnectionDialog from "../ConnectionDialog";
 
@@ -36,7 +38,7 @@ const mockVisibilityOptions = [
   },
 ];
 
-const mockConnection: Connection = {
+const mockConnection: Connection = createMockConnection({
   id: "1",
   name: "Test Server",
   type: "smb",
@@ -50,7 +52,7 @@ const mockConnection: Connection = {
   can_manage: true,
   created_at: "2024-01-01T00:00:00",
   updated_at: "2024-01-01T00:00:00",
-};
+});
 
 function mockViewportWidth(width: number) {
   const originalMatchMedia = window.matchMedia;
@@ -445,7 +447,7 @@ describe("ConnectionDialog Component", () => {
   });
 
   it("keeps the save label visible while the save request is pending", async () => {
-    let resolveCreate: ((value: Connection) => void) | null = null;
+    let resolveCreate: (value: Connection) => void = uninitializedTestCallback;
     vi.mocked(api.createConnection).mockReturnValue(
       new Promise((resolve) => {
         resolveCreate = resolve;

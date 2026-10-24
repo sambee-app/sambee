@@ -1,6 +1,8 @@
 import { getSearchQuery, searchPanelOpen } from "@codemirror/search";
 import { type Extension, RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type EditorView, ViewPlugin } from "@codemirror/view";
+import { findSelectedCodeMirrorSearchMatch, getCachedCodeMirrorSearchMatches } from "./codeMirrorSearchMatches";
+import { disposeSourceRegexSearch, sourceRegexSearchLifecycle, sourceRegexSearchUpdated } from "./sourceRegexSearch";
 
 export const PASSIVE_SEARCH_MATCH_CLASS = "sambee-passive-search-match";
 export const PASSIVE_SELECTED_SEARCH_MATCH_CLASS = "sambee-passive-search-match-selected";
@@ -19,39 +21,17 @@ function rangeEquals(left: SearchMatchRange | null, right: SearchMatchRange): bo
   return left !== null && left.from === right.from && left.to === right.to;
 }
 
-function rangeContainedInSelection(range: SearchMatchRange, selection: SearchMatchRange): boolean {
-  return selection.from <= range.from && selection.to >= range.to;
-}
-
 function resolveCurrentSearchRange(view: EditorView): SearchMatchRange | null {
-  const query = getSearchQuery(view.state);
-
-  if (!query.search) {
-    return null;
+  const ranges = getCachedCodeMirrorSearchMatches(view);
+  const selection = view.state.selection.main;
+  if (!ranges) {
+    const query = getSearchQuery(view.state);
+    if (selection.empty && !query.regexp) return null;
+    const match = query.getCursor(view.state, selection.from, selection.to).next();
+    return match.done ? null : { from: match.value.from, to: match.value.to };
   }
-
-  const cursor = query.getCursor(view.state);
-  const mainSelection = view.state.selection.main;
-  const mainSelectionRange = { from: mainSelection.from, to: mainSelection.to };
-
-  let currentRange: SearchMatchRange | null = null;
-  let containedRange: SearchMatchRange | null = null;
-
-  for (let nextMatch = cursor.next(); !nextMatch.done; nextMatch = cursor.next()) {
-    const match = nextMatch.value;
-    const matchRange = { from: match.from, to: match.to };
-
-    if (match.from === mainSelection.from && match.to === mainSelection.to) {
-      currentRange = matchRange;
-      continue;
-    }
-
-    if (containedRange === null && rangeContainedInSelection(matchRange, mainSelectionRange)) {
-      containedRange = matchRange;
-    }
-  }
-
-  return currentRange ?? containedRange;
+  const index = findSelectedCodeMirrorSearchMatch(ranges, selection);
+  return index < 0 ? null : (ranges[index] ?? null);
 }
 
 export function buildPassiveSearchHighlightExtension(): Extension {
@@ -59,7 +39,7 @@ export function buildPassiveSearchHighlightExtension(): Extension {
     class {
       decorations;
 
-      constructor(view: EditorView) {
+      constructor(private view: EditorView) {
         this.decorations = this.buildDecorations(view);
       }
 
@@ -70,6 +50,7 @@ export function buildPassiveSearchHighlightExtension(): Extension {
         docChanged: boolean;
         selectionSet: boolean;
         viewportChanged: boolean;
+        transactions?: readonly { effects: readonly { is: (effect: typeof sourceRegexSearchUpdated) => boolean }[] }[];
       }) {
         const query = getSearchQuery(update.state);
         const previousQuery = getSearchQuery(update.startState);
@@ -78,6 +59,7 @@ export function buildPassiveSearchHighlightExtension(): Extension {
           update.docChanged ||
           update.selectionSet ||
           update.viewportChanged ||
+          update.transactions?.some((transaction) => transaction.effects.some((effect) => effect.is(sourceRegexSearchUpdated))) ||
           !query.eq(previousQuery) ||
           searchPanelOpen(update.state) !== searchPanelOpen(update.startState)
         ) {
@@ -107,6 +89,28 @@ export function buildPassiveSearchHighlightExtension(): Extension {
 
         const builder = new RangeSetBuilder<Decoration>();
 
+        if (query.regexp) {
+          const ranges = getCachedCodeMirrorSearchMatches(view) ?? [];
+          for (const visible of view.visibleRanges) {
+            let low = 0;
+            let high = ranges.length;
+            while (low < high) {
+              const middle = (low + high) >>> 1;
+              const range = ranges[middle];
+              if (!range) break;
+              if (range.from < visible.from) low = middle + 1;
+              else high = middle;
+            }
+            for (let index = low; index < ranges.length; index += 1) {
+              const match = ranges[index];
+              if (!match || match.from > visible.to) break;
+              if (match.from === match.to) continue;
+              builder.add(match.from, match.to, rangeEquals(currentRange, match) ? passiveSelectedSearchMatchMark : passiveSearchMatchMark);
+            }
+          }
+          return builder.finish();
+        }
+
         for (const { from, to } of view.visibleRanges) {
           const cursor = query.getCursor(view.state, from, to);
 
@@ -124,6 +128,10 @@ export function buildPassiveSearchHighlightExtension(): Extension {
         }
 
         return builder.finish();
+      }
+
+      destroy() {
+        if (!this.view.plugin(sourceRegexSearchLifecycle)) disposeSourceRegexSearch(this.view);
       }
     },
     {

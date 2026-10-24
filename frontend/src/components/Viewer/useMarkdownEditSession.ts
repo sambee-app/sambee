@@ -23,6 +23,7 @@ export interface MarkdownEditSessionController {
   clearPendingBaselineSync: () => void;
   handleEditorChange: (markdown: string) => void;
   handleEditorUserEdit: (viewUpdate?: ViewUpdate) => void;
+  getEditGeneration: () => number;
   hasUserEditedInSession: boolean;
   markEditSessionPristine: () => void;
   requestRestoreEditingFocus: () => void;
@@ -38,6 +39,7 @@ export function useMarkdownEditSession({
   setEditBaselineContent,
 }: UseMarkdownEditSessionOptions): MarkdownEditSessionController {
   const hasUserEditedRef = useRef(false);
+  const editGenerationRef = useRef(0);
   const [hasUserEditedInSession, setHasUserEditedInSession] = useState(false);
   const allowBaselineSyncRef = useRef(false);
   const pendingRestoreEditorFocusRef = useRef(false);
@@ -61,12 +63,15 @@ export function useMarkdownEditSession({
     setHasUserEditedInSession(false);
   }, []);
 
+  const getEditGeneration = useCallback(() => editGenerationRef.current, []);
+
   const requestRestoreEditingFocus = useCallback(() => {
     pendingRestoreEditorFocusRef.current = true;
   }, []);
 
   const handleEditorChange = useCallback(
     (nextMarkdown: string) => {
+      editGenerationRef.current += 1;
       if (isEditing && allowBaselineSyncRef.current && !hasUserEditedRef.current) {
         clearPendingBaselineSync();
         const requestId = pendingBaselineSyncRequestIdRef.current;
@@ -99,6 +104,7 @@ export function useMarkdownEditSession({
       }
 
       clearBaselineSyncWindow();
+      editGenerationRef.current += 1;
       hasUserEditedRef.current = true;
       setHasUserEditedInSession(true);
     },
@@ -176,6 +182,7 @@ export function useMarkdownEditSession({
     clearPendingBaselineSync,
     handleEditorChange,
     handleEditorUserEdit,
+    getEditGeneration,
     hasUserEditedInSession,
     markEditSessionPristine,
     requestRestoreEditingFocus,

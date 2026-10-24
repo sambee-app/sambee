@@ -126,6 +126,71 @@ export const VIEWER_SCROLL_END_PADDING = {
   xs: "clamp(64px, 18dvh, 192px)",
   sm: "clamp(64px, 18dvh, 192px)",
 } as const;
+export const MARKDOWN_VIEWER_PRINT_STYLES = {
+  "@media print": {
+    "body:has([data-markdown-print-viewer])": { height: "auto !important", overflow: "visible !important" },
+    "body:has([data-markdown-print-viewer]) > :not([data-markdown-print-viewer])": { display: "none !important" },
+    "[data-markdown-print-viewer]": { position: "static !important", overflow: "visible" },
+    "[data-markdown-print-viewer] .MuiBackdrop-root, [data-markdown-print-frame] > :not([data-testid='markdown-viewer-content'])": {
+      display: "none !important",
+    },
+    "[data-markdown-print-viewer] .MuiDialog-paper, [data-markdown-print-viewer] [data-markdown-search-root]": {
+      color: "#000 !important",
+      backgroundColor: "#fff !important",
+    },
+    "[data-markdown-print-viewer] [data-markdown-search-root]": {
+      "--sambee-syntax-foreground": "#000 !important",
+      "--sambee-syntax-keyword": "#000 !important",
+      "--sambee-syntax-string": "#000 !important",
+      "--sambee-syntax-number": "#000 !important",
+      "--sambee-syntax-comment": "#000 !important",
+      "--sambee-syntax-type": "#000 !important",
+      "--sambee-syntax-function": "#000 !important",
+      "--sambee-syntax-operator": "#000 !important",
+      "--sambee-syntax-punctuation": "#000 !important",
+      "--sambee-search-foreground": "#000 !important",
+      "--sambee-search-other": "transparent !important",
+      "--sambee-search-current": "transparent !important",
+    },
+    "[data-markdown-print-viewer] [data-markdown-search-root] *": {
+      color: "#000 !important",
+      backgroundColor: "transparent !important",
+      boxShadow: "none !important",
+      textShadow: "none !important",
+    },
+    "[data-markdown-print-viewer] .MuiDialog-container, [data-markdown-print-viewer] .MuiDialog-paper, [data-markdown-print-frame], [data-markdown-print-viewer] [data-testid='markdown-viewer-content']":
+      {
+        position: "static",
+        display: "block",
+        width: "auto",
+        maxWidth: "none",
+        height: "auto",
+        maxHeight: "none",
+        minHeight: 0,
+        overflow: "visible",
+        flex: "none",
+        margin: 0,
+        paddingBottom: 0,
+      },
+    "[data-markdown-print-viewer] [data-markdown-search-root] pre, [data-markdown-print-viewer] [data-markdown-search-root] pre code": {
+      minWidth: 0,
+      whiteSpace: "pre-wrap",
+      overflowWrap: "anywhere",
+      overflow: "visible",
+    },
+    "[data-markdown-print-viewer] [data-markdown-search-root] table": {
+      display: "table",
+      width: "100%",
+      tableLayout: "fixed",
+      overflowWrap: "anywhere",
+    },
+    "[data-markdown-print-viewer] thead": { display: "table-header-group" },
+    "[data-markdown-print-viewer] tr, [data-markdown-print-viewer] img": { breakInside: "avoid" },
+    "[data-markdown-print-viewer] h1, [data-markdown-print-viewer] h2, [data-markdown-print-viewer] h3": { breakAfter: "avoid" },
+    "[data-markdown-print-viewer] p": { orphans: 3, widows: 3 },
+    "[data-markdown-print-viewer] img": { maxWidth: "100%", maxHeight: "240mm", objectFit: "contain" },
+  },
+} as const;
 export const MARKDOWN_TABLE_CELL_PADDING_INLINE = "0.675rem";
 export const MARKDOWN_TABLE_CELL_PADDING_BLOCK = "0.8em";
 export const MARKDOWN_TABLE_FONT_SIZE = "0.9375em";

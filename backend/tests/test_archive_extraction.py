@@ -851,7 +851,8 @@ async def test_live_source_selects_the_last_duplicate_record() -> None:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("duplicate.txt", "first")
-        archive.writestr("duplicate.txt", "last")
+        with pytest.warns(UserWarning, match=r"^Duplicate name: 'duplicate\.txt'$"):
+            archive.writestr("duplicate.txt", "last")
     backend = MemoryExtractionBackend(output.getvalue())
 
     source_session = LiveSourceSession(ZipReader(backend.reader, len(backend.archive)))

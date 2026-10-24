@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Reserve or resolve the immutable source commit for a publishable build."""
 
 from __future__ import annotations

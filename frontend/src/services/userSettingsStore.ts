@@ -9,7 +9,10 @@ export { SETTING_SUCCESS_DISPLAY_MS } from "./settingSaveFeedback";
 
 export type CurrentUserSettingsField = CurrentUserSettingsUpdate["field"];
 
-type ValueForField<Field extends CurrentUserSettingsField> = Extract<CurrentUserSettingsUpdate, { field: Field }>["value"];
+type CurrentUserSettingValues = {
+  [Field in CurrentUserSettingsField]: Extract<CurrentUserSettingsUpdate, { field: Field }>["value"];
+};
+type ValueForField<Field extends CurrentUserSettingsField> = CurrentUserSettingValues[Field];
 type CurrentUserSettingValue = CurrentUserSettingsUpdate["value"];
 
 export interface CurrentUserSetting<Field extends CurrentUserSettingsField> {

@@ -1,5 +1,6 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { requireTestValue } from "../../test/helpers/assertions";
 import type { KeyboardShortcut } from "../useKeyboardShortcuts";
 import { formatShortcut, useKeyboardShortcuts, withShortcut } from "../useKeyboardShortcuts";
 
@@ -46,9 +47,9 @@ describe("useKeyboardShortcuts", () => {
     it("keeps icon activation local while allowing file-list navigation", () => {
       const list = document.createElement("div");
       list.tabIndex = 0;
-      list.dataset.testid = "file-list-container";
+      list.dataset["testid"] = "file-list-container";
       const icon = document.createElement("button");
-      icon.dataset.fileSelectionIcon = "true";
+      icon.dataset["fileSelectionIcon"] = "true";
       list.appendChild(icon);
       document.body.appendChild(list);
       const shortcuts: KeyboardShortcut[] = [
@@ -116,10 +117,10 @@ describe("useKeyboardShortcuts", () => {
       ];
 
       renderHook(() => useKeyboardShortcuts({ shortcuts }));
-      const _event = simulateKeyPress("a");
+      simulateKeyPress("a");
 
       expect(mockHandler).toHaveBeenCalledWith(expect.any(KeyboardEvent));
-      expect((mockHandler as ReturnType<typeof vi.fn>).mock.calls[0][0].key).toBe("a");
+      expect(requireTestValue((mockHandler as ReturnType<typeof vi.fn>).mock.calls[0])[0].key).toBe("a");
     });
 
     it("should not trigger handler when disabled", () => {

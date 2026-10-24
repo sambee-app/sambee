@@ -290,7 +290,7 @@ describe("DynamicViewer", () => {
     mockGetViewerComponentLoadResult.mockResolvedValue({
       status: "loaded",
       component: function LoadedViewer({ path, isTransitioning, onCurrentIndexChange, navigation }: ViewerComponentProps) {
-        useKeyboardShortcuts({ shortcuts: [{ id: "download", keys: "d", handler: download }] });
+        useKeyboardShortcuts({ shortcuts: [{ description: "Save", id: "download", keys: "d", handler: download }] });
         return (
           <div
             data-testid="loaded-viewer"

@@ -93,7 +93,7 @@ export function requestForegroundArchiveCancellation(operationId: string): void 
   const headers: HeadersInit = { "Content-Type": "application/json" };
   const token = authSession.getAccessToken();
   if (token) {
-    headers.Authorization = `Bearer ${token}`;
+    headers["Authorization"] = `Bearer ${token}`;
   }
   void fetch(cancellationUrl(operationId), {
     method: "POST",

@@ -1,5 +1,14 @@
 # TODO
 
+## Bugs
+
+- Search in Markdown editor:
+   - Search terms aren't added to the search history
+
+## To improve soon
+
+- Vite production-build warning: one or more generated JavaScript chunks exceed 500 kB before gzip compression.
+
 ## Misc. commands
 
 - Add a command to open the current file list location in a new browser tab (which keyboard shortcut to assign? Ctrl+(Shift)+Tab is needed by the browser)

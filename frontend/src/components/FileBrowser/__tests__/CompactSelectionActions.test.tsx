@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../../i18n";
 import type { FileOperationAction } from "../../../pages/FileBrowser/fileOperationActions";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import { CompactSelectionActions } from "../CompactSelectionActions";
 
 const actions: FileOperationAction[] = [
@@ -46,14 +47,14 @@ describe("CompactSelectionActions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Selection actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Create archive" }));
-    expect(actions[0].onClick).toHaveBeenCalledOnce();
+    expect(requireTestValue(actions[0]).onClick).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Selection actions" }));
     expect(screen.getByRole("menuitem", { name: "Delete" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("keeps the action snapshot that was present when the menu opened", () => {
-    const firstAction = { ...actions[0], onClick: vi.fn() };
-    const secondAction = { ...actions[0], label: "Later action", onClick: vi.fn() };
+    const firstAction = { ...requireTestValue(actions[0]), onClick: vi.fn() };
+    const secondAction = { ...requireTestValue(actions[0]), label: "Later action", onClick: vi.fn() };
     const { rerender } = render(
       <CompactSelectionActions actions={actions} getActions={() => [firstAction]} selectedCount={1} onClearSelection={() => {}} />
     );

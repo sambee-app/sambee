@@ -1,5 +1,46 @@
-import { getSearchQuery, SearchQuery, setSearchQuery } from "@codemirror/search";
-import type { EditorView } from "@codemirror/view";
+import {
+  getSearchQuery,
+  findNext as nativeFindNext,
+  findPrevious as nativeFindPrevious,
+  replaceAll as nativeReplaceAll,
+  replaceNext as nativeReplaceNext,
+  SearchQuery,
+  setSearchQuery,
+} from "@codemirror/search";
+import { EditorView } from "@codemirror/view";
+import { t } from "i18next";
+import { logger } from "../../services/logger";
+import { findSelectedCodeMirrorSearchMatch, getCodeMirrorSearchMatches } from "../Editor/codeMirrorSearchMatches";
+import { getSourceRegexSearch, runSourceRegexSearchCommand } from "../Editor/sourceRegexSearch";
+import {
+  beginSourceReplacementFeedback,
+  isHeavySourceReplacement,
+  isSourceReplacementPending,
+  SOURCE_REPLACEMENT_HEAVY_MATCHES,
+} from "../Editor/sourceReplacementFeedback";
+
+export const findNext = (view: EditorView): boolean => runSourceRegexSearchCommand(view, "next") || nativeFindNext(view);
+export const findPrevious = (view: EditorView): boolean => runSourceRegexSearchCommand(view, "previous") || nativeFindPrevious(view);
+export const replaceNext = (view: EditorView): boolean => runSourceRegexSearchCommand(view, "replace-one") || nativeReplaceNext(view);
+export const replaceAll = (view: EditorView): boolean => {
+  if (isSourceReplacementPending(view)) return true;
+  if (runSourceRegexSearchCommand(view, "replace-all")) return true;
+  const query = getSearchQuery(view.state);
+  if (!query.valid || view.state.readOnly) return nativeReplaceAll(view);
+  const cursor = query.getCursor(view.state);
+  let matches = 0;
+  for (let match = cursor.next(); !match.done && matches < SOURCE_REPLACEMENT_HEAVY_MATCHES; match = cursor.next()) matches += 1;
+  if (!isHeavySourceReplacement(view.state.doc.length, matches, matches * query.replace.length)) return nativeReplaceAll(view);
+  beginSourceReplacementFeedback(view).apply(
+    () => nativeReplaceAll(view),
+    true,
+    (error) => {
+      logger.error("Atomic replacement failed; retry Replace All.", { error });
+      view.dispatch({ effects: EditorView.announce.of(t("viewer.edit.replacementFailed")) });
+    }
+  );
+  return true;
+};
 
 export interface CodeMirrorFindReplaceRequest {
   caseSensitive: boolean;
@@ -10,6 +51,8 @@ export interface CodeMirrorFindReplaceRequest {
 }
 
 export interface CodeMirrorFindReplaceMetrics {
+  pending: boolean;
+  error?: string;
   currentMatch: number;
   isSearchable: boolean;
   isValid: boolean;
@@ -25,50 +68,31 @@ export interface CodeMirrorFindReplaceOptions {
   wholeWord: boolean;
 }
 
-interface SearchMatchRange {
-  from: number;
-  to: number;
-}
-
-function rangeContainedInSelection(range: SearchMatchRange, selection: SearchMatchRange): boolean {
-  return selection.from <= range.from && selection.to >= range.to;
-}
-
 function resolveSearchMatchState(view: EditorView): CodeMirrorFindReplaceMetrics {
   const query = getSearchQuery(view.state);
   const searchText = query.search;
   const isSearchable = view.state.doc.length > 0;
 
   if (!searchText) {
-    return { currentMatch: 0, isSearchable, isValid: true, matches: 0, searchText };
+    return { currentMatch: 0, isSearchable, isValid: true, matches: 0, searchText, pending: false };
   }
 
   if (!query.valid) {
-    return { currentMatch: 0, isSearchable, isValid: false, matches: 0, searchText };
+    return { currentMatch: 0, isSearchable, isValid: false, matches: 0, searchText, pending: false };
   }
 
-  const cursor = query.getCursor(view.state);
-  const mainSelection = view.state.selection.main;
-  const mainSelectionRange = { from: mainSelection.from, to: mainSelection.to };
-  let matches = 0;
-  let currentMatch = 0;
-  let containedMatchIndex = 0;
-
-  for (let nextMatch = cursor.next(); !nextMatch.done; nextMatch = cursor.next()) {
-    matches += 1;
-    const match = nextMatch.value;
-
-    if (match.from === mainSelection.from && match.to === mainSelection.to) {
-      currentMatch = matches;
-      continue;
-    }
-
-    if (containedMatchIndex === 0 && rangeContainedInSelection(match, mainSelectionRange)) {
-      containedMatchIndex = matches;
-    }
-  }
-
-  return { currentMatch: currentMatch || containedMatchIndex, isSearchable, isValid: true, matches, searchText };
+  const ranges = getCodeMirrorSearchMatches(view);
+  const currentMatch = findSelectedCodeMirrorSearchMatch(ranges, view.state.selection.main) + 1;
+  const regex = query.regexp ? getSourceRegexSearch(view) : undefined;
+  return {
+    currentMatch,
+    isSearchable,
+    isValid: true,
+    matches: ranges.length,
+    searchText,
+    pending: isSourceReplacementPending(view) || (regex?.pending ?? false),
+    error: regex?.error,
+  };
 }
 
 export function updateCodeMirrorFindReplaceQuery(view: EditorView | null | undefined, options: CodeMirrorFindReplaceOptions): void {
@@ -92,7 +116,7 @@ export function updateCodeMirrorFindReplaceQuery(view: EditorView | null | undef
 
 export function getCodeMirrorFindReplaceMetrics(view: EditorView | null | undefined): CodeMirrorFindReplaceMetrics {
   if (!view) {
-    return { currentMatch: 0, isSearchable: false, isValid: true, matches: 0, searchText: "" };
+    return { currentMatch: 0, isSearchable: false, isValid: true, matches: 0, searchText: "", pending: false };
   }
 
   return resolveSearchMatchState(view);

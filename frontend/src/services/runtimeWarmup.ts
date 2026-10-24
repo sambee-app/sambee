@@ -1,19 +1,8 @@
 let warmupScheduled = false;
 const IS_TEST_ENVIRONMENT =
   import.meta.env["VITEST"] === true ||
-  (typeof process !== "undefined" && process.env?.["VITEST"] === "true") ||
+  import.meta.env.MODE === "test" ||
   (typeof globalThis !== "undefined" && ("describe" in globalThis || "it" in globalThis || "test" in globalThis));
-
-type IdleCallbackHandle = number;
-
-interface IdleCallbackDeadline {
-  didTimeout: boolean;
-  timeRemaining: () => number;
-}
-
-interface IdleWindow extends Window {
-  requestIdleCallback?: (callback: (deadline: IdleCallbackDeadline) => void, options?: { timeout?: number }) => IdleCallbackHandle;
-}
 
 async function warmRuntimeModules(): Promise<void> {
   await Promise.allSettled([
@@ -42,9 +31,8 @@ export function scheduleRuntimeWarmup(): void {
     void warmRuntimeModules();
   };
 
-  const idleWindow = window as IdleWindow;
-  if (typeof idleWindow.requestIdleCallback === "function") {
-    idleWindow.requestIdleCallback(
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(
       () => {
         runWarmup();
       },

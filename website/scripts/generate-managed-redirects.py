@@ -1,16 +1,14 @@
-#!/usr/bin/env python3
 """Generate configurable managed redirects in the built Cloudflare Pages artifact."""
 
 from __future__ import annotations
 
 import argparse
 import sys
+import tomllib
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
 from urllib.parse import urlparse
-
-import tomllib
 
 WEBSITE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_PATH = WEBSITE_DIR / "data" / "managed-redirects.toml"

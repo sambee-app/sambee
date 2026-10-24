@@ -1,3 +1,4 @@
+import type { ParseKeys } from "i18next";
 import { translate } from "../../i18n";
 import { SETTINGS_CATEGORY_ORDER, type SettingsCategory } from "./settingsCategories";
 
@@ -17,7 +18,7 @@ export interface VisibleSettingsSection {
 
 interface SettingsCategoryMeta {
   label: string;
-  descriptionKey: string;
+  descriptionKey: Extract<ParseKeys, `settings.categories.${string}.description` | `settings.connectionsSubgroups.${string}.description`>;
   route: string;
   section: SettingsSection;
   adminOnly?: boolean;
@@ -178,7 +179,7 @@ export function getSettingsViewTitle(view: MobileSettingsView): string {
   return view === "main" ? translate("settings.shell.title") : getSettingsNavItemLabel(view);
 }
 
-export function getSettingsCategoryDescriptionKey(category: SettingsCategory): string {
+export function getSettingsCategoryDescriptionKey(category: SettingsCategory): SettingsCategoryMeta["descriptionKey"] {
   return SETTINGS_CATEGORY_META[category].descriptionKey;
 }
 

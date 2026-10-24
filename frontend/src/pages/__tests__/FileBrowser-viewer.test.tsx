@@ -1,3 +1,5 @@
+import { createMockAuthToken } from "../../test/fixtures/users";
+import { requireTestValue } from "../../test/helpers/assertions";
 /**
  * Browser Component - View and Advanced Tests
  * Tests for file view, connection switching, and edge cases
@@ -34,7 +36,7 @@ vi.mock("@tanstack/react-virtual", () => import("../../__mocks__/@tanstack/react
 describe("Browser Component - View and Advanced", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     localStorage.removeItem("selectedConnectionId");
 
     // Use mock factory for successful API responses
@@ -234,9 +236,9 @@ describe("Browser Component - View and Advanced", () => {
       const documentsFolder = documentsFolders[0]; // Use first Documents button
 
       // Click multiple times rapidly
-      await user.click(documentsFolder);
-      await user.click(documentsFolder);
-      await user.click(documentsFolder);
+      await user.click(requireTestValue(documentsFolder));
+      await user.click(requireTestValue(documentsFolder));
+      await user.click(requireTestValue(documentsFolder));
 
       // Should handle gracefully - at least one Documents should exist
       const documentsElements = screen.getAllByText("Documents");

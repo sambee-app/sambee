@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserViewerPicker } from "../BrowserViewerPicker";
 
+const persistenceProps = { saving: false, saveError: null, onOpenWithoutSaving: vi.fn() };
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => {
@@ -35,6 +37,7 @@ describe("BrowserViewerPicker", () => {
 
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="report.pdf"
         viewerIds={["pdf", "markdown"]}
@@ -60,6 +63,7 @@ describe("BrowserViewerPicker", () => {
 
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="report.pdf"
         viewerIds={["pdf", "markdown"]}
@@ -90,6 +94,7 @@ describe("BrowserViewerPicker", () => {
 
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="archive.bin"
         viewerIds={["image", "markdown", "pdf"]}
@@ -117,6 +122,7 @@ describe("BrowserViewerPicker", () => {
 
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="notes.MD"
         viewerIds={["image", "markdown", "pdf"]}
@@ -143,6 +149,7 @@ describe("BrowserViewerPicker", () => {
   it("renders the text viewer option when provided", () => {
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="notes.txt"
         viewerIds={["text"]}
@@ -160,6 +167,7 @@ describe("BrowserViewerPicker", () => {
   it("focuses the viewer list when the dialog opens", async () => {
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="report.pdf"
         viewerIds={["pdf", "markdown"]}
@@ -183,6 +191,7 @@ describe("BrowserViewerPicker", () => {
 
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="report.pdf"
         viewerIds={["pdf", "markdown"]}
@@ -210,6 +219,7 @@ describe("BrowserViewerPicker", () => {
 
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="report.pdf"
         viewerIds={["pdf", "markdown"]}
@@ -235,6 +245,7 @@ describe("BrowserViewerPicker", () => {
 
     render(
       <BrowserViewerPicker
+        {...persistenceProps}
         open={true}
         fileName="report.pdf"
         viewerIds={["pdf"]}

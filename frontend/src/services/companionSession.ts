@@ -27,8 +27,10 @@ async function sign(secret: string, value: string): Promise<string> {
 function compareCodePoints(left: string, right: string): number {
   const leftPoints = Array.from(left, (character) => character.codePointAt(0) ?? 0);
   const rightPoints = Array.from(right, (character) => character.codePointAt(0) ?? 0);
-  for (let index = 0; index < Math.min(leftPoints.length, rightPoints.length); index += 1) {
-    if (leftPoints[index] !== rightPoints[index]) return leftPoints[index] - rightPoints[index];
+  for (const [index, leftPoint] of leftPoints.entries()) {
+    const rightPoint = rightPoints[index];
+    if (rightPoint === undefined) break;
+    if (leftPoint !== rightPoint) return leftPoint - rightPoint;
   }
   return leftPoints.length - rightPoints.length;
 }

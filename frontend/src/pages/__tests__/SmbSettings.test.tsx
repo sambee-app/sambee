@@ -34,7 +34,6 @@ const smbSettings: SmbSettingsData = {
     encryption_mode: "signing_only",
     connection_timeout_seconds: 30,
   },
-  policy_source: "default",
   require_signing: true,
   require_encryption: false,
 };

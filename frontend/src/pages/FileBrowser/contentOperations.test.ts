@@ -3,6 +3,9 @@ import type { TFunction } from "i18next";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
 import { browserHistoryService } from "../../services/browserHistoryService";
+import { StorageArchiveOperationCoordinator } from "../../services/storageArchiveOperations";
+import type { StorageBackendRegistry } from "../../services/storageContracts";
+import { requireTestValue } from "../../test/helpers/assertions";
 import { FileType } from "../../types";
 import {
   createContentItem,
@@ -275,9 +278,13 @@ describe("content operations", () => {
     );
 
     expect(copyWithinBackend).toHaveBeenCalledWith(
-      expect.objectContaining({ targetName: undefined, targetResolutionPolicy: "ask", transferAttemptId: onAttemptStart.mock.calls[0][0] })
+      expect.objectContaining({
+        targetName: undefined,
+        targetResolutionPolicy: "ask",
+        transferAttemptId: requireTestValue(onAttemptStart.mock.calls[0])[0],
+      })
     );
-    expect(onAttemptSettled).toHaveBeenCalledWith(onAttemptStart.mock.calls[0][0]);
+    expect(onAttemptSettled).toHaveBeenCalledWith(requireTestValue(onAttemptStart.mock.calls[0])[0]);
     expect(api.copyItem).not.toHaveBeenCalled();
   });
 
@@ -892,8 +899,8 @@ describe("content operations", () => {
     );
 
     expect(sourceBackend.copyWithinBackend).toHaveBeenCalledTimes(2);
-    expect(sourceBackend.copyWithinBackend.mock.calls[0][0].transferAttemptId).not.toBe(
-      sourceBackend.copyWithinBackend.mock.calls[1][0].transferAttemptId
+    expect(requireTestValue(sourceBackend.copyWithinBackend.mock.calls[0])[0].transferAttemptId).not.toBe(
+      requireTestValue(sourceBackend.copyWithinBackend.mock.calls[1])[0].transferAttemptId
     );
     expect(destinationBackend.remove).not.toHaveBeenCalled();
   });
@@ -978,7 +985,7 @@ describe("content operations", () => {
   it("retries refreshed leaf conflicts without restarting the directory traversal", async () => {
     const root = { name: "root", path: "root", type: "directory" };
     const existing = { name: "report.txt", path: "output/root/report.txt", type: "file" };
-    const conflict = (target: typeof existing) => ({
+    const conflict = (target: typeof existing & { modified_at?: string }) => ({
       response: {
         status: 409,
         data: { detail: { incoming_file: { name: "report.txt", path: "root/report.txt", type: "file" }, existing_file: target } },
@@ -1281,19 +1288,45 @@ describe("content operations", () => {
     const sources = [virtualItemHandle(zipLocation, "inner/one.txt"), virtualItemHandle(zipLocation, "inner/two.txt")];
     const destination = physicalLocation("source", "output");
     const target = { kind: "smb" as const, connectionId: "source" };
-    const storageRegistry = {
-      resolveItem: vi.fn(({ path }) => ({ target, path, resolvedTarget: { target } })),
-      resolveDirectory: vi.fn(({ path }) => ({ target, path, resolvedTarget: { target } })),
-      getCapabilities: vi.fn(() => ({ readable: true, writable: true })),
+    const resolvedTarget = {
+      target,
+      connection: null,
+      capabilitySnapshot: {
+        capabilityRevision: 1,
+        connections: [],
+        companion: { status: "unpaired" as const, revision: 0, drives: [], error: null },
+      },
     };
-    const archiveOperations = {
-      start: vi.fn(() => ({ result: Promise.resolve({ status: "completed" }), cancel: vi.fn(), isCancellationRequested: () => false })),
+    const storageRegistry: StorageBackendRegistry = {
+      resolveItem: vi.fn(({ path }) => ({ target, path, resolvedTarget })),
+      resolveDirectory: vi.fn(({ path }) => ({ target, path, resolvedTarget })),
+      getBackend: vi.fn(() => {
+        throw new Error("Archive creation should use the coordinator, not resolve a backend directly");
+      }),
+      getCapabilities: vi.fn(() => ({
+        readable: true,
+        writable: true,
+        canEditText: true,
+        canList: true,
+        canReadArchive: true,
+        preview: { imageConversion: true, imageResizing: true, pdfNormalization: true },
+        canWriteFile: true,
+        canResolveActivation: true,
+        canOpenInNativeApp: true,
+      })),
     };
-    const context = { ...environment, storageRegistry, archiveOperations } as never;
+    const archiveOperations = new StorageArchiveOperationCoordinator(storageRegistry);
+    const startArchive = vi.spyOn(archiveOperations, "start").mockReturnValue({
+      result: Promise.resolve({ status: "completed", effects: { source: "unchanged", destination: "mutated" } }),
+      recoveryReady: Promise.resolve(null),
+      cancel: vi.fn(),
+      isCancellationRequested: () => false,
+    });
+    const context = { ...environment, storageRegistry, archiveOperations };
 
     expect(getCreateContainerAvailability({ sources, destination }, context)).toEqual({ available: true });
     await expect(startCreateContainer({ sources, destination, name: "selected.zip" }, context).result).resolves.toBeUndefined();
-    expect(archiveOperations.start).toHaveBeenCalledWith(
+    expect(startArchive).toHaveBeenCalledWith(
       expect.objectContaining({
         sources: [expect.objectContaining({ path: "files.zip" })],
         selectedMemberPaths: ["inner/one.txt", "inner/two.txt"],
@@ -1303,12 +1336,18 @@ describe("content operations", () => {
       available: false,
       reason: "unsupported-source",
     });
-    const localTarget = { kind: "local" as const, connectionId: "local-drive:c" };
+    const localTarget = { kind: "local" as const, driveId: "c" };
     expect(
-      getCreateContainerAvailability({ sources, destination }, {
-        ...context,
-        storageRegistry: { ...storageRegistry, resolveDirectory: () => ({ target: localTarget }) },
-      } as never)
+      getCreateContainerAvailability(
+        { sources, destination },
+        {
+          ...context,
+          storageRegistry: {
+            ...storageRegistry,
+            resolveDirectory: ({ path }) => ({ target: localTarget, path, resolvedTarget: { ...resolvedTarget, target: localTarget } }),
+          },
+        }
+      )
     ).toEqual({ available: false, reason: "unsupported-source" });
   });
 

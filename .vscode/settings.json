@@ -107,116 +107,7 @@
   "js/ts.tsdk.path": "frontend/node_modules/typescript/lib",
   "js/ts.tsdk.promptToUseWorkspaceVersion": true,
   "js/ts.suggestionActions.enabled": false,
-  // GitHub Copilot Auto-Approve Commands
-  // Notes:
-  // - Regexes apply to subcommands individually, e.g.: sub-command-A && sub-command-B
-  // - If matchCommandLine is true, the match is applied to the entire command line
-  //   - This should only be used with start and end anchors, e.g. /^git status$/
-  //   - Since AI often varies the exact command line, matchCommandLine is not useful.
-  "chat.tools.terminal.autoApprove": {
-    // Local inspection
-    "basename": true,
-    "cat": true,
-    "cd": true,
-    "cut": true,
-    "date": true,
-    "df": true,
-    "dirname": true,
-    "du": true,
-    "echo": true,
-    "env": true,
-    "exit": true,
-    "file": true,
-    "grep": true,
-    "head": true,
-    "jq": true,
-    "ls": true,
-    "lsof": true,
-    "pgrep": true,
-    "printenv": true,
-    "ps": true,
-    "pwd": true,
-    "sort": true,
-    "stat": true,
-    "tail": true,
-    "tree": true,
-    "type": true,
-    "uniq": true,
-    "uptime": true,
-    "wc": true,
-    "which": true,
-    "who": true,
-    // Read-only Git inspection
-    "/^git(?:\\s+--no-pager)?\\s+(?:status|diff|log|show|branch|blame|rev-parse|ls-files|ls-remote|ls-tree|describe|tag|remote)\\b/": true,
-    // HTTP GET/HEAD with common non-mutating curl options.
-    // POST, PUT, DELETE, forms, uploads, output files, and custom
-    // request methods do not match and therefore require approval.
-    "/^curl\\s+(?:(?:-[fsSLI]+|--(?:fail|fail-with-body|silent|show-error|location|head|compressed))\\s+)*(?:['\\\"]?https?:\\/\\/[^\\s'\\\"]+['\\\"]?)(?:\\s+['\\\"]?https?:\\/\\/[^\\s'\\\"]+['\\\"]?)*$/": true,
-    // wget may inspect a URL or write the response only to stdout.
-    "/^wget\\s+(?:-qO-|--spider)\\s+['\\\"]?https?:\\/\\/[^\\s'\\\"]+['\\\"]?$/": true,
-    // DNS and reachability queries
-    "/^(dig|host|nslookup|ping)\\b/": true,
-    // Read-only package registry queries
-    "/^cargo\\s+search\\b/": true,
-    "/^pip3?\\s+index\\s+versions\\b/": true,
-    // Python tests and static analysis
-    "mypy": true,
-    "pytest": true,
-    // Virtualenv Python
-    "/^((\\.(\\.)?\\/|\\/workspace\\/)?backend\\/|\\.\\/)?\\.venv\\/bin\\/python\\s+-c\\s+\\'import\\s+/": true,
-    "/^((\\.(\\.)?\\/|\\/workspace\\/)?backend\\/|\\.\\/)?\\.venv\\/bin\\/python\\s+-m\\s+(compileall|json.tool|mypy|py_compile|pytest|ruff)\\b/": true,
-    "ruff": true,
-    "/^python3 -m (json.tool|unittest)\\b/": true,
-    // Frontend tests and static analysis
-    "npm test": true,
-    "npx vitest": true,
-    "npx tsc": true,
-    "npx biome": true,
-    "/^((\\.(\\.)?\\/|\\/workspace\\/)?node_modules\\/|\\.\\/)?\\.bin\\/biome\\s+(check|format)\\b/": true,
-    "/^((\\.(\\.)?\\/|\\/workspace\\/)?node_modules\\/|\\.\\/)?\\.bin\\/tsc\\b/": true,
-    // Frontend validation and builds
-    "/^npm(\\s+--prefix\\s+\\/workspace\\/frontend)?\\s+run\\s+(?:build|check|docs\\:validate|format|info|lint|redirects\\:generate|search|test(\\:.+)?|typecheck|view)\\b/": true,
-    // Rust validation and read-only inspection
-    "rustfmt": true,
-    "/^cargo\\s+(?:test|check|clippy|fmt|metadata|tree|doc)\\b/": true,
-    // Known repository validation scripts
-    "/^(?:\\.(\\.)?\\/)?scripts\\/(?:lint|test|format)(?:\\s|$)/": true,
-    "/^(?:\\.(\\.)?\\/)?scripts\\/(?:test-archive-topology-conformance)(?:\\s|$)/": true,
-    "/^python3\\s+scripts\\/(?:generate-managed-redirects|update-docs-derived-artifacts|verify-archive-single-worker)\\.py(?:\\s|$)/": true,
-    "/^python3\\s+(?:website\\/)?scripts\\/(?:docs-report|docs-editor|validate-docs-content)\\.py(?:\\s|$)/": true,
-    // Always require approval for destructive or privileged tools
-    "chmod": false,
-    "chown": false,
-    "dd": false,
-    "del": false,
-    "docker": false,
-    "kill": false,
-    "mkfs": false,
-    "mount": false,
-    "podman": false,
-    "rm": false,
-    "rmdir": false,
-    "sudo": false,
-    "su": false,
-    "umount": false,
-    // Require approval for remote access and transfer tools
-    "ftp": false,
-    "rsync": false,
-    "scp": false,
-    "sftp": false,
-    "ssh": false,
-    // Require approval for package installation or arbitrary execution
-    "apt": false,
-    "apt-get": false,
-    "corepack": false,
-    "pnpm": false,
-    "yarn": false,
-    // Require approval for Git writes and working-tree changes
-    "/^git(?:\\s+--no-pager)?\\s+(?:add|apply|bisect|checkout|cherry-pick|clean|clone|commit|fetch|merge|mv|pull|push|rebase|reset|restore|revert|rm|stash|switch|worktree)\\b/": false,
-    // Require approval for dependency and publishing operations
-    "/^npm\\s+(?:ci|install|uninstall|remove|update|publish|exec)\\b/": false,
-    "/^cargo\\s+(?:add|clean|fix|install|login|logout|new|init|package|publish|remove|run|update|watch)\\b/": false
-  },
+  // Color customization
   "workbench.colorCustomizations": {
     "activityBar.activeBackground": "#F4C430",
     "activityBar.background": "#F4C430",
@@ -243,5 +134,7 @@
     "statusBar.debuggingBackground": "#f4c430",
     "statusBar.debuggingForeground": "#15202b"
   },
-  "peacock.remoteColor": "#F4C430"
+  // Copilot and Chat Settings: allow automatic approval and terminal file writes (this is a devcontainer)
+  "chat.permissions.default": "autoApprove",
+  "chat.tools.terminal.blockDetectedFileWrites": "never"
 }

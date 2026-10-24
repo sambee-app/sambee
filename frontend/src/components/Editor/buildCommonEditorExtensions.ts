@@ -5,6 +5,8 @@ import { highlightSelectionMatches, search } from "@codemirror/search";
 import type { Extension } from "@codemirror/state";
 import { drawSelection, EditorView, highlightActiveLine, keymap } from "@codemirror/view";
 import { buildSelectionLayerExtension } from "./buildEditorSelectionLayer";
+import { sourceRegexSearchLifecycle } from "./sourceRegexSearch";
+import { sourceReplacementFeedbackExtension } from "./sourceReplacementFeedback";
 
 interface CommonEditorExtensionsOptions {
   defaultSyntaxHighlighting?: boolean;
@@ -28,7 +30,7 @@ function scrollEditorViewport(
   const scrollDelta = nextScrollTop - previousScrollTop;
 
   const selection = view.state.selection.main;
-  const cursorCoords = selection.empty ? view.coordsAtPos(selection.head, selection.assoc) : null;
+  const cursorCoords = selection.empty ? view.coordsAtPos(selection.head, selection.assoc === 0 ? undefined : selection.assoc) : null;
   const scrollerRect = scrollDOM.getBoundingClientRect();
   const caretMovement =
     cursorCoords && direction === EDITOR_VIEWPORT_SCROLL_DIRECTION.DOWN
@@ -82,6 +84,8 @@ export function buildCommonEditorExtensions({
     ...(defaultSyntaxHighlighting ? [syntaxHighlighting(defaultHighlightStyle, { fallback: true })] : []),
     bracketMatching(),
     search({ top: true }),
+    sourceRegexSearchLifecycle,
+    sourceReplacementFeedbackExtension,
     ...(includeSelectionMatches ? [highlightSelectionMatches()] : []),
     highlightActiveLine(),
     ...(lineWrapping ? [EditorView.lineWrapping] : []),

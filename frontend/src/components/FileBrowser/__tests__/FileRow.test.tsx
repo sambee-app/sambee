@@ -3,20 +3,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { formatDate, formatFileSize } from "../../../pages/FileBrowser/formatters";
 import { FILE_BROWSER_ROW_HEIGHT } from "../../../theme/constants";
-import { FileType } from "../../../types";
+import { type FileInfo, FileType } from "../../../types";
 import { FileRow, shortenTargetPath } from "../FileRow";
 
 function createDefaultFileRowProps() {
+  const file: FileInfo = {
+    name: "report.pdf",
+    path: "/report.pdf",
+    type: FileType.FILE,
+    size: 1024,
+    modified_at: "2024-01-01T00:00:00Z",
+    is_readable: true,
+    is_hidden: false,
+  };
   return {
-    file: {
-      name: "report.pdf",
-      path: "/report.pdf",
-      type: FileType.FILE,
-      size: 1024,
-      modified_at: "2024-01-01T00:00:00Z",
-      is_readable: true,
-      is_hidden: false,
-    },
+    file,
     useCompactLayout: false,
     index: 0,
     isSelected: true,

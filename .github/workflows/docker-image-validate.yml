@@ -81,7 +81,7 @@ permissions:
 
 jobs:
   prepare:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     outputs:
       created: ${{ steps.metadata.outputs.created }}
       os_packages_refresh_key: ${{ steps.metadata.outputs.os_packages_refresh_key }}
@@ -103,10 +103,10 @@ jobs:
         include:
           - docker_platform: linux/amd64
             platform_id: amd64
-            runner_label: ubuntu-24.04
+            runner_label: ubuntu-latest
           - docker_platform: linux/arm64
             platform_id: arm64
-            runner_label: ubuntu-24.04-arm
+            runner_label: ubuntu-26.04-arm
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

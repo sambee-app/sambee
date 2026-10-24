@@ -6,7 +6,7 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef, useState } from "react";
+import { createRef, useLayoutEffect, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { buildCommonEditorExtensions } from "../buildCommonEditorExtensions";
 import { getSelectionLineSegments, resolveOpaqueSelectionBackground } from "../buildEditorSelectionLayer";
@@ -18,10 +18,12 @@ import {
 import { buildMarkdownEditorExtensions } from "../buildMarkdownEditorExtensions";
 import type { MarkdownEditorThemeOptions } from "../buildMarkdownEditorTheme";
 import { buildTextEditorTheme, type TextEditorThemeOptions } from "../buildTextEditorTheme";
-import { SourceTextEditor } from "../SourceTextEditor";
+import { SOURCE_EDITOR_MEASURES, SourceTextEditor } from "../SourceTextEditor";
 import type { SourceTextEditorHandle } from "../sourceTextEditorTypes";
 
 const TEST_MARKDOWN_THEME: MarkdownEditorThemeOptions = {
+  currentSearchMatchBackground: "rgba(244, 196, 48, 0.32)",
+  otherSearchMatchBackground: "rgba(244, 196, 48, 0.18)",
   activeLineBackground: "rgba(244, 196, 48, 0.18)",
   borderColor: "rgba(31, 38, 43, 0.16)",
   isDarkMode: false,
@@ -49,6 +51,137 @@ const TEST_TEXT_THEME: TextEditorThemeOptions = {
 };
 
 describe("SourceTextEditor", () => {
+  it("measures serialization and synchronous parent publication without retaining source or repeating controlled echoes", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    const measure = vi.spyOn(performance, "measure");
+    const clearMeasures = vi.spyOn(performance, "clearMeasures");
+    try {
+      const { rerender } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Measured editor" onChange={onChange} />);
+      const view = editorRef.current?.getView();
+      if (!view) throw new Error("Expected a mounted editor");
+      view.dispatch({ changes: { from: view.state.doc.length, insert: " updated" } });
+      for (const name of Object.values(SOURCE_EDITOR_MEASURES)) {
+        expect(clearMeasures).toHaveBeenCalledWith(name);
+        expect(measure).toHaveBeenCalledWith(name, {
+          start: expect.any(Number),
+          detail: { revision: 1, documentUnits: "initial updated".length },
+        });
+      }
+      expect(onChange).toHaveBeenCalledOnce();
+      measure.mockClear();
+      rerender(<SourceTextEditor ref={editorRef} value="initial updated" ariaLabel="Measured editor" onChange={onChange} />);
+      expect(measure).not.toHaveBeenCalled();
+    } finally {
+      measure.mockRestore();
+      clearMeasures.mockRestore();
+    }
+  });
+
+  it("does not serialize again when a controlled parent echoes the latest edit", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    const { rerender } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Controlled editor" onChange={onChange} />);
+    const view = editorRef.current?.getView();
+    if (!view) throw new Error("Expected a mounted editor");
+    const transaction = view.state.update({ changes: { from: 7, insert: " updated" } });
+    const serialize = vi.spyOn(transaction.state.doc, "toString");
+    try {
+      view.dispatch(transaction);
+      expect(onChange).toHaveBeenLastCalledWith("initial updated", expect.anything());
+      expect(serialize).toHaveBeenCalledOnce();
+      serialize.mockClear();
+      rerender(<SourceTextEditor ref={editorRef} value="initial updated" ariaLabel="Controlled editor" onChange={onChange} />);
+      expect(serialize).not.toHaveBeenCalled();
+      expect(view.state.doc).toBe(transaction.state.doc);
+      rerender(<SourceTextEditor ref={editorRef} value="external" ariaLabel="Controlled editor" onChange={onChange} />);
+      expect(view.state.doc.toString()).toBe("external");
+      expect(onChange).toHaveBeenCalledOnce();
+    } finally {
+      serialize.mockRestore();
+    }
+  });
+
+  it("does not replay a controlled echo over an edit delivered before passive effects", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    function ControlledEditor({ value }: { value: string }) {
+      useLayoutEffect(() => {
+        if (value !== "initial updated") return;
+        const view = editorRef.current?.getView();
+        if (!view) throw new Error("Expected a mounted controlled editor");
+        view.dispatch({ changes: { from: view.state.doc.length, insert: " next" } });
+      }, [value]);
+      return <SourceTextEditor ref={editorRef} value={value} ariaLabel="Rapid controlled editor" onChange={onChange} />;
+    }
+    const { rerender } = render(<ControlledEditor value="initial" />);
+    const view = editorRef.current?.getView();
+    if (!view) throw new Error("Expected a mounted controlled editor");
+    view.dispatch({ changes: { from: view.state.doc.length, insert: " updated" } });
+    rerender(<ControlledEditor value="initial updated" />);
+    expect(view.state.doc.toString()).toBe("initial updated next");
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects snapshots throughout an active composition, including before its first change", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Composition editor" onChange={() => {}} />);
+    const handle = editorRef.current;
+    const view = handle?.getView();
+    if (!handle || !view) throw new Error("Expected a mounted source editor");
+    const original = handle.captureSnapshot();
+    view.contentDOM.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    expect(view.compositionStarted).toBe(true);
+    expect(view.composing).toBe(false);
+    expect(() => handle.captureSnapshot()).toThrow(/composition/);
+    view.dispatch({ changes: { from: view.state.doc.length, insert: " composed" }, userEvent: "input.type.compose" });
+    expect(() => handle.captureSnapshot()).toThrow(/composition/);
+    view.contentDOM.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "composed" }));
+
+    expect(view.compositionStarted).toBe(false);
+    expect(handle.captureSnapshot().serialize()).toBe("initial composed");
+    expect(original.serialize()).toBe("initial");
+  });
+
+  it("captures an immutable revision without serializing the source during capture", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const { unmount } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Snapshot editor" onChange={() => {}} />);
+    const handle = editorRef.current;
+    const view = handle?.getView();
+    if (!handle || !view) throw new Error("Expected a mounted editor");
+    const serialize = vi.spyOn(view.state.doc, "toString");
+    try {
+      const snapshot = handle.captureSnapshot();
+      expect(serialize).not.toHaveBeenCalled();
+      expect(snapshot.revision).toBe(0);
+      expect(Object.isFrozen(snapshot)).toBe(true);
+      view.dispatch({ changes: { from: view.state.doc.length, insert: " updated" } });
+      const latest = handle.captureSnapshot();
+      expect(latest.revision).toBeGreaterThan(snapshot.revision);
+      expect(snapshot.serialize()).toBe("initial");
+      expect(latest.serialize()).toBe("initial updated");
+      unmount();
+      expect(snapshot.serialize()).toBe("initial");
+      expect(() => handle.captureSnapshot()).toThrow(/disposed/);
+    } finally {
+      serialize.mockRestore();
+    }
+  });
+
+  it("includes external document replacements in snapshot revisions", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    const { rerender } = render(<SourceTextEditor ref={editorRef} value="initial" ariaLabel="Snapshot editor" onChange={onChange} />);
+    const first = editorRef.current?.captureSnapshot();
+    rerender(<SourceTextEditor ref={editorRef} value="replacement" ariaLabel="Snapshot editor" onChange={onChange} />);
+    const latest = editorRef.current?.captureSnapshot();
+
+    expect(first?.serialize()).toBe("initial");
+    expect(latest?.serialize()).toBe("replacement");
+    expect(latest?.revision).toBeGreaterThan(first?.revision ?? -1);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("scrolls the viewport with Ctrl+Arrow keys without changing the selection", async () => {
     const editorRef = createRef<SourceTextEditorHandle>();
     const initialValue = "Editor content";
@@ -226,6 +359,49 @@ describe("SourceTextEditor", () => {
       expect(editor).toHaveClass("cm-lineWrapping");
       expect(view.state.selection.main.head).toBe(longLine.length);
     });
+  });
+
+  it.each(["theme", "language"])("preserves the viewport and selection when %s extensions change", (change) => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onUpdate = vi.fn();
+    const onChange = vi.fn();
+    const value = "first\nsecond\nthird";
+    const { rerender } = render(
+      <SourceTextEditor
+        ref={editorRef}
+        value={value}
+        extensions={[]}
+        ariaLabel="Stable source editor"
+        onChange={onChange}
+        onUpdate={onUpdate}
+      />
+    );
+    const view = editorRef.current?.getView();
+    if (!view) throw new Error("Expected a mounted editor");
+    view.dispatch({ selection: EditorSelection.range(0, 5) });
+    const document = view.state.doc;
+    const selection = view.state.selection;
+    onUpdate.mockClear();
+
+    rerender(
+      <SourceTextEditor
+        ref={editorRef}
+        value={value}
+        extensions={change === "theme" ? buildTextEditorTheme(TEST_TEXT_THEME) : [markdown()]}
+        ariaLabel="Stable source editor"
+        onChange={onChange}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(editorRef.current?.getView()).toBe(view);
+    expect(view.state.doc).toBe(document);
+    expect(view.state.selection).toBe(selection);
+    expect(onUpdate).toHaveBeenCalled();
+    for (const [update] of onUpdate.mock.calls) {
+      expect(update.transactions.every((transaction: { scrollIntoView: boolean }) => !transaction.scrollIntoView)).toBe(true);
+    }
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("retains undo history across controlled value updates", async () => {
@@ -560,6 +736,9 @@ describe("SourceTextEditor", () => {
 
     expect(window.getComputedStyle(editor).color).toBe(TEST_MARKDOWN_THEME.textColor);
     expect(window.getComputedStyle(activeLine).backgroundColor).toBe(TEST_MARKDOWN_THEME.activeLineBackground);
-    expect(window.getComputedStyle(linkToken).color).toBe(TEST_MARKDOWN_THEME.linkColor);
+    expect(linkToken).toHaveClass("sambee-syntax-link");
+    expect(window.getComputedStyle(editor.closest(".cm-editor")!).getPropertyValue("--sambee-syntax-link").replaceAll(" ", "")).toBe(
+      TEST_MARKDOWN_THEME.linkColor.replaceAll(" ", "")
+    );
   });
 });

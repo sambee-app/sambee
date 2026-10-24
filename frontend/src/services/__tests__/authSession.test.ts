@@ -1,5 +1,6 @@
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import { server } from "../../test/mocks/server";
 import { type AuthSessionError, AuthSessionManager } from "../authSession";
 
@@ -23,16 +24,16 @@ describe("AuthSessionManager", () => {
     );
     session = new AuthSessionManager();
     session.setAuthenticated(
-      {
+      createMockAuthToken({
         access_token: "still-usable-token",
         token_type: "bearer",
         access_token_expires_at: new Date(Date.now() + 60_000).toISOString(),
         oidc_refresh_generation: 7,
-      },
+      }),
       true
     );
 
-    await expect(session.requestRefresh()).rejects.toMatchObject<AuthSessionError>({ code: "refresh-uncertain" });
+    await expect(session.requestRefresh()).rejects.toMatchObject<Partial<AuthSessionError>>({ code: "refresh-uncertain" });
 
     expect(session.getState()).toBe("refresh-uncertain");
     expect(session.getAccessToken()).toBe("still-usable-token");
@@ -45,20 +46,20 @@ describe("AuthSessionManager", () => {
     const redirect = vi.fn();
     session.setReauthenticationHandler(redirect);
     session.setAuthenticated(
-      {
+      createMockAuthToken({
         access_token: "no-refresh-token",
         token_type: "bearer",
         user_id: "user-1",
         oidc_session_capability: "reauthorization_only",
         oidc_session_expires_at: new Date(deadline).toISOString(),
         access_token_expires_at: new Date(deadline).toISOString(),
-      },
+      }),
       true
     );
     expect(session.hasUsableAccessToken()).toBe(true);
     const clock = vi.spyOn(Date, "now").mockReturnValue(deadline);
     try {
-      await expect(session.refreshIfNeeded()).rejects.toMatchObject<AuthSessionError>({ code: "reauthentication-required" });
+      await expect(session.refreshIfNeeded()).rejects.toMatchObject<Partial<AuthSessionError>>({ code: "reauthentication-required" });
       expect(session.hasUsableAccessToken()).toBe(false);
       expect(redirect).toHaveBeenCalledOnce();
     } finally {
@@ -77,13 +78,13 @@ describe("AuthSessionManager", () => {
     );
     session = new AuthSessionManager();
     session.setAuthenticated(
-      {
+      createMockAuthToken({
         access_token: "old-session",
         token_type: "bearer",
         user_id: "user-1",
         oidc_session_expires_at: new Date(deadline).toISOString(),
         access_token_expires_at: new Date(deadline).toISOString(),
-      },
+      }),
       true
     );
     const clock = vi.spyOn(Date, "now").mockReturnValue(deadline);
@@ -113,7 +114,7 @@ describe("AuthSessionManager", () => {
       })
     );
     session = new AuthSessionManager();
-    session.setAuthenticated({ access_token: "expired-session", token_type: "bearer", user_id: "user-1" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "expired-session", token_type: "bearer", user_id: "user-1" }), true);
     const oldRefresh = session.requestRefresh();
     const oldFailure = expect(oldRefresh).rejects.toThrow();
     await vi.waitFor(() => expect(refreshRequests).toBe(1));
@@ -159,10 +160,10 @@ describe("AuthSessionManager", () => {
     const identities: Array<{ epoch: number; userId: string | null }> = [];
     session.subscribeToIdentity((identity) => identities.push(identity));
 
-    session.setAuthenticated({ access_token: "first-token", token_type: "bearer", user_id: "user-1" }, true);
-    session.setAuthenticated({ access_token: "refreshed-token", token_type: "bearer", user_id: "user-1" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "first-token", token_type: "bearer", user_id: "user-1" }), true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "refreshed-token", token_type: "bearer", user_id: "user-1" }), true);
     session.clear();
-    session.setAuthenticated({ access_token: "second-token", token_type: "bearer", user_id: "user-1" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "second-token", token_type: "bearer", user_id: "user-1" }), true);
 
     expect(identities).toEqual([
       { epoch: 1, userId: "user-1" },
@@ -189,7 +190,7 @@ describe("AuthSessionManager", () => {
     session.subscribeToIdentity(({ epoch }) => identities.push(epoch));
     const bootstrap = session.bootstrap();
     await vi.waitFor(() => expect(session?.getState()).toBe("refreshing"));
-    session.setAuthenticated({ access_token: "new-session", token_type: "bearer", user_id: "same-user" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "new-session", token_type: "bearer", user_id: "same-user" }), true);
     session.completeLoginBootstrap();
     finishRefresh();
     await bootstrap;
@@ -224,13 +225,13 @@ describe("AuthSessionManager", () => {
       })
     );
     session = new AuthSessionManager();
-    session.setAuthenticated({ access_token: "session-a", token_type: "bearer", user_id: "same-user" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer", user_id: "same-user" }), true);
     const oldRefresh = session.requestRefresh();
     const oldFailure = expect(oldRefresh).rejects.toThrow();
     await vi.waitFor(() => expect(requests).toBe(1));
 
     session.beginNewLogin();
-    session.setAuthenticated({ access_token: "session-b", token_type: "bearer", user_id: "same-user" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer", user_id: "same-user" }), true);
     const newRefresh = session.requestRefresh();
     await vi.waitFor(() => expect(requests).toBe(2));
     releaseOld();
@@ -267,11 +268,11 @@ describe("AuthSessionManager", () => {
       })
     );
     session = new AuthSessionManager();
-    session.setAuthenticated({ access_token: "session-a", token_type: "bearer" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer" }), true);
     const oldRefresh = session.requestRefresh();
     const oldFailure = expect(oldRefresh).rejects.toThrow();
     session.beginNewLogin();
-    session.setAuthenticated({ access_token: "session-b", token_type: "bearer" }, true);
+    session.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer" }), true);
     releaseLock();
 
     await oldFailure;

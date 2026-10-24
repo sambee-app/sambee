@@ -8,18 +8,38 @@ export interface DomTextSearchMatch {
   elements: HTMLElement[];
 }
 
-interface IndexedTextSegment {
+const activeMatches = new WeakMap<DomTextSearchMatch[], DomTextSearchMatch>();
+
+function measureSearchStage<Result>(stage: string, operation: () => Result): Result {
+  const start = performance.now();
+  try {
+    return operation();
+  } finally {
+    const name = `sambee:preview-search:${stage}`;
+    performance.clearMeasures?.(name);
+    performance.measure?.(name, { start, end: performance.now() });
+  }
+}
+
+export interface IndexedTextSegment {
   node: Text;
   start: number;
   end: number;
 }
 
-interface IndexedDomText {
+export interface IndexedDomText {
   fullText: string;
   segments: IndexedTextSegment[];
 }
 
-interface LogicalMatch {
+interface DomTextIndexBuilder {
+  chunks: string[];
+  length: number;
+  lastCharacter: string;
+  segments: IndexedTextSegment[];
+}
+
+export interface LogicalMatch {
   id: number;
   start: number;
   end: number;
@@ -75,42 +95,61 @@ export function clearDomTextSearchHighlights(container: ParentNode | null): void
     return;
   }
 
+  measureSearchStage("clear", () => clearHighlights(container));
+}
+
+function clearHighlights(container: ParentNode): void {
   const highlights = container.querySelectorAll(DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR);
+  const parents = new Set<Element | Document | DocumentFragment>();
   for (const highlight of highlights) {
     const parent = highlight.parentNode;
-    if (!parent) {
-      continue;
+    if (parent instanceof Element || parent instanceof Document || parent instanceof DocumentFragment) parents.add(parent);
+  }
+  for (const parent of parents) {
+    const fragment = document.createDocumentFragment();
+    let text = "";
+    for (const child of Array.from(parent.childNodes)) {
+      if (child instanceof Text || (child instanceof HTMLElement && child.matches(DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR))) {
+        text += child.textContent ?? "";
+      } else {
+        if (text) fragment.append(document.createTextNode(text));
+        text = "";
+        fragment.append(child);
+      }
     }
-
-    parent.replaceChild(document.createTextNode(highlight.textContent ?? ""), highlight);
-    parent.normalize();
+    if (text) fragment.append(document.createTextNode(text));
+    parent.replaceChildren(fragment);
   }
 }
 
-function appendBlockSeparator(indexedText: IndexedDomText): void {
-  if (!indexedText.fullText || indexedText.fullText.endsWith("\n")) {
+function appendBlockSeparator(indexedText: DomTextIndexBuilder): void {
+  if (!indexedText.length || indexedText.lastCharacter === "\n") {
     return;
   }
 
-  indexedText.fullText += "\n";
+  indexedText.chunks.push("\n");
+  indexedText.length += 1;
+  indexedText.lastCharacter = "\n";
 }
 
-function indexTextNode(node: Text, indexedText: IndexedDomText): void {
+function indexTextNode(node: Text, indexedText: DomTextIndexBuilder): void {
   const text = node.textContent ?? "";
-  if (!text.trim()) {
+  if (!text || (!text.trim() && !node.parentElement?.closest("pre"))) {
     return;
   }
 
-  const start = indexedText.fullText.length;
-  indexedText.fullText += text;
+  const start = indexedText.length;
+  indexedText.chunks.push(text);
+  indexedText.length += text.length;
+  indexedText.lastCharacter = text.slice(-1);
   indexedText.segments.push({
     node,
     start,
-    end: indexedText.fullText.length,
+    end: indexedText.length,
   });
 }
 
-function buildIndexedDomText(node: Node, indexedText: IndexedDomText, isRoot = false): void {
+function buildIndexedDomText(node: Node, indexedText: DomTextIndexBuilder, isRoot = false): void {
   if (node instanceof Text) {
     if (node.parentElement?.closest(DOM_TEXT_SEARCH_HIGHLIGHT_SELECTOR)) {
       return;
@@ -141,18 +180,20 @@ function buildIndexedDomText(node: Node, indexedText: IndexedDomText, isRoot = f
   }
 }
 
-function createDomTextIndex(container: HTMLElement): IndexedDomText {
-  const indexedText: IndexedDomText = {
-    fullText: "",
+export function createDomTextIndex(container: HTMLElement): IndexedDomText {
+  const indexedText: DomTextIndexBuilder = {
+    chunks: [],
+    length: 0,
+    lastCharacter: "",
     segments: [],
   };
 
   buildIndexedDomText(container, indexedText, true);
 
-  return indexedText;
+  return { fullText: indexedText.chunks.join(""), segments: indexedText.segments };
 }
 
-function findLogicalMatches(fullText: string, query: string): LogicalMatch[] {
+export function findLogicalMatches(fullText: string, query: string): LogicalMatch[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!normalizedQuery) {
     return [];
@@ -182,14 +223,19 @@ function findLogicalMatches(fullText: string, query: string): LogicalMatch[] {
   return matches;
 }
 
-function buildHighlightSlices(indexedText: IndexedDomText, matches: LogicalMatch[]): Map<Text, HighlightSlice[]> {
+export function buildHighlightSlices(indexedText: IndexedDomText, matches: LogicalMatch[]): Map<Text, HighlightSlice[]> {
   const slicesByNode = new Map<Text, HighlightSlice[]>();
+  let segmentIndex = 0;
 
   for (const match of matches) {
-    for (const segment of indexedText.segments) {
-      if (segment.end <= match.start || segment.start >= match.end) {
-        continue;
-      }
+    while (segmentIndex < indexedText.segments.length) {
+      const segment = indexedText.segments[segmentIndex];
+      if (!segment || segment.end > match.start) break;
+      segmentIndex += 1;
+    }
+    for (let overlapIndex = segmentIndex; overlapIndex < indexedText.segments.length; overlapIndex += 1) {
+      const segment = indexedText.segments[overlapIndex];
+      if (!segment || segment.start >= match.end) break;
 
       const overlappingStart = Math.max(match.start, segment.start);
       const overlappingEnd = Math.min(match.end, segment.end);
@@ -240,31 +286,29 @@ function applyHighlightSlices(slicesByNode: Map<Text, HighlightSlice[]>, matchCo
 }
 
 export function applyDomTextSearchHighlights(container: HTMLElement, query: string): DomTextSearchMatch[] {
-  const indexedText = createDomTextIndex(container);
-  const matches = findLogicalMatches(indexedText.fullText, query);
+  const indexedText = measureSearchStage("capture", () => createDomTextIndex(container));
+  const matches = measureSearchStage("matching", () => findLogicalMatches(indexedText.fullText, query));
 
   if (matches.length === 0) {
     return [];
   }
 
-  const slicesByNode = buildHighlightSlices(indexedText, matches);
-  return applyHighlightSlices(slicesByNode, matches.length);
+  const slicesByNode = measureSearchStage("slices", () => buildHighlightSlices(indexedText, matches));
+  return measureSearchStage("markers", () => applyHighlightSlices(slicesByNode, matches.length));
 }
 
-export function activateDomTextSearchMatch(matches: DomTextSearchMatch[], currentMatch: number): HTMLElement | null {
-  for (const [index, match] of matches.entries()) {
-    const isCurrentMatch = index === currentMatch - 1;
-    for (const highlight of match.elements) {
-      if (isCurrentMatch) {
-        highlight.setAttribute(DOM_TEXT_SEARCH_CURRENT_MATCH_ATTRIBUTE, "true");
-      } else {
-        highlight.removeAttribute(DOM_TEXT_SEARCH_CURRENT_MATCH_ATTRIBUTE);
-      }
-    }
+export function activateDomTextSearchMatch(matches: DomTextSearchMatch[], currentMatch: number, scroll = true): HTMLElement | null {
+  const previous = activeMatches.get(matches);
+  const current = currentMatch > 0 ? matches[currentMatch - 1] : undefined;
+  if (previous !== current) {
+    for (const highlight of previous?.elements ?? []) highlight.removeAttribute(DOM_TEXT_SEARCH_CURRENT_MATCH_ATTRIBUTE);
+    for (const highlight of current?.elements ?? []) highlight.setAttribute(DOM_TEXT_SEARCH_CURRENT_MATCH_ATTRIBUTE, "true");
+    if (current) activeMatches.set(matches, current);
+    else activeMatches.delete(matches);
   }
 
-  const activeHighlight = currentMatch > 0 ? (matches[currentMatch - 1]?.elements[0] ?? null) : null;
-  if (activeHighlight && typeof activeHighlight.scrollIntoView === "function") {
+  const activeHighlight = current?.elements[0] ?? null;
+  if (scroll && activeHighlight && typeof activeHighlight.scrollIntoView === "function") {
     activeHighlight.scrollIntoView({ block: "center", inline: "nearest" });
   }
 

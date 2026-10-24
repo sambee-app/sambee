@@ -26,7 +26,20 @@ function createContext(hasTwoPanes: boolean) {
     labels: Object.fromEntries(actionIds.map((id) => [id, id])) as Record<FileOperationActionId, string>,
     shortcuts: Object.fromEntries(actionIds.map((id) => [id, "F1"])) as Record<FileOperationActionId, string>,
     unavailableReasons: { delete: "Select an item to delete." },
-    handlers: Object.fromEntries(actionIds.map((id) => [id, vi.fn()])) as Record<FileOperationActionId, () => void>,
+    handlers: {
+      "new-directory": vi.fn(),
+      "new-file": vi.fn(),
+      rename: vi.fn(),
+      delete: vi.fn(),
+      copy: vi.fn(),
+      move: vi.fn(),
+      "create-archive": vi.fn(),
+      "extract-archive": vi.fn(),
+      download: vi.fn(),
+      share: vi.fn(),
+      upload: vi.fn(),
+      refresh: vi.fn(),
+    } satisfies Record<FileOperationActionId, () => void>,
   };
 }
 

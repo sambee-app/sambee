@@ -222,13 +222,35 @@ jobs:
       if: steps.source-ci.outputs.frontend != 'true'
       run: cd frontend && npm ci --prefer-offline
 
-    - name: Run frontend type checks
+    - name: Verify frontend type correctness
       if: steps.source-ci.outputs.frontend != 'true'
-      run: cd frontend && npx tsc --noEmit
+      id: frontend-types
+      run: cd frontend && npm run typecheck
 
     - name: Run frontend tests
       if: steps.source-ci.outputs.frontend != 'true'
       run: cd frontend && npm run test:ci
+
+    - name: Build production frontend for browser checks
+      if: steps.source-ci.outputs.frontend != 'true'
+      run: cd frontend && npm run build
+
+    - name: Install browser dependencies
+      if: steps.source-ci.outputs.frontend != 'true'
+      run: cd frontend && npm run test:e2e:install -- --with-deps
+
+    - name: Run browser correctness contracts
+      if: steps.source-ci.outputs.frontend != 'true'
+      run: cd frontend && npm run test:browser:ci
+
+    - name: Upload browser correctness reports
+      if: ${{ !cancelled() && steps.source-ci.outputs.frontend != 'true' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: release-browser-correctness
+        path: frontend/test-results/ci/
+        retention-days: 7
+        if-no-files-found: warn
 
   build-and-validate-platforms:
     needs: [prepare, validate-tests]
@@ -243,10 +265,10 @@ jobs:
         include:
           - docker_platform: linux/amd64
             platform_id: amd64
-            runner_label: ubuntu-24.04
+            runner_label: ubuntu-latest
           - docker_platform: linux/arm64
             platform_id: arm64
-            runner_label: ubuntu-24.04-arm
+            runner_label: ubuntu-26.04-arm
     steps:
     - name: Checkout source code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -564,10 +586,10 @@ jobs:
         include:
           - docker_platform: linux/amd64
             platform_id: amd64
-            runner_label: ubuntu-24.04
+            runner_label: ubuntu-latest
           - docker_platform: linux/arm64
             platform_id: arm64
-            runner_label: ubuntu-24.04-arm
+            runner_label: ubuntu-26.04-arm
     steps:
     - name: Checkout source code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -23,13 +23,26 @@ export interface UnsavedDraftMetadata {
   updatedAt: number;
 }
 
-export type DraftSaveResult = { saved: true } | { saved: false; reason: "no-user" | "too-large" | "storage-unavailable" };
+export type DraftSaveResult =
+  | { saved: true }
+  | { saved: false; reason: "no-user" | "too-large" | "storage-unavailable" | "stale-checkpoint" };
+
+export interface DraftCheckpoint {
+  readonly revision: number;
+}
+
+export interface DraftCheckpointSession {
+  capture(revision: number): DraftCheckpoint;
+  commit(checkpoint: DraftCheckpoint, baseline: string, content: string): DraftSaveResult;
+  dispose(): void;
+}
 
 interface RegisteredDraft {
   snapshot: () => void;
 }
 
 const registeredDrafts = new Set<RegisteredDraft>();
+const checkpointSessions = new Map<string, object>();
 
 function normalizePath(path: string): string {
   const segments: string[] = [];
@@ -55,9 +68,12 @@ function hashBaseline(value: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function key(connectionId: string, path: string, editorType: DraftEditorType): string | null {
-  const userId = authSession.getUserId();
+function keyForUser(userId: string | null, connectionId: string, path: string, editorType: DraftEditorType): string | null {
   return userId ? `${DRAFT_PREFIX}:${userId}:${connectionId}:${editorType}:${encodeURIComponent(normalizePath(path))}` : null;
+}
+
+function key(connectionId: string, path: string, editorType: DraftEditorType): string | null {
+  return keyForUser(authSession.getUserId(), connectionId, path, editorType);
 }
 
 function parseDraftSnapshot(value: string): DraftSnapshot | null {
@@ -126,14 +142,25 @@ export function saveDraft(
   baseline: string,
   content: string
 ): DraftSaveResult {
+  const storageKey = key(connectionId, path, editorType);
+  if (storageKey) checkpointSessions.delete(storageKey);
+  return writeDraft(storageKey, baseline, content);
+}
+
+function writeDraft(
+  storageKey: string | null,
+  baseline: string,
+  content: string,
+  authority?: { isCurrent(): boolean; acknowledge(): void }
+): DraftSaveResult {
+  if (authority && !authority.isCurrent()) return { saved: false, reason: "stale-checkpoint" };
   if (new Blob([content]).size > MAX_DRAFT_BYTES) {
     return { saved: false, reason: "too-large" };
   }
-  const storageKey = key(connectionId, path, editorType);
   if (!storageKey) {
     return { saved: false, reason: "no-user" };
   }
-  const current = loadDraft(connectionId, path, editorType);
+  const current = loadDraftAtKey(storageKey);
   const hadUnsavedDraft = current !== null && current.content !== current.baseline;
   const snapshot: DraftSnapshot = {
     baseline,
@@ -143,7 +170,10 @@ export function saveDraft(
     updatedAt: Date.now(),
   };
   try {
-    sessionStorage.setItem(storageKey, JSON.stringify(snapshot));
+    const serialized = JSON.stringify(snapshot);
+    if (authority && !authority.isCurrent()) return { saved: false, reason: "stale-checkpoint" };
+    sessionStorage.setItem(storageKey, serialized);
+    authority?.acknowledge();
     if (!hadUnsavedDraft) {
       notifyDraftRecoveryChanged();
     }
@@ -153,11 +183,60 @@ export function saveDraft(
   }
 }
 
+export function createDraftCheckpointSession(connectionId: string, path: string, editorType: DraftEditorType): DraftCheckpointSession {
+  const identity = authSession.getIdentity();
+  const storageKey = keyForUser(identity.userId, connectionId, path, editorType);
+  const session = {};
+  const checkpoints = new WeakSet<DraftCheckpoint>();
+  let acknowledgedRevision = -1;
+  let latestRevision = -1;
+  let disposed = false;
+  if (storageKey) checkpointSessions.set(storageKey, session);
+  const isCurrent = (checkpoint: DraftCheckpoint) => {
+    const currentIdentity = authSession.getIdentity();
+    return (
+      !disposed &&
+      storageKey !== null &&
+      checkpointSessions.get(storageKey) === session &&
+      checkpoints.has(checkpoint) &&
+      checkpoint.revision > acknowledgedRevision &&
+      currentIdentity.userId === identity.userId &&
+      currentIdentity.epoch === identity.epoch
+    );
+  };
+
+  return {
+    capture(revision) {
+      if (!Number.isSafeInteger(revision) || revision < 0 || revision < latestRevision) {
+        throw new RangeError("Draft checkpoint revisions must be nonnegative, safe integers in increasing order");
+      }
+      latestRevision = revision;
+      const checkpoint = Object.freeze({ revision });
+      checkpoints.add(checkpoint);
+      return checkpoint;
+    },
+    commit(checkpoint, baseline, content) {
+      if (!identity.userId) return { saved: false, reason: "no-user" };
+      return writeDraft(storageKey, baseline, content, {
+        isCurrent: () => isCurrent(checkpoint),
+        acknowledge: () => {
+          acknowledgedRevision = checkpoint.revision;
+        },
+      });
+    },
+    dispose() {
+      disposed = true;
+      if (storageKey && checkpointSessions.get(storageKey) === session) checkpointSessions.delete(storageKey);
+    },
+  };
+}
+
 export function loadDraft(connectionId: string, path: string, editorType: DraftEditorType): DraftSnapshot | null {
   const storageKey = key(connectionId, path, editorType);
-  if (!storageKey) {
-    return null;
-  }
+  return storageKey ? loadDraftAtKey(storageKey) : null;
+}
+
+function loadDraftAtKey(storageKey: string): DraftSnapshot | null {
   try {
     const value = sessionStorage.getItem(storageKey);
     if (!value) {
@@ -183,6 +262,7 @@ export function loadDraft(connectionId: string, path: string, editorType: DraftE
 export function clearDraft(connectionId: string, path: string, editorType: DraftEditorType): void {
   const storageKey = key(connectionId, path, editorType);
   if (storageKey) {
+    checkpointSessions.delete(storageKey);
     try {
       const hadDraft = sessionStorage.getItem(storageKey) !== null;
       sessionStorage.removeItem(storageKey);
@@ -281,9 +361,12 @@ export function clearCurrentUserDrafts(): void {
   if (!userId) {
     return;
   }
+  const prefix = `${DRAFT_PREFIX}:${userId}:`;
+  for (const storageKey of checkpointSessions.keys()) {
+    if (storageKey.startsWith(prefix)) checkpointSessions.delete(storageKey);
+  }
   let changed = false;
   try {
-    const prefix = `${DRAFT_PREFIX}:${userId}:`;
     for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
       const storageKey = sessionStorage.key(index);
       if (storageKey?.startsWith(prefix)) {

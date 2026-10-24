@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validate that every website raster source image has generated WebP files."""
 
 from __future__ import annotations

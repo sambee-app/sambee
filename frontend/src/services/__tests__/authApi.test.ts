@@ -1,3 +1,4 @@
+import { requireTestValue } from "../../test/helpers/assertions";
 /**
  * Contract tests for Authentication API
  *
@@ -287,7 +288,7 @@ describe("Authentication API Contract Tests", () => {
       await apiService.changePassword("current123", "new456");
 
       // Verify request structure
-      const callArgs = mockAxiosInstance.post.mock.calls[0];
+      const callArgs = requireTestValue(mockAxiosInstance.post.mock.calls[0]);
       expect(callArgs[0]).toBe("/auth/change-password");
       expect(callArgs[1]).toEqual({
         current_password: "current123",

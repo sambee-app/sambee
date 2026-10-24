@@ -1,3 +1,4 @@
+import type { ParseKeys } from "i18next";
 import type { KeyboardShortcut } from "../hooks/useKeyboardShortcuts";
 import { translate } from "../i18n";
 
@@ -58,9 +59,9 @@ export interface BrowserCommandDefinition {
 
 interface BrowserCommandTemplate {
   id: string;
-  titleKey: string;
-  categoryKey: string;
-  descriptionKey?: string;
+  titleKey: ParseKeys;
+  categoryKey: ParseKeys;
+  descriptionKey?: ParseKeys;
   keywords?: string[];
   defaultShortcutIds?: string[];
   shortcutLabel?: string;

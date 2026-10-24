@@ -2,6 +2,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearCachedAsyncData } from "../../hooks/useCachedAsyncData";
+import { createMockConnection } from "../../test/fixtures/connections";
+import { requireTestValue } from "../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../theme";
 import { ConnectionSettings } from "../ConnectionSettings";
 
@@ -139,7 +141,7 @@ describe("ConnectionSettings", () => {
   it("does not render an empty padded header block in headerless mobile mode", async () => {
     mockMobileMode(true);
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "shared-1",
         name: "Accounting",
         type: "smb",
@@ -151,7 +153,7 @@ describe("ConnectionSettings", () => {
         scope: "shared",
         access_mode: "read_write",
         can_manage: false,
-      },
+      }),
     ]);
 
     render(
@@ -170,7 +172,7 @@ describe("ConnectionSettings", () => {
 
   it("does not render an empty header or add top margin in headerless desktop mode", async () => {
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "shared-1",
         name: "Accounting",
         type: "smb",
@@ -182,7 +184,7 @@ describe("ConnectionSettings", () => {
         scope: "shared",
         access_mode: "read_write",
         can_manage: true,
-      },
+      }),
     ]);
 
     render(
@@ -201,7 +203,7 @@ describe("ConnectionSettings", () => {
 
   it("uses bold body text for connection names and aligns each group's first row with its section", async () => {
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "shared-1",
         name: "Accounting",
         type: "smb",
@@ -213,7 +215,7 @@ describe("ConnectionSettings", () => {
         scope: "shared",
         access_mode: "read_write",
         can_manage: true,
-      },
+      }),
     ]);
 
     renderSettings();
@@ -229,7 +231,7 @@ describe("ConnectionSettings", () => {
 
   it("shows a read-only badge for read-only connections", async () => {
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "shared-1",
         name: "Accounting",
         type: "smb",
@@ -241,7 +243,7 @@ describe("ConnectionSettings", () => {
         scope: "shared",
         access_mode: "read_only",
         can_manage: true,
-      },
+      }),
     ]);
 
     renderSettings();
@@ -253,7 +255,7 @@ describe("ConnectionSettings", () => {
 
   it("does not show a read-only badge for default read and write connections", async () => {
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "shared-1",
         name: "Accounting",
         type: "smb",
@@ -265,7 +267,7 @@ describe("ConnectionSettings", () => {
         scope: "shared",
         access_mode: "read_write",
         can_manage: true,
-      },
+      }),
     ]);
 
     renderSettings();
@@ -282,7 +284,7 @@ describe("ConnectionSettings", () => {
       role: "viewer",
     });
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "private-1",
         name: "Viewer Private Share",
         type: "smb",
@@ -294,7 +296,7 @@ describe("ConnectionSettings", () => {
         scope: "private",
         access_mode: "read_only",
         can_manage: false,
-      },
+      }),
     ]);
 
     renderSettings();
@@ -316,7 +318,7 @@ describe("ConnectionSettings", () => {
       role: "viewer",
     });
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "private-1",
         name: "Viewer Private Share",
         type: "smb",
@@ -328,7 +330,7 @@ describe("ConnectionSettings", () => {
         scope: "private",
         access_mode: "read_only",
         can_manage: false,
-      },
+      }),
     ]);
 
     renderSettings();
@@ -341,7 +343,7 @@ describe("ConnectionSettings", () => {
   it("omits Test Connection from the small-screen connection actions menu", async () => {
     mockMobileMode(true);
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "private-1",
         name: "Managed Private Share",
         type: "smb",
@@ -353,7 +355,7 @@ describe("ConnectionSettings", () => {
         scope: "private",
         access_mode: "read_write",
         can_manage: true,
-      },
+      }),
     ]);
 
     const user = userEvent.setup();
@@ -369,7 +371,7 @@ describe("ConnectionSettings", () => {
 
   it("omits Test Connection from managed desktop actions", async () => {
     vi.mocked(api.getConnections).mockResolvedValue([
-      {
+      createMockConnection({
         id: "private-1",
         name: "Managed Private Share",
         type: "smb",
@@ -381,7 +383,7 @@ describe("ConnectionSettings", () => {
         scope: "private",
         access_mode: "read_write",
         can_manage: true,
-      },
+      }),
     ]);
 
     renderSettings();
@@ -414,7 +416,7 @@ describe("ConnectionSettings", () => {
   it("persists updated visibility when editing and reopening a connection", async () => {
     const user = userEvent.setup();
     let connections = [
-      {
+      createMockConnection({
         id: "shared-1",
         name: "Accounting",
         type: "smb",
@@ -426,7 +428,7 @@ describe("ConnectionSettings", () => {
         scope: "shared" as const,
         access_mode: "read_write" as const,
         can_manage: true,
-      },
+      }),
     ];
 
     vi.mocked(api.getConnections).mockImplementation(async () => connections);
@@ -436,7 +438,7 @@ describe("ConnectionSettings", () => {
         ...updates,
       }));
 
-      return connections[0] as (typeof connections)[number];
+      return requireTestValue(connections[0]);
     });
 
     render(

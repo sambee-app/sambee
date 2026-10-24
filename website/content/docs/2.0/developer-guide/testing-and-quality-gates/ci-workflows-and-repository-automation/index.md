@@ -52,27 +52,32 @@ Those are not repository workflows, so their display names are not controlled by
 It first detects which top-level product areas changed, then fans out only the relevant jobs for:
 
 - backend
-- frontend
-- frontend Playwright Chromium smoke
-- frontend Playwright Firefox markdown coverage on pushes to `main` and manual runs
+- frontend, including Chromium and Firefox browser correctness
 - companion
+- website documentation
 
-Manual dispatch runs all three areas.
+Manual dispatch runs all areas. Changes to shared frontend CI infrastructure also select frontend validation.
 
 The workflow ends with a single gate job so branch protection can depend on one stable required check instead of a changing set of per-area jobs.
 
 In the backend job, regular tests run under `pytest-xdist` for throughput, while `@performance` tests run in a separate serial pass so wall-clock assertions are not distorted by parallel worker contention.
 
-For frontend coverage, the workflow is intentionally layered:
+Backend pytest runs treat unexpected warnings as errors, including resource-cleanup warnings. The shared policy in `backend/pyproject.toml` applies to both local and CI runs, and warning summaries aren't suppressed. Tests that deliberately trigger a warning must assert it with `pytest.warns(...)`, matching the warning category and message. Fix application warnings rather than ignoring them. Unavoidable dependency exceptions must be narrowly scoped and documented; the current exception covers Starlette's TestClient reference to AnyIO's deprecated `BlockingPortal` alias. Remove that exception when the dependency no longer needs it.
 
-- the `frontend` job keeps the fast TypeScript, lint, and Vitest checks in the main PR path
-- the `frontend-e2e` job runs a bounded Playwright Chromium smoke slice on frontend changes
-- the `frontend-e2e-firefox` job runs the markdown editor Playwright slice only on pushes to `main` and manual dispatch
+The `frontend` job requires a clean TypeScript check, runs Vitest, builds normal production assets, installs version-matched Playwright Chromium/Firefox binaries and their Linux dependencies, then runs `npm run test:browser:ci`. Both engines run on frontend pull requests, pushes, and manual dispatch. The same required checks run in release fallback when successful source CI cannot be reused.
 
-That split keeps pull-request runtime under control while still protecting the browser-sensitive editing workflows that unit tests do not cover.
+The browser command requires exactly 16 production cases: four scenarios at desktop and narrow widths in each engine. They protect real normalization/syntax workers, entity decoding, native selection/focus/heading links/search, regex replacement with undo/redo and exact Save content, and cancellation/reopen cleanup with stale-result replay. Two additional development-worker cases exercise Vite's dependency-resolution path. Browser APIs and workers are real; backend responses are mocked at `http://localhost:3000/browse/smb/demo`. This isn't full-stack SMB E2E or evidence of physical printing, browser-menu Find, hardware IME, or assistive-technology behavior.
+
+The correctness reporter rejects missing, duplicate, skipped, failed, and retried cases. Browser cases run with one worker and no retries. Reports and retained failure traces/screenshots are uploaded for seven days. Timing budgets, profiling, heap measurements, alternate renderers, and repeated cache/performance matrices remain separate opt-in diagnostics.
+
+`npm run typecheck` runs `tsc -b --noEmit` across the application, test/helper, and Node configuration projects. Browser code uses browser types; tests add Vitest and Node types; configuration tooling uses Node types. All source and declaration files remain checked with strict null/index and unused-code diagnostics enabled. The ES2023 library declarations describe existing APIs; the emitted target remains ES2020, and declarations don't provide runtime polyfills.
+
+Type correctness is mandatory in routine CI, release fallback, ordinary `npm run build`, `./scripts/test`, and the VS Code frontend validation task. The old root `tsc --noEmit` command checked no input files and mustn't be used as a substitute. Regression tests protect required command wiring, strict options, separate environments, and complete source coverage. Unit and browser correctness remain independent required gates.
+
+The required gate rejects an unexpectedly skipped selected job. Only unrelated, unselected areas may be skipped. Superseded pull-request test/lint runs are cancelled; main-branch validation runs aren't cancelled by that policy. Release reuse requires the exact source commit's successful frontend job, its successful browser-correctness step, and the new required `Verify frontend type correctness` step. Missing, skipped, or failed steps and legacy advisory type-check runs don't qualify.
 
 The current companion test job does not call `./scripts/test`.
-It runs explicit steps for Node install, companion TypeScript type checking, and `cargo test`.
+It runs explicit steps for Node install, companion TypeScript type checking, and the archive topology conformance script, including Rust tests, formatting, and Clippy.
 That means the local Windows GNU cross-check in `./scripts/test` does not currently run in `CI: Test`.
 
 ### Caching Model
@@ -81,11 +86,13 @@ The test workflow uses layered caching to reduce repeated setup work while keepi
 
 Current cache layers include:
 
-- `backend/.venv` caching keyed by the resolved backend requirement files and Python version.
-- `backend/.mypy_cache` caching keyed by backend Python source changes.
+- GitHub Actions BuildKit caching for the `backend-test` Docker target, with dependency layers before source copies.
 - `actions/setup-node` npm download caching for frontend and companion jobs.
-- `frontend/node_modules` caching keyed by `frontend/package-lock.json`.
 - Rust build caching for `companion/src-tauri`.
+
+Frontend jobs use clean `npm ci --prefer-offline` installs; they don't cache `node_modules` or Playwright browser downloads. The mypy cache inside the disposable backend test container isn't persisted separately.
+
+Vitest file parallelism is capped at four workers and further limited by the runner's available CPUs and RAM, reserving 2 GiB plus 2 GiB per worker. The CI command logs the actual resources and selected cap. Standard public Ubuntu runners currently provide 4 vCPUs/16 GB RAM; private runners provide 2 vCPUs/8 GB RAM. Local measurements on a larger machine aren't Actions performance guarantees.
 
 Treat those cache keys as reviewed dependency inputs, not as disposable generated noise.
 
@@ -107,8 +114,11 @@ When you want a closer CI-style pass, run the per-subsystem checks from [Test St
 
 For frontend work, that usually means:
 
-- `cd frontend && npm test` for the default Vitest suite
-- `cd frontend && npm run test:e2e` for the default Chromium browser pass
+- `cd frontend && npm run test` for the default Vitest suite
+- `cd frontend && npm run test:ci` for runner-aware Vitest concurrency
+- `cd frontend && npm run typecheck` for the complete strict compiler check
+- `cd frontend && npm run build` followed by `npm run test:browser:ci` for the exact production/development browser contract
+- `cd frontend && npm run test:e2e:install -- --with-deps` to install the matching browsers and Linux dependencies
 
 `./scripts/test` now includes a local companion Windows GNU target compatibility check.
 That check is intentionally a local validation aid, not part of the current `CI: Test` workflow contract.
@@ -123,6 +133,8 @@ Current coverage includes:
 - frontend Biome validation.
 - companion Clippy, Rustfmt, and Biome validation.
 
+Ruff's executable-script rules (`EXE`) also check Python files throughout the repository, including `.github/`. Any Python-file change selects backend lint, as do changes to the lint workflow or `scripts/test`. These checks fail CI and `./scripts/test` on errors; they aren't advisory. A script with a shebang must be executable. Files invoked explicitly through Python, and imported modules, don't need a shebang.
+
 The lint workflow does not run the local companion Windows GNU cross-check either.
 That cross-target validation is currently a local developer workflow check, while actual Windows artifact creation remains in the release workflow.
 
@@ -130,17 +142,9 @@ The workflow also ends with one gate job so branch protection can depend on a st
 
 ## Runner Distro Policy
 
-Sambee does not require every GitHub Actions job to run on the same base distro.
+All Ubuntu x64 host jobs use `ubuntu-latest`, following GitHub's managed OS migrations and runner-image updates. Native ARM64 image matrices use `ubuntu-26.04-arm`; GitHub doesn't currently document an `ubuntu-latest-arm` label. Windows and macOS coverage remains on its own platform runners.
 
-Instead, the rule is:
-
-- jobs that validate production-like runtime behavior or install native runtime dependencies should follow the same Debian family used by the production image and the dev container
-- jobs that only run language-level checks, dependency audits, repository automation, or other host-agnostic validation can stay on `ubuntu-latest`
-
-Current Debian-family jobs include:
-
-- the backend job in `CI: Test`
-- the `validate-tests` job in `Release: Create Docker Image`
+Host runner choice doesn't replace production-runtime validation. Debian-family checks still include the backend test container and the release `validate-tests` container.
 
 The backend job builds the `backend-test` Docker target, which inherits the same runtime base as production. It runs mypy and the backend test suites inside that target, including when a Python image or other runtime input changes. The release validation job uses the pinned Debian-based Python container because `scripts/install-system-deps` requires distro-provided ImageMagick 7, while the default Ubuntu GitHub-hosted runner image still resolves `imagemagick` to ImageMagick 6.
 

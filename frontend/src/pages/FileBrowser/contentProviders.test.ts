@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
 import { PreviewUnavailableError } from "../../services/previewPolicy";
 import { createStorageBackedTestContentProviderRegistry } from "../../test/helpers";
+import { requireTestValue } from "../../test/helpers/assertions";
+import { createMockLocalArchiveExecution } from "../../test/helpers/mockFactories";
 import { FileType } from "../../types";
 import { getArchiveExtractionAvailability, startArchiveExtraction } from "./contentOperations";
 import {
@@ -128,7 +130,7 @@ describe("content providers", () => {
       archive: { path: "archives/one.zip", size: 1 },
       path: "images",
       items: [{ name: "blocked.png", path: "images/blocked.png", type: FileType.FILE, state: "blocked", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -154,7 +156,7 @@ describe("content providers", () => {
       archive: { path: "archives/one.zip", size: 1 },
       path: "images",
       items: [{ name: "nested", path: "images/nested", type: FileType.DIRECTORY, state: "readable", is_hidden: false }],
-      total: 1,
+
       page_size: 100,
     });
 
@@ -195,7 +197,8 @@ describe("content providers", () => {
       }),
     };
     vi.mocked(api.listDirectory).mockResolvedValueOnce({
-      items: [{ name: "readme.md", path: "docs/readme.md", type: FileType.FILE }],
+      path: "docs",
+      items: [{ name: "readme.md", path: "docs/readme.md", type: FileType.FILE, is_readable: true, is_hidden: false }],
       total: 1,
     });
 
@@ -204,7 +207,9 @@ describe("content providers", () => {
       .list(location);
 
     expect(api.listDirectory).toHaveBeenCalledWith("local-drive:c", "docs", { signal: undefined });
-    expect(listing.items).toEqual([physicalItem(location, { name: "readme.md", path: "docs/readme.md", type: FileType.FILE })]);
+    expect(listing.items).toEqual([
+      physicalItem(location, { name: "readme.md", path: "docs/readme.md", type: FileType.FILE, is_readable: true, is_hidden: false }),
+    ]);
   });
 
   it("does not use the local-drive compatibility path when SMB directory resolution fails", async () => {
@@ -280,33 +285,39 @@ describe("content providers", () => {
 
   it("extracts a local ZIP through its content provider", async () => {
     const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
-    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 1,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
-    vi.mocked(api.waitForLocalArchiveExecution).mockImplementationOnce(async (_connectionId, _executionId, onUpdate) => {
-      onUpdate?.({
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
         execution_id: "local-extract-1",
         phase: "streaming",
         revision: 1,
-        progress: localArchiveProgress(2, 0, 3, 10),
+        progress: localArchiveProgress(),
         cancellation_requested: false,
-        aggregate_counters: extractionAggregate(1, 1, 5),
-      });
-      const completed = {
-        execution_id: "local-extract-1",
-        phase: "completed" as const,
-        revision: 2,
-        progress: localArchiveProgress(3, 1, 3, 10),
-        cancellation_requested: false,
-        aggregate_counters: extractionAggregate(2, 1, 10, 1),
-      };
-      onUpdate?.(completed);
-      return completed;
-    });
+      })
+    );
+    vi.mocked(api.waitForLocalArchiveExecution).mockImplementationOnce(
+      requireTestValue(async (_connectionId, _executionId, onUpdate) => {
+        onUpdate?.(
+          createMockLocalArchiveExecution({
+            execution_id: "local-extract-1",
+            phase: "streaming",
+            revision: 1,
+            progress: localArchiveProgress(2, 0, 3, 10),
+            cancellation_requested: false,
+            aggregate_counters: extractionAggregate(1, 1, 5),
+          })
+        );
+        const completed = createMockLocalArchiveExecution({
+          execution_id: "local-extract-1",
+          phase: "completed" as const,
+          revision: 2,
+          progress: localArchiveProgress(3, 1, 3, 10),
+          cancellation_requested: false,
+          aggregate_counters: extractionAggregate(2, 1, 10, 1),
+        });
+        onUpdate?.(completed);
+        return completed;
+      })
+    );
 
     const execution = startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
       source: localArchiveLocation,
@@ -344,21 +355,25 @@ describe("content providers", () => {
 
   it("extracts a local ZIP to a different local drive through the Companion", async () => {
     const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
-    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce({
-      execution_id: "cross-drive-extract-1",
-      phase: "streaming",
-      revision: 1,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
-    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce({
-      execution_id: "cross-drive-extract-1",
-      phase: "completed",
-      revision: 2,
-      progress: localArchiveProgress(1, 0, 1, 5),
-      cancellation_requested: false,
-      aggregate_counters: extractionAggregate(1, 0, 5),
-    });
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "cross-drive-extract-1",
+        phase: "streaming",
+        revision: 1,
+        progress: localArchiveProgress(),
+        cancellation_requested: false,
+      })
+    );
+    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "cross-drive-extract-1",
+        phase: "completed",
+        revision: 2,
+        progress: localArchiveProgress(1, 0, 1, 5),
+        cancellation_requested: false,
+        aggregate_counters: extractionAggregate(1, 0, 5),
+      })
+    );
 
     await expect(
       startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
@@ -413,47 +428,55 @@ describe("content providers", () => {
 
   it("resumes a paused direct-local extraction through the Companion decision endpoint", async () => {
     const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
-    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 1,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
-    vi.mocked(api.waitForLocalArchiveExecution)
-      .mockResolvedValueOnce({
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
         execution_id: "local-extract-1",
-        phase: "awaiting_user_decision",
-        revision: 2,
+        phase: "streaming",
+        revision: 1,
         progress: localArchiveProgress(),
         cancellation_requested: false,
-        pendingDecision: {
-          kind: "collision",
-          source_session_id: "source-session-1",
-          delivery_sequence: 1,
-          decision_revision: 1,
-          member_path: "source.txt",
-          is_directory: false,
-          source: { path: "source.txt", size: 5, modified_at: "2025-01-01T12:00:00Z" },
-          target: { path: "renamed.txt", size: 10, modified_at: "2025-01-02T12:00:00Z" },
-          allowed_actions: ["skip", "skip_all", "replace", "replace_all", "replace_older", "rename"],
-        },
       })
-      .mockResolvedValueOnce({
+    );
+    vi.mocked(api.waitForLocalArchiveExecution)
+      .mockResolvedValueOnce(
+        createMockLocalArchiveExecution({
+          execution_id: "local-extract-1",
+          phase: "awaiting_user_decision",
+          revision: 2,
+          progress: localArchiveProgress(),
+          cancellation_requested: false,
+          pendingDecision: {
+            kind: "collision",
+            source_session_id: "source-session-1",
+            delivery_sequence: 1,
+            decision_revision: 1,
+            member_path: "source.txt",
+            is_directory: false,
+            source: { path: "source.txt", size: 5, modified_at: "2025-01-01T12:00:00Z" },
+            target: { path: "renamed.txt", size: 10, modified_at: "2025-01-02T12:00:00Z" },
+            allowed_actions: ["skip", "skip_all", "replace", "replace_all", "replace_older", "rename"],
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        createMockLocalArchiveExecution({
+          execution_id: "local-extract-1",
+          phase: "completed",
+          revision: 4,
+          progress: localArchiveProgress(1),
+          cancellation_requested: false,
+          aggregate_counters: extractionAggregate(1, 0, 5),
+        })
+      );
+    vi.mocked(api.decideLocalArchiveExecution).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
         execution_id: "local-extract-1",
-        phase: "completed",
-        revision: 4,
-        progress: localArchiveProgress(1),
+        phase: "streaming",
+        revision: 3,
+        progress: localArchiveProgress(),
         cancellation_requested: false,
-        aggregate_counters: extractionAggregate(1, 0, 5),
-      });
-    vi.mocked(api.decideLocalArchiveExecution).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 3,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
+      })
+    );
 
     const execution = startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
       source: localArchiveLocation,
@@ -483,47 +506,55 @@ describe("content providers", () => {
 
   it("retries a paused direct-local member error through the Companion decision endpoint", async () => {
     const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
-    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 1,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
-    vi.mocked(api.waitForLocalArchiveExecution)
-      .mockResolvedValueOnce({
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
         execution_id: "local-extract-1",
-        phase: "awaiting_user_decision",
-        revision: 2,
+        phase: "streaming",
+        revision: 1,
         progress: localArchiveProgress(),
         cancellation_requested: false,
-        pendingDecision: {
-          kind: "member_error",
-          source_session_id: "source-session-1",
-          delivery_sequence: 1,
-          decision_revision: 1,
-          member_path: "source.txt",
-          target_path: "archives/one/source.txt",
-          message: "archive member integrity check failed",
-          partial_output: true,
-          allowed_actions: ["retry", "ignore"],
-        },
       })
-      .mockResolvedValueOnce({
+    );
+    vi.mocked(api.waitForLocalArchiveExecution)
+      .mockResolvedValueOnce(
+        createMockLocalArchiveExecution({
+          execution_id: "local-extract-1",
+          phase: "awaiting_user_decision",
+          revision: 2,
+          progress: localArchiveProgress(),
+          cancellation_requested: false,
+          pendingDecision: {
+            kind: "member_error",
+            source_session_id: "source-session-1",
+            delivery_sequence: 1,
+            decision_revision: 1,
+            member_path: "source.txt",
+            target_path: "archives/one/source.txt",
+            message: "archive member integrity check failed",
+            partial_output: true,
+            allowed_actions: ["retry", "ignore"],
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        createMockLocalArchiveExecution({
+          execution_id: "local-extract-1",
+          phase: "completed",
+          revision: 4,
+          progress: localArchiveProgress(1),
+          cancellation_requested: false,
+          aggregate_counters: extractionAggregate(1, 0, 5),
+        })
+      );
+    vi.mocked(api.decideLocalArchiveExecution).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
         execution_id: "local-extract-1",
-        phase: "completed",
-        revision: 4,
-        progress: localArchiveProgress(1),
+        phase: "streaming",
+        revision: 3,
+        progress: localArchiveProgress(),
         cancellation_requested: false,
-        aggregate_counters: extractionAggregate(1, 0, 5),
-      });
-    vi.mocked(api.decideLocalArchiveExecution).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 3,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
+      })
+    );
 
     const execution = startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
       source: localArchiveLocation,
@@ -556,27 +587,33 @@ describe("content providers", () => {
 
   it("cancels a direct-local ZIP extraction through its execution handle", async () => {
     const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
-    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 1,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
-    vi.mocked(api.cancelLocalArchiveExecutionWithRevisionRetry).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 2,
-      progress: localArchiveProgress(),
-      cancellation_requested: true,
-    });
-    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "cancelled",
-      revision: 3,
-      progress: localArchiveProgress(),
-      cancellation_requested: true,
-    });
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "streaming",
+        revision: 1,
+        progress: localArchiveProgress(),
+        cancellation_requested: false,
+      })
+    );
+    vi.mocked(api.cancelLocalArchiveExecutionWithRevisionRetry).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "streaming",
+        revision: 2,
+        progress: localArchiveProgress(),
+        cancellation_requested: true,
+      })
+    );
+    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "cancelled",
+        revision: 3,
+        progress: localArchiveProgress(),
+        cancellation_requested: true,
+      })
+    );
 
     const execution = startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
       source: localArchiveLocation,
@@ -614,27 +651,33 @@ describe("content providers", () => {
 
   it("uses the shared direct-local cancellation helper after a progress revision race", async () => {
     const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
-    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 1,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
-    vi.mocked(api.cancelLocalArchiveExecutionWithRevisionRetry).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 3,
-      progress: localArchiveProgress(),
-      cancellation_requested: true,
-    });
-    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "cancelled",
-      revision: 4,
-      progress: localArchiveProgress(),
-      cancellation_requested: true,
-    });
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "streaming",
+        revision: 1,
+        progress: localArchiveProgress(),
+        cancellation_requested: false,
+      })
+    );
+    vi.mocked(api.cancelLocalArchiveExecutionWithRevisionRetry).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "streaming",
+        revision: 3,
+        progress: localArchiveProgress(),
+        cancellation_requested: true,
+      })
+    );
+    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "cancelled",
+        revision: 4,
+        progress: localArchiveProgress(),
+        cancellation_requested: true,
+      })
+    );
 
     const execution = startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
       source: localArchiveLocation,
@@ -781,21 +824,25 @@ describe("content providers", () => {
     vi.clearAllMocks();
     const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
     const otherSmbArchiveLocation = virtualLocation("zip", "conn-1", physicalLocation("conn-1", "archives/one.zip"), "");
-    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "streaming",
-      revision: 1,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-    });
-    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce({
-      execution_id: "local-extract-1",
-      phase: "completed",
-      revision: 2,
-      progress: localArchiveProgress(),
-      cancellation_requested: false,
-      aggregate_counters: extractionAggregate(),
-    });
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "streaming",
+        revision: 1,
+        progress: localArchiveProgress(),
+        cancellation_requested: false,
+      })
+    );
+    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "completed",
+        revision: 2,
+        progress: localArchiveProgress(),
+        cancellation_requested: false,
+        aggregate_counters: extractionAggregate(),
+      })
+    );
 
     await expect(
       startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {

@@ -2,12 +2,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileOperationAction } from "../../../pages/FileBrowser/fileOperationActions";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import { FileOperationsToolbar } from "../FileOperationsToolbar";
 
 function createAction(id: FileOperationAction["id"], overrides: Partial<FileOperationAction> = {}): FileOperationAction {
   return {
     id,
+    surface: "desktop-toolbar",
+    scope: "selection",
     priority: 1,
     label: id,
     shortcut: "F1",
@@ -84,10 +87,10 @@ describe("FileOperationsToolbar", () => {
         disconnect() {}
       }
     );
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
-      if (this.dataset.operationId) return { width: 100 } as DOMRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.dataset["operationId"]) return { width: 100 } as DOMRect;
       if (this.hasAttribute("data-more-button")) return { width: 44 } as DOMRect;
-      if (this.dataset.testid === "file-operations-toolbar") return { width: 180 } as DOMRect;
+      if (this.dataset["testid"] === "file-operations-toolbar") return { width: 180 } as DOMRect;
       return { width: 0 } as DOMRect;
     });
 
@@ -116,10 +119,10 @@ describe("FileOperationsToolbar", () => {
         disconnect() {}
       }
     );
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
-      if (this.dataset.operationId) return { width: operationWidth } as DOMRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.dataset["operationId"]) return { width: operationWidth } as DOMRect;
       if (this.hasAttribute("data-more-button")) return { width: 60 } as DOMRect;
-      if (this.dataset.testid === "file-operations-toolbar") return { width: toolbarWidth } as DOMRect;
+      if (this.dataset["testid"] === "file-operations-toolbar") return { width: toolbarWidth } as DOMRect;
       return { width: 0 } as DOMRect;
     });
     const copy = createAction("copy", { label: "Copy" });
@@ -135,7 +138,7 @@ describe("FileOperationsToolbar", () => {
     expect(move.onClick).toHaveBeenCalledOnce();
 
     toolbarWidth = 600;
-    act(() => observers[0]([], {} as ResizeObserver));
+    act(() => requireTestValue(observers[0])([], {} as ResizeObserver));
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "More" })).not.toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Move" })).toBeInTheDocument();
@@ -162,10 +165,10 @@ describe("FileOperationsToolbar", () => {
         disconnect() {}
       }
     );
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
-      if (this.dataset.operationId) return { width: 100 } as DOMRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.dataset["operationId"]) return { width: 100 } as DOMRect;
       if (this.hasAttribute("data-more-button")) return { width: 60 } as DOMRect;
-      if (this.dataset.testid === "file-operations-toolbar") return { width: 80 } as DOMRect;
+      if (this.dataset["testid"] === "file-operations-toolbar") return { width: 80 } as DOMRect;
       return { width: 0 } as DOMRect;
     });
     const onUploadTriggerChange = vi.fn();
@@ -203,10 +206,10 @@ describe("FileOperationsToolbar", () => {
         disconnect() {}
       }
     );
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
-      if (this.dataset.operationId) return { width: 100 } as DOMRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.dataset["operationId"]) return { width: 100 } as DOMRect;
       if (this.hasAttribute("data-more-button")) return { width: 60 } as DOMRect;
-      if (this.dataset.testid === "file-operations-toolbar") return { width: 180 } as DOMRect;
+      if (this.dataset["testid"] === "file-operations-toolbar") return { width: 180 } as DOMRect;
       return { width: 0 } as DOMRect;
     });
     const move = createAction("move", { label: "Move", enabled: false });

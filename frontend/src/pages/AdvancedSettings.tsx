@@ -74,8 +74,8 @@ function getByteUnitFactor(unitLabel: ByteUnitLabel): number {
 function createFormState(settings: AdvancedSystemSettings): AdvancedSettingsFormState {
   return {
     temporaryArchiveDownloadSizeBytes: settings.temporary_archive_download_size_bytes?.value ?? null,
-    imagemagickMaxFileSizeBytes: settings.preprocessors.imagemagick.max_file_size_bytes.value,
-    imagemagickTimeoutSeconds: settings.preprocessors.imagemagick.timeout_seconds.value,
+    imagemagickMaxFileSizeBytes: settings.preprocessors["imagemagick"]?.max_file_size_bytes.value ?? null,
+    imagemagickTimeoutSeconds: settings.preprocessors["imagemagick"]?.timeout_seconds.value ?? null,
     pdfCacheQuotaBytes: settings.pdf?.cache_quota_bytes.value ?? null,
     pdfCacheInactivityTtlSeconds: settings.pdf?.cache_inactivity_ttl_seconds.value ?? null,
     pdfMaxSourceSizeBytes: settings.pdf?.max_source_size_bytes.value ?? null,
@@ -373,7 +373,7 @@ function applyIntegerSettingUpdate(setting: IntegerSystemSetting, update: Advanc
 
 function applyAdvancedSettingUpdate(settings: AdvancedSystemSettings, update: AdvancedSystemSettingsUpdate): AdvancedSystemSettings {
   const updateSetting = (setting: IntegerSystemSetting) => applyIntegerSettingUpdate(setting, update);
-  const imagemagick = settings.preprocessors.imagemagick;
+  const imagemagick = settings.preprocessors["imagemagick"];
   return {
     ...settings,
     temporary_archive_download_size_bytes: settings.temporary_archive_download_size_bytes
@@ -381,10 +381,14 @@ function applyAdvancedSettingUpdate(settings: AdvancedSystemSettings, update: Ad
       : undefined,
     preprocessors: {
       ...settings.preprocessors,
-      imagemagick: {
-        max_file_size_bytes: updateSetting(imagemagick.max_file_size_bytes),
-        timeout_seconds: updateSetting(imagemagick.timeout_seconds),
-      },
+      ...(imagemagick
+        ? {
+            imagemagick: {
+              max_file_size_bytes: updateSetting(imagemagick.max_file_size_bytes),
+              timeout_seconds: updateSetting(imagemagick.timeout_seconds),
+            },
+          }
+        : {}),
     },
     ...(settings.pdf
       ? {
@@ -469,6 +473,9 @@ export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsP
     void refresh(true);
   };
 
+  const imagemagick = settings?.preprocessors["imagemagick"];
+  const pdf = settings?.pdf;
+
   return (
     <SettingsPage
       category="admin-system"
@@ -507,102 +514,100 @@ export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsP
           )}
           <SettingsGroup title={t("settings.advanced.sections.preprocessors")}>
             <Stack spacing={3.5}>
-              <SettingsGroup title={t("settings.advanced.sections.imageMagick")} level="subsection">
-                <ByteSizeSettingField
-                  setting={settings.preprocessors.imagemagick.max_file_size_bytes}
-                  value={formState.imagemagickMaxFileSizeBytes}
-                  onChange={(value) =>
-                    updateFormField("imagemagickMaxFileSizeBytes", value, settings.preprocessors.imagemagick.max_file_size_bytes)
-                  }
-                  {...getFieldPersistenceProps(settings.preprocessors.imagemagick.max_file_size_bytes)}
-                />
-                <SettingField
-                  setting={settings.preprocessors.imagemagick.timeout_seconds}
-                  value={formState.imagemagickTimeoutSeconds}
-                  onChange={(value) =>
-                    updateFormField("imagemagickTimeoutSeconds", value, settings.preprocessors.imagemagick.timeout_seconds)
-                  }
-                  unitAdornment={t("settings.advanced.fields.seconds")}
-                  {...getFieldPersistenceProps(settings.preprocessors.imagemagick.timeout_seconds)}
-                />
-              </SettingsGroup>
-              {settings.pdf && (
+              {imagemagick && (
+                <SettingsGroup title={t("settings.advanced.sections.imageMagick")} level="subsection">
+                  <ByteSizeSettingField
+                    setting={imagemagick.max_file_size_bytes}
+                    value={formState.imagemagickMaxFileSizeBytes}
+                    onChange={(value) => updateFormField("imagemagickMaxFileSizeBytes", value, imagemagick.max_file_size_bytes)}
+                    {...getFieldPersistenceProps(imagemagick.max_file_size_bytes)}
+                  />
+                  <SettingField
+                    setting={imagemagick.timeout_seconds}
+                    value={formState.imagemagickTimeoutSeconds}
+                    onChange={(value) => updateFormField("imagemagickTimeoutSeconds", value, imagemagick.timeout_seconds)}
+                    unitAdornment={t("settings.advanced.fields.seconds")}
+                    {...getFieldPersistenceProps(imagemagick.timeout_seconds)}
+                  />
+                </SettingsGroup>
+              )}
+              {pdf && (
                 <SettingsGroup title={t("settings.advanced.sections.pdfCompatibility")} level="subsection">
                   <ByteSizeSettingField
-                    setting={settings.pdf.cache_quota_bytes}
+                    setting={pdf.cache_quota_bytes}
                     value={formState.pdfCacheQuotaBytes}
-                    onChange={(value) => updateFormField("pdfCacheQuotaBytes", value, settings.pdf.cache_quota_bytes)}
-                    {...getFieldPersistenceProps(settings.pdf.cache_quota_bytes)}
+                    onChange={(value) => updateFormField("pdfCacheQuotaBytes", value, pdf.cache_quota_bytes)}
+                    {...getFieldPersistenceProps(pdf.cache_quota_bytes)}
                   />
                   <SettingField
-                    setting={settings.pdf.cache_inactivity_ttl_seconds}
+                    setting={pdf.cache_inactivity_ttl_seconds}
                     value={formState.pdfCacheInactivityTtlSeconds}
-                    onChange={(value) => updateFormField("pdfCacheInactivityTtlSeconds", value, settings.pdf.cache_inactivity_ttl_seconds)}
+                    onChange={(value) => updateFormField("pdfCacheInactivityTtlSeconds", value, pdf.cache_inactivity_ttl_seconds)}
                     unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(settings.pdf.cache_inactivity_ttl_seconds)}
+                    {...getFieldPersistenceProps(pdf.cache_inactivity_ttl_seconds)}
                   />
                   <ByteSizeSettingField
-                    setting={settings.pdf.max_source_size_bytes}
+                    setting={pdf.max_source_size_bytes}
                     value={formState.pdfMaxSourceSizeBytes}
-                    onChange={(value) => updateFormField("pdfMaxSourceSizeBytes", value, settings.pdf.max_source_size_bytes)}
-                    {...getFieldPersistenceProps(settings.pdf.max_source_size_bytes)}
+                    onChange={(value) => updateFormField("pdfMaxSourceSizeBytes", value, pdf.max_source_size_bytes)}
+                    {...getFieldPersistenceProps(pdf.max_source_size_bytes)}
                   />
                   <ByteSizeSettingField
-                    setting={settings.pdf.max_output_size_bytes}
+                    setting={pdf.max_output_size_bytes}
                     value={formState.pdfMaxOutputSizeBytes}
-                    onChange={(value) => updateFormField("pdfMaxOutputSizeBytes", value, settings.pdf.max_output_size_bytes)}
-                    {...getFieldPersistenceProps(settings.pdf.max_output_size_bytes)}
+                    onChange={(value) => updateFormField("pdfMaxOutputSizeBytes", value, pdf.max_output_size_bytes)}
+                    {...getFieldPersistenceProps(pdf.max_output_size_bytes)}
                   />
                   <ByteSizeSettingField
-                    setting={settings.pdf.address_space_bytes}
+                    setting={pdf.address_space_bytes}
                     value={formState.pdfAddressSpaceBytes}
-                    onChange={(value) => updateFormField("pdfAddressSpaceBytes", value, settings.pdf.address_space_bytes)}
-                    {...getFieldPersistenceProps(settings.pdf.address_space_bytes)}
+                    onChange={(value) => updateFormField("pdfAddressSpaceBytes", value, pdf.address_space_bytes)}
+                    {...getFieldPersistenceProps(pdf.address_space_bytes)}
                   />
                   <ByteSizeSettingField
-                    setting={settings.pdf.temporary_disk_bytes}
+                    setting={pdf.temporary_disk_bytes}
                     value={formState.pdfTemporaryDiskBytes}
-                    onChange={(value) => updateFormField("pdfTemporaryDiskBytes", value, settings.pdf.temporary_disk_bytes)}
-                    {...getFieldPersistenceProps(settings.pdf.temporary_disk_bytes)}
+                    onChange={(value) => updateFormField("pdfTemporaryDiskBytes", value, pdf.temporary_disk_bytes)}
+                    {...getFieldPersistenceProps(pdf.temporary_disk_bytes)}
                   />
                   <SettingField
-                    setting={settings.pdf.timeout_seconds}
+                    setting={pdf.timeout_seconds}
                     value={formState.pdfTimeoutSeconds}
-                    onChange={(value) => updateFormField("pdfTimeoutSeconds", value, settings.pdf.timeout_seconds)}
+                    onChange={(value) => updateFormField("pdfTimeoutSeconds", value, pdf.timeout_seconds)}
                     unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(settings.pdf.timeout_seconds)}
+                    {...getFieldPersistenceProps(pdf.timeout_seconds)}
                   />
                   <SettingField
-                    setting={settings.pdf.cpu_time_seconds}
+                    setting={pdf.cpu_time_seconds}
                     value={formState.pdfCpuTimeSeconds}
-                    onChange={(value) => updateFormField("pdfCpuTimeSeconds", value, settings.pdf.cpu_time_seconds)}
+                    onChange={(value) => updateFormField("pdfCpuTimeSeconds", value, pdf.cpu_time_seconds)}
                     unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(settings.pdf.cpu_time_seconds)}
+                    {...getFieldPersistenceProps(pdf.cpu_time_seconds)}
                   />
                   <SettingField
-                    setting={settings.pdf.max_concurrent}
+                    setting={pdf.max_concurrent}
                     value={formState.pdfMaxConcurrent}
-                    onChange={(value) => updateFormField("pdfMaxConcurrent", value, settings.pdf.max_concurrent)}
-                    {...getFieldPersistenceProps(settings.pdf.max_concurrent)}
+                    onChange={(value) => updateFormField("pdfMaxConcurrent", value, pdf.max_concurrent)}
+                    {...getFieldPersistenceProps(pdf.max_concurrent)}
                   />
                   <SettingField
-                    setting={settings.pdf.queue_wait_seconds}
+                    setting={pdf.queue_wait_seconds}
                     value={formState.pdfQueueWaitSeconds}
-                    onChange={(value) => updateFormField("pdfQueueWaitSeconds", value, settings.pdf.queue_wait_seconds)}
+                    onChange={(value) => updateFormField("pdfQueueWaitSeconds", value, pdf.queue_wait_seconds)}
                     unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(settings.pdf.queue_wait_seconds)}
+                    {...getFieldPersistenceProps(pdf.queue_wait_seconds)}
                   />
                   <SettingField
-                    setting={settings.pdf.screen_derivative_enabled}
+                    setting={pdf.screen_derivative_enabled}
                     value={formState.pdfScreenDerivativeEnabled}
-                    onChange={(value) => updateFormField("pdfScreenDerivativeEnabled", value, settings.pdf.screen_derivative_enabled)}
-                    {...getFieldPersistenceProps(settings.pdf.screen_derivative_enabled)}
+                    onChange={(value) => updateFormField("pdfScreenDerivativeEnabled", value, pdf.screen_derivative_enabled)}
+                    {...getFieldPersistenceProps(pdf.screen_derivative_enabled)}
                   />
                   <SettingField
-                    setting={settings.pdf.screen_max_decoded_pixels}
+                    setting={pdf.screen_max_decoded_pixels}
                     value={formState.pdfScreenMaxDecodedPixels}
-                    onChange={(value) => updateFormField("pdfScreenMaxDecodedPixels", value, settings.pdf.screen_max_decoded_pixels)}
-                    {...getFieldPersistenceProps(settings.pdf.screen_max_decoded_pixels)}
+                    onChange={(value) => updateFormField("pdfScreenMaxDecodedPixels", value, pdf.screen_max_decoded_pixels)}
+                    {...getFieldPersistenceProps(pdf.screen_max_decoded_pixels)}
                   />
                 </SettingsGroup>
               )}

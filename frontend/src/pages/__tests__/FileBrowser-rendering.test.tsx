@@ -1,3 +1,4 @@
+import { createMockAuthToken } from "../../test/fixtures/users";
 /**
  * Browser Component - Rendering Tests
  * Tests for basic rendering, loading states, errors, and empty states
@@ -46,7 +47,7 @@ describe("Browser Component - Rendering", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetBackendAvailabilityForTests();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     localStorage.removeItem("selectedConnectionId");
     sessionStorage.clear();
 

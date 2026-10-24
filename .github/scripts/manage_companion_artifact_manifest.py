@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Create and verify immutable Companion package artifact manifests."""
 
 from __future__ import annotations

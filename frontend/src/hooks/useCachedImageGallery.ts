@@ -197,6 +197,8 @@ function getImageLoadErrorMessage(err: unknown): string {
   if (
     typeof detail === "object" &&
     detail !== null &&
+    "code" in detail &&
+    "message" in detail &&
     detail.code === IMAGE_PREVIEW_TOO_LARGE_ERROR_CODE &&
     typeof detail.message === "string" &&
     detail.message.trim()
@@ -360,7 +362,7 @@ export const useCachedImageGallery = ({
   // Cache of blob URLs for loaded images, keyed by index
   const imageCacheRef = useRef<Map<number, string>>(committedSessionResources.imageCache);
   // Timer for delayed spinner display
-  const loadingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
   const failedBackgroundRequestKeysRef = useRef<Set<string>>(committedSessionResources.failedBackgroundRequestKeys);
   // Track in-flight requests by image index so a preload can be promoted to the

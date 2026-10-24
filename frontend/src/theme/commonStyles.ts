@@ -9,6 +9,10 @@ import type { ThemeConfig } from "./types";
 /** Focus ring width to match FOCUS_OUTLINE_WIDTH_PX from theme constants */
 const FOCUS_RING_WIDTH = 3;
 const CONTAINED_BUTTON_FOCUS_INNER_RING_WIDTH = 1;
+const SEARCH_HIGHLIGHT_OPACITY = {
+  light: { other: 0.3, current: 0.36 },
+  dark: { other: 0.4, current: 0.44 },
+};
 
 export function getControlAccentColor(theme: Theme): string {
   return theme.palette.mode === "dark" ? theme.palette.primary.main : (theme.palette.primary.dark ?? theme.palette.primary.main);
@@ -64,10 +68,11 @@ export function getSearchHighlightColors(theme: Theme, themeConfig?: ThemeConfig
   const otherMatchesBase =
     themeConfig?.components?.search?.otherMatch ?? theme.palette.warning.main ?? theme.palette.primary.dark ?? theme.palette.primary.main;
   const currentMatchBase = themeConfig?.components?.search?.currentMatch ?? theme.palette.info.main ?? theme.palette.primary.main;
+  const opacity = SEARCH_HIGHLIGHT_OPACITY[theme.palette.mode];
 
   return {
-    otherMatches: alpha(otherMatchesBase, theme.palette.mode === "dark" ? 0.5 : 0.3),
-    currentMatch: alpha(currentMatchBase, theme.palette.mode === "dark" ? 0.52 : 0.36),
+    otherMatches: alpha(otherMatchesBase, opacity.other),
+    currentMatch: alpha(currentMatchBase, opacity.current),
   };
 }
 
@@ -110,7 +115,7 @@ export function getSecondaryActionStripStyle(theme: Theme) {
   };
 }
 
-export const secondaryActionStripSx: SxProps<Theme> = (theme) => getSecondaryActionStripStyle(theme);
+export const secondaryActionStripSx = ((theme: Theme) => getSecondaryActionStripStyle(theme)) satisfies SxProps<Theme>;
 
 export function getSecondaryToolbarMenuPaperStyle(theme: Theme) {
   const colors = getSecondaryToolbarSurfaceColors(theme);

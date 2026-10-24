@@ -20,11 +20,15 @@ export interface BrowserHistoryService {
 export const browserHistoryService: BrowserHistoryService = {
   searchRecentFiles: (query, resultLimit, signal) => api.searchRecentFiles(query, resultLimit, signal),
   hasItemType: async (connectionId, path, expectedType) => (await api.getFileInfo(connectionId, path)).type === expectedType,
-  recordRecentFile: (connectionId, path) => api.recordRecentFile(connectionId, path),
+  recordRecentFile: async (connectionId, path) => {
+    await api.recordRecentFile(connectionId, path);
+  },
   removeRecentFile: (recordId) => api.removeRecentFile(recordId),
   validateRecentFileTarget: (recordId) => api.validateRecentFileTarget(recordId),
   searchRecentDirectories: (query, resultLimit, signal) => api.searchRecentDirectories(query, resultLimit, signal),
-  recordRecentDirectory: (connectionId, path) => api.recordRecentDirectory(connectionId, path),
+  recordRecentDirectory: async (connectionId, path) => {
+    await api.recordRecentDirectory(connectionId, path);
+  },
   removeRecentDirectory: (recordId) => api.removeRecentDirectory(recordId),
   searchDirectories: (connectionId, query, options) => api.searchDirectories(connectionId, query, options),
 };

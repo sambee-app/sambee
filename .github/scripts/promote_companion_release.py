@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from __future__ import annotations
 
 import argparse
@@ -176,6 +174,8 @@ def request_asset_bytes(asset: dict, token: str | None = None) -> bytes:
                 with urllib.request.urlopen(request) as response:
                     return response.read()
             except urllib.error.URLError as error:
+                if isinstance(error, urllib.error.HTTPError):
+                    error.close()
                 if (
                     not is_retryable_asset_download_error(error)
                     or attempt == ASSET_DOWNLOAD_MAX_ATTEMPTS - 1

@@ -69,28 +69,32 @@ export function useSelectableListbox<T extends string>({
         0,
         options.findIndex((option) => option.value === selectedValue)
       );
+      const selectIndex = (index: number) => {
+        const option = options[index];
+        if (option) onSelectValue(option.value);
+      };
 
       switch (event.key) {
         case "ArrowDown": {
           event.preventDefault();
           const nextIndex = Math.min(currentIndex + 1, options.length - 1);
-          onSelectValue(options[nextIndex].value);
+          selectIndex(nextIndex);
           break;
         }
         case "ArrowUp": {
           event.preventDefault();
           const nextIndex = Math.max(currentIndex - 1, 0);
-          onSelectValue(options[nextIndex].value);
+          selectIndex(nextIndex);
           break;
         }
         case "Home": {
           event.preventDefault();
-          onSelectValue(options[0].value);
+          selectIndex(0);
           break;
         }
         case "End": {
           event.preventDefault();
-          onSelectValue(options[options.length - 1].value);
+          selectIndex(options.length - 1);
           break;
         }
         case "Enter":

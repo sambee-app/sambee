@@ -33,6 +33,16 @@ export const builtInThemes: ThemeConfig[] = [
       selected: "#F4C43029", // 16% opacity
     },
     components: {
+      syntax: {
+        keyword: "#A62640",
+        string: "#216A35",
+        number: "#805400",
+        comment: "#626A73",
+        type: "#6851A5",
+        function: "#005C99",
+        operator: "#8F3540",
+        punctuation: "#525960",
+      },
       link: {
         main: "#C24400", // Dark for readability
         hover: "#FF5900", // Lighter on hover for visual feedback
@@ -123,6 +133,16 @@ export const builtInThemes: ThemeConfig[] = [
       selected: "#D4A02038", // 22% opacity
     },
     components: {
+      syntax: {
+        keyword: "#FF8999",
+        string: "#A3D99B",
+        number: "#EDC47C",
+        comment: "#A2A9B1",
+        type: "#D1B3F0",
+        function: "#8FC8F5",
+        operator: "#F2A6B0",
+        punctuation: "#BCC3CB",
+      },
       link: {
         main: "#D4A020", // Default dark-mode primary shade
         hover: "#F4C430", // Brighter hover shade

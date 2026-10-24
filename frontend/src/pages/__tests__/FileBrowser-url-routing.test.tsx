@@ -1,3 +1,4 @@
+import { createMockAuthToken } from "../../test/fixtures/users";
 /**
  * FileBrowser — URL Routing Tests (Phase 3)
  * ==========================================
@@ -97,7 +98,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
   afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.clearAllMocks();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     localStorage.removeItem("selectedConnectionId");
     localStorage.removeItem("dual-pane-mode");
     localStorage.removeItem("active-pane");
@@ -499,7 +500,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("serializes archive navigation and restores a virtual archive deep link", async () => {
-      vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => ({
+      vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") => ({
         path,
         items:
           path === "Archives"
@@ -515,7 +516,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
             : [],
         total: path === "Archives" ? 1 : 0,
       }));
-      vi.mocked(api.listArchiveDirectory).mockImplementation(async (_connectionId, archivePath, virtualPath) => ({
+      vi.mocked(api.listArchiveDirectory).mockImplementation(async (_connectionId, archivePath, virtualPath = "") => ({
         archive: { path: archivePath, size: 1 },
         path: virtualPath,
         items:
@@ -553,7 +554,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("hydrates an archive deep link through its virtual provider", async () => {
-      vi.mocked(api.listArchiveDirectory).mockImplementation(async (_connectionId, archivePath, virtualPath) => ({
+      vi.mocked(api.listArchiveDirectory).mockImplementation(async (_connectionId, archivePath, virtualPath = "") => ({
         archive: { path: archivePath, size: 1 },
         path: virtualPath,
         items:

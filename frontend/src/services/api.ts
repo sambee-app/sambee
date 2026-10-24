@@ -283,7 +283,6 @@ function getDevicePixelDimension(value: number | undefined): number | undefined 
 
 let controlledReauthenticationInProgress = false;
 let oidcExchangePending = window.location.pathname === "/login/oidc/callback";
-
 export function setOidcExchangePending(pending: boolean): void {
   oidcExchangePending = pending;
 }
@@ -378,7 +377,7 @@ class ApiService {
 
   constructor() {
     // Use absolute URL for tests (required by MSW), relative for production
-    const baseURL = import.meta.env.VITE_API_URL || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
+    const baseURL = import.meta.env["VITE_API_URL"] || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
     this.api = axios.create({
       baseURL,
     });

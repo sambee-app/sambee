@@ -46,7 +46,7 @@ describe("getItemActionAvailability", () => {
 
   it("treats links to directories as folders", () => {
     const item = createItem("documents-link");
-    item.entry.link_target = { target: { type: FileType.DIRECTORY } };
+    item.entry.link_target = { source_path: item.entry.path, state: "resolved", target: { name: "target", type: FileType.DIRECTORY } };
 
     expect(
       getItemActionAvailability({

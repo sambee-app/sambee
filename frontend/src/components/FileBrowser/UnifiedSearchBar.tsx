@@ -128,7 +128,7 @@ interface UnifiedSearchBarProps {
   /** Increments whenever visible results should refresh without changing dropdown visibility. */
   refreshToken?: number;
   /** Ref forwarded to the underlying <input> element */
-  inputRef?: React.RefObject<HTMLInputElement>;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
   /** Remove from Tab order (dual-pane mode uses Tab for pane switching) */
   disableTabFocus?: boolean;
   /** Whether to use compact (mobile) layout styling */

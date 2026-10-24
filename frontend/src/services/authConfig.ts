@@ -29,7 +29,7 @@ export async function getAuthConfig(): Promise<AuthConfig> {
   }
 
   try {
-    const baseURL = import.meta.env.VITE_API_URL || "/api";
+    const baseURL = import.meta.env["VITE_API_URL"] || "/api";
     const response = await axios.get<unknown>(`${baseURL}/auth/config`);
     authConfigCache = parseAuthConfig(response.data);
     logger.info(`Auth configuration loaded: ${authConfigCache.sign_in_mode}`, {}, "auth");
@@ -45,7 +45,7 @@ function isOidcPublicConfig(value: unknown): value is OidcPublicConfig {
     return false;
   }
   const candidate = value as Record<string, unknown>;
-  return typeof candidate.display_name === "string" && typeof candidate.authorization_path === "string";
+  return typeof candidate["display_name"] === "string" && typeof candidate["authorization_path"] === "string";
 }
 
 export function parseAuthConfig(value: unknown): AuthConfig {
