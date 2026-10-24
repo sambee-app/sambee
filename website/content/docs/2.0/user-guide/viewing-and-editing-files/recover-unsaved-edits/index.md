@@ -27,4 +27,3 @@ Draft recovery depends on browser tab storage. Sambee keeps recovery drafts only
 Closing the tab, explicitly discarding the draft, or signing out can remove the recovery copy.
 
 An unfinished edit may not be recoverable when the browser suspends or terminates the page. A successful recovery checkpoint isn't a file save or a guarantee that the draft will survive closing the tab.
-
