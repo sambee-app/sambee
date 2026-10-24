@@ -52,7 +52,7 @@ class Logger {
     // Detect test environment - vitest sets this or we can check if vitest globals exist
     this.isTest =
       import.meta.env["VITEST"] === true ||
-      (typeof process !== "undefined" && process.env?.["VITEST"] === "true") ||
+      import.meta.env.MODE === "test" ||
       // Alternative: check if vitest globals are available
       (typeof globalThis !== "undefined" && ("describe" in globalThis || "it" in globalThis || "test" in globalThis));
     // In production, only show warnings and errors; in development, show all logs

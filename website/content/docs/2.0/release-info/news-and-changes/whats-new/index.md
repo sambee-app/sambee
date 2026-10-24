@@ -79,6 +79,26 @@ Sambee uses a provider refresh token when one is returned, whether or not `offli
 
 - OIDC login failures after password reset: OIDC login now completes reliably after an administrator resets the account’s password. Sambee ignores responses from the previous browser session while the new login finishes, reloads the user’s themes and settings, and returns to the file browser instead of the login page.
 
+## Text and Markdown Editors
+
+### Syntax Highlighting and Rendering Performance Optimization
+
+Sambee now uses a consolidated syntax highlighting system throughout all text and Markdown rendering surfaces: text viewer and editor, Markdown editor, fenced code blocks in Markdown viewer and editor. The syntax highlighting system is integrated with the theming system; highlight colors are now part of each theme and can be edited in the new theme editor.
+
+Text viewer/editor and Markdown editor performance was significantly boosted, especially for long documents. This was achieved through virtualization and viewport rendering.
+
+## Markdown Viewer
+
+### Print / Save as PDF
+
+When you print or save as PDF from the browser, the Markdown viewer reformats the full rendered document to fit the page, spanning multiple pages as needed. A new print icon in the top bar makes the new functionality discoverable.
+
+### Other Changes
+
+- Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
+- When reloading a browser tab with an editor, Sambee now recovers the file lock. This prevents the error `Unable to enter edit mode. File is locked for editing by <username>`.
+
+
 ## Miscellaneous
 
 ### Native Mobile Sharing
@@ -114,11 +134,6 @@ HTTP for development on `localhost` is treated as secure by browsers and continu
 
 If your browser is too old or lacks features Sambee needs, you'll now see a clear message instead of a blank page. The message identifies missing capabilities and links to the browser requirements so you can choose a supported browser.
 
-### Text and Markdown Editors
-
-- Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
-- When reloading a browser tab with an editor, Sambee now recovers the file lock. This prevents the error `Unable to enter edit mode. File is locked for editing by <username>`.
-
 ### Password Login
 
 - When an admin configures a user to require a password change, that change is now enforced upon the next password login.
@@ -149,6 +164,11 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 - Updated all **dependencies** with known issues or vulnerabilities to fixed versions.
 - Pinned all third-party GitHub Actions workflows to commit SHAs.
 - Frontend: removed `patch-package` to get rid of vulnerable transisitve dependency `braces`.
+
+### Frontend Type Correctness
+
+Type correctness of frontend code and tests is now enforced. As part of this implementation, 1,152 diagnostics across 162 files were fixed: 840 in tests, 311 in application code,
+and one in an imported browser-test helper.
 
 ## Internals
 

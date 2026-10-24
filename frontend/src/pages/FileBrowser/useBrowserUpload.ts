@@ -260,7 +260,7 @@ export function useBrowserUpload({
                 directoryChanges.writingPaths.add(parent);
                 const result = await publishBrowserFile(file, destination.connectionId, joinPath(parent, name), policy, {
                   signal: controller.signal,
-                  onProgress: updateProgress,
+                  onProgress: (bytes) => updateProgress(bytes),
                   onUploadSent: () => updateProgress(file.size, "publishing"),
                 });
                 if (result.status === "completed") {

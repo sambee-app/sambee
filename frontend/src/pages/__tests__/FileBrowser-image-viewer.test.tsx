@@ -6,10 +6,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useCachedImageGallery } from "../../hooks/useCachedImageGallery";
 import apiService from "../../services/api";
 import { authSession } from "../../services/authSession";
+import { createMockConnection } from "../../test/fixtures/connections";
+import { createMockAuthToken } from "../../test/fixtures/users";
+import { requireTestValue } from "../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType } from "../../types";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import FileBrowser from "../FileBrowser";
+
+const FILE_LIST_READY_TIMEOUT_MS = 5000;
 
 const { loadImageBlob, recordFilename } = vi.hoisted(() => ({
   loadImageBlob: vi.fn(),
@@ -115,11 +120,11 @@ describe("Browser - Image View Integration", () => {
     loadImageBlob.mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
 
     // Set up authentication
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
 
     // Mock successful API responses
     mockedApi.getConnections.mockResolvedValue([
-      {
+      createMockConnection({
         id: "conn-1",
         name: "Test Server",
         slug: "test-server-1",
@@ -130,7 +135,7 @@ describe("Browser - Image View Integration", () => {
         username: "user",
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-01-01T00:00:00Z",
-      },
+      }),
     ]);
   });
 
@@ -150,7 +155,7 @@ describe("Browser - Image View Integration", () => {
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
     const { router } = renderBrowser();
-    fireEvent.click(await screen.findByRole("button", { name: "File: one.jpg" }));
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
     expect(await screen.findByTestId("image-view")).toHaveAttribute("data-path", "one.jpg");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     recordFilename.mockClear();
@@ -192,7 +197,7 @@ describe("Browser - Image View Integration", () => {
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
     const { router } = renderBrowser();
-    fireEvent.click(await screen.findByRole("button", { name: "File: one.jpg" }));
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
     await screen.findByTestId("image-view");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     let backNavigation: Promise<void> | undefined;
@@ -241,7 +246,7 @@ describe("Browser - Image View Integration", () => {
     const imageFile = imageButtons[0];
 
     // Click on the image file
-    fireEvent.click(imageFile);
+    fireEvent.click(requireTestValue(imageFile));
 
     // Image view should open
     const view = await screen.findByTestId("image-view");
@@ -338,7 +343,7 @@ describe("Browser - Image View Integration", () => {
     const imageFile = imageButtons[0];
 
     // Click on the image file
-    fireEvent.click(imageFile);
+    fireEvent.click(requireTestValue(imageFile));
 
     // Image view should open
     const view = await screen.findByTestId("image-view");
@@ -372,7 +377,7 @@ describe("Browser - Image View Integration", () => {
     });
     const imageButtons = screen.getAllByRole("button", { name: /photo\.jpg/i });
     const imageFile = imageButtons[0];
-    fireEvent.click(imageFile);
+    fireEvent.click(requireTestValue(imageFile));
 
     // Wait for view to open
     const view = await screen.findByTestId("image-view");
@@ -408,7 +413,7 @@ describe("Browser - Image View Integration", () => {
     const markdownFile = markdownButtons[0];
 
     // Click on the markdown file
-    fireEvent.click(markdownFile);
+    fireEvent.click(requireTestValue(markdownFile));
 
     // Markdown view should open
     const view = await screen.findByTestId("markdown-view");

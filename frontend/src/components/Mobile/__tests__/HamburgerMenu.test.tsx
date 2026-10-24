@@ -2,6 +2,7 @@ import { createTheme } from "@mui/material";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import "../../../i18n";
 import HamburgerMenu from "../../../components/Mobile/HamburgerMenu";
 import { mobileNavigationDrawerTypographySx } from "../../../theme/mobileShell";
@@ -109,7 +110,7 @@ describe("HamburgerMenu", () => {
       throw new Error("Main drawer typography must remain theme-aware.");
     }
 
-    const styles = mobileNavigationDrawerTypographySx(theme);
+    const styles = requireTestValue(mobileNavigationDrawerTypographySx(theme));
     expect(styles[theme.breakpoints.down("sm")]).toMatchObject({
       "& .MuiTypography-h6": { fontSize: "20px" },
       "& .MuiListItemText-primary, & .MuiInputBase-input, & .MuiSelect-select": { fontSize: "17px" },

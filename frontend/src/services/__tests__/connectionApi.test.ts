@@ -1,3 +1,5 @@
+import { createMockConnection } from "../../test/fixtures/connections";
+import { requireTestValue } from "../../test/helpers/assertions";
 /**
  * Contract tests for Connection Management API
  *
@@ -55,7 +57,7 @@ describe("Connection Management API Contract Tests", () => {
   describe("Contract Tests - GET /connections", () => {
     it("should return array of connections", async () => {
       const backendResponse: Connection[] = [
-        {
+        createMockConnection({
           id: "123e4567-e89b-12d3-a456-426614174000",
           name: "Test Server",
           type: "smb",
@@ -66,7 +68,7 @@ describe("Connection Management API Contract Tests", () => {
           path_prefix: "/",
           created_at: "2024-01-01T00:00:00Z",
           updated_at: "2024-01-01T00:00:00Z",
-        },
+        }),
       ];
 
       mockAxiosInstance.get.mockResolvedValueOnce({
@@ -82,7 +84,7 @@ describe("Connection Management API Contract Tests", () => {
 
     it("should include all required connection fields", async () => {
       const backendResponse: Connection[] = [
-        {
+        createMockConnection({
           id: "123e4567-e89b-12d3-a456-426614174000",
           name: "Test Server",
           type: "smb",
@@ -93,7 +95,7 @@ describe("Connection Management API Contract Tests", () => {
           path_prefix: "/data",
           created_at: "2024-01-01T12:30:00Z",
           updated_at: "2024-01-02T08:15:00Z",
-        },
+        }),
       ];
 
       mockAxiosInstance.get.mockResolvedValueOnce({
@@ -118,7 +120,7 @@ describe("Connection Management API Contract Tests", () => {
 
     it("should have correct field types", async () => {
       const backendResponse: Connection[] = [
-        {
+        createMockConnection({
           id: "123e4567-e89b-12d3-a456-426614174000",
           name: "Test Server",
           type: "smb",
@@ -129,7 +131,7 @@ describe("Connection Management API Contract Tests", () => {
           path_prefix: "/",
           created_at: "2024-01-01T00:00:00Z",
           updated_at: "2024-01-01T00:00:00Z",
-        },
+        }),
       ];
 
       mockAxiosInstance.get.mockResolvedValueOnce({
@@ -137,7 +139,7 @@ describe("Connection Management API Contract Tests", () => {
       } as AxiosResponse);
 
       const result = await apiService.getConnections();
-      const conn = result[0];
+      const conn = requireTestValue(result[0]);
 
       // Verify types
       expect(typeof conn.id).toBe("string");
@@ -155,7 +157,7 @@ describe("Connection Management API Contract Tests", () => {
     it("should parse UUID strings correctly", async () => {
       const uuid = "123e4567-e89b-12d3-a456-426614174000";
       const backendResponse: Connection[] = [
-        {
+        createMockConnection({
           id: uuid,
           name: "Test",
           type: "smb",
@@ -166,7 +168,7 @@ describe("Connection Management API Contract Tests", () => {
           path_prefix: "/",
           created_at: "2024-01-01T00:00:00Z",
           updated_at: "2024-01-01T00:00:00Z",
-        },
+        }),
       ];
 
       mockAxiosInstance.get.mockResolvedValueOnce({
@@ -176,13 +178,13 @@ describe("Connection Management API Contract Tests", () => {
       const result = await apiService.getConnections();
 
       // UUID should be a valid UUID string
-      expect(result[0].id).toBe(uuid);
-      expect(result[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      expect(requireTestValue(result[0]).id).toBe(uuid);
+      expect(requireTestValue(result[0]).id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     });
 
     it("should parse ISO 8601 timestamps", async () => {
       const backendResponse: Connection[] = [
-        {
+        createMockConnection({
           id: "123e4567-e89b-12d3-a456-426614174000",
           name: "Test",
           type: "smb",
@@ -193,7 +195,7 @@ describe("Connection Management API Contract Tests", () => {
           path_prefix: "/",
           created_at: "2024-01-15T10:30:45Z",
           updated_at: "2024-02-20T14:25:30.123Z",
-        },
+        }),
       ];
 
       mockAxiosInstance.get.mockResolvedValueOnce({
@@ -203,12 +205,12 @@ describe("Connection Management API Contract Tests", () => {
       const result = await apiService.getConnections();
 
       // Timestamps should be ISO 8601 strings
-      expect(result[0].created_at).toBe("2024-01-15T10:30:45Z");
-      expect(result[0].updated_at).toBe("2024-02-20T14:25:30.123Z");
+      expect(requireTestValue(result[0]).created_at).toBe("2024-01-15T10:30:45Z");
+      expect(requireTestValue(result[0]).updated_at).toBe("2024-02-20T14:25:30.123Z");
 
       // Should be parseable as dates
-      expect(new Date(result[0].created_at).toISOString()).toBeTruthy();
-      expect(new Date(result[0].updated_at).toISOString()).toBeTruthy();
+      expect(new Date(requireTestValue(result[0]).created_at).toISOString()).toBeTruthy();
+      expect(new Date(requireTestValue(result[0]).updated_at).toISOString()).toBeTruthy();
     });
 
     it("should handle empty connections array", async () => {
@@ -224,7 +226,7 @@ describe("Connection Management API Contract Tests", () => {
 
     it("should handle multiple connections", async () => {
       const backendResponse: Connection[] = [
-        {
+        createMockConnection({
           id: "123e4567-e89b-12d3-a456-426614174000",
           name: "Server 1",
           type: "smb",
@@ -235,8 +237,8 @@ describe("Connection Management API Contract Tests", () => {
           path_prefix: "/",
           created_at: "2024-01-01T00:00:00Z",
           updated_at: "2024-01-01T00:00:00Z",
-        },
-        {
+        }),
+        createMockConnection({
           id: "223e4567-e89b-12d3-a456-426614174001",
           name: "Server 2",
           type: "smb",
@@ -247,7 +249,7 @@ describe("Connection Management API Contract Tests", () => {
           path_prefix: "/data",
           created_at: "2024-01-02T00:00:00Z",
           updated_at: "2024-01-02T00:00:00Z",
-        },
+        }),
       ];
 
       mockAxiosInstance.get.mockResolvedValueOnce({
@@ -257,8 +259,8 @@ describe("Connection Management API Contract Tests", () => {
       const result = await apiService.getConnections();
 
       expect(result).toHaveLength(2);
-      expect(result[0].name).toBe("Server 1");
-      expect(result[1].name).toBe("Server 2");
+      expect(requireTestValue(result[0]).name).toBe("Server 1");
+      expect(requireTestValue(result[1]).name).toBe("Server 2");
     });
   });
 
@@ -277,7 +279,7 @@ describe("Connection Management API Contract Tests", () => {
         access_mode: "read_write",
       };
 
-      const backendResponse: Connection = {
+      const backendResponse: Connection = createMockConnection({
         id: "323e4567-e89b-12d3-a456-426614174002",
         name: "New Server",
         type: "smb",
@@ -291,7 +293,7 @@ describe("Connection Management API Contract Tests", () => {
         can_manage: true,
         created_at: "2024-03-01T10:00:00Z",
         updated_at: "2024-03-01T10:00:00Z",
-      };
+      });
 
       mockAxiosInstance.post.mockResolvedValueOnce({
         data: backendResponse,
@@ -320,7 +322,7 @@ describe("Connection Management API Contract Tests", () => {
         access_mode: "read_write",
       };
 
-      const backendResponse: Connection = {
+      const backendResponse: Connection = createMockConnection({
         id: "423e4567-e89b-12d3-a456-426614174003",
         name: "Test",
         type: "smb",
@@ -334,7 +336,7 @@ describe("Connection Management API Contract Tests", () => {
         can_manage: true,
         created_at: "2024-03-01T10:00:00Z",
         updated_at: "2024-03-01T10:00:00Z",
-      };
+      });
 
       mockAxiosInstance.post.mockResolvedValueOnce({
         data: backendResponse,
@@ -361,7 +363,7 @@ describe("Connection Management API Contract Tests", () => {
         access_mode: "read_write",
       };
 
-      const backendResponse: Connection = {
+      const backendResponse: Connection = createMockConnection({
         id: "523e4567-e89b-12d3-a456-426614174004",
         name: "Test",
         type: "smb",
@@ -375,7 +377,7 @@ describe("Connection Management API Contract Tests", () => {
         can_manage: true,
         created_at: "2024-03-01T10:00:00Z",
         updated_at: "2024-03-01T10:00:00Z",
-      };
+      });
 
       mockAxiosInstance.post.mockResolvedValueOnce({
         data: backendResponse,
@@ -405,7 +407,7 @@ describe("Connection Management API Contract Tests", () => {
         share_name: "updated_share",
       };
 
-      const backendResponse: Connection = {
+      const backendResponse: Connection = createMockConnection({
         id: connectionId,
         name: "Updated Name",
         type: "smb",
@@ -419,7 +421,7 @@ describe("Connection Management API Contract Tests", () => {
         can_manage: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-03-01T15:00:00Z", // Updated timestamp
-      };
+      });
 
       mockAxiosInstance.put.mockResolvedValueOnce({
         data: backendResponse,
@@ -438,7 +440,7 @@ describe("Connection Management API Contract Tests", () => {
       const originalTimestamp = "2024-01-01T00:00:00Z";
       const updatedTimestamp = "2024-03-01T16:30:00Z";
 
-      const backendResponse: Connection = {
+      const backendResponse: Connection = createMockConnection({
         id: connectionId,
         name: "Test",
         type: "smb",
@@ -452,7 +454,7 @@ describe("Connection Management API Contract Tests", () => {
         can_manage: true,
         created_at: originalTimestamp,
         updated_at: updatedTimestamp,
-      };
+      });
 
       mockAxiosInstance.put.mockResolvedValueOnce({
         data: backendResponse,
@@ -471,7 +473,7 @@ describe("Connection Management API Contract Tests", () => {
     it("should match Connection type structure", async () => {
       const connectionId = "823e4567-e89b-12d3-a456-426614174007";
 
-      const backendResponse: Connection = {
+      const backendResponse: Connection = createMockConnection({
         id: connectionId,
         name: "Test",
         type: "smb",
@@ -485,7 +487,7 @@ describe("Connection Management API Contract Tests", () => {
         can_manage: true,
         created_at: "2024-01-01T00:00:00Z",
         updated_at: "2024-03-01T00:00:00Z",
-      };
+      });
 
       mockAxiosInstance.put.mockResolvedValueOnce({
         data: backendResponse,
@@ -622,6 +624,8 @@ describe("Connection Management API Contract Tests", () => {
 
     it("should handle validation errors on create", async () => {
       const invalidConnection: ConnectionCreate = {
+        scope: "private",
+        access_mode: "read_write",
         name: "",
         type: "smb",
         host: "",

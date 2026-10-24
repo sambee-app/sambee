@@ -150,7 +150,7 @@ export function ThemeSelectorDialog({ open, onClose }: ThemeSelectorDialogProps)
 //
 
 interface ThemePreviewProps {
-  theme: { primary: { main: string }; secondary: { main: string }; mode: "light" | "dark" };
+  theme: { primary: { main: string }; mode: "light" | "dark" };
 }
 
 /**

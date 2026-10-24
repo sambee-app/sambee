@@ -3,6 +3,7 @@ import { HttpResponse, http } from "msw";
 import { type ReactNode, StrictMode, useEffect, useState } from "react";
 import { createMemoryRouter, Route, RouterProvider, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import { server } from "../../test/mocks/server";
 import { SambeeThemeProvider, useSambeeTheme } from "../../theme";
 import OidcCallback from "../OidcCallback";
@@ -130,7 +131,9 @@ describe("OIDC callback", () => {
         }
       }
     );
-    vi.mocked(exchangeOidcGrant).mockResolvedValue({ access_token: "sambee-token", token_type: "bearer", return_path: "/browse" });
+    vi.mocked(exchangeOidcGrant).mockResolvedValue(
+      createMockAuthToken({ access_token: "sambee-token", token_type: "bearer", return_path: "/browse" })
+    );
 
     render(
       <MemoryRouter initialEntries={["/login/oidc/callback"]}>
@@ -173,7 +176,7 @@ describe("OIDC callback", () => {
   });
 
   it("finishes the same-user callback despite late 401s from A and loads protected data with B", async () => {
-    const sessionA = { access_token: "session-a", token_type: "bearer", user_id: "same-user" };
+    const sessionA = createMockAuthToken({ access_token: "session-a", token_type: "bearer", user_id: "same-user" });
     const sessionB = {
       access_token: "session-b",
       token_type: "bearer",

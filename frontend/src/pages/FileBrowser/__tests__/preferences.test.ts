@@ -92,9 +92,12 @@ describe("File Browser preferences", () => {
   });
 
   it("shows Quick Bar hints according to compact layout, saved evidence, and visibility mode", () => {
-    const { result, rerender } = renderHook(({ visibility, compact }) => useQuickBarKeyboardHints(visibility, compact), {
-      initialProps: { visibility: "auto" as const, compact: true },
-    });
+    const { result, rerender } = renderHook<boolean, { visibility: "auto" | "always" | "never"; compact: boolean }>(
+      ({ visibility, compact }) => useQuickBarKeyboardHints(visibility, compact),
+      {
+        initialProps: { visibility: "auto" as const, compact: true },
+      }
+    );
 
     expect(result.current).toBe(false);
 

@@ -112,7 +112,6 @@ export const buildBrowseRouteTarget = (
     return {
       kind: BROWSE_TARGET_KIND_LOCAL,
       targetId: driveId,
-      connectionId,
       path: buildRoutePath(path, virtualLocation),
       ...(virtualLocation ? { virtualLocation } : {}),
     };

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../../i18n";
 import { CONNECTION_TYPE_LOCAL, LOCAL_DRIVE_PREFIX } from "../../../services/backendRouter";
+import { createMockConnection } from "../../../test/fixtures/connections";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import { ConnectionSelector } from "../ConnectionSelector";
 
@@ -12,7 +13,7 @@ describe("ConnectionSelector", () => {
   });
 
   const connections = [
-    {
+    createMockConnection({
       id: "server-1",
       name: "Office Share",
       type: "smb",
@@ -22,8 +23,8 @@ describe("ConnectionSelector", () => {
       username: "alex",
       created_at: "2026-03-11T00:00:00Z",
       updated_at: "2026-03-11T00:00:00Z",
-    },
-    {
+    }),
+    createMockConnection({
       id: `${LOCAL_DRIVE_PREFIX}c`,
       name: "Local Disk (C:)",
       type: CONNECTION_TYPE_LOCAL,
@@ -33,7 +34,7 @@ describe("ConnectionSelector", () => {
       username: "",
       created_at: "2026-03-11T00:00:00Z",
       updated_at: "2026-03-11T00:00:00Z",
-    },
+    }),
   ];
 
   it.each([

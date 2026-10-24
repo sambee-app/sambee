@@ -79,7 +79,10 @@ run_check "Test images generated" "Failed to generate test images" env QUIET=1 "
 echo -e "${YELLOW}=== Backend: Static Analysis ===${NC}"
 cd "$BACKEND_DIR" || exit 1
 
-# mypy - Type checking (non-fatal, just warnings)
+echo -e "${BLUE}Running Ruff executable-script checks...${NC}"
+run_check "Ruff executable-script checks passed" "Ruff executable-script checks failed" "$BACKEND_PYTHON" -m ruff check --select EXE "$REPO_ROOT" "$REPO_ROOT/.github"
+
+# mypy - Type checking
 echo -e "${BLUE}Running mypy (type checking)...${NC}"
 run_check "mypy passed" "mypy failed" "$BACKEND_PYTHON" -m mypy app
 
@@ -130,7 +133,7 @@ cd "$REPO_ROOT/frontend" || exit 1
 
 # TypeScript - Type checking
 echo -e "${BLUE}Running TypeScript compiler (type checking)...${NC}"
-run_check "TypeScript type check passed" "TypeScript type check failed" npx tsc --noEmit
+run_check "TypeScript type check passed" "TypeScript type check failed" npm run typecheck
 
 echo -e "${BLUE}Running Biome lint...${NC}"
 run_check "Frontend lint passed" "Frontend lint failed" npm run lint

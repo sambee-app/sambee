@@ -41,12 +41,14 @@ export interface CodeMirrorFindReplacePopoverProps {
   regex: boolean;
   replaceText: string;
   searchMatches: number;
+  searchPending?: boolean;
+  searchError?: string;
   searchText: string;
   wholeWord: boolean;
 }
 
 function navigateHistory(
-  event: ReactKeyboardEvent<HTMLInputElement>,
+  event: ReactKeyboardEvent<HTMLElement>,
   history: string[],
   historyIndexRef: MutableRefObject<number | null>,
   historyDraftRef: MutableRefObject<string>,
@@ -75,11 +77,14 @@ function navigateHistory(
 
   if (event.key === "ArrowUp") {
     const nextHistoryIndex = historyIndex === null ? 0 : Math.min(historyIndex + 1, history.length - 1);
+    const entry = history[nextHistoryIndex];
+    if (entry === undefined) return;
     historyIndexRef.current = nextHistoryIndex;
-    onValueChange(history[nextHistoryIndex]);
+    onValueChange(entry);
     return;
   }
 
+  if (historyIndex === null) return;
   const nextHistoryIndex = historyIndex - 1;
   if (nextHistoryIndex < 0) {
     historyIndexRef.current = null;
@@ -87,8 +92,10 @@ function navigateHistory(
     return;
   }
 
+  const entry = history[nextHistoryIndex];
+  if (entry === undefined) return;
   historyIndexRef.current = nextHistoryIndex;
-  onValueChange(history[nextHistoryIndex]);
+  onValueChange(entry);
 }
 
 export function CodeMirrorFindReplacePopover({
@@ -113,6 +120,8 @@ export function CodeMirrorFindReplacePopover({
   regex,
   replaceText,
   searchMatches,
+  searchPending = false,
+  searchError,
   searchText,
   wholeWord,
 }: CodeMirrorFindReplacePopoverProps) {
@@ -126,7 +135,8 @@ export function CodeMirrorFindReplacePopover({
   const [findHistory, setFindHistory] = useState(() => readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY));
   const [replaceHistory, setReplaceHistory] = useState(() => readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY));
   const hasMatches = isSearchValid && searchMatches > 0;
-  const replaceDisabled = disabled || !hasMatches;
+  const canNavigate = hasMatches || (isSearchValid && regex && Boolean(searchText) && (searchPending || Boolean(searchError)));
+  const replaceDisabled = disabled || searchPending || Boolean(searchError) || !hasMatches;
   const dialogSurfaces = getOverlaySurfaceTokens(theme.palette.background.default, theme.palette.mode);
 
   useEffect(() => {
@@ -226,10 +236,10 @@ export function CodeMirrorFindReplacePopover({
     const lastFocusableElementIndex = focusableElements.length - 1;
     if (!event.shiftKey && activeElementIndex === lastFocusableElementIndex) {
       event.preventDefault();
-      focusableElements[0].focus();
+      focusableElements[0]?.focus();
     } else if (event.shiftKey && activeElementIndex === 0) {
       event.preventDefault();
-      focusableElements[lastFocusableElementIndex].focus();
+      focusableElements[lastFocusableElementIndex]?.focus();
     }
   };
 
@@ -266,6 +276,11 @@ export function CodeMirrorFindReplacePopover({
           zIndex: (currentTheme) => currentTheme.zIndex.modal + 1,
         }}
       >
+        {searchError && (
+          <Typography color="error" role="alert" sx={{ fontSize: "0.875rem", overflowWrap: "anywhere" }}>
+            {searchError}
+          </Typography>
+        )}
         <Box
           sx={{
             alignItems: "center",
@@ -307,10 +322,16 @@ export function CodeMirrorFindReplacePopover({
                   <InputAdornment position="end">
                     <Typography
                       aria-live="polite"
-                      color={hasMatches ? "text.secondary" : "error"}
+                      color={hasMatches || searchPending ? "text.secondary" : "error"}
                       sx={{ fontSize: "0.875rem", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
                     >
-                      {isSearchValid ? `${currentMatch} / ${searchMatches}` : t("viewer.edit.invalidRegularExpression")}
+                      {searchPending
+                        ? t("app.loading")
+                        : searchError
+                          ? "?"
+                          : isSearchValid
+                            ? `${currentMatch} / ${searchMatches}`
+                            : t("viewer.edit.invalidRegularExpression")}
                     </Typography>
                   </InputAdornment>
                 ),
@@ -412,7 +433,7 @@ export function CodeMirrorFindReplacePopover({
                 <span>
                   <IconButton
                     aria-label={t("viewer.edit.previousMatch")}
-                    disabled={disabled || !hasMatches}
+                    disabled={disabled || !canNavigate}
                     onClick={handleFindPrevious}
                     size="small"
                     sx={{ height: 30, p: 0.25, width: 26 }}
@@ -425,7 +446,7 @@ export function CodeMirrorFindReplacePopover({
                 <span>
                   <IconButton
                     aria-label={t("viewer.edit.nextMatch")}
-                    disabled={disabled || !hasMatches}
+                    disabled={disabled || !canNavigate}
                     onClick={handleFindNext}
                     size="small"
                     sx={{ height: 30, p: 0.25, width: 26 }}

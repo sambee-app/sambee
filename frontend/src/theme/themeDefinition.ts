@@ -1,7 +1,9 @@
-import { THEME_SCHEMA, type ThemeConfig, type ThemeFieldSchema } from "./types";
+import { resolveSyntaxTheme } from "./resolveSyntaxTheme";
+import { HEX_COLOR_PATTERN, THEME_SCHEMA, type ThemeConfig, type ThemeFieldSchema } from "./types";
+
+export { HEX_COLOR_PATTERN } from "./types";
 
 export const THEME_DEFINITION_VERSION = 1;
-export const HEX_COLOR_PATTERN = /^#[\da-fA-F]{6}(?:[\da-fA-F]{2})?$/;
 const COPY_SUFFIX = " (copy)";
 
 export function getThemeCopyName(name: string, existingNames: Iterable<string>, alwaysCopy = false): string {
@@ -31,13 +33,14 @@ function collectColors(schema: ThemeFieldSchema, prefix: string, group: string):
 }
 
 export const COLOR_ROLES: ColorRole[] = [
+  ...collectColors(THEME_SCHEMA["components"]!.fields!["syntax"]!, "components.syntax", "Syntax"),
   ...["primary", "background", "text", "action"].flatMap((key) => collectColors(THEME_SCHEMA[key]!, key, "Core")),
   ...["pdfViewer", "imageViewer", "markdownViewer"].flatMap((key) =>
-    collectColors(THEME_SCHEMA.components!.fields![key]!, `components.${key}`, key === "markdownViewer" ? "Markdown" : "Viewers")
+    collectColors(THEME_SCHEMA["components"]!.fields![key]!, `components.${key}`, key === "markdownViewer" ? "Markdown" : "Viewers")
   ),
   ...["link", "search", "alert"].flatMap((key) =>
     collectColors(
-      THEME_SCHEMA.components!.fields![key]!,
+      THEME_SCHEMA["components"]!.fields![key]!,
       `components.${key}`,
       key === "link" ? "Core" : key === "search" ? "Search" : "Alerts"
     )
@@ -72,6 +75,11 @@ export function withColor(theme: ThemeConfig, path: string, color: string): Them
 }
 
 export function validateThemeDefinition(theme: ThemeConfig): string | null {
+  try {
+    theme = resolveSyntaxTheme(theme);
+  } catch (error) {
+    return error instanceof Error ? error.message : "Invalid syntax colors.";
+  }
   if (!theme.name.trim()) return "Enter a theme name.";
   if (theme.mode !== "light" && theme.mode !== "dark") return "Choose light or dark mode.";
   for (const role of COLOR_ROLES) {
@@ -81,7 +89,7 @@ export function validateThemeDefinition(theme: ThemeConfig): string | null {
 }
 
 export function editableDefinition(theme: ThemeConfig): Omit<ThemeConfig, "id"> {
-  const copy = structuredClone(theme);
+  const copy = resolveSyntaxTheme(theme);
   const { id: _id, ...definition } = copy;
   void _id;
   delete definition.background?.paper;
@@ -95,15 +103,18 @@ export function parseThemeImport(source: string): ThemeConfig {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Import a versioned theme definition.");
   const exportFile = parsed as Record<string, unknown>;
   if (
-    exportFile.version !== THEME_DEFINITION_VERSION ||
-    !exportFile.definition ||
-    typeof exportFile.definition !== "object" ||
-    Array.isArray(exportFile.definition)
+    exportFile["version"] !== THEME_DEFINITION_VERSION ||
+    !exportFile["definition"] ||
+    typeof exportFile["definition"] !== "object" ||
+    Array.isArray(exportFile["definition"])
   ) {
     throw new Error("Unsupported theme format or version.");
   }
-  const definition = exportFile.definition as Record<string, unknown>;
-  if (typeof definition.name !== "string" || (definition.description !== undefined && typeof definition.description !== "string")) {
+  const definition = exportFile["definition"] as Record<string, unknown>;
+  if (
+    typeof definition["name"] !== "string" ||
+    (definition["description"] !== undefined && typeof definition["description"] !== "string")
+  ) {
     throw new Error("Theme name and description must be text.");
   }
   const allowedPaths = new Set(["id", "name", "description", "mode"]);
@@ -119,7 +130,7 @@ export function parseThemeImport(source: string): ThemeConfig {
     }
   };
   checkPaths(definition);
-  const theme = { ...(exportFile.definition as ThemeConfig), id: "draft" };
+  const theme = resolveSyntaxTheme({ ...(exportFile["definition"] as ThemeConfig), id: "draft" });
   for (const role of COLOR_ROLES) {
     const value = colorAt(theme, role.path);
     if (!HEX_COLOR_PATTERN.test(value ?? "")) {

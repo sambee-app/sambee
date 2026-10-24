@@ -138,7 +138,7 @@
     {
       "label": "Frontend: Type Check + Lint",
       "type": "shell",
-      "command": "npx tsc --noEmit 2>&1 && echo '✓ TypeScript type check passed' && npm run lint 2>&1 && echo '✓ Biome lint passed' && echo '' && echo '══════════════════════════════════' && echo '  All frontend checks passed ✓' && echo '══════════════════════════════════'",
+      "command": "npm run typecheck 2>&1 && echo '✓ TypeScript type check passed' && npm run lint 2>&1 && echo '✓ Biome lint passed' && echo '' && echo '══════════════════════════════════' && echo '  All frontend checks passed ✓' && echo '══════════════════════════════════'",
       "options": {
         "cwd": "${workspaceFolder}/frontend"
       },

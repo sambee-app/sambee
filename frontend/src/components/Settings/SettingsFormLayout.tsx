@@ -1,4 +1,5 @@
-import { alpha, Box, type ReactNode, Tooltip } from "@mui/material";
+import { alpha, Box, Tooltip } from "@mui/material";
+import type { ReactNode } from "react";
 import { SettingsGroup } from "./SettingsGroup";
 
 interface SettingsFormSectionProps {

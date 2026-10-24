@@ -1,5 +1,6 @@
 import type { AxiosResponse } from "axios";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import type {
   AdvancedSystemSettings,
   AuthToken,
@@ -47,7 +48,12 @@ vi.mock("axios", () => {
 // Get reference to the mocked functions for assertions
 import axios from "axios";
 // Now import the API service (it will use the mocked axios.create)
-import apiService, { ExpiredEditLockError, OIDC_FINALIZATION_REQUEST_TIMEOUT_MS, setOidcExchangePending } from "../api";
+import apiService, {
+  ExpiredEditLockError,
+  OIDC_FINALIZATION_REQUEST_TIMEOUT_MS,
+  setOidcExchangePending,
+  startControlledReauthentication,
+} from "../api";
 import { AuthSessionError, authSession } from "../authSession";
 import { getBackendAvailabilitySnapshot, markBackendUnavailable, resetBackendAvailabilityForTests } from "../backendAvailability";
 import * as backendRouter from "../backendRouter";
@@ -65,7 +71,10 @@ const mockAxiosInstance = mockedAxios.create() as ReturnType<typeof mockedAxios.
 };
 const requestInterceptorUse = vi.mocked(mockAxiosInstance.interceptors.request.use);
 const requestInterceptorHandlers = requestInterceptorUse.mock.calls[0] as
-  | [((config: { url?: string; headers: Record<string, string> }) => Promise<unknown>)?, ((error: unknown) => Promise<never>)?]
+  | [
+      ((config: { url?: string; method?: string; headers: Record<string, string> }) => Promise<unknown>)?,
+      ((error: unknown) => Promise<never>)?,
+    ]
   | undefined;
 const requestHandler = requestInterceptorHandlers?.[0];
 const responseInterceptorUse = vi.mocked(mockAxiosInstance.interceptors.response.use);
@@ -129,9 +138,9 @@ describe("API Service", () => {
 
   describe("OIDC request classification", () => {
     it.each(["oidc_reauthentication_required", undefined])("ignores obsolete token 401s (%s)", async (code) => {
-      authSession.setAuthenticated({ access_token: "session-a", token_type: "bearer", user_id: "same-user" }, true);
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer", user_id: "same-user" }), true);
       const request = (await requestHandler?.({ url: "/themes", method: "get", headers: {} })) as { headers: Record<string, string> };
-      authSession.setAuthenticated({ access_token: "session-b", token_type: "bearer", user_id: "same-user" }, true);
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer", user_id: "same-user" }), true);
       markBackendUnavailable("Recovery in progress");
       const availabilityBeforeFailure = getBackendAvailabilitySnapshot();
       const refresh = vi.spyOn(authSession, "requestRefresh");
@@ -150,14 +159,16 @@ describe("API Service", () => {
       const currentRequest = (await requestHandler?.({ url: "/themes", method: "get", headers: {} })) as {
         headers: Record<string, string>;
       };
-      expect(currentRequest.headers.Authorization).toBe("Bearer session-b");
+      expect(currentRequest.headers["Authorization"]).toBe("Bearer session-b");
       responseSuccessHandler?.({ config: { method: "get", url: "/themes" }, status: 200, statusText: "OK" } as never);
       expect(window.location.assign).not.toHaveBeenCalled();
     });
 
     it("keeps current-token 401 handling and never replays a write", async () => {
-      authSession.setAuthenticated({ access_token: "session-b", token_type: "bearer" }, true);
-      const refresh = vi.spyOn(authSession, "requestRefresh").mockResolvedValue({ access_token: "renewed", token_type: "bearer" });
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer" }), true);
+      const refresh = vi
+        .spyOn(authSession, "requestRefresh")
+        .mockResolvedValue(createMockAuthToken({ access_token: "renewed", token_type: "bearer" }));
       const error = {
         response: { status: 401, headers: {} },
         message: "Unauthorized",
@@ -173,7 +184,7 @@ describe("API Service", () => {
     });
 
     it.each(["success", "failure"])("does not act on A's 401 when its refresh settles after B (%s)", async (outcome) => {
-      authSession.setAuthenticated({ access_token: "session-a", token_type: "bearer" }, true);
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer" }), true);
       let finishRefresh!: (response: AuthToken) => void;
       let failRefresh!: (reason: Error) => void;
       const refresh = new Promise<AuthToken>((resolve, reject) => {
@@ -188,8 +199,8 @@ describe("API Service", () => {
         config: { url: "/themes", method: "get", headers: { Authorization: "Bearer session-a" } },
       };
       const pending = responseErrorHandler?.(error as never);
-      authSession.setAuthenticated({ access_token: "session-b", token_type: "bearer" }, true);
-      if (outcome === "success") finishRefresh({ access_token: "old-refresh", token_type: "bearer" });
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer" }), true);
+      if (outcome === "success") finishRefresh(createMockAuthToken({ access_token: "old-refresh", token_type: "bearer" }));
       else failRefresh(new Error("Refresh failed"));
 
       await expect(pending).rejects.toBe(error);
@@ -206,9 +217,9 @@ describe("API Service", () => {
           failRefresh = reject;
         })
       );
-      authSession.setAuthenticated({ access_token: "session-a", token_type: "bearer" }, true);
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer" }), true);
       const request = requestHandler?.({ url: "/themes", method: "get", headers: {} });
-      authSession.setAuthenticated({ access_token: "session-b", token_type: "bearer" }, true);
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer" }), true);
       failRefresh(new AuthSessionError("reauthentication-required", "Session expired"));
       await expect(request).rejects.toMatchObject({ code: "reauthentication-required" });
       expect(window.location.assign).not.toHaveBeenCalled();
@@ -285,20 +296,35 @@ describe("API Service", () => {
       expect(authSession.requestRefresh).not.toHaveBeenCalled();
     });
 
+    it("attempts a synchronous snapshot before sign-in without requiring a storage acknowledgement", () => {
+      const snapshot = vi.fn(() => {
+        expect(window.location.assign).not.toHaveBeenCalled();
+        return { saved: false as const, reason: "storage-unavailable" as const };
+      });
+      const unregister = draftRecovery.registerDraftSnapshot(snapshot);
+      try {
+        startControlledReauthentication();
+        expect(snapshot).toHaveBeenCalledOnce();
+        expect(window.location.assign).toHaveBeenCalledOnce();
+      } finally {
+        unregister();
+      }
+    });
+
     it("preserves drafts and the browse return path at a no-refresh deadline", async () => {
       vi.spyOn(authSession, "refreshIfNeeded").mockRestore();
       const originalPathname = window.location.pathname;
       const originalSearch = window.location.search;
       const deadline = Date.now() + 30_000;
       authSession.setAuthenticated(
-        {
+        createMockAuthToken({
           access_token: "expiring-token",
           token_type: "bearer",
           user_id: "user-1",
           oidc_session_capability: "reauthorization_only",
           oidc_session_expires_at: new Date(deadline).toISOString(),
           access_token_expires_at: new Date(deadline).toISOString(),
-        },
+        }),
         true
       );
       const snapshotDrafts = vi.spyOn(draftRecovery, "snapshotRegisteredDrafts");
@@ -328,6 +354,7 @@ describe("API Service", () => {
     await apiService.finalizeOidcConfiguration(
       "flow-id",
       {
+        no_refresh_session_limit_hours: 8,
         sign_in_mode: "oidc_only",
         interactive_reauthentication_max_age_days: 30,
         admission_mode: "selected_groups",
@@ -349,6 +376,7 @@ describe("API Service", () => {
         reviewed_policy: {
           sign_in_mode: "oidc_only",
           interactive_reauthentication_max_age_days: 30,
+          no_refresh_session_limit_hours: 8,
           admission_mode: "selected_groups",
           admission_groups: ["users"],
           role_assignment_mode: "uniform",

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setRegionalLocalePreference } from "../../i18n";
+import { requireTestValue } from "../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../theme";
 import type { CurrentAccount } from "../../types";
 import { formatLocalizedDateTime } from "../../utils/localeFormatting";
@@ -104,7 +105,7 @@ describe("AccountSettings", () => {
     vi.mocked(api.getCurrentAccount).mockResolvedValue({
       ...PASSWORD_ACCOUNT,
       current_session: {
-        ...PASSWORD_ACCOUNT.current_session,
+        ...requireTestValue(PASSWORD_ACCOUNT.current_session),
         started_at: startedAt,
       },
     });

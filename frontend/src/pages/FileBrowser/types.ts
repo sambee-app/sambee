@@ -214,7 +214,7 @@ export interface UseFileBrowserPaneReturn {
   sortDirection: "asc" | "desc";
   setSortDirection: React.Dispatch<React.SetStateAction<"asc" | "desc">>;
   viewMode: ViewMode;
-  setViewMode: React.Dispatch<React.SetStateAction<ViewMode>>;
+  setViewMode: (viewMode: ViewMode) => void;
   focusedIndex: number;
 
   // ── Selection State (multi-select) ────────────────────────────────────
@@ -271,8 +271,8 @@ export interface UseFileBrowserPaneReturn {
   openInAppLoading: boolean;
 
   // ── Refs (needed by parent for WebSocket wiring / shortcut checks) ────
-  parentRef: React.RefObject<HTMLDivElement>;
-  searchInputRef: React.RefObject<HTMLInputElement>;
+  parentRef: React.RefObject<HTMLDivElement | null>;
+  searchInputRef: React.RefObject<HTMLInputElement | null>;
   listContainerRef: (node: HTMLDivElement | null) => void;
   listContainerEl: HTMLDivElement | null;
   /** Always-current mirror of sortedFiles for use in callbacks. */

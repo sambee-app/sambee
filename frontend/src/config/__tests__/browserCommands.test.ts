@@ -35,6 +35,8 @@ function createContext(): BrowserCommandContext {
     createArchive: () => {},
     extractArchive: () => {},
     openInApp: () => {},
+    openInViewerPicker: () => {},
+    openInNativePicker: () => {},
     toggleDualPane: () => {},
     focusLeftPane: () => {},
     focusRightPane: () => {},

@@ -15,6 +15,7 @@ export const EN_TRANSLATIONS = {
       edit: "Edit",
       logout: "Logout",
       move: "Move",
+      print: "Print",
       rename: "Rename",
       replace: "Replace",
       retry: "Retry",
@@ -1282,6 +1283,10 @@ export const EN_TRANSLATIONS = {
     },
   },
   viewer: {
+    renderingFailed: "Unable to finish rendering this document. Close and reopen the file to retry.",
+    renderingPrintPending: "The document is still loading. Close the print dialog and try again when loading finishes.",
+    printTitle: "Print / Save as PDF",
+    printError: "The print dialog couldn't open. Try Print from your browser menu.",
     helpTitles: {
       pdf: "PDF viewer shortcuts",
       image: "Image viewer shortcuts",
@@ -1360,6 +1365,8 @@ export const EN_TRANSLATIONS = {
       regularExpression: "Use regular expression",
       regularExpressionShortcut: "Use regular expression (Alt+R)",
       replaceAll: "Replace all",
+      replacing: "Replacing matches...",
+      replacementFailed: "Replacement failed. Try Replace All again.",
       replaceCurrent: "Replace current match",
       wholeWord: "Match whole word",
       wholeWordShortcut: "Match whole word (Alt+W)",
@@ -1379,6 +1386,7 @@ export const EN_TRANSLATIONS = {
       redo: "Redo",
     },
     text: {
+      loadFailed: "Failed to load file.",
       lockFailed: "Unable to enter text edit mode. {{message}}",
       lockFailedReason: "Failed to acquire edit lock.",
       saveFailed: "Failed to save text file changes.",

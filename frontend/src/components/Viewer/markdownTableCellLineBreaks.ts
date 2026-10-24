@@ -81,13 +81,21 @@ function applyMarkdownReplacements(markdown: string, replacements: MarkdownRepla
     return markdown;
   }
 
-  let nextMarkdown = markdown;
+  const segments: string[] = [];
+  let previousEndOffset = 0;
 
-  for (const { startOffset, endOffset, replacement } of [...replacements].sort((left, right) => right.startOffset - left.startOffset)) {
-    nextMarkdown = `${nextMarkdown.slice(0, startOffset)}${replacement}${nextMarkdown.slice(endOffset)}`;
+  for (const { startOffset, endOffset, replacement } of [...replacements].sort((left, right) => left.startOffset - right.startOffset)) {
+    if (startOffset < previousEndOffset || endOffset < startOffset || endOffset > markdown.length) {
+      throw new Error(
+        `Invalid Markdown replacement range ${startOffset}:${endOffset} after ${previousEndOffset} in ${markdown.length} units`
+      );
+    }
+    segments.push(markdown.slice(previousEndOffset, startOffset), replacement);
+    previousEndOffset = endOffset;
   }
 
-  return nextMarkdown;
+  segments.push(markdown.slice(previousEndOffset));
+  return segments.join("");
 }
 
 function setMarkdownReplacement(replacements: Map<string, MarkdownReplacement>, replacement: MarkdownReplacement): void {
@@ -270,8 +278,7 @@ function haveEquivalentMarkdownTables(previousMarkdown: string, nextMarkdown: st
   );
 }
 
-function removeRedundantTableCellEscapes(markdown: string): string {
-  const tree = markdownParser.parse(markdown) as Root;
+function removeRedundantTableCellEscapes(markdown: string, tree: Root): string {
   const escapeOffsetGroups: number[][] = [];
 
   visit(tree, "tableCell", (node) => {
@@ -319,9 +326,10 @@ function removeRedundantTableCellEscapes(markdown: string): string {
   return normalizedMarkdown;
 }
 
-export function normalizeMarkdownTableCellLineBreaks(markdown: string): string {
-  const sourceMarkdown = removeRedundantTableCellEscapes(markdown);
-  const tree = markdownParser.parse(sourceMarkdown) as Root;
+export function normalizeMarkdownTableCellLineBreaks(markdown: string, onPrepared?: (source: string, tree: Root) => void): string {
+  const sourceTree = markdownParser.parse(markdown) as Root;
+  const sourceMarkdown = removeRedundantTableCellEscapes(markdown, sourceTree);
+  const tree = sourceMarkdown === markdown ? sourceTree : (markdownParser.parse(sourceMarkdown) as Root);
   const replacements = new Map<string, MarkdownReplacement>();
 
   visit(tree, "tableCell", (node) => {
@@ -332,7 +340,9 @@ export function normalizeMarkdownTableCellLineBreaks(markdown: string): string {
 
   collectListMarkerReplacements(sourceMarkdown, tree, replacements);
 
-  return applyMarkdownReplacements(sourceMarkdown, [...replacements.values()]);
+  const normalized = applyMarkdownReplacements(sourceMarkdown, [...replacements.values()]);
+  if (onPrepared) onPrepared(normalized, normalized === sourceMarkdown ? tree : (markdownParser.parse(normalized) as Root));
+  return normalized;
 }
 
 export function prepareMarkdownTableCellLineBreaksForEditor(markdown: string): string {
@@ -351,8 +361,12 @@ export function prepareMarkdownTableCellLineBreaksForEditor(markdown: string): s
   return applyMarkdownReplacements(markdown, replacements);
 }
 
+export function needsMarkdownTableSourceComparison(previousMarkdown: string, nextMarkdown: string): boolean {
+  return previousMarkdown !== nextMarkdown && previousMarkdown.includes("|") && nextMarkdown.includes("|");
+}
+
 export function preserveUnchangedMarkdownTableSource(previousMarkdown: string, nextMarkdown: string): string {
-  if (previousMarkdown === nextMarkdown) {
+  if (!needsMarkdownTableSourceComparison(previousMarkdown, nextMarkdown)) {
     return nextMarkdown;
   }
 

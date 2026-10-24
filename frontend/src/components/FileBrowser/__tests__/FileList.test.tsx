@@ -2,8 +2,9 @@ import type { Virtualizer } from "@tanstack/react-virtual";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import { FILE_BROWSER_ROW_HEIGHT } from "../../../theme/constants";
-import type { FileEntry } from "../../../types";
+import { type FileEntry, FileType } from "../../../types";
 import { FileList } from "../FileList";
 
 const rowVirtualizerStub = {
@@ -29,7 +30,7 @@ describe("FileList", () => {
     const file: FileEntry = {
       name: "readme.txt",
       path: "readme.txt",
-      type: "file",
+      type: FileType.FILE,
       is_readable: true,
       is_hidden: false,
     };
@@ -124,7 +125,7 @@ describe("FileList", () => {
       {
         name: "readme.txt",
         path: "readme.txt",
-        type: "file",
+        type: FileType.FILE,
         size: 123,
         mime_type: "text/plain",
         modified_at: "2026-07-15T00:00:00Z",
@@ -157,7 +158,7 @@ describe("FileList", () => {
       {
         name: "readme.txt",
         path: "readme.txt",
-        type: "file",
+        type: FileType.FILE,
         size: 123,
         modified_at: "2026-07-15T00:00:00Z",
         is_readable: true,
@@ -207,7 +208,7 @@ describe("FileList", () => {
       {
         name: "readme.txt",
         path: "readme.txt",
-        type: "file",
+        type: FileType.FILE,
         size: 123,
         modified_at: "2026-07-15T00:00:00Z",
         is_readable: true,
@@ -224,7 +225,7 @@ describe("FileList", () => {
       <FileList
         files={files}
         focusedIndex={0}
-        selectedFiles={new Set([files[0].path])}
+        selectedFiles={new Set([requireTestValue(files[0]).path])}
         onFileClick={() => {}}
         onToggleItemSelection={onToggleItemSelection}
         onSelectItem={() => {}}
@@ -252,7 +253,7 @@ describe("FileList", () => {
       {
         name: "readme.txt",
         path: "readme.txt",
-        type: "file",
+        type: FileType.FILE,
         size: 123,
         modified_at: "2026-07-15T00:00:00Z",
         is_readable: true,
@@ -264,7 +265,7 @@ describe("FileList", () => {
       <FileList
         files={files}
         focusedIndex={0}
-        selectedFiles={new Set([files[0].path])}
+        selectedFiles={new Set([requireTestValue(files[0]).path])}
         onFileClick={() => {}}
         compactOverlay={<div data-testid="selection-dock-overlay" />}
         compactOverlayLayout="dock"
@@ -286,7 +287,7 @@ describe("FileList", () => {
       {
         name: "backup.zip",
         path: "backup.zip",
-        type: "file",
+        type: FileType.FILE,
         size: 123,
         modified_at: "2026-07-15T00:00:00Z",
         is_readable: true,

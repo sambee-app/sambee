@@ -52,6 +52,10 @@ export function buildCodeMirrorSurfaceTheme({
         [`.${PASSIVE_SELECTED_SEARCH_MATCH_CLASS}`]: {
           backgroundColor: currentSearchMatchBackground,
         },
+        [`.cm-content .cm-searchMatch, .cm-content .cm-searchMatch *, .cm-content .${PASSIVE_SEARCH_MATCH_CLASS}, .cm-content .${PASSIVE_SEARCH_MATCH_CLASS} *`]:
+          {
+            color: textColor,
+          },
         ".cm-cursor": {
           borderLeft: `2px solid ${textColor}`,
           marginLeft: 0,
@@ -72,6 +76,11 @@ export function buildCodeMirrorSurfaceTheme({
           outline: `1px solid ${borderColor}`,
         },
         ".cm-tooltip": {
+          backgroundColor: surfaceBackground,
+          border: `1px solid ${borderColor}`,
+          color: textColor,
+        },
+        ".sambee-source-replacement-feedback": {
           backgroundColor: surfaceBackground,
           border: `1px solid ${borderColor}`,
           color: textColor,

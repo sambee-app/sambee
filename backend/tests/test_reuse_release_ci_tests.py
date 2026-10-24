@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / ".github/scripts"))
 
@@ -19,6 +20,15 @@ RUN = {
     "event": "push",
     "status": "completed",
     "conclusion": "success",
+}
+FRONTEND_JOB = {
+    "name": "frontend",
+    "conclusion": "success",
+    "steps": [{"name": name, "conclusion": "success"} for name in reuse_ci.FRONTEND_REQUIRED_STEPS],
+}
+FRONTEND_COMMANDS = {
+    "Run browser correctness contracts": "cd frontend && npm run test:browser:ci",
+    "Verify frontend type correctness": "cd frontend && npm run typecheck",
 }
 
 
@@ -43,7 +53,7 @@ def test_reuse_both_successful_jobs(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch,
         [
             {"workflow_runs": [RUN]},
-            {"jobs": [{"name": "backend", "conclusion": "success"}, {"name": "frontend", "conclusion": "success"}]},
+            {"jobs": [{"name": "backend", "conclusion": "success"}, FRONTEND_JOB]},
         ],
     ) == {"backend", "frontend"}
 
@@ -53,9 +63,49 @@ def test_skipped_or_failed_jobs_are_not_reused(monkeypatch: pytest.MonkeyPatch) 
         monkeypatch,
         [
             {"workflow_runs": [RUN]},
-            {"jobs": [{"name": "backend", "conclusion": "skipped"}, {"name": "frontend", "conclusion": "success"}]},
+            {"jobs": [{"name": "backend", "conclusion": "skipped"}, FRONTEND_JOB]},
         ],
     ) == {"frontend"}
+
+
+@pytest.mark.parametrize("conclusion", ["skipped", "failure", "cancelled", None])
+@pytest.mark.parametrize("required_step", FRONTEND_COMMANDS)
+def test_frontend_reuse_requires_each_successful_gate(monkeypatch: pytest.MonkeyPatch, conclusion: str | None, required_step: str) -> None:
+    job = {
+        **FRONTEND_JOB,
+        "steps": [{"name": name, "conclusion": conclusion if name == required_step else "success"} for name in FRONTEND_COMMANDS],
+    }
+    assert run_lookup(monkeypatch, [{"workflow_runs": [RUN]}, {"jobs": [job]}]) == set()
+
+
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
+def test_legacy_advisory_type_check_is_not_release_evidence(monkeypatch: pytest.MonkeyPatch, conclusion: str) -> None:
+    job = {
+        **FRONTEND_JOB,
+        "steps": [
+            {"name": "Run browser correctness contracts", "conclusion": "success"},
+            {"name": "TypeScript type check", "conclusion": conclusion},
+        ],
+    }
+    assert run_lookup(monkeypatch, [{"workflow_runs": [RUN]}, {"jobs": [job]}]) == set()
+
+
+def test_legacy_frontend_job_without_browser_checks_is_not_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert run_lookup(monkeypatch, [{"workflow_runs": [RUN]}, {"jobs": [{"name": "frontend", "conclusion": "success"}]}]) == set()
+
+
+@pytest.mark.parametrize("name,job", [("test.yml", "frontend"), ("docker-image-preview-publish.yml", "validate-tests")])
+def test_ci_and_release_require_the_same_browser_contract(name: str, job: str) -> None:
+    assert reuse_ci.FRONTEND_REQUIRED_STEPS == FRONTEND_COMMANDS.keys()
+    source = Path(__file__).resolve().parents[2] / ".github/workflows" / name
+    steps = yaml.safe_load(source.read_text())["jobs"][job]["steps"]
+    browser_steps = [step for step in steps if step.get("name") in reuse_ci.FRONTEND_REQUIRED_STEPS]
+    assert len(browser_steps) == len(reuse_ci.FRONTEND_REQUIRED_STEPS)
+    assert all(step["run"] == FRONTEND_COMMANDS[step["name"]] and not step.get("continue-on-error") for step in browser_steps)
+    commands = [step.get("run") for step in steps]
+    assert "cd frontend && npm run build" in commands
+    assert "cd frontend && npm run test:e2e:install -- --with-deps" in commands
+    assert any(step.get("with", {}).get("path") == "frontend/test-results/ci/" and step["with"]["retention-days"] == 7 for step in steps)
 
 
 @pytest.mark.parametrize(

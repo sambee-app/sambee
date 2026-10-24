@@ -2,7 +2,12 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setOidcExchangePending } from "../../services/api";
 import { AuthSessionError, authSession } from "../../services/authSession";
-import { getBackendAvailabilitySnapshot, resetBackendAvailabilityForTests } from "../../services/backendAvailability";
+import {
+  type BackendAvailabilityStatus,
+  getBackendAvailabilitySnapshot,
+  resetBackendAvailabilityForTests,
+} from "../../services/backendAvailability";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import { useBackendRecoveryMonitor } from "../useBackendRecoveryMonitor";
 
 async function flushAsyncWork(): Promise<void> {
@@ -33,9 +38,12 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const { rerender } = renderHook(({ status }) => useBackendRecoveryMonitor({ status, onRecovered, onReconnectNow }), {
-      initialProps: { status: "available" as const },
-    });
+    const { rerender } = renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(
+      ({ status }: { status: BackendAvailabilityStatus }) => useBackendRecoveryMonitor({ status, onRecovered, onReconnectNow }),
+      {
+        initialProps: { status: "available" as const },
+      }
+    );
 
     rerender({ status: "unavailable" });
 
@@ -60,9 +68,12 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const { rerender } = renderHook(({ status }) => useBackendRecoveryMonitor({ status, onReconnectNow }), {
-      initialProps: { status: "available" as const },
-    });
+    const { rerender } = renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(
+      ({ status }: { status: BackendAvailabilityStatus }) => useBackendRecoveryMonitor({ status, onReconnectNow }),
+      {
+        initialProps: { status: "available" as const },
+      }
+    );
 
     rerender({ status: "unavailable" });
 
@@ -83,7 +94,9 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    renderHook(() => useBackendRecoveryMonitor({ status: "available" }));
+    renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(() =>
+      useBackendRecoveryMonitor({ status: "available" })
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(0);
 
@@ -100,7 +113,9 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    renderHook(() => useBackendRecoveryMonitor({ status: "available" }));
+    renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(() =>
+      useBackendRecoveryMonitor({ status: "available" })
+    );
 
     act(() => {
       window.dispatchEvent(new Event("focus"));
@@ -133,7 +148,9 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    renderHook(() => useBackendRecoveryMonitor({ status: "available" }));
+    renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(() =>
+      useBackendRecoveryMonitor({ status: "available" })
+    );
 
     act(() => {
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
@@ -148,7 +165,9 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    renderHook(() => useBackendRecoveryMonitor({ status: "available" }));
+    renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(() =>
+      useBackendRecoveryMonitor({ status: "available" })
+    );
 
     act(() => {
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
@@ -161,12 +180,15 @@ describe("useBackendRecoveryMonitor", () => {
   it("uses an authenticated recovery probe when an access token is present", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
 
-    authSession.setAuthenticated({ access_token: "token-123", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "token-123", token_type: "bearer" }), false);
     vi.stubGlobal("fetch", fetchMock);
 
-    const { rerender } = renderHook(({ status }) => useBackendRecoveryMonitor({ status }), {
-      initialProps: { status: "available" as const },
-    });
+    const { rerender } = renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(
+      ({ status }: { status: BackendAvailabilityStatus }) => useBackendRecoveryMonitor({ status }),
+      {
+        initialProps: { status: "available" as const },
+      }
+    );
 
     rerender({ status: "unavailable" });
 
@@ -188,15 +210,20 @@ describe("useBackendRecoveryMonitor", () => {
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(null, { status: 401 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
-    const refreshMock = vi.spyOn(authSession, "requestRefresh").mockResolvedValue({ access_token: "renewed-token", token_type: "bearer" });
+    const refreshMock = vi
+      .spyOn(authSession, "requestRefresh")
+      .mockResolvedValue(createMockAuthToken({ access_token: "renewed-token", token_type: "bearer" }));
     const onReconnectNow = vi.fn();
 
-    authSession.setAuthenticated({ access_token: "expired-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "expired-token", token_type: "bearer" }), false);
     vi.stubGlobal("fetch", fetchMock);
 
-    const { rerender } = renderHook(({ status }) => useBackendRecoveryMonitor({ status, onReconnectNow }), {
-      initialProps: { status: "available" as const },
-    });
+    const { rerender } = renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(
+      ({ status }: { status: BackendAvailabilityStatus }) => useBackendRecoveryMonitor({ status, onReconnectNow }),
+      {
+        initialProps: { status: "available" as const },
+      }
+    );
 
     rerender({ status: "unavailable" });
     await flushAsyncWork();
@@ -223,16 +250,18 @@ describe("useBackendRecoveryMonitor", () => {
     );
     const refresh = vi.spyOn(authSession, "requestRefresh");
     const onAuthenticationFailure = vi.fn();
-    authSession.setAuthenticated({ access_token: "session-a", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer" }), false);
     vi.stubGlobal("fetch", fetchMock);
 
-    renderHook(() => useBackendRecoveryMonitor({ status: "available", onAuthenticationFailure }));
+    renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(() =>
+      useBackendRecoveryMonitor({ status: "available", onAuthenticationFailure })
+    );
     act(() => window.dispatchEvent(new Event("focus")));
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer session-a" }) })
     );
-    authSession.setAuthenticated({ access_token: "session-b", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer" }), false);
     await act(async () => {
       finishProbe(new Response(null, { status: 401 }));
     });
@@ -257,9 +286,11 @@ describe("useBackendRecoveryMonitor", () => {
     );
     const refresh = vi.spyOn(authSession, "requestRefresh");
     const onAuthenticationFailure = vi.fn();
-    authSession.setAuthenticated({ access_token: "session-a", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer" }), false);
     setOidcExchangePending(true);
-    renderHook(() => useBackendRecoveryMonitor({ status: "available", onAuthenticationFailure }));
+    renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(() =>
+      useBackendRecoveryMonitor({ status: "available", onAuthenticationFailure })
+    );
     act(() => window.dispatchEvent(new Event("focus")));
     setOidcExchangePending(false);
     await act(async () => {
@@ -281,13 +312,15 @@ describe("useBackendRecoveryMonitor", () => {
       })
     );
     const onAuthenticationFailure = vi.fn();
-    authSession.setAuthenticated({ access_token: "session-a", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "session-a", token_type: "bearer" }), false);
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 401 })));
-    renderHook(() => useBackendRecoveryMonitor({ status: "available", onAuthenticationFailure }));
+    renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(() =>
+      useBackendRecoveryMonitor({ status: "available", onAuthenticationFailure })
+    );
     act(() => window.dispatchEvent(new Event("focus")));
     await flushAsyncWork();
     expect(refresh).toHaveBeenCalledTimes(1);
-    authSession.setAuthenticated({ access_token: "session-b", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "session-b", token_type: "bearer" }), false);
     await act(async () => {
       failRefresh(new AuthSessionError("reauthentication-required", "A expired"));
     });
@@ -304,14 +337,21 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.spyOn(authSession, "requestRefresh").mockRejectedValue(new AuthSessionError("refresh-uncertain", "Refresh result is uncertain."));
     authSession.setAuthenticated(
-      { access_token: "still-usable-token", token_type: "bearer", access_token_expires_at: new Date(Date.now() + 60_000).toISOString() },
+      createMockAuthToken({
+        access_token: "still-usable-token",
+        token_type: "bearer",
+        access_token_expires_at: new Date(Date.now() + 60_000).toISOString(),
+      }),
       true
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const { rerender } = renderHook(({ status }) => useBackendRecoveryMonitor({ status, onAuthenticationFailure }), {
-      initialProps: { status: "available" as const },
-    });
+    const { rerender } = renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(
+      ({ status }: { status: BackendAvailabilityStatus }) => useBackendRecoveryMonitor({ status, onAuthenticationFailure }),
+      {
+        initialProps: { status: "available" as const },
+      }
+    );
 
     rerender({ status: "unavailable" });
     await flushAsyncWork();
@@ -332,12 +372,15 @@ describe("useBackendRecoveryMonitor", () => {
     const onAuthenticationFailure = vi.fn();
 
     vi.spyOn(authSession, "requestRefresh").mockRejectedValue(new AuthSessionError("reauthentication-required", "Sign-in required."));
-    authSession.setAuthenticated({ access_token: "expired-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "expired-token", token_type: "bearer" }), false);
     vi.stubGlobal("fetch", fetchMock);
 
-    const { rerender } = renderHook(({ status }) => useBackendRecoveryMonitor({ status, onAuthenticationFailure }), {
-      initialProps: { status: "available" as const },
-    });
+    const { rerender } = renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(
+      ({ status }: { status: BackendAvailabilityStatus }) => useBackendRecoveryMonitor({ status, onAuthenticationFailure }),
+      {
+        initialProps: { status: "available" as const },
+      }
+    );
 
     rerender({ status: "unavailable" });
     await flushAsyncWork();
@@ -351,9 +394,12 @@ describe("useBackendRecoveryMonitor", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const { rerender } = renderHook(({ status }) => useBackendRecoveryMonitor({ status }), {
-      initialProps: { status: "available" as const },
-    });
+    const { rerender } = renderHook<ReturnType<typeof useBackendRecoveryMonitor>, { status: BackendAvailabilityStatus }>(
+      ({ status }: { status: BackendAvailabilityStatus }) => useBackendRecoveryMonitor({ status }),
+      {
+        initialProps: { status: "available" as const },
+      }
+    );
 
     rerender({ status: "reconnecting" });
 

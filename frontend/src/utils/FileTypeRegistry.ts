@@ -42,7 +42,7 @@ export type ViewerId = "image" | "markdown" | "pdf" | "text";
 
 export interface ViewerDefinition {
   id: ViewerId;
-  translationKey: string;
+  translationKey: import("i18next").ParseKeys;
   description: string;
 }
 

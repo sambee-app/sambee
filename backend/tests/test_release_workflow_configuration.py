@@ -80,8 +80,11 @@ def test_docker_release_reuses_only_verified_source_ci_jobs() -> None:
     frontend_steps = (
         "Set up Node.js",
         "Install frontend dependencies",
-        "Run frontend type checks",
+        "Verify frontend type correctness",
         "Run frontend tests",
+        "Build production frontend for browser checks",
+        "Install browser dependencies",
+        "Run browser correctness contracts",
     )
     for component, names in (("backend", backend_steps), ("frontend", frontend_steps)):
         for name in names:

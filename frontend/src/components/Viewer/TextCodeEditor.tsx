@@ -1,21 +1,25 @@
-import { LanguageDescription } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
-import { findNext, findPrevious, replaceAll, replaceNext } from "@codemirror/search";
 import type { Extension } from "@codemirror/state";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { loadNativeLanguage, resolveFilename } from "../../utils/codeMirrorHighlighting";
 import { buildPassiveSearchHighlightExtension } from "../Editor/buildCodeMirrorSearchHighlights";
 import { buildCommonEditorExtensions } from "../Editor/buildCommonEditorExtensions";
 import { buildTextEditorTheme, type TextEditorThemeOptions } from "../Editor/buildTextEditorTheme";
 import { SourceTextEditor } from "../Editor/SourceTextEditor";
-import type { SourceTextEditorHandle } from "../Editor/sourceTextEditorTypes";
+import type { SourceTextEditorHandle, SourceTextSnapshot } from "../Editor/sourceTextEditorTypes";
 import {
+  findNext,
+  findPrevious,
   getCodeMirrorFindReplaceMetrics,
+  replaceAll,
+  replaceNext,
   shouldAutoNavigateCodeMirrorFindReplace,
   updateCodeMirrorFindReplaceQuery,
 } from "./codeMirrorFindReplace";
 
 export interface TextCodeEditorHandle {
   focus: () => void;
+  captureSnapshot: (signal?: AbortSignal) => Promise<SourceTextSnapshot>;
+  captureSnapshotSync: () => SourceTextSnapshot;
   flushPendingEdits: () => Promise<void>;
   getCanonicalText: () => string;
   getPrimarySelectionText: () => string;
@@ -29,6 +33,8 @@ export interface TextCodeEditorHandle {
 }
 
 export interface TextCodeEditorSearchState {
+  pending?: boolean;
+  error?: string;
   searchText: string;
   searchMatches: number;
   currentMatch: number;
@@ -96,7 +102,7 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
     } | null>(null);
     const extensions = useMemo(
       () => [
-        ...buildCommonEditorExtensions({ highlightSelectionMatches: false, lineWrapping }),
+        ...buildCommonEditorExtensions({ defaultSyntaxHighlighting: false, highlightSelectionMatches: false, lineWrapping }),
         ...buildTextEditorTheme(theme),
         buildPassiveSearchHighlightExtension(),
         ...languageExtensions,
@@ -105,15 +111,14 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
     );
     useEffect(() => {
       let cancelled = false;
-      const languageDescription = LanguageDescription.matchFilename(languages, filename);
+      const resolved = resolveFilename(filename);
 
-      if (!languageDescription) {
+      if (!("language" in resolved)) {
         setLanguageExtensions(EMPTY_EXTENSIONS);
         return;
       }
 
-      void languageDescription
-        .load()
+      void loadNativeLanguage(resolved.language)
         .then((support) => {
           if (cancelled) {
             return;
@@ -139,6 +144,8 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
 
       const metrics = getCodeMirrorFindReplaceMetrics(editorRef.current?.getView());
       onSearchStateChange({
+        pending: metrics.pending,
+        error: metrics.error,
         searchText: searchOpen ? searchText : "",
         searchMatches: searchOpen ? metrics.matches : 0,
         currentMatch: searchOpen ? metrics.currentMatch : 0,
@@ -196,12 +203,23 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
       searchWholeWord,
     ]);
 
+    const captureSnapshotSync = useCallback((): SourceTextSnapshot => {
+      const editor = editorRef.current;
+      if (!editor) throw new Error("Cannot capture a snapshot after the text editor is disposed");
+      return editor.captureSnapshot();
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
         focus: () => {
           editorRef.current?.focus();
         },
+        captureSnapshot: async (signal) => {
+          signal?.throwIfAborted();
+          return captureSnapshotSync();
+        },
+        captureSnapshotSync,
         flushPendingEdits: async () => {},
         getCanonicalText: () => editorRef.current?.getValue() ?? text,
         getPrimarySelectionText: () => editorRef.current?.getPrimarySelectionText() ?? "",
@@ -230,7 +248,7 @@ export const TextCodeEditor = forwardRef<TextCodeEditorHandle, TextCodeEditorPro
           reportSearchState();
         },
       }),
-      [reportSearchState, text]
+      [captureSnapshotSync, reportSearchState, text]
     );
 
     return (

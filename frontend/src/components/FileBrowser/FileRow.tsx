@@ -54,7 +54,7 @@ interface FileRowProps {
 export const shortenTargetPath = abbreviatePath;
 
 function getCompactFileMetadata(file: FileEntry): string | null {
-  if (file.type === "directory" || file.link_target?.target.type === "directory") {
+  if (file.type === "directory" || file.link_target?.target?.type === "directory") {
     return null;
   }
 

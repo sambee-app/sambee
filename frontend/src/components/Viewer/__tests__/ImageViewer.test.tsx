@@ -287,7 +287,7 @@ describe("ImageViewer", () => {
       currentImageLoadPhase: "decoding" as const,
       imageSourceRevision: 0,
       markImageAsDecoded,
-      getCachedImageSrc: () => undefined,
+      getCachedImageSrc: (): string | undefined => undefined,
     };
     mockUseCachedImageGallery.mockImplementation(() => gallery);
 

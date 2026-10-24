@@ -1,5 +1,6 @@
 import { createTheme } from "@mui/material";
 import { describe, expect, it } from "vitest";
+import { requireTestValue } from "../../../test/helpers/assertions";
 import { COMPACT_LAYOUT_SIZE } from "../../../theme/constants";
 import { settingsCompactTypographyScopeSx } from "../settingsTypographyStyles";
 
@@ -24,7 +25,7 @@ describe("settings compact typography", () => {
       throw new Error("Settings compact typography must remain theme-aware.");
     }
 
-    const styles = settingsCompactTypographyScopeSx(theme);
+    const styles = requireTestValue(settingsCompactTypographyScopeSx(theme));
     const compactStyles = styles[theme.breakpoints.down("sm")];
 
     expect(compactStyles).toMatchObject({

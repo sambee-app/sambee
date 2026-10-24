@@ -1,3 +1,4 @@
+import { requireTestValue } from "../../test/helpers/assertions";
 /**
  * Contract tests for Viewer API
  *
@@ -125,7 +126,7 @@ describe("Viewer API Contract Tests", () => {
       });
 
       // Verify request included viewport parameters
-      const callArgs = mockAxiosInstance.get.mock.calls[0];
+      const callArgs = requireTestValue(mockAxiosInstance.get.mock.calls[0]);
       expect(callArgs[0]).toBe(`/viewer/${testConnectionId}/file`);
       expect(callArgs[1]?.params).toHaveProperty("viewport_width");
       expect(callArgs[1]?.params).toHaveProperty("viewport_height");
@@ -146,7 +147,7 @@ describe("Viewer API Contract Tests", () => {
       });
 
       // Verify no_resizing parameter was sent
-      const callArgs = mockAxiosInstance.get.mock.calls[0];
+      const callArgs = requireTestValue(mockAxiosInstance.get.mock.calls[0]);
       expect(callArgs[1]?.params).toHaveProperty("no_resizing", 1);
     });
 
@@ -166,7 +167,7 @@ describe("Viewer API Contract Tests", () => {
       });
 
       // Verify signal was passed
-      const callArgs = mockAxiosInstance.get.mock.calls[0];
+      const callArgs = requireTestValue(mockAxiosInstance.get.mock.calls[0]);
       expect(callArgs[1]?.signal).toBe(abortController.signal);
     });
 
@@ -245,7 +246,7 @@ describe("Viewer API Contract Tests", () => {
       });
 
       // Verify signal was passed
-      const callArgs = mockAxiosInstance.get.mock.calls[0];
+      const callArgs = requireTestValue(mockAxiosInstance.get.mock.calls[0]);
       expect(callArgs[1]?.signal).toBe(abortController.signal);
     });
 
@@ -260,7 +261,10 @@ describe("Viewer API Contract Tests", () => {
 
       await apiService.getPdfBlob(testConnectionId, "/document.pdf", { pdfVariant: "normalized" });
 
-      expect(mockAxiosInstance.get.mock.calls[0][1]?.params).toEqual({ path: "/document.pdf", pdf_variant: "normalized" });
+      expect(requireTestValue(mockAxiosInstance.get.mock.calls[0])[1]?.params).toEqual({
+        path: "/document.pdf",
+        pdf_variant: "normalized",
+      });
     });
 
     it("should include the physical display profile for compatibility selection", async () => {
@@ -277,7 +281,7 @@ describe("Viewer API Contract Tests", () => {
         screenProfile: { width: 5120, height: 2880, zoomPercent: 200 },
       });
 
-      expect(mockAxiosInstance.get.mock.calls[0][1]?.params).toEqual({
+      expect(requireTestValue(mockAxiosInstance.get.mock.calls[0])[1]?.params).toEqual({
         path: "/document.pdf",
         pdf_variant: "normalized",
         screen_width: 5120,

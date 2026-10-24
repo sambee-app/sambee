@@ -75,7 +75,8 @@ def _duplicate_name_zip_bytes() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
         archive.writestr("duplicate.txt", b"first")
-        archive.writestr("duplicate.txt", b"second entry")
+        with pytest.warns(UserWarning, match=r"^Duplicate name: 'duplicate\.txt'$"):
+            archive.writestr("duplicate.txt", b"second entry")
     return buffer.getvalue()
 
 

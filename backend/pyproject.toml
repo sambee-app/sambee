@@ -9,7 +9,6 @@ addopts = [
     "--strict-config",
     "--tb=short",
     "-q",
-    "--disable-warnings",
 ]
 log_cli = false
 log_level = "ERROR"
@@ -22,8 +21,7 @@ markers = [
     "security: Security vulnerability tests",
 ]
 filterwarnings = [
-    # Ignore resource warnings from test cleanup (handled in fixtures)
-    "ignore::ResourceWarning",
+    "error",
     # Starlette 1.6.0's TestClient still references AnyIO's deprecated alias.
     "ignore:The anyio\\.abc\\.BlockingPortal alias is deprecated, use anyio\\.from_thread\\.BlockingPortal instead\\.:DeprecationWarning:starlette\\.testclient",
 ]
@@ -55,7 +53,7 @@ indent-style = "space"
 
 [tool.ruff.lint]
 # Only enable essential rules (no extended plugins)
-select = ["E4", "E7", "E9", "F", "I"]
+select = ["E4", "E7", "E9", "EXE", "F", "I"]
 ignore = [
     "E501", # line too long handled by formatter/tests
 ]

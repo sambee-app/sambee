@@ -1,3 +1,4 @@
+import { requireTestValue } from "../../test/helpers/assertions";
 /**
  * Mobile Logging API Contract Tests
  *
@@ -402,7 +403,7 @@ describe("Mobile Logging API Contract Tests", () => {
       expect(typeof result.total_size).toBe("number");
 
       // Verify file structure
-      const file = result.files[0];
+      const file = requireTestValue(result.files[0]);
       expect(file).toHaveProperty("filename");
       expect(file).toHaveProperty("size");
       expect(file).toHaveProperty("modified");

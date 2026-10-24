@@ -1,6 +1,5 @@
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
-import { tags } from "@lezer/highlight";
+import { nativeSyntaxHighlighting } from "../../utils/codeMirrorHighlighting";
 import { buildCodeMirrorSurfaceTheme, type CodeMirrorSurfaceThemeOptions } from "./buildCodeMirrorSurfaceTheme";
 import { buildSelectionLayerTheme } from "./buildEditorSelectionLayer";
 
@@ -16,12 +15,6 @@ export function buildTextEditorTheme({ accentColor, ...surfaceOptions }: TextEdi
       selectionBackground: surfaceOptions.selectionBackground,
       surfaceBackground: surfaceOptions.surfaceBackground,
     }),
-    syntaxHighlighting(
-      HighlightStyle.define([
-        { tag: [tags.keyword, tags.controlKeyword, tags.operatorKeyword], color: accentColor },
-        { tag: [tags.string, tags.url], color: accentColor },
-        { tag: [tags.comment], color: `${surfaceOptions.textColor}99`, fontStyle: "italic" },
-      ])
-    ),
+    nativeSyntaxHighlighting,
   ];
 }

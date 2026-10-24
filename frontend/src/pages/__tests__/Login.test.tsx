@@ -4,7 +4,9 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../services/authSession";
 import { OIDC_ATTEMPT_MARKER, OIDC_LOGIN_CHANNEL, OIDC_LOGOUT_MARKER } from "../../services/oidcAuth";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import { render } from "../../test/utils/test-utils";
+import type { AuthToken } from "../../types";
 import Login from "../Login";
 
 // Mock the entire API module
@@ -90,7 +92,9 @@ describe("Login Component", () => {
 
   it.each(["/browse/smb/demo", "/settings/appearance"])("recovers the tab's own destination %s after another OIDC login", async (path) => {
     vi.stubGlobal("BroadcastChannel", LoginChannel);
-    vi.spyOn(authSession, "requestRefresh").mockResolvedValue({ access_token: "restored-token", token_type: "bearer" });
+    vi.spyOn(authSession, "requestRefresh").mockResolvedValue(
+      createMockAuthToken({ access_token: "restored-token", token_type: "bearer" })
+    );
     vi.mocked(mockGetAuthConfig).mockResolvedValue({
       sign_in_mode: "oidc_or_password",
       oidc: { display_name: "Example Identity", authorization_path: "/api/auth/oidc/authorize" },
@@ -120,7 +124,7 @@ describe("Login Component", () => {
     const refresh = vi
       .spyOn(authSession, "requestRefresh")
       .mockRejectedValueOnce(new Error("No browser session"))
-      .mockResolvedValueOnce({ access_token: "restored-token", token_type: "bearer" });
+      .mockResolvedValueOnce(createMockAuthToken({ access_token: "restored-token", token_type: "bearer" }));
     vi.mocked(mockGetAuthConfig).mockResolvedValue({
       sign_in_mode: "oidc_or_password",
       oidc: { display_name: "Example Identity", authorization_path: "/api/auth/oidc/authorize" },
@@ -146,7 +150,9 @@ describe("Login Component", () => {
 
   it("recovers on focus when BroadcastChannel is unavailable", async () => {
     vi.stubGlobal("BroadcastChannel", undefined);
-    const refresh = vi.spyOn(authSession, "requestRefresh").mockResolvedValue({ access_token: "restored-token", token_type: "bearer" });
+    const refresh = vi
+      .spyOn(authSession, "requestRefresh")
+      .mockResolvedValue(createMockAuthToken({ access_token: "restored-token", token_type: "bearer" }));
     vi.mocked(mockGetAuthConfig).mockResolvedValue({
       sign_in_mode: "oidc_or_password",
       oidc: { display_name: "Example Identity", authorization_path: "/api/auth/oidc/authorize" },
@@ -203,8 +209,8 @@ describe("Login Component", () => {
 
   it("lets a login hint supersede a pending focus refresh", async () => {
     vi.stubGlobal("BroadcastChannel", LoginChannel);
-    let finishFocus!: (response: { access_token: string; token_type: string }) => void;
-    let finishHint!: (response: { access_token: string; token_type: string }) => void;
+    let finishFocus!: (response: AuthToken) => void;
+    let finishHint!: (response: AuthToken) => void;
     const refresh = vi
       .spyOn(authSession, "requestRefresh")
       .mockReturnValueOnce(
@@ -236,15 +242,15 @@ describe("Login Component", () => {
     expect(refresh).toHaveBeenCalledTimes(2);
     expect(refresh).toHaveBeenNthCalledWith(2, { newLogin: true });
 
-    await act(async () => finishFocus({ access_token: "old-session", token_type: "bearer" }));
+    await act(async () => finishFocus(createMockAuthToken({ access_token: "old-session", token_type: "bearer" })));
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-    await act(async () => finishHint({ access_token: "new-session", token_type: "bearer" }));
+    await act(async () => finishHint(createMockAuthToken({ access_token: "new-session", token_type: "bearer" })));
     expect(await screen.findByText("/browse")).toBeInTheDocument();
   });
 
   it("waits for a login hint received during configuration loading before starting OIDC", async () => {
     vi.stubGlobal("BroadcastChannel", LoginChannel);
-    let finishRefresh!: (response: { access_token: string; token_type: string }) => void;
+    let finishRefresh!: (response: AuthToken) => void;
     vi.spyOn(authSession, "requestRefresh").mockReturnValue(
       new Promise((resolve) => {
         finishRefresh = resolve;
@@ -267,7 +273,7 @@ describe("Login Component", () => {
     await waitFor(() => expect(authSession.requestRefresh).toHaveBeenCalledOnce());
     expect(window.location.assign).not.toHaveBeenCalled();
 
-    finishRefresh({ access_token: "restored-token", token_type: "bearer" });
+    finishRefresh(createMockAuthToken({ access_token: "restored-token", token_type: "bearer" }));
     expect(await screen.findByText("/browse")).toBeInTheDocument();
     expect(window.location.assign).not.toHaveBeenCalled();
   });

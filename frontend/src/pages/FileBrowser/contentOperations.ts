@@ -36,6 +36,7 @@ export async function downloadContentSelection(
 ): Promise<void> {
   const item = items[0];
   if (!item || !items.every((selected) => selected.entry.is_readable)) throw new Error("Select readable items to download");
+  const virtualSource = item.handle.kind === "virtual" ? item.handle.location.source.path : null;
   if (items.length > 1 || item.entry.type === FileType.DIRECTORY) {
     if (item.handle.kind === "physical" && items.every((selected) => selected.handle.kind === "physical")) {
       await downloadPhysicalSelection(
@@ -50,7 +51,7 @@ export async function downloadContentSelection(
         (selected) =>
           selected.handle.kind === "virtual" &&
           selected.handle.location.providerId === "zip" &&
-          selected.handle.location.source.path === item.handle.location.source.path
+          selected.handle.location.source.path === virtualSource
       )
     ) {
       await downloadZipSelection(
@@ -488,6 +489,13 @@ export async function executeTransferTree(
   };
   const preservePartialEffects = (result: ContentTransferResult): ContentTransferResult => {
     if (result.status === "skipped") return result;
+    if (result.status === "completed_with_source_retained") {
+      const effects = partialEffects();
+      if (effects.source === "unknown" || effects.destination === "unknown") {
+        return { status: "outcome_unknown", replaced, effects };
+      }
+      return { ...result, replaced, effects: { source: effects.source, destination: effects.destination } };
+    }
     return { ...result, replaced, effects: partialEffects() };
   };
   const decide = async (

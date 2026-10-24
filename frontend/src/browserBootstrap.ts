@@ -9,6 +9,9 @@ if (!("withResolvers" in Promise) || typeof Promise.withResolvers !== "function"
 if (!("toReversed" in Array.prototype) || typeof Array.prototype.toReversed !== "function") {
   missingFeatures.push("Array.prototype.toReversed");
 }
+if (typeof globalThis.Worker !== "function") {
+  missingFeatures.push("Web Workers");
+}
 
 const simulateUnsupportedBrowser = import.meta.env.DEV && new URLSearchParams(window.location.search).has("simulateUnsupportedBrowser");
 if (simulateUnsupportedBrowser) {

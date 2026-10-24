@@ -42,12 +42,14 @@ function getViewportSize(): ResizableDialogViewport {
 }
 
 function isResizableDialogSize(value: unknown): value is ResizableDialogSize {
-  if (typeof value !== "object" || value === null) {
+  if (typeof value !== "object" || value === null || !("width" in value) || !("height" in value)) {
     return false;
   }
 
-  const { width, height } = value as Partial<ResizableDialogSize>;
-  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0;
+  const { width, height } = value;
+  return (
+    typeof width === "number" && typeof height === "number" && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+  );
 }
 
 function clampDimension(value: number, minimum: number, maximum: number): number {

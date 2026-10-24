@@ -11,6 +11,8 @@ export function areMarkdownSearchStatesEqual(
     previousState.isSearchOpen === nextState.isSearchOpen &&
     previousState.isSearchable === nextState.isSearchable &&
     previousState.isValid === nextState.isValid &&
+    previousState.pending === nextState.pending &&
+    previousState.error === nextState.error &&
     previousState.viewMode === nextState.viewMode
   );
 }

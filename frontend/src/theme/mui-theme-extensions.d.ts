@@ -3,12 +3,14 @@
  */
 
 import "@mui/material/styles";
-import type { ThemeConfig } from "./types";
+import type { SyntaxPalette, ThemeConfig } from "./types";
 
 type MarkdownDocumentColors = NonNullable<NonNullable<ThemeConfig["components"]>["markdownViewer"]>["document"];
 
 declare module "@mui/material/styles" {
   interface Palette {
+    link?: { main: string; hover: string };
+    syntax?: SyntaxPalette;
     chrome?: string;
     markdownDocument?: MarkdownDocumentColors;
     appBar?: {
@@ -24,6 +26,8 @@ declare module "@mui/material/styles" {
   }
 
   interface PaletteOptions {
+    link?: { main: string; hover: string };
+    syntax?: SyntaxPalette;
     chrome?: string;
     markdownDocument?: MarkdownDocumentColors;
     appBar?: {

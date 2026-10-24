@@ -1,11 +1,17 @@
 import { Annotation, Compartment, EditorSelection, EditorState, type TransactionSpec } from "@codemirror/state";
 import { type Command, EditorView, type ViewUpdate } from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { useTheme } from "@mui/material";
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
+import { getSyntaxVariables } from "../../theme/syntaxStyles";
 import { CODEMIRROR_EDITOR_HORIZONTAL_INSET_CSS_VARIABLE } from "../../theme/viewerStyles";
 import { getCodeMirrorHorizontalInset } from "./getCodeMirrorHorizontalInset";
 import type { SourceTextEditorHandle, SourceTextEditorProps } from "./sourceTextEditorTypes";
 
 const EXTERNAL_SYNC_ANNOTATION = Annotation.define<boolean>();
+export const SOURCE_EDITOR_MEASURES = {
+  serialize: "sambee:source-editor:serialize",
+  publish: "sambee:source-editor:publish",
+} as const;
 
 const sourceTextEditorBaseTheme = EditorView.theme({
   "&": {
@@ -82,13 +88,16 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
     },
     ref
   ) => {
+    const muiTheme = useTheme();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
+    const revisionRef = useRef(0);
     const preservedSelectionRef = useRef<PreservedSelectionSnapshot | null>(null);
     const readOnlyCompartmentRef = useRef(new Compartment());
     const extensionsCompartmentRef = useRef(new Compartment());
     const contentAttributesCompartmentRef = useRef(new Compartment());
     const initialValueRef = useRef(value);
+    const publishedValueRef = useRef(value);
     const initialExtensionsRef = useRef(extensions);
     const appliedExtensionsRef = useRef(extensions);
     const initialReadOnlyRef = useRef(readOnly);
@@ -113,6 +122,7 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       }
 
       const updateListener = EditorView.updateListener.of((viewUpdate: ViewUpdate) => {
+        if (viewUpdate.docChanged) revisionRef.current += 1;
         onUpdateRef.current?.(viewUpdate, viewUpdate.view);
 
         if (!viewUpdate.docChanged) {
@@ -126,7 +136,16 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
         }
 
         onUserEditRef.current?.(viewUpdate);
-        onChangeRef.current(viewUpdate.state.doc.toString(), viewUpdate);
+        const serializationStart = performance.now();
+        const nextValue = viewUpdate.state.doc.toString();
+        const detail = { revision: revisionRef.current, documentUnits: nextValue.length };
+        performance.clearMeasures(SOURCE_EDITOR_MEASURES.serialize);
+        performance.measure(SOURCE_EDITOR_MEASURES.serialize, { start: serializationStart, detail });
+        publishedValueRef.current = nextValue;
+        const publicationStart = performance.now();
+        onChangeRef.current(nextValue, viewUpdate);
+        performance.clearMeasures(SOURCE_EDITOR_MEASURES.publish);
+        performance.measure(SOURCE_EDITOR_MEASURES.publish, { start: publicationStart, detail });
       });
 
       const initialState = EditorState.create({
@@ -198,23 +217,21 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       appliedExtensionsRef.current = extensions;
       view.dispatch({
         effects: extensionsCompartmentRef.current.reconfigure(extensions),
-        scrollIntoView: true,
       });
     }, [extensions]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
       const view = viewRef.current;
 
       if (!view) {
         return;
       }
 
-      const currentValue = view.state.doc.toString();
-
-      if (currentValue === value) {
+      if (publishedValueRef.current === value) {
         return;
       }
 
+      publishedValueRef.current = value;
       const currentSelection = view.state.selection.main;
       const nextAnchor = Math.min(currentSelection.anchor, value.length);
       const nextHead = Math.min(currentSelection.head, value.length);
@@ -231,6 +248,23 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       () => ({
         focus: () => {
           viewRef.current?.focus();
+        },
+        captureSnapshot: () => {
+          const view = viewRef.current;
+          if (!view) throw new Error("Cannot capture a snapshot after the source editor is disposed");
+          if (
+            view.compositionStarted ||
+            Array.from(view.dom.querySelectorAll<HTMLElement>(".cm-editor")).some(
+              (element) => EditorView.findFromDOM(element)?.compositionStarted
+            )
+          ) {
+            throw new DOMException(
+              "Finish the current input method composition before saving or creating a recovery snapshot.",
+              "InvalidStateError"
+            );
+          }
+          const doc = view.state.doc;
+          return Object.freeze({ revision: revisionRef.current, serialize: () => doc.toString() });
         },
         getValue: () => viewRef.current?.state.doc.toString() ?? value,
         getPrimarySelectionText: () => {
@@ -272,14 +306,19 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
           }
 
           const clampedSnapshot = clampSelectionSnapshot(snapshot, view.state.doc.length);
-
-          view.dispatch({
-            selection: EditorSelection.fromJSON(clampedSnapshot.selection),
-            scrollIntoView: false,
-          });
-          view.focus();
-          view.scrollDOM.scrollTop = clampedSnapshot.scrollTop;
-          view.scrollDOM.scrollLeft = clampedSnapshot.scrollLeft;
+          const startedAt = performance.now();
+          try {
+            view.dispatch({
+              selection: EditorSelection.fromJSON(clampedSnapshot.selection),
+              scrollIntoView: false,
+            });
+            view.focus();
+            view.scrollDOM.scrollTop = clampedSnapshot.scrollTop;
+            view.scrollDOM.scrollLeft = clampedSnapshot.scrollLeft;
+          } finally {
+            performance.clearMeasures("sambee:source-editor:restore-selection");
+            performance.measure("sambee:source-editor:restore-selection", { start: startedAt });
+          }
 
           return view.hasFocus;
         },
@@ -305,7 +344,7 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       [value]
     );
 
-    return <div ref={containerRef} className={className} />;
+    return <div ref={containerRef} className={className} style={getSyntaxVariables(muiTheme)} />;
   }
 );
 

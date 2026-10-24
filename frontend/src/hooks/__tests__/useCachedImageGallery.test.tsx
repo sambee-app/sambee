@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import apiService from "../../services/api";
 import { logger } from "../../services/logger";
 import { PreviewUnavailableError } from "../../services/previewPolicy";
+import { uninitializedTestCallback } from "../../test/helpers/assertions";
 import { IMAGE_LOAD_CANCELED_MESSAGE, IMAGE_LOAD_FAILED_MESSAGE, useCachedImageGallery } from "../useCachedImageGallery";
 
 vi.mock("../../services/api", () => ({
@@ -406,7 +406,7 @@ describe("useCachedImageGallery", () => {
 
   it("retries an in-flight preload once after it is promoted to the current image", async () => {
     const requestedPaths: string[] = [];
-    let rejectFirstPreloadAttempt: ((error: unknown) => void) | null = null;
+    let rejectFirstPreloadAttempt: (error: unknown) => void = uninitializedTestCallback;
     let preloadAttempts = 0;
 
     vi.mocked(apiService.getImageBlob).mockImplementation((_connectionId: string, path: string, options?: { signal?: AbortSignal }) => {
@@ -534,7 +534,7 @@ describe("useCachedImageGallery", () => {
 
   it("does not retry a request after it is demoted from current to overlap", async () => {
     const requestedPaths: string[] = [];
-    let rejectCurrentAttempt: ((error: unknown) => void) | null = null;
+    let rejectCurrentAttempt: (error: unknown) => void = uninitializedTestCallback;
     let firstPathAttempts = 0;
 
     vi.mocked(apiService.getImageBlob).mockImplementation((_connectionId: string, path: string, _options?: { signal?: AbortSignal }) => {
@@ -712,7 +712,7 @@ describe("useCachedImageGallery", () => {
 
   it("does not relaunch a request that fails after being demoted from current to overlap", async () => {
     const requestedPaths: string[] = [];
-    let rejectDemotedAttempt: ((error: unknown) => void) | null = null;
+    let rejectDemotedAttempt: (error: unknown) => void = uninitializedTestCallback;
 
     vi.mocked(apiService.getImageBlob).mockImplementation((_connectionId: string, path: string) => {
       requestedPaths.push(path);
@@ -795,7 +795,7 @@ describe("useCachedImageGallery", () => {
     });
 
     const { rerender } = renderHook(
-      ({ connectionId, images }) =>
+      ({ connectionId, images }: { connectionId: string; images: string[] }) =>
         useCachedImageGallery({
           connectionId,
           loadImageBlob: loadMockImageBlob,
@@ -806,7 +806,6 @@ describe("useCachedImageGallery", () => {
       {
         initialProps: {
           connectionId: "conn-1",
-          loadImageBlob: (path, options) => apiService.getImageBlob("conn-1", path, options),
           images: ["/a0.jpg", "/shared.jpg", "/a2.jpg"],
         },
       }
@@ -818,7 +817,6 @@ describe("useCachedImageGallery", () => {
 
     rerender({
       connectionId: "conn-1",
-      loadImageBlob: (path, options) => apiService.getImageBlob("conn-1", path, options),
       images: ["/b0.jpg", "/shared.jpg", "/b2.jpg"],
     });
 
@@ -1182,7 +1180,7 @@ describe("useCachedImageGallery", () => {
   });
 
   it("does not let a previous gallery request populate the new gallery cache when it resolves late", async () => {
-    let resolveOldGalleryCurrent: ((blob: Blob) => void) | null = null;
+    let resolveOldGalleryCurrent: (blob: Blob) => void = uninitializedTestCallback;
     const requestedPaths: string[] = [];
 
     vi.mocked(apiService.getImageBlob).mockImplementation((_connectionId: string, path: string) => {

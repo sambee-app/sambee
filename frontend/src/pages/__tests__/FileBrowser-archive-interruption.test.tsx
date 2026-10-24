@@ -8,6 +8,7 @@ import {
   storeForegroundArchiveOperation,
 } from "../../services/foregroundArchiveOperation";
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
+import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { renderBrowser } from "./FileBrowser.test.utils";
 
@@ -18,7 +19,7 @@ describe("FileBrowser archive interruption recovery", () => {
     vi.clearAllMocks();
     resetCurrentUserSettingsStoreForTests();
     clearForegroundArchiveOperation();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     setupSuccessfulApiMocks(api as unknown as ApiMock);
   });
 

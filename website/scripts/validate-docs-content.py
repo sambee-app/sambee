@@ -1,14 +1,12 @@
-#!/usr/bin/env python3
 """Validate website docs navigation, content bundles, and inheritance markers."""
 
 from __future__ import annotations
 
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 WEBSITE_DIR = Path(__file__).resolve().parent.parent
 DOCS_CONTENT_DIR = WEBSITE_DIR / "content" / "docs"

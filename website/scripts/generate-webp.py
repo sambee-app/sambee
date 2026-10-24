@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Generate responsive WebP derivatives for website asset images.
 
 Source images live under ``website/assets/images``. For each JPG or PNG source,

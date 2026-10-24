@@ -64,7 +64,7 @@ describe("useSystemSettingPersistence", () => {
       await expect(outcome!).resolves.toMatchObject({ status: "failed" });
       expect(requestSignal?.aborted).toBe(true);
       expect(result.current.isPending("limit")).toBe(false);
-      expect(result.current.fieldErrors.limit).toBe("Saving this setting timed out. Check the connection and try again.");
+      expect(result.current.fieldErrors["limit"]).toBe("Saving this setting timed out. Check the connection and try again.");
     } finally {
       vi.useRealTimers();
     }

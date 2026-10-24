@@ -32,6 +32,7 @@ import type { StorageBackendRegistry } from "../../services/storageContracts";
 import { useSambeeTheme } from "../../theme";
 import type { FileEntry, RecentFileValidationError } from "../../types";
 import { FileType, isApiError } from "../../types";
+import { getApiErrorMessage } from "../../utils/apiErrors";
 import { getAllViewerIds, getCompatibleViewerIds, getFileTypeByExtension, isImageFile, type ViewerId } from "../../utils/FileTypeRegistry";
 import { compareLocalizedStrings } from "../../utils/localeFormatting";
 import { getConnectionById, isConnectionReadOnly } from "./access";
@@ -113,6 +114,8 @@ const UNAVAILABLE_STORAGE_REGISTRY: StorageBackendRegistry = {
       writable: false,
       canList: false,
       canReadArchive: false,
+      canEditText: false,
+      preview: { imageConversion: false, imageResizing: false, pdfNormalization: false },
       canWriteFile: false,
       canResolveActivation: false,
       canOpenInNativeApp: false,
@@ -560,9 +563,10 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   const latestVirtualActivationIdRef = React.useRef(0);
   const pendingLocationRef = React.useRef<{ connectionId: string; path: string } | null>(null);
   const latestLocalActivationRequestIdRef = React.useRef(0);
-  const loadPhysicalDirectoryRef =
-    React.useRef<(path: string, forceRefresh?: boolean, preserveVisibleContent?: boolean) => Promise<void>>();
-  const loadArchiveFilesRef = React.useRef<(location: ArchiveLocation, append?: boolean) => Promise<void>>();
+  const loadPhysicalDirectoryRef = React.useRef<
+    ((path: string, forceRefresh?: boolean, preserveVisibleContent?: boolean) => Promise<void>) | undefined
+  >(undefined);
+  const loadArchiveFilesRef = React.useRef<((location: ArchiveLocation, append?: boolean) => Promise<void>) | undefined>(undefined);
   const loadMoreVirtualItemsRef = React.useRef<() => void>(() => {});
   const latestLoadRequestIdRef = React.useRef(0);
   const directoryLoadAbortRef = React.useRef<AbortController | null>(null);
@@ -959,29 +963,26 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
           setCompanionPairingError({ kind: pairingErrorKind, message: errorMessage });
         } else if (isClientTimeoutError(err)) {
           errorMessage = DIRECTORY_LOAD_TIMEOUT_ERROR;
-        } else if (err && typeof err === "object" && "message" in err) {
-          const error = err as Error & { code?: string };
-          const message = error.message;
-          if (message.includes("Network Error") || message.includes("ECONNREFUSED") || error.code === "ECONNREFUSED") {
+        } else if (err && typeof err === "object" && "message" in err && typeof err.message === "string") {
+          const message = err.message;
+          if (message.includes("Network Error") || message.includes("ECONNREFUSED") || ("code" in err && err.code === "ECONNREFUSED")) {
             errorMessage = DIRECTORY_LOAD_NETWORK_ERROR;
           } else if (isApiError(err)) {
             if (err.response?.status === 404) {
-              const detail = err.response?.data?.detail;
-              errorMessage = detail || "Directory not found. It may have been removed or renamed.";
+              errorMessage = getApiErrorMessage(err, "Directory not found. It may have been removed or renamed.");
             } else if (err.response?.status === 504) {
-              errorMessage = err.response?.data?.detail || DIRECTORY_LOAD_TIMEOUT_ERROR;
-            } else if (err.response?.data?.detail) {
-              errorMessage = err.response.data.detail;
+              errorMessage = getApiErrorMessage(err, DIRECTORY_LOAD_TIMEOUT_ERROR);
+            } else {
+              errorMessage = getApiErrorMessage(err, errorMessage);
             }
           }
         } else if (isApiError(err)) {
           if (err.response?.status === 404) {
-            const detail = err.response?.data?.detail;
-            errorMessage = detail || "Directory not found. It may have been removed or renamed.";
+            errorMessage = getApiErrorMessage(err, "Directory not found. It may have been removed or renamed.");
           } else if (err.response?.status === 504) {
-            errorMessage = err.response?.data?.detail || DIRECTORY_LOAD_TIMEOUT_ERROR;
-          } else if (err.response?.data?.detail) {
-            errorMessage = err.response.data.detail;
+            errorMessage = getApiErrorMessage(err, DIRECTORY_LOAD_TIMEOUT_ERROR);
+          } else {
+            errorMessage = getApiErrorMessage(err, errorMessage);
           }
         }
 
@@ -2813,10 +2814,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
       logger.info(`Deleted ${deleteTargets.length} item(s).`, { paths: deleteTargets.map((target) => target.handle.path) }, "file-browser");
     } catch (err: unknown) {
-      let detail = "Failed to delete item.";
-      if (isApiError(err) && err.response?.data?.detail) {
-        detail = err.response.data.detail;
-      }
+      const detail = getApiErrorMessage(err, "Failed to delete item.");
       setError(detail);
       setDeleteTargets((currentTargets) => currentTargets.slice(deletedCount));
       logger.error("Delete failed.", { error: err, paths: deleteTargets.map((target) => target.handle.path) }, "file-browser");
@@ -2885,10 +2883,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
         logger.info(`Renamed: ${renameTarget.handle.path} -> ${newName}`, undefined, "file-browser");
       } catch (err: unknown) {
-        let detail = "Failed to rename item.";
-        if (isApiError(err) && err.response?.data?.detail) {
-          detail = err.response.data.detail;
-        }
+        const detail = getApiErrorMessage(err, "Failed to rename item.");
         setRenameError(detail);
         logger.error(`Rename failed: ${renameTarget.handle.path}`, { error: err }, "file-browser");
       } finally {
@@ -2965,10 +2960,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
         logger.info(`Created ${createItemType}: ${name}`, undefined, "file-browser");
       } catch (err: unknown) {
-        let detail = "Failed to create item.";
-        if (isApiError(err) && err.response?.data?.detail) {
-          detail = err.response.data.detail;
-        }
+        const detail = getApiErrorMessage(err, "Failed to create item.");
         setCreateError(detail);
         logger.error(`Create failed: ${name}`, { error: err }, "file-browser");
       } finally {
@@ -3403,8 +3395,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       const segments = targetPath.split("/").filter(Boolean);
       let physicalPath = "";
 
-      for (let index = 0; index < segments.length; index += 1) {
-        const segment = segments[index];
+      for (const [index, segment] of segments.entries()) {
         const candidatePath = joinRoutePath(physicalPath, segment);
         const providerId = providerRegistry.getVirtualProviderIdForFilename(candidatePath);
         if (!providerId) {
@@ -3524,7 +3515,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
         // Quick-bar inputs own their keyboard interaction. File-list handlers
         // must not react while focus remains inside the quick bar.
-        if (input.dataset.quickBarInput === "true") {
+        if (input.dataset["quickBarInput"] === "true") {
           return;
         }
 

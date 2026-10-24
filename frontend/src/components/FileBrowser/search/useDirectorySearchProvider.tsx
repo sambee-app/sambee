@@ -315,7 +315,7 @@ export function useDirectorySearchProvider(
   // onSelect
   //
   const onSelect = useCallback(
-    (value: string) => {
+    (value: string): undefined => {
       if (value.startsWith(RECENT_DIRECTORY_PREFIX)) {
         const directory = recentDirectoriesRef.current.get(value.slice(RECENT_DIRECTORY_PREFIX.length));
         if (directory) {

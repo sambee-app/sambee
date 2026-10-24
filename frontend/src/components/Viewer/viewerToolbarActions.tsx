@@ -1,4 +1,4 @@
-import { Edit, Save } from "@mui/icons-material";
+import { Edit, Print, Save } from "@mui/icons-material";
 import { COMMON_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { withShortcut } from "../../hooks/useKeyboardShortcuts";
 import { translate } from "../../i18n";
@@ -70,5 +70,21 @@ export function createSaveToolbarAction({
     onClick,
     disabled,
     title: withShortcut(COMMON_SHORTCUTS.SAVE),
+  });
+}
+
+export function createPrintToolbarAction({
+  onClick,
+  isMobile,
+  disabled,
+  id = "print",
+}: CommonViewerToolbarActionOptions): ViewerToolbarAction {
+  return createIconToolbarAction({
+    id,
+    label: translate("common.actions.print"),
+    icon: <Print fontSize={getToolbarIconFontSize(isMobile)} />,
+    onClick,
+    disabled,
+    title: translate("viewer.printTitle"),
   });
 }

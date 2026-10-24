@@ -99,6 +99,19 @@ describe("AdvancedSettings", () => {
     expect(screen.queryByRole("button", { name: /save changes/i })).not.toBeInTheDocument();
   });
 
+  it("does not invent settings for an unavailable optional preprocessor", async () => {
+    vi.mocked(api.getAdvancedSettings).mockResolvedValue({ preprocessors: {} });
+    render(
+      <SambeeThemeProvider>
+        <AdvancedSettings />
+      </SambeeThemeProvider>
+    );
+    expect(await screen.findByText("Preprocessors")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Maximum file size")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Conversion timeout")).not.toBeInTheDocument();
+    expect(api.updateAdvancedSettings).not.toHaveBeenCalled();
+  });
+
   it("does not save unchanged values when focus leaves a field", async () => {
     const user = userEvent.setup();
     render(

@@ -30,7 +30,7 @@ interface BackendRecoveryMonitorOptions {
 
 function getRecoveryDelay(failures: number): number {
   const index = Math.min(failures, RECOVERY_RETRY_DELAYS_MS.length - 1);
-  return RECOVERY_RETRY_DELAYS_MS[index];
+  return RECOVERY_RETRY_DELAYS_MS[index] ?? RECOVERY_RETRY_DELAYS_MS[0];
 }
 
 interface RecoveryProbeRequest {
@@ -123,7 +123,7 @@ export function useBackendRecoveryMonitor({
       const isSuperseded = () => {
         const currentToken = authSession.getAccessToken();
         return Boolean(
-          probeRequest.headers.Authorization && currentToken && probeRequest.headers.Authorization !== `Bearer ${currentToken}`
+          probeRequest.headers["Authorization"] && currentToken && probeRequest.headers["Authorization"] !== `Bearer ${currentToken}`
         );
       };
 
@@ -137,7 +137,7 @@ export function useBackendRecoveryMonitor({
         if (isSuperseded()) return;
         if (response.status === 401 && (exchangePendingAtDispatch || isOidcExchangePending())) return;
 
-        if (response.status === 401 && probeRequest.headers.Authorization) {
+        if (response.status === 401 && probeRequest.headers["Authorization"]) {
           markBackendAvailable();
           await authSession.requestRefresh();
           if (isSuperseded()) return;

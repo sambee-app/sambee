@@ -149,7 +149,7 @@ const OverwriteConflictDialog: React.FC<OverwriteConflictDialogProps> = ({
   const [renameDraft, setRenameDraft] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const targetNameRef = useRef<HTMLInputElement>(null);
-  const resolutionGroupRef = useRef<HTMLDivElement>(null);
+  const resolutionGroupRef = useRef<HTMLFieldSetElement>(null);
   const previousConflictIdentityRef = useRef<string | null>(null);
   const shouldFocusInitialControlRef = useRef(false);
   const shouldFocusRenameInputRef = useRef(false);
@@ -403,7 +403,7 @@ const OverwriteConflictDialog: React.FC<OverwriteConflictDialogProps> = ({
           />
         </Box>
         {progress && (
-          <Typography variant="caption" display="block" sx={{ mt: 0.5, color: "text.secondary" }}>
+          <Typography variant="caption" sx={{ display: "block", mt: 0.5, color: "text.secondary" }}>
             {S.PROGRESS_CONTEXT(progress.current, progress.total, progress.conflictsSoFar)}
           </Typography>
         )}

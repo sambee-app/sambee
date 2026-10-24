@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Resolve the immutable publication state for a Companion release tag."""
 
 from __future__ import annotations

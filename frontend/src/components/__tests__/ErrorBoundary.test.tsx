@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../i18n";
 import ErrorBoundary from "../ErrorBoundary";
 
-function ThrowingComponent() {
+function ThrowingComponent(): never {
   throw new Error("Boom");
 }
 

@@ -150,8 +150,9 @@ export function useWorkspaceNavigation({
         existingVirtual.path === virtual.virtualPath
       : !existingVirtual;
     if (
+      existing &&
       sameVirtual &&
-      existing?.connectionId === target?.connectionId &&
+      existing.connectionId === target?.connectionId &&
       existing.path === path &&
       existing.viewerId === viewer.viewerId &&
       retry === resolvedRetry.current
@@ -221,7 +222,7 @@ export function useWorkspaceNavigation({
   return {
     navigateRoute,
     openViewer,
-    closeViewer: () => navigateRoute({ ...route, viewer: undefined }),
+    closeViewer: () => navigateRoute({ ...route, viewer: undefined }, { flushSync: true }),
     changeImage: (paneId: PaneId, index: number) => {
       const info = panes.current[paneId].viewInfo;
       const path = info?.images?.[index];
@@ -237,7 +238,7 @@ export function useWorkspaceNavigation({
     changeMode: (mode: "view" | "edit", replace = false) => {
       if (!viewer || viewer.mode === mode) return;
       const next = { ...route, viewer: { ...viewer, mode } };
-      navigateRoute(next, { replace });
+      navigateRoute(next, { replace, flushSync: true });
     },
     openSettings: (settings: MobileSettingsView) => navigateRoute({ ...route, settings }, { flushSync: true }),
     closeSettings: () => navigateRoute({ ...route, settings: undefined }),

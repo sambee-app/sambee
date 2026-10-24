@@ -121,7 +121,7 @@ export const MobileSettingsDrawer: React.FC<MobileSettingsDrawerProps> = ({
                 subheaderSx={{ bgcolor: "background.default", textTransform: "uppercase", letterSpacing: 0.8 }}
                 itemButtonSx={{ py: 2 }}
                 itemIconSx={{ color: "primary.main" }}
-                primaryTypographyProps={{ fontWeight: "medium" }}
+                primaryTypographyProps={{ sx: { fontWeight: "medium" } }}
               />
             </Box>
           )}

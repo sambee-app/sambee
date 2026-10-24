@@ -1,15 +1,19 @@
 """Regression tests for CI component selection."""
 
+import ast
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 import ci_change_detector
+from check_ci_test_gate import COMPONENT_JOBS, gate_errors
 from ci_change_detector import ARCHIVE_TOPOLOGY_PATHS, FULL_TREE_DIFF_BASE, classify_paths
 
 
@@ -49,6 +53,94 @@ def test_non_topology_component_changes_remain_selective() -> None:
         "companion": False,
         "website": False,
     }
+
+
+@pytest.mark.parametrize("path", sorted(ci_change_detector.FRONTEND_EXTRAS))
+def test_frontend_ci_infrastructure_runs_frontend_checks(path: str) -> None:
+    assert classify_paths([path])["frontend"]
+
+
+def test_workflows_use_latest_x64_and_supported_arm_ubuntu_labels() -> None:
+    workflows = Path(__file__).resolve().parents[2] / ".github/workflows"
+    allowed = {"ubuntu-latest", "ubuntu-26.04-arm"}
+    for workflow in workflows.glob("*.yml"):
+        source = workflow.read_text()
+        assert isinstance(yaml.safe_load(source)["jobs"], dict), workflow.name
+        labels = set(re.findall(r"ubuntu-[\w.-]+", source))
+        assert labels <= allowed, f"{workflow.name}: unexpected Ubuntu labels {labels - allowed}"
+
+
+@pytest.mark.parametrize(
+    ("path", "requires_lint"),
+    [
+        ("backend/app/main.py", True),
+        (".github/scripts/promote_companion_release.py", True),
+        ("website/scripts/validate-docs-content.py", True),
+        ("scripts/ci_change_detector.py", True),
+        (".github/workflows/lint.yml", True),
+        ("scripts/test", True),
+        ("frontend/src/App.tsx", False),
+    ],
+)
+def test_python_and_lint_infrastructure_changes_schedule_backend_lint(path: str, requires_lint: bool) -> None:
+    workflow_path = Path(__file__).resolve().parents[2] / ".github/workflows/lint.yml"
+    workflow = yaml.safe_load(workflow_path.read_text())
+    detector = ast.parse(workflow["jobs"]["changes"]["steps"][0]["run"].split("\n", 1)[1].rsplit("\nPY", 1)[0])
+    selection = ast.Module(
+        body=[
+            statement
+            for statement in detector.body
+            if isinstance(statement, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id in {"backend_extras", "backend"} for target in statement.targets)
+        ],
+        type_ignores=[],
+    )
+    namespace: dict[str, Any] = {"filenames": [path]}
+    exec(compile(selection, str(workflow_path), "exec"), namespace)
+    assert namespace["backend"] is requires_lint
+
+
+def test_executable_script_lint_is_required_in_ci_and_local_validation() -> None:
+    workspace = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((workspace / ".github/workflows/lint.yml").read_text())
+    steps = workflow["jobs"]["lint-backend"]["steps"]
+    executable_check = next(step for step in steps if step.get("name") == "Ruff executable-script check")
+    assert executable_check["run"] == "python -m ruff check --select EXE . .github"
+    assert not executable_check.get("continue-on-error", False)
+    local_runner = (workspace / "scripts/test").read_text()
+    assert 'run_check "Ruff executable-script checks passed" "Ruff executable-script checks failed"' in local_runner
+    assert '"$BACKEND_PYTHON" -m ruff check --select EXE "$REPO_ROOT" "$REPO_ROOT/.github"' in local_runner
+
+
+def test_gate_requires_selected_components_and_allows_intentional_skips() -> None:
+    needs = {"changes": {"result": "success", "outputs": {component: "false" for component in COMPONENT_JOBS}}}
+    needs.update({job: {"result": "skipped"} for job in COMPONENT_JOBS.values()})
+    assert gate_errors(needs, "pull_request") == []
+    needs["changes"]["outputs"]["frontend"] = "true"
+    assert gate_errors(needs, "pull_request") == ["Required frontend job did not succeed: skipped"]
+    needs["frontend"]["result"] = "success"
+    assert gate_errors(needs, "pull_request") == []
+    assert gate_errors(needs, "workflow_dispatch")
+
+
+@pytest.mark.parametrize("name", ["test.yml", "lint.yml"])
+def test_only_superseded_pr_checks_are_cancelled(name: str) -> None:
+    source = Path(__file__).resolve().parents[2] / ".github/workflows" / name
+    concurrency = yaml.safe_load(source.read_text())["concurrency"]
+    assert "github.event.pull_request.number || github.run_id" in concurrency["group"]
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+
+
+@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped", None])
+def test_gate_rejects_failed_change_detection(result: str | None) -> None:
+    assert gate_errors({"changes": {"result": result}}, "push")
+
+
+def test_gate_rejects_missing_outputs_and_unselected_failures() -> None:
+    assert gate_errors({"changes": {"result": "success"}}, "push")
+    needs = {"changes": {"result": "success", "outputs": {component: "false" for component in COMPONENT_JOBS}}}
+    needs.update({job: {"result": "cancelled"} for job in COMPONENT_JOBS.values()})
+    assert len(gate_errors(needs, "push")) == len(COMPONENT_JOBS)
 
 
 @pytest.mark.parametrize(

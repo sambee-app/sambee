@@ -1,6 +1,11 @@
 import type { Extension, TransactionSpec } from "@codemirror/state";
 import type { Command, EditorView, ViewUpdate } from "@codemirror/view";
 
+export interface SourceTextSnapshot {
+  readonly revision: number;
+  serialize(): string;
+}
+
 export interface SourceTextEditorProps {
   value: string;
   extensions?: Extension[];
@@ -16,6 +21,7 @@ export interface SourceTextEditorProps {
 
 export interface SourceTextEditorHandle {
   focus: () => void;
+  captureSnapshot: () => SourceTextSnapshot;
   getValue: () => string;
   getPrimarySelectionText: () => string;
   getView: () => EditorView | null;

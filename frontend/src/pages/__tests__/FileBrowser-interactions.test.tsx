@@ -1,3 +1,6 @@
+import { createMockAuthToken } from "../../test/fixtures/users";
+import { requireTestValue } from "../../test/helpers/assertions";
+import { createMockCurrentUserSettings } from "../../test/helpers/mockFactories";
 /**
  * Browser Component - Interactions Tests
  * Tests for keyboard navigation, search/filter, sorting, settings, and refresh
@@ -70,7 +73,7 @@ const regularTransferTestItems = [
 ];
 
 const setupRegularFileTransferListing = () => {
-  vi.mocked(api.listDirectory).mockImplementation((_connectionId, path) =>
+  vi.mocked(api.listDirectory).mockImplementation((_connectionId, path = "") =>
     Promise.resolve(
       path === "" || path === "/"
         ? { path: "", items: regularTransferTestItems, total: regularTransferTestItems.length }
@@ -124,7 +127,7 @@ describe("Browser Component - Interactions", () => {
     vi.mocked(api.copyItem).mockReset();
     vi.mocked(api.moveItem).mockReset();
     resetCurrentUserSettingsStoreForTests();
-    authSession.setAuthenticated({ access_token: "fake-token", token_type: "bearer" }, false);
+    authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
     localStorage.removeItem("selectedConnectionId");
     localStorage.removeItem(QUICK_NAV_INCLUDE_DOT_DIRECTORIES_STORAGE_KEY);
 
@@ -149,7 +152,7 @@ describe("Browser Component - Interactions", () => {
       renderBrowser("/browse/smb/test-server-1");
       for (const focusReturned of [true, false, true]) {
         hasFocus.mockReturnValue(focusReturned);
-        fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+        fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
         fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
         if (!focusReturned) expect(pickers).toHaveLength(1);
       }
@@ -181,7 +184,7 @@ describe("Browser Component - Interactions", () => {
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0]!;
       await user.click(listContainer);
       await user.keyboard(" ");
-      fireEvent.click(screen.getByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       expect(pickers).toHaveLength(1);
 
@@ -209,7 +212,7 @@ describe("Browser Component - Interactions", () => {
     const listContainer = await screen.findByTestId("virtual-list");
     await user.click(listContainer);
     await user.keyboard(" ");
-    await user.click(screen.getByRole("button", { name: "Download", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Download" }));
 
     expect(await screen.findByText("Preparing download")).toBeInTheDocument();
     const cancel = await screen.findByRole("button", { name: "Cancel" });
@@ -227,7 +230,7 @@ describe("Browser Component - Interactions", () => {
     const listContainer = await screen.findByTestId("virtual-list");
     await user.click(listContainer);
     await user.keyboard(" ");
-    await user.click(screen.getByRole("button", { name: "Download", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Download" }));
 
     await waitFor(() => expect(api.downloadFile).toHaveBeenCalled());
     expect(screen.queryByText("Preparing download")).not.toBeInTheDocument();
@@ -245,7 +248,7 @@ describe("Browser Component - Interactions", () => {
     const listContainer = await screen.findByTestId("virtual-list");
     await user.click(listContainer);
     await user.keyboard(" ");
-    await user.click(screen.getByRole("button", { name: "Download", exact: true }));
+    await user.click(screen.getByRole("button", { name: "Download" }));
 
     expect(await screen.findByText("Preparing archive")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
@@ -256,7 +259,7 @@ describe("Browser Component - Interactions", () => {
     const pickerClick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("button", { name: /folder: documents/i, hidden: true }));
       await waitFor(() => expectDirectoryLoad("conn-1", "Documents"));
       fireEvent.click(screen.getByRole("menuitem", { name: "Files" }));
@@ -270,7 +273,7 @@ describe("Browser Component - Interactions", () => {
 
   it("navigates the upload choices by keyboard and restores focus on Escape", async () => {
     renderBrowser("/browse/smb/test-server-1");
-    const trigger = await screen.findByRole("button", { name: "Upload", exact: true });
+    const trigger = await screen.findByRole("button", { name: "Upload" });
     trigger.focus();
     fireEvent.click(trigger);
     const files = await screen.findByRole("menuitem", { name: "Files" });
@@ -302,7 +305,7 @@ describe("Browser Component - Interactions", () => {
     });
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       expect(picker).not.toBeNull();
       fireEvent.click(await screen.findByRole("button", { name: /folder: documents/i }));
@@ -325,7 +328,7 @@ describe("Browser Component - Interactions", () => {
     });
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
       expect(await screen.findByText(/did not provide usable folder paths/)).toBeInTheDocument();
@@ -348,7 +351,7 @@ describe("Browser Component - Interactions", () => {
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
       await waitFor(() =>
@@ -389,7 +392,7 @@ describe("Browser Component - Interactions", () => {
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
       await waitFor(() =>
@@ -421,7 +424,7 @@ describe("Browser Component - Interactions", () => {
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
       await waitFor(() =>
@@ -449,7 +452,7 @@ describe("Browser Component - Interactions", () => {
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
       expect(await screen.findByRole("button", { name: "Cancel upload" })).toBeInTheDocument();
@@ -480,7 +483,7 @@ describe("Browser Component - Interactions", () => {
     });
     try {
       renderBrowser("/browse/smb/test-server-1");
-      const trigger = await screen.findByRole("button", { name: "Upload", exact: true });
+      const trigger = await screen.findByRole("button", { name: "Upload" });
       fireEvent.click(trigger);
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
       expect(await screen.findByRole("button", { name: "Cancel upload" })).toBeInTheDocument();
@@ -512,7 +515,7 @@ describe("Browser Component - Interactions", () => {
     });
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
       expect(await screen.findByText(/Inspect the destination before retrying/)).toBeInTheDocument();
@@ -534,7 +537,7 @@ describe("Browser Component - Interactions", () => {
       .mockResolvedValueOnce(completedTransferResult);
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
 
       await waitFor(() => expect(api.publishBrowserFile).toHaveBeenCalledTimes(2));
@@ -597,11 +600,11 @@ describe("Browser Component - Interactions", () => {
     );
     try {
       renderBrowser("/browse/smb/test-server-1");
-      fireEvent.click(await screen.findByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       await waitFor(() => expect(api.publishBrowserFile).toHaveBeenCalledOnce());
       expect(screen.getByText(/Sending/)).toBeInTheDocument();
-      const options = vi.mocked(api.publishBrowserFile).mock.calls[0][4];
+      const options = requireTestValue(vi.mocked(api.publishBrowserFile).mock.calls[0])[4];
       act(() => options?.onProgress?.(3, 5));
       expect(screen.getByText(/3 B \/ 5 B/)).toBeInTheDocument();
       act(() => options?.onProgress?.(5, 5));
@@ -634,7 +637,7 @@ describe("Browser Component - Interactions", () => {
       const rootLoads = () =>
         vi.mocked(api.listDirectory).mock.calls.filter(([connectionId, path]) => connectionId === "conn-1" && path === "").length;
       const initialLoads = rootLoads();
-      fireEvent.click(screen.getByRole("button", { name: "Upload", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       await waitFor(() => expect(completeUpload).toBeDefined());
       fireEvent.click(screen.getByRole("button", { name: /folder: documents/i }));
@@ -848,7 +851,7 @@ describe("Browser Component - Interactions", () => {
     it("maintains sort preference across navigation", async () => {
       const user = userEvent.setup();
 
-      vi.mocked(api.listDirectory).mockImplementation((_connectionId, path) => {
+      vi.mocked(api.listDirectory).mockImplementation((_connectionId, path = "") => {
         if (path === "Documents") {
           return Promise.resolve({
             items: [
@@ -1138,7 +1141,7 @@ describe("Browser Component - Interactions", () => {
       ).length;
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{F5}");
 
@@ -1173,7 +1176,7 @@ describe("Browser Component - Interactions", () => {
         const nested = { ...regularTransferTestItems[0]!, name: "nested", path: "Documents/nested", type: FileType.DIRECTORY };
         const file = { ...regularTransferTestItems[0]!, name: "report.txt", path: "Documents/nested/report.txt" };
         const secondFile = { ...file, path: "Pictures/report.txt" };
-        vi.mocked(api.listDirectory).mockImplementation(async (connectionId, path) => ({
+        vi.mocked(api.listDirectory).mockImplementation(async (connectionId, path = "") => ({
           path,
           items:
             connectionId === "conn-1"
@@ -1242,7 +1245,7 @@ describe("Browser Component - Interactions", () => {
           await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Move" }));
 
           if (childStatus === "conflict") {
-            await user.click(await screen.findByRole("radio", { name: "Overwrite", exact: true }));
+            await user.click(await screen.findByRole("radio", { name: "Overwrite" }));
             await user.click(screen.getByRole("checkbox", { name: /apply this choice to remaining conflicts/i }));
             await user.click(screen.getByRole("button", { name: "Continue" }));
             await waitFor(() => expect(api.moveItem).toHaveBeenCalledTimes(3));
@@ -1309,13 +1312,13 @@ describe("Browser Component - Interactions", () => {
         const user = userEvent.setup();
         renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
         const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-        await user.click(listContainer);
+        await user.click(requireTestValue(listContainer));
         await user.keyboard(" ");
         await user.keyboard("{F5}");
         const dialog = await screen.findByRole("dialog");
         await user.click(within(dialog).getByRole("button", { name: "Copy" }));
         await waitFor(() => expect(api.copyItem).toHaveBeenCalledOnce());
-        const attemptId = vi.mocked(api.copyItem).mock.calls[0][6]?.transferAttemptId;
+        const attemptId = requireTestValue(vi.mocked(api.copyItem).mock.calls[0])[6]?.transferAttemptId;
         expect(attemptId).toMatch(/^[\da-f-]{36}$/);
         const socket = sockets.find((entry) => entry.url.includes("/api/ws"));
         expect(socket).toBeDefined();
@@ -1354,7 +1357,7 @@ describe("Browser Component - Interactions", () => {
       renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       const [listContainer] = await screen.findAllByTestId("virtual-list");
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{F5}");
       await screen.findByRole("dialog");
@@ -1417,7 +1420,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard("{Control>}a{/Control}");
       await user.keyboard("{F5}");
       await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Copy" }));
@@ -1459,7 +1462,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{F5}");
       await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Copy" }));
@@ -1513,7 +1516,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{F5}");
       await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Copy" }));
@@ -1550,7 +1553,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{F6}");
 
@@ -1572,7 +1575,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{F5}");
 
@@ -1593,7 +1596,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
 
       const event = createEvent.keyDown(document, { key: "F5" });
       fireEvent(document, event);
@@ -1609,7 +1612,7 @@ describe("Browser Component - Interactions", () => {
       renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("file-list-container");
-      listContainer.focus();
+      requireTestValue(listContainer).focus();
 
       const copyEvent = createEvent.keyDown(document, { key: "F5" });
       fireEvent(document, copyEvent);
@@ -1687,7 +1690,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{F6}");
 
@@ -1714,20 +1717,24 @@ describe("Browser Component - Interactions", () => {
         ],
         total: 1,
       });
-      vi.mocked(api.getCurrentUserSettings).mockResolvedValue({
-        appearance: { theme_id: "sambee-light", custom_themes: [] },
-        localization: {
-          language: "browser",
-          regional_locale: "browser",
-        },
-        browser: {
-          quick_nav_include_dot_directories: false,
-          file_browser_view_mode: "list",
-          pane_mode: "single",
-          selected_connection_id: null,
-          viewer_associations: {},
-        },
-      });
+      vi.mocked(api.getCurrentUserSettings).mockResolvedValue(
+        createMockCurrentUserSettings({
+          appearance: { theme_id: "sambee-light", custom_themes: [] },
+          localization: {
+            language: "browser",
+            regional_locale: "browser",
+          },
+          browser: {
+            touch_friendly_file_selection: "auto",
+            quick_bar_shortcut_hint_visibility: "auto",
+            quick_nav_include_dot_directories: false,
+            file_browser_view_mode: "list",
+            pane_mode: "single",
+            selected_connection_id: null,
+            viewer_associations: {},
+          },
+        })
+      );
 
       renderBrowser("/browse/smb/test-server-1");
 
@@ -1801,20 +1808,24 @@ describe("Browser Component - Interactions", () => {
         ],
         total: 1,
       });
-      vi.mocked(api.getCurrentUserSettings).mockResolvedValue({
-        appearance: { theme_id: "sambee-light", custom_themes: [] },
-        localization: {
-          language: "browser",
-          regional_locale: "browser",
-        },
-        browser: {
-          quick_nav_include_dot_directories: false,
-          file_browser_view_mode: "list",
-          pane_mode: "single",
-          selected_connection_id: null,
-          viewer_associations: { "mime:application/pdf": "pdf" },
-        },
-      });
+      vi.mocked(api.getCurrentUserSettings).mockResolvedValue(
+        createMockCurrentUserSettings({
+          appearance: { theme_id: "sambee-light", custom_themes: [] },
+          localization: {
+            language: "browser",
+            regional_locale: "browser",
+          },
+          browser: {
+            touch_friendly_file_selection: "auto",
+            quick_bar_shortcut_hint_visibility: "auto",
+            quick_nav_include_dot_directories: false,
+            file_browser_view_mode: "list",
+            pane_mode: "single",
+            selected_connection_id: null,
+            viewer_associations: { "mime:application/pdf": "pdf" },
+          },
+        })
+      );
 
       renderBrowser("/browse/smb/test-server-1");
 
@@ -1948,7 +1959,7 @@ describe("Browser Component - Interactions", () => {
         archive: { path: "temp.zip", size: 102400 },
         path: "",
         items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
 
@@ -1990,7 +2001,7 @@ describe("Browser Component - Interactions", () => {
         archive: { path: "temp.zip", size: 102400 },
         path: "",
         items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
 
@@ -2049,7 +2060,7 @@ describe("Browser Component - Interactions", () => {
       renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("file-list-container");
-      listContainer.focus();
+      requireTestValue(listContainer).focus();
       fireEvent.keyDown(document, { key: "F9", altKey: true });
       expect(screen.queryByRole("dialog", { name: "Extract from ZIP Archive" })).not.toBeInTheDocument();
 
@@ -2075,7 +2086,7 @@ describe("Browser Component - Interactions", () => {
       renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("virtual-list");
-      await user.click(listContainer);
+      await user.click(requireTestValue(listContainer));
       await user.keyboard(" ");
       await user.keyboard("{Alt>}{F5}{/Alt}");
       await screen.findByRole("dialog", { name: "Create ZIP Archive" });
@@ -2113,7 +2124,7 @@ describe("Browser Component - Interactions", () => {
         archive: { path: "archive.zip", size: 1 },
         path: "",
         items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
       vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-selected" } as never);
@@ -2153,7 +2164,7 @@ describe("Browser Component - Interactions", () => {
         archive: { path: "archive.zip", size: 1 },
         path: "",
         items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
       renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/archive.zip&active=2");
@@ -2177,7 +2188,7 @@ describe("Browser Component - Interactions", () => {
         archive: { path: "archive.zip", size: 1 },
         path: "",
         items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
-        total: 1,
+
         page_size: 100,
       });
       vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-cancelled" } as never);
@@ -2216,23 +2227,27 @@ describe("Browser Component - Interactions", () => {
         ],
         total: 1,
       });
-      vi.mocked(api.getCurrentUserSettings).mockResolvedValue({
-        appearance: { theme_id: "sambee-light", custom_themes: [] },
-        localization: {
-          language: "browser",
-          regional_locale: "browser",
-        },
-        browser: {
-          quick_nav_include_dot_directories: false,
-          file_browser_view_mode: "list",
-          pane_mode: "single",
-          selected_connection_id: null,
-          viewer_associations: {
-            "mime:application/pdf": "markdown",
-            "ext:.pdf": "markdown",
+      vi.mocked(api.getCurrentUserSettings).mockResolvedValue(
+        createMockCurrentUserSettings({
+          appearance: { theme_id: "sambee-light", custom_themes: [] },
+          localization: {
+            language: "browser",
+            regional_locale: "browser",
           },
-        },
-      });
+          browser: {
+            touch_friendly_file_selection: "auto",
+            quick_bar_shortcut_hint_visibility: "auto",
+            quick_nav_include_dot_directories: false,
+            file_browser_view_mode: "list",
+            pane_mode: "single",
+            selected_connection_id: null,
+            viewer_associations: {
+              "mime:application/pdf": "markdown",
+              "ext:.pdf": "markdown",
+            },
+          },
+        })
+      );
 
       renderBrowser("/browse/smb/test-server-1");
 
@@ -2816,7 +2831,7 @@ describe("Browser Component - Interactions", () => {
         };
       });
 
-      vi.mocked(api.listDirectory).mockImplementation(async (connectionId, path) => {
+      vi.mocked(api.listDirectory).mockImplementation(async (connectionId, path = "") => {
         if (connectionId === "conn-2" && path === "RightTarget") {
           return {
             items: [],
@@ -2871,20 +2886,24 @@ describe("Browser Component - Interactions", () => {
       const user = userEvent.setup();
 
       localStorage.setItem(QUICK_NAV_INCLUDE_DOT_DIRECTORIES_STORAGE_KEY, "true");
-      vi.mocked(api.getCurrentUserSettings).mockResolvedValue({
-        appearance: { theme_id: "sambee-light", custom_themes: [] },
-        localization: {
-          language: "browser",
-          regional_locale: "browser",
-        },
-        browser: {
-          quick_nav_include_dot_directories: true,
-          file_browser_view_mode: "list",
-          pane_mode: "single",
-          selected_connection_id: null,
-          viewer_associations: {},
-        },
-      });
+      vi.mocked(api.getCurrentUserSettings).mockResolvedValue(
+        createMockCurrentUserSettings({
+          appearance: { theme_id: "sambee-light", custom_themes: [] },
+          localization: {
+            language: "browser",
+            regional_locale: "browser",
+          },
+          browser: {
+            touch_friendly_file_selection: "auto",
+            quick_bar_shortcut_hint_visibility: "auto",
+            quick_nav_include_dot_directories: true,
+            file_browser_view_mode: "list",
+            pane_mode: "single",
+            selected_connection_id: null,
+            viewer_associations: {},
+          },
+        })
+      );
 
       renderBrowser("/browse/smb/test-server-1");
 
@@ -3067,7 +3086,7 @@ describe("Browser Component - Interactions", () => {
       const user = userEvent.setup();
 
       // Start in a subdirectory
-      vi.mocked(api.listDirectory).mockImplementation((_connectionId, path) => {
+      vi.mocked(api.listDirectory).mockImplementation((_connectionId, path = "") => {
         if (path === "Documents") {
           return Promise.resolve({
             items: [
@@ -3107,7 +3126,7 @@ describe("Browser Component - Interactions", () => {
     it("does not navigate to parent when Backspace is pressed in an empty commands quick bar", async () => {
       const user = userEvent.setup();
 
-      vi.mocked(api.listDirectory).mockImplementation((_connectionId, path) => {
+      vi.mocked(api.listDirectory).mockImplementation((_connectionId, path = "") => {
         if (path === "Documents") {
           return Promise.resolve({
             items: [
@@ -3538,7 +3557,7 @@ describe("Browser Component - Interactions", () => {
       const downloadBlob = vi.spyOn(viewerContent, "downloadViewerBlob").mockImplementation(() => {});
 
       try {
-        vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => ({
+        vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") => ({
           path,
           items: path
             ? []
@@ -3682,7 +3701,7 @@ describe("Browser Component - Interactions", () => {
           path: `file-${index}.txt`,
           size: index === 0 ? 200 * 1024 * 1024 : undefined,
         }));
-        vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => ({
+        vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") => ({
           path,
           items: path ? [] : items,
           total: path ? 0 : items.length,
@@ -3782,7 +3801,7 @@ describe("Browser Component - Interactions", () => {
       const { share, restore } = setupCompactNativeShare();
 
       try {
-        vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => ({
+        vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") => ({
           path,
           items: path ? [] : [{ ...regularTransferTestItems[0]!, type: FileType.DIRECTORY }, regularTransferTestItems[1]!],
           total: path ? 0 : 2,
@@ -3804,7 +3823,9 @@ describe("Browser Component - Interactions", () => {
         vi.mocked(api.getOriginalFileBlob).mockImplementation(
           (_connectionId, _path, options) =>
             new Promise((_resolve, reject) =>
-              options.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), { once: true })
+              requireTestValue(options).signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")), {
+                once: true,
+              })
             )
         );
         await user.click(screen.getByRole("button", { name: "More actions for Pictures" }));

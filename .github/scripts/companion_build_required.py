@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Decide whether a pull request needs the expensive companion package build."""
 
 from __future__ import annotations

@@ -3,6 +3,7 @@
 //
 
 import { Alert, Box, Button, Link, Stack, Typography } from "@mui/material";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { BackendAvailabilityStatus } from "../../services/backendAvailability";
 import type { CompanionPairingErrorKind } from "../../services/localDrivePairing";
@@ -10,7 +11,7 @@ import { EmptyStateIllustration } from "./EmptyStateIllustration";
 
 export type CompanionLifecycleStatus = "renewal_required" | "auth_failed" | "lock_lost" | "recovery_required";
 
-function getCompanionLifecycleMessage(t: ReturnType<typeof useTranslation>["t"], status: CompanionLifecycleStatus): string {
+function getCompanionLifecycleMessage(t: TFunction, status: CompanionLifecycleStatus): string {
   switch (status) {
     case "renewal_required":
       return t("fileBrowser.chrome.alerts.companionLifecycle.renewal_required");
@@ -115,7 +116,7 @@ export function FileBrowserAlerts({
           sx={{ mb: 2, mx: 2 }}
           action={
             companionPairingError && onOpenLocalDrivesSettings ? (
-              <Stack direction="row" flexWrap="wrap">
+              <Stack direction="row" sx={{ flexWrap: "wrap" }}>
                 {companionPairingError === "signature" && (
                   <Button color="inherit" size="small" onClick={() => window.location.reload()}>
                     {t("settings.localDrives.reloadButton")}

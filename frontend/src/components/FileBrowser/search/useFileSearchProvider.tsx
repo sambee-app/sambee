@@ -97,7 +97,7 @@ export function useFileSearchProvider({
               {
                 id: "recent-group-header",
                 kind: "group-header" as const,
-                value: "",
+                value: "" as const,
                 label: t("fileBrowser.search.groups.recentFiles"),
               },
             ]
@@ -116,7 +116,7 @@ export function useFileSearchProvider({
               {
                 id: "current-directory-group-header",
                 kind: "group-header" as const,
-                value: "",
+                value: "" as const,
                 label: t("fileBrowser.search.groups.currentDirectory"),
               },
             ]

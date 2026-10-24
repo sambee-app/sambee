@@ -15,7 +15,7 @@ export interface AuthIdentity {
   userId: string | null;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
+const API_BASE_URL = import.meta.env["VITE_API_URL"] || (import.meta.env.MODE === "test" ? "http://localhost:3000/api" : "/api");
 const REFRESH_SAFETY_MARGIN_MS = 5 * 60_000;
 const REFRESH_JITTER_RATIO = 0.05;
 const REFRESH_RETRY_DELAY_MS = 30_000;

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Reuse successful source checks from CI on the exact release commit."""
 
 from __future__ import annotations
@@ -15,6 +14,9 @@ COMPONENTS = ("backend", "frontend")
 CI_WORKFLOW = "test.yml"
 API_TIMEOUT_SECONDS = 10
 JOBS_PER_PAGE = 100
+FRONTEND_REQUIRED_STEPS = frozenset(
+    {"Run browser correctness contracts", "Verify frontend type correctness"}
+)
 
 
 def github_get(url: str, token: str) -> dict[str, Any]:
@@ -63,10 +65,7 @@ def reusable_jobs(api_url: str, repository: str, sha: str, token: str) -> set[st
     successful: set[str] = set()
     page = 1
     while True:
-        jobs_url = (
-            f"{api_url}/repos/{repository}/actions/runs/{run_id}/jobs?"
-            f"filter=latest&per_page={JOBS_PER_PAGE}&page={page}"
-        )
+        jobs_url = f"{api_url}/repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page={JOBS_PER_PAGE}&page={page}"
         jobs = github_get(jobs_url, token).get("jobs")
         if not isinstance(jobs, list):
             raise ValueError("CI workflow jobs response is missing jobs")
@@ -74,6 +73,19 @@ def reusable_jobs(api_url: str, repository: str, sha: str, token: str) -> set[st
             if not isinstance(job, dict):
                 raise ValueError("CI workflow job is not an object")
             if job.get("name") in COMPONENTS and job.get("conclusion") == "success":
+                if job["name"] == "frontend":
+                    steps = job.get("steps", [])
+                    if not isinstance(steps, list):
+                        raise ValueError("Frontend CI job steps are not a list")
+                    successful_steps = {
+                        step.get("name")
+                        for step in steps
+                        if isinstance(step, dict)
+                        and step.get("conclusion") == "success"
+                        and isinstance(step.get("name"), str)
+                    }
+                    if not FRONTEND_REQUIRED_STEPS <= successful_steps:
+                        continue
                 successful.add(job["name"])
         if len(jobs) < JOBS_PER_PAGE:
             return successful
