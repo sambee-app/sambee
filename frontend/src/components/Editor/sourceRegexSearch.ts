@@ -14,6 +14,8 @@ import { beginSourceReplacementFeedback, isHeavySourceReplacement, isSourceRepla
 
 export const sourceRegexSearchUpdated = StateEffect.define<null>();
 
+type NavigationOperation = "next" | "previous";
+
 interface RegexSearchSession {
   document: Text;
   query: SearchQuery;
@@ -21,6 +23,7 @@ interface RegexSearchSession {
   pending: boolean;
   error?: string;
   cancel: () => void;
+  enqueueNavigation?: (operation: NavigationOperation) => boolean;
 }
 
 const sessions = new WeakMap<EditorView, RegexSearchSession>();
@@ -63,6 +66,7 @@ export function runSourceRegexSearchCommand(view: EditorView, operation: Exclude
   if ((operation === "replace-one" || operation === "replace-all") && view.state.readOnly) return true;
   if ((operation === "replace-one" || operation === "replace-all") && isSourceReplacementPending(view)) return true;
   const session = getSourceRegexSearch(view);
+  if ((operation === "next" || operation === "previous") && session.enqueueNavigation?.(operation)) return true;
   session.cancel();
   run(view, session, operation);
   return true;
@@ -70,7 +74,10 @@ export function runSourceRegexSearchCommand(view: EditorView, operation: Exclude
 
 function run(view: EditorView, session: RegexSearchSession, operation: SourceSearchOperation): void {
   const { document, query } = session;
-  const selection = view.state.selection;
+  let selection = view.state.selection;
+  const isNavigation = operation === "next" || operation === "previous";
+  const navigationQueue = new Map<number, NavigationOperation>();
+  let nextNavigation = 0;
   let worker: Worker | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let sourceOffset = 0;
@@ -89,6 +96,8 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
     if (stopped) return;
     stopped = true;
     clearTimeout(timer);
+    navigationQueue.clear();
+    session.enqueueNavigation = undefined;
     if (worker) {
       worker.onmessage = null;
       worker.onerror = null;
@@ -114,6 +123,13 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
     releaseReplacementBuffers();
   };
   session.cancel = cancel;
+  if (isNavigation) {
+    session.enqueueNavigation = (next) => {
+      if (stopped || !current() || selection !== view.state.selection) return false;
+      navigationQueue.set(nextNavigation++, next);
+      return true;
+    };
+  }
   const notify = () => {
     queueMicrotask(() => {
       if (current()) view.dispatch({ effects: sourceRegexSearchUpdated.of(null) });
@@ -212,7 +228,7 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
           send({ type: "ack" });
         } else if (message.type === "error") fail(message.message);
         else if (message.type === "complete") {
-          stopTransport();
+          if (!isNavigation) stopTransport();
           if (operation === "count") {
             session.pending = false;
             session.ranges = ranges;
@@ -220,7 +236,7 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
           } else {
             const plan: ChangeSpec[] = changes.map((change) => ({ from: change.from, to: change.to, insert: change.chunks.join("") }));
             const commit = () => {
-              session.pending = false;
+              session.pending = isNavigation && navigationQueue.size > 0;
               if (!current() || selection !== view.state.selection || (plan.length > 0 && view.state.readOnly)) return;
               const commitStart = performance.now();
               view.dispatch({
@@ -235,7 +251,22 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
                 start: commitStart,
                 detail: { operation, documentUnits: document.length, changes: plan.length },
               });
-              if (current() && session.ranges.length === 0) run(view, session, "count");
+              if (isNavigation && current() && navigationQueue.size > 0) {
+                selection = view.state.selection;
+                const [index, next] = navigationQueue.entries().next().value!;
+                navigationQueue.delete(index);
+                operation = next;
+                session.pending = true;
+                send({
+                  type: "navigate",
+                  operation,
+                  selection: { anchor: selection.main.anchor, head: selection.main.head },
+                  wordChars: view.state.languageDataAt<string>("wordChars", selection.main.head).join(""),
+                });
+              } else {
+                stopTransport();
+                if (current() && session.ranges.length === 0) run(view, session, "count");
+              }
             };
             if (feedback) {
               const insertedUnits = changes.reduce(

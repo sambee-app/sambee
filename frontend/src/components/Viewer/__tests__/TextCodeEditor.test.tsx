@@ -207,6 +207,53 @@ describe("TextCodeEditor", () => {
           }
         }
       }
+      for (const expression of ["alpha", "(?=alpha)", "a.a", "a+"]) {
+        for (const wholeWord of [false, true]) {
+          const query = new SearchQuery({ search: expression, regexp: true, wholeWord });
+          let requestWordChars = "$";
+          let reference = EditorState.create({
+            doc: "alpha alphabet ALPHA $alpha\nalpha alpha",
+            selection: EditorSelection.range(10, 2),
+            extensions: [search(), EditorState.languageData.of(() => [{ wordChars: requestWordChars }])],
+          });
+          reference = reference.update({ effects: setSearchQuery.of(query) }).state;
+          const navigation: ("next" | "previous")[] = ["next", "next", "previous", "next", "next", "next", "next", "previous", "previous"];
+          for (const [index, operation] of navigation.entries()) {
+            requestWordChars = index % 2 ? "" : "$";
+            const selection = { anchor: reference.selection.main.anchor, head: reference.selection.main.head };
+            responses.length = 0;
+            if (index === 0) {
+              send({
+                type: "start",
+                operation,
+                query: { search: expression, replace: "", caseSensitive: false, wholeWord, wordChars: requestWordChars, literal: true },
+                selection,
+              });
+              expect(responses.splice(0)).toEqual([{ type: "source-ack" }]);
+              send({ type: "source", text: reference.doc.toString(), complete: true });
+            } else send({ type: "navigate", operation, selection, wordChars: requestWordChars });
+            commands[operation]({
+              state: reference,
+              plugin: () => null,
+              dispatch: (spec: TransactionSpec) => {
+                reference = reference.update(spec).state;
+              },
+            } as unknown as EditorView);
+            let completion: Extract<SourceSearchResponse, { type: "complete" }> | undefined;
+            for (let responseIndex = 0; responseIndex < responses.length; responseIndex += 1) {
+              const response = responses[responseIndex];
+              if (response.type === "announcement") send({ type: "ack" });
+              else if (response.type === "complete") completion = response;
+              else throw new Error(`Unexpected navigation response ${JSON.stringify(response)}`);
+            }
+            expect(completion).toBeDefined();
+            expect(completion!.selection ?? selection).toEqual({
+              anchor: reference.selection.main.anchor,
+              head: reference.selection.main.head,
+            });
+          }
+        }
+      }
       expect([...effectiveOperations].sort()).toEqual([...operations].sort());
       expect([...selectionDirections].sort()).toEqual([-1, 0, 1]);
     } finally {
@@ -589,6 +636,104 @@ describe("TextCodeEditor", () => {
     } finally {
       if (!view.destroyed) view.destroy();
       mock.restore();
+    }
+  });
+
+  it("preserves repeated regex navigation without restarting the active worker", () => {
+    const mock = mockSearchWorkers();
+    const view = new EditorView({
+      state: EditorState.create({ doc: "aa aa aa aa", extensions: [search(), sourceRegexSearchLifecycle] }),
+    });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
+      getCodeMirrorFindReplaceMetrics(view);
+      mock.workers[0].emit({
+        type: "ranges",
+        ranges: [0, 3, 6, 9].map((from) => ({ from, to: from + 2 })),
+      });
+      mock.workers[0].emit({ type: "complete", announcements: [] });
+      for (let index = 0; index < 3; index += 1) runSourceRegexSearchCommand(view, "next");
+      expect(mock.workers).toHaveLength(2);
+      const worker = mock.workers[1];
+      expect(worker.terminate).not.toHaveBeenCalled();
+      for (const from of [0, 3, 6]) {
+        worker.emit({ type: "complete", selection: { anchor: from, head: from + 2 }, announcements: [] });
+        expect(view.state.selection.main.from).toBe(from);
+      }
+      expect(worker.postMessage.mock.calls.map(([message]) => message)).toEqual([
+        { type: "navigate", operation: "next", selection: { anchor: 0, head: 2 }, wordChars: "" },
+        { type: "navigate", operation: "next", selection: { anchor: 3, head: 5 }, wordChars: "" },
+      ]);
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(getCodeMirrorFindReplaceMetrics(view)).toMatchObject({ pending: false, matches: 4, currentMatch: 3 });
+    } finally {
+      view.destroy();
+      mock.restore();
+    }
+  });
+
+  it.each(["next", "previous"] as const)("keeps mixed queued regex navigation in order after %s", (operation) => {
+    const mock = mockSearchWorkers();
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: "$alpha alpha",
+        extensions: [search(), sourceRegexSearchLifecycle, EditorState.languageData.of(() => [{ wordChars: "$" }])],
+      }),
+    });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "alpha", regexp: true, wholeWord: true })) });
+      runSourceRegexSearchCommand(view, operation);
+      runSourceRegexSearchCommand(view, "previous");
+      runSourceRegexSearchCommand(view, "next");
+      const worker = mock.workers.at(-1)!;
+      worker.emit({ type: "complete", selection: { anchor: 7, head: 12 }, announcements: [] });
+      expect(getCodeMirrorFindReplaceMetrics(view).pending).toBe(true);
+      expect(worker.postMessage).toHaveBeenLastCalledWith({
+        type: "navigate",
+        operation: "previous",
+        selection: { anchor: 7, head: 12 },
+        wordChars: "$",
+      });
+      worker.emit({ type: "complete", announcements: [] });
+      expect(worker.postMessage).toHaveBeenLastCalledWith({
+        type: "navigate",
+        operation: "next",
+        selection: { anchor: 7, head: 12 },
+        wordChars: "$",
+      });
+      worker.emit({ type: "complete", selection: { anchor: 7, head: 12 }, announcements: [] });
+      expect(worker.terminate).toHaveBeenCalledOnce();
+    } finally {
+      view.destroy();
+      mock.restore();
+    }
+  });
+
+  it.each(["selection", "document", "query", "destroy", "error", "timeout"])("cancels queued regex navigation on %s", async (reason) => {
+    vi.useFakeTimers();
+    const mock = mockSearchWorkers();
+    const view = new EditorView({ state: EditorState.create({ doc: "aa aa", extensions: [search(), sourceRegexSearchLifecycle] }) });
+    try {
+      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true })) });
+      runSourceRegexSearchCommand(view, "next");
+      runSourceRegexSearchCommand(view, "previous");
+      const worker = mock.workers.at(-1)!;
+      if (reason === "selection") {
+        view.dispatch({ selection: { anchor: 3 } });
+        view.dispatch({ selection: { anchor: 0 } });
+      } else if (reason === "document") view.dispatch({ changes: { from: 0, insert: "new " } });
+      else if (reason === "query") view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "b+", regexp: true })) });
+      else if (reason === "destroy") view.destroy();
+      else if (reason === "error") worker.emit({ type: "error", message: "Navigation failed" });
+      else await vi.advanceTimersByTimeAsync(SOURCE_SEARCH_TIMEOUT_MS);
+      worker.emit({ type: "complete", selection: { anchor: 0, head: 2 }, announcements: [] });
+      expect(view.state.selection.main.empty).toBe(true);
+      expect(worker.terminate).toHaveBeenCalledOnce();
+      expect(worker.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "navigate" }));
+    } finally {
+      if (!view.destroyed) view.destroy();
+      mock.restore();
+      vi.useRealTimers();
     }
   });
 

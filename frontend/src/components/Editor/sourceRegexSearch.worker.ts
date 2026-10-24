@@ -11,15 +11,18 @@ import {
 let request: Extract<SourceSearchRequest, { type: "start" }> | undefined;
 let chunks: string[] = [];
 let output: Generator<SourceSearchResponse> | undefined;
+let navigationState: EditorState | undefined;
 
 function* execute(): Generator<SourceSearchResponse> {
   if (!request) throw new Error("Source search started without a request");
   const query = new SearchQuery({ ...request.query, regexp: true });
   if (!query.valid) throw new Error("Invalid source-search expression");
-  let state = EditorState.create({
-    doc: chunks.join(""),
-    extensions: [search(), EditorState.languageData.of(() => [{ wordChars: request?.query.wordChars ?? "" }])],
-  });
+  let state =
+    navigationState ??
+    EditorState.create({
+      doc: chunks.join(""),
+      extensions: [search(), EditorState.languageData.of(() => [{ wordChars: request?.query.wordChars ?? "" }])],
+    });
   chunks = [];
   state = state.update({ effects: setSearchQuery.of(query), selection: request.selection }).state;
   if (request.operation === "count") {
@@ -48,6 +51,7 @@ function* execute(): Generator<SourceSearchResponse> {
   };
   const commands = { next: findNext, previous: findPrevious, "replace-one": replaceNext, "replace-all": replaceAll };
   commands[request.operation](target as unknown as EditorView);
+  if (request.operation === "next" || request.operation === "previous") navigationState = transaction?.state ?? state;
   if (!transaction) {
     yield { type: "complete", announcements: [] };
     return;
@@ -93,7 +97,19 @@ globalThis.onmessage = (event: MessageEvent<SourceSearchRequest>) => {
     if (message.type === "start") {
       request = message;
       chunks = [];
+      navigationState = undefined;
       globalThis.postMessage({ type: "source-ack" } satisfies SourceSearchResponse);
+    } else if (message.type === "navigate") {
+      if (!navigationState || !request || (request.operation !== "next" && request.operation !== "previous"))
+        throw new Error("Source navigation requires a prepared navigation document");
+      request = {
+        ...request,
+        operation: message.operation,
+        selection: message.selection,
+        query: { ...request.query, wordChars: message.wordChars },
+      };
+      output = execute();
+      publishNext();
     } else if (message.type === "source") {
       if (message.text.length > SOURCE_SEARCH_CHUNK_UNITS) throw new Error("Source-search transfer exceeded its chunk bound");
       chunks.push(message.text);
@@ -105,6 +121,7 @@ globalThis.onmessage = (event: MessageEvent<SourceSearchRequest>) => {
   } catch (error) {
     output = undefined;
     chunks = [];
+    navigationState = undefined;
     globalThis.postMessage({ type: "error", message: error instanceof Error ? error.message : "Source search failed" });
   }
 };

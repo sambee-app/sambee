@@ -21,6 +21,7 @@ export interface SourceSearchQuery {
 export type SourceSearchRequest =
   | { type: "start"; operation: SourceSearchOperation; query: SourceSearchQuery; selection: { anchor: number; head: number } }
   | { type: "source"; text: string; complete: boolean }
+  | { type: "navigate"; operation: "next" | "previous"; selection: { anchor: number; head: number }; wordChars: string }
   | { type: "ack" };
 
 export type SourceSearchResponse =

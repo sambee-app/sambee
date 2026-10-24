@@ -1121,17 +1121,33 @@ test.describe("production source regex containment", () => {
       await serveProductionAssets(page);
       await page.addInitScript(() => {
         const OriginalWorker = window.Worker;
-        const state = { stall: "", observed: "", live: 0, requests: [] as string[] };
+        const state = { stall: "", observed: "", live: 0, requests: [] as string[], created: 0, sources: 0, navigations: 0, holdNavigation: false, held: false, release: null as (() => void) | null };
         Object.assign(window, { sourceRegexProbe: state });
         window.Worker = class extends OriginalWorker {
           private owned = false;
           constructor(url: string | URL, options?: WorkerOptions) {
             super(url, options);
             this.owned = String(url).includes("sourceRegexSearch.worker");
-            if (this.owned) state.live += 1;
+            if (this.owned) {
+              state.live += 1;
+              state.created += 1;
+              this.addEventListener("message", (event) => {
+                if (!state.holdNavigation || event.data.type !== "complete") return;
+                event.stopImmediatePropagation();
+                state.holdNavigation = false;
+                state.held = true;
+                state.release = () => {
+                  state.held = false;
+                  state.release = null;
+                  this.dispatchEvent(new MessageEvent("message", { data: event.data }));
+                };
+              });
+            }
           }
           postMessage(message: unknown, transfer?: Transferable[]) {
             const request = message as { type?: string; operation?: string; query?: { search: string } };
+            if (this.owned && request.type === "source") state.sources += 1;
+            if (this.owned && request.type === "navigate") state.navigations += 1;
             if (this.owned && request.type === "start") {
               state.requests.push(request.operation!);
               if (request.operation === state.stall) {
@@ -1169,6 +1185,22 @@ test.describe("production source regex containment", () => {
       await controls.getByRole("button", { name: "Next match", exact: true }).click();
       await expect(controls.getByText("2 / 2", { exact: true })).toBeVisible();
       await controls.getByRole("button", { name: "Previous match", exact: true }).click();
+      await expect(controls.getByText("1 / 2", { exact: true })).toBeVisible();
+      const beforeBurst = await page.evaluate(() => {
+        const state = (window as unknown as { sourceRegexProbe: { holdNavigation: boolean; created: number; sources: number; navigations: number } }).sourceRegexProbe;
+        state.holdNavigation = true;
+        return { created: state.created, sources: state.sources, navigations: state.navigations };
+      });
+      await controls.getByRole("button", { name: "Next match", exact: true }).click();
+      await expect.poll(() => page.evaluate(() => (window as unknown as { sourceRegexProbe: { held: boolean } }).sourceRegexProbe.held)).toBe(true);
+      await controls.getByRole("button", { name: "Next match", exact: true }).click();
+      await controls.getByRole("button", { name: "Previous match", exact: true }).click();
+      await controls.getByRole("button", { name: "Next match", exact: true }).click();
+      await page.evaluate(() => (window as unknown as { sourceRegexProbe: { release: (() => void) | null } }).sourceRegexProbe.release!());
+      await expect.poll(() => page.evaluate(() => {
+        const { live, created, sources, navigations } = (window as unknown as { sourceRegexProbe: { live: number; created: number; sources: number; navigations: number } }).sourceRegexProbe;
+        return { live, created, sources, navigations };
+      })).toEqual({ live: 0, created: beforeBurst.created + 1, sources: beforeBurst.sources + 1, navigations: beforeBurst.navigations + 3 });
       await expect(controls.getByText("1 / 2", { exact: true })).toBeVisible();
       await replace.fill("$2:$1");
       await expect(controls.getByText("1 / 2", { exact: true })).toBeVisible();
