@@ -16,11 +16,19 @@ In **Settings** > **Appearance**, edit or copy a theme and open **Syntax** to ad
 
 Existing complete themes without a Syntax group use the built-in palette matching their light or dark mode. Saving or exporting includes the resolved colors. Updated Sambee versions can import those legacy version-1 exports, but older releases may reject exports containing the new roles. Very large code blocks can remain plain text without truncating their contents.
 
+## Large Documents
+
+Large Markdown previews appear progressively. You can read the text already displayed or close the viewer while loading continues. Search, editing, heading links and the toolbar's Print action become available when the complete document is ready. Printing from the browser menu before then shows a loading notice instead of an incomplete document.
+
+Large previews can briefly pause while loading, and code colors can arrive after the text. Large Replace All operations show busy feedback before applying the complete replacement, but the editor and indicator can pause during that step. Editing very large tables can also be slow. These limitations don't shorten the document or split a replacement into separate undo steps.
+
 ## Saving Changes
 
 A small indicator next to the file name shows whether the document has unsaved changes. Click the save icon or press <kbd>Ctrl</kbd> + <kbd>S</kbd> at any time to save the current state of the document.
 
 Finish any input-method composition before saving. Sambee waits for table-cell edits to reach the document before capturing the saved text. If that can't finish, the editor stays open with your changes rather than saving an incomplete cell. Retry Save after the edit finishes.
+
+You can keep editing during an ordinary Save. Save writes the revision it captured; edits made afterward remain unsaved. If preparation or writing fails, your changes remain available in the editor.
 
 If Sambee must send you through OIDC sign-in while you are editing, it saves an eligible unsaved Markdown draft in this browser tab before leaving the page. See [Recover Unsaved In-Browser Edits](../recover-unsaved-edits/) for how recovery works.
 

@@ -134,7 +134,6 @@
     "statusBar.debuggingBackground": "#f4c430",
     "statusBar.debuggingForeground": "#15202b"
   },
-  "peacock.remoteColor": "#F4C430",
   // Copilot and Chat Settings: allow automatic approval and terminal file writes (this is a devcontainer)
   "chat.permissions.default": "autoApprove",
   "chat.tools.terminal.blockDetectedFileWrites": "never"
