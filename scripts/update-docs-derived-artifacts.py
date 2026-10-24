@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Refresh committed docs-derived artifacts when relevant docs inputs change."""
 
 from __future__ import annotations

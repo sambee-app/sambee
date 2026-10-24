@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Editor-oriented automation for versioned website docs content."""
 
 from __future__ import annotations
@@ -11,12 +10,11 @@ import shutil
 import sys
 import tempfile
 import textwrap
+import tomllib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, cast
-
-import tomllib
 
 DEFAULT_WEBSITE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -130,7 +128,7 @@ class EditorPaths:
     validator_script: Path
 
     @classmethod
-    def for_website(cls, website_dir: Path) -> "EditorPaths":
+    def for_website(cls, website_dir: Path) -> EditorPaths:
         """Build an EditorPaths object for one website root."""
         root = website_dir.resolve()
         return cls(

@@ -62,6 +62,8 @@ The workflow ends with a single gate job so branch protection can depend on one 
 
 In the backend job, regular tests run under `pytest-xdist` for throughput, while `@performance` tests run in a separate serial pass so wall-clock assertions are not distorted by parallel worker contention.
 
+Backend pytest runs treat unexpected warnings as errors, including resource-cleanup warnings. The shared policy in `backend/pyproject.toml` applies to both local and CI runs, and warning summaries aren't suppressed. Tests that deliberately trigger a warning must assert it with `pytest.warns(...)`, matching the warning category and message. Fix application warnings rather than ignoring them. Unavoidable dependency exceptions must be narrowly scoped and documented; the current exception covers Starlette's TestClient reference to AnyIO's deprecated `BlockingPortal` alias. Remove that exception when the dependency no longer needs it.
+
 The `frontend` job requires a clean TypeScript check, runs Vitest, builds normal production assets, installs version-matched Playwright Chromium/Firefox binaries and their Linux dependencies, then runs `npm run test:browser:ci`. Both engines run on frontend pull requests, pushes, and manual dispatch. The same required checks run in release fallback when successful source CI cannot be reused.
 
 The browser command requires exactly 16 production cases: four scenarios at desktop and narrow widths in each engine. They protect real normalization/syntax workers, entity decoding, native selection/focus/heading links/search, regex replacement with undo/redo and exact Save content, and cancellation/reopen cleanup with stale-result replay. Two additional development-worker cases exercise Vite's dependency-resolution path. Browser APIs and workers are real; backend responses are mocked at `http://localhost:3000/browse/smb/demo`. This isn't full-stack SMB E2E or evidence of physical printing, browser-menu Find, hardware IME, or assistive-technology behavior.
@@ -130,6 +132,8 @@ Current coverage includes:
 - backend Ruff checks and formatting validation.
 - frontend Biome validation.
 - companion Clippy, Rustfmt, and Biome validation.
+
+Ruff's executable-script rules (`EXE`) also check Python files throughout the repository, including `.github/`. Any Python-file change selects backend lint, as do changes to the lint workflow or `scripts/test`. These checks fail CI and `./scripts/test` on errors; they aren't advisory. A script with a shebang must be executable. Files invoked explicitly through Python, and imported modules, don't need a shebang.
 
 The lint workflow does not run the local companion Windows GNU cross-check either.
 That cross-target validation is currently a local developer workflow check, while actual Windows artifact creation remains in the release workflow.

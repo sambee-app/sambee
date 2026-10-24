@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validate homepage CTA targets in built website output."""
 
 from __future__ import annotations

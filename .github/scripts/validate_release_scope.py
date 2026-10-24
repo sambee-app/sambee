@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validate a public Sambee release's component-promotion scope."""
 
 from __future__ import annotations

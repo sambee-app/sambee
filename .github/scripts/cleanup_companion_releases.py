@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Delete obsolete Companion GitHub Releases after validating every feed marker."""
 
 from __future__ import annotations

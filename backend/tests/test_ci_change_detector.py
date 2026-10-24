@@ -1,5 +1,6 @@
 """Regression tests for CI component selection."""
 
+import ast
 import json
 import re
 import sys
@@ -67,6 +68,48 @@ def test_workflows_use_latest_x64_and_supported_arm_ubuntu_labels() -> None:
         assert isinstance(yaml.safe_load(source)["jobs"], dict), workflow.name
         labels = set(re.findall(r"ubuntu-[\w.-]+", source))
         assert labels <= allowed, f"{workflow.name}: unexpected Ubuntu labels {labels - allowed}"
+
+
+@pytest.mark.parametrize(
+    ("path", "requires_lint"),
+    [
+        ("backend/app/main.py", True),
+        (".github/scripts/promote_companion_release.py", True),
+        ("website/scripts/validate-docs-content.py", True),
+        ("scripts/ci_change_detector.py", True),
+        (".github/workflows/lint.yml", True),
+        ("scripts/test", True),
+        ("frontend/src/App.tsx", False),
+    ],
+)
+def test_python_and_lint_infrastructure_changes_schedule_backend_lint(path: str, requires_lint: bool) -> None:
+    workflow_path = Path(__file__).resolve().parents[2] / ".github/workflows/lint.yml"
+    workflow = yaml.safe_load(workflow_path.read_text())
+    detector = ast.parse(workflow["jobs"]["changes"]["steps"][0]["run"].split("\n", 1)[1].rsplit("\nPY", 1)[0])
+    selection = ast.Module(
+        body=[
+            statement
+            for statement in detector.body
+            if isinstance(statement, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id in {"backend_extras", "backend"} for target in statement.targets)
+        ],
+        type_ignores=[],
+    )
+    namespace: dict[str, Any] = {"filenames": [path]}
+    exec(compile(selection, str(workflow_path), "exec"), namespace)
+    assert namespace["backend"] is requires_lint
+
+
+def test_executable_script_lint_is_required_in_ci_and_local_validation() -> None:
+    workspace = Path(__file__).resolve().parents[2]
+    workflow = yaml.safe_load((workspace / ".github/workflows/lint.yml").read_text())
+    steps = workflow["jobs"]["lint-backend"]["steps"]
+    executable_check = next(step for step in steps if step.get("name") == "Ruff executable-script check")
+    assert executable_check["run"] == "python -m ruff check --select EXE . .github"
+    assert not executable_check.get("continue-on-error", False)
+    local_runner = (workspace / "scripts/test").read_text()
+    assert 'run_check "Ruff executable-script checks passed" "Ruff executable-script checks failed"' in local_runner
+    assert '"$BACKEND_PYTHON" -m ruff check --select EXE "$REPO_ROOT" "$REPO_ROOT/.github"' in local_runner
 
 
 def test_gate_requires_selected_components_and_allows_intentional_skips() -> None:

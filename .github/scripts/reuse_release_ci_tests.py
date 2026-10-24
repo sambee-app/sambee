@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Reuse successful source checks from CI on the exact release commit."""
 
 from __future__ import annotations

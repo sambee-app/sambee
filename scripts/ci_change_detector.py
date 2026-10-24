@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Select CI components from changed repository paths."""
 
 from __future__ import annotations

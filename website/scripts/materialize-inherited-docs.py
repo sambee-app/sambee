@@ -1,11 +1,9 @@
-#!/usr/bin/env python3
 """Generate Hugo routing anchors for inherited and stable current docs routes."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 WEBSITE_DIR = Path(__file__).resolve().parent.parent
 DOCS_CONTENT_DIR = WEBSITE_DIR / "content" / "docs"

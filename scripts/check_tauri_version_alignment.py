@@ -1,13 +1,11 @@
-#!/usr/bin/env python3
 """Validate that Tauri JavaScript packages align with Rust crate minors."""
 
 from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPANION_DIR = REPO_ROOT / "companion"
