@@ -942,7 +942,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   useLayoutEffect(() => {
     const search = previewSearchRef.current;
-    if (isEditing || !activeViewerSearchText.trim() || loading || error) {
+    if (isEditing || !activeViewerSearchText.trim() || loading || !previewReady || error) {
       search?.setQuery("", previewSearchRevision);
       setSearchMatches(0);
       setCurrentSearchMatch(0);
@@ -963,7 +963,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     setSearchMatches(count);
     setCurrentSearchMatch(initialMatch);
     search.activate(initialMatch, !unchangedSearch);
-  }, [activeViewerSearchText, error, isEditing, loading, previewGeneration.id, previewSearchRevision]);
+  }, [activeViewerSearchText, error, isEditing, loading, previewGeneration.id, previewReady, previewSearchRevision]);
 
   useEffect(() => {
     previewSearchRef.current?.activate(currentSearchMatch);

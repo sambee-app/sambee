@@ -2266,6 +2266,33 @@ describe("MarkdownViewer", () => {
     }
   });
 
+  it("restores open search after leaving edit mode in a progressively rendered preview", async () => {
+    enableSearchHighlights();
+    const paragraphCount = 1500;
+    const markdown = `# Search fixture\n\n${"needle ordinary paragraph text for the search fixture.\n\n".repeat(paragraphCount)}`;
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue(markdown);
+    vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob([markdown], { type: "text/markdown" }));
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+
+    renderViewer();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("textbox", { name: "Markdown editor" });
+    const closeViewerButton = screen.getByRole("button", { name: "Close" });
+    await viewerSearch.openSearch("needle");
+    fireEvent.click(closeViewerButton);
+
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Markdown editor" })).not.toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector('[data-markdown-publication="complete"]')).not.toBeNull());
+    expect(screen.getByDisplayValue("needle")).toBeInTheDocument();
+    expect(await screen.findByText(`1 / ${paragraphCount}`)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Next match" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Next match" }));
+    expect(await screen.findByText(`2 / ${paragraphCount}`)).toBeInTheDocument();
+  });
+
   it("searches rendered markdown and navigates between matches", async () => {
     enableSearchHighlights();
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Alpha\n\nAlpha beta alpha\n");
