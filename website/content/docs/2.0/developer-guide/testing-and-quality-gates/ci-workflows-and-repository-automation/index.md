@@ -58,7 +58,7 @@ It first detects which top-level product areas changed, then fans out only the r
 
 Manual dispatch runs all areas. Changes to shared frontend CI infrastructure also select frontend validation.
 
-The workflow ends with a single gate job so branch protection can depend on one stable required check instead of a changing set of per-area jobs.
+The workflow ends with a single gate job so branch protection can depend on one stable required check instead of a changing set of per-area jobs. Require `CI: Test / test-gate` in the repository's branch protection or ruleset. A failed browser check fails the selected frontend job and therefore the gate; browser correctness doesn't wait for Docker image creation.
 
 In the backend job, regular tests run under `pytest-xdist` for throughput, while `@performance` tests run in a separate serial pass so wall-clock assertions are not distorted by parallel worker contention.
 
@@ -147,6 +147,8 @@ All Ubuntu x64 host jobs use `ubuntu-latest`, following GitHub's managed OS migr
 Host runner choice doesn't replace production-runtime validation. Debian-family checks still include the backend test container and the release `validate-tests` container.
 
 The backend job builds the `backend-test` Docker target, which inherits the same runtime base as production. It runs mypy and the backend test suites inside that target, including when a Python image or other runtime input changes. The release validation job uses the pinned Debian-based Python container because `scripts/install-system-deps` requires distro-provided ImageMagick 7, while the default Ubuntu GitHub-hosted runner image still resolves `imagemagick` to ImageMagick 6.
+
+The release `validate-tests` job runs as root and sets `HOME=/root` at job scope. GitHub Actions can otherwise supply a mounted home directory owned by another user, which Firefox refuses to use. The override keeps dependency installation, Playwright browser installation, and browser execution on the same owned home. Hosted frontend PR checks keep the runner's normal home; don't apply `/root` globally or change ownership of GitHub's mounted directories.
 
 ## Shared Runtime Targets
 

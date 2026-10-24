@@ -158,6 +158,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.prepare.outputs.python_runtime_image }}
+    env:
+      HOME: /root
     defaults:
       run:
         shell: bash

@@ -92,6 +92,38 @@ def test_docker_release_reuses_only_verified_source_ci_jobs() -> None:
             assert step["if"] == f"steps.source-ci.outputs.{component} != 'true'"
 
 
+def test_release_browser_checks_use_the_container_users_home() -> None:
+    workflow = load_workflow("docker-image-preview-publish.yml")
+    validation = workflow["jobs"]["validate-tests"]
+
+    assert validation["container"]["image"] == "${{ needs.prepare.outputs.python_runtime_image }}"
+    assert not validation["container"].get("options")
+    assert validation["env"]["HOME"] == "/root"
+    assert "HOME" not in workflow.get("env", {})
+    for step in validation["steps"]:
+        assert "HOME" not in step.get("env", {})
+
+
+def test_pr_browser_checks_are_required_by_the_test_gate() -> None:
+    workflow = load_workflow("test.yml")
+    trigger = workflow.get("on", workflow.get(True, {}))
+    assert "main" in trigger["pull_request"]["branches"]
+    assert "paths" not in trigger["pull_request"]
+    assert "paths-ignore" not in trigger["pull_request"]
+
+    frontend = workflow["jobs"]["frontend"]
+    assert frontend["needs"] == "changes"
+    assert frontend["if"] == "needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'"
+    assert not frontend.get("continue-on-error")
+    assert "HOME" not in workflow.get("env", {})
+    assert "HOME" not in frontend.get("env", {})
+
+    gate = workflow["jobs"]["test-gate"]
+    assert "frontend" in gate["needs"]
+    assert gate["if"] == "always()"
+    assert any(step.get("run", "").strip() == "python3 scripts/check_ci_test_gate.py" for step in gate["steps"])
+
+
 def test_candidate_matrix_builds_depend_on_shared_preflight() -> None:
     for workflow_name in (
         "docker-image-preview-publish.yml",
