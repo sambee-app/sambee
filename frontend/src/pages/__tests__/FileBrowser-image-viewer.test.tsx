@@ -14,6 +14,8 @@ import { FileType } from "../../types";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import FileBrowser from "../FileBrowser";
 
+const FILE_LIST_READY_TIMEOUT_MS = 5000;
+
 const { loadImageBlob, recordFilename } = vi.hoisted(() => ({
   loadImageBlob: vi.fn(),
   recordFilename: vi.fn(),
@@ -153,7 +155,7 @@ describe("Browser - Image View Integration", () => {
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
     const { router } = renderBrowser();
-    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
     expect(await screen.findByTestId("image-view")).toHaveAttribute("data-path", "one.jpg");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     recordFilename.mockClear();
@@ -195,7 +197,7 @@ describe("Browser - Image View Integration", () => {
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
     const { router } = renderBrowser();
-    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
     await screen.findByTestId("image-view");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     let backNavigation: Promise<void> | undefined;

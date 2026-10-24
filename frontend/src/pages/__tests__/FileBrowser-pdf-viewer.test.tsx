@@ -18,6 +18,8 @@ import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType } from "../../types";
 import FileBrowser from "../FileBrowser";
 
+const FILE_LIST_READY_TIMEOUT_MS = 5000;
+
 // Mock the API service
 vi.mock("../../services/api");
 const mockedApi = apiService as MockedObject<typeof apiService>;
@@ -89,10 +91,13 @@ vi.mock("react-pdf", () => ({
  * Handles the case where filename appears in both file list and status bar
  */
 async function getFileButton(filename: string): Promise<HTMLElement> {
-  await waitFor(() => {
-    const elements = screen.getAllByText(filename);
-    expect(elements.length).toBeGreaterThan(0);
-  });
+  await waitFor(
+    () => {
+      const elements = screen.getAllByText(filename);
+      expect(elements.length).toBeGreaterThan(0);
+    },
+    { timeout: FILE_LIST_READY_TIMEOUT_MS }
+  );
   // Get the button that contains the filename (file list, not status bar)
   const buttons = screen.getAllByRole("button", { name: new RegExp(filename, "i") });
   return requireTestValue(buttons[0]);

@@ -102,7 +102,7 @@ describe("required frontend type correctness", () => {
       expect(checkedFiles.has(resolve(root, "vitest.config.ts"))).toBe(true);
       expect(projects.map((project) => project.options["types"])).toEqual([
         ["vite/client"],
-        ["vite/client", "vitest/globals", "node"],
+        ["vite/client", "vitest/globals", "@testing-library/jest-dom/vitest", "node"],
         ["node"],
       ]);
     } finally {
