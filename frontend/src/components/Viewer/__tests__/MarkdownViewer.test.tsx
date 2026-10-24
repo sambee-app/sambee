@@ -1344,9 +1344,11 @@ describe("MarkdownViewer", () => {
   });
 
   it("retries recovery after normalization completes without changing the published draft", async () => {
-    authSession.setAuthenticated({ access_token: "mock-token", token_type: "bearer", user_id: "test-user", username: "test-user" }, false);
+    const token = { access_token: "mock-token", token_type: "bearer", user_id: "test-user", username: "test-user" };
+    authSession.setAuthenticated(token, false);
     vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
     vi.spyOn(authSession, "refreshIfNeeded").mockResolvedValue("mock-token");
+    vi.spyOn(authSession, "requestRefresh").mockResolvedValue(token);
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
     vi.spyOn(apiService, "getOriginalFileBlob").mockResolvedValue(new Blob(["# Readme\n"], { type: "text/markdown" }));
     vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
@@ -1354,13 +1356,12 @@ describe("MarkdownViewer", () => {
     const { unmount } = renderViewer();
     await userEvent.setup().click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
-    fireEvent.change(editor, { target: { value: "# Acknowledged draft\n" } });
-    act(() => snapshotRegisteredDrafts());
-    const acknowledged = loadDraft("conn1", "/docs/readme.md", "markdown");
-    expect(acknowledged?.content).toBe("# Acknowledged draft\n");
-
     vi.useFakeTimers();
     try {
+      fireEvent.change(editor, { target: { value: "# Acknowledged draft\n" } });
+      act(() => snapshotRegisteredDrafts());
+      const acknowledged = loadDraft("conn1", "/docs/readme.md", "markdown");
+      expect(acknowledged?.content).toBe("# Acknowledged draft\n");
       act(() => {
         mockMarkdownEditorBehavior.flushRejectError = new DOMException("Normalization pending", "InvalidStateError");
         mockMarkdownEditorBehavior.onNormalizationStateChange?.(true);

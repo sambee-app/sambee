@@ -132,6 +132,32 @@ function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH,
       return;
     }
 
+    if (pathname === "/api/auth/oidc/refresh" && request.method() === "POST") {
+      await fulfillJson(route, { access_token: "ci-browser-token", token_type: "bearer", username: "demo-admin", user_id: "user-1", role: "admin" });
+      return;
+    }
+
+    if (pathname === "/api/auth/account" && request.method() === "GET") {
+      await fulfillJson(route, {
+        id: "user-1", username: "demo-admin", role: userRole, is_active: true,
+        must_change_password: false, expires_at: null, created_at: "2026-04-12T12:00:00Z",
+        has_local_password: true, identity_source: "local", password_change_available: true,
+        password_change_required: false, browser_session_management_available: false,
+        oidc_provider_name: null, current_session: null,
+      });
+      return;
+    }
+
+    if (pathname === "/api/themes" && request.method() === "GET") {
+      await fulfillJson(route, { themes: [], site_default_id: "sambee-light" });
+      return;
+    }
+
+    if (pathname === "/api/browse/recent-files" && request.method() === "POST") {
+      await fulfillJson(route, null);
+      return;
+    }
+
     if (pathname.endsWith("/auth/me/settings") && request.method() === "GET") {
       await fulfillJson(route, {
         appearance: { theme_id: themeId(), custom_themes: [] },
@@ -1087,6 +1113,162 @@ test.describe("production syntax theme dialog", () => {
         await expect(editor).toHaveCount(0);
         expect(writes).toHaveLength(1);
         expect(settingsWrites).toEqual([]);
+      });
+    }
+  }
+});
+
+interface CiWorkerProbe {
+  jobs: { kind: string; terminated: boolean; messages: string[] }[];
+  errors: string[];
+  held: boolean;
+  release: () => void;
+}
+
+async function installCiWorkerProbe(page: Page, holdNormalization = false): Promise<void> {
+  await page.addInitScript((holdNext) => {
+    const probe: CiWorkerProbe = { jobs: [], errors: [], held: false, release: () => {} };
+    Object.assign(window, { ciWorkerProbe: probe });
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      private job: CiWorkerProbe["jobs"][number];
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        const path = String(url);
+        this.job = { kind: path.includes("markdownCodePreparation.worker") ? "normalization" : path.includes("markdownSyntax.worker") ? "syntax" : path.includes("sourceRegexSearch.worker") ? "regex" : "other", terminated: false, messages: [] };
+        probe.jobs.push(this.job);
+        this.addEventListener("error", event => probe.errors.push(event.message));
+        this.addEventListener("messageerror", () => probe.errors.push("Worker message could not be decoded"));
+        this.addEventListener("message", event => {
+          this.job.messages.push(event.data?.type);
+          if (event.data?.type === "error") probe.errors.push(event.data.message);
+          if (holdNext && this.job.kind === "normalization" && event.data?.type === "complete") {
+            event.stopImmediatePropagation();
+            holdNext = false;
+            probe.held = true;
+            probe.release = () => {
+              probe.held = false;
+              this.dispatchEvent(new MessageEvent("message", { data: event.data }));
+            };
+          }
+        });
+      }
+      terminate() {
+        this.job.terminated = true;
+        super.terminate();
+      }
+    };
+  }, holdNormalization);
+}
+
+const readCiProbe = (page: Page) => page.evaluate(() => {
+  const probe = (window as typeof window & { ciWorkerProbe: CiWorkerProbe }).ciWorkerProbe;
+  return { jobs: probe.jobs, errors: probe.errors, held: probe.held };
+});
+
+test.describe("production CI correctness", () => {
+  test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires a normal production build");
+  const markdown = "# CI preview\n\n[CI tail](#ci-tail)\n\nA &amp; B and &#x1F680;\n\n```javascript\nconst alpha = 1;\n```\n\n## CI tail\n\nLast paragraph.\n";
+
+  for (const width of [1543, 390]) {
+    for (const scenario of ["real workers", "native contracts", "edit and save", "cancel and reopen"] as const) {
+      test(`CI ${scenario} at ${width}px`, async ({ browser }) => {
+        const original = scenario === "edit and save" ? "one=1 two=2\n" : markdown;
+        const proxy = await createCacheableViewerProxy({ initialMarkdown: original, existingFilePaths: [DEMO_PATH], wordWrapEnabled: false });
+        let context: BrowserContext | undefined;
+        try {
+          context = await browser.newContext({ viewport: { width, height: 900 }, serviceWorkers: "block", proxy: { server: proxy.url, bypass: "<-loopback>" } });
+          const page = await context.newPage();
+          const errors: string[] = [];
+          page.on("pageerror", error => errors.push(error.message));
+          page.on("response", response => { if (new URL(response.url()).origin === CACHE_PROOF_ORIGIN && response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
+          await installCiWorkerProbe(page, scenario === "cancel and reopen");
+          await page.goto("/browse/smb/demo");
+          await page.getByRole("button", { name: "Later", exact: true }).click();
+          const file = page.getByRole("button", { name: DEMO_PATH, exact: true }).or(page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true }));
+          await file.click();
+          const root = page.locator('[data-markdown-search-root="true"]');
+
+          if (scenario === "cancel and reopen") {
+            await expect.poll(async () => (await readCiProbe(page)).held).toBe(true);
+            await page.getByRole("button", { name: "Close", exact: true }).click();
+            await expect.poll(async () => (await readCiProbe(page)).jobs.every(job => job.terminated)).toBe(true);
+            await page.evaluate(() => (window as typeof window & { ciWorkerProbe: CiWorkerProbe }).ciWorkerProbe.release());
+            await expect(root).toHaveCount(0);
+            await file.click();
+          }
+
+          await expect(root).toBeVisible();
+          if (scenario !== "edit and save") {
+            await expect(root.locator("p").nth(1)).toHaveText("A & B and \u{1F680}");
+            await expect(root.locator("pre code")).toHaveText("const alpha = 1;\n");
+            await expect.poll(async () => (await readCiProbe(page)).jobs.some(job => job.kind === "syntax" && job.messages.includes("ranges") && job.messages.includes("complete"))).toBe(true);
+            expect((await readCiProbe(page)).jobs.some(job => job.kind === "normalization" && job.messages.includes("normalized-source") && job.messages.includes("tree-chunk") && job.messages.includes("complete"))).toBe(true);
+          }
+
+          if (scenario === "native contracts") {
+            const viewport = root.locator("..");
+            await expect(viewport).toBeFocused();
+            await page.keyboard.press("Tab");
+            await expect(root.getByRole("link", { name: "CI tail", exact: true })).toBeFocused();
+            await page.keyboard.press("Enter");
+            await expect(root.getByRole("heading", { name: "CI tail", exact: true })).toHaveAttribute("id", "sambee-markdown-ci-tail");
+            await viewport.focus();
+            await page.keyboard.press("Control+a");
+            const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+            expect(selected).toContain("const alpha = 1;");
+            expect(selected).toContain("Last paragraph.");
+            expect(await root.ariaSnapshot()).toContain('heading "CI preview" [level=1]');
+            await page.getByRole("button", { name: "Search", exact: true }).click();
+            await page.getByPlaceholder("Search", { exact: true }).fill("alpha");
+            await expect(page.getByText("1 / 1", { exact: true })).toBeVisible();
+          }
+
+          if (scenario === "edit and save") {
+            await enterMarkdownEditMode(page);
+            const editor = page.getByRole("textbox", { name: "Markdown editor" });
+            await editor.click();
+            await page.keyboard.press("Control+h");
+            const controls = page.getByRole("search");
+            await controls.getByRole("button", { name: "Use regular expression", exact: true }).click();
+            await controls.getByRole("textbox", { name: "Find", exact: true }).fill("(one|two)=(\\d)");
+            await controls.getByRole("textbox", { name: "Replace", exact: true }).fill("$2:$1");
+            await expect(controls.getByText("0 / 2", { exact: true })).toBeVisible();
+            await page.mouse.move(0, 0);
+            await expect(page.getByRole("tooltip")).toHaveCount(0);
+            await controls.getByRole("button", { name: "Replace all", exact: true }).click();
+            await expect(editor).toContainText("1:one 2:two");
+            await controls.getByRole("button", { name: "Close", exact: true }).click();
+            await editor.focus();
+            await page.keyboard.press("Control+z");
+            await expect(editor).toContainText("one=1 two=2");
+            await page.keyboard.press("Control+Shift+Z");
+            await expect(editor).toContainText("1:one 2:two");
+            await page.getByRole("button", { name: "Save", exact: true }).click();
+            await expect.poll(() => proxy.uploads.length).toBe(1);
+            const upload = proxy.uploads[0];
+            const form = await new Response(upload.body, { headers: { "Content-Type": upload.contentType } }).formData();
+            const files = [...form.values()].filter((value): value is File => typeof value !== "string");
+            expect(files).toHaveLength(1);
+            expect(await files[0].text()).toBe("1:one 2:two\n");
+            expect((await readCiProbe(page)).jobs.some(job => job.kind === "regex" && job.messages.includes("complete"))).toBe(true);
+            await page.getByRole("button", { name: "Close", exact: true }).click();
+            await expect(editor).toHaveCount(0);
+          }
+
+          await page.getByRole("button", { name: "Close", exact: true }).click();
+          await expect(root).toHaveCount(0);
+          await expect.poll(async () => (await readCiProbe(page)).jobs.every(job => job.terminated)).toBe(true);
+          expect((await readCiProbe(page)).errors).toEqual([]);
+          expect(errors).toEqual([]);
+          expect(proxy.errors).toEqual([]);
+        } finally {
+          try {
+            await context?.close();
+          } finally {
+            await proxy.close();
+          }
+        }
       });
     }
   }

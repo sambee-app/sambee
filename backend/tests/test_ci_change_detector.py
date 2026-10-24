@@ -1,15 +1,18 @@
 """Regression tests for CI component selection."""
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 import ci_change_detector
+from check_ci_test_gate import COMPONENT_JOBS, gate_errors
 from ci_change_detector import ARCHIVE_TOPOLOGY_PATHS, FULL_TREE_DIFF_BASE, classify_paths
 
 
@@ -49,6 +52,52 @@ def test_non_topology_component_changes_remain_selective() -> None:
         "companion": False,
         "website": False,
     }
+
+
+@pytest.mark.parametrize("path", sorted(ci_change_detector.FRONTEND_EXTRAS))
+def test_frontend_ci_infrastructure_runs_frontend_checks(path: str) -> None:
+    assert classify_paths([path])["frontend"]
+
+
+def test_workflows_use_latest_x64_and_supported_arm_ubuntu_labels() -> None:
+    workflows = Path(__file__).resolve().parents[2] / ".github/workflows"
+    allowed = {"ubuntu-latest", "ubuntu-26.04-arm"}
+    for workflow in workflows.glob("*.yml"):
+        source = workflow.read_text()
+        assert isinstance(yaml.safe_load(source)["jobs"], dict), workflow.name
+        labels = set(re.findall(r"ubuntu-[\w.-]+", source))
+        assert labels <= allowed, f"{workflow.name}: unexpected Ubuntu labels {labels - allowed}"
+
+
+def test_gate_requires_selected_components_and_allows_intentional_skips() -> None:
+    needs = {"changes": {"result": "success", "outputs": {component: "false" for component in COMPONENT_JOBS}}}
+    needs.update({job: {"result": "skipped"} for job in COMPONENT_JOBS.values()})
+    assert gate_errors(needs, "pull_request") == []
+    needs["changes"]["outputs"]["frontend"] = "true"
+    assert gate_errors(needs, "pull_request") == ["Required frontend job did not succeed: skipped"]
+    needs["frontend"]["result"] = "success"
+    assert gate_errors(needs, "pull_request") == []
+    assert gate_errors(needs, "workflow_dispatch")
+
+
+@pytest.mark.parametrize("name", ["test.yml", "lint.yml"])
+def test_only_superseded_pr_checks_are_cancelled(name: str) -> None:
+    source = Path(__file__).resolve().parents[2] / ".github/workflows" / name
+    concurrency = yaml.safe_load(source.read_text())["concurrency"]
+    assert "github.event.pull_request.number || github.run_id" in concurrency["group"]
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
+
+
+@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped", None])
+def test_gate_rejects_failed_change_detection(result: str | None) -> None:
+    assert gate_errors({"changes": {"result": result}}, "push")
+
+
+def test_gate_rejects_missing_outputs_and_unselected_failures() -> None:
+    assert gate_errors({"changes": {"result": "success"}}, "push")
+    needs = {"changes": {"result": "success", "outputs": {component: "false" for component in COMPONENT_JOBS}}}
+    needs.update({job: {"result": "cancelled"} for job in COMPONENT_JOBS.values()})
+    assert len(gate_errors(needs, "push")) == len(COMPONENT_JOBS)
 
 
 @pytest.mark.parametrize(

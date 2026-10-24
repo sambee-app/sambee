@@ -21,9 +21,23 @@ BACKEND_EXTRAS = frozenset(
         "scripts/setup-test-images",
         "scripts/verify-python-runtime-image.py",
         ".github/actions/setup-runtime-python/action.yml",
+        ".github/scripts/reuse_release_ci_tests.py",
+        "scripts/check_ci_test_gate.py",
     }
 )
-FRONTEND_EXTRAS = frozenset({"VERSION", "scripts/sync-version"})
+FRONTEND_EXTRAS = frozenset(
+    {
+        "VERSION",
+        "scripts/sync-version",
+        "scripts/ci_change_detector.py",
+        "scripts/check_ci_test_gate.py",
+        ".github/workflows/test.yml",
+        ".github/workflows/lint.yml",
+        ".github/workflows/docker-image-preview-publish.yml",
+        ".github/scripts/reuse_release_ci_tests.py",
+        ".github/actions/sync-version-check/action.yml",
+    }
+)
 COMPANION_EXTRAS = frozenset({"VERSION", "scripts/sync-version"})
 WEBSITE_EXTRAS = frozenset({"VERSION"})
 FULL_TREE_DIFF_BASE = "__empty_tree__"

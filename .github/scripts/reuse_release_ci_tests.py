@@ -15,6 +15,7 @@ COMPONENTS = ("backend", "frontend")
 CI_WORKFLOW = "test.yml"
 API_TIMEOUT_SECONDS = 10
 JOBS_PER_PAGE = 100
+FRONTEND_REQUIRED_STEPS = frozenset({"Run browser correctness contracts"})
 
 
 def github_get(url: str, token: str) -> dict[str, Any]:
@@ -74,6 +75,19 @@ def reusable_jobs(api_url: str, repository: str, sha: str, token: str) -> set[st
             if not isinstance(job, dict):
                 raise ValueError("CI workflow job is not an object")
             if job.get("name") in COMPONENTS and job.get("conclusion") == "success":
+                if job["name"] == "frontend":
+                    steps = job.get("steps", [])
+                    if not isinstance(steps, list):
+                        raise ValueError("Frontend CI job steps are not a list")
+                    successful_steps = {
+                        step.get("name")
+                        for step in steps
+                        if isinstance(step, dict)
+                        and step.get("conclusion") == "success"
+                        and isinstance(step.get("name"), str)
+                    }
+                    if not FRONTEND_REQUIRED_STEPS <= successful_steps:
+                        continue
                 successful.add(job["name"])
         if len(jobs) < JOBS_PER_PAGE:
             return successful
