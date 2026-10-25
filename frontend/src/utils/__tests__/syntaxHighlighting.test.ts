@@ -27,6 +27,52 @@ describe("shared syntax highlighting", () => {
   });
 
   it.each([
+    ["script.PS1", "powershell"],
+    ["script.Ps1", "powershell"],
+    ["module.PsM1", "powershell"],
+    ["example.PY", "python"],
+    ["example.build", "python"],
+    ["example.BuIlD", "python"],
+    ["example.R", "r"],
+    ["example.M", "mathematica"],
+    ["example.SIG", "pgp"],
+    ["example.V", "systemverilog"],
+    ["project.CMAKE.IN", "properties files"],
+  ])("resolves filename %s independently of extension case", (filename, language) => {
+    expect(resolveFilename(filename)).toEqual({ language });
+  });
+
+  it("resolves every registered extension consistently across case variants", () => {
+    for (const description of languages) {
+      for (const extension of description.extensions) {
+        const expected = resolveFilename(`example.${extension}`);
+        expect(resolveFilename(`example.${extension.toLowerCase()}`)).toEqual(expected);
+        expect(resolveFilename(`example.${extension.toUpperCase()}`)).toEqual(expected);
+      }
+    }
+  });
+
+  it.each([
+    ["CMakeLists.txt", "cmake"],
+    ["Dockerfile", "dockerfile"],
+    ["BUILD", "python"],
+    ["Gemfile", "ruby"],
+    ["extensions.conf", "asterisk"],
+    ["EXTENSIONS.CONF", "asterisk"],
+    ["nginx.conf", "nginx"],
+    ["NGINX.CONF", "nginx"],
+  ])("preserves special filename matching for %s", (filename, language) => {
+    expect(resolveFilename(filename)).toEqual({ language });
+  });
+
+  it.each(["dockerfile", "build", "gemfile", "example.unknown", "", "example."])(
+    "keeps unmatched filename %s as plain text",
+    (filename) => {
+      expect(resolveFilename(filename)).toEqual({ reason: "unknown-language" });
+    }
+  );
+
+  it.each([
     ["mssql", "ms sql"],
     ["mariadb", "mariadb sql"],
   ])("resolves %s to its registered dialect rather than generic SQL", (label, language) => {

@@ -105,7 +105,14 @@ function resolution(description: LanguageDescription | null): LanguageResolution
   return description ? { language: description.name.toLowerCase() as LanguageId } : { reason: "unknown-language" };
 }
 export function resolveFilename(filename: string): LanguageResolution {
-  return resolution(LanguageDescription.matchFilename(languages, filename));
+  const filenameMatch = languages.find((description) => description.filename?.test(filename));
+  if (filenameMatch) return resolution(filenameMatch);
+  const extension = /\.([^.]+)$/.exec(filename)?.[1]?.toLowerCase();
+  return resolution(
+    extension
+      ? (languages.find((description) => description.extensions.some((candidate) => candidate.toLowerCase() === extension)) ?? null)
+      : null
+  );
 }
 export function resolveFence(label?: string | null): LanguageResolution {
   const normalized = label?.trim().split(/\s+/)[0]?.toLowerCase() ?? "";

@@ -96,6 +96,7 @@ title = "Reference"
 [pages.user-guide.reference]
 items = [
   "supported-file-formats",
+  "syntax-highlighting-languages",
 ]
 
 [[sections.admin-guide.items]]
