@@ -509,6 +509,36 @@ test.describe("production unified text editor", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
   const filename = "notes.txt";
   for (const width of [1543, 390]) {
+    test(`acquisition feedback never shifts the document at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await serveProductionAssets(page);
+      await mockMarkdownViewerApi(page, { initialMarkdown: "saved text", filePath: filename });
+      let releaseLock!: () => void;
+      const heldLock = new Promise<void>(resolve => { releaseLock = resolve; });
+      await page.route(`**/api/browse/${DEMO_CONNECTION_ID}/lock?**`, async route => {
+        if (route.request().method() === "POST") await heldLock;
+        await route.fallback();
+      });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      await page.getByRole("button").filter({ has: page.getByText(filename, { exact: true }) }).click();
+      const content = page.getByTestId("text-viewer-content");
+      const editor = page.locator(".sambee-text-editor .cm-content");
+      await expect(editor).toHaveAttribute("contenteditable", "false");
+      const initialTop = await content.evaluate(element => element.getBoundingClientRect().top);
+      const status = page.getByRole("status", { name: "Checking write access..." });
+      await expect(status).toBeVisible();
+      expect(await status.evaluate(element => !!element.closest('[data-testid="text-editor-acquisition-slot"]'))).toBe(true);
+      expect(await content.evaluate(element => element.getBoundingClientRect().top)).toBe(initialTop);
+      await expect(page.locator(".MuiAlert-root")).toHaveCount(0);
+      releaseLock();
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await expect(status).toHaveCount(0);
+      expect(await content.evaluate(element => element.getBoundingClientRect().top)).toBe(initialTop);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(editor).toHaveCount(0);
+    });
+
     test(`direct editing and one-step dirty Close at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       await serveProductionAssets(page);

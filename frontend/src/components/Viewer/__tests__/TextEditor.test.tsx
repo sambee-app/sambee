@@ -207,6 +207,125 @@ async function enterEditMode(): Promise<HTMLElement> {
 }
 
 describe("TextEditor", () => {
+  it("keeps fast acquisition feedback invisible without removing its reserved toolbar slot", async () => {
+    renderViewer();
+    await enterEditMode();
+    expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
+    expect(screen.getByTestId("text-editor-acquisition-slot")).toHaveStyle({ width: "20px", height: "20px" });
+  });
+
+  it.each(["lock", "baseline"])("delays toolbar feedback while waiting for the %s and keeps typing disabled", async (stage) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let finish!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const acquire = vi.mocked(apiService.acquireEditLock);
+      const lock = await acquire.getMockImplementation()!("conn1", "/docs/readme.txt");
+      if (stage === "lock")
+        acquire.mockImplementationOnce(async () => {
+          await pending;
+          return lock;
+        });
+      else
+        vi.mocked(apiService.getFileContent)
+          .mockResolvedValueOnce("hello world")
+          .mockImplementationOnce(async () => {
+            await pending;
+            return "fresh baseline";
+          });
+      renderViewer();
+      await act(async () => {});
+      expect(acquire).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
+      await act(() => vi.advanceTimersByTimeAsync(199));
+      expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      const status = screen.getByRole("status", { name: "Checking write access..." });
+      expect(screen.getByTestId("text-editor-acquisition-slot")).toContainElement(status);
+      expect(status.closest(".MuiAlert-root")).toBeNull();
+      await act(async () => finish());
+      expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly");
+      expect(screen.getByTestId("text-editor-acquisition-slot")).toHaveStyle({ width: "20px", height: "20px" });
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels delayed feedback on unmount and releases a late acquisition", async () => {
+    const acquire = vi.mocked(apiService.acquireEditLock);
+    const lock = await acquire.getMockImplementation()!("conn1", "/docs/readme.txt");
+    let finish!: (value: typeof lock) => void;
+    acquire.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const timeout = vi.spyOn(window, "setTimeout");
+    const clear = vi.spyOn(window, "clearTimeout");
+    const { unmount } = renderViewer();
+    await waitFor(() => expect(acquire).toHaveBeenCalledTimes(1));
+    const feedbackTimerIndex = timeout.mock.calls.findIndex(([, delay]) => delay === 200);
+    expect(feedbackTimerIndex).toBeGreaterThanOrEqual(0);
+    const feedbackResult = timeout.mock.results[feedbackTimerIndex];
+    if (!feedbackResult) throw new Error("Expected an acquisition feedback timer");
+    const feedbackTimer = feedbackResult.value;
+    unmount();
+    expect(clear).toHaveBeenCalledWith(feedbackTimer);
+    await act(async () => finish(lock));
+    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
+  });
+
+  it("reports baseline failures immediately in one notice with details and Retry", async () => {
+    vi.mocked(apiService.getFileContent).mockResolvedValueOnce("hello world").mockRejectedValueOnce(new Error("Baseline unavailable"));
+    renderViewer();
+    const retry = await screen.findByRole("button", { name: "Retry editing" });
+    const notice = screen.getByRole("alert");
+    expect(notice).toContainElement(retry);
+    expect(notice).toHaveTextContent("Baseline unavailable");
+    expect(document.querySelectorAll(".MuiAlert-root")).toHaveLength(1);
+    expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
+    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the read-only notice during a slow retry without stacking progress banners", async () => {
+    const acquire = vi.mocked(apiService.acquireEditLock);
+    const lock = await acquire.getMockImplementation()!("conn1", "/docs/readme.txt");
+    acquire.mockRejectedValueOnce({ response: { status: 409 } });
+    let finish!: (value: typeof lock) => void;
+    acquire.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderViewer();
+    const retry = await screen.findByRole("button", { name: "Retry editing" });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      fireEvent.click(retry);
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      expect(retry).toBeDisabled();
+      expect(screen.getByTestId("text-editor-acquisition-slot")).toContainElement(
+        screen.getByRole("status", { name: "Checking write access..." })
+      );
+      expect(document.querySelectorAll(".MuiAlert-root")).toHaveLength(1);
+      await act(async () => finish(lock));
+      expect(document.querySelectorAll(".MuiAlert-root")).toHaveLength(0);
+      expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly");
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   it("opens directly for editing and closes to the file list in one step", async () => {
     const onClose = vi.fn();
     renderViewer({ onClose });
