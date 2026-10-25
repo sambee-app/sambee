@@ -83,7 +83,9 @@ Sambee uses a provider refresh token when one is returned, whether or not `offli
 
 ### Text Viewer and Editor Combined
 
-Sambee's text viewer and text editor are now combined into a single component. Text files now open directly in the editor. If write mode cannot be enabled, text editor operates in read-only mode.
+Sambee's text viewer and text editor are now combined into a single component. Text files now open directly in the editor. If write mode cannot be enabled, text editor operates in read-only mode and a notification is shown.
+
+As part of this change, text editor, Markdown viewer and Markdown editor got a consistent toast-based notification system.
 
 ### Syntax Highlighting and Rendering Performance Optimization
 
