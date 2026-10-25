@@ -1437,39 +1437,52 @@ describe("useFileBrowserPane", () => {
     }
   });
 
-  it("keeps selection, focus and scroll while automatically refreshing unchanged rows", async () => {
-    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
-    act(() => result.current.applyLocation("conn-1", ""));
-    await waitFor(() => expect(result.current.files).toHaveLength(3));
-    const list = document.createElement("div");
-    list.tabIndex = 0;
-    document.body.appendChild(list);
-    try {
-      act(() => {
-        result.current.listContainerRef(list);
-        result.current.parentRef.current = list;
-      });
-      list.focus();
-      act(() => result.current.handleEnd());
-      act(() => result.current.handleToggleSelection());
-      const selected = new Set(result.current.selectedFiles);
-      expect(selected.size).toBe(1);
-      const focusedIndex = result.current.focusedIndex;
-      list.scrollTop = 120;
+  it.each(["before", "after"])(
+    "keeps selection, focus and scroll while automatically refreshing unchanged rows (refresh resolves %s next frame)",
+    async (refreshTiming) => {
+      const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+      act(() => result.current.applyLocation("conn-1", ""));
+      await waitFor(() => expect(result.current.files).toHaveLength(3));
+      const list = document.createElement("div");
+      list.tabIndex = 0;
+      document.body.appendChild(list);
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          result.current.listContainerRef(list);
+          result.current.parentRef.current = list;
+        });
+        list.focus();
+        act(() => result.current.handleEnd());
+        act(() => vi.advanceTimersToNextFrame());
+        const focusedIndex = result.current.sortedFiles.length - 1;
+        expect(result.current.focusedIndex).toBe(focusedIndex);
+        act(() => result.current.handleToggleSelection());
+        const selected = new Set(result.current.selectedFiles);
+        expect(selected).toEqual(new Set([requireTestValue(result.current.sortedFiles[focusedIndex]).path]));
+        list.scrollTop = 120;
 
-      const refresh = deferred<typeof mockDirectoryListing>();
-      vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
-      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
-      expect(result.current.loading).toBe(false);
-      await act(async () => refresh.resolve({ ...mockDirectoryListing, items: mockDirectoryListing.items.map((entry) => ({ ...entry })) }));
+        const refresh = deferred<typeof mockDirectoryListing>();
+        vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
+        act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+        expect(result.current.loading).toBe(false);
+        if (refreshTiming === "after") {
+          act(() => vi.advanceTimersToNextFrame());
+        }
+        await act(async () =>
+          refresh.resolve({ ...mockDirectoryListing, items: mockDirectoryListing.items.map((entry) => ({ ...entry })) })
+        );
+        act(() => vi.advanceTimersToNextFrame());
 
-      expect(result.current.selectedFiles).toEqual(selected);
-      expect(result.current.focusedIndex).toBe(focusedIndex);
-      expect(list.scrollTop).toBe(120);
-    } finally {
-      list.remove();
+        expect(result.current.selectedFiles).toEqual(selected);
+        expect(result.current.focusedIndex).toBe(focusedIndex);
+        expect(list.scrollTop).toBe(120);
+      } finally {
+        list.remove();
+        vi.useRealTimers();
+      }
     }
-  });
+  );
 
   it("reloads an open archive when its physical parent directory changes", async () => {
     const archive = { name: "backup.zip", path: "backup.zip", type: FileType.FILE, is_readable: true, is_hidden: false };
