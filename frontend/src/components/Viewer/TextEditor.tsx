@@ -1,10 +1,11 @@
-import { Alert, Box, Button, CircularProgress, Dialog, Tooltip, useMediaQuery, useTheme } from "@mui/material";
+import { Refresh } from "@mui/icons-material";
+import { Alert, Box, Button, CircularProgress, Dialog, Snackbar, Tooltip, useMediaQuery, useTheme } from "@mui/material";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { BROWSER_SHORTCUTS, CODEMIRROR_EDITOR_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
-import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useKeyboardShortcuts, withShortcut } from "../../hooks/useKeyboardShortcuts";
 import { useRoutedViewerEditing } from "../../hooks/useRoutedViewerEditing";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
@@ -43,7 +44,7 @@ import MarkdownEditorErrorBoundary from "./MarkdownEditorErrorBoundary";
 import { RecoveredDraftDialog } from "./RecoveredDraftDialog";
 import { TextCodeEditor, type TextCodeEditorHandle, type TextCodeEditorSearchState } from "./TextCodeEditor";
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
-import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
+import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge, type ViewerToolbarAction } from "./ViewerControls";
 import { downloadViewerBlob } from "./viewerContent";
 import { createSaveToolbarAction } from "./viewerToolbarActions";
 
@@ -56,6 +57,7 @@ const EDIT_HEARTBEAT_INTERVAL_MS = 30_000;
 const ACQUISITION_FEEDBACK_DELAY_MS = 200;
 const ACQUISITION_STATUS_SLOT_SIZE = 20;
 const ACQUISITION_SPINNER_SIZE = 16;
+const READ_ONLY_NOTIFICATION_AUTOHIDE_MS = 15_000;
 
 function withOpacity(color: string, opacity: number): string {
   const normalizedOpacity = Math.max(0, Math.min(1, opacity));
@@ -144,6 +146,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   const [isAcquiring, setIsAcquiring] = useState(false);
   const [showAcquisitionFeedback, setShowAcquisitionFeedback] = useState(false);
   const [readOnlyReason, setReadOnlyReason] = useState<TextReadOnlyReason | null>(null);
+  const [readOnlyNotificationOpen, setReadOnlyNotificationOpen] = useState(false);
   const [heartbeatWarning, setHeartbeatWarning] = useState(false);
   const [conflict, setConflict] = useState<{ serverContent: string; draftContent: string } | null>(null);
   const acquisitionPending = useRef(false);
@@ -909,6 +912,14 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   const textEditorShortcuts = useMemo(
     () => [
       { ...COMMON_SHORTCUTS.DOWNLOAD, handler: handleDownload },
+      {
+        ...COMMON_SHORTCUTS.RETRY_EDITING,
+        handler: (): void => void handleEnterEditMode(),
+        enabled:
+          (readOnlyReason === "locked" || readOnlyReason === "unavailable" || readOnlyReason === "lost") &&
+          !isAcquiring &&
+          !isTransitioning,
+      },
       { ...VIEWER_SHORTCUTS.FULLSCREEN, handler: handleToggleFullscreen },
       {
         ...COMMON_SHORTCUTS.SEARCH,
@@ -976,6 +987,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       error,
       exceedsEditorLimit,
       handleDownload,
+      handleEnterEditMode,
       handleEscape,
       handleOpenSearch,
       handleOpenReplace,
@@ -987,6 +999,9 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       handleToggleFullscreen,
       editorShouldBeReadOnly,
       isSaving,
+      isAcquiring,
+      isTransitioning,
+      readOnlyReason,
       loading,
       searchMatches,
       searchMode,
@@ -1003,22 +1018,44 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
     inputSelector: "input, textarea",
   });
 
-  const toolbarActions = useMemo(
-    () =>
-      isEditing
-        ? [
-            createSaveToolbarAction({
-              id: "save-text",
-              onClick: () => {
-                void handleSave();
-              },
-              isMobile,
-              disabled: editorShouldBeReadOnly || isSaving || exceedsEditorLimit,
-            }),
-          ]
-        : [],
-    [editorShouldBeReadOnly, exceedsEditorLimit, handleSave, isEditing, isMobile, isSaving]
-  );
+  const toolbarActions = useMemo(() => {
+    const actions: ViewerToolbarAction[] = isEditing
+      ? [
+          createSaveToolbarAction({
+            id: "save-text",
+            onClick: () => {
+              void handleSave();
+            },
+            isMobile,
+            disabled: editorShouldBeReadOnly || isSaving || exceedsEditorLimit,
+          }),
+        ]
+      : [];
+    if (readOnlyReason === "locked" || readOnlyReason === "unavailable" || readOnlyReason === "lost") {
+      actions.push({
+        id: "retry-editing",
+        kind: "icon",
+        icon: <Refresh fontSize={isMobile ? "small" : "medium"} />,
+        label: t("viewer.text.retryEditing"),
+        title: withShortcut(COMMON_SHORTCUTS.RETRY_EDITING),
+        disabled: isAcquiring || isTransitioning,
+        onClick: () => void handleEnterEditMode(),
+      });
+    }
+    return actions;
+  }, [
+    editorShouldBeReadOnly,
+    exceedsEditorLimit,
+    handleEnterEditMode,
+    handleSave,
+    isAcquiring,
+    isEditing,
+    isMobile,
+    isSaving,
+    isTransitioning,
+    readOnlyReason,
+    t,
+  ]);
 
   const unsavedChangesIndicator = hasUnsavedChanges ? (
     <Box
@@ -1076,6 +1113,11 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   );
 
   const hasReadOnlyNotice = readOnlyReason !== null && readOnlyReason !== "conflict";
+  const readOnlyNotificationMessage = hasReadOnlyNotice ? editError || t(`viewer.text.readOnlyReasons.${readOnlyReason}`) : null;
+
+  useEffect(() => {
+    setReadOnlyNotificationOpen(readOnlyNotificationMessage !== null);
+  }, [readOnlyNotificationMessage]);
 
   const handleDialogClose = useCallback(
     (_event: unknown, reason: string) => {
@@ -1233,20 +1275,38 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
             </Alert>
           ) : null}
           {hasReadOnlyNotice ? (
-            <Alert
-              severity={editError ? "error" : "info"}
-              role={editError ? "alert" : "status"}
-              action={
-                ["locked", "unavailable", "lost"].includes(readOnlyReason) ? (
-                  <Button disabled={isAcquiring || isTransitioning} onClick={() => void handleEnterEditMode()}>
-                    {t("viewer.text.retryEditing")}
-                  </Button>
-                ) : undefined
-              }
+            <Snackbar
+              open={readOnlyNotificationOpen}
+              autoHideDuration={editError ? null : READ_ONLY_NOTIFICATION_AUTOHIDE_MS}
+              anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+              onClose={(_event, reason) => {
+                if (reason !== "clickaway") setReadOnlyNotificationOpen(false);
+              }}
             >
-              {t(`viewer.text.readOnlyReasons.${readOnlyReason}`)}
-              {editError && editError !== t(`viewer.text.readOnlyReasons.${readOnlyReason}`) ? <Box>{editError}</Box> : null}
-            </Alert>
+              <Alert
+                severity={editError ? "error" : "info"}
+                role={editError ? "alert" : "status"}
+                onClose={() => setReadOnlyNotificationOpen(false)}
+                sx={{
+                  width: "100%",
+                  "&&": editError ? {} : { backgroundColor: toolbarBg, color: toolbarText, "& .MuiAlert-icon": { color: "inherit" } },
+                }}
+              >
+                {readOnlyReason === "locked" ? (
+                  <Trans
+                    i18nKey="viewer.text.lockedNotification"
+                    components={{
+                      retryIcon: (
+                        <Refresh fontSize="inherit" titleAccess={t("viewer.text.retryEditing")} sx={{ verticalAlign: "text-bottom" }} />
+                      ),
+                    }}
+                  />
+                ) : (
+                  t(`viewer.text.readOnlyReasons.${readOnlyReason}`)
+                )}
+                {editError && editError !== t(`viewer.text.readOnlyReasons.${readOnlyReason}`) ? <Box>{editError}</Box> : null}
+              </Alert>
+            </Snackbar>
           ) : null}
           {nativeSharing.failureDialog}
           {draftStorageWarning ? (

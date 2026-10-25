@@ -1395,6 +1395,8 @@ export const EN_TRANSLATIONS = {
         "The text editor encountered an internal error. Your draft is still kept in memory. Retry the editor or close the file.",
       acquiring: "Checking write access...",
       retryEditing: "Retry editing",
+      lockedNotification:
+        "This file is being edited in another session. You can read it here. Retry editing with <retryIcon/> when the other editor is closed.",
       heartbeatFailed: "Could not refresh the edit lock. Check your connection; saving may require acquiring the lock again.",
       readOnlyReasons: {
         "read-only": "This location is read-only.",

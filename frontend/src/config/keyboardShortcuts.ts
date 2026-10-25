@@ -70,6 +70,17 @@ export const COMMON_SHORTCUTS = {
     ctrl: true,
     allowInInput: true,
   },
+  RETRY_EDITING: {
+    id: "retry-editing",
+    keys: ["r", "R"],
+    get description() {
+      return translate("viewer.text.retryEditing");
+    },
+    label: "Ctrl+R",
+    helpGroup: "editing",
+    ctrl: true,
+    allowInInput: true,
+  },
 
   //
   // Search

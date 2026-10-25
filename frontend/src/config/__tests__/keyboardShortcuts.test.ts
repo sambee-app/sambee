@@ -20,7 +20,24 @@ describe("Keyboard Shortcuts Configuration", () => {
     });
 
     it("should have valid key values", () => {
-      const validKeys = ["Enter", "Escape", "d", "e", "s", "S", "f", "F3", "Home", "End", "PageDown", "PageUp", "ArrowRight", "ArrowLeft"];
+      const validKeys = [
+        "Enter",
+        "Escape",
+        "d",
+        "e",
+        "s",
+        "S",
+        "r",
+        "R",
+        "f",
+        "F3",
+        "Home",
+        "End",
+        "PageDown",
+        "PageUp",
+        "ArrowRight",
+        "ArrowLeft",
+      ];
 
       for (const shortcut of Object.values(COMMON_SHORTCUTS)) {
         const keys = Array.isArray(shortcut.keys) ? shortcut.keys : [shortcut.keys];

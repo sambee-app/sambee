@@ -283,12 +283,13 @@ describe("TextEditor", () => {
     expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
   });
 
-  it("reports baseline failures immediately in one notice with details and Retry", async () => {
+  it("reports baseline failures in a toast with details and keeps Retry in the toolbar", async () => {
     vi.mocked(apiService.getFileContent).mockResolvedValueOnce("hello world").mockRejectedValueOnce(new Error("Baseline unavailable"));
     renderViewer();
     const retry = await screen.findByRole("button", { name: "Retry editing" });
     const notice = screen.getByRole("alert");
-    expect(notice).toContainElement(retry);
+    expect(notice.closest(".MuiSnackbar-root")).not.toBeNull();
+    expect(notice).not.toContainElement(retry);
     expect(notice).toHaveTextContent("Baseline unavailable");
     expect(document.querySelectorAll(".MuiAlert-root")).toHaveLength(1);
     expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
@@ -296,7 +297,29 @@ describe("TextEditor", () => {
     expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the read-only notice during a slow retry without stacking progress banners", async () => {
+  it("keeps toolbar Retry and the read-only badge after dismissing the one-time toast", async () => {
+    vi.mocked(apiService.acquireEditLock).mockRejectedValueOnce({ response: { status: 409 } });
+    renderViewer();
+    const retry = await screen.findByRole("button", { name: "Retry editing" });
+    const notice = screen.getByText(/This file is being edited in another session\. You can read it here\. Retry editing with/);
+    const toast = notice.closest(".MuiAlert-root");
+    if (!(toast instanceof HTMLElement)) throw new Error("Expected a read-only toast");
+    expect(toast.closest(".MuiSnackbar-root")).not.toBeNull();
+    expect(within(toast).getByRole("img", { name: "Retry editing" })).toBeInTheDocument();
+    expect(toast).toHaveTextContent("when the other editor is closed.");
+    fireEvent.click(within(toast).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(notice).not.toBeInTheDocument());
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(retry).toBeEnabled();
+    const editor = screen.getByRole("textbox", { name: "Text editor" });
+    fireEvent.keyDown(editor, { altKey: true, key: "z" });
+    expect(notice).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    await waitFor(() => expect(editor).not.toHaveAttribute("readonly"));
+    expect(screen.queryByRole("button", { name: "Retry editing" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the read-only toast during a slow retry without stacking progress banners", async () => {
     const acquire = vi.mocked(apiService.acquireEditLock);
     const lock = await acquire.getMockImplementation()!("conn1", "/docs/readme.txt");
     acquire.mockRejectedValueOnce({ response: { status: 409 } });
@@ -314,6 +337,8 @@ describe("TextEditor", () => {
       fireEvent.click(retry);
       await act(() => vi.advanceTimersByTimeAsync(200));
       expect(retry).toBeDisabled();
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Text editor" }), { ctrlKey: true, key: "r" });
+      expect(acquire).toHaveBeenCalledTimes(2);
       expect(screen.getByTestId("text-editor-acquisition-slot")).toContainElement(
         screen.getByRole("status", { name: "Checking write access..." })
       );
@@ -326,6 +351,33 @@ describe("TextEditor", () => {
       cleanup();
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the lock toast for 15 seconds and leaves Retry available after automatic dismissal", async () => {
+    const timeout = vi.spyOn(window, "setTimeout");
+    vi.mocked(apiService.acquireEditLock).mockRejectedValueOnce({ response: { status: 409 } });
+    renderViewer();
+    const retry = await screen.findByRole("button", { name: "Retry editing" });
+    const notice = screen.getByText(/This file is being edited in another session\. You can read it here\./);
+    const dismiss = timeout.mock.calls.find(([, delay]) => delay === 15_000)?.[0];
+    if (typeof dismiss !== "function") throw new Error("Expected a 15-second toast dismissal timer");
+    act(() => dismiss());
+    await waitFor(() => expect(notice).not.toBeInTheDocument());
+    expect(retry).toBeEnabled();
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+  });
+
+  it.each(["r", "R"])("retries with Ctrl+%s only while editing can be retried", async (key) => {
+    vi.mocked(apiService.acquireEditLock).mockRejectedValueOnce({ response: { status: 409 } });
+    renderViewer();
+    await screen.findByRole("button", { name: "Retry editing" });
+    const editor = screen.getByRole("textbox", { name: "Text editor" });
+    editor.focus();
+    expect(fireEvent.keyDown(editor, { ctrlKey: true, key })).toBe(false);
+    await waitFor(() => expect(editor).not.toHaveAttribute("readonly"));
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2);
+    expect(fireEvent.keyDown(editor, { ctrlKey: true, key })).toBe(true);
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2);
   });
 
   it("opens directly for editing and closes to the file list in one step", async () => {
