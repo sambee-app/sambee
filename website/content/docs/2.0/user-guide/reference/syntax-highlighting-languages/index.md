@@ -184,4 +184,3 @@ The file column lists extensions and special filename matches. Special filenames
 
 - [Edit Markdown](../../viewing-and-editing-files/edit-markdown/)
 - [Supported File Formats](../supported-file-formats/)
-
