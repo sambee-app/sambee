@@ -238,7 +238,8 @@ describe("TextEditor", () => {
       renderViewer();
       await act(async () => {});
       expect(acquire).toHaveBeenCalledTimes(1);
-      expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
+      const initialEditor = screen.getByRole("textbox", { name: "Text editor" });
+      expect(initialEditor).toHaveAttribute("readonly");
       await act(() => vi.advanceTimersByTimeAsync(199));
       expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
       await act(() => vi.advanceTimersByTimeAsync(1));
@@ -247,6 +248,7 @@ describe("TextEditor", () => {
       expect(status.closest(".MuiAlert-root")).toBeNull();
       await act(async () => finish());
       expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Text editor" })).toBe(initialEditor);
       expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly");
       expect(screen.getByTestId("text-editor-acquisition-slot")).toHaveStyle({ width: "20px", height: "20px" });
     } finally {

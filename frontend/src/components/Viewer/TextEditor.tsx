@@ -148,6 +148,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   const [conflict, setConflict] = useState<{ serverContent: string; draftContent: string } | null>(null);
   const acquisitionPending = useRef(false);
   const editActivation = useRef(0);
+  const hasActivatedEditorRef = useRef(false);
   const [editSession, setEditSession] = useState<ContentEditSession | null>(null);
   const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
   const [searchFocusTarget, setSearchFocusTarget] = useState<"find" | "replace" | null>(null);
@@ -561,7 +562,11 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
         beginBaselineSyncWindow();
         markEditSessionPristine();
         setSearchAutoNavigate(true);
-        setEditorBoundaryKey((previousKey) => previousKey + 1);
+        if (hasActivatedEditorRef.current || initialDraft !== undefined) {
+          setEditorBoundaryKey((previousKey) => previousKey + 1);
+        }
+        hasActivatedEditorRef.current = true;
+        requestRestoreEditingFocus();
         setIsEditing(true);
         return true;
       } catch (err) {
@@ -598,6 +603,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       markEditSessionPristine,
       maxFileSizeBytes,
       path,
+      requestRestoreEditingFocus,
       setEditBaselineContent,
       t,
     ]

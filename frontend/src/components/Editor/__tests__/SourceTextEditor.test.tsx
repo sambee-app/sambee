@@ -51,6 +51,43 @@ const TEST_TEXT_THEME: TextEditorThemeOptions = {
 };
 
 describe("SourceTextEditor", () => {
+  it("keeps the view when activating a fresh baseline without adding that baseline to undo history", () => {
+    const editorRef = createRef<SourceTextEditorHandle>();
+    const onChange = vi.fn();
+    const extensions = buildCommonEditorExtensions();
+    const { rerender } = render(
+      <SourceTextEditor
+        ref={editorRef}
+        value="old baseline"
+        readOnly
+        extensions={extensions}
+        ariaLabel="Baseline editor"
+        onChange={onChange}
+      />
+    );
+    const view = editorRef.current?.getView();
+    if (!view) throw new Error("Expected a mounted editor");
+    const contentDOM = view.contentDOM;
+    view.dispatch({ selection: { anchor: 3 } });
+
+    rerender(
+      <SourceTextEditor ref={editorRef} value="fresh baseline" extensions={extensions} ariaLabel="Baseline editor" onChange={onChange} />
+    );
+
+    expect(editorRef.current?.getView()).toBe(view);
+    expect(view.contentDOM).toBe(contentDOM);
+    expect(view.state.readOnly).toBe(false);
+    expect(view.state.selection.main.anchor).toBe(3);
+    expect(view.state.doc.toString()).toBe("fresh baseline");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(undo(view)).toBe(false);
+
+    view.dispatch({ changes: { from: view.state.doc.length, insert: " edited" }, userEvent: "input.type" });
+    expect(undo(view)).toBe(true);
+    expect(view.state.doc.toString()).toBe("fresh baseline");
+    expect(undo(view)).toBe(false);
+  });
+
   it("measures serialization and synchronous parent publication without retaining source or repeating controlled echoes", () => {
     const editorRef = createRef<SourceTextEditorHandle>();
     const onChange = vi.fn();

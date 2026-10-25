@@ -525,6 +525,8 @@ test.describe("production unified text editor", () => {
       const content = page.getByTestId("text-viewer-content");
       const editor = page.locator(".sambee-text-editor .cm-content");
       await expect(editor).toHaveAttribute("contenteditable", "false");
+      const initialEditor = await editor.elementHandle();
+      if (!initialEditor) throw new Error("Expected the initial read-only editor");
       const initialTop = await content.evaluate(element => element.getBoundingClientRect().top);
       const status = page.getByRole("status", { name: "Checking write access..." });
       await expect(status).toBeVisible();
@@ -533,6 +535,8 @@ test.describe("production unified text editor", () => {
       await expect(page.locator(".MuiAlert-root")).toHaveCount(0);
       releaseLock();
       await expect(editor).toHaveAttribute("contenteditable", "true");
+      expect(await editor.evaluate((element, initial) => element === initial, initialEditor)).toBe(true);
+      await expect(editor).toBeFocused();
       await expect(status).toHaveCount(0);
       expect(await content.evaluate(element => element.getBoundingClientRect().top)).toBe(initialTop);
       await page.getByRole("button", { name: "Close", exact: true }).click();
