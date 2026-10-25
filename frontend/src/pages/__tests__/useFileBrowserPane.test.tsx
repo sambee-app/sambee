@@ -356,6 +356,31 @@ describe("useFileBrowserPane", () => {
     expect(onNavigatePath).toHaveBeenCalledWith("Documents");
   });
 
+  it.each(["example.cjs", "example.clj", "Dockerfile"])("opens recognized language file %s without a viewer picker", async (filename) => {
+    const file = {
+      name: filename,
+      path: filename,
+      type: FileType.FILE,
+      is_readable: true,
+      is_hidden: false,
+      mime_type: "application/octet-stream",
+    };
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => {
+      result.current.applyLocation("conn-1", "");
+    });
+    await waitFor(() => {
+      expect(result.current.connectionId).toBe("conn-1");
+    });
+    act(() => {
+      result.current.handleOpenFileForFile(file, 0);
+    });
+    await waitFor(() => {
+      expect(result.current.viewInfo).toMatchObject({ path: filename, viewerId: "text" });
+    });
+    expect(result.current.browserViewerPickerState).toBeNull();
+  });
+
   it("restores a captured recovery snapshot with pane UI state", async () => {
     const { result } = renderHook(
       () =>

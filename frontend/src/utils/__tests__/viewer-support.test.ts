@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { getCompatibleViewerIds, hasViewerSupport, isImageFile, requiresServerImageConversion } from "../FileTypeRegistry";
+import {
+  getCompatibleViewerIds,
+  getFileTypesByCategory,
+  hasViewerSupport,
+  isImageFile,
+  requiresServerImageConversion,
+} from "../FileTypeRegistry";
+import { languages } from "../fileLanguages";
 
 describe("hasViewerSupport", () => {
   it("returns true for image formats", () => {
@@ -100,5 +107,63 @@ describe("getCompatibleViewerIds", () => {
 
   it("does not route mp4 files to the text viewer", () => {
     expect(getCompatibleViewerIds("clip.mp4", "video/mp4")).toEqual([]);
+  });
+
+  it("routes every language extension to text except dedicated viewers", () => {
+    const dedicatedViewers = new Map([
+      ["md", "markdown"],
+      ["markdown", "markdown"],
+      ["svg", "image"],
+    ]);
+    for (const language of languages) {
+      for (const extension of language.extensions) {
+        const expected = dedicatedViewers.get(extension.toLowerCase()) ?? "text";
+        for (const variant of [extension.toLowerCase(), extension.toUpperCase()]) {
+          expect(getCompatibleViewerIds(`example.${variant}`, "application/octet-stream"), `${language.name}: ${variant}`).toEqual([
+            expected,
+          ]);
+        }
+      }
+    }
+  });
+
+  it.each(["Dockerfile", "BUILD", "Gemfile", "CMakeLists.txt", "extensions.conf", "EXTENSIONS.CONF", "nginx.conf", "NGINX.CONF"])(
+    "routes special filename %s to text",
+    (filename) => {
+      expect(getCompatibleViewerIds(filename, "application/octet-stream")).toEqual(["text"]);
+    }
+  );
+
+  it.each(["dockerfile", "build", "gemfile", "example.unknown", "", "example."])(
+    "does not automatically open unmatched filename %s as text",
+    (filename) => {
+      expect(getCompatibleViewerIds(filename, "text/plain")).toEqual([]);
+    }
+  );
+
+  it.each(["txt", "conf", "log", "env", "bat", "cmd"])("retains plain text support for .%s", (extension) => {
+    expect(getCompatibleViewerIds(`example.${extension}`, "text/plain")).toEqual(["text"]);
+  });
+
+  it("preserves dedicated viewers and specific MIME precedence", () => {
+    expect(getCompatibleViewerIds("diagram.svg", "application/octet-stream")).toEqual(["image"]);
+    expect(getCompatibleViewerIds("report.pdf", "application/octet-stream")).toEqual(["pdf"]);
+    expect(getCompatibleViewerIds("notes.markdown", "application/octet-stream")).toEqual(["markdown"]);
+    expect(getCompatibleViewerIds("example.clj", "application/pdf")).toEqual(["pdf"]);
+    expect(getCompatibleViewerIds("photo.png", "application/json")).toEqual(["text"]);
+  });
+
+  it("retains every existing text and code extension and MIME mapping", () => {
+    for (const category of ["text", "code"] as const) {
+      for (const fileType of getFileTypesByCategory(category)) {
+        for (const extension of fileType.extensions) {
+          const expected = [".md", ".markdown"].includes(extension) ? "markdown" : "text";
+          expect(getCompatibleViewerIds(`example${extension}`, "application/octet-stream"), extension).toEqual([expected]);
+        }
+        for (const mimeType of fileType.mimeTypes) {
+          expect(hasViewerSupport(mimeType), mimeType).toBe(true);
+        }
+      }
+    }
   });
 });
