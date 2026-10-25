@@ -962,6 +962,54 @@ describe("TextEditor", () => {
     expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { choice: "Use saved file", permissionDenied: false },
+    { choice: "Keep my draft", permissionDenied: false },
+    { choice: "Use saved file", permissionDenied: true },
+    { choice: "Keep my draft", permissionDenied: true },
+  ])(
+    "preserves heartbeat failure after conflict resolution: $choice, permission denied: $permissionDenied",
+    async ({ choice, permissionDenied }) => {
+      const interval = vi.spyOn(window, "setInterval");
+      const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockResolvedValue(undefined);
+      renderViewer();
+      const editor = await enterEditMode();
+      fireEvent.change(editor, { target: { value: "my unsaved draft" } });
+      vi.mocked(apiService.writeTextWithEditLock).mockRejectedValueOnce(new ExpiredEditLockError());
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      const retry = await screen.findByRole("button", { name: "Retry editing" });
+      vi.mocked(apiService.getFileContent).mockResolvedValue("another user's revision");
+      fireEvent.click(retry);
+      const dialog = await screen.findByRole("dialog", { name: "File changed" });
+      heartbeatRequest.mockRejectedValueOnce(permissionDenied ? { response: { status: 403 } } : new ExpiredEditLockError());
+      const heartbeat = interval.mock.calls.filter(([, delay]) => delay === 30_000).at(-1)?.[0];
+      if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
+      await act(async () => heartbeat());
+      await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(2));
+
+      fireEvent.click(within(dialog).getByRole("button", { name: choice }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "File changed" })).not.toBeInTheDocument());
+      const currentEditor = screen.getByRole("textbox", { name: "Text editor" });
+      expect(currentEditor).toHaveAttribute("readonly");
+      expect(currentEditor).toHaveValue(choice === "Keep my draft" ? "my unsaved draft" : "another user's revision");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByText("Read only")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry editing" }) !== null).toBe(!permissionDenied);
+      expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1);
+
+      if (!permissionDenied) {
+        fireEvent.click(screen.getByRole("button", { name: "Retry editing" }));
+        await waitFor(() => expect(currentEditor).not.toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
+        expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue(
+          choice === "Keep my draft" ? "my unsaved draft" : "another user's revision"
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(2));
+      }
+    }
+  );
+
   it("does not acquire for a retained transitioning presentation", async () => {
     render(
       <SambeeThemeProvider>

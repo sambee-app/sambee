@@ -1518,7 +1518,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
                   clearDraft(connectionId, path, "text");
                   markEditSessionPristine();
                   setConflict(null);
-                  setReadOnlyReason(null);
+                  setReadOnlyReason((reason) => (reason === "conflict" ? null : reason));
                 }}
               >
                 {t("viewer.text.useSavedFile")}
@@ -1529,7 +1529,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
                   setDraftContent(conflict.draftContent);
                   setEditBaselineContent(conflict.serverContent);
                   setConflict(null);
-                  setReadOnlyReason(null);
+                  setReadOnlyReason((reason) => (reason === "conflict" ? null : reason));
                 }}
               >
                 {t("viewer.text.keepDraft")}
