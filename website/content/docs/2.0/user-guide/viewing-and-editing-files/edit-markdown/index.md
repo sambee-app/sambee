@@ -8,6 +8,10 @@ Markdown files are opened in Sambee's [Markdown viewer](../view-images-and-read-
 
 In the Markdown viewer's toolbar, click the edit icon or press <kbd>E</kbd> to switch to the Markdown editor. You edit Markdown source directly, with highlighted structure and fenced code. Highlighting doesn't change your source text or line layout.
 
+If another session holds the edit lock, a bottom-center toast explains why editing isn't available. The **Read only** badge and **Retry editing** icon remain after the informational toast closes automatically after 15 seconds. Click Retry or press <kbd>Ctrl</kbd> + <kbd>R</kbd> when the other editor is closed. Slow access checks show a small spinner beside the filename without moving the document.
+
+If the lock is lost while editing, Sambee stops changes and retains your draft. On retry, if the saved file changed, choose **Use saved file** or **Keep my draft**. Keeping your draft doesn't save it; review it before choosing Save.
+
 ## Code Colors
 
 Code blocks use the same language highlighting as the text editor. A fence's language label selects its grammar; unknown or unlabelled blocks remain plain text. Preview highlighting loads in the background and waits while you're selecting preview text. Code text, whitespace, copying, and search remain unchanged.
@@ -31,6 +35,8 @@ A small indicator next to the file name shows whether the document has unsaved c
 Finish any input-method composition before saving. Sambee waits for table-cell edits to reach the document before capturing the saved text. If that can't finish, the editor stays open with your changes rather than saving an incomplete cell. Retry Save after the edit finishes.
 
 You can keep editing during an ordinary Save. Save writes the revision it captured; edits made afterward remain unsaved. If preparation or writing fails, your changes remain available in the editor.
+
+The Markdown viewer/editor and text editor show operation failures, lock-renewal warnings, and draft-recovery warnings as bottom-center toasts, without resizing the document. Errors and warnings stay until you dismiss them or the problem clears. Only one toast appears at a time, with errors first. Dismissing a toast doesn't resolve the problem or discard your changes. A failed Save inside a recovery or unsaved-changes dialog stays in that dialog instead.
 
 If Sambee must send you through OIDC sign-in while you are editing, it saves an eligible unsaved Markdown draft in this browser tab before leaving the page. See [Recover Unsaved In-Browser Edits](../recover-unsaved-edits/) for how recovery works.
 

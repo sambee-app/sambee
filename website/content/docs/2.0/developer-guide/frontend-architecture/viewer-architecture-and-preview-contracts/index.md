@@ -47,9 +47,17 @@ Acquisition feedback appears after 200 ms as a small spinner beside the filename
 
 Acquisition uses an activation generation to release obsolete results, and a pending release completes before another acquisition starts. Confirmed lock loss or revoked access freezes mutations and retains the draft; a transient heartbeat failure shows a warning. Retry is explicit, not an acquisition loop. A fresh baseline that differs from a retained draft's original baseline requires a conflict decision before editing resumes. Choosing the draft doesn't save it.
 
-Text saves pass `reacquireExpiredLock: false`; they must not silently reacquire an expired lock and overwrite a changed file. The existing default remains for Markdown. Save acknowledges only the captured revision, preserving newer edits as dirty. The routed leave guard protects dirty navigation and pending operations. Text Close goes directly to the file list after release, and Discard commits a clean state before navigation so the guard doesn't prompt twice.
+Text and Markdown saves pass `reacquireExpiredLock: false`; they must not silently reacquire an expired lock and overwrite a changed file. Save acknowledges only the captured revision, preserving newer edits as dirty. The routed leave guard protects dirty navigation and pending operations. Text Close goes directly to the file list after release, and Discard commits a clean state before navigation so the guard doesn't prompt twice.
 
 Read-only disables typing, Save, and Replace, not Find, selection, copying, wrapping, download, or sharing. Recovery is resolved before automatic activation. Keep regressions for late acquisition, Strict Mode, read-only and conflict states, history navigation, and Markdown's separate lifecycle when changing this shared path.
+
+## Shared Viewer Notifications
+
+`ViewerNotifications.tsx` provides the viewer-local toast host, shared edit-lock message mapping, and delayed acquisition indicator for text and Markdown. Markdown retains its preview/edit lifecycle, but uses the same lock/read-only notification, filename badge, explicit Retry action, and retained-draft conflict decision. Lock release completes before another acquisition starts; obsolete acquisition results are released without publishing errors.
+
+Each viewer supplies active notices with stable IDs, severity, and operation occurrence numbers. The host displays one bottom-center toast at a time, prioritizing errors over warnings and information. Dismissed heartbeat and draft-storage conditions stay dismissed until resolution or a changed condition. A new operation failure can notify again even when its message is unchanged. Resolved notices leave the queue, and viewer identity keys isolate dismissal state between files.
+
+Informational lock notices auto-dismiss after 15 seconds. Errors and safety warnings remain until dismissed or resolved. Toasts don't take focus or change document geometry, and dismissal never changes the owning edit, lock, or recovery state. Recovery and unsaved-changes dialogs retain their own failure notices and suppress viewer toasts while open. Document-load failures, file-size limits, search validation, and editor-load/crash recovery remain in context rather than moving into the toast queue.
 
 ## Browser-Native Versus Server-Converted Images
 

@@ -1,8 +1,8 @@
 import { Refresh } from "@mui/icons-material";
-import { Alert, Box, Button, CircularProgress, Dialog, Snackbar, Tooltip, useMediaQuery, useTheme } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, Dialog, useMediaQuery, useTheme } from "@mui/material";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { BROWSER_SHORTCUTS, CODEMIRROR_EDITOR_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts, withShortcut } from "../../hooks/useKeyboardShortcuts";
@@ -45,19 +45,23 @@ import { RecoveredDraftDialog } from "./RecoveredDraftDialog";
 import { TextCodeEditor, type TextCodeEditorHandle, type TextCodeEditorSearchState } from "./TextCodeEditor";
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
 import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge, type ViewerToolbarAction } from "./ViewerControls";
+import {
+  useViewerLockNotice,
+  useViewerOperationError,
+  VIEWER_EDIT_HEARTBEAT_MS,
+  ViewerEditAcquisitionStatus,
+  type ViewerNotice,
+  ViewerNotifications,
+  type ViewerReadOnlyReason,
+} from "./ViewerNotifications";
 import { downloadViewerBlob } from "./viewerContent";
 import { createSaveToolbarAction } from "./viewerToolbarActions";
 
 type PendingUnsavedChangesAction = "stay-edit" | "navigate" | "close";
 type TextSearchCloseReason = "escape" | "toggle";
-type TextReadOnlyReason = "read-only" | "locked" | "permission-denied" | "unsupported" | "unavailable" | "lost" | "conflict";
+type TextReadOnlyReason = ViewerReadOnlyReason;
 
 const DRAFT_SNAPSHOT_DEBOUNCE_MS = 250;
-const EDIT_HEARTBEAT_INTERVAL_MS = 30_000;
-const ACQUISITION_FEEDBACK_DELAY_MS = 200;
-const ACQUISITION_STATUS_SLOT_SIZE = 20;
-const ACQUISITION_SPINNER_SIZE = 16;
-const READ_ONLY_NOTIFICATION_AUTOHIDE_MS = 15_000;
 
 function withOpacity(color: string, opacity: number): string {
   const normalizedOpacity = Math.max(0, Math.min(1, opacity));
@@ -135,7 +139,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   const [draftContent, setDraftContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editError, setEditError] = useState<string | null>(null);
+  const [editError, setEditError, editErrorOccurrence] = useViewerOperationError();
   const [shareRevision, setShareRevision] = useState(0);
   const [draftStorageWarning, setDraftStorageWarning] = useState<string | null>(null);
   const [recoveryDraft, setRecoveryDraft] = useState<DraftSnapshot | null>(null);
@@ -144,9 +148,8 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAcquiring, setIsAcquiring] = useState(false);
-  const [showAcquisitionFeedback, setShowAcquisitionFeedback] = useState(false);
   const [readOnlyReason, setReadOnlyReason] = useState<TextReadOnlyReason | null>(null);
-  const [readOnlyNotificationOpen, setReadOnlyNotificationOpen] = useState(false);
+  const [lockNoticeOccurrence, setLockNoticeOccurrence] = useState(0);
   const [heartbeatWarning, setHeartbeatWarning] = useState(false);
   const [conflict, setConflict] = useState<{ serverContent: string; draftContent: string } | null>(null);
   const acquisitionPending = useRef(false);
@@ -257,13 +260,6 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   const unsavedChangesDialogOpen = pendingUnsavedChangesAction !== null;
   const hasUnsavedChanges = isEditing && draftContent !== editBaselineContentRef.current;
   const editorShouldBeReadOnly = !isEditing || isAcquiring || readOnlyReason !== null || Boolean(isSaving && pendingUnsavedChangesAction);
-
-  useEffect(() => {
-    setShowAcquisitionFeedback(false);
-    if (!isAcquiring || isTransitioning) return;
-    const timeoutId = window.setTimeout(() => setShowAcquisitionFeedback(true), ACQUISITION_FEEDBACK_DELAY_MS);
-    return () => window.clearTimeout(timeoutId);
-  }, [isAcquiring, isTransitioning]);
 
   const {
     beginBaselineSyncWindow,
@@ -427,7 +423,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
           }
           logError("Failed to refresh text edit lock", { error: err, path, connectionId });
         });
-    }, EDIT_HEARTBEAT_INTERVAL_MS);
+    }, VIEWER_EDIT_HEARTBEAT_MS);
 
     return () => {
       active = false;
@@ -494,7 +490,15 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       setIsEditing(false);
       setPendingUnsavedChangesAction(null);
     },
-    [clearBaselineSyncWindow, clearPendingBaselineSync, content, markEditSessionPristine, releaseEditSession, setEditBaselineContent]
+    [
+      clearBaselineSyncWindow,
+      clearPendingBaselineSync,
+      content,
+      markEditSessionPristine,
+      releaseEditSession,
+      setEditBaselineContent,
+      setEditError,
+    ]
   );
 
   const closeViewer = useCallback(async () => {
@@ -525,6 +529,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
         if (editResult.kind !== "acquired") {
           if (activation === editActivation.current) {
             setReadOnlyReason(editResult.kind);
+            setLockNoticeOccurrence((previous) => previous + 1);
             if (initialDraft !== undefined) setEditError(t(`viewer.text.readOnlyReasons.${editResult.kind}`));
           }
           return false;
@@ -609,6 +614,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       requestRestoreEditingFocus,
       setEditBaselineContent,
       t,
+      setEditError,
     ]
   );
 
@@ -653,7 +659,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
     setEditBaselineContent(content);
     setEditError(null);
     setRecoveryDraft(null);
-  }, [connectionId, content, path, setEditBaselineContent]);
+  }, [connectionId, content, path, setEditBaselineContent, setEditError]);
 
   const persistDraft = useCallback(
     async (afterSave: PendingUnsavedChangesAction = "stay-edit") => {
@@ -730,6 +736,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       restoreEditingFocus,
       setEditBaselineContent,
       t,
+      setEditError,
     ]
   );
 
@@ -1083,41 +1090,19 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
 
   const filenameAdornment = (
     <Box sx={{ display: "flex", alignItems: "center", gap: isMobile ? 0.75 : 1 }}>
-      <Box
-        data-testid="text-editor-acquisition-slot"
-        sx={{
-          width: ACQUISITION_STATUS_SLOT_SIZE,
-          height: ACQUISITION_STATUS_SLOT_SIZE,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {isAcquiring && !isTransitioning && showAcquisitionFeedback ? (
-          <Tooltip title={t("viewer.text.acquiring")}>
-            <Box component="span" role="status" aria-label={t("viewer.text.acquiring")} sx={{ display: "flex" }}>
-              <CircularProgress
-                size={ACQUISITION_SPINNER_SIZE}
-                color="inherit"
-                aria-hidden="true"
-                sx={{ "@media (prefers-reduced-motion: reduce)": { "&, & .MuiCircularProgress-circle": { animation: "none" } } }}
-              />
-            </Box>
-          </Tooltip>
-        ) : null}
-      </Box>
+      <ViewerEditAcquisitionStatus acquiring={isAcquiring && !isTransitioning} />
       {unsavedChangesIndicator}
       {readOnlyIndicator}
     </Box>
   );
 
-  const hasReadOnlyNotice = readOnlyReason !== null && readOnlyReason !== "conflict";
-  const readOnlyNotificationMessage = hasReadOnlyNotice ? editError || t(`viewer.text.readOnlyReasons.${readOnlyReason}`) : null;
-
-  useEffect(() => {
-    setReadOnlyNotificationOpen(readOnlyNotificationMessage !== null);
-  }, [readOnlyNotificationMessage]);
+  const lockNotice = useViewerLockNotice(readOnlyReason, editError, editErrorOccurrence + lockNoticeOccurrence);
+  const notices: ViewerNotice[] = [];
+  if (lockNotice) notices.push(lockNotice);
+  else if (editError) notices.push({ id: "edit-error", message: editError, severity: "error", occurrence: editErrorOccurrence });
+  if (heartbeatWarning && readOnlyReason === null)
+    notices.push({ id: "heartbeat", message: t("viewer.text.heartbeatFailed"), severity: "warning" });
+  if (draftStorageWarning) notices.push({ id: "draft-storage", message: draftStorageWarning, severity: "warning" });
 
   const handleDialogClose = useCallback(
     (_event: unknown, reason: string) => {
@@ -1264,56 +1249,14 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
             wholeWord={searchWholeWord}
           />
 
-          {editError && !hasReadOnlyNotice ? (
-            <Alert severity="error" sx={{ m: 2, flexShrink: 0 }}>
-              {editError}
-            </Alert>
-          ) : null}
-          {heartbeatWarning && readOnlyReason === null ? (
-            <Alert severity="warning" role="status">
-              {t("viewer.text.heartbeatFailed")}
-            </Alert>
-          ) : null}
-          {hasReadOnlyNotice ? (
-            <Snackbar
-              open={readOnlyNotificationOpen}
-              autoHideDuration={editError ? null : READ_ONLY_NOTIFICATION_AUTOHIDE_MS}
-              anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-              onClose={(_event, reason) => {
-                if (reason !== "clickaway") setReadOnlyNotificationOpen(false);
-              }}
-            >
-              <Alert
-                severity={editError ? "error" : "info"}
-                role={editError ? "alert" : "status"}
-                onClose={() => setReadOnlyNotificationOpen(false)}
-                sx={{
-                  width: "100%",
-                  "&&": editError ? {} : { backgroundColor: toolbarBg, color: toolbarText, "& .MuiAlert-icon": { color: "inherit" } },
-                }}
-              >
-                {readOnlyReason === "locked" ? (
-                  <Trans
-                    i18nKey="viewer.text.lockedNotification"
-                    components={{
-                      retryIcon: (
-                        <Refresh fontSize="inherit" titleAccess={t("viewer.text.retryEditing")} sx={{ verticalAlign: "text-bottom" }} />
-                      ),
-                    }}
-                  />
-                ) : (
-                  t(`viewer.text.readOnlyReasons.${readOnlyReason}`)
-                )}
-                {editError && editError !== t(`viewer.text.readOnlyReasons.${readOnlyReason}`) ? <Box>{editError}</Box> : null}
-              </Alert>
-            </Snackbar>
-          ) : null}
+          <ViewerNotifications
+            key={JSON.stringify([connectionId, path])}
+            notices={notices}
+            toolbarBackground={toolbarBg}
+            toolbarText={toolbarText}
+            suppressed={Boolean(unsavedChangesDialogOpen || recoveryDraft || conflict)}
+          />
           {nativeSharing.failureDialog}
-          {draftStorageWarning ? (
-            <Alert severity="warning" sx={{ m: 2, flexShrink: 0 }}>
-              {draftStorageWarning}
-            </Alert>
-          ) : null}
 
           <Box
             ref={contentRef}
@@ -1439,7 +1382,13 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
         }}
         title={t("viewer.edit.unsavedChangesTitle")}
         description={t("viewer.edit.unsavedChangesExitMessage")}
-        actionNotice={editError ? <Alert severity="error">{editError}</Alert> : null}
+        actionNotice={
+          editError || lockNotice ? (
+            <Alert severity={editError ? "error" : "info"} role={editError ? "alert" : "status"}>
+              {editError || lockNotice?.message}
+            </Alert>
+          ) : null
+        }
         maxWidth="xs"
         disableAutoFocus
         disableEnforceFocus
@@ -1488,7 +1437,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
                   } else void persistDraft(pendingUnsavedChangesAction);
                 }
               }}
-              disabled={isSaving}
+              disabled={isSaving || readOnlyReason !== null || isAcquiring}
               variant="contained"
             >
               {t("common.actions.save")}

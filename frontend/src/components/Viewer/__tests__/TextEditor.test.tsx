@@ -1114,7 +1114,9 @@ describe("TextEditor", () => {
     const editor = await enterEditMode();
     fireEvent.change(editor, { target: { value: "x".repeat(2 * 1024 * 1024 + 1) } });
 
-    expect(await screen.findByText("Draft recovery is unavailable because this edit is too large.")).toBeInTheDocument();
+    const warning = await screen.findByText("Draft recovery is unavailable because this edit is too large.");
+    expect(warning.closest(".MuiSnackbar-root")).not.toBeNull();
+    expect(warning.closest(".MuiAlert-root")).toHaveAttribute("role", "status");
 
     fireEvent.change(editor, { target: { value: "updated text" } });
 
