@@ -10,7 +10,7 @@ The browser app decides how to render a file based on metadata and file-type inf
 
 Three rules matter most:
 
-- the backend and frontend file-type registries must describe the same extensions and MIME types
+- the backend and frontend file-type registries must agree on image formats, conversion requirements, and MIME types used for dedicated viewers
 - the backend decides whether an image format needs server-side conversion for browser compatibility
 - the frontend chooses the right viewer component and file icon based on the effective file type and MIME information it receives
 
@@ -19,7 +19,8 @@ Three rules matter most:
 | Path | Responsibility |
 |---|---|
 | `backend/app/utils/file_type_registry.py` | backend source of truth for extensions, MIME types, categories, and whether an image requires conversion |
-| `frontend/src/utils/FileTypeRegistry.ts` | frontend source of truth for extensions, MIME types, categories, viewer components, icons, and colors |
+| `frontend/src/utils/fileLanguages.ts` | shared CodeMirror language catalogue, filename matching, and additional plain-text extensions used by highlighting and default text opening |
+| `frontend/src/utils/FileTypeRegistry.ts` | dedicated viewer mappings and MIME/presentation metadata; derives text-viewer support from shared filename recognition |
 | `frontend/src/components/Viewer/` | viewer components and shared viewer UI |
 | `backend/app/services/image_converter.py` | server-side conversion for non-browser-native image formats |
 
@@ -32,7 +33,9 @@ At a high level, the preview pipeline works like this:
 3. the frontend maps the file type to the appropriate viewer component
 4. the shared viewer controls keep the toolbar and common behavior consistent across viewers
 
-That is why a file-type change almost always touches both backend and frontend code.
+Dedicated formats such as images require backend and frontend agreement. Text-file recognition instead uses `fileLanguages.ts`: both highlighting and default text opening consume the same CodeMirror catalogue. Language metadata doesn't load a grammar or import the highlighting core into the file browser.
+
+Explicit image, PDF, and Markdown viewers take precedence over extension-based text recognition. A recognized, non-generic MIME type with a viewer mapping takes precedence over the filename; empty MIME types, `application/octet-stream`, and `text/plain` fall back to filename recognition. Saved viewer preferences override the default selection. Unknown files still use the viewer picker unless a MIME mapping or saved preference selects a viewer.
 
 ## Browser-Native Versus Server-Converted Images
 
@@ -435,14 +438,15 @@ If you add another viewer or extend an existing one:
 
 ## Adding a New File Type Safely
 
-File-type support is registry-driven. The safest way to add a new type is to treat backend and frontend changes as one contract update.
+File-type support is registry-driven. Dedicated formats need a coordinated backend/frontend contract update. Languages already present in the shared CodeMirror catalogue need no separate extension registration for text opening; extra frontend entries are only needed for MIME or presentation metadata.
 
 ### Main Files to Change
 
 | Path | Why it changes |
 |---|---|
 | `backend/app/utils/file_type_registry.py` | declare extensions, MIME types, category, description, and whether an image requires conversion |
-| `frontend/src/utils/FileTypeRegistry.ts` | declare extensions, MIME types, category, viewer component, icon, color, and description |
+| `frontend/src/utils/fileLanguages.ts` | reuse shared language filename matching; maintain additional plain-text extensions here rather than duplicating language extensions |
+| `frontend/src/utils/FileTypeRegistry.ts` | declare dedicated viewers and optional MIME/presentation metadata; text-viewer assignments are derived automatically |
 | `frontend/src/components/Viewer/` | add or reuse a viewer component when the type needs a dedicated preview surface |
 
 If a file type is user-visible, update the published support docs that describe what Sambee can preview.

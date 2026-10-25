@@ -7,10 +7,10 @@ import {
   languageDataProp,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
 import type { Extension } from "@codemirror/state";
 import { NodeType, Parser, type PartialParse, Tree } from "@lezer/common";
 import { highlightTree, styleTags, type Tag, tags } from "@lezer/highlight";
+import { languages, matchFileLanguage } from "./fileLanguages";
 import {
   type HighlightingService,
   type LanguageId,
@@ -105,7 +105,7 @@ function resolution(description: LanguageDescription | null): LanguageResolution
   return description ? { language: description.name.toLowerCase() as LanguageId } : { reason: "unknown-language" };
 }
 export function resolveFilename(filename: string): LanguageResolution {
-  return resolution(LanguageDescription.matchFilename(languages, filename));
+  return resolution(matchFileLanguage(filename));
 }
 export function resolveFence(label?: string | null): LanguageResolution {
   const normalized = label?.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
