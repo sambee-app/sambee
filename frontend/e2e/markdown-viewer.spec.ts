@@ -11,6 +11,7 @@ import { editableDefinition } from "../src/theme/themeDefinition";
 import { builtInThemes } from "../src/theme/themes";
 import { MARKDOWN_HEADING_ID_PREFIX } from "../src/utils/markdownHeadingLinks";
 import { SOURCE_SEARCH_CHUNK_UNITS } from "../src/components/Editor/sourceRegexSearchProtocol";
+import { INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS } from "../src/utils/markdownCodePreparationProtocol";
 import { evaluateSourceResponsivenessBudgets, evaluateSourceTypingBudgets, evaluateViewerReadinessBudgets, evaluateViewerTimingBudgets, VIEWER_TIMING_TARGETS_MS, type ViewerTimingSamples } from "./viewer-performance-budgets";
 
 const DEMO_CONNECTION_ID = "85610f49-ab40-4d96-8750-ddab3e8e8764";
@@ -1471,19 +1472,44 @@ test.describe("production CI correctness", () => {
 
 test.describe("development Markdown worker", () => {
   test.skip(process.env.SAMBEE_E2E_DEVELOPMENT !== "1", "Requires the development server and approved demo route");
+  test("renders small notes without starting a normalization worker", async ({ page }, testInfo) => {
+    const workers: string[] = [];
+    const errors: string[] = [];
+    page.on("worker", worker => workers.push(worker.url()));
+    page.on("pageerror", error => errors.push(error.message));
+    await mockMarkdownViewerApi(page, { initialMarkdown: "# Small note\n\nA **formatted** note.\n\n| Column |\n| --- |\n| first<br>second |\n", existingFilePaths: [DEMO_PATH] });
+    await page.goto("/browse/smb/demo");
+    await page.getByRole("button").filter({ has: page.getByText(DEMO_PATH, { exact: true }) }).click();
+    const root = page.locator('[data-markdown-search-root="true"]');
+    await expect(root.getByRole("heading", { name: "Small note" })).toBeVisible();
+    await expect(root.locator("strong")).toHaveText("formatted");
+    await expect(root.locator("td br")).toHaveCount(1);
+    expect(workers.filter(url => url.includes("markdownCodePreparation.worker"))).toEqual([]);
+    const normalization = await page.evaluate(() => performance.getEntriesByName("sambee:preview-preparation:load-normalization-elapsed").map(entry => entry.duration));
+    expect(normalization).toHaveLength(1);
+    await testInfo.attach("small-note-normalization-ms", { body: JSON.stringify(normalization), contentType: "application/json" });
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(root).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test("normalizes and renders entity text without DOM globals in the worker", async ({ page }) => {
     const errors: string[] = [];
+    const workers: string[] = [];
+    page.on("worker", worker => workers.push(worker.url()));
     page.on("pageerror", (error) => errors.push(error.message));
     await page.addLocatorHandler(page.getByRole("dialog", { name: "Update available" }), async (dialog) => {
       await dialog.getByRole("button", { name: "Later", exact: true }).click();
     });
-    await mockMarkdownViewerApi(page, { initialMarkdown: "# Preview\n\nA &amp; B and &#x1F680;\n\n```js\nconst alpha = 1;\n```", existingFilePaths: [DEMO_PATH] });
+    const markdown = `# Preview\n\nA &amp; B and &#x1F680;\n\n\`\`\`js\nconst alpha = 1;\n\`\`\`\n${" ".repeat(INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS)}`;
+    await mockMarkdownViewerApi(page, { initialMarkdown: markdown, existingFilePaths: [DEMO_PATH] });
     await page.goto("/browse/smb/demo");
     await page.getByRole("button").filter({ has: page.getByText(DEMO_PATH, { exact: true }) }).click();
     const root = page.locator('[data-markdown-search-root="true"]');
     await expect(root.getByRole("heading", { name: "Preview" })).toBeVisible();
     await expect(root.locator("p")).toHaveText("A & B and 🚀");
     await expect(root.locator("pre code")).toHaveText("const alpha = 1;\n");
+    expect(workers.some(url => url.includes("markdownCodePreparation.worker"))).toBe(true);
     await expect(page.getByRole("alert").filter({ hasText: "Server is busy" })).toHaveCount(0);
     expect(errors).toEqual([]);
   });

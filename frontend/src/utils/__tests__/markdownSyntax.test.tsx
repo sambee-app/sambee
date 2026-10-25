@@ -12,6 +12,8 @@ import {
 import { requireTestValue } from "../../test/helpers/assertions";
 import {
   createMarkdownEditNormalization,
+  INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS,
+  normalizeMarkdownSource,
   PREPARATION_SOURCE_CHUNK_UNITS,
   type PreparationRequest,
   type PreparationResponse,
@@ -208,6 +210,48 @@ describe("engine-neutral Markdown syntax adapter", () => {
     { type: "root", position: { start: { line: 1, column: 1, offset: "unbounded metadata" }, end: { line: 1, column: 1, offset: 0 } } },
   ])("rejects text and arrays outside the bounded field channel (%#)", (node) => {
     expect(() => createMarkdownTreeReceiver().consume([{ kind: "node", id: 0, parent: null, node, children: true }])).toThrow("tree node");
+  });
+
+  it.each([
+    "# Note\n\nA **small** note with [a link](https://example.com).\n",
+    "* item\n\n| Column |\n| --- |\n| first<br>second<br> |\n",
+    "x".repeat(INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS),
+    "",
+  ])("prepares small notes without worker startup and preserves canonical trees (%#)", async (source) => {
+    const worker = vi.fn();
+    vi.stubGlobal("Worker", worker);
+    try {
+      const expectedTree = vi.fn();
+      const expected = normalizeMarkdownTableCellLineBreaks(source, (_source, tree) => expectedTree(tree));
+      const prepared = vi.fn();
+      await expect(normalizeMarkdownSource(source, new AbortController().signal, prepared)).resolves.toBe(expected);
+      expect(prepared).toHaveBeenCalledExactlyOnceWith(expectedTree.mock.calls[0]![0]);
+      expect(worker).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps larger notes in workers and rejects aborted small-note loads", async () => {
+    PreparationWorker.instances = [];
+    vi.stubGlobal("Worker", PreparationWorker);
+    const location = vi.spyOn(window.location, "toString").mockReturnValue("http://localhost:3000/");
+    try {
+      const cancelled = new AbortController();
+      cancelled.abort();
+      await expect(normalizeMarkdownSource("# Note", cancelled.signal, vi.fn())).rejects.toMatchObject({ name: "AbortError" });
+      expect(PreparationWorker.instances).toHaveLength(0);
+      const controller = new AbortController();
+      const pending = normalizeMarkdownSource("x".repeat(INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS + 1), controller.signal, vi.fn());
+      const worker = requireTestValue(PreparationWorker.instances[0]);
+      expect(worker.postMessage).toHaveBeenCalledWith({ type: "prepare", generation: 0, prepareTree: true });
+      controller.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      expect(worker.terminate).toHaveBeenCalledOnce();
+    } finally {
+      location.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("isolates normalization workers, bounds results and cleans up success, cancellation, decode errors and timeouts", async () => {
