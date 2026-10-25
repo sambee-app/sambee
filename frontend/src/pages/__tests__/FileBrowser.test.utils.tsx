@@ -4,7 +4,7 @@
  *          FileBrowser-interactions.test.tsx, FileBrowser-viewer.test.tsx
  */
 
-import { render } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { LocalePreferencesProvider } from "../../i18n/LocalePreferencesProvider";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
@@ -55,4 +55,13 @@ export const renderBrowser = (initialPath = "/browse") => {
     ),
     router,
   };
+};
+
+export const renderBrowserAndFlush = async (initialPath = "/browse") => {
+  let result: ReturnType<typeof renderBrowser> | undefined;
+  await act(async () => {
+    result = renderBrowser(initialPath);
+  });
+  if (!result) throw new Error("FileBrowser did not mount during act");
+  return result;
 };

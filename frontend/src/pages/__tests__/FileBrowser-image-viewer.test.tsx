@@ -96,7 +96,7 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
 });
 
 describe("Browser - Image View Integration", () => {
-  const renderBrowser = (initialPath = "/browse/smb/test-server-1") => {
+  const renderBrowser = async (initialPath = "/browse/smb/test-server-1") => {
     const router = createMemoryRouter(
       [
         { path: "/browse/:targetType/:targetId/*", element: <FileBrowser /> },
@@ -105,12 +105,16 @@ describe("Browser - Image View Integration", () => {
       ],
       { initialEntries: [initialPath] }
     );
-    return {
-      ...render(
+    let result: ReturnType<typeof render> | undefined;
+    await act(async () => {
+      result = render(
         <SambeeThemeProvider>
           <RouterProvider router={router} />
         </SambeeThemeProvider>
-      ),
+      );
+    });
+    return {
+      ...requireTestValue(result),
       router,
     };
   };
@@ -154,7 +158,7 @@ describe("Browser - Image View Integration", () => {
       })),
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
-    const { router } = renderBrowser();
+    const { router } = await renderBrowser();
     fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
     expect(await screen.findByTestId("image-view")).toHaveAttribute("data-path", "one.jpg");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
@@ -196,7 +200,7 @@ describe("Browser - Image View Integration", () => {
       })),
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
-    const { router } = renderBrowser();
+    const { router } = await renderBrowser();
     fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
     await screen.findByTestId("image-view");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
@@ -235,7 +239,7 @@ describe("Browser - Image View Integration", () => {
       total: 1,
     });
 
-    renderBrowser();
+    await renderBrowser();
 
     // Wait for files to load
     await waitFor(() => {
@@ -302,7 +306,7 @@ describe("Browser - Image View Integration", () => {
       total: 4,
     });
 
-    renderBrowser();
+    await renderBrowser();
 
     // Wait for files to load and click second image (image2.png)
     const imageFile = await screen.findByText("image2.png");
@@ -332,7 +336,7 @@ describe("Browser - Image View Integration", () => {
       total: 1,
     });
 
-    renderBrowser();
+    await renderBrowser();
 
     // Wait for files to load
     await waitFor(() => {
@@ -368,7 +372,7 @@ describe("Browser - Image View Integration", () => {
       total: 1,
     });
 
-    renderBrowser();
+    await renderBrowser();
 
     // Wait for files to load and click image
     await waitFor(() => {
@@ -402,7 +406,7 @@ describe("Browser - Image View Integration", () => {
       total: 1,
     });
 
-    renderBrowser();
+    await renderBrowser();
 
     // Wait for files to load
     await waitFor(() => {

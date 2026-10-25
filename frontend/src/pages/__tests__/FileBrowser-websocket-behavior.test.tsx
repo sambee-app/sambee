@@ -146,9 +146,9 @@ describe("FileBrowser WebSocket behavior", () => {
 
   it("redacts the server WebSocket token from connection logs", async () => {
     const infoSpy = vi.spyOn(logger, "info");
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(infoSpy).toHaveBeenCalledWith(
@@ -167,9 +167,9 @@ describe("FileBrowser WebSocket behavior", () => {
       status: "paired",
     });
     const infoSpy = vi.spyOn(logger, "info");
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/local/c/Users");
+    await renderBrowserAndFlush("/browse/local/c/Users");
 
     await waitFor(() => {
       expect(infoSpy).toHaveBeenCalledWith("Connecting to companion WebSocket", { wsUrl: "ws://localhost:21549/api/ws" }, "websocket");
@@ -179,9 +179,9 @@ describe("FileBrowser WebSocket behavior", () => {
   });
 
   it("does not mark the backend as reconnecting when the realtime socket closes", async () => {
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.length).toBeGreaterThan(0);
@@ -197,9 +197,9 @@ describe("FileBrowser WebSocket behavior", () => {
 
   it("ignores malformed WebSocket frames and continues handling later directory changes", async () => {
     const warnSpy = vi.spyOn(logger, "warn");
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.length).toBeGreaterThan(0);
@@ -243,8 +243,8 @@ describe("FileBrowser WebSocket behavior", () => {
       this.dispatchEvent(new Event("change", { bubbles: true }));
     });
     try {
-      const { renderBrowser } = await import("./FileBrowser.test.utils");
-      renderBrowser("/browse/smb/test-server-1");
+      const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
       backendSocket?.open();
@@ -291,8 +291,8 @@ describe("FileBrowser WebSocket behavior", () => {
       this.dispatchEvent(new Event("change", { bubbles: true }));
     });
     try {
-      const { renderBrowser } = await import("./FileBrowser.test.utils");
-      renderBrowser("/browse/smb/test-server-1");
+      const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
       backendSocket?.open();
@@ -315,9 +315,9 @@ describe("FileBrowser WebSocket behavior", () => {
 
   it("ignores acknowledged WebSocket control frames without malformed-message warnings", async () => {
     const warnSpy = vi.spyOn(logger, "warn");
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.length).toBeGreaterThan(0);
@@ -344,9 +344,9 @@ describe("FileBrowser WebSocket behavior", () => {
       status: "paired",
     });
 
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(api.listDirectory).toHaveBeenCalled();
@@ -362,9 +362,9 @@ describe("FileBrowser WebSocket behavior", () => {
       status: "paired",
     });
 
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/local/c/Users");
+    await renderBrowserAndFlush("/browse/local/c/Users");
 
     await waitFor(() => {
       expect(mockBuildCompanionWsUrl).toHaveBeenCalled();
@@ -386,9 +386,9 @@ describe("FileBrowser WebSocket behavior", () => {
       ],
     });
 
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/smb/test-server-1/Documents?p2=local/c/Users");
+    await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=local/c/Users");
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.length).toBeGreaterThanOrEqual(2);
@@ -444,9 +444,9 @@ describe("FileBrowser WebSocket behavior", () => {
   });
 
   it("deduplicates same-directory subscriptions across dual SMB panes", async () => {
-    const { renderBrowser } = await import("./FileBrowser.test.utils");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
-    renderBrowser("/browse/smb/test-server-1/Documents?p2=smb/test-server-1/Documents");
+    await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=smb/test-server-1/Documents");
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.length).toBeGreaterThan(0);

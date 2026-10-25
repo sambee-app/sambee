@@ -22,7 +22,7 @@ import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { FileType } from "../../types";
 import { type BrowseRouteState, parseBrowseRoute, serializeBrowseRoute } from "../FileBrowser/routing";
 import { ACTIVE_PANE_QUERY_KEY, RIGHT_PANE_QUERY_KEY } from "../FileBrowser/types";
-import { mockDirectoryListing, renderBrowser } from "./FileBrowser.test.utils";
+import { mockDirectoryListing, renderBrowserAndFlush } from "./FileBrowser.test.utils";
 
 const expectDirectoryLoad = (connectionId: string, path: string) => {
   expect(api.listDirectory).toHaveBeenCalledWith(
@@ -205,7 +205,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
   describe("settings dialog routing", () => {
     it("commits category navigation synchronously while retaining category history", async () => {
       const user = userEvent.setup();
-      const { router } = renderBrowser("/browse/smb/test-server-1?settings=appearance");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?settings=appearance");
       await screen.findByTestId("settings-dialog");
       const navigate = vi.spyOn(router, "navigate");
       await user.click(screen.getByRole("button", { name: "Account category" }));
@@ -234,7 +234,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
         }))
       );
       const user = userEvent.setup();
-      const { router } = renderBrowser("/browse/smb/test-server-1?settings=main");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?settings=main");
       const drawer = await screen.findByRole("dialog");
       await user.click(within(drawer).getByText("Account", { exact: true }));
       expect(router.state.location.search).toContain("settings=account");
@@ -245,7 +245,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
     it("records settings Close and retraces category history with Back and Forward", async () => {
       const user = userEvent.setup();
-      const { router } = renderBrowser("/browse/smb/test-server-1");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");
       await user.click(await screen.findByRole("button", { name: /open settings/i }));
       const initialCategory = (await screen.findByTestId("settings-dialog")).getAttribute("data-category");
       await user.click(await screen.findByRole("button", { name: "Account category" }));
@@ -266,13 +266,13 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
     it("dismisses a direct category link without leaving the workspace", async () => {
       const user = userEvent.setup();
-      const { router } = renderBrowser("/browse/smb/test-server-1?settings=account");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?settings=account");
       await user.click(await screen.findByRole("button", { name: "Close Settings" }));
       expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
       expect(router.state.location.search).not.toContain("settings=");
     });
     it("opens the requested settings category from the settings query parameter", async () => {
-      renderBrowser("/browse/smb/test-server-1?settings=admin-authentication#flow=test-flow");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?settings=admin-authentication#flow=test-flow");
 
       const dialog = await screen.findByTestId("settings-dialog");
 
@@ -280,7 +280,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("opens the File Search settings category from the settings query parameter", async () => {
-      renderBrowser("/browse/smb/test-server-1?settings=admin-file-search");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?settings=admin-file-search");
 
       const dialog = await screen.findByTestId("settings-dialog");
 
@@ -309,7 +309,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
     it("pushes a viewer location and restores it with Back and Forward", async () => {
       const user = userEvent.setup();
-      const { router } = renderBrowser("/browse/smb/test-server-1");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");
       await user.click(await screen.findByRole("button", { name: /file: readme\.md/i }));
       expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
       expect(new URLSearchParams(router.state.location.search).get("viewer")).toBe("markdown");
@@ -324,7 +324,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       const user = userEvent.setup();
       const directory = "/browse/smb/test-server-1/Documents";
       const viewer = `${directory}?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown&keep=1#anchor`;
-      const { router } = renderBrowser(direct ? viewer : `${directory}?keep=1#anchor`);
+      const { router } = await renderBrowserAndFlush(direct ? viewer : `${directory}?keep=1#anchor`);
       if (!direct) await user.click(await screen.findByRole("button", { name: /file: readme\.md/i }));
       await user.click(await screen.findByRole("button", { name: "Close Viewer" }));
       await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
@@ -347,7 +347,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
     it("records edit exit without overwriting the prior editor entry", async () => {
       const user = userEvent.setup();
-      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
       await user.click(await screen.findByRole("button", { name: "Enter editor" }));
       await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-mode", "edit"));
       await user.click(screen.getByRole("button", { name: "Leave editor" }));
@@ -362,7 +362,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
     it("records settings Close while preserving its underlying viewer", async () => {
       const user = userEvent.setup();
-      const { router } = renderBrowser(
+      const { router } = await renderBrowserAndFlush(
         "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown&settings=account&keep=1#anchor"
       );
       await screen.findByTestId("markdown-viewer");
@@ -379,7 +379,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("opens a fresh viewer URL without a file-row click", async () => {
-      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
       expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
       expect(router.state.location.search).toContain("viewer=markdown");
       expect(api.getFileInfo).toHaveBeenCalled();
@@ -388,7 +388,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     it("keeps the same viewer mounted through delayed file navigation and Back", async () => {
       const first = "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown";
       const second = "/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Fother.md&viewer=markdown";
-      const { router } = renderBrowser(first);
+      const { router } = await renderBrowserAndFlush(first);
       const outgoing = await screen.findByTestId("markdown-viewer");
       let finishMetadata!: (metadata: never) => void;
       vi.mocked(api.getFileInfo).mockImplementationOnce(
@@ -419,7 +419,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("cancels a pending file change on Escape and ignores its late metadata", async () => {
-      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
       await screen.findByTestId("markdown-viewer");
       let finishMetadata!: (metadata: never) => void;
       vi.mocked(api.getFileInfo).mockImplementationOnce(
@@ -439,7 +439,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     it("offers retry for an unavailable file and closes a direct link safely", async () => {
       const user = userEvent.setup();
       vi.mocked(api.getFileInfo).mockRejectedValueOnce(new Error("File unavailable"));
-      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
       expect(await screen.findByText(/File unavailable/)).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: /retry/i }));
       expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
@@ -453,7 +453,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       for (let attempt = 0; attempt < failures; attempt += 1) {
         vi.mocked(api.getFileInfo).mockRejectedValueOnce(new Error("File unavailable"));
       }
-      const { router } = renderBrowser("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
       for (let attempt = 0; attempt < failures; attempt += 1) {
         await screen.findByText(/File unavailable/);
         await user.click(screen.getByRole("button", { name: /retry/i }));
@@ -472,7 +472,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("normalizes an invalid workspace descriptor while preserving unrelated query and hash", async () => {
-      const { router } = renderBrowser("/browse/smb/test-server-1?file=bad&viewer=unknown&settings=unknown&keep=1#anchor");
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=bad&viewer=unknown&settings=unknown&keep=1#anchor");
       await waitFor(() => expect(router.state.location.search).toBe("?keep=1"));
       expect(router.state.location.hash).toBe("#anchor");
       expect(router.state.location.pathname).toBe("/browse/smb/test-server-1");
@@ -485,7 +485,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
   describe("single-pane typed routes", () => {
     it("loads single-pane mode from a clean URL without query params", async () => {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Should load and display files in single pane
       await waitFor(() => {
@@ -504,7 +504,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("loads single-pane mode with a subpath", async () => {
-      renderBrowser("/browse/smb/test-server-1/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "Documents");
@@ -546,7 +546,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       );
 
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1/Archives");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Archives");
 
       await user.click(await screen.findByRole("button", { name: /file: backup\.zip/i }));
       await waitFor(() => {
@@ -583,7 +583,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
           }) as never
       );
 
-      renderBrowser("/browse/smb/test-server-1/Archives/backup.zip/nested");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Archives/backup.zip/nested");
       await waitFor(() => {
         expect(api.listArchiveDirectory).toHaveBeenCalledWith("conn-1", "Archives/backup.zip", "nested", {
           pageSize: 100,
@@ -596,7 +596,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     it("keeps physical directory semantics for a directory named with an archive extension", async () => {
       vi.mocked(api.getFileInfo).mockResolvedValue({ type: FileType.DIRECTORY } as never);
 
-      renderBrowser("/browse/smb/test-server-1/folder.zip/child");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/folder.zip/child");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "folder.zip/child");
@@ -612,7 +612,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
         return { type: FileType.DIRECTORY } as never;
       });
 
-      renderBrowser("/browse/smb/test-server-1/Existing/missing.zip");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Existing/missing.zip");
 
       await waitFor(() => {
         expect(screen.getByTestId("router-location")).toHaveTextContent("/browse/smb/test-server-1/Existing");
@@ -629,7 +629,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       );
       vi.mocked(api.listArchiveDirectory).mockRejectedValue({ isAxiosError: true, response: { status: 422 } });
 
-      renderBrowser("/browse/smb/test-server-1/Archives/broken.zip/nested");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Archives/broken.zip/nested");
 
       await waitFor(() => {
         expect(screen.getByTestId("router-location")).toHaveTextContent("/browse/smb/test-server-1/Archives");
@@ -644,7 +644,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
   describe("dual-pane restoration from URL", () => {
     it("activates dual-pane mode when ?p2= is present", async () => {
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -661,7 +661,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("restores right pane path from ?p2=type/id/path/segments", async () => {
-      renderBrowser("/browse/smb/test-server-1/Documents?p2=smb/test-server-2/Pictures");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=smb/test-server-2/Pictures");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -679,7 +679,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("restores both panes to the same connection", async () => {
-      renderBrowser("/browse/smb/test-server-1/Documents?p2=smb/test-server-1/Pictures");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=smb/test-server-1/Pictures");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -696,7 +696,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("persists dual-pane mode through the current-user settings store when restored from URL", async () => {
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -717,7 +717,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
   describe("active pane restoration from URL", () => {
     it("defaults to left pane when ?active is absent", async () => {
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -729,7 +729,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("restores right pane as active when ?active=2", async () => {
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2&active=2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2&active=2");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -747,7 +747,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
   describe("edge cases", () => {
     it("ignores malformed encoded right-pane paths without breaking the left pane", async () => {
-      renderBrowser("/browse/smb/test-server-1?p2=smb%2Ftest-server-2%2Fbad%25name&active=2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb%2Ftest-server-2%2Fbad%25name&active=2");
 
       await waitFor(() => expectDirectoryLoad("conn-1", ""));
       expect(vi.mocked(api.listDirectory).mock.calls.some(([connectionId]) => connectionId === "conn-2")).toBe(false);
@@ -766,7 +766,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("ignores invalid SMB p2 targets gracefully", async () => {
-      renderBrowser("/browse/smb/test-server-1?p2=smb/nonexistent-server/photos");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/nonexistent-server/photos");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -785,7 +785,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("handles p2 with no path (root of connection)", async () => {
-      renderBrowser("/browse/smb/test-server-1/Documents?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=smb/test-server-2");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -798,7 +798,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("loads local drives from typed left-pane URLs", async () => {
-      renderBrowser("/browse/local/c/Users");
+      await renderBrowserAndFlush("/browse/local/c/Users");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -810,7 +810,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     });
 
     it("restores a local drive in the right pane from p2", async () => {
-      renderBrowser("/browse/smb/test-server-1/Documents?p2=local/c/Users");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=local/c/Users");
 
       await waitFor(() => {
         expect(api.getConnections).toHaveBeenCalled();
@@ -830,7 +830,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
         response: { status: 403, data: { code: "companion_auth_signature_mismatch", detail: "Invalid authentication" } },
       });
 
-      renderBrowser("/browse/local/c/Users");
+      await renderBrowserAndFlush("/browse/local/c/Users");
 
       expect(await screen.findByText(/Sambee Companion rejected this browser's pairing/i)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
@@ -847,7 +847,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
         return mockDirectoryListing;
       });
 
-      renderBrowser("/browse/smb/test-server-1?p2=local/c/Users");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=local/c/Users");
 
       const alert = (await screen.findByText(/Sambee Companion rejected this browser's pairing/i)).closest("[role='alert']");
       expect(alert).toHaveTextContent("Right pane:");
@@ -863,7 +863,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
         },
       });
 
-      renderBrowser("/browse/local/c/Users");
+      await renderBrowserAndFlush("/browse/local/c/Users");
 
       expect(await screen.findByText(/Sambee Companion rejected this browser's pairing/i)).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Reload Sambee" })).toBeInTheDocument();
@@ -876,7 +876,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
         response: { status: 403, data: { code: "companion_pairing_not_found", detail: "Not paired with this origin" } },
       });
 
-      renderBrowser("/browse/local/c/Users");
+      await renderBrowserAndFlush("/browse/local/c/Users");
 
       expect(await screen.findByText(/This browser is not paired with Sambee Companion/i)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
@@ -888,7 +888,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
     it("opens pairing settings when the browser secret is missing", async () => {
       vi.mocked(api.listDirectory).mockRejectedValue(new Error("Not paired with companion"));
 
-      renderBrowser("/browse/local/c/Users");
+      await renderBrowserAndFlush("/browse/local/c/Users");
 
       expect(await screen.findByText(/This browser is not paired with Sambee Companion/i)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
@@ -900,7 +900,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       localStorage.setItem("companion_secret", "valid-secret");
       vi.mocked(api.listDirectory).mockRejectedValue({ response: { status: 403, data: { detail: "Permission denied" } } });
 
-      renderBrowser("/browse/local/c/Users");
+      await renderBrowserAndFlush("/browse/local/c/Users");
 
       expect(await screen.findByText("Permission denied")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
@@ -911,7 +911,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       localStorage.setItem("companion_secret", "valid-secret");
       vi.mocked(api.listDirectory).mockRejectedValue(new Error("Network Error"));
 
-      renderBrowser("/browse/local/c/Users");
+      await renderBrowserAndFlush("/browse/local/c/Users");
 
       expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Local Drives" })).not.toBeInTheDocument();

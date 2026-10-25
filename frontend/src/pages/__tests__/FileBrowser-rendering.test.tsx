@@ -22,7 +22,7 @@ import {
   setupSuccessfulApiMocks,
 } from "../../test/helpers";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
-import { mockConnections, mockDirectoryListing, renderBrowser } from "./FileBrowser.test.utils";
+import { mockConnections, mockDirectoryListing, renderBrowser, renderBrowserAndFlush } from "./FileBrowser.test.utils";
 
 const expectDirectoryLoad = (connectionId: string, path: string) => {
   expect(api.listDirectory).toHaveBeenCalledWith(
@@ -111,7 +111,7 @@ describe("Browser Component - Rendering", () => {
       vi.mocked(api.getConnections).mockRejectedValueOnce(failure);
       const logSpy = vi.spyOn(logger, "error");
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       await waitFor(() => expect(logSpy).toHaveBeenCalledWith("Error loading connections", { error: failure }, "browser"));
       expect((await screen.findAllByText("Documents")).length).toBeGreaterThan(0);
       expect(screen.queryByText(/Failed to load connections|Access denied/i)).not.toBeInTheDocument();
@@ -147,7 +147,7 @@ describe("Browser Component - Rendering", () => {
       right: null,
     });
 
-    renderBrowser("/browse/smb/test-server-1/Documents");
+    await renderBrowserAndFlush("/browse/smb/test-server-1/Documents");
 
     await waitFor(() => {
       expectDirectoryLoad("conn-1", "Documents");
@@ -157,7 +157,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("displays connection selector with available connections", async () => {
-    renderBrowser();
+    await renderBrowserAndFlush();
 
     // Optimized: Use findByRole instead of waitFor + getByRole
     const combobox = await screen.findByRole("combobox");
@@ -165,7 +165,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("shows breadcrumb navigation", async () => {
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     // Now shows connection name in breadcrumb instead of "Root"
     // Use getAllByText and filter to avoid collision with connection selector combobox
@@ -175,7 +175,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("renders file and folder list", async () => {
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     // Wait for connections to load first
     await waitFor(() => {
@@ -198,7 +198,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("renders one toolbar without cross-pane commands in single-pane mode", async () => {
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await screen.findAllByText("Documents");
 
@@ -210,7 +210,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("renders one toolbar with transfer commands and an aligned status bar for each dual pane", async () => {
-    renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+    await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
     await waitFor(() => {
       expectDirectoryLoad("conn-1", "");
@@ -226,7 +226,7 @@ describe("Browser Component - Rendering", () => {
   it("keeps permitted creation and refresh commands available in an empty directory", async () => {
     vi.mocked(api.listDirectory).mockResolvedValue({ items: [], path: "", total: 0 });
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     expect(await screen.findByText(/This directory is empty/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New folder" })).toBeEnabled();
@@ -237,7 +237,7 @@ describe("Browser Component - Rendering", () => {
   it("keeps the toolbar visible while mutation commands are disabled on a read-only connection", async () => {
     vi.mocked(api.getConnections).mockResolvedValue([{ ...mockConnections[0], access_mode: "read_only" }]);
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await screen.findAllByText("Documents");
     expect(screen.getByRole("button", { name: "New folder" })).toBeDisabled();
@@ -259,7 +259,7 @@ describe("Browser Component - Rendering", () => {
     }));
 
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
       expect(screen.queryByTestId("file-operations-toolbar")).not.toBeInTheDocument();
@@ -287,7 +287,7 @@ describe("Browser Component - Rendering", () => {
     }));
 
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findByRole("button", { name: "More actions for readme.txt" });
       fireEvent.click(screen.getByRole("button", { name: "More actions for readme.txt" }));
@@ -325,7 +325,7 @@ describe("Browser Component - Rendering", () => {
     } as never);
 
     try {
-      renderBrowser("/browse/smb/test-server-1/archive.zip");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip");
 
       await screen.findByRole("button", { name: /file: inside\.txt/i });
       expect(screen.getByText("archive.zip")).toBeInTheDocument();
@@ -391,7 +391,7 @@ describe("Browser Component - Rendering", () => {
       response: { data: { detail: "Connection failed" } },
     });
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     // Optimized: Use findByText instead of waitFor + getByText
     expect(await screen.findByText(/Connection failed/i)).toBeInTheDocument();
@@ -399,25 +399,25 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("shows a typed companion lifecycle alert from the route query", async () => {
-    renderBrowser("/browse/smb/test-server-1?companion_status=renewal_required");
+    await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=renewal_required");
 
     expect(await screen.findByText(/The companion edit session expired before the file could be finished/i)).toBeInTheDocument();
   });
 
   it("shows the auth-failed companion lifecycle alert from the route query", async () => {
-    renderBrowser("/browse/smb/test-server-1?companion_status=auth_failed");
+    await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=auth_failed");
 
     expect(await screen.findByText(/The companion could not finish signing in to the Sambee backend/i)).toBeInTheDocument();
   });
 
   it("shows the recovery-required companion lifecycle alert from the route query", async () => {
-    renderBrowser("/browse/smb/test-server-1?companion_status=recovery_required");
+    await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=recovery_required");
 
     expect(await screen.findByText(/The companion has an unfinished recovery item for this file/i)).toBeInTheDocument();
   });
 
   it("ignores unknown companion lifecycle statuses in the route query", async () => {
-    renderBrowser("/browse/smb/test-server-1?companion_status=not_real");
+    await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=not_real");
 
     await waitFor(() => {
       expect(api.listDirectory).toHaveBeenCalled();
@@ -427,7 +427,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("dismisses the typed companion lifecycle alert and clears the query state", async () => {
-    renderBrowser("/browse/smb/test-server-1?companion_status=lock_lost");
+    await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=lock_lost");
 
     expect(await screen.findByText(/The companion lost the active edit lock for this file/i)).toBeInTheDocument();
 
@@ -439,7 +439,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("refreshes the visible pane automatically when backend availability recovers", async () => {
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(api.listDirectory).toHaveBeenCalledTimes(1);
@@ -462,7 +462,7 @@ describe("Browser Component - Rendering", () => {
   it("keeps the previous file list visible if the recovery refresh times out", async () => {
     vi.mocked(api.listDirectory).mockResolvedValueOnce(mockDirectoryListing).mockRejectedValueOnce(createTimeoutError());
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     expect((await screen.findAllByText("Documents")).length).toBeGreaterThan(0);
 
@@ -481,7 +481,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("refreshes both visible panes automatically when dual-pane backend availability recovers", async () => {
-    renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2&active=2");
+    await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2&active=2");
 
     await waitFor(() => {
       expect(api.listDirectory).toHaveBeenCalledTimes(2);
@@ -505,7 +505,7 @@ describe("Browser Component - Rendering", () => {
   });
 
   it("refreshes the visible pane when a proactive recovery probe succeeds without a status transition", async () => {
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(api.listDirectory).toHaveBeenCalledTimes(1);
@@ -524,7 +524,7 @@ describe("Browser Component - Rendering", () => {
   it("shows retryable timeout state when directory loading times out", async () => {
     vi.mocked(api.listDirectory).mockRejectedValueOnce(createTimeoutError()).mockResolvedValueOnce(mockDirectoryListing);
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     expect(await screen.findByText(/Directory listing timed out. The remote share took too long to respond/i)).toBeInTheDocument();
 
@@ -538,7 +538,7 @@ describe("Browser Component - Rendering", () => {
   it("shows message when no connections are configured", async () => {
     vi.mocked(api.getConnections).mockResolvedValue([]);
 
-    renderBrowser();
+    await renderBrowserAndFlush();
 
     // Optimized: Use findByText instead of waitFor + getByText
     expect(await screen.findByText(/adding your first SMB network share/i)).toBeInTheDocument();
@@ -551,7 +551,7 @@ describe("Browser Component - Rendering", () => {
       total: 0,
     });
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     // Optimized: Use findByText instead of waitFor + getByText
     expect(await screen.findByText(/This directory is empty/i)).toBeInTheDocument();

@@ -14,7 +14,7 @@ import { type ApiMock, createMarkdownViewerMock, createSettingsDialogMock, setup
 import { createMockCurrentUserSettings } from "../../test/helpers/mockFactories";
 import type { FileInfo } from "../../types";
 import { FileType } from "../../types";
-import { mockDirectoryListing, renderBrowser } from "./FileBrowser.test.utils";
+import { mockDirectoryListing, renderBrowserAndFlush } from "./FileBrowser.test.utils";
 
 const expectDirectoryLoad = (connectionId: string, path: string) => {
   expect(api.listDirectory).toHaveBeenCalledWith(
@@ -94,7 +94,7 @@ describe("Browser Component - Navigation", () => {
     });
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     // Wait for Documents to load (may appear multiple times in UI)
     await waitFor(() => {
@@ -133,7 +133,7 @@ describe("Browser Component - Navigation", () => {
     });
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     const listContainer = await screen.findByTestId("file-list-container");
     listContainer.focus();
@@ -166,7 +166,7 @@ describe("Browser Component - Navigation", () => {
     vi.mocked(api.listDirectory).mockResolvedValue({ items: rootFiles, path: "", total: rootFiles.length });
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     const listContainer = await screen.findByTestId("file-list-container");
     listContainer.focus();
@@ -202,7 +202,7 @@ describe("Browser Component - Navigation", () => {
     });
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     const focusDestinationAndOpen = async () => {
       const listContainer = await screen.findByTestId("file-list-container");
@@ -260,7 +260,7 @@ describe("Browser Component - Navigation", () => {
       return mockDirectoryListing;
     });
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     expect(await screen.findByText("readme.txt")).toBeInTheDocument();
 
@@ -310,7 +310,7 @@ describe("Browser Component - Navigation", () => {
     });
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1/Documents/Subfolder");
+    await renderBrowserAndFlush("/browse/smb/test-server-1/Documents/Subfolder");
 
     // Optimized: Use findByText
     expect(await screen.findByText("Subfolder")).toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("Browser Component - Navigation", () => {
   });
 
   it("loads connection from URL parameter", async () => {
-    renderBrowser("/browse/smb/test-server-2");
+    await renderBrowserAndFlush("/browse/smb/test-server-2");
 
     // Wait for connections to load and URL to be processed
     await waitFor(() => {
@@ -343,7 +343,7 @@ describe("Browser Component - Navigation", () => {
   });
 
   it("loads nested path from URL", async () => {
-    renderBrowser("/browse/smb/test-server-1/Documents/Subfolder");
+    await renderBrowserAndFlush("/browse/smb/test-server-1/Documents/Subfolder");
 
     // Wait for connections to load
     await waitFor(() => {
@@ -375,7 +375,7 @@ describe("Browser Component - Navigation", () => {
       })
     );
 
-    renderBrowser("/browse");
+    await renderBrowserAndFlush("/browse");
 
     await waitFor(() => {
       expectDirectoryLoad("conn-1", "");
@@ -385,7 +385,7 @@ describe("Browser Component - Navigation", () => {
   it("falls back to first connection when no saved preference", async () => {
     localStorage.removeItem("selectedConnectionId");
 
-    renderBrowser("/browse");
+    await renderBrowserAndFlush("/browse");
 
     await waitFor(() => {
       expectDirectoryLoad("conn-1", "");
@@ -408,7 +408,7 @@ describe("Browser Component - Navigation", () => {
     vi.mocked(api.listDirectory).mockResolvedValueOnce(mockDirectoryListing);
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     // Wait for Documents to load (may appear multiple times in UI)
     await waitFor(() => {
@@ -469,7 +469,7 @@ describe("Browser Component - Navigation", () => {
       return Promise.resolve(mockDirectoryListing);
     });
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     const select = await screen.findByRole("combobox");
     await user.click(select);

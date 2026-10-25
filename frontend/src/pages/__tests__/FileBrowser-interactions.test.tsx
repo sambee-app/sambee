@@ -27,7 +27,7 @@ import {
 } from "../../test/helpers";
 import { type ConflictInfo, FileType } from "../../types";
 import { QUICK_NAV_INCLUDE_DOT_DIRECTORIES_STORAGE_KEY } from "../FileBrowser/preferences";
-import { mockConnections, mockDirectoryListing, renderBrowser } from "./FileBrowser.test.utils";
+import { mockConnections, mockDirectoryListing, renderBrowserAndFlush } from "./FileBrowser.test.utils";
 
 const expectDirectoryLoad = (connectionId: string, path: string) => {
   expect(api.listDirectory).toHaveBeenCalledWith(
@@ -141,6 +141,21 @@ describe("Browser Component - Interactions", () => {
     localStorage.clear();
   });
 
+  it("flushes mocked initial loading without advancing timers", async () => {
+    vi.useFakeTimers();
+    try {
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
+
+      expectDirectoryLoad("conn-1", "");
+      expect(screen.getByRole("button", { name: "Folder: Documents" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "File: readme.txt" })).toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   it("ignores a stale picker result after a later upload attempt", async () => {
     const pickers: HTMLInputElement[] = [];
     const pickerClick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (this: HTMLInputElement) {
@@ -149,7 +164,7 @@ describe("Browser Component - Interactions", () => {
     const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       for (const focusReturned of [true, false, true]) {
         hasFocus.mockReturnValue(focusReturned);
         fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
@@ -180,7 +195,7 @@ describe("Browser Component - Interactions", () => {
     });
     try {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0]!;
       await user.click(listContainer);
       await user.keyboard(" ");
@@ -208,7 +223,7 @@ describe("Browser Component - Interactions", () => {
     });
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
     const listContainer = await screen.findByTestId("virtual-list");
     await user.click(listContainer);
     await user.keyboard(" ");
@@ -226,7 +241,7 @@ describe("Browser Component - Interactions", () => {
     vi.mocked(api.downloadFile).mockResolvedValueOnce(undefined);
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
     const listContainer = await screen.findByTestId("virtual-list");
     await user.click(listContainer);
     await user.keyboard(" ");
@@ -244,7 +259,7 @@ describe("Browser Component - Interactions", () => {
     });
 
     const user = userEvent.setup();
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
     const listContainer = await screen.findByTestId("virtual-list");
     await user.click(listContainer);
     await user.keyboard(" ");
@@ -258,7 +273,7 @@ describe("Browser Component - Interactions", () => {
   it("rejects a menu choice after the destination changes", async () => {
     const pickerClick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("button", { name: /folder: documents/i, hidden: true }));
       await waitFor(() => expectDirectoryLoad("conn-1", "Documents"));
@@ -272,7 +287,7 @@ describe("Browser Component - Interactions", () => {
   });
 
   it("navigates the upload choices by keyboard and restores focus on Escape", async () => {
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
     const trigger = await screen.findByRole("button", { name: "Upload" });
     trigger.focus();
     fireEvent.click(trigger);
@@ -304,7 +319,7 @@ describe("Browser Component - Interactions", () => {
       if (this.type === "file") picker = this;
     });
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       expect(picker).not.toBeNull();
@@ -327,7 +342,7 @@ describe("Browser Component - Interactions", () => {
       this.dispatchEvent(new Event("change", { bubbles: true }));
     });
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
@@ -350,7 +365,7 @@ describe("Browser Component - Interactions", () => {
     });
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
@@ -391,7 +406,7 @@ describe("Browser Component - Interactions", () => {
     });
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
@@ -423,7 +438,7 @@ describe("Browser Component - Interactions", () => {
     vi.mocked(api.createItem).mockRejectedValueOnce({ response: { status: 409 } });
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
@@ -451,7 +466,7 @@ describe("Browser Component - Interactions", () => {
     });
     vi.mocked(api.publishBrowserFile).mockResolvedValue(completedTransferResult);
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
@@ -482,7 +497,7 @@ describe("Browser Component - Interactions", () => {
       throw createNotFoundError();
     });
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       const trigger = await screen.findByRole("button", { name: "Upload" });
       fireEvent.click(trigger);
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
@@ -514,7 +529,7 @@ describe("Browser Component - Interactions", () => {
       effects: { source: "unchanged", destination: "unknown" },
     });
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
@@ -536,7 +551,7 @@ describe("Browser Component - Interactions", () => {
       .mockResolvedValueOnce({ status: "outcome_unknown", replaced: false, effects: { source: "unchanged", destination: "unknown" } })
       .mockResolvedValueOnce(completedTransferResult);
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
 
@@ -571,7 +586,7 @@ describe("Browser Component - Interactions", () => {
         : completedTransferResult
     );
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
     await screen.findByTestId("file-list-container");
     fireEvent.drop(screen.getByTestId("file-list-container"), {
       dataTransfer: {
@@ -599,7 +614,7 @@ describe("Browser Component - Interactions", () => {
         })
     );
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       await waitFor(() => expect(api.publishBrowserFile).toHaveBeenCalledOnce());
@@ -632,7 +647,7 @@ describe("Browser Component - Interactions", () => {
         })
     );
     try {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       await screen.findByRole("button", { name: /folder: documents/i });
       const rootLoads = () =>
         vi.mocked(api.listDirectory).mock.calls.filter(([connectionId, path]) => connectionId === "conn-1" && path === "").length;
@@ -656,7 +671,7 @@ describe("Browser Component - Interactions", () => {
   describe("Settings", () => {
     it("disables the Refresh toolbar command while settings is open", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
       expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
@@ -669,7 +684,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens settings when settings button clicked", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -688,7 +703,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not show unavailable shortcut feedback while settings is open", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
       await user.keyboard("{Control>},{/Control}");
@@ -703,7 +718,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not show unavailable shortcut feedback while help is open", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
       await user.keyboard("{F1}");
@@ -741,7 +756,7 @@ describe("Browser Component - Interactions", () => {
         ],
         total: 1,
       });
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await user.click(await screen.findByRole("button", { name: new RegExp(`file: ${name}`, "i") }));
       await screen.findByRole("dialog");
@@ -768,7 +783,7 @@ describe("Browser Component - Interactions", () => {
 
       try {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "Open menu" }));
         await screen.findByRole("button", { name: "Open settings" });
@@ -794,7 +809,7 @@ describe("Browser Component - Interactions", () => {
   describe("Sort Functionality", () => {
     it("sorts files by name, size, and date", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -831,7 +846,7 @@ describe("Browser Component - Interactions", () => {
 
     it("sorts files by name", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -881,7 +896,7 @@ describe("Browser Component - Interactions", () => {
         return Promise.resolve(mockDirectoryListing);
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -918,7 +933,7 @@ describe("Browser Component - Interactions", () => {
   describe("Refresh", () => {
     it("refreshes file list when Ctrl+R pressed", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -939,7 +954,7 @@ describe("Browser Component - Interactions", () => {
 
     it("returns to single-pane mode after pressing Ctrl+B twice", async () => {
       const user = userEvent.setup();
-      const { container } = renderBrowser("/browse/smb/test-server-1");
+      const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         const documentsElements = screen.getAllByText("Documents");
@@ -980,7 +995,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens dual-pane mode from the pane toggle button", async () => {
       const user = userEvent.setup();
-      const { container } = renderBrowser("/browse/smb/test-server-1");
+      const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
 
@@ -999,7 +1014,7 @@ describe("Browser Component - Interactions", () => {
 
     it("creates an archive from the active right pane into the opposite pane", async () => {
       const user = userEvent.setup();
-      const { container } = renderBrowser("/browse/smb/test-server-1");
+      const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -1035,7 +1050,7 @@ describe("Browser Component - Interactions", () => {
 
     it("reuses the current left-pane directory contents when opening dual-pane on the same target", async () => {
       const user = userEvent.setup();
-      const { container } = renderBrowser("/browse/smb/test-server-1");
+      const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1065,7 +1080,7 @@ describe("Browser Component - Interactions", () => {
 
     it("returns to single-pane mode after pressing Ctrl+B twice even when a toolbar button has focus", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         const documentsElements = screen.getAllByText("Documents");
@@ -1100,7 +1115,7 @@ describe("Browser Component - Interactions", () => {
 
     it("returns to single-pane mode after pressing Ctrl+B twice even if the left pane receives focus during the transition", async () => {
       const user = userEvent.setup();
-      const { container } = renderBrowser("/browse/smb/test-server-1");
+      const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         const documentsElements = screen.getAllByText("Documents");
@@ -1129,7 +1144,7 @@ describe("Browser Component - Interactions", () => {
 
       vi.mocked(api.copyItem).mockResolvedValue(completedTransferResult);
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1233,7 +1248,7 @@ describe("Browser Component - Interactions", () => {
         });
 
         try {
-          renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+          await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
           await waitFor(() => {
             expectDirectoryLoad("conn-1", "");
             expectDirectoryLoad("conn-2", "Documents");
@@ -1310,7 +1325,7 @@ describe("Browser Component - Interactions", () => {
       try {
         setupRegularFileTransferListing();
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+        await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
         const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
         await user.click(requireTestValue(listContainer));
         await user.keyboard(" ");
@@ -1354,7 +1369,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not show unavailable feedback while a copy dialog owns keyboard interaction", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       const [listContainer] = await screen.findAllByTestId("virtual-list");
       await user.click(requireTestValue(listContainer));
@@ -1379,7 +1394,7 @@ describe("Browser Component - Interactions", () => {
         });
       });
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       const listContainer = (await screen.findAllByTestId("virtual-list"))[0];
       await user.click(listContainer!);
@@ -1412,7 +1427,7 @@ describe("Browser Component - Interactions", () => {
           error: { code: "transport", detail: "Destination is unavailable." },
         });
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1454,7 +1469,7 @@ describe("Browser Component - Interactions", () => {
       };
       vi.mocked(api.copyItem).mockRejectedValueOnce({ response: { status: 409, data: { detail: conflict } } });
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1508,7 +1523,7 @@ describe("Browser Component - Interactions", () => {
         .mockRejectedValueOnce({ response: { status: 409, data: { detail: renamedTargetConflict } } })
         .mockResolvedValueOnce(completedTransferResult);
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1545,7 +1560,7 @@ describe("Browser Component - Interactions", () => {
     it("opens Move when the destination is writable", async () => {
       const user = userEvent.setup();
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1567,7 +1582,7 @@ describe("Browser Component - Interactions", () => {
 
       vi.mocked(api.getConnections).mockResolvedValue([mockConnections[0], { ...mockConnections[1], access_mode: "read_only" }]);
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1588,7 +1603,7 @@ describe("Browser Component - Interactions", () => {
 
       vi.mocked(api.getConnections).mockResolvedValue([mockConnections[0], { ...mockConnections[1], access_mode: "read_only" }]);
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1609,7 +1624,7 @@ describe("Browser Component - Interactions", () => {
 
     it("explains unavailable F5, F6, and Alt+F5 when no item is selected", async () => {
       vi.mocked(api.listDirectory).mockResolvedValue({ path: "", items: [], total: 0 });
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("file-list-container");
       requireTestValue(listContainer).focus();
@@ -1632,7 +1647,7 @@ describe("Browser Component - Interactions", () => {
     });
 
     it("explains why F5 requires dual-pane mode", async () => {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const listContainer = await screen.findByTestId("virtual-list");
       listContainer.focus();
@@ -1646,7 +1661,7 @@ describe("Browser Component - Interactions", () => {
 
     it("explains why F7 and Shift+F7 cannot create content in a read-only location", async () => {
       vi.mocked(api.getConnections).mockResolvedValue([{ ...mockConnections[0], access_mode: "read_only" }]);
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const listContainer = await screen.findByTestId("virtual-list");
       listContainer.focus();
@@ -1664,7 +1679,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not show unavailable shortcut feedback while the quick bar input owns focus", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
       await user.keyboard("{Control>}p{/Control}");
@@ -1682,7 +1697,7 @@ describe("Browser Component - Interactions", () => {
 
       vi.mocked(api.getConnections).mockResolvedValue(mockConnections);
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/Documents");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -1736,7 +1751,7 @@ describe("Browser Component - Interactions", () => {
         })
       );
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(
         () => {
@@ -1775,7 +1790,7 @@ describe("Browser Component - Interactions", () => {
         total: 1,
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
@@ -1827,7 +1842,7 @@ describe("Browser Component - Interactions", () => {
         })
       );
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
@@ -1867,7 +1882,7 @@ describe("Browser Component - Interactions", () => {
         total: 1,
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const virtualList = await screen.findByTestId("virtual-list");
       await user.click(virtualList);
@@ -1917,7 +1932,7 @@ describe("Browser Component - Interactions", () => {
         total: 2,
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const virtualList = await screen.findByTestId("virtual-list");
       await user.click(virtualList);
@@ -1963,7 +1978,7 @@ describe("Browser Component - Interactions", () => {
         page_size: 100,
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const virtualList = await screen.findByTestId("virtual-list");
       await user.click(virtualList);
@@ -2005,7 +2020,7 @@ describe("Browser Component - Interactions", () => {
         page_size: 100,
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const virtualList = await screen.findByTestId("virtual-list");
       await user.click(virtualList);
@@ -2057,7 +2072,7 @@ describe("Browser Component - Interactions", () => {
         total: 2,
       });
 
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("file-list-container");
       requireTestValue(listContainer).focus();
@@ -2083,7 +2098,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not show unavailable feedback while the archive creation dialog owns keyboard interaction", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("virtual-list");
       await user.click(requireTestValue(listContainer));
@@ -2101,7 +2116,7 @@ describe("Browser Component - Interactions", () => {
 
     it("blocks copy, move, and archive creation when the opposite pane is a ZIP archive", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
 
       const lists = await screen.findAllByTestId("virtual-list");
       await user.click(lists[1]!);
@@ -2129,7 +2144,7 @@ describe("Browser Component - Interactions", () => {
       });
       vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-selected" } as never);
       vi.mocked(api.executeArchiveExtraction).mockResolvedValueOnce({ phase: "completed", checkpoint_json: "{}" } as never);
-      renderBrowser("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
 
       const archiveMember = await screen.findByRole("button", { name: /file: inside\.txt/i });
       const archiveList = archiveMember.closest('[data-testid="virtual-list"]');
@@ -2167,7 +2182,7 @@ describe("Browser Component - Interactions", () => {
 
         page_size: 100,
       });
-      renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2/archive.zip&active=2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2/archive.zip&active=2");
 
       await waitFor(() => expectDirectoryLoad("conn-1", ""));
       const archiveMember = await screen.findByRole("button", { name: /file: inside\.txt/i });
@@ -2193,7 +2208,7 @@ describe("Browser Component - Interactions", () => {
       });
       vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-cancelled" } as never);
       vi.mocked(api.executeArchiveExtraction).mockResolvedValueOnce({ phase: "cancelled", checkpoint_json: "{}" } as never);
-      renderBrowser("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
 
       const archiveMember = await screen.findByRole("button", { name: /file: inside\.txt/i });
       const archiveList = archiveMember.closest('[data-testid="virtual-list"]');
@@ -2249,9 +2264,7 @@ describe("Browser Component - Interactions", () => {
         })
       );
 
-      await act(async () => {
-        renderBrowser("/browse/smb/test-server-1");
-      });
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
       expect(screen.getByRole("button", { name: "File: report.pdf" })).toBeInTheDocument();
 
       const listContainer = screen.getByTestId("virtual-list");
@@ -2284,11 +2297,8 @@ describe("Browser Component - Interactions", () => {
         total: 1,
       });
 
-      renderBrowser("/browse/smb/test-server-1");
-
-      await waitFor(() => {
-        expect(screen.getByRole("button", { name: /report.pdf/i })).toBeInTheDocument();
-      });
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
+      expect(screen.getByRole("button", { name: "File: report.pdf" })).toBeInTheDocument();
 
       const listContainer = screen.getByTestId("virtual-list");
       await user.click(listContainer);
@@ -2322,9 +2332,9 @@ describe("Browser Component - Interactions", () => {
         total: 1,
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-      const fileButton = await screen.findByRole("button", { name: /archive.bin/i });
+      const fileButton = screen.getByRole("button", { name: "File: archive.bin" });
       await user.click(fileButton);
 
       await waitFor(() => {
@@ -2346,7 +2356,7 @@ describe("Browser Component - Interactions", () => {
         ["End", ["Folder: Pictures (selected)", "File: readme.txt (selected)"], "readme.txt"],
       ])("Shift+%s selects the inclusive range from current focus and moves focus to the boundary", async (key, expected, target) => {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "Folder: Pictures" });
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
@@ -2381,7 +2391,7 @@ describe("Browser Component - Interactions", () => {
         "Shift+%s preserves selections outside the range and uses focus instead of the previous anchor",
         async (key, initialKey, initialName) => {
           const user = userEvent.setup();
-          renderBrowser("/browse/smb/test-server-1");
+          await renderBrowserAndFlush("/browse/smb/test-server-1");
           await screen.findByRole("button", { name: "Folder: Pictures" });
           const list = screen.getByTestId("file-list-container");
           await user.click(within(list).getByTestId("virtual-list"));
@@ -2412,7 +2422,7 @@ describe("Browser Component - Interactions", () => {
         ["Home", "End", "Folder: Documents (selected)"],
       ])("Shift+%s uses pending focus from %s before an animation frame commits", async (key, navigationKey, targetName) => {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "Folder: Pictures" });
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
@@ -2452,9 +2462,7 @@ describe("Browser Component - Interactions", () => {
       it.each(["Home", "End"])("Shift+%s selects a single-item list without toggling it off", async (key) => {
         const user = userEvent.setup();
         vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: [mockDirectoryListing.items[0]!], total: 1 });
-        await act(async () => {
-          renderBrowser("/browse/smb/test-server-1");
-        });
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         expect(screen.getByRole("button", { name: "Folder: Documents" })).toBeInTheDocument();
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
@@ -2466,7 +2474,7 @@ describe("Browser Component - Interactions", () => {
       it.each(["Home", "End"])("Shift+%s does nothing in an empty list", async (key) => {
         const user = userEvent.setup();
         vi.mocked(api.listDirectory).mockResolvedValue({ path: "", items: [], total: 0 });
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByText("This directory is empty");
         const list = screen.getByTestId("file-list-container");
         await user.click(list);
@@ -2477,7 +2485,7 @@ describe("Browser Component - Interactions", () => {
 
       it.each(["Home", "End"])("Shift+%s leaves text inputs and toolbar focus alone", async (key) => {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "Folder: Pictures" });
         const list = screen.getByTestId("file-list-container");
         const input = screen.getByPlaceholderText("Navigate to any directory");
@@ -2495,7 +2503,7 @@ describe("Browser Component - Interactions", () => {
 
       it.each(["Home", "End"])("Shift+%s does not select files while a dialog is open", async (key) => {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "Folder: Pictures" });
         await user.click(screen.getByRole("button", { name: "Delete" }));
         await screen.findByRole("dialog");
@@ -2507,7 +2515,7 @@ describe("Browser Component - Interactions", () => {
 
       it("keeps unmodified Home and End as focus-only navigation", async () => {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "Folder: Pictures" });
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
@@ -2525,7 +2533,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens navigate mode with Ctrl+K even when a toolbar button is focused", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         const documentsElements = screen.getAllByText("Documents");
@@ -2544,7 +2552,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens the connection selector with Ctrl+ArrowDown", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2562,7 +2570,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not open the connection selector or mode menu when Ctrl+ArrowDown is pressed on the mode button", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2580,7 +2588,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not show an empty no-results dropdown when navigate mode opens", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2596,7 +2604,7 @@ describe("Browser Component - Interactions", () => {
 
     it("searches recent directories and shows no-results for single-character quick nav input", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2613,7 +2621,7 @@ describe("Browser Component - Interactions", () => {
 
     it("always shows the current quick-bar mode pill", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2648,7 +2656,7 @@ describe("Browser Component - Interactions", () => {
     ])("refreshes active File Search after %s", async (_description, triggerRefresh) => {
       const user = userEvent.setup();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2676,7 +2684,7 @@ describe("Browser Component - Interactions", () => {
     ])("does not reopen focused but dismissed File Search after %s", async (_description, triggerRefresh) => {
       const user = userEvent.setup();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
@@ -2705,7 +2713,7 @@ describe("Browser Component - Interactions", () => {
     ])("refreshes active Directory Navigation after %s", async (_description, triggerRefresh) => {
       const user = userEvent.setup();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2738,7 +2746,7 @@ describe("Browser Component - Interactions", () => {
           },
         ],
       });
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await user.keyboard("{Control>}k{/Control}");
       const navigateInput = await screen.findByPlaceholderText("Navigate to any directory");
@@ -2761,7 +2769,7 @@ describe("Browser Component - Interactions", () => {
     it("does not reopen dismissed File Search after returning to the browser tab", async () => {
       const user = userEvent.setup();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
@@ -2784,7 +2792,7 @@ describe("Browser Component - Interactions", () => {
 
     it("keeps Home and End bound to the navigate input text", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2844,7 +2852,7 @@ describe("Browser Component - Interactions", () => {
         return mockDirectoryListing;
       });
 
-      const { container } = renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+      const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       await waitFor(() => {
         expectDirectoryLoad("conn-1", "");
@@ -2906,7 +2914,7 @@ describe("Browser Component - Interactions", () => {
         })
       );
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -2931,7 +2939,7 @@ describe("Browser Component - Interactions", () => {
 
     it("keeps focus in the quick bar when a command switches quick-bar modes", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         const documentsElements = screen.getAllByText("Documents");
@@ -2955,7 +2963,7 @@ describe("Browser Component - Interactions", () => {
 
     it("switches quick-bar modes from the mode pill", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         const documentsElements = screen.getAllByText("Documents");
@@ -2995,7 +3003,7 @@ describe("Browser Component - Interactions", () => {
 
     it("navigates down with ArrowDown key", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -3016,7 +3024,7 @@ describe("Browser Component - Interactions", () => {
 
     it("navigates up with ArrowUp key", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -3035,7 +3043,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens file or folder with Enter key", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -3059,7 +3067,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens the focused item when Open Focused Item is selected from commands mode", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         const documentsElements = screen.getAllByText("Documents");
@@ -3108,7 +3116,7 @@ describe("Browser Component - Interactions", () => {
         return Promise.resolve(mockDirectoryListing);
       });
 
-      renderBrowser("/browse/smb/test-server-1/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -3148,7 +3156,7 @@ describe("Browser Component - Interactions", () => {
         return Promise.resolve(mockDirectoryListing);
       });
 
-      renderBrowser("/browse/smb/test-server-1/Documents");
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents");
 
       await waitFor(() => {
         expect(screen.getAllByText("file.txt").length).toBeGreaterThan(0);
@@ -3171,7 +3179,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens shortcuts dialog with ? key", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -3191,7 +3199,7 @@ describe("Browser Component - Interactions", () => {
 
     it("closes the commands dropdown after selecting Show Keyboard Shortcuts", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3209,7 +3217,7 @@ describe("Browser Component - Interactions", () => {
 
     it("handles keyboard navigation without crashing on empty directory", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Optimized: Use findByText
       await waitFor(() => {
@@ -3228,7 +3236,7 @@ describe("Browser Component - Interactions", () => {
 
     it("handles switching between mouse and keyboard input without crashing", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Wait for files to load
       await waitFor(() => {
@@ -3258,7 +3266,7 @@ describe("Browser Component - Interactions", () => {
     it("redirects to login when unauthorized (401)", async () => {
       vi.mocked(api.getConnections).mockRejectedValue(createUnauthorizedError());
 
-      renderBrowser();
+      await renderBrowserAndFlush();
 
       expect(await screen.findByText("Login Page")).toBeInTheDocument();
     });
@@ -3266,7 +3274,7 @@ describe("Browser Component - Interactions", () => {
     it("shows access denied message for admin endpoints (403)", async () => {
       vi.mocked(api.getConnections).mockRejectedValue(createForbiddenError());
 
-      renderBrowser();
+      await renderBrowserAndFlush();
 
       expect(await screen.findByText(/Access denied. Please contact an administrator/i)).toBeInTheDocument();
     });
@@ -3274,7 +3282,7 @@ describe("Browser Component - Interactions", () => {
     it("handles connection not found (404)", async () => {
       vi.mocked(api.listDirectory).mockRejectedValue(createNotFoundError());
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       expect(await screen.findByText(/Connection not found/i)).toBeInTheDocument();
     });
@@ -3284,7 +3292,7 @@ describe("Browser Component - Interactions", () => {
         response: { data: { detail: "Server error" } },
       });
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       expect(await screen.findByText(/Server error/i)).toBeInTheDocument();
     });
@@ -3292,7 +3300,7 @@ describe("Browser Component - Interactions", () => {
     it("handles network errors", async () => {
       vi.mocked(api.listDirectory).mockRejectedValue(createNetworkError());
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       expect(await screen.findByText(/Failed to load files. Please check your connection settings/i)).toBeInTheDocument();
     });
@@ -3300,7 +3308,7 @@ describe("Browser Component - Interactions", () => {
     it("handles timeout errors with a dedicated message", async () => {
       vi.mocked(api.listDirectory).mockRejectedValue(createTimeoutError());
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       expect(await screen.findByText(/Directory listing timed out. The remote share took too long to respond/i)).toBeInTheDocument();
     });
@@ -3309,7 +3317,7 @@ describe("Browser Component - Interactions", () => {
   describe("Delete", () => {
     it("returns focus to the file list when a toolbar confirmation is dismissed with Escape", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3328,7 +3336,7 @@ describe("Browser Component - Interactions", () => {
 
     it("returns focus to the file list when Escape is pressed on a focused file row", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3346,7 +3354,7 @@ describe("Browser Component - Interactions", () => {
 
     it("returns focus to the file list when Escape is pressed after clicking unused toolbar space", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3363,7 +3371,7 @@ describe("Browser Component - Interactions", () => {
     });
 
     it("returns focus to the file list when Escape is pressed with document focus", async () => {
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3376,7 +3384,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens delete dialog when Delete Focused Item is selected from commands mode", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3397,7 +3405,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens confirm dialog when Delete key pressed on focused file", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Wait for files to load
       await waitFor(() => {
@@ -3420,7 +3428,7 @@ describe("Browser Component - Interactions", () => {
 
     it("calls deleteItem API when confirmed", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Wait for files to load
       await waitFor(() => {
@@ -3449,7 +3457,7 @@ describe("Browser Component - Interactions", () => {
 
     it("deletes every selected item when confirmed", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3484,7 +3492,7 @@ describe("Browser Component - Interactions", () => {
         setupRegularFileTransferListing();
         vi.mocked(api.getOriginalFileBlob).mockResolvedValue(new Blob(["original"], { type: "text/plain" }));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
@@ -3530,7 +3538,7 @@ describe("Browser Component - Interactions", () => {
       try {
         setupRegularFileTransferListing();
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
@@ -3568,7 +3576,7 @@ describe("Browser Component - Interactions", () => {
         vi.mocked(api.getOriginalFileBlob).mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/octet-stream" }));
         share.mockRejectedValueOnce(new DOMException("The browser blocked this file", "NotAllowedError"));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for document.pdf" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
@@ -3605,7 +3613,7 @@ describe("Browser Component - Interactions", () => {
         vi.mocked(api.getOriginalFileBlob).mockImplementation(async (_connectionId, path) => new Blob([path]));
         share.mockRejectedValueOnce(new DOMException("Permission denied", "NotAllowedError"));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Select" }));
@@ -3644,7 +3652,7 @@ describe("Browser Component - Interactions", () => {
         setupRegularFileTransferListing();
         vi.mocked(api.getOriginalFileBlob).mockRejectedValueOnce(new Error("Download failed (403): Forbidden"));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
@@ -3665,7 +3673,7 @@ describe("Browser Component - Interactions", () => {
         setupRegularFileTransferListing();
         vi.mocked(api.getOriginalFileBlob).mockImplementation(async (_connectionId, path) => new Blob([path], { type: "text/plain" }));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Select" }));
@@ -3709,7 +3717,7 @@ describe("Browser Component - Interactions", () => {
         }));
         vi.mocked(api.getOriginalFileBlob).mockResolvedValue(new Blob(["content"], { type: "text/plain" }));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         const list = await screen.findByTestId("file-list-container");
         await user.click(list);
@@ -3741,7 +3749,7 @@ describe("Browser Component - Interactions", () => {
         setupRegularFileTransferListing();
         vi.mocked(api.getOriginalFileBlob).mockResolvedValue(new Blob(["content"]));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
@@ -3769,7 +3777,7 @@ describe("Browser Component - Interactions", () => {
         setupRegularFileTransferListing();
         vi.mocked(api.getOriginalFileBlob).mockResolvedValue(new Blob(["content"]));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "More actions for Documents" });
 
         const fileEntry = {
@@ -3808,7 +3816,7 @@ describe("Browser Component - Interactions", () => {
           total: path ? 0 : 2,
         }));
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         expect(screen.queryByRole("menuitem", { name: "Share" })).not.toBeInTheDocument();
@@ -3847,7 +3855,7 @@ describe("Browser Component - Interactions", () => {
       try {
         setupRegularFileTransferListing();
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         expect(screen.queryByRole("menuitem", { name: "Share" })).not.toBeInTheDocument();
@@ -3874,7 +3882,7 @@ describe("Browser Component - Interactions", () => {
 
       try {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         await user.click(await screen.findByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Select" }));
@@ -3904,7 +3912,7 @@ describe("Browser Component - Interactions", () => {
 
       try {
         const user = userEvent.setup();
-        renderBrowser("/browse/smb/test-server-1");
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
 
         expect(await screen.findByRole("button", { name: "Refresh" })).toBeInTheDocument();
         expect(screen.queryByRole("button", { name: "Open menu" })).not.toBeInTheDocument();
@@ -3921,7 +3929,7 @@ describe("Browser Component - Interactions", () => {
 
     it("closes dialog when Cancel is clicked", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Wait for files to load
       await waitFor(() => {
@@ -3949,7 +3957,7 @@ describe("Browser Component - Interactions", () => {
 
       vi.mocked(api.getConnections).mockResolvedValue([{ ...mockConnections[0], access_mode: "read_only" }]);
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -3971,7 +3979,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens the rename dialog from the active pane toolbar command", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
       await user.click(screen.getByRole("button", { name: "Rename" }));
@@ -4029,7 +4037,7 @@ describe("Browser Component - Interactions", () => {
           releaseLeftListing();
           releaseRightListing();
         }
-        const { container } = renderBrowser("/browse/smb/test-server-1?p2=smb/test-server-2");
+        const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
         if (loading === "delayed") {
           await waitFor(() => expect(api.getConnections).toHaveBeenCalled(), { timeout: PANE_READY_TIMEOUT_MS });
           expect(api.listDirectory).not.toHaveBeenCalled();
@@ -4075,7 +4083,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens rename dialog when Rename Focused Item is selected from commands mode", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -4096,7 +4104,7 @@ describe("Browser Component - Interactions", () => {
 
     it("opens rename dialog when F2 is pressed on focused file", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Wait for files to load
       await waitFor(() => {
@@ -4117,7 +4125,7 @@ describe("Browser Component - Interactions", () => {
 
     it("keeps slash input in the rename dialog instead of opening File Search", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -4136,7 +4144,7 @@ describe("Browser Component - Interactions", () => {
 
     it("calls renameItem API when confirmed", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Wait for files to load
       await waitFor(() => {
@@ -4166,7 +4174,7 @@ describe("Browser Component - Interactions", () => {
 
     it("sends NFC when a decomposed filename is renamed", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -4186,7 +4194,7 @@ describe("Browser Component - Interactions", () => {
 
     it("closes dialog when Cancel is clicked", async () => {
       const user = userEvent.setup();
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       // Wait for files to load
       await waitFor(() => {
@@ -4214,7 +4222,7 @@ describe("Browser Component - Interactions", () => {
 
       vi.mocked(api.getConnections).mockResolvedValue([{ ...mockConnections[0], access_mode: "read_only" }]);
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
@@ -4235,7 +4243,7 @@ describe("Browser Component - Interactions", () => {
 
       vi.mocked(api.getConnections).mockResolvedValue([{ ...mockConnections[0], access_mode: "read_only" }]);
 
-      renderBrowser("/browse/smb/test-server-1");
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await waitFor(() => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);

@@ -10,7 +10,7 @@ import {
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
-import { renderBrowser } from "./FileBrowser.test.utils";
+import { renderBrowserAndFlush } from "./FileBrowser.test.utils";
 
 vi.mock("../../services/api");
 
@@ -27,7 +27,7 @@ describe("FileBrowser archive interruption recovery", () => {
     storeForegroundArchiveOperation("operation-id");
     vi.mocked(api.cancelArchiveOperation).mockResolvedValue({} as never);
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(api.cancelArchiveOperation).toHaveBeenCalledWith("operation-id");
@@ -40,7 +40,7 @@ describe("FileBrowser archive interruption recovery", () => {
     storeForegroundArchiveOperation("operation-id");
     vi.mocked(api.cancelArchiveOperation).mockRejectedValue(new Error("offline"));
 
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
       expect(api.cancelArchiveOperation).toHaveBeenCalledWith("operation-id");
@@ -51,7 +51,7 @@ describe("FileBrowser archive interruption recovery", () => {
 
   it("cancels marked archive work on pagehide and warns before unload", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
-    renderBrowser("/browse/smb/test-server-1");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
     await screen.findByText("Documents");
     storeForegroundArchiveOperation("operation-id");
 

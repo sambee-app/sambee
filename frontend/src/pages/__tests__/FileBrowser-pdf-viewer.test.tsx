@@ -6,7 +6,7 @@ import { requireTestValue } from "../../test/helpers/assertions";
  * Tests for PDF file viewing workflows
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useRef } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -144,18 +144,22 @@ global.URL.createObjectURL = vi.fn(() => "blob:mock-pdf-url");
 global.URL.revokeObjectURL = vi.fn();
 
 describe("Browser - PDF Viewer Integration", () => {
-  const renderBrowser = (initialPath = "/browse/smb/test-server-1") => {
-    return render(
-      <SambeeThemeProvider>
-        <MemoryRouter initialEntries={[initialPath]}>
-          <Routes>
-            <Route path="/browse/:targetType/:targetId/*" element={<FileBrowser />} />
-            <Route path="/browse" element={<FileBrowser />} />
-            <Route path="/login" element={<div>Login Page</div>} />
-          </Routes>
-        </MemoryRouter>
-      </SambeeThemeProvider>
-    );
+  const renderBrowser = async (initialPath = "/browse/smb/test-server-1") => {
+    let result: ReturnType<typeof render> | undefined;
+    await act(async () => {
+      result = render(
+        <SambeeThemeProvider>
+          <MemoryRouter initialEntries={[initialPath]}>
+            <Routes>
+              <Route path="/browse/:targetType/:targetId/*" element={<FileBrowser />} />
+              <Route path="/browse" element={<FileBrowser />} />
+              <Route path="/login" element={<div>Login Page</div>} />
+            </Routes>
+          </MemoryRouter>
+        </SambeeThemeProvider>
+      );
+    });
+    return requireTestValue(result);
   };
 
   const waitForPageNavigationReady = async () => {
@@ -212,7 +216,7 @@ describe("Browser - PDF Viewer Integration", () => {
         total: 1,
       });
 
-      renderBrowser();
+      await renderBrowser();
 
       // Wait for file to load and get the button
       const pdfFile = await getFileButton("document.pdf");
@@ -245,7 +249,7 @@ describe("Browser - PDF Viewer Integration", () => {
         total: 1,
       });
 
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("report.pdf");
       fireEvent.click(pdfFile);
@@ -274,7 +278,7 @@ describe("Browser - PDF Viewer Integration", () => {
         total: 1,
       });
 
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -307,7 +311,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("navigates to next page using button", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -326,7 +330,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("navigates to previous page using button", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -355,7 +359,7 @@ describe("Browser - PDF Viewer Integration", () => {
 
     it("jumps to specific page via input", async () => {
       const user = userEvent.setup();
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -376,7 +380,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("navigates using keyboard (ArrowLeft/Right)", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -405,7 +409,7 @@ describe("Browser - PDF Viewer Integration", () => {
 
     it("goes to first page (Home key)", async () => {
       const user = userEvent.setup();
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -439,7 +443,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("goes to last page (End key)", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -482,7 +486,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("closes on close button click", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -500,7 +504,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("closes on Escape key", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -517,7 +521,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("returns to file browser after closing", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -538,7 +542,7 @@ describe("Browser - PDF Viewer Integration", () => {
     });
 
     it("keeps the PDF viewer open when Escape closes the shortcuts help", async () => {
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -586,7 +590,7 @@ describe("Browser - PDF Viewer Integration", () => {
 
       mockedApi.getPdfBlob.mockRejectedValue(new Error("Network error"));
 
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -622,7 +626,7 @@ describe("Browser - PDF Viewer Integration", () => {
         response: { data: { detail: "Access denied" }, status: 403 },
       });
 
-      renderBrowser();
+      await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
       fireEvent.click(pdfFile);
@@ -664,7 +668,7 @@ describe("Browser - PDF Viewer Integration", () => {
 
       const revokeObjectURLSpy = vi.spyOn(URL, "revokeObjectURL");
 
-      renderBrowser();
+      await renderBrowser();
 
       // Open first PDF
       const pdf1 = await getFileButton("document1.pdf");
