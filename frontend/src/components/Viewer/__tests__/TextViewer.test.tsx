@@ -1,4 +1,4 @@
-import { act, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, type ReactNode, useEffect, useEffectEvent, useImperativeHandle, useRef, useState } from "react";
 import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from "react-router-dom";
@@ -7,7 +7,7 @@ import { useRemoveLocationFragment } from "../../../hooks/useRemoveLocationFragm
 import { type ViewerLeaveGuard, WorkspaceNavigationGuard } from "../../../hooks/useRoutedViewerEditing";
 import i18n from "../../../i18n";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
-import apiService from "../../../services/api";
+import apiService, { ExpiredEditLockError } from "../../../services/api";
 import { authSession } from "../../../services/authSession";
 import { loadDraft, snapshotRegisteredDrafts } from "../../../services/draftRecovery";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
@@ -189,32 +189,57 @@ function renderRoutedViewer(edit = false, fragment = false) {
   return router;
 }
 
-function renderViewer({ onClose = vi.fn() }: { onClose?: () => void } = {}) {
+function renderViewer({ onClose = vi.fn(), isReadOnly = false }: { onClose?: () => void; isReadOnly?: boolean } = {}) {
   return render(
     <SambeeThemeProvider>
-      <TextViewer connectionId="conn1" path="/docs/readme.txt" onClose={onClose} />
+      <TextViewer connectionId="conn1" path="/docs/readme.txt" onClose={onClose} isReadOnly={isReadOnly} />
     </SambeeThemeProvider>
   );
 }
 
 async function enterEditMode(): Promise<HTMLElement> {
-  const editButton = await screen.findByRole("button", { name: /^edit$/i });
-
-  await waitFor(() => {
-    expect(editButton).toBeEnabled();
-  });
-
-  fireEvent.click(editButton);
-
   await waitFor(() => {
     expect(apiService.acquireEditLock).toHaveBeenCalledWith("conn1", "/docs/readme.txt");
   });
-
-  return screen.getByRole("textbox", { name: "Text editor" });
+  const editor = await screen.findByRole("textbox", { name: "Text editor" });
+  await waitFor(() => expect(editor).not.toHaveAttribute("readonly"));
+  return editor;
 }
 
 describe("TextViewer", () => {
-  afterEach(() => {
+  it("opens directly for editing and closes to the file list in one step", async () => {
+    const onClose = vi.fn();
+    renderViewer({ onClose });
+    await enterEditMode();
+    expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a legacy view route directly for editing without changing history", async () => {
+    const router = renderRoutedViewer();
+    await enterEditMode();
+    expect(router.state.location.search).not.toContain("mode=edit");
+    await act(() => router.navigate(-1));
+    expect(await screen.findByText("Files")).toBeInTheDocument();
+  });
+
+  it("saves and completes a dirty Close directly", async () => {
+    const onClose = vi.fn();
+    renderViewer({ onClose });
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "direct edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1);
+  });
+
+  afterEach(async () => {
+    cleanup();
+    await act(async () => {});
     sessionStorage.clear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -222,6 +247,7 @@ describe("TextViewer", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
     useTextEditorMaxFileSizeBytesPreferenceMock.mockReturnValue([52_428_800, vi.fn()]);
     vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("hello world");
@@ -339,10 +365,10 @@ describe("TextViewer", () => {
     expect(share).toHaveBeenCalledTimes(1);
   });
 
-  it("toggles word wrap with Alt+Z while viewing read-only text", async () => {
+  it("toggles word wrap with Alt+Z after automatic activation", async () => {
     renderViewer();
 
-    const editor = await screen.findByRole("textbox", { name: "Text editor" });
+    const editor = await enterEditMode();
     editor.focus();
     fireEvent.keyDown(editor, { altKey: true, key: "z" });
 
@@ -390,13 +416,14 @@ describe("TextViewer", () => {
     renderViewer();
 
     await screen.findByRole("textbox", { name: "Text editor" });
-    expect(apiService.getFileContent).toHaveBeenCalledTimes(1);
+    await enterEditMode();
+    expect(apiService.getFileContent).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       await i18n.changeLanguage(originalLanguage === "de" ? "en" : "de");
     });
 
-    expect(apiService.getFileContent).toHaveBeenCalledTimes(1);
+    expect(apiService.getFileContent).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       await i18n.changeLanguage(originalLanguage);
@@ -434,8 +461,7 @@ describe("TextViewer", () => {
     } else {
       expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
     }
-    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly"));
-    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue("saved revision");
+    await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
   });
 
   it("closes exactly once on Escape from the viewer dialog", async () => {
@@ -465,7 +491,7 @@ describe("TextViewer", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
-  it.each(["Close", "Escape"])("returns to the viewer on %s and closes it on the next Close", async (action) => {
+  it.each(["Close", "Escape"])("closes the editor directly on %s", async (action) => {
     const onClose = vi.fn();
     renderViewer({ onClose });
 
@@ -477,18 +503,11 @@ describe("TextViewer", () => {
       fireEvent.click(screen.getByRole("button", { name: "Close" }));
     }
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled());
-    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
-    expect(screen.queryByRole("button", { name: "Discard" })).not.toBeInTheDocument();
-    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
-    expect(onClose).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["Save", "Discard"])("returns to the text viewer after Close and %s", async (choice) => {
+  it.each(["Save", "Discard"])("closes directly after Close and %s", async (choice) => {
     const onClose = vi.fn();
     renderViewer({ onClose });
 
@@ -498,14 +517,9 @@ describe("TextViewer", () => {
     const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(dialog).getByRole("button", { name: choice }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /^edit$/i })).toBeEnabled());
-    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue(choice === "Save" ? "updated text" : "hello world");
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(choice === "Save" ? 1 : 0);
     expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
-    expect(onClose).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it.each(["Cancel", "failed Save"])("keeps text editing after Close and %s", async (choice) => {
@@ -534,11 +548,10 @@ describe("TextViewer", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it.each(["Back", "Close"])("leaves clean editing with %s and serializes rapid re-entry behind lock release", async (action) => {
+  it.each(["Back", "Close"])("leaves clean editing with %s after releasing the lock", async (action) => {
     const user = userEvent.setup();
     const router = renderRoutedViewer();
     await enterEditMode();
-    await waitFor(() => expect(router.state.location.search).toContain("mode=edit"));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
     let finishRelease!: () => void;
     vi.mocked(apiService.releaseEditLock).mockImplementationOnce(
@@ -554,22 +567,16 @@ describe("TextViewer", () => {
     try {
       if (action === "Back") await act(() => router.navigate(-1));
       else await user.click(screen.getByRole("button", { name: "Close" }));
-      await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
       await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
-      expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");
-
-      await act(() => router.navigate(action === "Back" ? 1 : -1));
-      expect(router.state.location.search).toContain("mode=edit");
+      expect(router.state.location.pathname).toBe(action === "Back" ? "/browse" : "/viewer");
       expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1);
       await act(async () => {
         finishRelease();
       });
+      expect(await screen.findByText("Files")).toBeInTheDocument();
+      await act(() => router.navigate(action === "Back" ? 1 : -1));
+      await enterEditMode();
       await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
-      expect(blocked).not.toHaveBeenCalled();
-
-      await act(() => router.navigate(-1));
-      await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(2));
     } finally {
       unsubscribe();
     }
@@ -578,7 +585,6 @@ describe("TextViewer", () => {
   it("guards routed Back, preserves a cancelled draft, and continues Discard", async () => {
     const router = renderRoutedViewer();
     await enterEditMode();
-    await waitFor(() => expect(router.state.location.search).toContain("mode=edit"));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
     const routedEditor = screen.getByRole("textbox", { name: "Text editor" });
     fireEvent.change(routedEditor, { target: { value: "unsaved routed text" } });
@@ -586,12 +592,12 @@ describe("TextViewer", () => {
     let dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(routedEditor).toHaveValue("unsaved routed text");
-    expect(router.state.location.search).toContain("mode=edit");
+    expect(router.state.location.pathname).toBe("/viewer");
     expect(apiService.releaseEditLock).not.toHaveBeenCalled();
     await act(() => router.navigate(-1));
     dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
-    await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
+    await screen.findByText("Files");
     await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
     await act(() => router.navigate(1));
     await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(2));
@@ -609,23 +615,20 @@ describe("TextViewer", () => {
           fail = reject;
         })
     );
-    const router = renderRoutedViewer();
+    const router = renderRoutedViewer(true);
     await screen.findByRole("textbox", { name: "Text editor" });
-    await act(() => router.navigate("/viewer?file=smb%2Fdemo%2Fdocs%2Freadme.txt&viewer=text&mode=edit"));
     await waitFor(() => expect(acquire).toHaveBeenCalledTimes(1));
     await act(() => router.navigate(-1));
-    await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
-    await act(() => router.navigate(1));
-    expect(router.state.location.search).toContain("mode=edit");
-    expect(acquire).toHaveBeenCalledTimes(1);
+    await screen.findByText("Files");
     await act(async () => {
       if (result === "acquired") finish(lock);
       else fail(new Error("Cancelled acquisition failed"));
     });
+    await act(() => router.navigate(1));
     await waitFor(() => expect(acquire).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
     expect(apiService.releaseEditLock).toHaveBeenCalledTimes(result === "acquired" ? 1 : 0);
-    expect(router.state.location.search).toContain("mode=edit");
+    expect(router.state.location.pathname).toBe("/viewer");
   });
 
   it("acquires a fresh edit session for an editor bookmark", async () => {
@@ -640,7 +643,6 @@ describe("TextViewer", () => {
     await waitFor(() => expect(router.state.location.hash).toBe("#keep=1"));
     expect(router.state.location.state).toEqual({ returnTo: "/browse" });
     await enterEditMode();
-    await waitFor(() => expect(router.state.location.search).toContain("mode=edit"));
     const editor = screen.getByRole("textbox", { name: "Text editor" });
     fireEvent.change(editor, { target: { value: "updated routed text" } });
     const unload = new Event("beforeunload", { cancelable: true });
@@ -661,19 +663,18 @@ describe("TextViewer", () => {
     await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
     if (choice === "Save") {
       await waitFor(() => expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1));
-      expect(router.state.location.search).toContain("mode=edit");
+      expect(router.state.location.pathname).toBe("/viewer");
       await act(async () => {
         release();
       });
-      await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
+      await screen.findByText("Files");
       expect(apiService.releaseEditLock).toHaveBeenCalledTimes(1);
-      await act(() => router.navigate(-1));
       expect(router.state.location.pathname).toBe("/browse");
       await act(() => router.navigate(1));
       expect(router.state.location.hash).toBe("#keep=1");
     } else {
       await waitFor(() => expect(within(dialog).getByRole("button", { name: "Save" })).toBeEnabled());
-      expect(router.state.location.search).toContain("mode=edit");
+      expect(router.state.location.pathname).toBe("/viewer");
       expect(editor).toHaveValue("updated routed text");
       expect(apiService.releaseEditLock).not.toHaveBeenCalled();
     }
@@ -717,6 +718,65 @@ describe("TextViewer", () => {
         { mimeType: undefined }
       );
     });
+  });
+
+  it("keeps a read-only connection usable without attempting a lock", async () => {
+    renderViewer({ isReadOnly: true });
+    const editor = await screen.findByRole("textbox", { name: "Text editor" });
+    expect(editor).toHaveAttribute("readonly");
+    expect(apiService.acquireEditLock).not.toHaveBeenCalled();
+    editor.focus();
+    fireEvent.keyDown(editor, { altKey: true, key: "z" });
+    expect(mockSetWordWrapEnabled).toHaveBeenCalledWith(true);
+    fireEvent.keyDown(editor, { ctrlKey: true, key: "h" });
+    expect(screen.queryByRole("textbox", { name: "Replace" })).not.toBeInTheDocument();
+  });
+
+  it.each([409, 403, 503])("opens read-only after access failure %s without repeatedly acquiring", async (status) => {
+    vi.mocked(apiService.acquireEditLock).mockRejectedValueOnce({ response: { status } });
+    renderViewer();
+    const editor = await screen.findByRole("textbox", { name: "Text editor" });
+    await waitFor(() => expect(screen.getByText("Read only")).toBeInTheDocument());
+    expect(editor).toHaveAttribute("readonly");
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry editing" }) !== null).toBe(status !== 403);
+  });
+
+  it("retries a contended lock and uses a fresh baseline", async () => {
+    vi.mocked(apiService.acquireEditLock).mockRejectedValueOnce({ response: { status: 409 } });
+    renderViewer();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry editing" }));
+    vi.mocked(apiService.getFileContent).mockResolvedValue("new saved content");
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).not.toHaveAttribute("readonly"));
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue("new saved content");
+    expect(screen.queryByRole("status", { name: /unsaved changes/i })).not.toBeInTheDocument();
+  });
+
+  it.each(["Use saved file", "Keep my draft"])("requires a changed-baseline decision after lock loss: %s", async (choice) => {
+    renderViewer();
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "my unsaved draft" } });
+    vi.mocked(apiService.writeTextWithEditLock).mockRejectedValueOnce(new ExpiredEditLockError());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const retry = await screen.findByRole("button", { name: "Retry editing" });
+    expect(editor).toHaveAttribute("readonly");
+    expect(editor).toHaveValue("my unsaved draft");
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1);
+    vi.mocked(apiService.getFileContent).mockResolvedValue("another user's revision");
+    fireEvent.click(retry);
+    const dialog = await screen.findByRole("dialog", { name: "File changed" });
+    expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole("button", { name: choice }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "File changed" })).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue(choice === "Keep my draft" ? "my unsaved draft" : "another user's revision");
+    expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not acquire for a retained transitioning presentation", async () => {
+    render(<SambeeThemeProvider><TextViewer connectionId="conn1" path="/docs/readme.txt" onClose={vi.fn()} isTransitioning /></SambeeThemeProvider>);
+    await screen.findByRole("textbox", { name: "Text editor" });
+    expect(apiService.acquireEditLock).not.toHaveBeenCalled();
   });
 
   it.each(["pagehide", "registered"])("captures current editor text before React publication on %s", async (trigger) => {
@@ -803,7 +863,7 @@ describe("TextViewer", () => {
     renderViewer();
 
     await userEvent.click(await screen.findByRole("button", { name: "Resume editing" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByRole("alert").length).toBeGreaterThan(0));
     expect(screen.getByRole("heading", { name: "Unsaved local draft available" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resume editing" })).toBeEnabled();
   });
@@ -822,7 +882,7 @@ describe("TextViewer", () => {
     expect(screen.getByText("Replace")).toBeInTheDocument();
     expect(screen.queryByText("viewer.shortcuts.replace")).not.toBeInTheDocument();
     expect(screen.queryByText("Edit")).not.toBeInTheDocument();
-    expect(screen.queryByText("Toggle fullscreen")).not.toBeInTheDocument();
+    expect(screen.getByText("Toggle fullscreen")).toBeInTheDocument();
 
     await user.keyboard("{Escape}");
     await waitFor(() => {
@@ -843,7 +903,8 @@ describe("TextViewer", () => {
     renderViewer();
 
     expect(await screen.findByText(/exceeds your Text Editor limit/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^edit$/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(apiService.acquireEditLock).not.toHaveBeenCalled();
   });
 
   it("resets field history navigation when reopening find and replace", async () => {

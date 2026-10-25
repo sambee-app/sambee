@@ -97,8 +97,16 @@ export interface WriteFileRequest {
 
 export type TargetResolutionPolicy = "ask" | "skip" | "replace" | "replace_older";
 
+export class ExpiredEditLockError extends Error {
+  constructor() {
+    super("Lock not found or expired");
+    this.name = "ExpiredEditLockError";
+  }
+}
+
 export interface StorageTextWriteOptions {
   mimeType?: string;
+  reacquireExpiredLock?: boolean;
 }
 
 export interface StorageEditSession {
@@ -111,6 +119,8 @@ export interface StorageEditSession {
 export type StorageEditStartResult =
   | { kind: "acquired"; session: StorageEditSession }
   | { kind: "read-only" }
+  | { kind: "locked" }
+  | { kind: "permission-denied" }
   | { kind: "unsupported" }
   | { kind: "unavailable" };
 

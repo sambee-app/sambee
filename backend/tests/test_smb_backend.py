@@ -42,6 +42,17 @@ from app.storage.smb import SMB_FILETIME_TICKS_PER_SECOND, SMBBackend
 _LIVE_SMB_ENVIRONMENT_VARIABLES = ("TEST_SMB_HOST", "TEST_SMB_SHARE", "TEST_SMB_USERNAME", "TEST_SMB_PASSWORD")
 _LIVE_SMB_ENABLED = all(os.environ.get(name) for name in _LIVE_SMB_ENVIRONMENT_VARIABLES)
 
+
+@pytest.mark.asyncio
+async def test_write_access_probe_does_not_truncate_or_write() -> None:
+    backend = SMBBackend(host="server", share_name="share", username="user", password="pass")
+    with patch("app.storage.smb.smbclient.open_file") as open_file:
+        await backend.check_write_access("docs/readme.txt")
+    assert open_file.call_args.kwargs["mode"] == "r+b"
+    assert open_file.call_args.kwargs["share_access"] == "rwd"
+    open_file.return_value.__enter__.return_value.write.assert_not_called()
+
+
 SMB_AUTH_KWARGS = {
     "username": "user",
     "password": "pass",

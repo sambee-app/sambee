@@ -1157,6 +1157,7 @@ def _validate_browser_lock_control(lock: EditLock, body: BrowserEditLockControlR
 async def acquire_browser_edit_lock(
     connection_id: uuid.UUID,
     path: str = Query(..., description="Path to the file to lock"),
+    check_write_access: bool = Query(False, description="Verify existing-file write permission before acquiring a lock"),
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
 ) -> BrowserEditLockResponse:
@@ -1166,6 +1167,29 @@ async def acquire_browser_edit_lock(
 
     connection = _get_connection_or_404(session, current_user, connection_id)
     require_connection_write_access(current_user, connection, action="acquire_browser_lock", path=path)
+
+    if check_write_access:
+        backend = build_smb_backend(connection, backend_factory=SMBBackend)
+        try:
+            await backend.connect()
+            await backend.check_write_access(path)
+        except PermissionError as error:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have write access to this file") from error
+        except FileNotFoundError as error:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File no longer exists") from error
+        except TimeoutError as error:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Write access check timed out; retry editing"
+            ) from error
+        except Exception as error:
+            logger.exception("Failed to check file write access: connection_id=%s, path=%s", connection_id, path)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to verify file write access; retry editing"
+            ) from error
+        finally:
+            await disconnect_backend_safely(
+                backend, logger=logger, context=f"write access check: connection_id={connection_id}, path='{path}'"
+            )
 
     remove_expired_file_locks(session, connection_id, path)
     existing = _get_active_lock(connection_id, path, session)

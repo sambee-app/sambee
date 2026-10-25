@@ -10,7 +10,7 @@ In the Markdown viewer's toolbar, click the edit icon or press <kbd>E</kbd> to s
 
 ## Code Colors
 
-Code blocks use the same language highlighting as the text viewer and editor. A fence's language label selects its grammar; unknown or unlabelled blocks remain plain text. Preview highlighting loads in the background and waits while you're selecting preview text. Code text, whitespace, copying, and search remain unchanged.
+Code blocks use the same language highlighting as the text editor. A fence's language label selects its grammar; unknown or unlabelled blocks remain plain text. Preview highlighting loads in the background and waits while you're selecting preview text. Code text, whitespace, copying, and search remain unchanged.
 
 See [Text File Support and Syntax Highlighting](../../reference/text-file-support-and-syntax-highlighting/) for supported languages, code block labels, and a fenced-code example.
 
@@ -38,7 +38,7 @@ If Sambee must send you through OIDC sign-in while you are editing, it saves an 
 
 Click the X icon or press <kbd>Esc</kbd> to leave the Markdown editor and return to the viewer. If there are unsaved changes, choose **Save** to save them and return to the viewer, **Discard** to return without saving, or **Cancel** to keep editing. If saving fails, the editor stays open with your changes.
 
-From the viewer, click the X icon again to return to the file list. The text editor uses the same two-step close sequence.
+From the viewer, click the X icon again to return to the file list. This two-step sequence applies to Markdown only. The text editor opens directly and closes straight to the file list, with the same Save, Discard, and Cancel choices for unsaved changes.
 
 ## Print Or Save As PDF
 

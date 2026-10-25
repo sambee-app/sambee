@@ -218,7 +218,12 @@ export function parseViewerRoute(searchParams: URLSearchParams, hasRightPane: bo
       return;
     }
   }
-  return { file: target, viewerId: viewerId as ViewerId, paneId: pane === "2" ? "right" : "left", mode: mode as ViewerRoute["mode"] };
+  return {
+    file: target,
+    viewerId: viewerId as ViewerId,
+    paneId: pane === "2" ? "right" : "left",
+    mode: viewerId === "text" ? "view" : (mode as ViewerRoute["mode"]),
+  };
 }
 
 export const serializeBrowseRoute = ({ left, right, activePaneId, viewer, settings, extraSearch }: BrowseRouteState): string => {
@@ -242,7 +247,7 @@ export const serializeBrowseRoute = ({ left, right, activePaneId, viewer, settin
   if (viewer) {
     queryParams.set("file", `${viewer.file.kind}/${encodeURIComponent(viewer.file.targetId)}/${encodePath(viewer.file.path)}`);
     queryParams.set("viewer", viewer.viewerId);
-    if (viewer.mode === "edit") queryParams.set("mode", "edit");
+    if (viewer.mode === "edit" && viewer.viewerId !== "text") queryParams.set("mode", "edit");
     if (viewer.paneId === "right") queryParams.set("pane", "2");
     const virtual = viewer.file.virtualLocation;
     if (virtual) queryParams.set("virtual", JSON.stringify([virtual.providerId, virtual.sourcePath, virtual.virtualPath]));

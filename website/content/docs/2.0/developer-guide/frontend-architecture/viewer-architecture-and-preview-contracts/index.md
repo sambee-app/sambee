@@ -20,7 +20,7 @@ Three rules matter most:
 |---|---|
 | `backend/app/utils/file_type_registry.py` | backend source of truth for extensions, MIME types, categories, and whether an image requires conversion |
 | `frontend/src/utils/fileLanguages.ts` | shared CodeMirror language catalogue, filename matching, and additional plain-text extensions used by highlighting and default text opening |
-| `frontend/src/utils/FileTypeRegistry.ts` | dedicated viewer mappings and MIME/presentation metadata; derives text-viewer support from shared filename recognition |
+| `frontend/src/utils/FileTypeRegistry.ts` | dedicated viewer mappings and MIME/presentation metadata; derives text-editor support from shared filename recognition |
 | `frontend/src/components/Viewer/` | viewer components and shared viewer UI |
 | `backend/app/services/image_converter.py` | server-side conversion for non-browser-native image formats |
 
@@ -36,6 +36,18 @@ At a high level, the preview pipeline works like this:
 Dedicated formats such as images require backend and frontend agreement. Text-file recognition instead uses `fileLanguages.ts`: both highlighting and default text opening consume the same CodeMirror catalogue. Language metadata doesn't load a grammar or import the highlighting core into the file browser.
 
 Explicit image, PDF, and Markdown viewers take precedence over extension-based text recognition. A recognized, non-generic MIME type with a viewer mapping takes precedence over the filename; empty MIME types, `application/octet-stream`, and `text/plain` fall back to filename recognition. Saved viewer preferences override the default selection. Unknown files still use the viewer picker unless a MIME mapping or saved preference selects a viewer.
+
+## Unified Text Editor
+
+`TextEditor.tsx` owns the text destination and reuses `TextCodeEditor` for writable and read-only content. There isn't a separate text-viewer component or an Edit action. The public `viewer=text` identifier, viewer preferences, settings, and recovery-draft keys remain compatible. Text routes accept absent, `view`, and `edit` modes as the same destination; canonical URLs omit `mode` without adding a history entry or dropping fragments. Markdown still uses its existing preview/edit route modes.
+
+Opening an eligible text file automatically calls `beginViewerTextEdit`. The editor stays read-only until acquisition succeeds and a fresh content read establishes the baseline. Archive members, read-only connections, and oversized files don't acquire sessions. Storage boundaries distinguish contention, denied permissions, unsupported editing, and temporary unavailability. SMB's acquisition request opts into a non-mutating per-file write probe; Companion also checks an existing file with read/write open and no creation or truncation.
+
+Acquisition uses an activation generation to release obsolete results, and a pending release completes before another acquisition starts. Confirmed lock loss or revoked access freezes mutations and retains the draft; a transient heartbeat failure shows a warning. Retry is explicit, not an acquisition loop. A fresh baseline that differs from a retained draft's original baseline requires a conflict decision before editing resumes. Choosing the draft doesn't save it.
+
+Text saves pass `reacquireExpiredLock: false`; they must not silently reacquire an expired lock and overwrite a changed file. The existing default remains for Markdown. Save acknowledges only the captured revision, preserving newer edits as dirty. The routed leave guard protects dirty navigation and pending operations. Text Close goes directly to the file list after release, and Discard commits a clean state before navigation so the guard doesn't prompt twice.
+
+Read-only disables typing, Save, and Replace, not Find, selection, copying, wrapping, download, or sharing. Recovery is resolved before automatic activation. Keep regressions for late acquisition, Strict Mode, read-only and conflict states, history navigation, and Markdown's separate lifecycle when changing this shared path.
 
 ## Browser-Native Versus Server-Converted Images
 
@@ -513,7 +525,7 @@ Frontend file-type definitions control how the browser app presents the file.
 - choose an icon that matches the product language for that file category
 - choose a color that distinguishes the format without inventing a new palette on every addition
 
-For image formats, reusing `ImageViewer` is usually enough. For non-image formats, you may need a dedicated viewer such as `PdfViewer`, `VideoViewer`, `AudioViewer`, or `TextViewer`.
+For image formats, reusing `ImageViewer` is usually enough. For non-image formats, you may need a dedicated viewer such as `PdfViewer`, `VideoViewer`, `AudioViewer`, or the unified `TextEditor`.
 
 ### Non-Image File Types
 

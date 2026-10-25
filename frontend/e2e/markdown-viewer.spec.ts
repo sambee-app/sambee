@@ -70,6 +70,7 @@ interface MockMarkdownViewerApiOptions {
   themeId?: () => string;
   wordWrapEnabled?: boolean;
   userRole?: "user" | "admin";
+  accessMode?: "read_write" | "read_only";
   includeDirectory?: boolean;
   includeZip?: boolean;
   existingFilePaths?: readonly string[];
@@ -98,7 +99,7 @@ async function mockMarkdownViewerApi(page: Page, options: MockMarkdownViewerApiO
   });
 }
 
-function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH, additionalFilePaths = [], themeId = () => "sambee-light", wordWrapEnabled, userRole = "admin", includeDirectory, includeZip, existingFilePaths, onUploadBody }: MockMarkdownViewerApiOptions): (route: ViewerApiRoute) => Promise<void> {
+function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH, additionalFilePaths = [], themeId = () => "sambee-light", wordWrapEnabled, userRole = "admin", accessMode = "read_write", includeDirectory, includeZip, existingFilePaths, onUploadBody }: MockMarkdownViewerApiOptions): (route: ViewerApiRoute) => Promise<void> {
   let currentMarkdown = initialMarkdown;
 
   return async (route) => {
@@ -214,7 +215,7 @@ function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH,
           username: "demo\\tester",
           path_prefix: "\\Demo",
           scope: "private",
-          access_mode: "read_write",
+          access_mode: accessMode,
           can_manage: true,
           created_at: "2026-02-13T20:22:41.779354",
           updated_at: "2026-04-12T10:15:47.930127",
@@ -504,6 +505,110 @@ test.describe("production bundle loading", () => {
   }
 });
 
+test.describe("production unified text editor", () => {
+  test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
+  const filename = "notes.txt";
+  for (const width of [1543, 390]) {
+    test(`direct editing and one-step dirty Close at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await serveProductionAssets(page);
+      let writes = 0;
+      await mockMarkdownViewerApi(page, { initialMarkdown: "saved text", filePath: filename, existingFilePaths: [filename], onUploadBody: () => { writes += 1; } });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      const file = page.getByRole("button").filter({ has: page.getByText(filename, { exact: true }) });
+      await file.click();
+      const editor = page.locator(".sambee-text-editor .cm-content");
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await expect(page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+      expect(new URL(page.url()).searchParams.has("mode")).toBe(false);
+      await editor.fill("unsaved text");
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      const dialog = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Unsaved changes", exact: true }) });
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(editor).toHaveText("unsaved text");
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Save", exact: true }).click();
+      await expect(editor).toHaveCount(0);
+      await expect(file).toBeVisible();
+      expect(writes).toBe(1);
+      await expect(page).toHaveURL("/browse/smb/demo");
+      await file.click();
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await editor.fill("discard this");
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await dialog.getByRole("button", { name: "Discard", exact: true }).click();
+      await expect(editor).toHaveCount(0);
+      expect(writes).toBe(1);
+    });
+
+    test(`dirty Back and legacy bookmark at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await serveProductionAssets(page);
+      await mockMarkdownViewerApi(page, { initialMarkdown: "saved text", filePath: filename, existingFilePaths: [filename] });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      await page.getByRole("button").filter({ has: page.getByText(filename, { exact: true }) }).click();
+      const editor = page.locator(".sambee-text-editor .cm-content");
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await editor.fill("dirty Back draft");
+      await page.goBack();
+      const dialog = page.getByRole("dialog").filter({ has: page.getByRole("heading", { name: "Unsaved changes", exact: true }) });
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(editor).toHaveText("dirty Back draft");
+      await page.goBack();
+      await dialog.getByRole("button", { name: "Discard", exact: true }).click();
+      await expect(editor).toHaveCount(0);
+      await page.goto(`/browse/smb/demo?file=smb%2Fdemo%2F${filename}&viewer=text&mode=view#keep=1`);
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      await expect.poll(() => new URL(page.url()).searchParams.has("mode")).toBe(false);
+      expect(new URL(page.url()).hash).toBe("#keep=1");
+    });
+
+    test(`read-only contention and explicit retry at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await serveProductionAssets(page);
+      await mockMarkdownViewerApi(page, { initialMarkdown: "saved text", filePath: filename });
+      let attempts = 0;
+      await page.route(`**/api/browse/${DEMO_CONNECTION_ID}/lock?**`, async route => {
+        if (route.request().method() === "POST" && attempts++ === 0) await fulfillJson(route, { detail: "File is locked" }, 409);
+        else await route.fallback();
+      });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      await page.getByRole("button").filter({ has: page.getByText(filename, { exact: true }) }).click();
+      const editor = page.locator(".sambee-text-editor .cm-content");
+      await expect(page.getByRole("dialog").getByText("Read only", { exact: true })).toBeVisible();
+      await expect(editor).toHaveAttribute("contenteditable", "false");
+      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await expect(page.getByRole("textbox", { name: "Find", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Retry editing", exact: true }).click();
+      await expect(editor).toHaveAttribute("contenteditable", "true");
+      expect(attempts).toBe(2);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(editor).toHaveCount(0);
+    });
+
+    test(`read-only connection never requests a lock at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await serveProductionAssets(page);
+      await mockMarkdownViewerApi(page, { initialMarkdown: "saved text", filePath: filename, accessMode: "read_only" });
+      const lockRequests: string[] = [];
+      page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/lock")) lockRequests.push(request.url()); });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      await page.getByRole("button").filter({ has: page.getByText(filename, { exact: true }) }).click();
+      await expect(page.locator(".sambee-text-editor .cm-content")).toHaveAttribute("contenteditable", "false");
+      await expect(page.getByRole("dialog").getByText("Read only", { exact: true })).toBeVisible();
+      expect(lockRequests).toEqual([]);
+      await page.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(page.locator(".sambee-text-editor")).toHaveCount(0);
+    });
+  }
+});
+
 test.describe("production shared syntax correctness", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires the production build and approved demo route");
   const fixtures = [
@@ -544,10 +649,9 @@ test.describe("production shared syntax correctness", () => {
           await page.getByRole("button", { name: "Later", exact: true }).click();
           await page.getByRole("button").filter({ has: page.getByText(fixture.filename, { exact: true }) }).click();
           const editor = page.locator(".sambee-text-editor");
-          await expect(editor.locator(".cm-content")).toHaveAttribute("contenteditable", "false");
+          await expect(editor.locator(".cm-content")).toHaveAttribute("contenteditable", "true");
           await expect.poll(async () => (await editorTokens(editor, fixture.code)).length).toBeGreaterThan(0);
           native = await editorTokens(editor, fixture.code);
-          await page.getByRole("button", { name: "Edit", exact: true }).click();
           await expect(editor.locator(".cm-content")).toHaveAttribute("contenteditable", "true");
           await expect.poll(() => editorTokens(editor, fixture.code)).toEqual(native);
           await page.getByRole("button", { name: "Close", exact: true }).click();
@@ -775,6 +879,7 @@ test.describe("production shared syntax theme identity", () => {
       await mockMarkdownViewerApi(page, {
         initialMarkdown: kind === "text" ? code : `\`\`\`js\n${code}\n\`\`\``, filePath,
         existingFilePaths: [filePath], themeId: () => themeId, wordWrapEnabled: false,
+        accessMode: kind === "text" && !editing ? "read_only" : "read_write",
       });
       await installThemeRoutes();
       await page.addLocatorHandler(page.getByRole("dialog", { name: "Update available" }), async (dialog) => {
@@ -783,7 +888,8 @@ test.describe("production shared syntax theme identity", () => {
       await page.goto("/browse/smb/demo");
       const file = page.getByRole("button", { name: filePath, exact: true }).or(page.getByRole("button", { name: `File: ${filePath}`, exact: true }));
       await file.click();
-      if (editing) await page.getByRole("button", { name: "Edit", exact: true }).click();
+      if (editing && kind === "markdown") await page.getByRole("button", { name: "Edit", exact: true }).click();
+      if (kind === "text") await expect(page.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("contenteditable", String(editing));
 
       const checkThemes = async (surface: Locator, preview: boolean) => {
         const hasSyntax = () => surface.evaluate((element, isPreview) => isPreview
@@ -965,7 +1071,7 @@ test.describe("production shared syntax theme identity", () => {
       const surface = preview ? page.locator('[data-markdown-search-root="true"]') : page.getByRole("textbox", { name: kind === "text" ? "Text editor" : "Markdown editor" });
       await checkThemes(surface, preview);
       await page.getByRole("button", { name: "Close", exact: true }).click();
-      if (editing) {
+      if (editing && kind === "markdown") {
         await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
         await page.getByRole("button", { name: "Close", exact: true }).click();
       }

@@ -5517,6 +5517,24 @@ fn lock_response(lock: super::edit_locks::LocalEditLock) -> EditLockResponse {
     }
 }
 
+async fn check_editor_write_access(path: &FsPath) -> Result<(), ApiError> {
+    if !tokio::fs::metadata(path)
+        .await
+        .map_err(|error| map_io_error(error, path))?
+        .is_file()
+    {
+        return Err(ApiError::BadRequest("Edit locks require an existing regular file".to_string()));
+    }
+    let probe = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .await
+        .map_err(|error| map_io_error(error, path))?;
+    drop(probe);
+    Ok(())
+}
+
 /// `POST /api/browse/{drive}/lock` — acquire an exclusive local editor lease.
 pub async fn browse_acquire_edit_lock(
     State(state): State<Arc<AppState>>,
@@ -5527,13 +5545,7 @@ pub async fn browse_acquire_edit_lock(
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
     let path = normalize_drive_relative_path(&drive, &query.path)?;
     let full_path = resolve_safe_path(&base_path, &drive, &query.path)?;
-    if !tokio::fs::metadata(&full_path)
-        .await
-        .map_err(|error| map_io_error(error, &full_path))?
-        .is_file()
-    {
-        return Err(ApiError::BadRequest("Edit locks require an existing regular file".to_string()));
-    }
+    check_editor_write_access(&full_path).await?;
     let lock = state.edit_locks.acquire(&drive, &path, extract_origin(&headers)?).await?;
     Ok(Json(lock_response(lock)))
 }
@@ -6727,6 +6739,45 @@ async fn rename_noreplace(_source: &FsPath, _destination: &FsPath) -> Result<(),
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn editor_access_probe_preserves_existing_content() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("notes.txt");
+        tokio::fs::write(&path, b"existing content").await.unwrap();
+        super::check_editor_write_access(&path).await.expect("writable file should pass");
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), b"existing content");
+    }
+
+    #[tokio::test]
+    async fn editor_access_probe_does_not_create_missing_files() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("missing.txt");
+        assert!(matches!(
+            super::check_editor_write_access(&path).await,
+            Err(crate::server::errors::ApiError::NotFound(_))
+        ));
+        assert!(!path.exists());
+        assert!(matches!(
+            super::check_editor_write_access(directory.path()).await,
+            Err(crate::server::errors::ApiError::BadRequest(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn editor_access_probe_rejects_read_only_files() {
+        let directory = tempfile::tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("notes.txt");
+        tokio::fs::write(&path, b"read-only content").await.unwrap();
+        let original_permissions = tokio::fs::metadata(&path).await.unwrap().permissions();
+        let mut read_only_permissions = original_permissions.clone();
+        read_only_permissions.set_readonly(true);
+        tokio::fs::set_permissions(&path, read_only_permissions).await.unwrap();
+        let result = super::check_editor_write_access(&path).await;
+        tokio::fs::set_permissions(&path, original_permissions).await.unwrap();
+        assert!(matches!(result, Err(crate::server::errors::ApiError::Forbidden(_))));
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), b"read-only content");
+    }
+
     #[tokio::test]
     async fn local_rename_changes_only_case_for_files_and_directories() {
         let directory = tempfile::tempdir().expect("temporary drive should be created");

@@ -1913,6 +1913,25 @@ class TestGetFileInfo:
 class TestBrowserEditLocks:
     """Test browser-authenticated edit lock lifecycle endpoints."""
 
+    @pytest.mark.parametrize("denied", [False, True])
+    def test_acquire_checks_file_write_access_before_creating_lock(
+        self, client: TestClient, auth_headers_user: dict, test_connection: Connection, session: Session, denied: bool
+    ) -> None:
+        backend = AsyncMock()
+        if denied:
+            backend.check_write_access.side_effect = PermissionError("read-only file")
+        with patch("app.api.browser.SMBBackend", return_value=backend):
+            response = client.post(
+                f"/api/browse/{test_connection.id}/lock",
+                headers=auth_headers_user,
+                params={"path": "/docs/readme.txt", "check_write_access": "true"},
+            )
+        assert response.status_code == (403 if denied else 200)
+        backend.check_write_access.assert_awaited_once_with("/docs/readme.txt")
+        backend.disconnect.assert_awaited_once()
+        locks = session.exec(select(EditLock).where(EditLock.connection_id == test_connection.id)).all()
+        assert len(locks) == (0 if denied else 1)
+
     def test_acquire_browser_edit_lock(
         self,
         client: TestClient,

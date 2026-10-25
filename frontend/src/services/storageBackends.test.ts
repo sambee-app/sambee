@@ -115,7 +115,11 @@ describe("edit-lock reload recovery", () => {
       heldLocks.clear();
       navigationType = "reload";
       vi.mocked(api.heartbeatEditLock).mockRejectedValueOnce(error);
-      await expect(begin()).rejects.toEqual(error);
+      if ("response" in error) {
+        await expect(new SambeeSmbBackend().editing.begin(source as never)).resolves.toEqual({ kind: "permission-denied" });
+      } else {
+        await expect(begin()).rejects.toEqual(error);
+      }
       expect(api.acquireEditLock).toHaveBeenCalledTimes(1);
       expect(sessionStorage.length).toBe(1);
       const resumed = await begin();
@@ -126,7 +130,7 @@ describe("edit-lock reload recovery", () => {
   it("rejects a second tab even if it copied credentials and then reloaded", async () => {
     const original = await begin();
     navigationType = "reload";
-    await expect(begin()).rejects.toThrow("another tab");
+    await expect(new SambeeSmbBackend().editing.begin(source as never)).resolves.toEqual({ kind: "locked" });
     expect(api.acquireEditLock).toHaveBeenCalledTimes(1);
     expect(api.heartbeatEditLock).not.toHaveBeenCalled();
     await original.release();
@@ -369,6 +373,34 @@ describe("SambeeSmbBackend archive reads", () => {
     );
     expect(api.heartbeatEditLock).toHaveBeenCalledWith("connection-1", "docs/readme.txt", expect.objectContaining({ lock_id: "lock-2" }));
     expect(api.releaseEditLock).toHaveBeenCalledWith("connection-1", "docs/readme.txt", expect.objectContaining({ lock_id: "lock-2" }));
+  });
+
+  it("does not silently reacquire an expired lock for unified text saves", async () => {
+    const target = { kind: "smb" as const, connectionId: "connection-1" };
+    const source = {
+      target,
+      path: "docs/readme.txt",
+      resolvedTarget: {
+        target,
+        connection: { access_mode: "read_write" },
+        capabilitySnapshot: { companion: { status: "unavailable" } },
+      },
+    };
+    vi.mocked(api.acquireEditLock).mockResolvedValueOnce({
+      lock_id: "lock-1",
+      lock_capability: "capability-1",
+      operation_id: "operation-1",
+      file_path: source.path,
+      locked_by: "alice",
+      locked_at: "2026-03-23T12:00:00Z",
+    });
+    const result = await new SambeeSmbBackend().editing.begin(source as never);
+    if (result.kind !== "acquired") throw new Error("Expected acquired session");
+    vi.mocked(api.writeTextWithEditLock).mockRejectedValueOnce(new ExpiredEditLockError());
+    await expect(result.session.writeText("draft", { reacquireExpiredLock: false })).rejects.toBeInstanceOf(ExpiredEditLockError);
+    expect(api.acquireEditLock).toHaveBeenCalledTimes(1);
+    expect(api.writeTextWithEditLock).toHaveBeenCalledTimes(1);
+    await result.session.release();
   });
 
   it("reacquires an expired Companion local-drive edit lock", async () => {

@@ -671,6 +671,25 @@ class SMBBackend(StorageBackend):
     #
     # get_file_info
     #
+    async def check_write_access(self, path: str) -> None:
+        """Verify existing-file write access without truncating or changing bytes."""
+        smb_path = self._build_smb_path(path)
+        pool = await get_connection_pool()
+        async with pool.get_connection(
+            host=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+            share_name=self.share_name,
+            connection_cache=self._connection_cache,
+        ):
+
+            def probe() -> None:
+                with smbclient.open_file(smb_path, mode="r+b", buffering=0, share_access="rwd", **self._smb_auth_kwargs()):
+                    pass
+
+            await self._run_blocking_smb_call("check_write_access", probe, SMB_FILE_OPEN_TIMEOUT_SECONDS, smb_path=smb_path)
+
     async def get_file_info(self, path: str) -> FileInfo:
         """Get information about a specific file or directory"""
 

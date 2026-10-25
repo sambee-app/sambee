@@ -15,6 +15,8 @@ import {
 } from "../../pages/FileBrowser/contentProviders";
 import { useTextEditorMaxFileSizeBytesPreference, useTextEditorWordWrapPreference } from "../../pages/FileBrowser/preferences";
 import { clearDraft, type DraftSnapshot, loadDraft, registerDraftSnapshot, saveDraft } from "../../services/draftRecovery";
+import { ExpiredEditLockError } from "../../services/api";
+import { isApiError } from "../../types";
 import { error as logError, info as logInfo } from "../../services/logger";
 import { useSambeeTheme } from "../../theme";
 import { getSearchHighlightColors } from "../../theme/commonStyles";
@@ -42,12 +44,14 @@ import { TextCodeEditor, type TextCodeEditorHandle, type TextCodeEditorSearchSta
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
 import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
 import { downloadViewerBlob } from "./viewerContent";
-import { createEditToolbarAction, createSaveToolbarAction } from "./viewerToolbarActions";
+import { createSaveToolbarAction } from "./viewerToolbarActions";
 
-type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit" | "navigate";
+type PendingUnsavedChangesAction = "cancel-edit" | "stay-edit" | "navigate" | "close";
 type TextSearchCloseReason = "escape" | "toggle";
+type TextReadOnlyReason = "read-only" | "locked" | "permission-denied" | "unsupported" | "unavailable" | "lost" | "conflict";
 
 const DRAFT_SNAPSHOT_DEBOUNCE_MS = 250;
+const EDIT_HEARTBEAT_INTERVAL_MS = 30_000;
 
 function withOpacity(color: string, opacity: number): string {
   const normalizedOpacity = Math.max(0, Math.min(1, opacity));
@@ -131,11 +135,13 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const [recoveryDraft, setRecoveryDraft] = useState<DraftSnapshot | null>(null);
   const [isResumingRecoveryDraft, setIsResumingRecoveryDraft] = useState(false);
   const [resumedRecoveryDraft, setResumedRecoveryDraft] = useState(false);
-  const [showViewerHelp, setShowViewerHelp] = useState(false);
   const [showEditorHelp, setShowEditorHelp] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAcquiring, setIsAcquiring] = useState(false);
+  const [readOnlyReason, setReadOnlyReason] = useState<TextReadOnlyReason | null>(null);
+  const [conflict, setConflict] = useState<{ serverContent: string; draftContent: string } | null>(null);
+  const acquisitionPending = useRef(false);
   const editActivation = useRef(0);
   const [editSession, setEditSession] = useState<ContentEditSession | null>(null);
   const [searchCaseSensitive, setSearchCaseSensitive] = useState(false);
@@ -166,6 +172,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const unsavedChangesCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const editBaselineContentRef = useRef("");
   const editSessionRef = useRef<ContentEditSession | null>(null);
+  const releasePromise = useRef<Promise<void> | null>(null);
   const isEditingRef = useRef(false);
   const translationRef = useRef(t);
   const fetchWithRetry = useApiRetry();
@@ -240,7 +247,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
 
   const unsavedChangesDialogOpen = pendingUnsavedChangesAction !== null;
   const hasUnsavedChanges = isEditing && draftContent !== editBaselineContentRef.current;
-  const editorShouldBeReadOnly = !isEditing || Boolean(isSaving && pendingUnsavedChangesAction);
+  const editorShouldBeReadOnly = !isEditing || isAcquiring || readOnlyReason !== null || Boolean(isSaving && pendingUnsavedChangesAction);
 
   const {
     beginBaselineSyncWindow,
@@ -283,6 +290,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
             retryDelay: 1000,
           }
         );
+        if (abortController.signal.aborted) return;
         setContent(data);
         if (!isEditingRef.current && !isReadOnly) {
           const recoveredDraft = loadDraft(connectionId, path, "text");
@@ -361,19 +369,21 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     };
   }, [snapshotDraft]);
 
-  const releaseEditSession = useCallback(async () => {
+  const releaseEditSession = useCallback((): Promise<void> => {
+    if (releasePromise.current) return releasePromise.current;
     const session = editSessionRef.current;
     if (!session) {
-      return;
+      return Promise.resolve();
     }
     editSessionRef.current = null;
-    try {
-      await session.release();
-    } catch (err) {
+    const pending = session.release().catch((err) => {
       logError("Failed to release text edit lock", { error: err, path, connectionId });
-    } finally {
-      setEditSession(null);
-    }
+    }).finally(() => {
+      setEditSession((current) => current === session ? null : current);
+      releasePromise.current = null;
+    });
+    releasePromise.current = pending;
+    return pending;
   }, [connectionId, path]);
 
   useEffect(() => {
@@ -381,16 +391,26 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       return;
     }
 
+    let active = true;
     const intervalId = window.setInterval(() => {
       void editSession.heartbeat().catch((err) => {
+        if (!active) return;
+        if (err instanceof ExpiredEditLockError || (isApiError(err) && err.response?.status === 403)) {
+          snapshotDraft();
+          setReadOnlyReason(err instanceof ExpiredEditLockError ? "lost" : "permission-denied");
+          void releaseEditSession();
+        } else {
+          setEditError(t("viewer.text.heartbeatFailed"));
+        }
         logError("Failed to refresh text edit lock", { error: err, path, connectionId });
       });
-    }, 30_000);
+    }, EDIT_HEARTBEAT_INTERVAL_MS);
 
     return () => {
+      active = false;
       window.clearInterval(intervalId);
     };
-  }, [connectionId, editSession, isEditing, path]);
+  }, [connectionId, editSession, isEditing, path, releaseEditSession, snapshotDraft, t]);
 
   useEffect(() => {
     return () => {
@@ -463,42 +483,71 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   }, [clearBaselineSyncWindow, clearPendingBaselineSync, onClose, releaseEditSession]);
 
   const handleEnterEditMode = useCallback(
-    async (initialDraft = content): Promise<boolean> => {
-      if (editSessionRef.current || isAcquiring) return Boolean(editSessionRef.current);
-      if (isReadOnly || loading || error || exceedsEditorLimit) {
+    async (initialDraft?: string): Promise<boolean> => {
+      if (editSessionRef.current || acquisitionPending.current) return Boolean(editSessionRef.current);
+      if (isReadOnly || loading || error || exceedsEditorLimit || isTransitioning) {
         return false;
       }
 
       setEditError(null);
       const activation = ++editActivation.current;
+      acquisitionPending.current = true;
       setIsAcquiring(true);
+      let acquiredSession: ContentEditSession | null = null;
 
       try {
+        await releasePromise.current;
+        if (activation !== editActivation.current) return false;
         const editResult = await beginViewerTextEdit(connectionId, path, contentProviders);
-        if (editResult.kind !== "acquired") throw new Error(`Editing is ${editResult.kind}`);
+        if (editResult.kind !== "acquired") {
+          if (activation === editActivation.current) {
+            setReadOnlyReason(editResult.kind);
+            if (initialDraft !== undefined) setEditError(t(`viewer.text.readOnlyReasons.${editResult.kind}`));
+          }
+          return false;
+        }
+        acquiredSession = editResult.session;
+        if (activation !== editActivation.current) {
+          await acquiredSession.release();
+          acquiredSession = null;
+          return false;
+        }
+        const freshContent = await readViewerContent(connectionId, path, { kind: "text" }, undefined, contentProviders).then((blob) => blob.text());
         if (activation !== editActivation.current) {
           await editResult.session.release();
+          acquiredSession = null;
           return false;
         }
         editSessionRef.current = editResult.session;
         setEditSession(editResult.session);
 
-        setDraftContent(initialDraft);
-        setEditBaselineContent(content);
+        const retainedDraft = initialDraft ?? (hasUnsavedChanges ? draftContent : undefined);
+        const previousBaseline = initialDraft === undefined ? editBaselineContentRef.current : (recoveryDraft?.baseline ?? content);
+        const needsConflictDecision = retainedDraft !== undefined && freshContent !== previousBaseline && retainedDraft !== freshContent;
+        setContent(freshContent);
+        setDraftContent(retainedDraft ?? freshContent);
+        setEditBaselineContent(needsConflictDecision ? previousBaseline : freshContent);
+        setReadOnlyReason(needsConflictDecision ? "conflict" : null);
+        setConflict(needsConflictDecision ? { serverContent: freshContent, draftContent: retainedDraft! } : null);
         clearPendingBaselineSync();
         beginBaselineSyncWindow();
         markEditSessionPristine();
         setSearchAutoNavigate(true);
         setEditorBoundaryKey((previousKey) => previousKey + 1);
         setIsEditing(true);
-        navigation?.onModeChange("edit");
         return true;
       } catch (err) {
+        if (acquiredSession && editSessionRef.current !== acquiredSession) {
+          await acquiredSession.release().catch((releaseError) => logError("Failed to release unused text edit lock", { error: releaseError, connectionId, path }));
+        }
+        if (activation !== editActivation.current) return false;
+        setReadOnlyReason(isApiError(err) && err.response?.status === 403 ? "permission-denied" : "unavailable");
         const message = getApiErrorMessage(err, t("viewer.text.lockFailedReason"), { includeOriginalMessage: true });
         setEditError(t("viewer.text.lockFailed", { message }));
         logError("Failed to enter text edit mode", { error: err, path, connectionId });
         return false;
       } finally {
+        acquisitionPending.current = false;
         setIsAcquiring(false);
       }
     },
@@ -508,25 +557,28 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       connectionId,
       contentProviders,
       content,
+      draftContent,
+      hasUnsavedChanges,
+      recoveryDraft,
       error,
       exceedsEditorLimit,
       isReadOnly,
-      isAcquiring,
+      isTransitioning,
       loading,
       markEditSessionPristine,
       path,
       setEditBaselineContent,
       t,
-      navigation,
     ]
   );
 
   const routedEditing = useRoutedViewerEditing({
+    automatic: true,
     navigation,
     isEditing,
     isSaving,
     isAcquiring,
-    loading,
+    loading: loading || Boolean(recoveryDraft) || isTransitioning,
     dirty: hasUnsavedChanges,
     enterEdit: handleEnterEditMode,
     exitEdit: exitEditMode,
@@ -564,23 +616,9 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     setRecoveryDraft(null);
   }, [connectionId, content, path, setEditBaselineContent]);
 
-  const handleCancelEdit = useCallback(async () => {
-    if (navigation) {
-      navigation.onModeChange("view");
-      return;
-    }
-    if (hasUnsavedChanges) {
-      preserveTextEditorSelection(editorRef);
-      setPendingUnsavedChangesAction("cancel-edit");
-      return;
-    }
-
-    await exitEditMode();
-  }, [exitEditMode, hasUnsavedChanges, navigation]);
-
   const persistDraft = useCallback(
     async (afterSave: PendingUnsavedChangesAction = "stay-edit") => {
-      if (!isEditing || isReadOnly) {
+      if (!isEditing || isReadOnly || readOnlyReason !== null || isAcquiring) {
         return false;
       }
 
@@ -600,7 +638,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         const savedContent = snapshot.serialize();
 
         if (!editSession) throw new Error("Edit session is no longer active");
-        await editSession.writeText(savedContent);
+        await editSession.writeText(savedContent, { reacquireExpiredLock: false });
         const hasNewerEdits = getEditGeneration() !== saveGeneration && editor.getCanonicalText() !== savedContent;
         setContent(savedContent);
         setShareRevision((revision) => revision + 1);
@@ -615,9 +653,17 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         if (afterSave === "cancel-edit" && !hasNewerEdits) {
           await exitEditMode(savedContent);
         }
+        if (afterSave === "close" && !hasNewerEdits) {
+          await closeViewer();
+        }
 
         return !hasNewerEdits;
       } catch (err) {
+        if (err instanceof ExpiredEditLockError || (isApiError(err) && [403, 409].includes(err.response?.status ?? 0))) {
+          snapshotDraft();
+          setReadOnlyReason(err instanceof ExpiredEditLockError ? "lost" : err.response?.status === 403 ? "permission-denied" : "locked");
+          await releaseEditSession();
+        }
         setEditError(getApiErrorMessage(err, t("viewer.text.saveFailed"), { includeOriginalMessage: true }));
         logError("Failed to save text file", { error: err, path, connectionId });
         return false;
@@ -632,12 +678,17 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     },
     [
       clearBaselineSyncWindow,
+      closeViewer,
       connectionId,
       editSession,
       exitEditMode,
       getEditGeneration,
       isEditing,
       isReadOnly,
+      isAcquiring,
+      readOnlyReason,
+      releaseEditSession,
+      snapshotDraft,
       markEditSessionPristine,
       path,
       requestRestoreEditingFocus,
@@ -652,13 +703,16 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   }, [persistDraft]);
 
   const handleRequestClose = useCallback(async () => {
-    if (isEditing) {
-      await handleCancelEdit();
+    if (isSaving) return;
+    editActivation.current += 1;
+    if (hasUnsavedChanges) {
+      preserveTextEditorSelection(editorRef);
+      setPendingUnsavedChangesAction("close");
       return;
     }
 
     await closeViewer();
-  }, [closeViewer, handleCancelEdit, isEditing]);
+  }, [closeViewer, hasUnsavedChanges, isSaving]);
 
   const closeSearchPanel = useCallback(({ preserveQuery, restoreEditorFocus }: { preserveQuery: boolean; restoreEditorFocus: boolean }) => {
     setSearchPanelOpen(false);
@@ -680,14 +734,12 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   const handleEscape = useCallback(() => {
     if (searchPanelOpen || isViewerSearchInputFocused()) {
       closeSearchPanel({ preserveQuery: true, restoreEditorFocus: true });
-    } else if (isEditing) {
-      void handleCancelEdit();
     } else if (document.fullscreenElement) {
       document.exitFullscreen();
     } else {
       void handleRequestClose();
     }
-  }, [closeSearchPanel, handleCancelEdit, handleRequestClose, isEditing, searchPanelOpen]);
+  }, [closeSearchPanel, handleRequestClose, searchPanelOpen]);
 
   const handleOpenSearch = useCallback(() => {
     if (loading || error || exceedsEditorLimit || !editorSearchState.isSearchable) {
@@ -822,67 +874,29 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     openExternalUrl("https://sambee.net/docs/");
   }, []);
 
-  const textViewerShortcuts = useMemo(
-    () => [
-      { ...COMMON_SHORTCUTS.DOWNLOAD, handler: handleDownload, enabled: !isEditing },
-      {
-        ...COMMON_SHORTCUTS.SEARCH,
-        handler: handleOpenSearch,
-        enabled: !isEditing && !loading && !error && !exceedsEditorLimit && editorSearchState.isSearchable,
-      },
-      { ...COMMON_SHORTCUTS.NEXT_MATCH, handler: handleSearchNext, enabled: !isEditing && searchMatches > 0 },
-      { ...COMMON_SHORTCUTS.PREVIOUS_MATCH, handler: handleSearchPrevious, enabled: !isEditing && searchMatches > 0 },
-      {
-        ...COMMON_SHORTCUTS.EDIT,
-        handler: (): void => void handleEnterEditMode(),
-        enabled: !isEditing && !isReadOnly && !exceedsEditorLimit,
-      },
-      { ...VIEWER_SHORTCUTS.FULLSCREEN, handler: handleToggleFullscreen, enabled: !isEditing },
-      { ...COMMON_SHORTCUTS.CLOSE, handler: handleEscape, allowInInput: false, enabled: !isEditing && !unsavedChangesDialogOpen },
-      { ...BROWSER_SHORTCUTS.SHOW_HELP, handler: () => setShowViewerHelp(true), enabled: !isEditing },
-      { ...BROWSER_SHORTCUTS.SHOW_HELP_ALTERNATE, handler: () => setShowViewerHelp(true), enabled: !isEditing },
-    ],
-    [
-      editorSearchState.isSearchable,
-      error,
-      exceedsEditorLimit,
-      handleDownload,
-      handleEnterEditMode,
-      handleEscape,
-      handleOpenSearch,
-      handleSearchNext,
-      handleSearchPrevious,
-      handleToggleFullscreen,
-      isEditing,
-      isReadOnly,
-      loading,
-      searchMatches,
-      unsavedChangesDialogOpen,
-    ]
-  );
-
   const textEditorShortcuts = useMemo(
     () => [
-      { ...COMMON_SHORTCUTS.DOWNLOAD, handler: handleDownload, enabled: isEditing },
+      { ...COMMON_SHORTCUTS.DOWNLOAD, handler: handleDownload },
+      { ...VIEWER_SHORTCUTS.FULLSCREEN, handler: handleToggleFullscreen },
       {
         ...COMMON_SHORTCUTS.SEARCH,
         handler: handleOpenSearch,
-        enabled: isEditing && !loading && !error && !exceedsEditorLimit && editorSearchState.isSearchable,
+        enabled: !loading && !error && !exceedsEditorLimit && editorSearchState.isSearchable,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.REPLACE,
         handler: handleOpenReplace,
-        enabled: isEditing && !isSaving && !exceedsEditorLimit && editorSearchState.isSearchable,
+        enabled: !editorShouldBeReadOnly && !isSaving && !exceedsEditorLimit && editorSearchState.isSearchable,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.REPLACE_CURRENT,
         handler: handleReplaceCurrent,
-        enabled: isEditing && !isSaving && !exceedsEditorLimit && searchMode === "replace" && searchPanelOpen,
+        enabled: !editorShouldBeReadOnly && !isSaving && !exceedsEditorLimit && searchMode === "replace" && searchPanelOpen,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.REPLACE_ALL,
         handler: handleReplaceAll,
-        enabled: isEditing && !isSaving && !exceedsEditorLimit && searchMode === "replace" && searchPanelOpen,
+        enabled: !editorShouldBeReadOnly && !isSaving && !exceedsEditorLimit && searchMode === "replace" && searchPanelOpen,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_CASE_SENSITIVE,
@@ -907,16 +921,16 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       {
         ...COMMON_SHORTCUTS.NEXT_MATCH,
         handler: handleSearchNext,
-        enabled: isEditing && (searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error)),
+        enabled: searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error),
       },
       {
         ...COMMON_SHORTCUTS.PREVIOUS_MATCH,
         handler: handleSearchPrevious,
-        enabled: isEditing && (searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error)),
+        enabled: searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error),
       },
-      { ...COMMON_SHORTCUTS.SAVE, handler: (): void => void handleSave(), allowInInput: true, enabled: isEditing && !isSaving },
-      { ...COMMON_SHORTCUTS.CLOSE, handler: handleEscape, allowInInput: false, enabled: isEditing && !unsavedChangesDialogOpen },
-      { ...BROWSER_SHORTCUTS.SHOW_HELP_ALTERNATE, handler: () => setShowEditorHelp(true), enabled: isEditing },
+      { ...COMMON_SHORTCUTS.SAVE, handler: (): void => void handleSave(), allowInInput: true, enabled: !editorShouldBeReadOnly && !isSaving },
+      { ...COMMON_SHORTCUTS.CLOSE, handler: handleEscape, allowInInput: false, enabled: !unsavedChangesDialogOpen },
+      { ...BROWSER_SHORTCUTS.SHOW_HELP_ALTERNATE, handler: () => setShowEditorHelp(true) },
     ],
     [
       editorSearchState.isSearchable,
@@ -933,7 +947,8 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
       handleSave,
       handleSearchNext,
       handleSearchPrevious,
-      isEditing,
+      handleToggleFullscreen,
+      editorShouldBeReadOnly,
       isSaving,
       loading,
       searchMatches,
@@ -946,8 +961,8 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   );
 
   useKeyboardShortcuts({
-    active: !showViewerHelp && !showEditorHelp,
-    shortcuts: [...textViewerShortcuts, ...textEditorShortcuts],
+    active: !showEditorHelp,
+    shortcuts: textEditorShortcuts,
     inputSelector: "input, textarea",
   });
 
@@ -961,24 +976,11 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
                 void handleSave();
               },
               isMobile,
-              disabled: isSaving || exceedsEditorLimit,
+              disabled: editorShouldBeReadOnly || isSaving || exceedsEditorLimit,
             }),
           ]
-        : [
-            ...(isReadOnly
-              ? []
-              : [
-                  createEditToolbarAction({
-                    id: "edit-text",
-                    onClick: () => {
-                      void handleEnterEditMode();
-                    },
-                    isMobile,
-                    disabled: loading || !!error || exceedsEditorLimit,
-                  }),
-                ]),
-          ],
-    [error, exceedsEditorLimit, handleEnterEditMode, handleSave, isEditing, isMobile, isReadOnly, isSaving, loading]
+        : [],
+    [editorShouldBeReadOnly, exceedsEditorLimit, handleSave, isEditing, isMobile, isSaving]
   );
 
   const unsavedChangesIndicator = hasUnsavedChanges ? (
@@ -1000,7 +1002,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
     />
   ) : null;
 
-  const readOnlyIndicator = isReadOnly ? (
+  const readOnlyIndicator = isReadOnly || readOnlyReason !== null || exceedsEditorLimit ? (
     <ViewerFilenameBadge label={t("settings.connectionDialog.accessMode.readOnlyLabel")} toolbarText={toolbarText} />
   ) : null;
 
@@ -1024,12 +1026,12 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
   );
 
   useEffect(() => {
-    logInfo("Text viewer opened", { filename, path });
+    logInfo("Text editor opened", { filename, path });
   }, [filename, path]);
 
   useEffect(() => {
     return () => {
-      logInfo("Text viewer closed");
+      logInfo("Text editor closed");
       if (document.fullscreenElement) {
         document.exitFullscreen();
       }
@@ -1088,13 +1090,11 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
               toolbarText={toolbarText}
               actions={toolbarActions}
               toolbarAccessory={
-                isEditing ? (
                   <HelpMenu
                     menuId="text-editor-help-menu"
                     onOpenHelp={() => setShowEditorHelp(true)}
                     onOpenDocumentation={handleOpenDocumentation}
                   />
-                ) : undefined
               }
               config={{ download: true, share: shareEnabled, search: !exceedsEditorLimit }}
               onClose={() => {
@@ -1163,6 +1163,14 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
             <Alert severity="error" sx={{ m: 2, flexShrink: 0 }}>
               {editError}
             </Alert>
+          ) : null}
+          {isAcquiring ? <Alert severity="info" role="status">{t("viewer.text.acquiring")}</Alert> : null}
+          {readOnlyReason && readOnlyReason !== "conflict" ? (
+            <Alert severity="info" role="status" action={
+              ["locked", "unavailable", "lost"].includes(readOnlyReason) ? (
+                <Button disabled={isAcquiring || isTransitioning} onClick={() => void handleEnterEditMode()}>{t("viewer.text.retryEditing")}</Button>
+              ) : undefined
+            }>{t(`viewer.text.readOnlyReasons.${readOnlyReason}`)}</Alert>
           ) : null}
           {nativeSharing.failureDialog}
           {draftStorageWarning ? (
@@ -1237,14 +1245,14 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
                   title={t("viewer.text.editorCrashTitle")}
                   description={t("viewer.text.editorCrashMessage")}
                   retryLabel={t("viewer.edit.retryEditor")}
-                  returnToPreviewLabel={t("viewer.edit.returnToPreview")}
+                  returnToPreviewLabel={t("common.actions.close")}
                   onError={() => {}}
                   onRetry={() => {
                     setEditError(null);
                     setEditorBoundaryKey((previousKey) => previousKey + 1);
                   }}
                   onReturnToPreview={() => {
-                    void handleCancelEdit();
+                    void handleRequestClose();
                   }}
                 >
                   <TextCodeEditor
@@ -1257,7 +1265,7 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
                     onUserEdit={handleEditorUserEdit}
                     ariaLabel={t("viewer.text.editorLabel")}
                     autoFocus={true}
-                    readOnly={editorShouldBeReadOnly || routedEditing.isExiting}
+                    readOnly={editorShouldBeReadOnly || routedEditing.isExiting || isTransitioning}
                     lineWrapping={wordWrapEnabled}
                     searchText={searchPanelOpen ? searchText : ""}
                     searchOpen={searchPanelOpen}
@@ -1318,7 +1326,10 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
                   clearDraft(connectionId, path, "text");
                 }
                 if (pendingUnsavedChangesAction === "navigate") void routedEditing.completeNavigation();
-                else void exitEditMode();
+                else if (pendingUnsavedChangesAction === "close") {
+                  clearDraft(connectionId, path, "text");
+                  void closeViewer();
+                } else void exitEditMode();
               }}
               disabled={isSaving}
               color="error"
@@ -1347,12 +1358,30 @@ export const TextViewer: React.FC<ViewerComponentProps> = ({
         {null}
       </ResponsiveDialogShell>
 
-      <KeyboardShortcutsHelp
-        open={showViewerHelp}
-        onClose={() => setShowViewerHelp(false)}
-        shortcuts={textViewerShortcuts}
-        title={t("keyboardShortcutsHelp.titles.textViewer")}
-      />
+      <ResponsiveDialogShell
+        open={conflict !== null}
+        onClose={() => {}}
+        disableClose
+        title={t("viewer.text.conflictTitle")}
+        description={t("viewer.text.conflictDescription")}
+        maxWidth="xs"
+        actions={conflict ? <>
+          <Button variant="outlined" autoFocus onClick={() => {
+            setDraftContent(conflict.serverContent);
+            setEditBaselineContent(conflict.serverContent);
+            clearDraft(connectionId, path, "text");
+            markEditSessionPristine();
+            setConflict(null);
+            setReadOnlyReason(null);
+          }}>{t("viewer.text.useSavedFile")}</Button>
+          <Button variant="contained" onClick={() => {
+            setDraftContent(conflict.draftContent);
+            setEditBaselineContent(conflict.serverContent);
+            setConflict(null);
+            setReadOnlyReason(null);
+          }}>{t("viewer.text.keepDraft")}</Button>
+        </> : null}
+      >{null}</ResponsiveDialogShell>
       <KeyboardShortcutsHelp
         open={showEditorHelp}
         onClose={() => setShowEditorHelp(false)}

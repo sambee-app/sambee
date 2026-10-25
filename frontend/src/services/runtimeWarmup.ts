@@ -10,7 +10,7 @@ async function warmRuntimeModules(): Promise<void> {
     import("../components/Viewer/MarkdownRichEditor"),
     import("../components/Viewer/MarkdownViewer"),
     import("../components/Viewer/PDFViewer"),
-    import("../components/Viewer/TextViewer"),
+    import("../components/Viewer/TextEditor"),
     import("./authConfig"),
     import("./loggingConfig"),
   ]);
