@@ -1828,15 +1828,20 @@ describe("MarkdownViewer", () => {
       if (editorNormalization) mockMarkdownEditorBehavior.initialNormalizedMarkdown = "# Readme\n\n\n";
       vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
       vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValueOnce(new ExpiredEditLockError());
+      vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
       const interval = vi.spyOn(window, "setInterval");
       renderViewer();
       await screen.findByText("Readme");
-      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      });
       const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
       fireEvent.change(editor, { target: { value: "# Retained draft\n" } });
       const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
       if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
       await act(async () => heartbeat());
+      expect(editor).toHaveAttribute("readonly");
+      expect(editor).toHaveValue("# Retained draft\n");
       fireEvent.click(screen.getByRole("button", { name: "Retry editing" }));
       await waitFor(() => expect(editor).not.toHaveAttribute("readonly"));
       expect(screen.queryByRole("dialog", { name: "File changed" })).not.toBeInTheDocument();
