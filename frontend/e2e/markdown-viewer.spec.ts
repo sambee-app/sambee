@@ -1364,7 +1364,7 @@ const readCiProbe = (page: Page) => page.evaluate(() => {
 
 test.describe("production CI correctness", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires a normal production build");
-  const markdown = "# CI preview\n\n[CI tail](#ci-tail)\n\nA &amp; B and &#x1F680;\n\n```javascript\nconst alpha = 1;\n```\n\n## CI tail\n\nLast paragraph.\n";
+  const markdown = "# CI preview\n\n[CI tail](#ci-tail)\n\nA &amp; B and &#x1F680;\n\n```javascript\nconst alpha = 1;\n```\n\n## CI tail\n\nLast paragraph.\n" + " ".repeat(INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS);
 
   for (const width of [1543, 390]) {
     for (const scenario of ["real workers", "native contracts", "edit and save", "cancel and reopen"] as const) {
