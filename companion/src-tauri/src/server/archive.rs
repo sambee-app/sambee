@@ -2329,7 +2329,10 @@ fn create_private_temporary_file(path: &Path) -> Result<FsFile, std::io::Error> 
 
 fn create_private_temporary_directory(prefix: &str) -> Result<tempfile::TempDir, std::io::Error> {
     let store = prepare_temporary_archive_store()?;
-    cleanup_stale_temporary_archive_directories(&store)?;
+    create_private_temporary_directory_in_store(&store, prefix)
+}
+
+fn create_private_temporary_directory_in_store(store: &Path, prefix: &str) -> Result<tempfile::TempDir, std::io::Error> {
     let mut builder = tempfile::Builder::new();
     builder.prefix(prefix);
     #[cfg(unix)]
@@ -2823,6 +2826,53 @@ mod tests {
         assert!(!stale.exists());
         assert!(recent.exists());
         assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn temporary_directory_creation_does_not_clean_other_downloads() {
+        let store = tempdir().unwrap();
+        let stale = store.path().join(format!("{TEMPORARY_DOWNLOAD_PREFIX}stale"));
+        fs::create_dir(&stale).unwrap();
+        set_test_path_modified_time(&stale, SystemTime::now() - TEMPORARY_ARCHIVE_MAX_AGE - Duration::from_secs(1));
+
+        for prefix in [TEMPORARY_DOWNLOAD_PREFIX, TEMPORARY_SOURCE_PREFIX] {
+            let directory = create_private_temporary_directory_in_store(store.path(), prefix).unwrap();
+            assert!(directory.path().is_dir());
+            assert!(stale.is_dir());
+        }
+
+        cleanup_stale_temporary_archive_directories(store.path()).unwrap();
+        assert!(!stale.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn temporary_directory_creation_does_not_inspect_a_download_pending_deletion() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+        let store = tempdir().unwrap();
+        let deleting = store.path().join(format!("{TEMPORARY_DOWNLOAD_PREFIX}deleting"));
+        fs::create_dir(&deleting).unwrap();
+        let handle = OpenOptions::new()
+            .access_mode(0)
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(&deleting)
+            .unwrap();
+        fs::remove_dir(&deleting).unwrap();
+        assert_eq!(
+            fs::symlink_metadata(&deleting).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+
+        for prefix in [TEMPORARY_DOWNLOAD_PREFIX, TEMPORARY_SOURCE_PREFIX] {
+            let directory = create_private_temporary_directory_in_store(store.path(), prefix).unwrap();
+            assert!(directory.path().is_dir());
+        }
+
+        drop(handle);
+        assert!(!deleting.exists());
     }
 
     #[test]
