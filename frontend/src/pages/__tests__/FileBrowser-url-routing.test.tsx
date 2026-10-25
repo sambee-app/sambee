@@ -112,6 +112,18 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
   // --------------------------------------------------------------------------
 
   describe("URL query param constants", () => {
+    it.each(["", "&mode=view", "&mode=edit"])("normalizes legacy text mode without changing other route state: %s", (mode) => {
+      const route = parseBrowseRoute({
+        targetType: "smb",
+        targetId: "demo",
+        searchParams: new URLSearchParams(`file=smb%2Fdemo%2Fnotes.txt&viewer=text${mode}&q=keep`),
+      });
+      expect(route.viewer).toMatchObject({ viewerId: "text", mode: "view" });
+      const serialized = new URL(serializeBrowseRoute(route), "http://localhost");
+      expect(serialized.searchParams.has("mode")).toBe(false);
+      expect(serialized.searchParams.get("q")).toBe("keep");
+    });
+
     it("round trips independent viewer targets, edit intent, settings, and unrelated query state", () => {
       const route: BrowseRouteState = {
         left: { kind: "smb", targetId: "test-server-1", path: "Documents" },

@@ -2249,11 +2249,10 @@ describe("Browser Component - Interactions", () => {
         })
       );
 
-      renderBrowser("/browse/smb/test-server-1");
-
-      await waitFor(() => {
-        expect(screen.getByRole("button", { name: /report.pdf/i })).toBeInTheDocument();
+      await act(async () => {
+        renderBrowser("/browse/smb/test-server-1");
       });
+      expect(screen.getByRole("button", { name: "File: report.pdf" })).toBeInTheDocument();
 
       const listContainer = screen.getByTestId("virtual-list");
       await user.click(listContainer);
@@ -2453,8 +2452,10 @@ describe("Browser Component - Interactions", () => {
       it.each(["Home", "End"])("Shift+%s selects a single-item list without toggling it off", async (key) => {
         const user = userEvent.setup();
         vi.mocked(api.listDirectory).mockResolvedValue({ ...mockDirectoryListing, items: [mockDirectoryListing.items[0]!], total: 1 });
-        renderBrowser("/browse/smb/test-server-1");
-        await screen.findByRole("button", { name: "Folder: Documents" });
+        await act(async () => {
+          renderBrowser("/browse/smb/test-server-1");
+        });
+        expect(screen.getByRole("button", { name: "Folder: Documents" })).toBeInTheDocument();
         const list = screen.getByTestId("file-list-container");
         await user.click(within(list).getByTestId("virtual-list"));
         await user.keyboard(`{Shift>}{${key}}{${key}}{/Shift}`);

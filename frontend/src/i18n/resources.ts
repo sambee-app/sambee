@@ -83,7 +83,6 @@ export const EN_TRANSLATIONS = {
       imageViewer: "Image viewer shortcuts",
       markdownViewer: "Markdown viewer shortcuts",
       markdownEditor: "Markdown editor shortcuts",
-      textViewer: "Text viewer shortcuts",
       textEditor: "Text editor shortcuts",
     },
   },
@@ -1387,13 +1386,32 @@ export const EN_TRANSLATIONS = {
     },
     text: {
       loadFailed: "Failed to load file.",
-      lockFailed: "Unable to enter text edit mode. {{message}}",
+      lockFailed: "Opened read-only. {{message}}",
       lockFailedReason: "Failed to acquire edit lock.",
       saveFailed: "Failed to save text file changes.",
       editorLabel: "Text editor",
       editorCrashTitle: "Text editor unavailable",
       editorCrashMessage:
-        "The text editor encountered an internal error. Your draft is still kept in memory. Retry the editor or return to the read-only view.",
+        "The text editor encountered an internal error. Your draft is still kept in memory. Retry the editor or close the file.",
+      acquiring: "Checking write access...",
+      retryEditing: "Retry editing",
+      lockedNotification:
+        "This file is being edited in another session. You can read it here. Retry editing with <retryIcon/> when the other editor is closed.",
+      heartbeatFailed: "Could not refresh the edit lock. Check your connection; saving may require acquiring the lock again.",
+      readOnlyReasons: {
+        "read-only": "This location is read-only.",
+        locked: "This file is being edited in another session. You can read it here and retry editing when the lock is released.",
+        "permission-denied": "You do not have write access to this file.",
+        unsupported: "Editing is not supported for this source.",
+        unavailable: "Write access is temporarily unavailable. You can continue reading or retry editing.",
+        lost: "The edit lock is no longer active. Your draft is preserved. Retry editing to acquire a new lock.",
+        conflict: "The saved file changed while your draft was not protected by an edit lock.",
+      },
+      conflictTitle: "File changed",
+      conflictDescription:
+        "The saved file differs from your draft's original version. Choose which content to keep in the editor. Keeping your draft does not save it until you choose Save.",
+      useSavedFile: "Use saved file",
+      keepDraft: "Keep my draft",
       limitMessage:
         "This file is {{currentSizeMb}} MB, which exceeds your Text Editor limit of {{maxSizeMb}} MB. Sambee opened it in a safer read-only fallback instead of the full CodeMirror editor.",
       limitSearchUnavailable: "Search is unavailable while this file is shown in the large-file fallback.",

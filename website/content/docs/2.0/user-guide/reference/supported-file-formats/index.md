@@ -12,7 +12,7 @@ This page lists the file types Sambee can process, open or edit in its browser-b
 | Converted image formats | `.tif`, `.tiff`, `.heic`, `.heif`, `.bmp`, `.dib`, `.ico`, `.cur`, `.pcx`, `.tga`, `.ppm`, `.pgm`, `.pbm`, `.pnm`, `.xbm`, `.xpm`, `.psd`, `.psb`, `.eps`, `.ai`, `.jp2`, `.j2k`, `.jpt`, `.j2c`, `.jpc`, `.jxl`, `.exr`, `.hdr`, `.fits`, `.fit`, `.fts`, `.svs`, `.ndpi`, `.scn`, `.mrxs`, `.vms`, `.vmu`, `.bif`, `.img`, `.mat` | Sambee converts the file into a browser-ready image before opening it in the image viewer. |
 | PDF | `.pdf` | Open in the PDF viewer with page navigation, search, zoom, and download support. |
 | Markdown | `.md`, `.markdown` | Open in a rendered Markdown view with an optional edit path. |
-| Text and code | See [Text File Support and Syntax Highlighting](../text-file-support-and-syntax-highlighting/) for extensions, filename matches, and plain-text formats. | Open in the text viewer, with an edit option. Dedicated viewers and saved viewer preferences take precedence. |
+| Text and code | See [Text File Support and Syntax Highlighting](../text-file-support-and-syntax-highlighting/) for extensions, filename matches, and plain-text formats. | Open directly in the text editor, read-only when editing isn't available. Dedicated viewers and saved viewer preferences take precedence. |
 
 ### Format-Specific Notes
 

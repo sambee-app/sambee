@@ -55,7 +55,7 @@ Choose the content pattern that matches the job:
 | Decision | `ResponsiveDialogShell` with compact content and actions. Do not add `FormSurface`. | Delete, overwrite conflict, application update, connection test result. |
 | Picker | `ResponsiveDialogShell` with a listbox or selection grid. Keep the picker’s keyboard and selection semantics in the owning component. | Viewer and theme pickers. |
 | Short workflow | `ResponsiveDialogShell` with state-specific body and actions. | Companion pairing. |
-| Full-screen workspace | Keep the specialized full-screen viewer shell. Share only reusable behavior that does not interfere with the viewer’s focus, toolbar, or third-party integration. | Image, PDF, Markdown, and text viewers. |
+| Full-screen workspace | Keep the specialized full-screen viewer shell. Share only reusable behavior that does not interfere with the viewer’s focus, toolbar, or third-party integration. | Image, PDF, and Markdown viewers, and the text editor. |
 
 The desktop settings overlay and mobile settings drawer are navigation containers, not form dialogs. Keep their information architecture separate while composing settings-form pages inside them.
 

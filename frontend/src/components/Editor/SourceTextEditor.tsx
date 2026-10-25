@@ -1,4 +1,4 @@
-import { Annotation, Compartment, EditorSelection, EditorState, type TransactionSpec } from "@codemirror/state";
+import { Annotation, Compartment, EditorSelection, EditorState, Transaction, type TransactionSpec } from "@codemirror/state";
 import { type Command, EditorView, type ViewUpdate } from "@codemirror/view";
 import { useTheme } from "@mui/material";
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
@@ -239,7 +239,7 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: value },
         selection: { anchor: nextAnchor, head: nextHead },
-        annotations: EXTERNAL_SYNC_ANNOTATION.of(true),
+        annotations: [EXTERNAL_SYNC_ANNOTATION.of(true), Transaction.addToHistory.of(false)],
       });
     }, [value]);
 

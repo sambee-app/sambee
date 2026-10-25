@@ -85,7 +85,7 @@ interface FileTypeDefinition {
 const imageViewerComponentLoader = () => import("../components/Viewer/ImageViewer");
 const markdownViewerComponentLoader = () => import("../components/Viewer/MarkdownViewer");
 const pdfViewerComponentLoader = () => import("../components/Viewer/PDFViewer");
-const textViewerComponentLoader = () => import("../components/Viewer/TextViewer");
+const textEditorComponentLoader = () => import("../components/Viewer/TextEditor");
 
 const VIEWER_DEFINITIONS: Record<ViewerId, ViewerDefinition & { loader: () => Promise<{ default: ViewerComponent }> }> = {
   image: {
@@ -109,8 +109,8 @@ const VIEWER_DEFINITIONS: Record<ViewerId, ViewerDefinition & { loader: () => Pr
   text: {
     id: "text",
     translationKey: "fileBrowser.viewerPicker.viewers.text",
-    description: "Text viewer",
-    loader: textViewerComponentLoader,
+    description: "Text editor",
+    loader: textEditorComponentLoader,
   },
 };
 
@@ -787,7 +787,7 @@ const mimeTypeMap = new Map<string, FileTypeDefinition>();
 // Build indexes
 for (const fileType of FILE_TYPE_REGISTRY) {
   if (!fileType.viewerComponent && fileType.extensions.every((extension) => isTextFilename(`file${extension}`))) {
-    fileType.viewerComponent = textViewerComponentLoader;
+    fileType.viewerComponent = textEditorComponentLoader;
   }
   for (const ext of fileType.extensions) {
     extensionMap.set(ext.toLowerCase(), fileType);
@@ -817,7 +817,7 @@ export const getFileTypeByExtension = (filename: string): FileTypeDefinition | n
     color: "#7b8794",
     description: matchFileLanguage(filename)?.name ?? "Text File",
     ...fileType,
-    viewerComponent: textViewerComponentLoader,
+    viewerComponent: textEditorComponentLoader,
   };
 };
 
@@ -866,7 +866,7 @@ function getViewerIdForFileType(fileType: FileTypeDefinition | null): ViewerId |
     return "pdf";
   }
 
-  if (fileType.viewerComponent === textViewerComponentLoader) {
+  if (fileType.viewerComponent === textEditorComponentLoader) {
     return "text";
   }
 

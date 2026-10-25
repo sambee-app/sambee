@@ -81,11 +81,19 @@ Sambee uses a provider refresh token when one is returned, whether or not `offli
 
 ## Text and Markdown Editors
 
+### Text Viewer and Editor Combined
+
+Sambee's text viewer and text editor are now combined into a single component. Text files now open directly in the editor. If write mode cannot be enabled, text editor operates in read-only mode and a notification is shown.
+
+As part of this change, text editor, Markdown viewer and Markdown editor got a consistent toast-based notification system.
+
 ### Syntax Highlighting and Rendering Performance Optimization
 
-Sambee now uses a consolidated syntax highlighting system throughout all text and Markdown rendering surfaces: text viewer and editor, Markdown editor, fenced code blocks in Markdown viewer and editor. The syntax highlighting system is integrated with the theming system; highlight colors are now part of each theme and can be edited in the new theme editor.
+Sambee now uses a consolidated syntax highlighting system throughout all text and Markdown rendering surfaces: text editor, Markdown editor, fenced code blocks in Markdown viewer and Markdown editor. The syntax highlighting system is integrated with the theming system; highlight colors are now part of each theme and can be edited in the new theme editor.
 
-Text viewer/editor and Markdown editor performance was significantly boosted, especially for long documents. This was achieved through virtualization and viewport rendering.
+Syntax highlighting is available for a wide range of languages and file types ((docs)[../../../user-guide/reference/text-file-support-and-syntax-highlighting/]).
+
+Text editor and Markdown editor performance was significantly boosted, especially for long documents. This was achieved through virtualization and viewport rendering.
 
 ## Markdown Viewer
 
@@ -98,14 +106,13 @@ When you print or save as PDF from the browser, the Markdown viewer reformats th
 - Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
 - When reloading a browser tab with an editor, Sambee now recovers the file lock. This prevents the error `Unable to enter edit mode. File is locked for editing by <username>`.
 
-
 ## Miscellaneous
 
 ### Native Mobile Sharing
 
 Consolidated the native mobile sharing implementation across the file list and image, PDF, text, and Markdown viewers and editors. When sharing fails, a dialog with details can be invoked to facilitate issue reporting.
 
-Text and Markdown viewers/editors now have an option to share the current content as text as an alternative to sharing the stored file. This helps circumvent Chrome restrictions that prevent sharing file types such as Markdown.
+Text editor and Markdown viewer/editor now have an option to share the current content as text as an alternative to sharing the stored file. This helps circumvent Chrome restrictions that prevent sharing file types such as Markdown.
 
 Image and PDF viewers alway share the displayed content, which may have been normalized for viewing in the browser.
 

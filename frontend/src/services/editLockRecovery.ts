@@ -5,6 +5,13 @@ import { warn } from "./logger";
 const RECOVERY_PREFIX = "sambee:edit-lock:";
 const activeGuards = new Set<() => void>();
 
+export class EditLockUnavailableError extends Error {
+  constructor() {
+    super("File is already being edited in another tab");
+    this.name = "EditLockUnavailableError";
+  }
+}
+
 export function clearEditLockRecovery(): void {
   for (const release of activeGuards) release();
   try {
@@ -28,7 +35,7 @@ export async function claimEditLockRecovery(connectionId: string, path: string) 
   if (navigator.locks) {
     await new Promise<void>((resolve, reject) => {
       lockCompletion = navigator.locks.request(key, { ifAvailable: true }, async (lock) => {
-        if (!lock) throw new Error("File is already being edited in another tab");
+        if (!lock) throw new EditLockUnavailableError();
         protectedTab = true;
         await new Promise<void>((unlock) => {
           release = () => {

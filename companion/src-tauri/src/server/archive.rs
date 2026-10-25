@@ -2329,7 +2329,10 @@ fn create_private_temporary_file(path: &Path) -> Result<FsFile, std::io::Error> 
 
 fn create_private_temporary_directory(prefix: &str) -> Result<tempfile::TempDir, std::io::Error> {
     let store = prepare_temporary_archive_store()?;
-    cleanup_stale_temporary_archive_directories(&store)?;
+    create_private_temporary_directory_in_store(&store, prefix)
+}
+
+fn create_private_temporary_directory_in_store(store: &Path, prefix: &str) -> Result<tempfile::TempDir, std::io::Error> {
     let mut builder = tempfile::Builder::new();
     builder.prefix(prefix);
     #[cfg(unix)]
@@ -2823,6 +2826,23 @@ mod tests {
         assert!(!stale.exists());
         assert!(recent.exists());
         assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn temporary_directory_creation_does_not_clean_other_downloads() {
+        let store = tempdir().unwrap();
+        let stale = store.path().join(format!("{TEMPORARY_DOWNLOAD_PREFIX}stale"));
+        fs::create_dir(&stale).unwrap();
+        set_test_path_modified_time(&stale, SystemTime::now() - TEMPORARY_ARCHIVE_MAX_AGE - Duration::from_secs(1));
+
+        for prefix in [TEMPORARY_DOWNLOAD_PREFIX, TEMPORARY_SOURCE_PREFIX] {
+            let directory = create_private_temporary_directory_in_store(store.path(), prefix).unwrap();
+            assert!(directory.path().is_dir());
+            assert!(stale.is_dir());
+        }
+
+        cleanup_stale_temporary_archive_directories(store.path()).unwrap();
+        assert!(!stale.exists());
     }
 
     #[test]

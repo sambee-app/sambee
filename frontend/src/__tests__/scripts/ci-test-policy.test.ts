@@ -24,6 +24,15 @@ describe("CI resource and browser policy", () => {
     expect(() => ciWorkerCount(cpus, memory)).toThrow("positive CPU and memory");
   });
 
+  it("requires both inline and worker normalization in each development engine", () => {
+    expect(expectedBrowserCases("development")).toEqual([
+      "chromium: renders small notes without starting a normalization worker",
+      "chromium: normalizes and renders entity text without DOM globals in the worker",
+      "firefox: renders small notes without starting a normalization worker",
+      "firefox: normalizes and renders entity text without DOM globals in the worker",
+    ]);
+  });
+
   for (const mode of ["production", "development"] as const) {
     const passing = () =>
       expectedBrowserCases(mode).map((identity) => {
@@ -31,7 +40,7 @@ describe("CI resource and browser policy", () => {
         return { engine, title, status: "passed", attempts: 1 };
       });
     it(`requires the complete ${mode} engine/width matrix`, () => {
-      expect(passing()).toHaveLength(mode === "production" ? 16 : 2);
+      expect(passing()).toHaveLength(mode === "production" ? 16 : 4);
       expect(validateBrowserCases(mode, passing())).toEqual([]);
       expect(validateBrowserCases(mode, passing().slice(1))).not.toEqual([]);
       expect(validateBrowserCases(mode, [...passing(), passing()[0]!])).not.toEqual([]);

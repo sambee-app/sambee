@@ -90,7 +90,9 @@ export function useWorkspaceNavigation({
     const search = new URLSearchParams(location.search);
     const invalidViewer = !route.viewer && ["file", "viewer", "mode", "pane", "virtual"].some((key) => search.has(key));
     const invalidSettings = search.has("settings") && !route.settings;
-    if (!invalidViewer && !invalidSettings) return;
+    const legacyTextMode = route.viewer?.viewerId === "text" && search.has("mode");
+    if (!invalidViewer && !invalidSettings && !legacyTextMode) return;
+    if (legacyTextMode) search.delete("mode");
     if (invalidViewer) for (const key of ["file", "viewer", "mode", "pane", "virtual"]) search.delete(key);
     if (invalidSettings) search.delete("settings");
     void navigate(

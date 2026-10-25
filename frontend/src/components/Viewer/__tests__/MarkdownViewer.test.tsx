@@ -11,6 +11,7 @@ import apiService from "../../../services/api";
 import { authSession } from "../../../services/authSession";
 import { loadDraft, snapshotRegisteredDrafts } from "../../../services/draftRecovery";
 import { logger } from "../../../services/logger";
+import { ExpiredEditLockError } from "../../../services/storageContracts";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { requireTestElement, requireTestValue, uninitializedTestCallback } from "../../../test/helpers/assertions";
 import { SambeeThemeProvider } from "../../../theme";
@@ -1705,9 +1706,192 @@ describe("MarkdownViewer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Unable to enter edit mode. Failed to acquire edit lock.: Lock conflict")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent("Lock conflict");
+      expect(screen.getByRole("alert").closest(".MuiSnackbar-root")).not.toBeNull();
     });
+    expect(screen.getByRole("button", { name: "Retry editing" })).toBeEnabled();
+    expect(screen.getByText("Read only")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Markdown editor" })).not.toBeInTheDocument();
+  });
+
+  it("uses the shared lock toast, delayed retry feedback, and persistent read-only badge", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    const acquire = vi.spyOn(apiService, "acquireEditLock").mockRejectedValueOnce({ response: { status: 409 } });
+    const timeout = vi.spyOn(window, "setTimeout");
+    renderViewer();
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const retry = await screen.findByRole("button", { name: "Retry editing" });
+    const toast = screen.getByRole("status");
+    expect(toast.closest(".MuiSnackbar-root")).not.toBeNull();
+    expect(toast).toHaveTextContent("This file is being edited in another session.");
+    expect(within(toast).getByRole("img", { name: "Retry editing" })).toBeInTheDocument();
+    const dismiss = timeout.mock.calls.find(([, delay]) => delay === 15_000)?.[0];
+    if (typeof dismiss !== "function") throw new Error("Expected the shared 15-second dismissal timer");
+    act(() => dismiss());
+    await waitFor(() => expect(toast).not.toBeInTheDocument());
+    expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(retry).toBeEnabled();
+    acquire.mockRejectedValueOnce({ response: { status: 409 } });
+    fireEvent.click(retry);
+    const repeatedNotice = await screen.findByRole("status");
+    expect(repeatedNotice).toHaveTextContent("This file is being edited in another session.");
+    fireEvent.click(within(repeatedNotice).getByRole("button", { name: "Close" }));
+    let finish: ((value: typeof mockEditLockInfo) => void) | undefined;
+    acquire.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    timeout.mockClear();
+    fireEvent.click(retry);
+    await waitFor(() => expect(acquire).toHaveBeenCalledTimes(3));
+    const feedback = timeout.mock.calls.find(([, delay]) => delay === 200)?.[0];
+    if (typeof feedback !== "function") throw new Error("Expected delayed acquisition feedback");
+    act(() => feedback());
+    expect(screen.getByRole("status", { name: "Checking write access..." }).closest(".MuiAlert-root")).toBeNull();
+    expect(retry).toBeDisabled();
+    fireEvent.keyDown(document, { ctrlKey: true, key: "r" });
+    expect(acquire).toHaveBeenCalledTimes(3);
+    if (!finish) throw new Error("Expected a pending lock retry");
+    await act(async () => finish?.(mockEditLockInfo));
+    expect(await screen.findByRole("textbox", { name: "Markdown editor" })).not.toHaveAttribute("readonly");
+    expect(screen.queryByText("Read only")).not.toBeInTheDocument();
+  });
+
+  it("deduplicates transient heartbeat warnings and clears them on recovery", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValue(new Error("Disconnected"));
+    const interval = vi.spyOn(window, "setInterval");
+    renderViewer();
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+    if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
+    await act(async () => heartbeat());
+    const warning = screen.getByRole("status");
+    expect(warning).toHaveTextContent("Could not refresh the edit lock");
+    expect(warning.closest(".MuiSnackbar-root")).not.toBeNull();
+    fireEvent.click(within(warning).getByRole("button", { name: "Close" }));
+    await act(async () => heartbeat());
+    expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+    expect(editor).not.toHaveAttribute("readonly");
+    heartbeatRequest.mockResolvedValueOnce(undefined);
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
+    expect(screen.getByRole("status")).toHaveTextContent("Could not refresh the edit lock");
+    heartbeatRequest.mockResolvedValue(undefined);
+    await act(async () => heartbeat());
+    expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+  });
+
+  it.each(["Keep my draft", "Use saved file"])(
+    "preserves the draft after lock loss and resolves remote changes with %s",
+    async (choice) => {
+      const read = vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+      vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+      vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValueOnce(new ExpiredEditLockError());
+      const release = vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+      const interval = vi.spyOn(window, "setInterval");
+      renderViewer();
+      await screen.findByText("Readme");
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+      fireEvent.change(editor, { target: { value: "# Retained draft\n" } });
+      const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+      if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
+      await act(async () => heartbeat());
+      expect(editor).toHaveAttribute("readonly");
+      expect(editor).toHaveValue("# Retained draft\n");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(release).toHaveBeenCalledTimes(1);
+      read.mockResolvedValue("# External change\n");
+      fireEvent.click(screen.getByRole("button", { name: "Retry editing" }));
+      const dialog = await screen.findByRole("dialog", { name: "File changed" });
+      expect(editor).toHaveAttribute("readonly");
+      fireEvent.click(within(dialog).getByRole("button", { name: choice }));
+      await waitFor(() => expect(editor).not.toHaveAttribute("readonly"));
+      expect(editor).toHaveValue(choice === "Keep my draft" ? "# Retained draft\n" : "# External change\n");
+      expect(screen.queryByText("Read only")).not.toBeInTheDocument();
+    }
+  );
+
+  it.each([false, true])(
+    "compares the normalized saved source on lock retry without inventing a conflict (editor normalization: %s)",
+    async (editorNormalization) => {
+      vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+      vi.spyOn(markdownCodePreparation, "normalizeMarkdownSource").mockResolvedValue("# Readme\n\n");
+      if (editorNormalization) mockMarkdownEditorBehavior.initialNormalizedMarkdown = "# Readme\n\n\n";
+      vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+      vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValueOnce(new ExpiredEditLockError());
+      vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+      const interval = vi.spyOn(window, "setInterval");
+      renderViewer();
+      await screen.findByText("Readme");
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      });
+      const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+      fireEvent.change(editor, { target: { value: "# Retained draft\n" } });
+      const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+      if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
+      await act(async () => heartbeat());
+      expect(editor).toHaveAttribute("readonly");
+      expect(editor).toHaveValue("# Retained draft\n");
+      fireEvent.click(screen.getByRole("button", { name: "Retry editing" }));
+      await waitFor(() => expect(editor).not.toHaveAttribute("readonly"));
+      expect(screen.queryByRole("dialog", { name: "File changed" })).not.toBeInTheDocument();
+      expect(editor).toHaveValue("# Retained draft\n");
+      expect(markdownCodePreparation.normalizeMarkdownSource).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("keeps lock loss inside an active unsaved-changes dialog and restores the toast after Cancel", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValueOnce(new ExpiredEditLockError());
+    const interval = vi.spyOn(window, "setInterval");
+    renderViewer();
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Retained draft\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+    if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
+    await act(async () => heartbeat());
+    expect(within(dialog).getByRole("status")).toHaveTextContent("The edit lock is no longer active");
+    expect(within(dialog).getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(document.querySelector(".MuiSnackbar-root")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.querySelector(".MuiSnackbar-root")).not.toBeNull());
+    expect(editor).toHaveValue("# Retained draft\n");
+    expect(editor).toHaveAttribute("readonly");
+  });
+
+  it("shows each failed Save in a toast without discarding edits or stealing focus", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "saveTextFile").mockRejectedValue(new Error("Disk full"));
+    renderViewer();
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Unsaved\n" } });
+    for (const attempt of [1, 2]) {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      const failure = await screen.findByRole("alert");
+      expect(failure).toHaveTextContent("Disk full");
+      expect(failure.closest(".MuiSnackbar-root")).not.toBeNull();
+      expect(apiService.saveTextFile).toHaveBeenCalledTimes(attempt);
+      fireEvent.click(within(failure).getByRole("button", { name: "Close" }));
+      expect(editor).toHaveValue("# Unsaved\n");
+      expect(editor).not.toHaveAttribute("readonly");
+    }
   });
 
   it("saves markdown changes and stays in edit mode", async () => {
@@ -2208,7 +2392,9 @@ describe("MarkdownViewer", () => {
     expect(editor).toHaveValue("# Newer unsaved\n");
     expect(editor).not.toHaveAttribute("readonly");
     expect(release).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(
+      requireTestValue(screen.getAllByRole("button", { name: "Close" }).find((button) => !button.closest(".MuiSnackbar-root")))
+    );
     const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument());

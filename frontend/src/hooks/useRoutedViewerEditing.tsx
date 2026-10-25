@@ -56,6 +56,7 @@ export function useRoutedViewerEditing({
   exitEdit,
   cancelAcquisition,
   requestUnsavedChanges,
+  automatic = false,
 }: {
   navigation?: ViewerNavigation;
   isEditing: boolean;
@@ -67,6 +68,7 @@ export function useRoutedViewerEditing({
   exitEdit: () => Promise<void>;
   cancelAcquisition: () => void;
   requestUnsavedChanges: () => void;
+  automatic?: boolean;
 }) {
   const pending = useRef<BlockedTransition | null>(null);
   const alive = useRef(true);
@@ -125,16 +127,16 @@ export function useRoutedViewerEditing({
   }, [requested, isSaving, dirty]);
 
   useEffect(() => {
-    const mode = navigation?.mode;
+    const mode = automatic ? "edit" : navigation?.mode;
     if (!mode || loading || isAcquiring || isExiting || exitPromise.current || attemptedMode.current === mode) return;
     attemptedMode.current = mode;
     if (mode === "edit" && !isEditing) {
       acquisitionCancelled.current = false;
       void enter().then((success) => {
-        if (!success && alive.current && !acquisitionCancelled.current) changeMode("view", true);
+        if (!success && !automatic && alive.current && !acquisitionCancelled.current) changeMode("view", true);
       });
     } else if (mode === "view" && isEditing && !pending.current) void exit();
-  }, [navigation?.mode, loading, isAcquiring, isEditing, isExiting]);
+  }, [automatic, navigation?.mode, loading, isAcquiring, isEditing, isExiting]);
 
   useEffect(() => {
     if (!dirty) return;

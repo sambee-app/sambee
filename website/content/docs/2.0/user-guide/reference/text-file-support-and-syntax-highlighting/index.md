@@ -2,11 +2,11 @@
 title = "Text File Support and Syntax Highlighting"
 +++
 
-Use this reference to check which files open in the text viewer and which language labels you can use in Markdown code blocks. Sambee uses the same syntax highlighting for text viewing and editing, Markdown source, and code blocks in Markdown previews.
+Use this reference to check which files open in the text editor and which language labels you can use in Markdown code blocks. Sambee uses the same syntax highlighting for the text editor, Markdown source, and code blocks in Markdown previews.
 
 ## Text File Support
 
-Files with an extension or special filename listed below open in the text viewer by default, with two exceptions: `.md` and `.markdown` open in the Markdown viewer, and `.svg` opens in the image viewer. A saved viewer preference or the file's MIME type can override the filename-based choice.
+Files with an extension or special filename listed below open in the text editor by default, with two exceptions: `.md` and `.markdown` open in the Markdown viewer, and `.svg` opens in the image viewer. A saved viewer preference or the file's MIME type can override the filename-based choice.
 
 The filename also selects the highlighting language:
 
@@ -14,9 +14,19 @@ The filename also selects the highlighting language:
 - Extensions aren't case-sensitive. Only the final suffix counts, so `project.cmake.in` uses Properties highlighting through `.in`, not CMake.
 - Shared extensions select one language: `.m` uses Mathematica, `.sig` uses PGP, and `.v` uses SystemVerilog.
 
-Plain-text formats such as `.txt` and `.log` open in the text viewer without highlighting. Unmatched files don't automatically open as text, but you can choose the text viewer from the viewer picker; without a language match, they use plain text.
+Plain-text formats such as `.txt` and `.log` open in the text editor without highlighting. Unmatched files don't automatically open as text, but you can choose the text editor from the viewer picker; without a language match, they use plain text.
 
 For images, PDFs, archives, and other supported formats, see [Supported File Formats](../supported-file-formats/).
+
+## Editing and Read-Only Access
+
+Text files open directly in the editor. Sambee checks write access, reserves an edit lock, and reloads the saved file before enabling changes. Opening a file doesn't save anything; use the save icon or <kbd>Ctrl</kbd> + <kbd>S</kbd> to save.
+
+If another tab or user holds the lock, or the connection temporarily fails, the file stays readable. A toast explains why editing isn't available and stays visible for 15 seconds. For files locked by another editor, the message includes the same retry icon used in the toolbar. The **Read only** badge and **Retry editing** toolbar icon remain available after the toast disappears. Click that icon or press <kbd>Ctrl</kbd> + <kbd>R</kbd> to retry editing; the shortcut is available only when editing can be retried and no retry is already pending. Detailed retry errors stay visible until dismissed or resolved. Files on read-only connections, files without write permission, archive members, and files above the configured editing limit stay read-only. Find, selection, copying, wrapping, and download remain available; Save and Replace require write access.
+
+If the edit lock is lost, Sambee stops changes and retains your draft. On retry, if the saved file has changed, choose **Use saved file** to discard your draft or **Keep my draft** to retain it against the new saved version. Keeping the draft doesn't write it; review it before saving.
+
+Click Close or press <kbd>Esc</kbd> to return directly to the file list. Escape closes an open search panel first. If you have unsaved changes, Close, Back, and navigation offer **Save**, **Discard**, or **Cancel**. A failed Save keeps the editor open with your draft. Markdown's rendered viewer and separate edit mode are unchanged.
 
 ## Markdown Code Block Languages
 

@@ -77,7 +77,9 @@ import { snapshotRegisteredDrafts } from "./draftRecovery";
 import { logger } from "./logger";
 import { sanitizeReturnPath } from "./oidcAuth";
 import { setPasswordChangeRequired } from "./passwordChange";
-import type { ContentTransferResult, TargetResolutionPolicy } from "./storageContracts";
+import { type ContentTransferResult, ExpiredEditLockError, type TargetResolutionPolicy } from "./storageContracts";
+
+export { ExpiredEditLockError } from "./storageContracts";
 
 export interface DirectorySearchOptions {
   includeDotDirectories?: boolean;
@@ -114,14 +116,6 @@ export interface CrossBackendTransferOptions {
 type ClientConfig = Pick<AxiosRequestConfig, "headers">;
 
 const EXPIRED_EDIT_LOCK_CODE = "edit_lock_lost";
-const EXPIRED_EDIT_LOCK_MESSAGE = "Lock not found or expired";
-
-export class ExpiredEditLockError extends Error {
-  constructor() {
-    super(EXPIRED_EDIT_LOCK_MESSAGE);
-    this.name = "ExpiredEditLockError";
-  }
-}
 
 function isExpiredEditLockResponse(body: string): boolean {
   try {
@@ -2302,7 +2296,7 @@ class ApiService {
     const { client, extraConfig } = await this.getClientConfig(connectionId);
     const response = await client.post<EditLockInfo>(`/browse/${segment}/lock`, undefined, {
       ...extraConfig,
-      params: { path },
+      params: { path, check_write_access: true },
     });
 
     return response.data;

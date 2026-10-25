@@ -1,5 +1,6 @@
 import type { MarkdownTreeRecord } from "./markdownPreparedTree";
 
+export const INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS = 4_096;
 export const PREPARATION_SOURCE_CHUNK_UNITS = 16_384;
 export const WORKER_PROGRESS_TIMEOUT_MS = 30_000;
 

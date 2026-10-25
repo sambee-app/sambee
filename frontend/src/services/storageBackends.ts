@@ -1,6 +1,6 @@
 import { type EditLockInfo, isApiError } from "../types";
 import api, { ExpiredEditLockError } from "./api";
-import { claimEditLockRecovery } from "./editLockRecovery";
+import { claimEditLockRecovery, EditLockUnavailableError } from "./editLockRecovery";
 import { assertLocalPreviewSupported } from "./previewPolicy";
 import type {
   ArchiveCreationOperations,
@@ -242,7 +242,13 @@ abstract class ApiStorageBackend implements StorageBackend {
       assertOwned(this.kind, item.resolvedTarget);
       if (!this.getCapabilities(item.resolvedTarget).canEditText) return { kind: "read-only" };
       const id = connectionId(item.target);
-      const recovery = await claimEditLockRecovery(id, item.path);
+      let recovery: Awaited<ReturnType<typeof claimEditLockRecovery>>;
+      try {
+        recovery = await claimEditLockRecovery(id, item.path);
+      } catch (error) {
+        if (error instanceof EditLockUnavailableError) return { kind: "locked" };
+        throw error;
+      }
       let lockInfo: EditLockInfo;
       try {
         const saved = recovery.load();
@@ -262,6 +268,8 @@ abstract class ApiStorageBackend implements StorageBackend {
         recovery.save(lockInfo);
       } catch (error) {
         await recovery.release();
+        if (isApiError(error) && error.response?.status === 409) return { kind: "locked" };
+        if (isApiError(error) && error.response?.status === 403) return { kind: "permission-denied" };
         throw error;
       }
       let lockContext = requireEditLockContext(lockInfo);
@@ -274,7 +282,7 @@ abstract class ApiStorageBackend implements StorageBackend {
             try {
               await api.writeTextWithEditLock(id, item.path, content, lockContext, { mimeType: options?.mimeType });
             } catch (error) {
-              if (!(error instanceof ExpiredEditLockError)) throw error;
+              if (!(error instanceof ExpiredEditLockError) || options?.reacquireExpiredLock === false) throw error;
 
               lockInfo = await api.acquireEditLock(id, item.path);
               lockContext = requireEditLockContext(lockInfo);

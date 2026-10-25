@@ -61,6 +61,7 @@ export interface ContentReadOptions {
 
 export interface ContentTextWriteOptions {
   mimeType?: string;
+  reacquireExpiredLock?: boolean;
 }
 
 export interface ContentEditSession {
@@ -73,6 +74,8 @@ export interface ContentEditSession {
 export type ContentEditStartResult =
   | { kind: "acquired"; session: ContentEditSession }
   | { kind: "read-only" }
+  | { kind: "locked" }
+  | { kind: "permission-denied" }
   | { kind: "unsupported" }
   | { kind: "unavailable" };
 

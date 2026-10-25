@@ -2014,7 +2014,9 @@ describe("API Service", () => {
         locked_by: "alice",
         locked_at: "2026-03-23T12:00:00Z",
       });
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith("/browse/conn1/lock", undefined, { params: { path: "/docs/readme.md" } });
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith("/browse/conn1/lock", undefined, {
+        params: { path: "/docs/readme.md", check_write_access: true },
+      });
     });
 
     it("heartbeatEditLock() refreshes the server-side lock heartbeat", async () => {
@@ -2154,7 +2156,7 @@ describe("API Service", () => {
       expect(mockAxiosInstance.post).toHaveBeenCalledWith(
         "/browse/c/lock",
         undefined,
-        expect.objectContaining({ params: { path: "/docs/readme.md" } })
+        expect.objectContaining({ params: { path: "/docs/readme.md", check_write_access: true } })
       );
       expect(mockAxiosInstance.post).toHaveBeenCalledWith(
         "/browse/c/lock/heartbeat",

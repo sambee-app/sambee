@@ -8,9 +8,13 @@ Markdown files are opened in Sambee's [Markdown viewer](../view-images-and-read-
 
 In the Markdown viewer's toolbar, click the edit icon or press <kbd>E</kbd> to switch to the Markdown editor. You edit Markdown source directly, with highlighted structure and fenced code. Highlighting doesn't change your source text or line layout.
 
+If another session holds the edit lock, a bottom-center toast explains why editing isn't available. The **Read only** badge and **Retry editing** icon remain after the informational toast closes automatically after 15 seconds. Click Retry or press <kbd>Ctrl</kbd> + <kbd>R</kbd> when the other editor is closed. Slow access checks show a small spinner beside the filename without moving the document.
+
+If the lock is lost while editing, Sambee stops changes and retains your draft. On retry, if the saved file changed, choose **Use saved file** or **Keep my draft**. Keeping your draft doesn't save it; review it before choosing Save.
+
 ## Code Colors
 
-Code blocks use the same language highlighting as the text viewer and editor. A fence's language label selects its grammar; unknown or unlabelled blocks remain plain text. Preview highlighting loads in the background and waits while you're selecting preview text. Code text, whitespace, copying, and search remain unchanged.
+Code blocks use the same language highlighting as the text editor. A fence's language label selects its grammar; unknown or unlabelled blocks remain plain text. Preview highlighting loads in the background and waits while you're selecting preview text. Code text, whitespace, copying, and search remain unchanged.
 
 See [Text File Support and Syntax Highlighting](../../reference/text-file-support-and-syntax-highlighting/) for supported languages, code block labels, and a fenced-code example.
 
@@ -32,13 +36,15 @@ Finish any input-method composition before saving. Sambee waits for table-cell e
 
 You can keep editing during an ordinary Save. Save writes the revision it captured; edits made afterward remain unsaved. If preparation or writing fails, your changes remain available in the editor.
 
+The Markdown viewer/editor and text editor show operation failures, lock-renewal warnings, and draft-recovery warnings as bottom-center toasts, without resizing the document. Errors and warnings stay until you dismiss them or the problem clears. Only one toast appears at a time, with errors first. Dismissing a toast doesn't resolve the problem or discard your changes. A failed Save inside a recovery or unsaved-changes dialog stays in that dialog instead.
+
 If Sambee must send you through OIDC sign-in while you are editing, it saves an eligible unsaved Markdown draft in this browser tab before leaving the page. See [Recover Unsaved In-Browser Edits](../recover-unsaved-edits/) for how recovery works.
 
 ## Leaving Edit Mode
 
 Click the X icon or press <kbd>Esc</kbd> to leave the Markdown editor and return to the viewer. If there are unsaved changes, choose **Save** to save them and return to the viewer, **Discard** to return without saving, or **Cancel** to keep editing. If saving fails, the editor stays open with your changes.
 
-From the viewer, click the X icon again to return to the file list. The text editor uses the same two-step close sequence.
+From the viewer, click the X icon again to return to the file list. This two-step sequence applies to Markdown only. The text editor opens directly and closes straight to the file list, with the same Save, Discard, and Cancel choices for unsaved changes.
 
 ## Print Or Save As PDF
 

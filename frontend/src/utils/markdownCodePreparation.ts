@@ -2,6 +2,7 @@ import type { Root } from "mdast";
 import { normalizeMarkdownTableCellLineBreaks } from "../components/Viewer/markdownTableCellLineBreaks";
 import { error as logError, info as logInfo } from "../services/logger";
 import {
+  INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS,
   PREPARATION_SOURCE_CHUNK_UNITS,
   type PreparationRequest,
   type PreparationResponse,
@@ -10,6 +11,7 @@ import {
 import { createMarkdownTreeReceiver } from "./markdownPreparedTree";
 
 export {
+  INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS,
   PREPARATION_SOURCE_CHUNK_UNITS,
   type PreparationRequest,
   type PreparationResponse,
@@ -163,6 +165,9 @@ export function createMarkdownEditNormalization(
 
 export async function normalizeMarkdownSource(source: string, signal: AbortSignal, onPrepared?: (tree: Root) => void): Promise<string> {
   signal.throwIfAborted();
+  if (source.length <= INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS) {
+    return normalizeMarkdownTableCellLineBreaks(source, onPrepared ? (_source, tree) => onPrepared(tree) : undefined);
+  }
   if (typeof Worker === "undefined") {
     logInfo(
       "Web Workers are unavailable; Markdown load normalization will run on the main thread",
