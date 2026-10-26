@@ -97,7 +97,12 @@ from app.services.cross_connection import (
     cross_connection_move,
     final_target_policy_check,
 )
-from app.services.history_common import LOCAL_DRIVE_PREFIX, normalize_recent_history_path
+from app.services.history_common import (
+    LOCAL_DRIVE_PREFIX,
+    directory_match_rank,
+    normalize_history_search_text,
+    normalize_recent_history_path,
+)
 from app.services.lock_manager import remove_expired_file_locks
 from app.services.recent_directories import (
     MAX_RECENT_DIRECTORY_RESULTS,
@@ -393,12 +398,12 @@ async def _verify_remote_recent_history_target(
         raise ValueError(f"Only {target_label} can be recorded in recent-{history_label} history")
 
 
-@router.post("/recent-directories", response_model=RecentDirectoryRead)
+@router.post("/recent-directories", response_model=RecentDirectoryRead | None)
 async def create_recent_directory(
     payload: RecentDirectoryRecordRequest,
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
-) -> RecentDirectoryRead:
+) -> RecentDirectoryRead | None:
     """Record a directory only after the client successfully navigated to it."""
 
     set_user(current_user.username)
@@ -453,7 +458,7 @@ async def get_recent_directories(
     set_user(current_user.username)
     return RecentDirectorySearchRead(
         results=search_recent_directories(query=q, limit=limit, current_user=current_user, session=session),
-        result_limit=min(limit, MAX_RECENT_DIRECTORY_RESULTS),
+        result_limit=get_recent_file_result_limit(limit=limit, session=session),
     )
 
 
@@ -1066,9 +1071,11 @@ async def search_directories(
         )
 
         results, total_matches = cache.search(q, include_dot_directories=include_dot_directories) if q else ([], 0)
+        normalized_query = normalize_history_search_text(q.replace("\\", "/").strip())
 
         return DirectorySearchResult(
             results=results,
+            match_ranks={path: directory_match_rank(path, normalized_query) for path in results},
             total_matches=total_matches,
             cache_state=cache.state.value,
             directory_count=cache.directory_count,

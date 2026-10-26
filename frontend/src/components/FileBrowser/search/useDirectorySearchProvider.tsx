@@ -24,7 +24,7 @@ import { logger } from "../../../services/logger";
 import { publishRecentDirectoriesChanged } from "../../../services/recentDirectoriesSync";
 import type { DirectorySearchResult, RecentDirectory } from "../../../types";
 import { normalizeQuerySeparators } from "./normalizeQuerySeparators";
-import { removeRecentHistoryResult } from "./recentHistory";
+import { historyMatchRank, rankHistorySearchResults, removeRecentHistoryResult } from "./recentHistory";
 import type { SearchProvider, SearchResult, SearchResultItem, SearchStatusInfo, SearchTextHighlight } from "./types";
 
 // ============================================================================
@@ -38,7 +38,7 @@ const DIRECTORY_SEARCH_DEBOUNCE_MS = 200;
 const DIRECTORY_MIN_QUERY_LENGTH = 2;
 
 const PATH_SEPARATOR = "/";
-const DEFAULT_RECENT_DIRECTORY_RESULT_LIMIT = 10;
+const MAX_RECENT_DIRECTORY_RESULT_LIMIT = 50;
 const RECENT_DIRECTORY_PREFIX = "recent-directory:";
 const DIRECTORY_PREFIX = "directory:";
 
@@ -210,7 +210,7 @@ export function useDirectorySearchProvider(
   const [directoryCount, setDirectoryCount] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
   const includeDotDirectories = options.includeDotDirectories ?? false;
-  const recentDirectoryResultLimit = options.resultLimit ?? DEFAULT_RECENT_DIRECTORY_RESULT_LIMIT;
+  const recentDirectoryResultLimit = options.resultLimit ?? MAX_RECENT_DIRECTORY_RESULT_LIMIT;
   const history = options.history ?? browserHistoryService;
   const recentDirectoriesRef = useRef(new Map<string, RecentDirectory>());
 
@@ -232,7 +232,7 @@ export function useDirectorySearchProvider(
   const fetchResults = useCallback(
     async (query: string, signal: AbortSignal): Promise<SearchResult[]> => {
       // Normalise backslashes to forward slashes for cross-directory search
-      const normalizedQuery = normalizeQuerySeparators(query);
+      const normalizedQuery = normalizeQuerySeparators(query).trim();
 
       try {
         const recentDirectoriesRequest = history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal);
@@ -260,44 +260,53 @@ export function useDirectorySearchProvider(
         const recentPaths = new Set(recentResponse.results.map((directory) => `${directory.connection_id}\u0000${directory.path}`));
         const directoryResults = (directorySearchResult?.results ?? [])
           .filter((path) => !recentPaths.has(`${connectionId}\u0000${path}`))
+          .slice(0, recentResponse.result_limit)
           .map((path) => ({
             kind: "result" as const,
             id: `${DIRECTORY_PREFIX}${path}`,
             value: `${DIRECTORY_PREFIX}${path}`,
             icon: "directory" as const,
+            matchRank:
+              directorySearchResult?.match_ranks?.[path] ?? historyMatchRank(path.split(PATH_SEPARATOR).at(-1) ?? path, normalizedQuery),
             ...getDirectoryResultPresentation(path, normalizedQuery),
           }));
 
-        return [
-          ...(recentResponse.results.length > 0
-            ? [
-                {
-                  kind: "group-header" as const,
-                  id: "recent-directories-group-header",
-                  value: "" as const,
-                  label: t("fileBrowser.search.groups.recentDirectories"),
-                },
-              ]
-            : []),
-          ...recentResponse.results.map((directory) => ({
-            kind: "result" as const,
-            id: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
-            value: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
-            icon: "directory" as const,
-            ...getRecentDirectoryPresentation(directory, normalizedQuery),
-          })),
-          ...(directoryResults.length > 0
-            ? [
-                {
-                  kind: "group-header" as const,
-                  id: "directories-group-header",
-                  value: "" as const,
-                  label: t("fileBrowser.search.groups.directories"),
-                },
-              ]
-            : []),
-          ...directoryResults,
-        ];
+        return rankHistorySearchResults(
+          [
+            ...(recentResponse.results.length > 0
+              ? [
+                  {
+                    kind: "group-header" as const,
+                    id: "recent-directories-group-header",
+                    value: "" as const,
+                    label: t("fileBrowser.search.groups.recentDirectories"),
+                  },
+                ]
+              : []),
+            ...recentResponse.results.map((directory) => ({
+              kind: "result" as const,
+              id: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
+              value: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
+              icon: "directory" as const,
+              matchRank:
+                directory.match_rank ?? historyMatchRank(directory.path.split(PATH_SEPARATOR).at(-1) ?? directory.path, normalizedQuery),
+              usageScore: directory.usage_score,
+              ...getRecentDirectoryPresentation(directory, normalizedQuery),
+            })),
+            ...(directoryResults.length > 0
+              ? [
+                  {
+                    kind: "group-header" as const,
+                    id: "directories-group-header",
+                    value: "" as const,
+                    label: t("fileBrowser.search.groups.directories"),
+                  },
+                ]
+              : []),
+            ...directoryResults,
+          ],
+          normalizedQuery
+        );
       } catch (error: unknown) {
         if (
           signal.aborted ||
