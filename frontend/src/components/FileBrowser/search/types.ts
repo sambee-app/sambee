@@ -51,6 +51,8 @@ export interface SearchResultItem {
   secondaryHighlight?: SearchTextHighlight;
   /** Optional keyboard shortcut badge, used by commands. */
   shortcutLabel?: string;
+  matchRank?: number;
+  usageScore?: number;
 }
 
 /** A non-selectable group label in the quick-bar result list. */

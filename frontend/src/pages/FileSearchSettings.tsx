@@ -25,11 +25,12 @@ import {
   useSystemSettingPersistence,
 } from "../hooks/useSystemSettingPersistence";
 import api from "../services/api";
+import { publishRecentDirectoriesChanged } from "../services/recentDirectoriesSync";
 import { publishRecentFilesChanged } from "../services/recentFilesSync";
 import type { FileSearchSettings as FileSearchSettingsModel, FileSearchSettingsUpdate } from "../types";
 
 const DEFAULT_SETTINGS: FileSearchSettingsModel = {
-  retention_limit: 50,
+  retention_limit: 200,
   result_limit: 10,
   excluded_categories: ["images", "temporary_backup"],
   excluded_extensions: [],
@@ -96,6 +97,9 @@ export function FileSearchSettings() {
       setConfirmedSettings((current) => ({ ...current, [result.update.field]: result.update.value }));
       setSettings((current) => ({ ...current, [result.update.field]: result.update.value }));
       publishRecentFilesChanged();
+      if (result.update.field === "retention_limit" || result.update.field === "result_limit") {
+        publishRecentDirectoriesChanged();
+      }
     }
   };
 

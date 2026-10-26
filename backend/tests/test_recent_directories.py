@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -9,11 +11,51 @@ from sqlmodel import Session
 from app.models.connection import Connection
 from app.models.file import FileInfo, FileType
 from app.models.recent_directory import RecentDirectory
+from app.models.system_settings import FileSearchSettings
 from app.models.user import User
 from app.services import recent_directories
+from app.services.history_common import history_usage_score, updated_history_usage_score
 
 
 class TestRecentDirectoriesApi:
+    def test_shared_policy_trims_both_histories_and_zero_disables_them(
+        self, client: TestClient, auth_headers_user: dict[str, str], auth_headers_admin: dict[str, str]
+    ) -> None:
+        settings = client.get("/api/admin/settings/file-search", headers=auth_headers_admin)
+        assert settings.status_code == 200
+        assert settings.json()["settings"]["retention_limit"] == 200
+        for index in range(3):
+            for endpoint, target in (("recent-files", {"is_regular_file": True}), ("recent-directories", {"is_directory": True})):
+                response = client.post(
+                    f"/api/browse/{endpoint}",
+                    headers=auth_headers_user,
+                    json={"connection_id": "local-drive:c", "path": f"item-{index}.txt", **target},
+                )
+                assert response.status_code == 200
+        for field, value in (("retention_limit", 2), ("result_limit", 1)):
+            response = client.put("/api/admin/settings/file-search", headers=auth_headers_admin, json={"field": field, "value": value})
+            assert response.status_code == 200
+        for endpoint in ("recent-files", "recent-directories"):
+            response = client.get(f"/api/browse/{endpoint}", headers=auth_headers_user, params={"limit": 50})
+            assert response.status_code == 200
+            assert response.json()["result_limit"] == 1
+            assert len(response.json()["results"]) == 1
+        response = client.put("/api/admin/settings/file-search", headers=auth_headers_admin, json={"field": "result_limit", "value": 50})
+        assert response.status_code == 200
+        for endpoint in ("recent-files", "recent-directories"):
+            assert len(client.get(f"/api/browse/{endpoint}", headers=auth_headers_user, params={"limit": 50}).json()["results"]) == 2
+        response = client.put("/api/admin/settings/file-search", headers=auth_headers_admin, json={"field": "retention_limit", "value": 0})
+        assert response.status_code == 200
+        for endpoint, target in (("recent-files", {"is_regular_file": True}), ("recent-directories", {"is_directory": True})):
+            assert client.get(f"/api/browse/{endpoint}", headers=auth_headers_user).json()["results"] == []
+            response = client.post(
+                f"/api/browse/{endpoint}",
+                headers=auth_headers_user,
+                json={"connection_id": "local-drive:c", "path": "disabled.txt", **target},
+            )
+            assert response.status_code == 200
+            assert response.json() is None
+
     @pytest.fixture(autouse=True)
     def mock_remote_target(self, monkeypatch: MonkeyPatch) -> None:
         import app.api.browser as browser_api
@@ -116,10 +158,41 @@ class TestRecentDirectoriesApi:
 
 
 class TestRecentDirectoryService:
+    def test_frequency_decay_and_duplicate_events(self) -> None:
+        now = datetime.now(timezone.utc)
+        assert history_usage_score(8, now - timedelta(days=30), now) == pytest.approx(4)
+        assert updated_history_usage_score(8, now, now) == 8
+        assert updated_history_usage_score(8, now - timedelta(minutes=1), now) > 8
+
+    def test_ranks_match_quality_before_frequency_then_recency(self, session: Session, regular_user: User) -> None:
+        now = datetime.now(timezone.utc)
+        for path, score, age in (("report-old", 8, 1), ("report-new", 1, 0), ("report", 1, 2)):
+            session.add(
+                RecentDirectory(
+                    user_id=regular_user.id,
+                    connection_id="local-drive:c",
+                    path=path,
+                    usage_score=score,
+                    last_visited_at=now - timedelta(days=age),
+                )
+            )
+        session.commit()
+        results = recent_directories.search_recent_directories(query="report", limit=10, current_user=regular_user, session=session)
+        assert [record.path for record in results] == ["report", "report-old", "report-new"]
+
+    def test_zero_retention_disables_recording(self, session: Session, regular_user: User, monkeypatch: MonkeyPatch) -> None:
+        monkeypatch.setattr(recent_directories, "get_file_search_settings", lambda _session: FileSearchSettings(retention_limit=0))
+        assert (
+            recent_directories.record_recent_directory(
+                connection_id="local-drive:c", path="Projects", current_user=regular_user, session=session
+            )
+            is None
+        )
+
     def test_upserts_normalizes_matches_and_trims_each_users_history(
         self, session: Session, regular_user: User, monkeypatch: MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(recent_directories, "DEFAULT_RECENT_DIRECTORY_RETENTION_LIMIT", 2)
+        monkeypatch.setattr(recent_directories, "get_file_search_settings", lambda _session: FileSearchSettings(retention_limit=2))
 
         first = recent_directories.record_recent_directory(
             connection_id="local-drive:c", path="Café\\Résumé", current_user=regular_user, session=session
@@ -134,6 +207,7 @@ class TestRecentDirectoryService:
             connection_id="local-drive:c", path="Archive", current_user=regular_user, session=session
         )
 
+        assert refreshed_first is not None and first is not None
         assert refreshed_first.id == first.id
         assert [
             record.path
@@ -171,7 +245,7 @@ class TestRecentDirectoryService:
 
         results = recent_directories.search_recent_directories(query="", limit=100, current_user=regular_user, session=session)
 
-        assert len(results) == recent_directories.MAX_RECENT_DIRECTORY_RESULTS
+        assert len(results) == FileSearchSettings().result_limit
         assert all(record.path != "Private" for record in results)
 
     def test_refuses_to_remove_another_users_record(self, session: Session, regular_user: User, admin_user: User) -> None:

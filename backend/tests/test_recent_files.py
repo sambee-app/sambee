@@ -1,11 +1,58 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
+from sqlmodel import Session
 
 from app.models.connection import Connection
 from app.models.file import FileInfo, FileType
+from app.models.recent_file import RecentFile
+from app.models.user import User
+from app.services import recent_files
+
+
+class TestRecentFileService:
+    def test_ranks_quality_before_decaying_frequency(self, session: Session, regular_user: User) -> None:
+        now = datetime.now(timezone.utc)
+        for name, score, age in (("report-old.txt", 8, 1), ("report-new.txt", 1, 0), ("report", 1, 2), ("report-stale.txt", 8, 120)):
+            session.add(
+                RecentFile(
+                    user_id=regular_user.id,
+                    connection_id="local-drive:c",
+                    path=name,
+                    file_name=name,
+                    usage_score=score,
+                    last_opened_at=now - timedelta(days=age),
+                )
+            )
+        session.commit()
+        results = recent_files.search_recent_files(query="report", limit=10, current_user=regular_user, session=session)
+        assert [record.file_name for record in results] == ["report", "report-old.txt", "report-new.txt", "report-stale.txt"]
+
+    def test_counts_a_later_open_but_not_a_rapid_duplicate(self, session: Session, regular_user: User) -> None:
+        record = RecentFile(
+            user_id=regular_user.id,
+            connection_id="local-drive:c",
+            path="report.txt",
+            file_name="report.txt",
+            usage_score=5,
+            last_opened_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        session.add(record)
+        session.commit()
+        first = recent_files.record_recent_file(
+            connection_id="local-drive:c", path=record.path, is_regular_file=True, current_user=regular_user, session=session
+        )
+        second = recent_files.record_recent_file(
+            connection_id="local-drive:c", path=record.path, is_regular_file=True, current_user=regular_user, session=session
+        )
+        assert first is not None and second is not None
+        assert first.id == second.id == record.id
+        assert first.usage_score > 5
+        assert second.usage_score == pytest.approx(first.usage_score)
 
 
 class TestRecentFilesApi:
