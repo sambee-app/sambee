@@ -98,6 +98,7 @@ import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge, typ
 import {
   useViewerLockNotice,
   useViewerOperationError,
+  VIEWER_EDIT_HEARTBEAT_FAILURE_THRESHOLD,
   VIEWER_EDIT_HEARTBEAT_MS,
   ViewerEditAcquisitionStatus,
   type ViewerNotice,
@@ -834,9 +835,9 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   const filenameAdornment = (
     <Box sx={{ display: "flex", alignItems: "center", gap: isMobile ? 0.75 : 1 }}>
-      <ViewerEditAcquisitionStatus acquiring={isAcquiring && !isTransitioning} />
       {unsavedChangesIndicator}
       {readOnlyIndicator}
+      <ViewerEditAcquisitionStatus acquiring={isAcquiring && !isTransitioning} />
     </Box>
   );
 
@@ -866,10 +867,15 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     }
 
     let active = true;
+    let pending = false;
+    let consecutiveFailures = 0;
     const intervalId = window.setInterval(() => {
+      if (!active || pending) return;
+      pending = true;
       void editSession
         .heartbeat()
         .then(() => {
+          consecutiveFailures = 0;
           if (active) setHeartbeatWarning(false);
         })
         .catch((err) => {
@@ -879,9 +885,13 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
             setReadOnlyReason(err instanceof ExpiredEditLockError ? "lost" : "permission-denied");
             void releaseEditSession();
           } else {
-            setHeartbeatWarning(true);
+            consecutiveFailures += 1;
+            setHeartbeatWarning(consecutiveFailures >= VIEWER_EDIT_HEARTBEAT_FAILURE_THRESHOLD);
           }
           logError("Failed to refresh markdown edit lock", { error: err, path, connectionId });
+        })
+        .finally(() => {
+          pending = false;
         });
     }, VIEWER_EDIT_HEARTBEAT_MS);
 

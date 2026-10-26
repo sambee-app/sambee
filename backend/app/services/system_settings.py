@@ -345,9 +345,11 @@ def update_file_search_settings(
     next_settings = FileSearchSettings.model_validate(next_settings)
 
     if next_settings.retention_limit < current.retention_limit:
+        from app.services.recent_directories import trim_all_recent_directories
         from app.services.recent_files import trim_all_recent_files
 
         trim_all_recent_files(retention_limit=next_settings.retention_limit, session=session)
+        trim_all_recent_directories(retention_limit=next_settings.retention_limit, session=session)
 
     value = getattr(next_settings, payload.field)
     serialized_value = _encode_string_set(value) if isinstance(value, set) else str(value)
