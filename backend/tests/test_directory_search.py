@@ -148,6 +148,39 @@ class TestSearchDirectories:
         assert data["total_matches"] > 0
         assert all("documents" in r.lower() for r in data["results"])
 
+    @pytest.mark.parametrize(
+        ("query", "paths", "expected_ranks"),
+        [
+            ("  STRASSE  ", ["Stra\u00dfe", "strasse-extra"], {"Stra\u00dfe": 0, "strasse-extra": 1}),
+            ("resume", ["R\u00e9sum\u00e9", "resume-extra"], {"R\u00e9sum\u00e9": 0, "resume-extra": 1}),
+            (r"Stra\child", ["Stra/child", "Stra/child/nested"], {"Stra/child": 3, "Stra/child/nested": 3}),
+        ],
+    )
+    def test_search_returns_server_match_ranks(
+        self,
+        client: TestClient,
+        auth_headers_user: dict,
+        test_connection: Connection,
+        mock_cache_manager,
+        mock_cache: ConnectionDirectoryCache,
+        query: str,
+        paths: list[str],
+        expected_ranks: dict[str, int],
+    ):
+        """Expose the cache's Unicode-aware ranks for cross-source merging."""
+        mock_cache.add_directories(paths)
+
+        response = client.get(
+            f"/api/browse/{test_connection.id}/directories",
+            headers=auth_headers_user,
+            params={"q": query},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["results"] == paths
+        assert data["match_ranks"] == expected_ranks
+
     def test_search_empty_query(
         self,
         client: TestClient,
@@ -166,6 +199,7 @@ class TestSearchDirectories:
         assert response.status_code == 200
         data = response.json()
         assert data["results"] == []
+        assert data["match_ranks"] == {}
         assert data["total_matches"] == 0
 
     def test_search_no_query_param(
@@ -299,7 +333,7 @@ class TestSearchDirectories:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["results"] == ["projects/.cache", "projects/visible-cache"]
+        assert data["results"] == ["projects/visible-cache", "projects/.cache"]
         assert data["total_matches"] == 2
 
     def test_search_triggers_cache_creation(

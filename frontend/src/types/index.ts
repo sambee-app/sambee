@@ -281,6 +281,8 @@ export interface RecentFile {
   path: string;
   file_name: string;
   last_opened_at: string;
+  usage_score?: number;
+  match_rank?: number;
 }
 
 export interface RecentFileSearchResponse {
@@ -293,6 +295,8 @@ export interface RecentDirectory {
   connection_id: string;
   path: string;
   last_visited_at: string;
+  usage_score?: number;
+  match_rank?: number;
 }
 
 export interface RecentDirectorySearchResponse {
@@ -552,6 +556,7 @@ export interface LocalLinkTargetListing {
 
 export interface DirectorySearchResult {
   results: string[];
+  match_ranks?: Record<string, number>;
   total_matches: number;
   cache_state: "empty" | "building" | "ready" | "updating";
   directory_count: number;

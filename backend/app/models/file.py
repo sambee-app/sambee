@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class FileType(StrEnum):
@@ -146,6 +146,7 @@ class DirectorySearchResult(BaseModel):
     """Response model for directory search (quick navigate)."""
 
     results: List[str]
+    match_ranks: dict[str, int] = Field(default_factory=dict)
     total_matches: int
     cache_state: str
     directory_count: int

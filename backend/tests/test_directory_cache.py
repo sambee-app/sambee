@@ -213,6 +213,13 @@ class TestConnectionDirectoryCacheInit:
 class TestSearch:
     """Tests for the search method."""
 
+    def test_word_boundary_ranks_before_substring_and_normalizes_accents(self, cache: ConnectionDirectoryCache):
+        cache.add_directories(["xreport", "annual-report", "report", "Résumé"])
+        matches, count = cache.search("report")
+        assert matches == ["report", "annual-report", "xreport"]
+        assert count == 3
+        assert cache.search("resume")[0] == ["Résumé"]
+
     def test_empty_query_returns_empty(self, populated_cache: ConnectionDirectoryCache):
         """Empty query should return no results."""
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unicodedata
 import uuid
+from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
 from sqlmodel import Session
@@ -10,11 +11,46 @@ from app.models.user import User
 from app.services.connection_access import get_accessible_connection_or_404
 
 LOCAL_DRIVE_PREFIX = "local-drive:"
+HISTORY_SCORE_HALF_LIFE_SECONDS = 30 * 24 * 60 * 60
+HISTORY_REPEAT_INTERVAL_SECONDS = 60
+HISTORY_SUBSTRING_MATCH_RANK = 3
+
+
+def history_usage_score(score: float, last_used: datetime, now: datetime) -> float:
+    """Decay frequency over thirty days, including SQLite's naive UTC dates."""
+    elapsed = max(0.0, (now - last_used.replace(tzinfo=timezone.utc)).total_seconds())
+    return score * 2 ** (-elapsed / HISTORY_SCORE_HALF_LIFE_SECONDS)
+
+
+def updated_history_usage_score(score: float, last_used: datetime, now: datetime) -> float:
+    """Do not count rapid duplicate events as additional use."""
+    elapsed = (now - last_used.replace(tzinfo=timezone.utc)).total_seconds()
+    return history_usage_score(score, last_used, now) + (1 if elapsed >= HISTORY_REPEAT_INTERVAL_SECONDS else 0)
 
 
 def normalize_history_search_text(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value)
     return "".join(character for character in decomposed if not unicodedata.combining(character)).casefold()
+
+
+def history_match_rank(normalized_name: str, normalized_query: str) -> int | None:
+    """Rank an exact name, prefix, word boundary, then substring match."""
+    if not normalized_query:
+        return 3
+    if normalized_name == normalized_query:
+        return 0
+    if normalized_name.startswith(normalized_query):
+        return 1
+    for index, character in enumerate(normalized_name):
+        if index > 0 and not character.isalnum() and normalized_name[index + 1 :].startswith(normalized_query):
+            return 2
+    return 3 if normalized_query in normalized_name else None
+
+
+def directory_match_rank(path: str, normalized_query: str) -> int:
+    """Rank a directory basename, with parent-path matches in the substring tier."""
+    rank = history_match_rank(normalize_history_search_text(path.rsplit("/", 1)[-1]), normalized_query)
+    return HISTORY_SUBSTRING_MATCH_RANK if rank is None else rank
 
 
 def normalize_recent_history_path(path: str) -> str:

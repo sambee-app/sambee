@@ -678,7 +678,7 @@ export const EN_TRANSLATIONS = {
       loadFailed: "Could not load File Search settings.",
       saveFailed: "Could not save File Search settings.",
       resetFailed: "Could not reset File Search settings.",
-      retentionLimit: "Recent files to retain",
+      retentionLimit: "Recent files and directories to retain",
       retentionLimitError: "Enter a whole number from 0 to 500.",
       resultLimit: "Results per group",
       resultLimitError: "Enter a whole number from 1 to 50.",
