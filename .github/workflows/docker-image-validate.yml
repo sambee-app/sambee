@@ -37,6 +37,7 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - 'scripts/install-system-deps'
+      - 'scripts/bootstrap-build-pip.py'
   pull_request:
     branches: [ main ]
     paths:
@@ -70,6 +71,7 @@ on:
       - 'backend/**'
       - 'frontend/**'
       - 'scripts/install-system-deps'
+      - 'scripts/bootstrap-build-pip.py'
   workflow_dispatch:
 
 concurrency:
@@ -215,6 +217,27 @@ jobs:
           test -w /app/data
           test -x /app/scripts/preflight-archive-v2-cutover
           test -x /app/scripts/reset-archive-v2-cutover-state
+        '
+
+    - name: Verify production packaging tools are absent
+      shell: bash
+      run: |
+        docker exec sambee-smoke-${{ matrix.platform_id }} python -c '
+        import importlib.util
+        import pathlib
+        import sys
+        import sysconfig
+
+        modules = ("pip", "ensurepip")
+        remaining = [name for name in modules if importlib.util.find_spec(name) is not None]
+        remaining.extend(str(path) for path in pathlib.Path(sysconfig.get_path("scripts")).glob("pip*"))
+        remaining.extend(str(path) for path in pathlib.Path(sysconfig.get_path("purelib")).glob("pip-*.dist-info"))
+        bootstrap = pathlib.Path(sysconfig.get_path("stdlib")) / "ensurepip"
+        if bootstrap.exists():
+            remaining.append(str(bootstrap))
+        if remaining:
+            sys.exit("Production packaging tools remain: " + ", ".join(remaining))
+        print("Production pip, launchers, metadata, and ensurepip are absent.")
         '
 
     - name: Report production runtime contract

@@ -176,6 +176,7 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 - Updated all **dependencies** with known issues or vulnerabilities to fixed versions.
 - Pinned all third-party GitHub Actions workflows to commit SHAs.
 - Frontend: removed `patch-package` to get rid of vulnerable transisitve dependency `braces`.
+- Backend: PIP is now upgraded before use and uninstalled from the Docker image afterwards.
 
 ### Frontend Type Correctness
 

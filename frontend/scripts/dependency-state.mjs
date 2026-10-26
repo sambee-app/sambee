@@ -3,17 +3,19 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const FRONTEND_ROOT = new URL("../", import.meta.url);
+const [mode, project = "frontend", ...extraArguments] = process.argv.slice(2);
+const PROJECT_ROOT = project === "companion" ? new URL("../../companion/", import.meta.url) : FRONTEND_ROOT;
 const STAMP_PATH = new URL("node_modules/.dependencies.sha256", FRONTEND_ROOT);
 const DEPENDENCY_INPUTS = ["package.json", "package-lock.json"];
-const RECOVERY_MESSAGE = "Run cd frontend && npm ci from the repository root to restore frontend dependencies.";
+const RECOVERY_MESSAGE = `Run cd ${project} && npm ci from the repository root to restore ${project} dependencies.`;
 const BIOME_PACKAGE = "@biomejs/biome";
 const BIOME_PACKAGE_PATH = `node_modules/${BIOME_PACKAGE}`;
-const BIOME_CONFIGS = ["../biome.json", "biome.json"];
+const BIOME_CONFIGS = project === "companion" ? ["../biome.json", "../frontend/biome.json", "biome.json"] : ["../biome.json", "biome.json"];
 const VALID_MODES = new Set(["--clear", "--write", "--check", "--check-biome"]);
 
 async function readJson(filename) {
   try {
-    return JSON.parse(await readFile(new URL(filename, FRONTEND_ROOT), "utf8"));
+    return JSON.parse(await readFile(new URL(filename, PROJECT_ROOT), "utf8"));
   } catch (error) {
     throw new Error(`Cannot read ${filename}. Restore a valid JSON file before running lint.`, { cause: error });
   }
@@ -23,7 +25,7 @@ async function checkBiome() {
   const lockfile = await readJson("package-lock.json");
   const version = lockfile?.packages?.[BIOME_PACKAGE_PATH]?.version;
   if (typeof version !== "string" || !version) {
-    throw new Error(`package-lock.json has no locked ${BIOME_PACKAGE} version. Restore the frontend lockfile.`);
+    throw new Error(`package-lock.json has no locked ${BIOME_PACKAGE} version. Restore the ${project} lockfile.`);
   }
   const manifest = await readJson("package.json");
   if (manifest?.devDependencies?.[BIOME_PACKAGE] !== version) {
@@ -57,9 +59,13 @@ async function dependencyHash() {
 }
 
 async function main() {
-  const [mode, ...extraArguments] = process.argv.slice(2);
-  if (!VALID_MODES.has(mode) || extraArguments.length > 0) {
-    throw new Error("Usage: node scripts/dependency-state.mjs --clear|--write|--check|--check-biome");
+  if (
+    !VALID_MODES.has(mode) ||
+    extraArguments.length > 0 ||
+    !["frontend", "companion"].includes(project) ||
+    (project !== "frontend" && mode !== "--check-biome")
+  ) {
+    throw new Error("Usage: node scripts/dependency-state.mjs --clear|--write|--check|--check-biome [frontend|companion]");
   }
 
   if (mode === "--check-biome") {
@@ -96,7 +102,7 @@ async function main() {
 try {
   await main();
 } catch (error) {
-  console.error(`Frontend dependency validation failed: ${error instanceof Error ? error.message : String(error)}`);
+  console.error(`${project === "companion" ? "Companion" : "Frontend"} dependency validation failed: ${error instanceof Error ? error.message : String(error)}`);
   console.error(RECOVERY_MESSAGE);
   process.exitCode = 1;
 }
