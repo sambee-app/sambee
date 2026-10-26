@@ -44,6 +44,25 @@ install. This check detects changed dependency inputs, not arbitrary damage to
 installed packages. If individual packages are missing despite a matching stamp,
 run `npm ci` again.
 
+### Biome Version Alignment
+
+`npm run lint` in `frontend/` and `companion/` checks the Biome version before
+linting source files. Each check requires an exact `@biomejs/biome` pin that
+matches the lockfile, installed package, and configuration schemas. The companion
+check also validates the shared frontend and repository-root schemas.
+
+To run the checks separately from the repository root:
+
+```bash
+npm --prefix frontend run check:biome
+npm --prefix companion run check:biome
+```
+
+Keep both projects on the same Biome version because they share configuration.
+Update both package pins, regenerate their lockfiles with npm, and migrate the
+configuration schemas together. If only the installed version is stale, run
+`npm ci` in the affected project. These checks do not install dependencies.
+
 ### Backend Dependency Updates
 
 For routine Dependabot backend dependency-update pull requests:

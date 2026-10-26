@@ -89,17 +89,25 @@ describe("frontend dependency freshness", () => {
     expect(result.stderr).toContain("Usage:");
   });
 
-  describe("Biome version alignment", () => {
+  describe.each(["frontend", "companion"])("%s Biome version alignment", (project) => {
     const version = "2.6.2";
     const schema = `https://biomejs.dev/schemas/${version}/schema.json`;
     const installedPackage = "node_modules/@biomejs/biome/package.json";
+    const configs = project === "companion" ? ["../biome.json", "../frontend/biome.json", "biome.json"] : ["../biome.json", "biome.json"];
+
+    function run(mode: string) {
+      const arguments_ = mode === "--check-biome" ? [project] : [];
+      return spawnSync(process.execPath, [script, mode, ...arguments_], { cwd: tmpdir(), encoding: "utf8" });
+    }
 
     beforeEach(() => {
+      root = join(workspace, project);
+      mkdirSync(root, { recursive: true });
       writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { "@biomejs/biome": version } }));
       writeFileSync(join(root, "package-lock.json"), JSON.stringify({ packages: { "node_modules/@biomejs/biome": { version } } }));
       mkdirSync(join(root, "node_modules/@biomejs/biome"), { recursive: true });
       writeFileSync(join(root, installedPackage), JSON.stringify({ version }));
-      for (const filename of ["../biome.json", "biome.json"]) {
+      for (const filename of configs) {
         writeFileSync(join(root, filename), JSON.stringify({ $schema: schema }));
       }
     });
@@ -108,7 +116,7 @@ describe("frontend dependency freshness", () => {
       expect(run("--check-biome").status).toBe(0);
     });
 
-    it.each(["../biome.json", "biome.json"])("rejects a schema mismatch in %s", (filename) => {
+    it.each(configs)("rejects a schema mismatch in %s", (filename) => {
       writeFileSync(join(root, filename), JSON.stringify({ $schema: "https://biomejs.dev/schemas/2.3.4/schema.json" }));
       const result = run("--check-biome");
       expect(result.status).toBe(1);
@@ -123,7 +131,7 @@ describe("frontend dependency freshness", () => {
       const result = run("--check-biome");
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("Installed Biome version 2.5.15 does not match locked version");
-      expect(result.stderr).toContain(RECOVERY_COMMAND);
+      expect(result.stderr).toContain(`cd ${project} && npm ci`);
     });
 
     it("rejects a package pin that differs from the locked version", () => {
@@ -148,6 +156,16 @@ describe("frontend dependency freshness", () => {
     });
   });
 
+  it.each([
+    ["--check-biome", "unknown"],
+    ["--write", "companion"],
+    ["--check-biome", "companion", "extra"],
+  ])("rejects invalid arguments %s %s", (...arguments_) => {
+    const result = spawnSync(process.execPath, [script, ...arguments_], { encoding: "utf8" });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Usage:");
+  });
+
   it("wires stamping after setup and validation before the expensive test stages", () => {
     const { scripts } = JSON.parse(readFileSync(join(FRONTEND_ROOT, "package.json"), "utf8"));
     expect(scripts.preinstall).toBe("node scripts/dependency-state.mjs --clear");
@@ -155,6 +173,9 @@ describe("frontend dependency freshness", () => {
     expect(scripts["check:dependencies"]).toBe("node scripts/dependency-state.mjs --check");
     expect(scripts["check:biome"]).toBe("node scripts/dependency-state.mjs --check-biome");
     expect(scripts.prelint).toBe("npm run check:dependencies && npm run check:biome");
+    const { scripts: companionScripts } = JSON.parse(readFileSync(join(FRONTEND_ROOT, "../companion/package.json"), "utf8"));
+    expect(companionScripts["check:biome"]).toBe("node ../frontend/scripts/dependency-state.mjs --check-biome companion");
+    expect(companionScripts.prelint).toBe("npm run check:biome");
     const runner = readFileSync(join(FRONTEND_ROOT, "../scripts/test"), "utf8");
     const checkPosition = runner.indexOf('node "$REPO_ROOT/frontend/scripts/dependency-state.mjs" --check');
     expect(checkPosition).toBeGreaterThan(0);
