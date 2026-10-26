@@ -580,6 +580,7 @@ describe("TextEditor", () => {
     });
     expect(getFileContentSpy).not.toHaveBeenCalled();
     expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(screen.getByTestId("text-editor-acquisition-slot").previousElementSibling).toContainElement(screen.getByText("Read only"));
     expect(screen.queryByRole("button", { name: /^edit$/i })).not.toBeInTheDocument();
     expect(acquireLockSpy).not.toHaveBeenCalled();
   });
@@ -1051,22 +1052,51 @@ describe("TextEditor", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
-  it("warns on a transient heartbeat failure without discarding the session and clears the warning on recovery", async () => {
+  it("silently retries transient heartbeats and warns only after consecutive failures", async () => {
     const interval = vi.spyOn(window, "setInterval");
-    vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValueOnce(new Error("Connection interrupted")).mockResolvedValue(undefined);
+    const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValue(new Error("Connection interrupted"));
     renderViewer();
     const editor = await enterEditMode();
     fireEvent.change(editor, { target: { value: "draft during disconnection" } });
     const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
     if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
     await act(async () => heartbeat());
+    expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+    heartbeatRequest.mockResolvedValueOnce(undefined);
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
+    expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+    await act(async () => heartbeat());
     expect(await screen.findByText(/Could not refresh the edit lock/)).toBeInTheDocument();
     expect(editor).not.toHaveAttribute("readonly");
     expect(editor).toHaveValue("draft during disconnection");
     expect(apiService.releaseEditLock).not.toHaveBeenCalled();
     expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1);
+    heartbeatRequest.mockResolvedValue(undefined);
     await act(async () => heartbeat());
     await waitFor(() => expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument());
+  });
+
+  it("does not overlap heartbeat requests", async () => {
+    const interval = vi.spyOn(window, "setInterval");
+    let finish!: () => void;
+    const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderViewer();
+    await enterEditMode();
+    const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+    if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
+    expect(heartbeatRequest).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+    await act(async () => heartbeat());
+    expect(heartbeatRequest).toHaveBeenCalledTimes(2);
   });
 
   it.each(["pagehide", "registered"])("captures current editor text before React publication on %s", async (trigger) => {
@@ -1142,6 +1172,9 @@ describe("TextEditor", () => {
     await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveValue("local draft"));
     expect(screen.getByRole("status", { name: /unsaved changes/i })).toBeInTheDocument();
+    expect(screen.getByTestId("text-editor-acquisition-slot").previousElementSibling).toBe(
+      screen.getByRole("status", { name: /unsaved changes/i })
+    );
     userIdSpy.mockRestore();
   });
 

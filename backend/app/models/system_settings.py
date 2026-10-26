@@ -161,7 +161,7 @@ FILE_SEARCH_EXTENSION_MAX_LENGTH = 255
 
 
 class FileSearchSettings(SQLModel):
-    retention_limit: int = Field(default=50, ge=0, le=500)
+    retention_limit: int = Field(default=200, ge=0, le=500)
     result_limit: int = Field(default=10, ge=1, le=50)
     excluded_categories: set[str] = Field(default_factory=lambda: {"images", "temporary_backup"})
     excluded_extensions: set[str] = Field(default_factory=set)

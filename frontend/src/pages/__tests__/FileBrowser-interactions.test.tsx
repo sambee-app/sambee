@@ -2616,7 +2616,7 @@ describe("Browser Component - Interactions", () => {
       await user.type(quickBarInput, "e");
 
       expect(await screen.findByText(/No results found for/i)).toHaveTextContent("e");
-      expect(api.searchRecentDirectories).toHaveBeenCalledWith("e", 10, expect.any(AbortSignal));
+      expect(api.searchRecentDirectories).toHaveBeenCalledWith("e", 50, expect.any(AbortSignal));
     });
 
     it("always shows the current quick-bar mode pill", async () => {
@@ -2722,7 +2722,7 @@ describe("Browser Component - Interactions", () => {
       await user.keyboard("{Control>}k{/Control}");
       await screen.findByPlaceholderText("Navigate to any directory");
       await waitFor(() => {
-        expect(api.searchRecentDirectories).toHaveBeenCalledWith("", 10, expect.any(AbortSignal));
+        expect(api.searchRecentDirectories).toHaveBeenCalledWith("", 50, expect.any(AbortSignal));
       });
 
       const callsBeforeRefresh = vi.mocked(api.searchRecentDirectories).mock.calls.length;
