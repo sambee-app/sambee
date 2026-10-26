@@ -406,7 +406,7 @@ describe("Viewer API Contract Tests", () => {
     });
   });
 
-  describe("Contract Tests - GET /viewer/{connection_id}/file (PDF Blob)", () => {
+  describe("Contract Tests - PDF viewer request timeout", () => {
     it("uses the bounded PDF viewer timeout", async () => {
       mockAxiosInstance.get.mockResolvedValueOnce({
         data: new ArrayBuffer(128),

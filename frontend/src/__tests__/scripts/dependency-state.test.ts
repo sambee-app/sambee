@@ -9,12 +9,15 @@ const HELPER_PATH = join(FRONTEND_ROOT, "scripts/dependency-state.mjs");
 const RECOVERY_COMMAND = "cd frontend && npm ci";
 
 describe("frontend dependency freshness", () => {
+  let workspace: string;
   let root: string;
   let script: string;
   let stamp: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "sambee-dependencies-"));
+    workspace = mkdtempSync(join(tmpdir(), "sambee-dependencies-"));
+    root = join(workspace, "frontend");
+    mkdirSync(root);
     mkdirSync(join(root, "scripts"));
     mkdirSync(join(root, "node_modules"));
     script = join(root, "scripts/dependency-state.mjs");
@@ -25,7 +28,7 @@ describe("frontend dependency freshness", () => {
   });
 
   afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(workspace, { recursive: true, force: true });
   });
 
   function run(mode: string) {
@@ -86,11 +89,72 @@ describe("frontend dependency freshness", () => {
     expect(result.stderr).toContain("Usage:");
   });
 
+  describe("Biome version alignment", () => {
+    const version = "2.6.2";
+    const schema = `https://biomejs.dev/schemas/${version}/schema.json`;
+    const installedPackage = "node_modules/@biomejs/biome/package.json";
+
+    beforeEach(() => {
+      writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { "@biomejs/biome": version } }));
+      writeFileSync(join(root, "package-lock.json"), JSON.stringify({ packages: { "node_modules/@biomejs/biome": { version } } }));
+      mkdirSync(join(root, "node_modules/@biomejs/biome"), { recursive: true });
+      writeFileSync(join(root, installedPackage), JSON.stringify({ version }));
+      for (const filename of ["../biome.json", "biome.json"]) {
+        writeFileSync(join(root, filename), JSON.stringify({ $schema: schema }));
+      }
+    });
+
+    it("accepts matching versions without an installation stamp", () => {
+      expect(run("--check-biome").status).toBe(0);
+    });
+
+    it.each(["../biome.json", "biome.json"])("rejects a schema mismatch in %s", (filename) => {
+      writeFileSync(join(root, filename), JSON.stringify({ $schema: "https://biomejs.dev/schemas/2.3.4/schema.json" }));
+      const result = run("--check-biome");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`${filename} must use schema ${schema}`);
+      expect(result.stderr).toContain("biome migrate --write");
+    });
+
+    it("rejects an installed version mismatch even with a current stamp", () => {
+      expect(run("--write").status).toBe(0);
+      writeFileSync(join(root, installedPackage), JSON.stringify({ version: "2.5.15" }));
+      expect(run("--check").status).toBe(0);
+      const result = run("--check-biome");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Installed Biome version 2.5.15 does not match locked version");
+      expect(result.stderr).toContain(RECOVERY_COMMAND);
+    });
+
+    it("rejects a package pin that differs from the locked version", () => {
+      writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { "@biomejs/biome": "2.5.15" } }));
+      expect(run("--check-biome").stderr).toContain("Pin @biomejs/biome in package.json");
+    });
+
+    it("rejects a missing locked Biome version", () => {
+      writeFileSync(join(root, "package-lock.json"), "{}");
+      const result = run("--check-biome");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("has no locked @biomejs/biome version");
+    });
+
+    it.each(["biome.json", installedPackage])("rejects missing or invalid JSON in %s", (filename) => {
+      rmSync(join(root, filename));
+      expect(run("--check-biome").status).toBe(1);
+      writeFileSync(join(root, filename), "invalid");
+      const result = run("--check-biome");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`Cannot read ${filename}`);
+    });
+  });
+
   it("wires stamping after setup and validation before the expensive test stages", () => {
     const { scripts } = JSON.parse(readFileSync(join(FRONTEND_ROOT, "package.json"), "utf8"));
     expect(scripts.preinstall).toBe("node scripts/dependency-state.mjs --clear");
     expect(scripts.postinstall).toMatch(/&& node scripts\/dependency-state.mjs --write$/);
     expect(scripts["check:dependencies"]).toBe("node scripts/dependency-state.mjs --check");
+    expect(scripts["check:biome"]).toBe("node scripts/dependency-state.mjs --check-biome");
+    expect(scripts.prelint).toBe("npm run check:dependencies && npm run check:biome");
     const runner = readFileSync(join(FRONTEND_ROOT, "../scripts/test"), "utf8");
     const checkPosition = runner.indexOf('node "$REPO_ROOT/frontend/scripts/dependency-state.mjs" --check');
     expect(checkPosition).toBeGreaterThan(0);

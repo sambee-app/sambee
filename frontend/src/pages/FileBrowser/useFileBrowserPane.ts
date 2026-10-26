@@ -1789,7 +1789,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
       if (useImageGallery) {
         const imageIndex = galleryImages.indexOf(filePath);
-        const effectiveIndex = imageIndex >= 0 ? imageIndex : 0;
+        const effectiveIndex = Math.max(imageIndex, 0);
         currentViewIndexRef.current = effectiveIndex;
         currentViewImagesRef.current = galleryImages;
         lastDisplayedImagePathRef.current = null;
