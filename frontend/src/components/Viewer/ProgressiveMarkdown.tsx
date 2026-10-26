@@ -240,11 +240,13 @@ export function ProgressiveMarkdown({
   const [complete, setComplete] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const Stage = useMemo(() => {
+    // biome-ignore lint/correctness/noComponentHookFactories: The memoized component identity resets batches only when the publication changes.
     const Batch = memo(({ children }: { children: RootContent[] }) => (
       <ReactMarkdown components={components} rehypePlugins={[[injectTree, children]]}>
         {""}
       </ReactMarkdown>
     ));
+    // biome-ignore lint/correctness/noComponentHookFactories: Slot state belongs to this publication and must reset when the memoized stage changes.
     const SlotComponent = ({ node }: { node: Element }) => {
       const slot = publication.slots.get(Number(node.properties["stageId"]))!;
       const [batches, setBatches] = useState(() => {

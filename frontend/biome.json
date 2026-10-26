@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.3.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.2/schema.json",
   "root": false,
   "vcs": {
     "enabled": true,
@@ -18,7 +18,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "complexity": {
         "useLiteralKeys": "off"
       },
@@ -45,6 +45,20 @@
     }
   },
   "overrides": [
+    {
+      "includes": [
+        "src/**/__tests__/**",
+        "src/test/**"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noComponentHookFactories": "off",
+            "noPlaywrightMissingAwait": "off"
+          }
+        }
+      }
+    },
     {
       "includes": [
         "src/components/CompactBadge.tsx"
