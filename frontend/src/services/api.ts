@@ -973,8 +973,8 @@ class ApiService {
     return response.data.deleted_count;
   }
 
-  async recordRecentDirectory(connectionId: string, path: string): Promise<RecentDirectory> {
-    const response = await this.api.post<RecentDirectory>("/browse/recent-directories", {
+  async recordRecentDirectory(connectionId: string, path: string): Promise<RecentDirectory | null> {
+    const response = await this.api.post<RecentDirectory | null>("/browse/recent-directories", {
       connection_id: connectionId,
       path,
       is_directory: true,

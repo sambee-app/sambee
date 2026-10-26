@@ -8,8 +8,10 @@ from sqlalchemy import MetaData, inspect, text
 from sqlalchemy.engine import Connection, Engine
 
 from app.core.logging import get_logger
+from app.core.system_setting_definitions import SystemSettingKey
 from app.core.usernames import USERNAME_COLLISION_CONSTRAINT, USERNAME_KEY_FUNCTION
 from app.models.connection import generate_unique_connection_slug
+from app.models.system_settings import FileSearchSettings
 
 logger = get_logger(__name__)
 
@@ -1050,6 +1052,37 @@ def _apply_case_insensitive_usernames_migration(connection: Connection) -> None:
     )
 
 
+def _apply_history_usage_score_migration(connection: Connection) -> None:
+    """Give existing history records a neutral initial frequency score."""
+    for table in ("recentfile", "recentdirectory"):
+        inspector = inspect(connection)
+        if inspector.has_table(table) and "usage_score" not in {column["name"] for column in inspector.get_columns(table)}:
+            connection.execute(text(f"ALTER TABLE {table} ADD COLUMN usage_score FLOAT NOT NULL DEFAULT 1"))
+
+    inspector = inspect(connection)
+    if not inspector.has_table("systemsetting") or not inspector.has_table("recentdirectory"):
+        return
+    saved_limit = connection.execute(
+        text("SELECT value FROM systemsetting WHERE key = :key"),
+        {"key": SystemSettingKey.FILE_SEARCH_RETENTION_LIMIT.value},
+    ).scalar_one_or_none()
+    if saved_limit is None:
+        return
+    retention_limit = FileSearchSettings(retention_limit=int(saved_limit)).retention_limit
+    connection.execute(
+        text("""
+            DELETE FROM recentdirectory WHERE id IN (
+                SELECT id FROM (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY user_id ORDER BY last_visited_at DESC, created_at DESC, id DESC
+                    ) AS retention_rank FROM recentdirectory
+                ) WHERE retention_rank > :retention_limit
+            )
+        """),
+        {"retention_limit": retention_limit},
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=1, name="ensure_connection_slugs", apply=_apply_connection_slug_migration),
     Migration(version=2, name="add_user_role_and_session_fields", apply=_apply_user_role_migration),
@@ -1091,6 +1124,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=36, name="add_download_intent_token_version", apply=_apply_download_intent_token_version_migration),
     Migration(version=37, name="add_oidc_no_refresh_sessions", apply=_apply_oidc_no_refresh_sessions_migration),
     Migration(version=38, name="case_insensitive_usernames", apply=_apply_case_insensitive_usernames_migration),
+    Migration(version=39, name="add_history_usage_score", apply=_apply_history_usage_score_migration),
 )
 
 
