@@ -10,8 +10,11 @@ from sqlmodel import Session, col, select
 from app.models.recent_file import RecentFile, RecentFileRead
 from app.models.user import User
 from app.services.history_common import (
+    history_match_rank,
+    history_usage_score,
     normalize_history_search_text,
     normalize_recent_history_path,
+    updated_history_usage_score,
     validate_history_connection_access,
 )
 from app.services.system_settings import get_file_search_settings
@@ -144,27 +147,13 @@ def record_recent_file(
         )
     else:
         record.file_name = file_name
+        record.usage_score = updated_history_usage_score(record.usage_score, record.last_opened_at, now)
         record.last_opened_at = now
     session.add(record)
     _trim_user_recent_files(user_id=current_user.id, retention_limit=settings.retention_limit, session=session)
     session.commit()
     session.refresh(record)
     return RecentFileRead.model_validate(record)
-
-
-def _match_rank(*, normalized_file_name: str, normalized_query: str) -> int | None:
-    if not normalized_query:
-        return 3
-    if normalized_file_name == normalized_query:
-        return 0
-    if normalized_file_name.startswith(normalized_query):
-        return 1
-    for index, character in enumerate(normalized_file_name):
-        if index > 0 and not character.isalnum() and normalized_file_name[index + 1 :].startswith(normalized_query):
-            return 2
-    if normalized_query in normalized_file_name:
-        return 3
-    return None
 
 
 def search_recent_files(*, query: str, limit: int, current_user: User, session: Session) -> list[RecentFileRead]:
@@ -175,11 +164,24 @@ def search_recent_files(*, query: str, limit: int, current_user: User, session: 
     ).all()
     matched: list[tuple[int, RecentFile]] = []
     for record in records:
-        rank = _match_rank(normalized_file_name=_normalize_for_matching(record.file_name), normalized_query=normalized_query)
+        rank = history_match_rank(_normalize_for_matching(record.file_name), normalized_query)
         if rank is not None:
             matched.append((rank, record))
-    matched.sort(key=lambda result: (result[0], -result[1].last_opened_at.timestamp()))
-    return [RecentFileRead.model_validate(record) for _, record in matched[:bounded_limit]]
+    now = datetime.now(timezone.utc)
+    matched.sort(
+        key=lambda result: (
+            result[0],
+            -history_usage_score(result[1].usage_score, result[1].last_opened_at, now),
+            -result[1].last_opened_at.timestamp(),
+            str(result[1].id),
+        )
+    )
+    return [
+        RecentFileRead.model_validate(record).model_copy(
+            update={"match_rank": rank, "usage_score": history_usage_score(record.usage_score, record.last_opened_at, now)}
+        )
+        for rank, record in matched[:bounded_limit]
+    ]
 
 
 def get_recent_file_result_limit(*, limit: int, session: Session) -> int:

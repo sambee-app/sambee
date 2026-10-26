@@ -116,6 +116,10 @@ Text editor and Markdown viewer/editor now have an option to share the current c
 
 Image and PDF viewers alway share the displayed content, which may have been normalized for viewing in the browser.
 
+### Quick Bar: File & Directory Search Improvements
+
+Directory navigation and file search in the quick bar now use frequency-aware ranking. This puts the files and folders you're working with most at the top of the list of search results, making access faster and requiring less scrolling. The default number of retained items was increased from 50 to 200 and is configurable in a combined setting for files and folders.
+
 ### Full Browser History Navigation
 
 Every navigation step is now encoded in the URL and recorded in browser history. This enables browser back/forward navigation across the entire Sambee workspace, including the file list, viewers, and editors.

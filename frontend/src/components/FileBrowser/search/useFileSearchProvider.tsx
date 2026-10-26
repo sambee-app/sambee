@@ -4,27 +4,11 @@ import type { BrowserOpenMode } from "../../../pages/FileBrowser/types";
 import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
 import { publishRecentFilesChanged } from "../../../services/recentFilesSync";
 import type { FileEntry, RecentFile } from "../../../types";
-import { removeRecentHistoryResult } from "./recentHistory";
+import { historyMatchRank, normalizeSearchText, rankHistorySearchResults, removeRecentHistoryResult } from "./recentHistory";
 import type { SearchProvider, SearchResult, SearchSelectionAction, SearchStatusInfo, SearchTextHighlight } from "./types";
 
 const CURRENT_DIRECTORY_PREFIX = "current:";
 const RECENT_FILE_PREFIX = "recent:";
-
-function normalizeSearchText(value: string): string {
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLocaleLowerCase();
-}
-
-function currentFileMatchRank(fileName: string, normalizedQuery: string): number {
-  if (!normalizedQuery) return 0;
-  const normalizedName = normalizeSearchText(fileName);
-  if (normalizedName === normalizedQuery) return 0;
-  if (normalizedName.startsWith(normalizedQuery)) return 1;
-  if (new RegExp(`(?:^|[^\\p{L}\\p{N}])${normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(normalizedName)) return 2;
-  return 3;
-}
 
 function toBrowserOpenMode(action: SearchSelectionAction): BrowserOpenMode {
   return action;
@@ -79,7 +63,7 @@ export function useFileSearchProvider({
       const currentCandidates = files
         .filter((file) => file.type === "file" && (!normalizedQuery || normalizeSearchText(file.name).includes(normalizedQuery)))
         .sort((left, right) => {
-          return currentFileMatchRank(left.name, normalizedQuery) - currentFileMatchRank(right.name, normalizedQuery);
+          return historyMatchRank(left.name, normalizedQuery) - historyMatchRank(right.name, normalizedQuery);
         });
       const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
       const effectiveResultLimit = recentResponse.result_limit ?? resultLimit;
@@ -91,46 +75,52 @@ export function useFileSearchProvider({
       recentFilesRef.current = new Map(recentResponse.results.map((file) => [file.id, file]));
       currentFilesRef.current = new Map(uniqueCurrentMatches.map((file) => [file.name, file]));
 
-      return [
-        ...(recentResponse.results.length > 0
-          ? [
-              {
-                id: "recent-group-header",
-                kind: "group-header" as const,
-                value: "" as const,
-                label: t("fileBrowser.search.groups.recentFiles"),
-              },
-            ]
-          : []),
-        ...recentResponse.results.map((file) => ({
-          kind: "result" as const,
-          id: `${RECENT_FILE_PREFIX}${file.id}`,
-          value: `${RECENT_FILE_PREFIX}${file.id}`,
-          icon: "recent-file" as const,
-          primaryText: file.file_name,
-          primaryHighlight: findTextHighlight(file.file_name, query.trim()),
-          secondaryText: formatConnectionPath(getConnectionName(file.connection_id), parentPath(file.path)),
-        })),
-        ...(uniqueCurrentMatches.length > 0
-          ? [
-              {
-                id: "current-directory-group-header",
-                kind: "group-header" as const,
-                value: "" as const,
-                label: t("fileBrowser.search.groups.currentDirectory"),
-              },
-            ]
-          : []),
-        ...uniqueCurrentMatches.map((file) => ({
-          kind: "result" as const,
-          id: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
-          value: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
-          icon: "file" as const,
-          primaryText: file.name,
-          primaryHighlight: findTextHighlight(file.name, query.trim()),
-          secondaryText: formatConnectionPath(connectionName, currentPath || "/"),
-        })),
-      ];
+      return rankHistorySearchResults(
+        [
+          ...(recentResponse.results.length > 0
+            ? [
+                {
+                  id: "recent-group-header",
+                  kind: "group-header" as const,
+                  value: "" as const,
+                  label: t("fileBrowser.search.groups.recentFiles"),
+                },
+              ]
+            : []),
+          ...recentResponse.results.map((file) => ({
+            kind: "result" as const,
+            id: `${RECENT_FILE_PREFIX}${file.id}`,
+            value: `${RECENT_FILE_PREFIX}${file.id}`,
+            icon: "recent-file" as const,
+            matchRank: file.match_rank ?? historyMatchRank(file.file_name, query),
+            usageScore: file.usage_score,
+            primaryText: file.file_name,
+            primaryHighlight: findTextHighlight(file.file_name, query.trim()),
+            secondaryText: formatConnectionPath(getConnectionName(file.connection_id), parentPath(file.path)),
+          })),
+          ...(uniqueCurrentMatches.length > 0
+            ? [
+                {
+                  id: "current-directory-group-header",
+                  kind: "group-header" as const,
+                  value: "" as const,
+                  label: t("fileBrowser.search.groups.currentDirectory"),
+                },
+              ]
+            : []),
+          ...uniqueCurrentMatches.map((file) => ({
+            kind: "result" as const,
+            id: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
+            value: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
+            icon: "file" as const,
+            matchRank: historyMatchRank(file.name, query),
+            primaryText: file.name,
+            primaryHighlight: findTextHighlight(file.name, query.trim()),
+            secondaryText: formatConnectionPath(connectionName, currentPath || "/"),
+          })),
+        ],
+        query
+      );
     },
     [connectionId, connectionName, currentPath, files, getConnectionName, history, resultLimit, t]
   );
