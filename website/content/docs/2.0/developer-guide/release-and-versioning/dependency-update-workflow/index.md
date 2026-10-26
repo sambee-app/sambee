@@ -67,6 +67,37 @@ compare the committed locks with a new clean dependency resolution. It is an
 optional maintenance check, not a required step for routine Dependabot pull
 requests.
 
+### Container Build Pip
+
+`backend/build-tools/requirements.txt` pins the build-time pip version and its
+wheel SHA-256 hash. Keep this file separate from the application lockfiles.
+Dependabot checks this directory each week and can update the version and hashes
+in one pull request. Don't copy the pin or download checksum into the Dockerfile.
+
+Before Python dependency downloads, `scripts/bootstrap-build-pip.py` fetches the
+pinned wheel through Python's standard-library HTTPS client and the system CA
+store. It checks the wheel against the committed hashes, then runs that wheel
+directly to install pip offline. The old pip isn't used for the download or
+upgrade. The shared runtime, native `pyvips` wheel builder, and backend-test
+virtual environment all use this bootstrap step.
+
+The production target installs the application dependencies, runs `pip check`,
+then uninstalls pip and removes Python's separate `ensurepip` bootstrap copy.
+The test, beta, and stable channels use this same production image. They can't
+install packages with pip at runtime; change the dependency inputs and rebuild
+the image instead. Development and backend-test targets keep pip.
+
+The upgrade and cleanup steps are cached before application source is copied.
+Uncached builds need a pip download, but application-only builds can reuse the
+dependency layer. Files from the base image can remain in older image layers,
+even after they're removed from the final filesystem.
+
+For build-pip updates:
+
+- Run `backend/.venv/bin/python -m pytest backend/tests/test_bootstrap_build_pip_script.py`.
+- Validate startup and the absence of pip, its launchers and metadata, and `ensurepip` in both production image architectures.
+- Run the container vulnerability scan. A pip release can still include vulnerable bundled libraries; a version update alone doesn't prove that all findings are fixed.
+
 ### High-Risk Dependency Areas
 
 Some ecosystems are intentionally treated as coordinated manual changes rather than casual bumps.

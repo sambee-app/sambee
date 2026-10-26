@@ -110,6 +110,20 @@ updates:
           - "ruff"
           - "smbprotocol"
 
+  - package-ecosystem: pip
+    directory: "/backend/build-tools"
+    commit-message:
+      prefix: "deps(build)"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:15"
+      timezone: UTC
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - python
+
   - package-ecosystem: npm
     directory: "/frontend"
     commit-message:

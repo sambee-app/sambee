@@ -15,6 +15,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     UPGRADE_EXISTING_PACKAGES=1 bash /tmp/install-system-deps && \
     rm /tmp/install-system-deps
 
+COPY backend/build-tools/requirements.txt scripts/bootstrap-build-pip.py /tmp/build-pip/
+RUN python /tmp/build-pip/bootstrap-build-pip.py /tmp/build-pip/requirements.txt && \
+    rm -rf /tmp/build-pip
+
 # Development target: inherits the runtime contract, then adds editor and
 # companion tooling without upgrading shared runtime packages again.
 FROM runtime-base AS devcontainer
@@ -108,7 +112,10 @@ FROM --platform=$BUILDPLATFORM ${PYTHON_BASE_IMAGE} AS pyvips-wheel-builder
 WORKDIR /tmp/pyvips-wheel-builder
 COPY backend/requirements.lock.txt ./
 COPY scripts/extract-pyvips-wheel-requirement.py /usr/local/bin/
+COPY backend/build-tools/requirements.txt scripts/bootstrap-build-pip.py /tmp/build-pip/
 RUN --mount=type=cache,target=/root/.cache/pip \
+    python /tmp/build-pip/bootstrap-build-pip.py /tmp/build-pip/requirements.txt && \
+    rm -rf /tmp/build-pip && \
     python /usr/local/bin/extract-pyvips-wheel-requirement.py \
         requirements.lock.txt /tmp/pyvips-wheel-requirement.txt && \
     pip wheel --wheel-dir /tmp/wheels --require-hashes --no-deps \
@@ -128,13 +135,15 @@ RUN useradd --create-home --shell /bin/bash --uid 1000 vscode && \
     chown -R vscode:vscode /home/vscode
 COPY backend/requirements-dev.lock.txt /tmp/requirements-dev.lock.txt
 COPY --from=pyvips-wheel-builder /tmp/wheels /tmp/wheels
+COPY backend/build-tools/requirements.txt scripts/bootstrap-build-pip.py /tmp/build-pip/
 RUN python -m venv /workspace/backend/.venv && \
+    /workspace/backend/.venv/bin/python /tmp/build-pip/bootstrap-build-pip.py /tmp/build-pip/requirements.txt && \
     /workspace/backend/.venv/bin/python -m pip install \
         --require-hashes \
         --find-links=/tmp/wheels \
         -r /tmp/requirements-dev.lock.txt && \
     chown vscode:vscode /workspace/backend && \
-    rm -rf /tmp/wheels
+    rm -rf /tmp/wheels /tmp/build-pip
 COPY --chown=vscode:vscode archive-contract/ ./archive-contract/
 COPY --chown=vscode:vscode companion/ ./companion/
 COPY --chown=vscode:vscode backend/ ./backend/
@@ -161,6 +170,9 @@ COPY --from=pyvips-wheel-builder /tmp/wheels /tmp/wheels
 # Install Python dependencies before copying full backend (changes rarely - better layer caching)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --root-user-action=ignore --disable-pip-version-check --require-hashes --find-links=/tmp/wheels -r requirements.lock.txt && \
+    python -m pip check && \
+    python -m pip --disable-pip-version-check uninstall --yes --root-user-action=ignore pip && \
+    python -c 'import shutil, sysconfig; from pathlib import Path; shutil.rmtree(Path(sysconfig.get_path("stdlib")) / "ensurepip")' && \
     rm -rf /tmp/wheels
 
 # The production image needs only the application package and startup guards.
