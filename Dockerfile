@@ -152,6 +152,7 @@ COPY --chown=vscode:vscode shared/ ./shared/
 COPY --chown=vscode:vscode VERSION ./VERSION
 COPY --chown=vscode:vscode .github/ ./.github/
 COPY --chown=vscode:vscode scripts/ ./scripts/
+COPY --chown=vscode:vscode Dockerfile ./Dockerfile
 USER vscode
 ENV PYTHONPATH=/workspace/backend
 
