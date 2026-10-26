@@ -164,6 +164,7 @@ def test_backend_test_dockerfile_is_available_in_build_context() -> None:
     dockerfile = (workspace / "Dockerfile").read_text(encoding="utf-8")
     backend_test = dockerfile.split("FROM runtime-base AS backend-test", 1)[1].split("FROM runtime-base AS production", 1)[0]
     assert "COPY --chown=vscode:vscode Dockerfile ./Dockerfile" in backend_test
+    assert "COPY --chown=vscode:vscode .dockerignore ./.dockerignore" in backend_test
     ignore_rules = (workspace / ".dockerignore").read_text(encoding="utf-8").splitlines()
     assert "!Dockerfile" in ignore_rules, "Allow Dockerfile in the build context for the backend-test COPY instruction"
     assert ignore_rules.index("Dockerfile*") < ignore_rules.index("!Dockerfile")
