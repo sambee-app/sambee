@@ -159,6 +159,16 @@ def test_docker_build_upgrades_before_downloads_and_removes_runtime_pip() -> Non
     assert production.index("uninstall --yes") < production.index("COPY --link backend/app")
 
 
+def test_backend_test_dockerfile_is_available_in_build_context() -> None:
+    workspace = SCRIPT.parents[1]
+    dockerfile = (workspace / "Dockerfile").read_text(encoding="utf-8")
+    backend_test = dockerfile.split("FROM runtime-base AS backend-test", 1)[1].split("FROM runtime-base AS production", 1)[0]
+    assert "COPY --chown=vscode:vscode Dockerfile ./Dockerfile" in backend_test
+    ignore_rules = (workspace / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert "!Dockerfile" in ignore_rules, "Allow Dockerfile in the build context for the backend-test COPY instruction"
+    assert ignore_rules.index("Dockerfile*") < ignore_rules.index("!Dockerfile")
+
+
 def test_committed_build_requirement_is_valid() -> None:
     version, hashes = MODULE.read_requirement(SCRIPT.parents[1] / "backend/build-tools/requirements.txt")
     assert version

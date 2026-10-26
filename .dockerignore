@@ -39,6 +39,7 @@ developer_docs/
 # Docker
 docker-compose*.yml
 Dockerfile*
+!Dockerfile
 
 # Config examples
 config.example.toml
