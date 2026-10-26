@@ -1192,6 +1192,7 @@ describe("MarkdownViewer", () => {
     await screen.findByText("Readme");
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.getByText("Read only")).toBeInTheDocument();
+    expect(screen.getByTestId("text-editor-acquisition-slot").previousElementSibling).toContainElement(screen.getByText("Read only"));
     expect(screen.queryByText("Browse and preview content, but block writes and edit flows through Sambee.")).not.toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "e" });
@@ -1433,6 +1434,9 @@ describe("MarkdownViewer", () => {
     const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
     expect(editor).toHaveValue("# Local draft\n");
     expect(screen.getByRole("status", { name: /unsaved changes/i })).toBeInTheDocument();
+    expect(screen.getByTestId("text-editor-acquisition-slot").previousElementSibling).toBe(
+      screen.getByRole("status", { name: /unsaved changes/i })
+    );
   });
 
   it("offers recovery when the draft baseline differs from the saved markdown", async () => {
@@ -1761,7 +1765,7 @@ describe("MarkdownViewer", () => {
     expect(screen.queryByText("Read only")).not.toBeInTheDocument();
   });
 
-  it("deduplicates transient heartbeat warnings and clears them on recovery", async () => {
+  it("silently retries transient heartbeats, warns on persistent failure, and resets on recovery", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
     vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
     const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockRejectedValue(new Error("Disconnected"));
@@ -1773,6 +1777,13 @@ describe("MarkdownViewer", () => {
     const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
     if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
     await act(async () => heartbeat());
+    expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+    heartbeatRequest.mockResolvedValueOnce(undefined);
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
+    expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+    await act(async () => heartbeat());
     const warning = screen.getByRole("status");
     expect(warning).toHaveTextContent("Could not refresh the edit lock");
     expect(warning.closest(".MuiSnackbar-root")).not.toBeNull();
@@ -1783,10 +1794,38 @@ describe("MarkdownViewer", () => {
     heartbeatRequest.mockResolvedValueOnce(undefined);
     await act(async () => heartbeat());
     await act(async () => heartbeat());
+    expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
     expect(screen.getByRole("status")).toHaveTextContent("Could not refresh the edit lock");
     heartbeatRequest.mockResolvedValue(undefined);
     await act(async () => heartbeat());
     expect(screen.queryByText(/Could not refresh the edit lock/)).not.toBeInTheDocument();
+  });
+
+  it("does not overlap heartbeat requests", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    const interval = vi.spyOn(window, "setInterval");
+    let finish!: () => void;
+    const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    renderViewer();
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("textbox", { name: "Markdown editor" });
+    const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+    if (typeof heartbeat !== "function") throw new Error("Expected heartbeat interval");
+    await act(async () => heartbeat());
+    await act(async () => heartbeat());
+    expect(heartbeatRequest).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+    await act(async () => heartbeat());
+    expect(heartbeatRequest).toHaveBeenCalledTimes(2);
   });
 
   it.each(["Keep my draft", "Use saved file"])(

@@ -4,10 +4,10 @@ pytest-cov==7.1.0
 pytest-xdist==3.8.0
 jsonschema==4.26.0
 black==26.10.1
-ruff==0.17.1
+ruff==0.17.2
 mypy==2.4.0
 httpx==0.28.1
-httpx2==2.13.1
+httpx2==2.16.0
 faker==40.43.0
 ipython==9.17.1
 rich==15.0.0

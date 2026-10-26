@@ -26,6 +26,7 @@ from app.db.migrations import (
     MIGRATIONS,
     _apply_archive_operation_contract_version_migration,
     _apply_case_insensitive_usernames_migration,
+    _apply_history_usage_score_migration,
     run_migrations,
 )
 from app.models.connection import Connection
@@ -36,6 +37,53 @@ from app.models.user import User, UserRole
 @pytest.mark.unit
 class TestDatabaseInitialization:
     """Test database initialization."""
+
+    @pytest.mark.parametrize("retention_limit", [0, 1, 200])
+    def test_history_upgrade_applies_existing_directory_retention(self, tmp_path: Path, retention_limit: int):
+        test_engine = create_engine(f"sqlite:///{tmp_path / 'history-retention-upgrade.db'}")
+        try:
+            with test_engine.begin() as connection:
+                connection.execute(text("CREATE TABLE systemsetting (key TEXT PRIMARY KEY, value TEXT NOT NULL)"))
+                connection.execute(
+                    text("INSERT INTO systemsetting VALUES ('file_search.retention_limit', :value)"), {"value": str(retention_limit)}
+                )
+                connection.execute(
+                    text("CREATE TABLE recentdirectory (id TEXT PRIMARY KEY, user_id TEXT, last_visited_at TEXT, created_at TEXT)")
+                )
+                for user_id in ("first", "second"):
+                    for index in range(3):
+                        connection.execute(
+                            text("INSERT INTO recentdirectory VALUES (:id, :user_id, :visited, :visited)"),
+                            {"id": f"{user_id}-{index}", "user_id": user_id, "visited": f"2026-01-0{index + 1}"},
+                        )
+                _apply_history_usage_score_migration(connection)
+                _apply_history_usage_score_migration(connection)
+                for user_id in ("first", "second"):
+                    ids = (
+                        connection.execute(
+                            text("SELECT id FROM recentdirectory WHERE user_id = :user_id ORDER BY id DESC"), {"user_id": user_id}
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    assert ids == [f"{user_id}-{index}" for index in reversed(range(3))][:retention_limit]
+                assert connection.execute(text("SELECT value FROM systemsetting")).scalar_one() == str(retention_limit)
+        finally:
+            test_engine.dispose()
+
+    def test_history_score_migration_preserves_existing_records(self, tmp_path: Path):
+        test_engine = create_engine(f"sqlite:///{tmp_path / 'history-upgrade.db'}")
+        try:
+            with test_engine.begin() as connection:
+                for table in ("recentfile", "recentdirectory"):
+                    connection.execute(text(f"CREATE TABLE {table} (id TEXT PRIMARY KEY, path TEXT NOT NULL)"))
+                    connection.execute(text(f"INSERT INTO {table} (id, path) VALUES ('existing', 'Documents')"))
+                _apply_history_usage_score_migration(connection)
+                _apply_history_usage_score_migration(connection)
+                for table in ("recentfile", "recentdirectory"):
+                    assert connection.execute(text(f"SELECT path, usage_score FROM {table}")).one() == ("Documents", 1.0)
+        finally:
+            test_engine.dispose()
 
     def test_username_migration_preserves_conflicts_and_guards_writes(self, tmp_path: Path):
         test_engine = create_engine(f"sqlite:///{tmp_path / 'username-upgrade.db'}")

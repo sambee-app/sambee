@@ -1,8 +1,10 @@
 import { render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import "../../../../i18n";
 import api from "../../../../services/api";
 import { SambeeThemeProvider } from "../../../../theme/ThemeContext";
 import { type FileEntry, FileType } from "../../../../types";
+import { rankHistorySearchResults } from "../recentHistory";
 import { useFileSearchProvider } from "../useFileSearchProvider";
 
 vi.mock("../../../../services/api");
@@ -18,6 +20,32 @@ function wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe("useFileSearchProvider", () => {
+  it("ranks exact matches across sources before frequency and preserves empty-query groups", () => {
+    const results = [
+      { kind: "group-header" as const, id: "recent", value: "" as const, label: "Recent" },
+      {
+        kind: "result" as const,
+        id: "frequent",
+        value: "recent:frequent",
+        icon: "recent-file" as const,
+        primaryText: "report-final",
+        matchRank: 1,
+        usageScore: 100,
+      },
+      { kind: "result" as const, id: "exact", value: "current:report", icon: "file" as const, primaryText: "report", matchRank: 0 },
+      {
+        kind: "result" as const,
+        id: "occasional",
+        value: "recent:occasional",
+        icon: "recent-file" as const,
+        primaryText: "report-other",
+        matchRank: 1,
+        usageScore: 1,
+      },
+    ];
+    expect(rankHistorySearchResults(results, "report").map((result) => result.id)).toEqual(["exact", "frequent", "occasional"]);
+    expect(rankHistorySearchResults(results, "")).toBe(results);
+  });
   it("keeps recent files first, omits duplicate current items, and preserves selection mode", async () => {
     const onOpenCurrentFile = vi.fn();
     const onOpenRecentFile = vi.fn();
@@ -52,14 +80,11 @@ describe("useFileSearchProvider", () => {
     const results = await result.current.fetchResults("report", new AbortController().signal);
 
     expect(results.map((entry) => ({ kind: entry.kind, value: entry.value }))).toEqual([
-      { kind: "group-header", value: "" },
       { kind: "result", value: "recent:recent-report" },
-      { kind: "group-header", value: "" },
       { kind: "result", value: "current:annual-report.txt" },
     ]);
 
     expect(results).toMatchObject([
-      { kind: "group-header" },
       {
         kind: "result",
         icon: "recent-file",
@@ -67,7 +92,6 @@ describe("useFileSearchProvider", () => {
         primaryHighlight: { start: 0, end: 6 },
         secondaryText: "Reports server:/Reports",
       },
-      { kind: "group-header" },
       {
         kind: "result",
         icon: "file",

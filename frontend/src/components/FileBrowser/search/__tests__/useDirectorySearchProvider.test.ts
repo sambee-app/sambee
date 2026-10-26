@@ -1,6 +1,7 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import "../../../../i18n";
 import api from "../../../../services/api";
 import { SambeeThemeProvider } from "../../../../theme/ThemeContext";
 import { getDirectoryResultPresentation, useDirectorySearchProvider } from "../useDirectorySearchProvider";
@@ -87,13 +88,14 @@ describe("getDirectoryResultPresentation", () => {
       secondaryText: "Documents server:/Documents/",
     });
 
-    const results = await result.current.fetchResults("report", new AbortController().signal);
+    let results: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+    await act(async () => {
+      results = await result.current.fetchResults("report", new AbortController().signal);
+    });
     expect(api.searchDirectories).toHaveBeenCalledWith("connection-1", "report", expect.objectContaining({ includeDotDirectories: false }));
     expect(results.map((entry) => ({ kind: entry.kind, value: entry.value }))).toEqual([
-      { kind: "group-header", value: "" },
       { kind: "result", value: "recent-directory:recent-reports" },
       { kind: "result", value: "recent-directory:recent-other-connection" },
-      { kind: "group-header", value: "" },
       { kind: "result", value: "directory:Documents/Reference" },
     ]);
 
@@ -107,6 +109,38 @@ describe("getDirectoryResultPresentation", () => {
     await expect(result.current.onRemoveSelected?.("directory:Documents/Reference")).resolves.toBe(false);
   });
 
+  it("preserves server match ranks when merging Unicode cache matches with history", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({
+      result_limit: 10,
+      results: [
+        {
+          id: "recent-prefix",
+          connection_id: "connection-1",
+          path: "strasse-extra",
+          last_visited_at: "2026-01-01T00:00:00Z",
+          match_rank: 1,
+          usage_score: 20,
+        },
+      ],
+    });
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: ["Stra\u00dfe"],
+      match_ranks: { "Stra\u00dfe": 0 },
+      total_matches: 1,
+      cache_state: "ready",
+      directory_count: 1,
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+
+    let results: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+    await act(async () => {
+      results = await result.current.fetchResults("strasse", new AbortController().signal);
+    });
+
+    expect(results.map((entry) => entry.value)).toEqual(["directory:Stra\u00dfe", "recent-directory:recent-prefix"]);
+    expect(results[0]).toMatchObject({ matchRank: 0 });
+  });
+
   it("queries recent directories but skips cache search for a one-character query", async () => {
     vi.mocked(api.searchDirectories).mockClear();
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
@@ -114,7 +148,7 @@ describe("getDirectoryResultPresentation", () => {
 
     await result.current.fetchResults("r", new AbortController().signal);
 
-    expect(api.searchRecentDirectories).toHaveBeenCalledWith("r", 10, expect.any(AbortSignal));
+    expect(api.searchRecentDirectories).toHaveBeenCalledWith("r", 50, expect.any(AbortSignal));
     expect(api.searchDirectories).not.toHaveBeenCalled();
   });
 

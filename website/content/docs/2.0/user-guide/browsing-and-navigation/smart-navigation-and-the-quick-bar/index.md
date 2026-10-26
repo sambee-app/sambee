@@ -19,7 +19,9 @@ The quick bar has multiple modes:
 
 ### Recent Directory History
 
-Recent directories appear before cache-based directory matches, including when the search box is empty. Choose a recent directory to switch to its connection and open the saved location. A directory that is both recent and present in the active connection's cache is shown once in Recent directories.
+When the search box is empty, the Recent directories group shows your saved locations. Choose a recent directory to switch to its connection and open the saved location. A directory that is both recent and present in the active connection's cache is shown once.
+
+When you type a query, recent and cache-based results use one ranked list. Exact directory names come first, followed by name prefixes, word-boundary matches, and other path matches. Within a match tier, frequently used locations move up. Their usage score decreases by half every 30 days, so old activity gradually has less effect. Rapid repeat visits within one minute do not add frequency, and directory refreshes do not count as visits.
 
 To remove only the selected item from Recent directories, press <kbd>Shift</kbd> + <kbd>Delete</kbd>. This removes history metadata; it never deletes the underlying directory or its contents.
 
@@ -29,10 +31,10 @@ Sambee records a directory after it opens successfully. History is private to yo
 
 1. Press <kbd>/</kbd> when the file browser has keyboard focus.
 1. Type part of a filename.
-1. Review the separate Recent files and Current directory groups.
+1. Review the ranked matches.
 1. Select a file and press <kbd>Enter</kbd> to open it.
 
-File Search doesn't build a global file index. It searches the files currently loaded in the active directory and your per-user recent-file history. A file that appears in both places is shown once in Recent files.
+File Search does not build a global file index. It searches the files currently loaded in the active directory and your per-user recent-file history. A file that appears in both places is shown once. With an empty query, results use separate Recent files and Current directory groups. With a typed query, exact filenames come first, followed by prefixes, word-boundary matches, and other filename matches. Frequency and recency order matches within each tier, using the same score decay as directory navigation. An exact current-directory match can therefore appear before a weaker recent-file match.
 
 Use modifiers with <kbd>Enter</kbd> or a result click to choose how to open the selected file:
 
@@ -44,7 +46,7 @@ To remove only a selected item from Recent files, press <kbd>Shift</kbd> + <kbd>
 
 Recent files are recorded when you attempt to open a regular file. History is private to your account and follows the configured retention and exclusion policy. The system verifies remote SMB targets and local Companion targets as regular files before keeping a history record.
 
-The File Search settings show whether Sambee is using the built-in defaults or an administrator's saved system override. Administrators can reset an override to the built-in defaults. Lowering retention removes the oldest records immediately, and setting retention to zero clears history and prevents new records. Image, temporary, backup, and configured extension exclusions apply before a record is stored.
+Administrators configure the shared **Recent files and directories to retain** limit in **Settings** > **File Search**. The default is 200 files and 200 directories per user, with separate limits for the two lists. Existing administrator overrides remain unchanged. Lowering retention removes the oldest records from both lists immediately. Setting retention to zero clears both lists and prevents new records. The **Results per group** default remains 10 and applies to both search modes. Image, temporary, backup, and configured extension exclusions apply only to file history before a record is stored.
 
 If a recent remote file no longer exists, Sambee removes its stale history entry after confirming that state. For local drives, Companion distinguishes a missing or no-longer-regular file from an unavailable drive; confirmed stale targets are removed, while unavailable, unpaired, or temporarily failing local drives keep their history for a later retry.
 

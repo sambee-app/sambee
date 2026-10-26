@@ -60,6 +60,7 @@ from smbprotocol.session import Session
 from smbprotocol.tree import TreeConnect
 
 from app.core.config import settings, static
+from app.services.history_common import directory_match_rank, normalize_history_search_text
 from app.services.system_settings import get_smbclient_policy_kwargs
 from app.storage.smb_pool import SMBConnectionPool, get_connection_pool, get_smb_connection_cache
 
@@ -340,31 +341,22 @@ class ConnectionDirectoryCache:
             return [], 0
 
         # Normalise backslashes to forward slashes so users can type either
-        query_lower = query.replace("\\", "/").lower()
+        query_lower = normalize_history_search_text(query.replace("\\", "/").strip())
 
         with self._lock:
             # Substring match on all cached paths
             matches = [
                 directory
                 for directory in self._directories
-                if query_lower in directory.lower() and (include_dot_directories or not path_contains_dot_directory(directory))
+                if query_lower in normalize_history_search_text(directory)
+                and (include_dot_directories or not path_contains_dot_directory(directory))
             ]
 
-        # Sort by relevance:
-        # 1. Exact basename match first
-        # 2. Basename starts with query
-        # 3. Path contains query — prefer shorter paths (closer to root)
         def sort_key(path: str) -> tuple[int, int, str]:
             """Sorting key: (priority_tier, path_depth, path_string)."""
 
-            basename = path.rsplit("/", 1)[-1].lower()
             depth = path.count("/")
-
-            if basename == query_lower:
-                return (0, depth, path.lower())
-            if basename.startswith(query_lower):
-                return (1, depth, path.lower())
-            return (2, depth, path.lower())
+            return (directory_match_rank(path, query_lower), depth, path.lower())
 
         matches.sort(key=sort_key)
         total_count = len(matches)

@@ -5,8 +5,9 @@ import { render } from "../../test/utils/test-utils";
 import type { FileSearchSettingsRead } from "../../types";
 import { FileSearchSettings } from "../FileSearchSettings";
 
-const { publishRecentFilesChangedMock } = vi.hoisted(() => ({
+const { publishRecentFilesChangedMock, publishRecentDirectoriesChangedMock } = vi.hoisted(() => ({
   publishRecentFilesChangedMock: vi.fn(),
+  publishRecentDirectoriesChangedMock: vi.fn(),
 }));
 
 vi.mock("../../services/api", () => ({
@@ -18,6 +19,9 @@ vi.mock("../../services/api", () => ({
 
 vi.mock("../../services/recentFilesSync", () => ({
   publishRecentFilesChanged: publishRecentFilesChangedMock,
+}));
+vi.mock("../../services/recentDirectoriesSync", () => ({
+  publishRecentDirectoriesChanged: publishRecentDirectoriesChangedMock,
 }));
 
 import api from "../../services/api";
@@ -43,7 +47,7 @@ describe("FileSearchSettings", () => {
     const user = userEvent.setup();
     render(<FileSearchSettings />);
 
-    const retentionLimit = await screen.findByLabelText("Recent files to retain");
+    const retentionLimit = await screen.findByLabelText("Recent files and directories to retain");
     await user.clear(retentionLimit);
     await user.type(retentionLimit, "501");
 
@@ -75,6 +79,7 @@ describe("FileSearchSettings", () => {
       );
     });
     expect(publishRecentFilesChangedMock).toHaveBeenCalled();
+    expect(publishRecentDirectoriesChangedMock).toHaveBeenCalledTimes(1);
   });
 
   it("groups category exclusions and omits the policy-source message", async () => {
@@ -108,7 +113,7 @@ describe("FileSearchSettings", () => {
   it("does not render a reset action", async () => {
     render(<FileSearchSettings />);
 
-    await screen.findByLabelText("Recent files to retain");
+    await screen.findByLabelText("Recent files and directories to retain");
 
     expect(screen.queryByRole("button", { name: "Reset to default" })).not.toBeInTheDocument();
   });
@@ -117,7 +122,7 @@ describe("FileSearchSettings", () => {
     const user = userEvent.setup();
     render(<FileSearchSettings />);
 
-    const retentionLimit = await screen.findByLabelText("Recent files to retain");
+    const retentionLimit = await screen.findByLabelText("Recent files and directories to retain");
     await user.click(retentionLimit);
     await user.tab();
 

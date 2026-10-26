@@ -7,6 +7,7 @@ export type ViewerReadOnlyReason = "read-only" | "locked" | "permission-denied" 
 
 export const VIEWER_LOCK_NOTICE_DURATION_MS = 15_000;
 export const VIEWER_EDIT_HEARTBEAT_MS = 30_000;
+export const VIEWER_EDIT_HEARTBEAT_FAILURE_THRESHOLD = 3;
 const ACQUISITION_FEEDBACK_DELAY_MS = 200;
 const ACQUISITION_STATUS_SLOT_SIZE = 20;
 const ACQUISITION_SPINNER_SIZE = 16;

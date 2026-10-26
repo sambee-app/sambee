@@ -23,6 +23,7 @@ class RecentFile(SQLModel, table=True):
     path: str = Field(max_length=4096)
     file_name: str = Field(max_length=1024)
     last_opened_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), index=True)
+    usage_score: float = Field(default=1.0, ge=0)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -38,6 +39,8 @@ class RecentFileRead(SQLModel):
     path: str
     file_name: str
     last_opened_at: datetime
+    usage_score: float = 0
+    match_rank: int = 3
 
 
 class RecentFileSearchRead(SQLModel):
