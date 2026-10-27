@@ -1402,6 +1402,58 @@ const Browser: React.FC = () => {
     );
   }, [allConnections, paneMode, rightPane]);
 
+  const getSettledPaneTarget = useCallback(
+    (paneId: PaneId) => {
+      const pane = paneId === "left" ? leftPane : rightPane;
+      if (pane.loading || pane.error) return null;
+      const target = paneId === "left" ? getCurrentLeftTarget() : getCurrentRightTarget();
+      const routeTarget = paneId === "left" ? currentRoute.left : currentRoute.right;
+      if (!target || !routeTarget) return null;
+      const serializeTarget = (left: typeof target) => serializeBrowseRoute({ left, right: null, activePaneId: "left" });
+      return serializeTarget(target) === serializeTarget(routeTarget) ? target : null;
+    },
+    [currentRoute.left, currentRoute.right, getCurrentLeftTarget, getCurrentRightTarget, leftPane, rightPane]
+  );
+  const canOpenLocationInNewTab = !browserOverlayOpen && Boolean(getSettledPaneTarget(effectiveActivePaneId));
+  const canOpenQuickBarLocationInNewTab =
+    !browserOverlayOpen && Boolean(getSettledPaneTarget(quickBarPaneId === "right" && isDualMode ? "right" : "left"));
+  const canMatchPaneLocations = !browserOverlayOpen && isDualMode && Boolean(getSettledPaneTarget("left") && getSettledPaneTarget("right"));
+
+  const handleOpenLocationInNewTab = useCallback(
+    (paneId: PaneId) => {
+      if (browserOverlayOpen) return;
+      const target = getSettledPaneTarget(paneId);
+      if (!target) return;
+      openExternalUrl(serializeBrowseRoute({ left: target, right: null, activePaneId: "left" }));
+    },
+    [browserOverlayOpen, getSettledPaneTarget]
+  );
+
+  const handleMatchPaneLocation = useCallback(
+    (destinationPaneId: PaneId) => {
+      if (!canMatchPaneLocations) return;
+      if (areSameContentLocations(getPaneForId("left").currentLocation, getPaneForId("right").currentLocation)) return;
+      const source = getSettledPaneTarget(destinationPaneId === "left" ? "right" : "left");
+      if (!source) return;
+      navigateToBrowseState({ left: source, right: source, activePaneId: effectiveActivePaneId });
+    },
+    [canMatchPaneLocations, effectiveActivePaneId, getPaneForId, getSettledPaneTarget, navigateToBrowseState]
+  );
+
+  const handleUnavailableLocationShortcut = useCallback(
+    (event: KeyboardEvent, requiresDualPane: boolean): boolean => {
+      if (event.repeat || !isActiveFileListKeyboardTarget()) return false;
+      const message = t(
+        requiresDualPane && !isDualMode
+          ? "fileBrowser.unavailableShortcuts.dualPaneRequired"
+          : "fileBrowser.unavailableShortcuts.locationUnavailable"
+      );
+      setUnavailableShortcutNotice((current) => ({ id: (current?.id ?? 0) + 1, message }));
+      return true;
+    },
+    [isActiveFileListKeyboardTarget, isDualMode, t]
+  );
+
   const navigateLeftPane = useCallback(
     (connectionId: string, path: string, options?: { replace?: boolean; activePaneId?: PaneId }) => {
       const leftTarget = buildBrowseRouteTarget(connectionId, path, allConnections);
@@ -3332,6 +3384,11 @@ const Browser: React.FC = () => {
       canOpenFocusedFileInApp: quickBarCanOpenInApp,
       canCopyToOtherPane: quickBarCanCopyToOtherPane,
       canMoveToOtherPane: quickBarCanMoveToOtherPane,
+      canOpenLocationInNewTab: canOpenQuickBarLocationInNewTab,
+      canMatchPaneLocations,
+      openLocationInNewTab: () => handleOpenLocationInNewTab(quickBarPaneId === "right" && isDualMode ? "right" : "left"),
+      matchLeftPaneLocation: () => handleMatchPaneLocation("left"),
+      matchRightPaneLocation: () => handleMatchPaneLocation("right"),
       openQuickNav: () => openQuickBarMode("navigate"),
       openFileSearch: () => openQuickBarMode("file-search"),
       openCommandMode: () => openQuickBarMode("commands"),
@@ -3362,6 +3419,11 @@ const Browser: React.FC = () => {
       moveToOtherPane: handleMoveToOtherPane,
     }),
     [
+      canOpenQuickBarLocationInNewTab,
+      canMatchPaneLocations,
+      handleOpenLocationInNewTab,
+      handleMatchPaneLocation,
+      quickBarPaneId,
       handleCopyToOtherPane,
       handleCreateArchiveRequest,
       handleArchiveExtractionRequest,
@@ -3745,6 +3807,26 @@ const Browser: React.FC = () => {
 
       // ── Dual-Pane Shortcuts ──────────────────────────────────────────────
       {
+        ...BROWSER_SHORTCUTS.OPEN_LOCATION_IN_NEW_TAB,
+        handler: (event) => {
+          if (!event?.repeat) handleOpenLocationInNewTab(effectiveActivePaneId);
+        },
+        enabled: canOpenLocationInNewTab,
+        onUnavailable: (event) => handleUnavailableLocationShortcut(event, false),
+      },
+      {
+        ...PANE_SHORTCUTS.MATCH_LEFT_LOCATION,
+        handler: () => handleMatchPaneLocation("left"),
+        enabled: canMatchPaneLocations,
+        onUnavailable: (event) => handleUnavailableLocationShortcut(event, true),
+      },
+      {
+        ...PANE_SHORTCUTS.MATCH_RIGHT_LOCATION,
+        handler: () => handleMatchPaneLocation("right"),
+        enabled: canMatchPaneLocations,
+        onUnavailable: (event) => handleUnavailableLocationShortcut(event, true),
+      },
+      {
         ...PANE_SHORTCUTS.TOGGLE_DUAL_PANE,
         handler: handleToggleDualPane,
         enabled: noSettings && !useCompactLayout,
@@ -3766,6 +3848,11 @@ const Browser: React.FC = () => {
       },
     ];
   }, [
+    canOpenLocationInNewTab,
+    canMatchPaneLocations,
+    handleOpenLocationInNewTab,
+    handleMatchPaneLocation,
+    handleUnavailableLocationShortcut,
     activePane,
     activePaneCanOpenInApp,
     activePaneIsArchive,

@@ -1,13 +1,8 @@
 # TODO
 
-## Misc. commands
-
-- Add a command to open the current file list location in a new browser tab (which keyboard shortcut to assign? Ctrl+(Shift)+Tab is needed by the browser)
-
-## File list
+## Settings
 
 - Settings > File browser: add a setting to control whether dot directories are shown in the list
-- Dual-pane mode: Ctrl+left/right to change the location (connection+path) of the left pane to that of the right pane and vice-versa
 
 ## Companion
 

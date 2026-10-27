@@ -430,6 +430,17 @@ export const MARKDOWN_EDITOR_SHORTCUTS = {
  * File browser specific shortcuts
  */
 export const BROWSER_SHORTCUTS = {
+  OPEN_LOCATION_IN_NEW_TAB: {
+    id: "open-location-in-new-tab",
+    keys: ["t", "T"],
+    ctrl: true,
+    alt: true,
+    get description() {
+      return translate("fileBrowser.shortcuts.openLocationInNewTab");
+    },
+    label: "Ctrl+Alt+T",
+    helpGroup: "navigation",
+  },
   //
   // Navigation
   //
@@ -760,6 +771,26 @@ export const COPY_MOVE_SHORTCUTS = {
  * Dual-pane layout shortcuts (Norton Commander style)
  */
 export const PANE_SHORTCUTS = {
+  MATCH_LEFT_LOCATION: {
+    id: "match-left-pane-location",
+    keys: "ArrowLeft",
+    ctrl: true,
+    get description() {
+      return translate("fileBrowser.shortcuts.matchLeftPaneLocation");
+    },
+    label: "Ctrl+Left",
+    helpGroup: "panes",
+  },
+  MATCH_RIGHT_LOCATION: {
+    id: "match-right-pane-location",
+    keys: "ArrowRight",
+    ctrl: true,
+    get description() {
+      return translate("fileBrowser.shortcuts.matchRightPaneLocation");
+    },
+    label: "Ctrl+Right",
+    helpGroup: "panes",
+  },
   TOGGLE_DUAL_PANE: {
     id: "toggle-dual-pane",
     keys: "b",
