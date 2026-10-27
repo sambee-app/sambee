@@ -18,6 +18,11 @@ export interface BrowserCommandContext {
   canOpenFocusedFileInApp: boolean;
   canCopyToOtherPane: boolean;
   canMoveToOtherPane: boolean;
+  canOpenLocationInNewTab: boolean;
+  canMatchPaneLocations: boolean;
+  openLocationInNewTab: () => void;
+  matchLeftPaneLocation: () => void;
+  matchRightPaneLocation: () => void;
   openQuickNav: () => void;
   openFileSearch: () => void;
   openCommandMode: () => void;
@@ -130,6 +135,36 @@ const BROWSER_COMMANDS = [
     shortcutLabel: "Backspace",
     isEnabled: (context) => context.connectionSelected,
     run: (context) => context.navigateUp(),
+  }),
+  createCommand({
+    id: "browser.openLocationInNewTab",
+    titleKey: "fileBrowser.commands.items.openLocationInNewTab.title",
+    categoryKey: "fileBrowser.commands.categories.navigation",
+    keywords: ["open", "location", "folder", "directory", "tab"],
+    defaultShortcutIds: ["open-location-in-new-tab"],
+    shortcutLabel: "Ctrl+Alt+T",
+    isEnabled: (context) => context.canOpenLocationInNewTab,
+    run: (context) => context.openLocationInNewTab(),
+  }),
+  createCommand({
+    id: "browser.matchLeftPaneLocation",
+    titleKey: "fileBrowser.commands.items.matchLeftPaneLocation.title",
+    categoryKey: "fileBrowser.commands.categories.panes",
+    keywords: ["left", "right", "pane", "location", "match", "directory"],
+    defaultShortcutIds: ["match-left-pane-location"],
+    shortcutLabel: "Ctrl+Left",
+    isEnabled: (context) => context.canMatchPaneLocations,
+    run: (context) => context.matchLeftPaneLocation(),
+  }),
+  createCommand({
+    id: "browser.matchRightPaneLocation",
+    titleKey: "fileBrowser.commands.items.matchRightPaneLocation.title",
+    categoryKey: "fileBrowser.commands.categories.panes",
+    keywords: ["left", "right", "pane", "location", "match", "directory"],
+    defaultShortcutIds: ["match-right-pane-location"],
+    shortcutLabel: "Ctrl+Right",
+    isEnabled: (context) => context.canMatchPaneLocations,
+    run: (context) => context.matchRightPaneLocation(),
   }),
   createCommand({
     id: "browser.refresh",

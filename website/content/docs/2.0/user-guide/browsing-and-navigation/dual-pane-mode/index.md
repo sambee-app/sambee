@@ -40,6 +40,19 @@ Sambee refreshes both panes after a batch. A directory can be partially moved ev
 
 After a partial or uncertain move, inspect both locations before starting another operation. Don't assume the source was retained when its deletion couldn't be confirmed. The completed dialog offers Close rather than repeating the batch. If source validation fails after a copy was published, the destination remains and Sambee reports the validation failure.
 
+## Match Pane Locations
+
+Use these commands to show the same connection and directory in both panes:
+
+- Press <kbd>Ctrl</kbd> + <kbd>Left</kbd> to set the left pane to the right pane's location.
+- Press <kbd>Ctrl</kbd> + <kbd>Right</kbd> to set the right pane to the left pane's location.
+
+The direction selects the pane to change, regardless of which pane is active. The active pane and keyboard focus stay unchanged. These commands copy only the location, including archive subdirectories. They don't copy or move files, selections, or pane preferences. Both locations must finish loading first. If they already match, nothing changes. Use browser Back to restore the previous locations.
+
+To open the active pane's location separately, press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd>. The new tab contains one pane. The original tab stays unchanged.
+
+All three commands are also available through command search (<kbd>Ctrl</kbd> + <kbd>P</kbd>).
+
 ## Extract Selected ZIP Members
 
 When the active pane shows a ZIP archive, select the files or directories to extract and press <kbd>F5</kbd>. Sambee extracts the selected members into the physical location in the inactive pane. Selecting a directory extracts all of its contents, including empty directories.

@@ -13,7 +13,7 @@ import { createMockAuthToken } from "../../test/fixtures/users";
  * - URL query param constants are correct
  */
 
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
@@ -95,7 +95,10 @@ vi.mock("../../components/Settings/SettingsDialog", () => ({
 vi.mock("@tanstack/react-virtual", () => import("../../__mocks__/@tanstack/react-virtual"));
 
 describe("FileBrowser — URL Routing (Phase 3)", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", token_type: "bearer" }), false);
@@ -483,7 +486,208 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
   // Single-pane backward compatibility
   // --------------------------------------------------------------------------
 
+  describe("location commands", () => {
+    it.each(["left", "right"] as const)("opens only the %s pane location in a new tab", async (activePaneId) => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      const user = userEvent.setup();
+      const left = { kind: "smb" as const, targetId: "test-server-1", path: "Reports # ready" };
+      const right = { kind: "local" as const, targetId: "c", path: "100% # ready" };
+      const initialUrl = serializeBrowseRoute({ left, right, activePaneId, extraSearch: "keep=1" });
+      const { router } = await renderBrowserAndFlush(initialUrl);
+      await waitFor(() => {
+        expectDirectoryLoad("conn-1", left.path);
+        expectDirectoryLoad("local-drive:c", right.path);
+      });
+
+      await user.keyboard("{Control>}{Alt>}t{/Alt}{/Control}");
+
+      expect(open).toHaveBeenCalledExactlyOnceWith(
+        serializeBrowseRoute({ left: activePaneId === "left" ? left : right, right: null, activePaneId: "left" }),
+        "_blank",
+        "noopener,noreferrer"
+      );
+      expect(router.state.location.pathname + router.state.location.search).toBe(initialUrl);
+    });
+
+    it.each(["left", "right"] as const)("opens the captured %s pane location from command search", async (activePaneId) => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      const user = userEvent.setup();
+      await renderBrowserAndFlush(
+        `/browse/smb/test-server-1/Documents?p2=smb/test-server-2/Pictures&active=${activePaneId === "right" ? "2" : "1"}`
+      );
+      await waitFor(() => {
+        expectDirectoryLoad("conn-1", "Documents");
+        expectDirectoryLoad("conn-2", "Pictures");
+      });
+      await user.keyboard("{Control>}p{/Control}");
+      await user.click(await screen.findByText("Open Current Location In New Tab"));
+      expect(open).toHaveBeenCalledExactlyOnceWith(
+        activePaneId === "right" ? "/browse/smb/test-server-2/Pictures" : "/browse/smb/test-server-1/Documents",
+        "_blank",
+        "noopener,noreferrer"
+      );
+    });
+
+    it("does not repeat new tabs or handle location shortcuts in an input", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents");
+      await waitFor(() => expectDirectoryLoad("conn-1", "Documents"));
+      fireEvent.keyDown(document, { key: "t", ctrlKey: true, altKey: true, repeat: true });
+      expect(open).not.toHaveBeenCalled();
+
+      const user = userEvent.setup();
+      await user.keyboard("{Control>}k{/Control}");
+      await user.keyboard("{Control>}{Alt>}t{/Alt}{/Control}");
+      expect(open).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["left", "ArrowLeft"],
+      ["left", "ArrowRight"],
+      ["right", "ArrowLeft"],
+      ["right", "ArrowRight"],
+    ] as const)("matches locations with %s active and %s, preserving focus and history", async (activePaneId, key) => {
+      const user = userEvent.setup();
+      const left = { kind: "smb" as const, targetId: "test-server-1", path: "Documents" };
+      const right = { kind: "smb" as const, targetId: "test-server-2", path: "Pictures" };
+      const initialUrl = serializeBrowseRoute({ left, right, activePaneId, extraSearch: "keep=1" });
+      const { router } = await renderBrowserAndFlush(initialUrl);
+      await waitFor(() => {
+        expectDirectoryLoad("conn-1", left.path);
+        expectDirectoryLoad("conn-2", right.path);
+      });
+      const lists = screen.getAllByTestId("file-list-container");
+      const activeList = lists[activePaneId === "left" ? 0 : 1]!;
+      act(() => activeList.focus());
+      const source = key === "ArrowLeft" ? right : left;
+
+      await user.keyboard(`{Control>}{${key}}{/Control}`);
+
+      await waitFor(() =>
+        expect(router.state.location.pathname + router.state.location.search).toBe(
+          serializeBrowseRoute({ left: source, right: source, activePaneId, extraSearch: "keep=1" })
+        )
+      );
+      await waitFor(() => expect(screen.getAllByTestId("file-list-container")[activePaneId === "left" ? 0 : 1]).toHaveFocus());
+      const matchedKey = router.state.location.key;
+      await user.keyboard(`{Control>}{${key}}{/Control}`);
+      expect(router.state.location.key).toBe(matchedKey);
+
+      await act(() => router.navigate(-1));
+      await waitFor(() => expect(router.state.location.pathname + router.state.location.search).toBe(initialUrl));
+    });
+
+    it("matches a local-drive root even when the file lists are empty", async () => {
+      vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path = "") => ({ path, items: [], total: 0 }));
+      const user = userEvent.setup();
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=local/c&active=2");
+      await waitFor(() => {
+        expectDirectoryLoad("conn-1", "Documents");
+        expectDirectoryLoad("local-drive:c", "");
+      });
+      await user.keyboard("{Control>}{ArrowLeft}{/Control}");
+      await waitFor(() => expect(router.state.location.pathname).toBe("/browse/local/c"));
+      expect(new URLSearchParams(router.state.location.search).get("p2")).toBe("local/c");
+      expect(new URLSearchParams(router.state.location.search).get("active")).toBe("2");
+    });
+
+    it("does not match locations in single-pane mode or while an input has focus", async () => {
+      const user = userEvent.setup();
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1/Documents");
+      await waitFor(() => expectDirectoryLoad("conn-1", "Documents"));
+      const initialKey = router.state.location.key;
+      await user.keyboard("{Control>}{ArrowLeft}{/Control}");
+      expect(router.state.location.key).toBe(initialKey);
+
+      await act(() => router.navigate("/browse/smb/test-server-1/Documents?p2=smb/test-server-2/Pictures"));
+      await waitFor(() => expectDirectoryLoad("conn-2", "Pictures"));
+      const dualKey = router.state.location.key;
+      await user.keyboard("{Control>}k{/Control}");
+      await user.keyboard("{Control>}{ArrowRight}{/Control}");
+      expect(router.state.location.key).toBe(dualKey);
+    });
+
+    it("does not add history when matching locations with a noncanonical query order", async () => {
+      const user = userEvent.setup();
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?active=2&p2=smb/test-server-1/Documents");
+      await waitFor(() => expectDirectoryLoad("conn-1", "Documents"));
+      const initialKey = router.state.location.key;
+      await user.keyboard("{Control>}{ArrowLeft}{/Control}{Control>}{ArrowRight}{/Control}");
+      expect(router.state.location.key).toBe(initialKey);
+    });
+
+    it("keeps archive subdirectories when opening a tab and matching the other pane", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      vi.mocked(api.listArchiveDirectory).mockImplementation(async (_connectionId, archivePath, virtualPath = "") => ({
+        archive: { path: archivePath, size: 1 },
+        path: virtualPath,
+        items:
+          virtualPath === "" ? [{ name: "nested", path: "nested", type: FileType.DIRECTORY, state: "readable", is_hidden: false }] : [],
+        total: virtualPath === "" ? 1 : 0,
+        page_size: 100,
+      }));
+      vi.mocked(api.getFileInfo).mockImplementation(
+        async (_connectionId, path) => ({ type: path === "Archives/backup.zip" ? FileType.FILE : FileType.DIRECTORY }) as never
+      );
+      const user = userEvent.setup();
+      const { router } = await renderBrowserAndFlush(
+        "/browse/smb/test-server-1/Documents?p2=smb/test-server-2/Archives/backup.zip/nested&active=2"
+      );
+      await waitFor(() => {
+        expect(api.listArchiveDirectory).toHaveBeenCalledWith("conn-2", "Archives/backup.zip", "nested", {
+          pageSize: 100,
+          signal: expect.any(AbortSignal),
+        });
+      });
+      await user.keyboard("{Control>}{Alt>}t{/Alt}{/Control}");
+      expect(open).toHaveBeenCalledExactlyOnceWith("/browse/smb/test-server-2/Archives/backup.zip/nested", "_blank", "noopener,noreferrer");
+      await user.keyboard("{Control>}{ArrowLeft}{/Control}");
+      await waitFor(() => expect(router.state.location.pathname).toBe("/browse/smb/test-server-2/Archives/backup.zip/nested"));
+      expect(new URLSearchParams(router.state.location.search).get("p2")).toBe("smb/test-server-2/Archives/backup.zip/nested");
+      await waitFor(() =>
+        expect(
+          vi.mocked(api.listArchiveDirectory).mock.calls.filter(([, , path, options]) => path === "nested" && options?.signal)
+        ).toHaveLength(2)
+      );
+    });
+
+    it("blocks commands while a pane location is loading", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      let finishLoading!: (value: typeof mockDirectoryListing) => void;
+      const pendingListing = new Promise<typeof mockDirectoryListing>((resolve) => {
+        finishLoading = resolve;
+      });
+      vi.mocked(api.listDirectory).mockImplementation(async (connectionId) =>
+        connectionId === "conn-2" ? pendingListing : mockDirectoryListing
+      );
+      const user = userEvent.setup();
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=smb/test-server-2/Pictures&active=2");
+      await waitFor(() => expectDirectoryLoad("conn-2", "Pictures"));
+      const initialKey = router.state.location.key;
+      await user.keyboard("{Control>}{Alt>}t{/Alt}{/Control}{Control>}{ArrowLeft}{/Control}");
+      expect(open).not.toHaveBeenCalled();
+      expect(router.state.location.key).toBe(initialKey);
+      await act(async () => finishLoading(mockDirectoryListing));
+      await user.keyboard("{Control>}{Alt>}t{/Alt}{/Control}");
+      expect(open).toHaveBeenCalledExactlyOnceWith("/browse/smb/test-server-2/Pictures", "_blank", "noopener,noreferrer");
+    });
+  });
+
   describe("single-pane typed routes", () => {
+    it("opens the current location in a new tab without changing the route", async () => {
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      const user = userEvent.setup();
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?keep=1");
+      await waitFor(() => expectDirectoryLoad("conn-1", "Documents"));
+
+      await user.keyboard("{Control>}{Alt>}t{/Alt}{/Control}");
+
+      expect(open).toHaveBeenCalledWith("/browse/smb/test-server-1/Documents", "_blank", "noopener,noreferrer");
+      expect(router.state.location.pathname).toBe("/browse/smb/test-server-1/Documents");
+      expect(router.state.location.search).toBe("?keep=1");
+      open.mockRestore();
+    });
+
     it("loads single-pane mode from a clean URL without query params", async () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
