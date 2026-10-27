@@ -810,6 +810,15 @@ export const EN_TRANSLATIONS = {
         toggleDualPane: {
           title: "Toggle Dual-Pane View",
         },
+        openLocationInNewTab: {
+          title: "Open Current Location In New Tab",
+        },
+        matchLeftPaneLocation: {
+          title: "Set Left Pane To Right Pane Location",
+        },
+        matchRightPaneLocation: {
+          title: "Set Right Pane To Left Pane Location",
+        },
         focusLeftPane: {
           title: "Focus Left Pane",
         },
@@ -979,6 +988,9 @@ export const EN_TRANSLATIONS = {
       showCommands: "Show commands",
       showHelp: "Show keyboard shortcuts",
       switchActivePane: "Switch active pane",
+      openLocationInNewTab: "Open current location in new tab",
+      matchLeftPaneLocation: "Set left pane to right pane location",
+      matchRightPaneLocation: "Set right pane to left pane location",
       toggleDualPane: "Toggle dual-pane view",
       toggleSelectionAndMoveDown: "Toggle selection & move down",
       upload: "Upload files to the current folder",
@@ -999,6 +1011,7 @@ export const EN_TRANSLATIONS = {
       selectItemsToDownload: "Select one or more items to download.",
       selectItemsToMove: "Select one or more items to move.",
       sourceUnavailable: "This action can't be used with the selected item.",
+      locationUnavailable: "Wait for the pane location to load. If loading fails, use Refresh or select another location.",
     },
     chrome: {
       breadcrumb: {

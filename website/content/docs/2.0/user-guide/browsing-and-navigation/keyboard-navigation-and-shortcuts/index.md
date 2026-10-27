@@ -24,6 +24,7 @@ Use these shortcuts when the main file list or browser shell has focus.
 | <kbd>Page Up</kbd> / <kbd>Page Down</kbd> | Move up or down by a page in the current list |
 | <kbd>Enter</kbd> | Open the focused file or enter the focused directory |
 | <kbd>Backspace</kbd> | Go up to the parent directory |
+| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd> | Open the active pane's current location in a new browser tab |
 | <kbd>Ctrl</kbd> + <kbd>Down</kbd> | Open the connection selector |
 | <kbd>Ctrl</kbd> + <kbd>K</kbd> | Open smart navigation |
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>F</kbd> | Filter the current directory in the active pane |
@@ -53,7 +54,13 @@ These shortcuts matter most when you are working keyboard-first across one or tw
 | <kbd>Ctrl</kbd> + <kbd>B</kbd> | Toggle dual-pane mode |
 | <kbd>Ctrl</kbd> + <kbd>1</kbd> / <kbd>Ctrl</kbd> + <kbd>2</kbd> | Focus the left or right pane |
 | <kbd>Tab</kbd> | Move focus to the other pane |
+| <kbd>Ctrl</kbd> + <kbd>Left</kbd> | Set the left pane to the right pane's connection and directory |
+| <kbd>Ctrl</kbd> + <kbd>Right</kbd> | Set the right pane to the left pane's connection and directory |
 | <kbd>F5</kbd> / <kbd>F6</kbd> | Copy or move selected items to the other pane |
+
+The location commands are also available through command search (<kbd>Ctrl</kbd> + <kbd>P</kbd>). They require loaded pane locations and are unavailable in viewers, dialogs, and text inputs. Opening a new tab copies only the location, including an archive subdirectory, not selection, scroll position, or the second pane. Browser settings control where the page opens. If your operating system uses <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd> for a terminal, use command search instead.
+
+Matching pane locations doesn't move files or change the active pane. Use browser Back to restore the previous locations. If both locations already match, the command makes no change.
 
 ## Viewers
 

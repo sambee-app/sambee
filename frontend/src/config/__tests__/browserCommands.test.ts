@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../i18n";
 import { type BrowserCommandContext, getEnabledBrowserCommands } from "../browserCommands";
 
@@ -19,6 +19,11 @@ function createContext(): BrowserCommandContext {
     canOpenFocusedFileInApp: true,
     canCopyToOtherPane: true,
     canMoveToOtherPane: true,
+    canOpenLocationInNewTab: true,
+    canMatchPaneLocations: true,
+    openLocationInNewTab: () => {},
+    matchLeftPaneLocation: () => {},
+    matchRightPaneLocation: () => {},
     openQuickNav: () => {},
     openFileSearch: () => {},
     openCommandMode: () => {},
@@ -89,6 +94,32 @@ describe("browserCommands", () => {
     expect(commandIds).not.toContain("browser.openInApp");
     expect(commandIds).not.toContain("browser.copyToOtherPane");
     expect(commandIds).not.toContain("browser.moveToOtherPane");
+  });
+
+  it.each([
+    ["browser.openLocationInNewTab", "openLocationInNewTab", "Ctrl+Alt+T"],
+    ["browser.matchLeftPaneLocation", "matchLeftPaneLocation", "Ctrl+Left"],
+    ["browser.matchRightPaneLocation", "matchRightPaneLocation", "Ctrl+Right"],
+  ] as const)("runs %s without requiring writable files", (id, handler, shortcutLabel) => {
+    const context = createContext();
+    context.connectionWritable = false;
+    context.hasFiles = false;
+    context.hasFocusedFile = false;
+    context[handler] = vi.fn();
+    const command = getEnabledBrowserCommands(context).find((candidate) => candidate.id === id);
+    expect(command).toMatchObject({ shortcutLabel });
+    command?.run(context);
+    expect(context[handler]).toHaveBeenCalledOnce();
+  });
+
+  it("omits location commands when their location is unavailable", () => {
+    const context = createContext();
+    context.canOpenLocationInNewTab = false;
+    context.canMatchPaneLocations = false;
+    const ids = getEnabledBrowserCommands(context).map((command) => command.id);
+    expect(ids).not.toContain("browser.openLocationInNewTab");
+    expect(ids).not.toContain("browser.matchLeftPaneLocation");
+    expect(ids).not.toContain("browser.matchRightPaneLocation");
   });
 
   it("runs archive creation only when a writable selection has an available executor", () => {

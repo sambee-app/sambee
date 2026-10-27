@@ -20,11 +20,16 @@ With Sambee's new theme editor, users can change all theme colors via hex values
 
 Previous versions of Sambee introduced multi-selection for mobile users and keyboard aficionados on desktop. Mouse coverage was lacking. That has been rectified now: Selecting multiple files with a mouse is now straightforward. Click a file or folder icon to select it, then Shift-click another icon to add everything in between without losing your earlier selections. The pane's status bar keeps the count in view.
 
+### New Keyboard Shortcuts
+
+- New tab: <kbd>Ctrl+Alt+T</kbd> opens the current location in a new browser tab.
+- Pane location: <kbd>Ctrl+Left</kbd> sets the left pane to the right pane's location, and <kbd>Ctrl+Right</kbd> sets the right pane to the left pane's location.
+- Item selection: keyboard shortcuts now include <kbd>Shift+Home</kbd> and <kbd>Shift+End</kbd>.
+
 ### Other Changes
 
 - Native mobile sharing is now available for single or multiple files from the file list.
 - Single-file downloads are now streamed directly without buffering in memory. This speeds up downloads and effectively removes limits imposed by file size.
-- Item selection keyboard shortcuts now include <kbd>Shift+Home</kbd> and <kbd>Shift+End</kbd>.
 
 ### Bugfixes
 
@@ -173,7 +178,7 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 
 ### Dependency Security
 
-- Updated all **dependencies** with known issues or vulnerabilities to fixed versions.
+- Updated all dependencies with known issues or vulnerabilities to fixed versions.
 - Pinned all third-party GitHub Actions workflows to commit SHAs.
 - Frontend: removed `patch-package` to get rid of vulnerable transisitve dependency `braces`.
 - Backend: PIP is now upgraded before use and uninstalled from the Docker image afterwards.
