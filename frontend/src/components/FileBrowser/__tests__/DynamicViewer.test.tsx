@@ -197,7 +197,7 @@ describe("DynamicViewer", () => {
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
   });
 
-  it("keeps the loaded viewer mounted when only the viewed path changes", async () => {
+  it("reuses the loaded module when the viewed path changes", async () => {
     mockGetViewerComponentLoadResult.mockResolvedValue({
       status: "loaded",
       component: function LoadedViewer() {
@@ -280,10 +280,37 @@ describe("DynamicViewer", () => {
     expect(screen.getByTestId("outgoing-viewer")).toHaveAttribute("data-pending", "true");
     expect(unmounted).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await act(async () => finishLoad({ status: "loaded", component: ({ path }) => <div data-testid="incoming-viewer">{path}</div> }));
+    await act(async () =>
+      finishLoad({
+        status: "loaded",
+        component: function Incoming({ path }) {
+          return <div data-testid="incoming-viewer">{path}</div>;
+        },
+      })
+    );
     expect(screen.getByTestId("incoming-viewer")).toHaveTextContent("next.png");
     expect(unmounted).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["text", "markdown", "image", "pdf"] as const)(
+    "renders only the selected %s resource without a hidden candidate",
+    async (viewerId) => {
+      mockGetViewerComponentLoadResult.mockResolvedValue({
+        status: "loaded",
+        component: function Content({ path }: ViewerComponentProps) {
+          return <div data-testid="displayed-content">{path}</div>;
+        },
+      });
+      const view = (path: string) => <DynamicViewer {...defaultProps} viewInfo={{ ...defaultProps.viewInfo, viewerId, path }} />;
+      const { rerender } = render(view("original"));
+      await screen.findByTestId("displayed-content");
+      rerender(view("missing"));
+      expect(screen.getAllByTestId("displayed-content")).toHaveLength(1);
+      expect(screen.getByTestId("displayed-content")).toHaveTextContent("missing");
+      rerender(view("newer"));
+      expect(screen.getByTestId("displayed-content")).toHaveTextContent("newer");
+    }
+  );
 
   it("suspends outgoing shortcuts and gallery callbacks while metadata resolves but allows Escape to cancel", async () => {
     const download = vi.fn();
@@ -317,7 +344,22 @@ describe("DynamicViewer", () => {
     expect(download).toHaveBeenCalledTimes(1);
   });
 
-  it("retains the selection key with its matching image index until the replacement is ready", async () => {
+  it("allows Escape once while metadata waits in the same viewer type", async () => {
+    mockGetViewerComponentLoadResult.mockResolvedValue({
+      status: "loaded",
+      component: function Content({ path }: ViewerComponentProps) {
+        return <div data-testid="displayed-content">{path}</div>;
+      },
+    });
+    const { rerender } = render(<DynamicViewer {...defaultProps} />);
+    await screen.findByTestId("displayed-content");
+    rerender(<DynamicViewer {...defaultProps} isPending viewInfo={{ ...defaultProps.viewInfo, path: "replacement.txt" }} />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("displayed-content")).toHaveTextContent(defaultProps.viewInfo.path);
+  });
+
+  it("retains the selection key with its matching image index until metadata is ready", async () => {
     mockGetViewerComponentLoadResult.mockResolvedValue({
       status: "loaded",
       component: function LoadedViewer({ currentIndex, navigation }: ViewerComponentProps) {

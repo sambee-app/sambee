@@ -23,6 +23,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { OperationNotificationProvider } from "../../components/OperationNotifications";
 import { createMockConnection } from "../../test/fixtures/connections";
 import type { Connection, FileEntry } from "../../types";
 import { FileType } from "../../types";
@@ -30,7 +31,8 @@ import { physicalLocation } from "../FileBrowser/contentProviders";
 import { FileBrowserPane, type FileBrowserPaneProps } from "../FileBrowser/FileBrowserPane";
 import type { UseFileBrowserPaneReturn } from "../FileBrowser/types";
 
-vi.mock("react-i18next", () => ({
+vi.mock("react-i18next", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("react-i18next")>()),
   useTranslation: () => ({
     t: (key: string) => {
       if (key === "settings.connectionDialog.accessMode.readOnlyLabel") {
@@ -315,6 +317,39 @@ function defaultProps(overrides: Partial<FileBrowserPaneProps> = {}): FileBrowse
 describe("FileBrowserPane", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("presents pane notices in the shared viewport host", () => {
+    const dismissNotification = vi.fn();
+    const pane = createMockPane({
+      notification: { id: "missing", message: "Folder was not found", severity: "warning", occurrence: 1 },
+      dismissNotification,
+    });
+    render(
+      <OperationNotificationProvider>
+        <FileBrowserPane {...defaultProps({ pane, paneId: "right", paneMode: "dual" })} />
+      </OperationNotificationProvider>
+    );
+    const notice = screen.getByRole("status");
+    expect(notice.closest("[data-pane-id]")).toBeNull();
+    expect(notice.closest(".MuiSnackbar-root")).not.toBeNull();
+    expect(notice).not.toHaveTextContent("Right pane:");
+    fireEvent.click(screen.getByRole("button", { name: "common.actions.close" }));
+    expect(dismissNotification).toHaveBeenCalledOnce();
+  });
+
+  it("shows a monitor summary with its full current target below it", () => {
+    const pane = createMockPane({
+      currentPath: "Projects/Reports",
+      directoryMonitorError: 'Folder "Reports" was not found. It may have been moved or deleted.',
+      directoryMonitorErrorSummary: "Folder not found. It may have been moved or deleted.",
+    });
+    render(<FileBrowserPane {...defaultProps({ pane })} />);
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent("Folder not found. It may have been moved or deleted.");
+    expect(notice).toHaveTextContent("My NAS: /Projects/Reports");
+    expect(notice).not.toHaveTextContent('Folder "Reports"');
+    expect(notice.querySelector("strong")).toBeNull();
   });
 
   // --------------------------------------------------------------------------

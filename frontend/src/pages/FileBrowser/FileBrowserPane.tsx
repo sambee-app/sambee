@@ -16,7 +16,7 @@
 
 import BlockOutlinedIcon from "@mui/icons-material/BlockOutlined";
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
-import { alpha, Box, CircularProgress, Typography, useTheme } from "@mui/material";
+import { alpha, Box, Button, CircularProgress, Typography, useTheme } from "@mui/material";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CompactBadge as Chip } from "../../components/CompactBadge";
@@ -27,12 +27,14 @@ import type { CompactItemAction } from "../../components/FileBrowser/CompactItem
 import { CompactSelectionActions } from "../../components/FileBrowser/CompactSelectionActions";
 import ConfirmDeleteDialog from "../../components/FileBrowser/ConfirmDeleteDialog";
 import CreateItemDialog from "../../components/FileBrowser/CreateItemDialog";
+import { FileBrowserAlerts } from "../../components/FileBrowser/FileBrowserAlerts";
 import { FileList } from "../../components/FileBrowser/FileList";
 import RenameDialog from "../../components/FileBrowser/RenameDialog";
 import { STATUS_BAR_HEIGHT } from "../../components/FileBrowser/StatusBar";
 import type { SearchProvider } from "../../components/FileBrowser/search";
 import type { UnifiedSearchBarModeOption } from "../../components/FileBrowser/UnifiedSearchBar";
 import { UnifiedSearchBar } from "../../components/FileBrowser/UnifiedSearchBar";
+import { formatNoticeTarget, OperationNotifications } from "../../components/OperationNotifications";
 import { DRAFT_RECOVERY_CHANGED_EVENT, getUnsavedDraftsForConnection } from "../../services/draftRecovery";
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
 import type { Connection, FileEntry } from "../../types";
@@ -114,6 +116,8 @@ export interface FileBrowserPaneProps {
   dropTargetLabel?: string;
   dropUnavailableReason?: string | null;
   onFileDrop?: (event: React.DragEvent<HTMLElement>) => void;
+  onOpenLocalDrivesSettings?: () => void;
+  onReload?: () => void;
 }
 
 // ============================================================================
@@ -148,6 +152,8 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   dropTargetLabel,
   dropUnavailableReason,
   onFileDrop,
+  onOpenLocalDrivesSettings,
+  onReload,
 }) => {
   const theme = useTheme();
   const { t } = useTranslation();
@@ -462,7 +468,6 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   /** Navigate to a breadcrumb path segment. */
   const handleBreadcrumbNavigate = React.useCallback(
     (path: string) => {
-      handleClearSelection();
       if (archiveLocation) {
         if (path === archiveLocation.archivePath) {
           pane.navigateArchiveToPath("");
@@ -473,11 +478,10 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
           pane.navigateArchiveToPath(path.slice(archivePrefix.length));
           return;
         }
-        pane.closeArchive();
       }
       pane.navigateToPath(path);
     },
-    [archiveLocation, handleClearSelection, pane]
+    [archiveLocation, pane]
   );
 
   const breadcrumbPath = archiveLocation
@@ -491,7 +495,53 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   if (!connectionId) return null;
 
   return (
-    <Box data-pane-id={paneId} sx={paneContainerSx} onClick={handlePaneClick} onFocusCapture={handlePaneFocus} onKeyDown={undefined}>
+    <Box
+      data-pane-id={paneId}
+      sx={[paneContainerSx, { position: "relative" }]}
+      onClick={handlePaneClick}
+      onFocusCapture={handlePaneFocus}
+      onKeyDown={undefined}
+    >
+      <OperationNotifications
+        suppressed={Boolean(pane.directoryUnavailable)}
+        notices={[
+          ...(pane.notification
+            ? [
+                {
+                  ...pane.notification,
+                  id: `${paneId}:${pane.notification.id}`,
+                  action: pane.companionPairingError ? (
+                    <>
+                      {pane.companionPairingError === "signature" && (
+                        <Button color="inherit" onClick={onReload}>
+                          {t("settings.localDrives.reloadButton")}
+                        </Button>
+                      )}
+                      <Button color="inherit" onClick={onOpenLocalDrivesSettings}>
+                        {t("settings.localDrives.headerTitle")}
+                      </Button>
+                    </>
+                  ) : undefined,
+                  onRetry: pane.companionPairingError ? undefined : pane.notification.onRetry,
+                },
+              ]
+            : []),
+          ...(pane.directoryMonitorError
+            ? [
+                {
+                  id: `${paneId}:monitor`,
+                  message: pane.directoryMonitorErrorSummary ?? pane.directoryMonitorError,
+                  occurrence: pane.directoryMonitorErrorOccurrence,
+                  severity: "warning" as const,
+                  failureKey: JSON.stringify([connectionId, currentPath]),
+                  targetLabel: formatNoticeTarget(connectionName, currentPath),
+                  onRetry: pane.handleRefresh,
+                },
+              ]
+            : []),
+        ]}
+        onDismiss={pane.dismissNotification}
+      />
       <Box
         aria-live="polite"
         aria-atomic="true"
@@ -529,6 +579,11 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
               sx={{ ml: 1, flexShrink: 0 }}
             />
           )}
+          {pane.directoryMonitorError && (
+            <Button size="small" onClick={pane.handleRefresh} sx={{ ml: "auto" }}>
+              {t("common.actions.monitoringStopped")}
+            </Button>
+          )}
         </Box>
       )}
 
@@ -565,10 +620,28 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
       )}
 
       {/* File list or loading indicator */}
+      {useCompactLayout && pane.directoryMonitorError && (
+        <Box sx={{ px: 2 }}>
+          <Button size="small" onClick={pane.handleRefresh}>
+            {t("common.actions.monitoringStopped")}
+          </Button>
+        </Box>
+      )}
       {loading ? (
         <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
           <CircularProgress />
         </Box>
+      ) : pane.directoryUnavailable && pane.error ? (
+        <FileBrowserAlerts
+          error={pane.error}
+          companionPairingError={pane.companionPairingError}
+          onOpenLocalDrivesSettings={onOpenLocalDrivesSettings}
+          onReload={onReload}
+          onRetry={pane.handleRefresh}
+          loadingConnections={false}
+          connectionsCount={connections.length}
+          backendAvailabilityStatus="available"
+        />
       ) : (
         <Box
           onDragEnter={(event) => {

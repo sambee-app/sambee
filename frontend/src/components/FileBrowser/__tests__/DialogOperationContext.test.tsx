@@ -11,7 +11,7 @@ class ResizeObserverMock {
 
   observe(target: Element) {
     ResizeObserverMock.callback = this.callback;
-    vi.spyOn(target, "getBoundingClientRect").mockImplementation(() => ({ width: ResizeObserverMock.width }) as DOMRect);
+    vi.spyOn(target, "clientWidth", "get").mockImplementation(() => ResizeObserverMock.width);
     this.callback([], this as unknown as ResizeObserver);
   }
 
@@ -101,9 +101,15 @@ describe("DialogOperationContext", () => {
     const value = "annual-report-final.pdf";
     render(<DialogOperationContext entries={[{ label: "Source item", value, kind: "fileName", testId: "source" }]} />);
 
-    expect(screen.getByTestId("source")).not.toHaveTextContent(value);
+    const identifier = screen.getByTestId("source");
+    expect(identifier).not.toHaveTextContent(value);
 
     ResizeObserverMock.resize(100);
     await waitFor(() => expect(screen.getByTestId("source")).toHaveTextContent(value));
+    expect(screen.getByTestId("source")).toBe(identifier);
+
+    ResizeObserverMock.resize(12);
+    await waitFor(() => expect(screen.getByTestId("source")).not.toHaveTextContent(value));
+    expect(screen.getByTestId("source")).toBe(identifier);
   });
 });

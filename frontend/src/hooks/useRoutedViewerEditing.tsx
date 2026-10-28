@@ -23,7 +23,6 @@ export function WorkspaceNavigationGuard({ guard }: { guard: ViewerLeaveGuard })
     const current = parseViewerRoute(new URLSearchParams(currentLocation.search), true);
     const next = parseViewerRoute(new URLSearchParams(nextLocation.search), true);
     return (
-      currentLocation.pathname !== nextLocation.pathname ||
       !current ||
       !next ||
       (current.mode === "edit" && next.mode !== "edit") ||
@@ -107,7 +106,7 @@ export function useRoutedViewerEditing({
     setRequested(true);
   });
   const onGuardChange = navigation?.onGuardChange;
-  const active = isEditing || isAcquiring || isSaving;
+  const active = isEditing || isAcquiring || isSaving || requested;
   useEffect(() => {
     if (!onGuardChange || !active) return;
     onGuardChange({ requestLeave, shouldBlock: () => blocking.current });
@@ -121,8 +120,10 @@ export function useRoutedViewerEditing({
       const transition = pending.current;
       if (!transition) return;
       pending.current = null;
-      setRequested(false);
-      void exit().then(() => transition?.proceed());
+      void exit().then(() => {
+        transition.proceed();
+        setRequested(false);
+      });
     }
   }, [requested, isSaving, dirty]);
 
@@ -159,10 +160,13 @@ export function useRoutedViewerEditing({
       const transition = pending.current;
       if (!transition) return false;
       pending.current = null;
-      setRequested(false);
-      await exit();
-      transition.proceed();
-      return true;
+      try {
+        await exit();
+        transition.proceed();
+        return true;
+      } finally {
+        setRequested(false);
+      }
     },
   };
 }

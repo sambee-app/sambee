@@ -29,6 +29,7 @@ from app.services.archive.zip_reader import ArchiveSourceUnavailableError
 from app.services.content_transfer import SourceDeleteError, SourceDeletionOutcomeUnknown
 from app.services.system_settings import get_integer_setting_value, get_smbclient_policy_kwargs
 from app.storage.base import ExclusiveWriter, MoveSourceReader, ProgressCallback, RandomAccessReader, StorageBackend
+from app.storage.smb_errors import translate_smb_target_error
 from app.storage.smb_pool import get_connection_pool, get_smb_connection_cache
 from app.utils.file_type_registry import get_mime_type
 
@@ -498,6 +499,11 @@ class SMBBackend(StorageBackend):
             )
         except asyncio.TimeoutError as exc:
             raise TimeoutError(f"SMB operation timed out during {operation_name}") from exc
+        except Exception as error:
+            translated = translate_smb_target_error(error, smb_path)
+            if translated is not error:
+                raise translated from error
+            raise
 
     async def _run_blocking_smb_operation(
         self,
@@ -661,11 +667,7 @@ class SMBBackend(StorageBackend):
                 f"Timeout listing directory '{path}' (smb_path='{smb_path}') after {SMB_LIST_DIRECTORY_TIMEOUT_SECONDS:.0f} seconds"
             )
             raise TimeoutError(f"SMB operation timed out while listing directory: {path}")
-        except Exception as e:
-            logger.error(
-                f"Failed to list directory '{path}' (smb_path='{smb_path}'): {type(e).__name__}: {e}",
-                exc_info=True,
-            )
+        except (FileNotFoundError, PermissionError, NotADirectoryError):
             raise
 
     #
@@ -732,11 +734,7 @@ class SMBBackend(StorageBackend):
                     is_hidden=filename.startswith("."),
                 )
 
-        except Exception as e:
-            error_str = str(e)
-            if "0xc0000034" in error_str or "No such file" in error_str or "File not found" in error_str:
-                raise FileNotFoundError(f"Path not found: {path}") from e
-            logger.error(f"Failed to get file info for {path}: {e}")
+        except (FileNotFoundError, PermissionError, NotADirectoryError, TimeoutError):
             raise
 
     #
@@ -1072,6 +1070,8 @@ class SMBBackend(StorageBackend):
         except TimeoutError:
             logger.error(f"Timeout writing '{path}' after {SMB_WRITE_FILE_TIMEOUT_SECONDS:.0f} seconds")
             raise TimeoutError(f"SMB operation timed out while writing: {path}")
+        except (FileNotFoundError, PermissionError, IsADirectoryError, NotADirectoryError):
+            raise
         except OSError as e:
             error_str = str(e)
             if "0xc0000043" in error_str or "being used by another process" in error_str:

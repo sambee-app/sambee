@@ -193,6 +193,26 @@ describe("useCachedImageGallery", () => {
     expect(decodeResult.current.errorStates.get(0)).toBe(IMAGE_LOAD_FAILED_MESSAGE);
   });
 
+  it("fetches fresh bytes after a locally cached image fails decoding and Retry is selected", async () => {
+    const invalid = new Blob(["invalid"], { type: "image/jpeg" });
+    const replacement = new Blob(["replacement"], { type: "image/jpeg" });
+    vi.mocked(apiService.getImageBlob).mockResolvedValueOnce(invalid).mockResolvedValueOnce(replacement);
+    const { result } = renderHook(() =>
+      useCachedImageGallery({
+        connectionId: "conn-1",
+        loadImageBlob: loadMockImageBlob,
+        images: ["/0.jpg"],
+        preloadRange: 0,
+      })
+    );
+    await waitFor(() => expect(result.current.currentImageLoadPhase).toBe("decoding"));
+    act(() => result.current.markImageDecodeFailed(0, "blob:gallery-image"));
+    act(() => result.current.retryCurrentImage());
+    await waitFor(() => expect(result.current.getCachedImageBlob(0)).toBe(replacement));
+    expect(apiService.getImageBlob).toHaveBeenCalledTimes(2);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:gallery-image");
+  });
+
   it("keeps unrecognized API errors generic", async () => {
     vi.mocked(apiService.getImageBlob).mockRejectedValue({
       response: { status: 500, data: { detail: "Failed to read file: smb://internal-server/private-share" } },

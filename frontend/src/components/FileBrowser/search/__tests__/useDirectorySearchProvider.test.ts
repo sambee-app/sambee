@@ -100,7 +100,7 @@ describe("getDirectoryResultPresentation", () => {
     ]);
 
     result.current.onSelect("recent-directory:recent-other-connection");
-    expect(onNavigateDirectory).toHaveBeenCalledWith("connection-2", "Projects/2026");
+    expect(onNavigateDirectory).toHaveBeenCalledWith("connection-2", "Projects/2026", "recent-other-connection");
     result.current.onSelect("directory:Documents/Reference");
     expect(onNavigate).toHaveBeenCalledWith("Documents/Reference");
 

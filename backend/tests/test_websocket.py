@@ -204,7 +204,10 @@ class TestWebSocketConnectionAuthorization:
             ws_client = WebSocketClient(websocket)
             response = ws_client.subscribe(str(other_private_connection.id), "/secret")
 
-        assert response == {"type": "error", "message": "Connection not found or access denied"}
+        assert response["type"] == "error"
+        assert response["code"] == "connection_unavailable"
+        assert response["connection_id"] == str(other_private_connection.id)
+        assert response["path"] == "/secret"
         mock_monitor.start_monitoring_async.assert_not_awaited()
 
     @patch("app.api.websocket.get_monitor")
@@ -223,7 +226,9 @@ class TestWebSocketConnectionAuthorization:
             ws_client = WebSocketClient(websocket)
             response = ws_client.subscribe("not-a-valid-uuid", "/documents")
 
-        assert response == {"type": "error", "message": "Connection not found or access denied"}
+        assert response["type"] == "error"
+        assert response["code"] == "connection_unavailable"
+        assert response["connection_id"] == "not-a-valid-uuid"
         mock_monitor.start_monitoring_async.assert_not_awaited()
 
 
@@ -250,7 +255,9 @@ class TestWebSocketMonitoring:
             assert key not in manager.active_connections
             assert key not in manager._resolved_paths
 
-        assert response == {"type": "error", "message": "Connection not found or access denied"}
+        assert response["type"] == "error"
+        assert response["code"] == "directory_unavailable"
+        assert response["path"] == "/documents"
 
     @patch("app.api.websocket.get_monitor")
     def test_subscribe_resolves_prefix_for_monitor(

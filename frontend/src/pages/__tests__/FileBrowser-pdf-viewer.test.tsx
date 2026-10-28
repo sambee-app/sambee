@@ -632,7 +632,7 @@ describe("Browser - PDF Viewer Integration", () => {
       fireEvent.click(pdfFile);
 
       await waitFor(() => {
-        expect(screen.getByText("Access denied")).toBeInTheDocument();
+        expect(screen.getByText("Access to this file was denied. Check your permissions and retry.")).toBeInTheDocument();
       });
     });
   });

@@ -181,7 +181,7 @@ export function getDirectoryResultPresentation(
 interface DirectorySearchProviderOptions {
   includeDotDirectories?: boolean;
   getConnectionName?: (connectionId: string) => string;
-  onNavigateDirectory?: (connectionId: string, path: string) => void;
+  onNavigateDirectory?: (connectionId: string, path: string, recordId?: string) => void;
   resultLimit?: number;
   history?: BrowserHistoryService;
 }
@@ -328,7 +328,7 @@ export function useDirectorySearchProvider(
       if (value.startsWith(RECENT_DIRECTORY_PREFIX)) {
         const directory = recentDirectoriesRef.current.get(value.slice(RECENT_DIRECTORY_PREFIX.length));
         if (directory) {
-          options.onNavigateDirectory?.(directory.connection_id, directory.path);
+          options.onNavigateDirectory?.(directory.connection_id, directory.path, directory.id);
         }
         return;
       }

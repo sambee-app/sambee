@@ -46,7 +46,7 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
             connectionId,
             navigation,
           }: ViewerComponentProps) {
-            const { currentIndex, setCurrentIndex, filename } = useCachedImageGallery({
+            const { currentIndex, setCurrentIndex, filename, errorStates, retryCurrentImage } = useCachedImageGallery({
               connectionId,
               images,
               initialIndex,
@@ -55,9 +55,18 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
               loadImageBlob,
             });
             useEffect(() => recordFilename(filename), [filename]);
+            const error = errorStates.get(currentIndex);
             return (
               <div data-testid="image-view" data-path={path} data-filename={filename}>
                 Image View
+                {error ? (
+                  <div role="alert">
+                    {error}
+                    <button type="button" onClick={retryCurrentImage}>
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
                 <button type="button" onClick={() => setCurrentIndex(currentIndex + 1)}>
                   Next image
                 </button>
@@ -166,7 +175,11 @@ describe("Browser - Image View Integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
     await waitFor(() => expect(new URLSearchParams(router.state.location.search).get("file")).toBe("smb/test-server-1/two.jpg"));
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
-    expect(recordFilename.mock.calls.map(([filename]) => filename)).toEqual(["two.jpg"]);
+    expect(
+      recordFilename.mock.calls
+        .map(([filename]) => filename)
+        .filter((filename, index, values) => index === 0 || filename !== values[index - 1])
+    ).toEqual(["two.jpg"]);
     expect(loadImageBlob).toHaveBeenCalledTimes(2);
     await act(() => router.navigate(-1));
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "one.jpg"));
@@ -183,6 +196,39 @@ describe("Browser - Image View Integration", () => {
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "one.jpg"));
     await act(() => router.navigate(2));
     await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
+  });
+
+  it("shows the selected image error and retries without retaining the previous filename", async () => {
+    mockedApi.listDirectory.mockResolvedValue({
+      path: "",
+      total: 2,
+      items: ["one.jpg", "two.jpg"].map((name) => ({
+        name,
+        path: name,
+        type: FileType.FILE,
+        mime_type: "image/jpeg",
+        size: 10,
+        is_readable: true,
+        is_hidden: false,
+      })),
+    });
+    mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
+    loadImageBlob.mockImplementation(async (path: string) => {
+      if (path === "two.jpg") throw { response: { status: 404, data: { detail: { code: "item_not_found" } } } };
+      return new Blob(["image"], { type: "image/jpeg" });
+    });
+    await renderBrowser();
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
+    await screen.findByTestId("image-view");
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await screen.findByRole("alert");
+    expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg");
+    expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "two.jpg");
+    const attempts = loadImageBlob.mock.calls.length;
+    loadImageBlob.mockResolvedValue(new Blob(["restored image"], { type: "image/jpeg" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(loadImageBlob.mock.calls.length).toBeGreaterThan(attempts);
   });
 
   it("restores an unchanged routed index when Back immediately follows an optimistic gallery move", async () => {

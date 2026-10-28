@@ -8,6 +8,10 @@ describe("abbreviatePath", () => {
     expect(abbreviatePath("Demo:/Users/sambee/Projects/Archive/report.pdf", 20, measureCharacters)).toBe("Demo:/.../report.pdf");
   });
 
+  it("preserves a spaced connection prefix while collapsing ancestors", () => {
+    expect(abbreviatePath("Demo: /Users/sambee/Projects/Archive/report.pdf", 21, measureCharacters)).toBe("Demo: /.../report.pdf");
+  });
+
   it("keeps an omission indicator when only the connection and basename fit", () => {
     expect(abbreviatePath("Demo:/Test/Test dir", 17, measureCharacters)).toBe("Demo:/...Test dir");
   });

@@ -8,7 +8,6 @@ import {
   Fade,
   IconButton,
   InputAdornment,
-  Paper,
   TextField,
   Tooltip,
   Typography,
@@ -18,7 +17,7 @@ import {
 import { animated, useSpring } from "@react-spring/web";
 import { useDrag } from "@use-gesture/react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Document, Page, pdfjs } from "react-pdf";
 import { PreviewUnavailableError } from "../../services/previewPolicy";
@@ -34,6 +33,7 @@ import {
   readViewerContent,
   readVirtualContent,
   useContentProviderRegistry,
+  verifyViewerSourceAfterFailure,
 } from "../../pages/FileBrowser/contentProviders";
 import { error as logError } from "../../services/logger";
 import { useSambeeTheme } from "../../theme";
@@ -52,6 +52,7 @@ import {
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
 import { createDisplayedShareFile, supportsNativeShare } from "../../utils/nativeShare";
+import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 import { settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
 import { ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
@@ -158,6 +159,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 }) => {
   const isReadOnly = connectionIsReadOnly || virtualSource !== undefined;
   const contentProviders = useContentProviderRegistry();
+  const checkedDecodeLoadRef = useRef<ActivePdfLoad | null>(null);
   const { t } = useTranslation();
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -173,6 +175,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   const [documentFailure, setDocumentFailure] = useState<string | null>(null);
   const [pdfPasswordCallback, setPdfPasswordCallback] = useState<PdfPasswordCallback | null>(null);
   const [pdfPassword, setPdfPassword] = useState("");
+  const pdfPasswordFormId = useId();
   const [showPdfPassword, setShowPdfPassword] = useState(false);
   const [searchText, setSearchText] = useState<string>("");
   const [currentMatch, setCurrentMatch] = useState<number>(0);
@@ -645,10 +648,31 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
   // Handle document load error
   const handleDocumentLoadError = useCallback(
-    (err: Error) => {
+    async (err: Error) => {
       logError("PDF load error", { error: err.message });
       if (pdfLoadCanceledRef.current) {
         return;
+      }
+
+      const activeLoad = activePdfLoadRef.current;
+      if (activeLoad && checkedDecodeLoadRef.current === activeLoad) return;
+      if (activeLoad && checkedDecodeLoadRef.current !== activeLoad) {
+        checkedDecodeLoadRef.current = activeLoad;
+        const sourceFailure = await verifyViewerSourceAfterFailure(
+          connectionId,
+          path,
+          virtualSource,
+          contentProviders,
+          () => activePdfLoadRef.current === activeLoad && !pdfLoadCanceledRef.current,
+          activeLoad.abortController.signal
+        );
+        if (activePdfLoadRef.current !== activeLoad || activeLoad.abortController.signal.aborted || pdfLoadCanceledRef.current) return;
+        if (sourceFailure) {
+          setDocumentFailure(sourceFailure);
+          setError(sourceFailure);
+          setPdfLoadPhase("error");
+          return;
+        }
       }
 
       const failureMessage = getApiErrorMessage(err, "Failed to load PDF", { includeOriginalMessage: true });
@@ -1344,8 +1368,8 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
   return (
     <Dialog
-      inert={isTransitioning}
-      open={true}
+      aria-busy={isTransitioning}
+      open
       onClose={handleDialogClose}
       maxWidth={false}
       fullScreen
@@ -1665,43 +1689,32 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
           )}
 
           {pdfPasswordCallback && (
-            <Box
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="pdf-password-dialog-title"
-              aria-describedby="pdf-password-dialog-description"
-              sx={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 3,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                p: { xs: 2, sm: 3 },
-                backgroundColor: "rgba(31, 38, 43, 0.48)",
-              }}
+            <ResponsiveDialogShell
+              open
+              onClose={handlePdfPasswordCancel}
+              title="Unlock PDF"
+              description="Enter the password to view this PDF."
+              maxWidth="xs"
+              actions={
+                <>
+                  <Button onClick={handlePdfPasswordCancel} variant="outlined" sx={settingsUtilityButtonSx}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" form={pdfPasswordFormId} variant="contained" disabled={!pdfPassword}>
+                    Open PDF
+                  </Button>
+                </>
+              }
             >
-              <Paper
+              <Box
                 component="form"
-                elevation={8}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    handlePdfPasswordCancel();
-                  }
-                }}
+                id={pdfPasswordFormId}
                 onSubmit={(event) => {
                   event.preventDefault();
                   handlePdfPasswordSubmit();
                 }}
-                sx={{ width: "min(100%, 26rem)", p: { xs: 2.5, sm: 3 }, borderRadius: 1 }}
               >
-                <Typography id="pdf-password-dialog-title" component="h2" variant="h6">
-                  Unlock PDF
-                </Typography>
-                <Typography id="pdf-password-dialog-description" color="text.secondary" sx={{ mt: 0.75 }}>
-                  Enter the password to view this PDF.
-                </Typography>
+                <Typography sx={{ mt: 1, overflowWrap: "anywhere" }}>{filename}</Typography>
                 <TextField
                   autoFocus
                   fullWidth
@@ -1729,16 +1742,8 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                   }}
                   sx={{ mt: 3 }}
                 />
-                <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, mt: 3 }}>
-                  <Button onClick={handlePdfPasswordCancel} variant="outlined" sx={settingsUtilityButtonSx}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" variant="contained" disabled={!pdfPassword}>
-                    Open PDF
-                  </Button>
-                </Box>
-              </Paper>
-            </Box>
+              </Box>
+            </ResponsiveDialogShell>
           )}
         </Box>
       </Box>

@@ -90,7 +90,7 @@ export function abbreviatePath(path: string, availableWidth: number, measureText
   }
 
   const separator = path.includes("\\") && !path.includes("/") ? "\\" : "/";
-  const prefixedRoot = path.match(/^([^/\\]+):[\\/]/)?.[0];
+  const prefixedRoot = path.match(/^([^/\\]+):[ \t]*[\\/]/)?.[0];
   const root = prefixedRoot ?? (path.startsWith(separator) ? separator : "");
   const segments = path.slice(root.length).split(/[\\/]/).filter(Boolean);
   const basename = segments.pop();

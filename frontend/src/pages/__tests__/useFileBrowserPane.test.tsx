@@ -2206,7 +2206,7 @@ describe("useFileBrowserPane", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.error).toBe("The link target no longer exists");
+      expect(result.current.error).toBe('File "Missing.lnk" was not found. It may have been moved or deleted.');
     });
     expect(result.current.viewInfo).toBeNull();
     expect(api.openLocalFile).not.toHaveBeenCalled();
@@ -2442,6 +2442,8 @@ describe("useFileBrowserPane", () => {
     await waitFor(() => {
       expect(result.current.error).not.toBeNull();
     });
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
 
     vi.mocked(api.listDirectory).mockResolvedValueOnce(mockNestedDirectory);
 
@@ -2450,6 +2452,351 @@ describe("useFileBrowserPane", () => {
     });
 
     expect(api.recordRecentDirectory).not.toHaveBeenCalled();
+  });
+
+  it("keeps the original location and selection when a target directory is missing", async () => {
+    const onNavigatePath = vi.fn();
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, onNavigatePath }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    act(() => result.current.selectItem(result.current.sortedFiles[1]!, 1));
+    const selection = new Set(result.current.selectedFiles);
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({
+      response: { status: 404, data: { detail: { code: "directory_not_found", message: "The folder was not found." } } },
+    });
+    act(() => result.current.navigateToPath("missing"));
+    await waitFor(() => expect(result.current.error).toBe('Folder "missing" was not found. It may have been moved or deleted.'));
+    expect(result.current.notification).toMatchObject({
+      message: "Folder not found. It may have been moved or deleted.",
+      targetLabel: `${mockConnections[0]!.name}: /missing`,
+    });
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+    expect(result.current.selectedFiles).toEqual(selection);
+    expect(onNavigatePath).not.toHaveBeenCalled();
+    act(() => result.current.setError("A later operation failed."));
+    await waitFor(() => expect(result.current.notification?.message).toBe("A later operation failed."));
+    expect(result.current.notification?.targetLabel).toBeUndefined();
+  });
+
+  it("retries the failed target instead of reloading the displayed directory", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 503, data: { detail: { code: "directory_unavailable" } } } });
+    act(() => result.current.navigateToPath("Documents"));
+    await waitFor(() => expect(result.current.notification?.onRetry).toBeTypeOf("function"));
+    expect(result.current.currentPath).toBe("");
+    act(() => result.current.notification?.onRetry?.());
+    await waitFor(() => expect(result.current.currentPath).toBe("Documents"));
+    expect(result.current.files).toEqual(mockNestedDirectory.items);
+  });
+
+  it("keeps full captured paths for failures with the same basename", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    for (const path of ["Projects/Reports", "Archive/Reports"]) {
+      vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "directory_not_found" } } } });
+      act(() => result.current.navigateToPath(path));
+      await waitFor(() => expect(result.current.notification?.targetLabel).toBe(`${mockConnections[0]!.name}: /${path}`));
+      expect(result.current.notification?.failureKey).toBe(JSON.stringify(["conn-1", path]));
+      expect(result.current.currentPath).toBe("");
+    }
+  });
+
+  it("identifies the parent that failed during recovery", async () => {
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
+      if (path === "deleted/child") throw { response: { status: 404, data: { detail: { code: "directory_not_found" } } } };
+      throw { response: { status: 503, data: { detail: { code: "directory_unavailable" } } } };
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "deleted/child"));
+    await waitFor(() => expect(result.current.notification?.targetLabel).toBe(`${mockConnections[0]!.name}: /deleted`));
+    expect(result.current.notification?.message).toBe("Failed to load directory contents. Please try again.");
+    expect(result.current.notification?.failureKey).toBe(JSON.stringify(["conn-1", "deleted"]));
+  });
+
+  it("validates history for the displayed folder and recovers when it was deleted", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({
+      result_limit: 10,
+      results: [{ id: "recent-current", connection_id: "conn-1", path: "Documents", last_visited_at: "2026-01-01T00:00:00Z" }],
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+    await act(async () => {
+      await result.current.directorySearchProvider.fetchResults("", new AbortController().signal);
+    });
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "directory_not_found" } } } });
+    act(() => result.current.directorySearchProvider.onSelect("recent-directory:recent-current"));
+    await waitFor(() => expect(result.current.currentPath).toBe(""));
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+    expect(api.removeRecentDirectory).toHaveBeenCalledWith("recent-current");
+    expect(result.current.notification?.message).toContain('Opened "/" instead.');
+  });
+
+  it("recovers a missing initial directory to an accessible parent", async () => {
+    const onResolveRouteLocation = vi.fn();
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
+      if (path === "deleted/child" || path === "deleted") {
+        throw { response: { status: 404, data: { detail: { code: "directory_not_found" } } } };
+      }
+      return mockDirectoryListing;
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, onResolveRouteLocation }), {
+      wrapper,
+    });
+    act(() => result.current.applyLocation("conn-1", "deleted/child"));
+    await waitFor(() => expect(onResolveRouteLocation).toHaveBeenCalledWith("", null));
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+    expect(result.current.notification?.message).toContain('Opened "/" instead.');
+    expect(result.current.notification?.targetLabel).toBe(`${mockConnections[0]!.name}: /deleted/child`);
+  });
+
+  it.each(["text", "markdown"] as const)("preserves the %s viewer session during missing-directory recovery", async (viewerId) => {
+    const onResolveRouteLocation = vi.fn();
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, onResolveRouteLocation }), {
+      wrapper,
+    });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+    const viewer = { connectionId: "conn-1", path: "Documents/draft.md", viewerId, mimeType: "text/plain", sessionId: "dirty-session" };
+    act(() => result.current.setViewInfo(viewer));
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "directory_not_found" } } } });
+    await act(async () => result.current.reloadCurrentLocation({ forceRefresh: true }));
+    await waitFor(() => expect(result.current.currentPath).toBe(""));
+    expect(result.current.viewInfo).toBe(viewer);
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+    expect(onResolveRouteLocation).toHaveBeenCalledWith("", null);
+  });
+
+  it.each(["directory_access_denied", "not_a_directory"])("continues recovery past a parent with %s", async (code) => {
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
+      if (path === "deleted/child") throw { response: { status: 404, data: { detail: { code: "directory_not_found" } } } };
+      if (path === "deleted") throw { response: { status: 403, data: { detail: { code } } } };
+      return mockDirectoryListing;
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "deleted/child"));
+    await waitFor(() => expect(result.current.currentPath).toBe(""));
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+  });
+
+  it("keeps local pairing controls and retries the failed local target while displaying SMB", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    act(() => result.current.selectItem(result.current.sortedFiles[1]!, 1));
+    const selection = new Set(result.current.selectedFiles);
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 401, data: { code: "companion_pairing_missing" } } });
+    act(() => result.current.applyLocation("local-drive:c", "Documents"));
+    await waitFor(() => expect(result.current.companionPairingError).toBe("pairing_required"));
+    expect(result.current.connectionId).toBe("conn-1");
+    expect(result.current.selectedFiles).toEqual(selection);
+    expect(result.current.monitoredLocation).toEqual({ connectionId: "conn-1", path: "" });
+    act(() => result.current.notification?.onRetry?.());
+    await waitFor(() => expect(result.current.connectionId).toBe("local-drive:c"));
+    expect(result.current.currentPath).toBe("Documents");
+    expect(result.current.companionPairingError).toBeNull();
+  });
+
+  it("refreshes the displayed SMB folder instead of retrying a failed local target", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 401, data: { code: "companion_pairing_missing" } } });
+    act(() => result.current.applyLocation("local-drive:c", "Documents"));
+    await waitFor(() => expect(result.current.companionPairingError).toBe("pairing_required"));
+    vi.mocked(api.listDirectory).mockClear();
+    act(() => result.current.handleRefresh());
+    await waitFor(() => expect(api.listDirectory).toHaveBeenCalled());
+    expect(vi.mocked(api.listDirectory).mock.calls.every(([connectionId, path]) => connectionId === "conn-1" && path === "")).toBe(true);
+    expect(result.current.connectionId).toBe("conn-1");
+  });
+
+  it("keeps the original connection and monitor when a cross-connection target fails", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.monitoredLocation).toEqual({ connectionId: "conn-1", path: "" }));
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "directory_not_found" } } } });
+    act(() => result.current.applyLocation("conn-2", "missing"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.connectionId).toBe("conn-1");
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+    expect(result.current.monitoredLocation).toEqual({ connectionId: "conn-1", path: "" });
+  });
+
+  it("ignores a late directory response after a newer navigation commits", async () => {
+    const slow = deferred<typeof mockDirectoryListing>();
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => (path === "slow" ? slow.promise : mockNestedDirectory));
+    act(() => result.current.navigateToPath("slow"));
+    expect(result.current.currentPath).toBe("");
+    act(() => result.current.navigateToPath("fast"));
+    await waitFor(() => expect(result.current.currentPath).toBe("fast"));
+    await act(async () => slow.resolve(mockDirectoryListing));
+    expect(result.current.currentPath).toBe("fast");
+    expect(result.current.files).toEqual(mockNestedDirectory.items);
+  });
+
+  it.each(["breadcrumb", "route"])(
+    "cancels pending navigation when returning to the displayed folder through %s navigation",
+    async (kind) => {
+      const slow = deferred<typeof mockDirectoryListing>();
+      const onNavigatePath = vi.fn();
+      const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, onNavigatePath }), { wrapper });
+      act(() => result.current.applyLocation("conn-1", ""));
+      await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+      act(() => result.current.selectItem(requireTestValue(result.current.sortedFiles[1]), 1));
+      const selection = new Set(result.current.selectedFiles);
+      vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) =>
+        path === "slow" ? slow.promise : mockDirectoryListing
+      );
+
+      act(() => result.current.navigateToPath("slow"));
+      const pendingSignal = vi.mocked(api.listDirectory).mock.lastCall?.[2]?.signal;
+      expect(pendingSignal?.aborted).toBe(false);
+      act(() => {
+        if (kind === "breadcrumb") result.current.navigateToPath("");
+        else result.current.applyLocation("conn-1", "");
+      });
+      expect(pendingSignal?.aborted).toBe(true);
+
+      await act(async () => slow.resolve(mockNestedDirectory));
+      expect(result.current.currentPath).toBe("");
+      expect(result.current.files).toEqual(mockDirectoryListing.items);
+      expect(result.current.selectedFiles).toEqual(selection);
+      expect(result.current.loading).toBe(false);
+      expect(onNavigatePath).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not let slow parent recovery replace a newer route", async () => {
+    const parentListing = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
+      if (path === "missing/child") throw { response: { status: 404, data: { detail: { code: "directory_not_found" } } } };
+      if (path === "missing") return parentListing.promise;
+      return mockNestedDirectory;
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "missing/child"));
+    await waitFor(() => expect(api.listDirectory).toHaveBeenCalledWith("conn-1", "missing", expect.anything()));
+    act(() => result.current.applyLocation("conn-1", "Elsewhere"));
+    await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+    await act(async () => parentListing.resolve(mockDirectoryListing));
+    expect(result.current.currentPath).toBe("Elsewhere");
+    expect(result.current.files).toEqual(mockNestedDirectory.items);
+  });
+
+  it.each([
+    ["directory_not_found", 404, true],
+    ["directory_access_denied", 403, false],
+    ["connection_not_found", 404, false],
+    ["directory_unavailable", 503, false],
+  ])("removes directory history only for confirmed absence: %s", async (code, status, shouldRemove) => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({
+      result_limit: 10,
+      results: [{ id: "recent-missing", connection_id: "conn-1", path: "missing", last_visited_at: "2026-01-01T00:00:00Z" }],
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    await act(async () => {
+      await result.current.directorySearchProvider.fetchResults("", new AbortController().signal);
+    });
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status, data: { detail: { code } } } });
+    act(() => result.current.directorySearchProvider.onSelect("recent-directory:recent-missing"));
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(api.removeRecentDirectory).toHaveBeenCalledTimes(shouldRemove ? 1 : 0);
+    expect(result.current.currentPath).toBe("");
+  });
+
+  it.each([
+    ["directory_not_found", 404, true],
+    ["directory_access_denied", 403, false],
+    ["not_a_directory", 409, false],
+    [undefined, 404, false],
+    ["directory_unavailable", 500, false],
+  ])(
+    "handles Companion directory history errors without confusing unavailable drives with missing folders: %s",
+    async (code, status, shouldRemove) => {
+      const connectionId = "local-drive:d";
+      vi.mocked(api.searchRecentDirectories).mockResolvedValue({
+        result_limit: 10,
+        results: [{ id: "recent-local", connection_id: connectionId, path: "missing", last_visited_at: "2026-01-01T00:00:00Z" }],
+      });
+      const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+      act(() => result.current.applyLocation(connectionId, ""));
+      await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+      act(() => result.current.selectItem(result.current.sortedFiles[1]!, 1));
+      const selection = new Set(result.current.selectedFiles);
+      await act(async () => {
+        await result.current.directorySearchProvider.fetchResults("", new AbortController().signal);
+      });
+      vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status, data: { detail: "Safe Companion message", code } } });
+      act(() => result.current.directorySearchProvider.onSelect("recent-directory:recent-local"));
+      await waitFor(() => expect(result.current.error).not.toBeNull());
+      expect(api.listDirectory).toHaveBeenLastCalledWith(connectionId, "missing", expect.anything());
+      expect(api.removeRecentDirectory).toHaveBeenCalledTimes(shouldRemove ? 1 : 0);
+      if (shouldRemove) expect(api.removeRecentDirectory).toHaveBeenCalledWith("recent-local");
+      expect(result.current.connectionId).toBe(connectionId);
+      expect(result.current.currentPath).toBe("");
+      expect(result.current.files).toEqual(mockDirectoryListing.items);
+      expect(result.current.selectedFiles).toEqual(selection);
+      expect(result.current.monitoredLocation).toEqual({ connectionId, path: "" });
+    }
+  );
+
+  it("recovers a missing local deep link through deleted ancestors to the drive root", async () => {
+    const connectionId = "local-drive:d";
+    const onResolveRouteLocation = vi.fn();
+    vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
+      if (path) throw { response: { status: 404, data: { detail: "The folder was not found.", code: "directory_not_found" } } };
+      return mockDirectoryListing;
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, onResolveRouteLocation }), {
+      wrapper,
+    });
+    act(() => result.current.applyLocation(connectionId, "deleted/child"));
+    await waitFor(() => expect(onResolveRouteLocation).toHaveBeenCalledWith("", null));
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+    expect(result.current.monitoredLocation).toEqual({ connectionId, path: "" });
+    expect(result.current.notification?.message).toContain('Opened "/" instead.');
+    expect(api.listDirectory).toHaveBeenCalledWith(connectionId, "deleted", expect.anything());
+  });
+
+  it("retries a failed local target instead of reloading the displayed folder", async () => {
+    const connectionId = "local-drive:d";
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation(connectionId, ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({
+      response: { status: 500, data: { detail: "The folder could not be opened.", code: "directory_unavailable" } },
+    });
+    act(() => result.current.navigateToPath("Documents"));
+    await waitFor(() => expect(result.current.notification?.onRetry).toBeTypeOf("function"));
+    expect(result.current.currentPath).toBe("");
+    act(() => result.current.notification?.onRetry?.());
+    await waitFor(() => expect(result.current.currentPath).toBe("Documents"));
+    expect(result.current.files).toEqual(mockNestedDirectory.items);
+    expect(result.current.monitoredLocation).toEqual({ connectionId, path: "Documents" });
+  });
+
+  it("clears stale rows if a deleted current directory has no accessible parent", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.files).toHaveLength(3));
+    vi.mocked(api.listDirectory).mockRejectedValue({ response: { status: 404, data: { detail: { code: "directory_not_found" } } } });
+    await act(async () => result.current.reloadCurrentLocation({ forceRefresh: true }));
+    expect(result.current.files).toEqual([]);
+    expect(result.current.selectedFiles.size).toBe(0);
+    expect(result.current.loading).toBe(false);
   });
 
   it("resets the file list scroll position when navigating into a fresh child directory", async () => {
@@ -2652,10 +2999,10 @@ describe("useFileBrowserPane", () => {
     });
   });
 
-  it("removes a local recent record only when Companion confirms its target is missing", async () => {
+  it.each(["local_link_target_missing", "item_not_found"])("removes a local recent record for confirmed %s", async (code) => {
     const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     vi.mocked(api.resolveLocalActivation).mockRejectedValue({
-      response: { data: { code: "local_link_target_missing" }, status: 404 },
+      response: { data: { code }, status: 404 },
     });
     vi.mocked(api.removeRecentFile).mockResolvedValue(undefined);
 
@@ -2674,7 +3021,32 @@ describe("useFileBrowserPane", () => {
     });
 
     expect(api.removeRecentFile).toHaveBeenCalledWith("recent-1");
-    expect(result.current.error).toBe("The recent file no longer exists.");
+    expect(result.current.error).toBe('File "deleted.txt" was not found. It may have been moved or deleted.');
+    expect(result.current.notification).toMatchObject({
+      message: "File not found. It may have been moved or deleted.",
+      targetLabel: `${localConnection.name}: /Documents/deleted.txt`,
+    });
+  });
+
+  it("removes a local recent non-file without navigating to its replacement directory", async () => {
+    const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
+    vi.mocked(api.resolveLocalActivation).mockResolvedValue({
+      drive_id: "c",
+      path: "Documents/report.txt",
+      item: { name: "report.txt", path: "Documents/report.txt", type: FileType.DIRECTORY, is_readable: true, is_hidden: false },
+    });
+    vi.mocked(api.removeRecentFile).mockResolvedValue(undefined);
+    const { result } = renderHook(
+      () => useFileBrowserPane({ rowHeight: 40, connections: [localConnection], storageRegistry: createLocalStorageRegistry() as never }),
+      { wrapper }
+    );
+    await act(async () => {
+      await result.current.handleOpenFileAtPath("local-drive:c", "Documents/report.txt", "associated-viewer", "recent-1");
+    });
+    expect(api.removeRecentFile).toHaveBeenCalledExactlyOnceWith("recent-1");
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.error).toBe("This target is not a regular file. Select another file.");
+    expect(api.openLocalFile).not.toHaveBeenCalled();
   });
 
   it("preserves a local recent record when Companion is unavailable", async () => {
@@ -2697,13 +3069,13 @@ describe("useFileBrowserPane", () => {
     });
 
     expect(api.removeRecentFile).not.toHaveBeenCalled();
-    expect(result.current.error).toBe("The recent file could not be opened.");
+    expect(result.current.error).toBe("The file could not be opened. Check the connection and retry.");
   });
 
   it.each([
-    ["recent_file_native_launch_failed", "Failed to launch the native application."],
-    ["recent_file_target_not_file", "Not a file: Documents/report.txt"],
-  ])("removes a local recent record after a classified %s native-open failure", async (code, detail) => {
+    ["recent_file_native_launch_failed", "The file could not be opened. Check the connection and retry.", false],
+    ["recent_file_target_not_file", "This target is not a regular file. Select another file.", true],
+  ] as const)("applies history eligibility for a classified %s native-open failure", async (code, detail, shouldRemove) => {
     const localConnection = { ...requireTestValue(mockConnections[0]), id: "local-drive:c", slug: "c", type: "local" };
     vi.mocked(api.resolveLocalActivation).mockResolvedValue({
       drive_id: "c",
@@ -2737,9 +3109,18 @@ describe("useFileBrowserPane", () => {
 
     await waitFor(() => {
       expect(api.openLocalFile).toHaveBeenCalledWith("local-drive:c", "Documents/report.txt", { forcePicker: false });
-      expect(api.removeRecentFile).toHaveBeenCalledWith("recent-1");
+      expect(api.removeRecentFile).toHaveBeenCalledTimes(shouldRemove ? 1 : 0);
+      if (shouldRemove) expect(api.removeRecentFile).toHaveBeenCalledWith("recent-1");
       expect(result.current.error).toBe(detail);
     });
+    if (!shouldRemove) {
+      vi.mocked(api.openLocalFile).mockResolvedValue(undefined);
+      await act(async () => result.current.notification?.onRetry?.());
+      await waitFor(() => expect(api.openLocalFile).toHaveBeenCalledTimes(2));
+      expect(result.current.error).toBeNull();
+      await act(async () => result.current.handleRefresh());
+      expect(api.openLocalFile).toHaveBeenCalledTimes(2);
+    }
   });
 
   it("opens a local recent shortcut at its resolved file target", async () => {

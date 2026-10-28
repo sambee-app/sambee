@@ -25,7 +25,6 @@ Edit locking:
 """
 
 import uuid
-from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from secrets import token_urlsafe
 from typing import Any, Literal, NoReturn
@@ -37,13 +36,13 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.api._smb_helpers import build_smb_backend, disconnect_backend_safely
+from app.api._smb_helpers import build_smb_backend, disconnect_backend_safely, file_target_http_error, prepare_file_streamer
 from app.core.logging import format_audit_fields, get_logger, set_user
 from app.core.security import create_access_token, decode_access_token, get_current_user_with_auth_check, is_user_expired, oauth2_scheme
 from app.db.database import get_session
 from app.models.companion_uri_token_jti import CompanionUriTokenJti
 from app.models.edit_lock import HEARTBEAT_TIMEOUT_SECONDS, EditLock
-from app.models.file import FileInfo
+from app.models.file import FileInfo, FileType
 from app.models.user import User, UserRole
 from app.services.companion_downloads import (
     CompanionDownloadResolutionError,
@@ -870,19 +869,14 @@ async def get_companion_file_info(
                 logger=logger,
                 context=f"companion file info request: connection_id={connection_id}, path='{path}'",
             )
-    except FileNotFoundError:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Path not found: {path}")
-    except TimeoutError:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="File info request timed out. The remote share did not respond in time.",
-        )
+    except (FileNotFoundError, PermissionError, NotADirectoryError, TimeoutError) as error:
+        raise file_target_http_error(error, requires_file=False) from error
     except Exception as error:
         logger.error(
             f"Failed to get companion file info: connection_id={connection_id}, path='{path}', error={type(error).__name__}: {error}",
             exc_info=True,
         )
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get file info: {error}")
+        raise file_target_http_error(error, requires_file=False) from error
 
 
 @router.get("/{connection_id}/download")
@@ -925,31 +919,26 @@ async def download_file_for_companion(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Connection has no share name configured")
 
     backend = build_smb_backend(connection, backend_factory=SMBBackend)
-    await backend.connect()
 
     try:
+        await backend.connect()
         file_info = await backend.get_file_info(path)
-    except Exception:
+    except Exception as error:
         await disconnect_backend_safely(
             backend,
             logger=logger,
             context=f"companion download metadata request: connection_id={connection_id}, path='{path}'",
         )
-        raise
+        raise file_target_http_error(error) from error
 
-    async def file_streamer() -> AsyncIterator[bytes]:
-        try:
-            async for chunk in backend.read_file(path):
-                yield chunk
-        finally:
-            await disconnect_backend_safely(
-                backend,
-                logger=logger,
-                context=f"companion download stream: connection_id={connection_id}, path='{path}'",
-            )
+    if file_info.type != FileType.FILE:
+        await disconnect_backend_safely(backend, logger=logger, context="companion download wrong type")
+        raise file_target_http_error(IsADirectoryError())
 
     headers = {"Content-Disposition": build_content_disposition("attachment", file_info.name)}
-    return StreamingResponse(file_streamer(), media_type=file_info.mime_type or "application/octet-stream", headers=headers)
+    return StreamingResponse(
+        await prepare_file_streamer(backend, path), media_type=file_info.mime_type or "application/octet-stream", headers=headers
+    )
 
 
 @router.post("/{connection_id}/upload", response_model=CompanionUploadResponse)

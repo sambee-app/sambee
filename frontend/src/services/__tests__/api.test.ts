@@ -1954,6 +1954,25 @@ describe("API Service", () => {
       expect((uploadedFile as File).size).toBeGreaterThan(0);
     });
 
+    it.each([
+      [404, { detail: { code: "item_not_found", message: "private SMB path" } }, "missing"],
+      [404, { code: "item_not_found", detail: "private OS path" }, "missing"],
+      [403, { code: "file_access_denied", detail: "private identity" }, "access_denied"],
+      [409, { code: "not_a_file", detail: "private path" }, "not_file"],
+      [504, { code: "file_timeout", detail: "private server" }, "timeout"],
+      [404, { detail: "private unknown failure" }, "unknown"],
+    ])("preserves a classified %s editor upload failure without raw details", async (status, data, kind) => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } }));
+      const request = apiService.writeTextWithEditLock("conn1", "/notes/readme.md", "# Unsaved draft\n", {
+        lock_id: "lock-1",
+        lock_capability: "capability-1",
+        operation_id: "operation-1",
+      });
+      await expect(request).rejects.toMatchObject({ failure: { kind } });
+      await expect(request).rejects.not.toThrow(/private/);
+      await expect(request).rejects.not.toBeInstanceOf(ExpiredEditLockError);
+    });
+
     it("classifies an expired edit lock upload response with a nested error code", async () => {
       fetchMock.mockResolvedValueOnce(
         new Response(JSON.stringify({ detail: { code: "edit_lock_lost", message: "Lock not found or expired" } }), { status: 404 })

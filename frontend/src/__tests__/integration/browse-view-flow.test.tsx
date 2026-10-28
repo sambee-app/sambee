@@ -122,7 +122,7 @@ describe("Browse → View Flow", () => {
       // Wait for error message (longer timeout in case of retry)
       await waitFor(
         () => {
-          expect(screen.getByText(/internal server error/i)).toBeInTheDocument();
+          expect(screen.getByText("The file could not be opened. Check the connection and retry.")).toBeInTheDocument();
         },
         { timeout: 2000 }
       );
@@ -146,7 +146,7 @@ describe("Browse → View Flow", () => {
       // Wait for error message (longer timeout in case of retry)
       await waitFor(
         () => {
-          expect(screen.getByText(/unauthorized/i)).toBeInTheDocument();
+          expect(screen.getByText("The file could not be opened. Check the connection and retry.")).toBeInTheDocument();
         },
         { timeout: 2000 }
       );

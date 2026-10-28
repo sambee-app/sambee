@@ -167,7 +167,7 @@ function renderRoutedViewer(edit = false, fragment = false) {
   const router = createMemoryRouter(
     [
       { path: "/browse", element: <div>Files</div> },
-      { path: "/viewer", element: <RoutedTextEditor /> },
+      { path: "/viewer/*", element: <RoutedTextEditor /> },
     ],
     {
       initialEntries: [
@@ -207,6 +207,54 @@ async function enterEditMode(): Promise<HTMLElement> {
 }
 
 describe("TextEditor", () => {
+  it("retries a missing content read for the same file without opening an edit session", async () => {
+    vi.mocked(apiService.getFileContent)
+      .mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "item_not_found" } } } })
+      .mockResolvedValue("recovered text");
+    renderViewer({ isReadOnly: true });
+    await screen.findByText('File "readme.txt" was not found. It may have been moved or deleted.');
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("recovered text")).toBeInTheDocument();
+    expect(apiService.getFileContent).toHaveBeenLastCalledWith("conn1", "/docs/readme.txt");
+    expect(apiService.getFileContent).toHaveBeenCalledTimes(2);
+    expect(apiService.acquireEditLock).not.toHaveBeenCalled();
+  });
+
+  it("preserves a dirty editor and lock during a directory-only route replacement", async () => {
+    vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
+    const router = renderRoutedViewer();
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "retained directory recovery draft" } });
+    snapshotRegisteredDrafts();
+    const acquisitions = vi.mocked(apiService.acquireEditLock).mock.calls.length;
+    const reads = vi.mocked(apiService.getFileContent).mock.calls.length;
+    await act(async () =>
+      router.navigate({ pathname: "/viewer/recovered-parent", search: router.state.location.search }, { replace: true })
+    );
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toBe(editor);
+    expect(editor).toHaveValue("retained directory recovery draft");
+    expect(loadDraft("conn1", "/docs/readme.txt", "text")?.content).toBe("retained directory recovery draft");
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(acquisitions);
+    expect(apiService.getFileContent).toHaveBeenCalledTimes(reads);
+    expect(screen.queryByRole("dialog", { name: /unsaved/i })).not.toBeInTheDocument();
+  });
+  it("keeps the mounted draft and recovery data after a confirmed missing-target save", async () => {
+    vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
+    vi.mocked(apiService.writeTextWithEditLock).mockRejectedValueOnce({
+      response: { status: 404, data: { detail: { code: "item_not_found", message: "private SMB path" } } },
+    });
+    renderViewer();
+    const editor = await enterEditMode();
+    fireEvent.change(editor, { target: { value: "unsaved text draft" } });
+    const acquisitions = vi.mocked(apiService.acquireEditLock).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/File "readme.txt" was not found/);
+    expect(screen.getByRole("textbox", { name: "Text editor" })).toBe(editor);
+    expect(editor).toHaveValue("unsaved text draft");
+    expect(loadDraft("conn1", "/docs/readme.txt", "text")?.content).toBe("unsaved text draft");
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(acquisitions);
+    expect(screen.queryByText(/private SMB path/)).not.toBeInTheDocument();
+  });
   it("keeps fast acquisition feedback invisible without removing its reserved toolbar slot", async () => {
     renderViewer();
     await enterEditMode();
@@ -290,7 +338,7 @@ describe("TextEditor", () => {
     const notice = screen.getByRole("alert");
     expect(notice.closest(".MuiSnackbar-root")).not.toBeNull();
     expect(notice).not.toContainElement(retry);
-    expect(notice).toHaveTextContent("Baseline unavailable");
+    expect(notice).toHaveTextContent("The file could not be opened. Check the connection and retry.");
     expect(document.querySelectorAll(".MuiAlert-root")).toHaveLength(1);
     expect(screen.queryByRole("status", { name: "Checking write access..." })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Text editor" })).toHaveAttribute("readonly");

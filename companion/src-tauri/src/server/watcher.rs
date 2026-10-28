@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use log::{info, warn};
@@ -20,6 +21,53 @@ const DEBOUNCE_DURATION: Duration = Duration::from_millis(300);
 
 /// Maximum number of pending events in the broadcast channel.
 const BROADCAST_CAPACITY: usize = 256;
+
+#[cfg(test)]
+mod tests {
+    use super::DirectoryWatcher;
+
+    #[tokio::test]
+    async fn rejects_missing_and_wrong_type_targets_without_a_watcher() {
+        let root = tempfile::tempdir().expect("temporary drive root");
+        let watcher = DirectoryWatcher::new();
+        let missing = watcher.subscribe("test", "missing", root.path()).await.expect_err("missing target");
+        assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+        std::fs::write(root.path().join("file"), b"content").expect("write test file");
+        let wrong_type = watcher
+            .subscribe("test", "file", root.path())
+            .await
+            .expect_err("non-directory target");
+        assert_eq!(wrong_type.kind(), std::io::ErrorKind::NotADirectory);
+        assert!(watcher.entries.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn invalidates_and_retires_a_deleted_directory() {
+        let root = tempfile::tempdir().expect("temporary drive root");
+        std::fs::create_dir(root.path().join("watched")).expect("create watched directory");
+        let watcher = DirectoryWatcher::new();
+        let mut events = watcher.subscribe_events();
+        watcher.subscribe("test", "watched", root.path()).await.expect("subscribe");
+        std::fs::remove_dir(root.path().join("watched")).expect("remove watched directory");
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+            .await
+            .expect("deletion notification")
+            .expect("event");
+        assert_eq!(event.drive, "test");
+        assert_eq!(event.path, "watched");
+        assert!(watcher.entries.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dropping_manager_releases_watcher_state() {
+        let root = tempfile::tempdir().expect("temporary drive root");
+        let watcher = DirectoryWatcher::new();
+        watcher.subscribe("test", "", root.path()).await.expect("subscribe");
+        let entries = std::sync::Arc::downgrade(&watcher.entries);
+        drop(watcher);
+        assert!(entries.upgrade().is_none());
+    }
+}
 
 /// A directory change notification sent to WebSocket clients.
 #[derive(Clone, Debug)]
@@ -40,6 +88,12 @@ struct WatchEntry {
     _debounce_handle: tokio::task::JoinHandle<()>,
 }
 
+impl Drop for WatchEntry {
+    fn drop(&mut self) {
+        self._debounce_handle.abort();
+    }
+}
+
 /// Manages filesystem watchers with subscriber counting and debouncing.
 ///
 /// Each unique `{drive}:{path}` gets one OS-level watcher, shared across
@@ -48,7 +102,7 @@ struct WatchEntry {
 /// broadcast channel after a short debounce window.
 pub struct DirectoryWatcher {
     /// Active watchers keyed by `"drive:path"`.
-    entries: Mutex<HashMap<String, WatchEntry>>,
+    entries: Arc<Mutex<HashMap<String, WatchEntry>>>,
     /// Broadcast sender — each WS handler subscribes its own receiver.
     event_tx: broadcast::Sender<DirectoryChangeEvent>,
 }
@@ -58,7 +112,7 @@ impl DirectoryWatcher {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);
         Self {
-            entries: Mutex::new(HashMap::new()),
+            entries: Arc::new(Mutex::new(HashMap::new())),
             event_tx: tx,
         }
     }
@@ -76,7 +130,7 @@ impl DirectoryWatcher {
     /// - `drive` — drive identifier (e.g. `"c"`, `"root"`).
     /// - `path`  — relative directory path within the drive.
     /// - `root`  — absolute filesystem root of the drive.
-    pub async fn subscribe(&self, drive: &str, path: &str, root: &Path) -> Result<(), String> {
+    pub async fn subscribe(&self, drive: &str, path: &str, root: &Path) -> std::io::Result<()> {
         let key = format!("{drive}:{path}");
         let mut entries = self.entries.lock().await;
 
@@ -87,22 +141,22 @@ impl DirectoryWatcher {
             return Ok(());
         }
 
-        let canonical_root = root.canonicalize().map_err(|e| format!("Drive root inaccessible: {e}"))?;
+        let canonical_root = root.canonicalize()?;
 
         // Resolve the filesystem path to watch
         let watch_path = if path.is_empty() {
             canonical_root.clone()
         } else {
             let joined = canonical_root.join(path);
-            let canonical = joined.canonicalize().map_err(|e| format!("Cannot resolve path: {e}"))?;
+            let canonical = joined.canonicalize()?;
             if !canonical.starts_with(&canonical_root) {
-                return Err("Path is outside drive root".into());
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
             }
             canonical
         };
 
         if !watch_path.is_dir() {
-            return Err(format!("Not a directory: {}", watch_path.display()));
+            return Err(std::io::Error::from(std::io::ErrorKind::NotADirectory));
         }
 
         // ── Debounce channel ──────────────────────────────────────────────
@@ -113,6 +167,9 @@ impl DirectoryWatcher {
         let broadcast_tx = self.event_tx.clone();
         let drive_owned = drive.to_string();
         let path_owned = path.to_string();
+        let watched_path = watch_path.clone();
+        let watched_entries = Arc::downgrade(&self.entries);
+        let watched_key = key.clone();
 
         let debounce_handle = tokio::spawn(async move {
             while let Some(()) = debounce_rx.recv().await {
@@ -124,6 +181,12 @@ impl DirectoryWatcher {
                     drive: drive_owned.clone(),
                     path: path_owned.clone(),
                 });
+                if matches!(watched_path.metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound) {
+                    if let Some(entries) = watched_entries.upgrade() {
+                        entries.lock().await.remove(&watched_key);
+                    }
+                    break;
+                }
             }
         });
 
@@ -137,11 +200,15 @@ impl DirectoryWatcher {
             },
             Err(e) => warn!("Watcher error: {e}"),
         })
-        .map_err(|e| format!("Failed to create watcher: {e}"))?;
+        .map_err(std::io::Error::other)?;
 
         watcher
             .watch(&watch_path, RecursiveMode::NonRecursive)
-            .map_err(|e| format!("Failed to watch {}: {e}", watch_path.display()))?;
+            .map_err(|error| match error.kind {
+                notify::ErrorKind::Io(error) => error,
+                notify::ErrorKind::PathNotFound => std::io::Error::from(std::io::ErrorKind::NotFound),
+                _ => std::io::Error::other(error),
+            })?;
 
         info!("Watcher: started watching {key} at {}", watch_path.display());
 

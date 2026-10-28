@@ -2193,7 +2193,7 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{F5}");
 
-      expect(await screen.findByRole("alert")).toHaveTextContent("This location is read-only.");
+      expect(await screen.findByRole("status")).toHaveTextContent("This location is read-only.");
       expect(screen.queryByRole("dialog", { name: "Extract from ZIP Archive" })).not.toBeInTheDocument();
     });
 
@@ -3284,7 +3284,7 @@ describe("Browser Component - Interactions", () => {
 
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-      expect(await screen.findByText(/Connection not found/i)).toBeInTheDocument();
+      expect(await screen.findByText(/The connection is unavailable. Check connection settings and try again/i)).toBeInTheDocument();
     });
 
     it("handles generic API errors", async () => {
@@ -3294,7 +3294,7 @@ describe("Browser Component - Interactions", () => {
 
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-      expect(await screen.findByText(/Server error/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Failed to load directory contents. Please try again/i)).toBeInTheDocument();
     });
 
     it("handles network errors", async () => {
@@ -3793,7 +3793,12 @@ describe("Browser Component - Interactions", () => {
         await user.click(screen.getByRole("button", { name: "More actions for Documents" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
         expect(await screen.findByText("1 file ready to share")).toBeInTheDocument();
-        expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(2);
+        expect(screen.getAllByRole("button", { name: "Cancel" })).toHaveLength(1);
+        expect(document.querySelectorAll(".MuiSnackbar-root")).toHaveLength(1);
+        await user.click(screen.getByRole("button", { name: /Next notification/ }));
+        expect(screen.getByText("Preparing upload")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+        await user.click(screen.getByRole("button", { name: /Next notification/ }));
 
         canShare.mockReturnValue(false);
         await user.click(screen.getByRole("button", { name: "Share" }));

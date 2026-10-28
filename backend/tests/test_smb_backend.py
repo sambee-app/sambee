@@ -27,8 +27,9 @@ from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 import pytest
 import smbclient
 from smbclient._os import FileAttributes
-from smbprotocol.exceptions import AccessDenied
+from smbprotocol.exceptions import AccessDenied, SMBOSError
 from smbprotocol.file_info import FileDispositionInformation, InfoType
+from smbprotocol.header import NtStatus
 from smbprotocol.open import FileInformationClass, FilePipePrinterAccessMask, SMB2SetInfoResponse
 from smbprotocol.structure import DateTimeField
 
@@ -84,6 +85,22 @@ def mock_smb_pool(request: pytest.FixtureRequest):
         mock_pool_instance.retain_connection_until_future_complete = AsyncMock()
         mock_pool.return_value = mock_pool_instance
         yield mock_pool
+
+
+@pytest.mark.asyncio
+async def test_write_recreates_missing_target_and_truncates_existing_content(tmp_path) -> None:
+    target = tmp_path / "draft.txt"
+    backend = SMBBackend(host="server", share_name="share", username="user", password="pass")
+
+    def open_target(_path, *, mode, **_kwargs):
+        return target.open(mode)
+
+    with patch("app.storage.smb.smbclient.open_file", side_effect=open_target):
+        assert await backend.write_file("draft.txt", io.BytesIO(b"draft")) == 5
+        assert target.read_bytes() == b"draft"
+        target.write_bytes(b"old content longer than draft")
+        assert await backend.write_file("draft.txt", io.BytesIO(b"draft")) == 5
+    assert target.read_bytes() == b"draft"
 
 
 class _MemoryArchiveReader:
@@ -631,6 +648,22 @@ class TestDirectoryListing:
     """Test directory listing functionality."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("error_status", "expected_error"),
+        [
+            (NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, FileNotFoundError),
+            (NtStatus.STATUS_OBJECT_PATH_NOT_FOUND, FileNotFoundError),
+            (NtStatus.STATUS_ACCESS_DENIED, PermissionError),
+            (NtStatus.STATUS_NOT_A_DIRECTORY, NotADirectoryError),
+        ],
+    )
+    async def test_list_directory_translates_target_errors(self, error_status, expected_error):
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with patch("app.storage.smb.smbclient.scandir", side_effect=SMBOSError(error_status, "missing")):
+            with pytest.raises(expected_error):
+                await backend.list_directory("missing")
+
+    @pytest.mark.asyncio
     @patch("app.storage.smb.smbclient.scandir")
     async def test_list_empty_directory(self, mock_scandir):
         """Test listing an empty directory."""
@@ -972,14 +1005,14 @@ class TestFileInfoRetrieval:
             password="pass",
         )
 
-        with pytest.raises(FileNotFoundError, match="Path not found: nonexistent.txt"):
+        with pytest.raises(FileNotFoundError):
             await backend.get_file_info("nonexistent.txt")
 
     @pytest.mark.asyncio
     @patch("app.storage.smb.smbclient.stat")
     async def test_get_file_info_maps_smb_missing_path_to_file_not_found(self, mock_stat):
         """SMB missing-path errors should surface as FileNotFoundError."""
-        mock_stat.side_effect = OSError("[Error 2] [NtStatus 0xc0000034] No such file or directory")
+        mock_stat.side_effect = SMBOSError(NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, "nonexistent.txt")
 
         backend = SMBBackend(
             host="server.local",
@@ -988,7 +1021,7 @@ class TestFileInfoRetrieval:
             password="pass",
         )
 
-        with pytest.raises(FileNotFoundError, match="Path not found: nonexistent.txt"):
+        with pytest.raises(FileNotFoundError):
             await backend.get_file_info("nonexistent.txt")
 
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
+import { subscribeMissingPhysicalFiles } from "../../services/fileRecoveryEvents";
 import { PreviewUnavailableError } from "../../services/previewPolicy";
 import { createStorageBackedTestContentProviderRegistry } from "../../test/helpers";
 import { requireTestValue } from "../../test/helpers/assertions";
@@ -15,6 +16,7 @@ import {
   readContent,
   readViewerContent,
   readVirtualContent,
+  verifyViewerSourceAfterFailure,
   virtualItem,
   virtualItemHandle,
   virtualLocation,
@@ -109,6 +111,42 @@ function liveExtractionStatus(pendingDecision: Record<string, unknown>) {
 }
 
 describe("content providers", () => {
+  it.each([true, false])("checks an ambiguous media failure without publishing a stale absence (current=%s)", async (current) => {
+    const providers = createStorageBackedTestContentProviderRegistry();
+    const provider = providers.get(physicalLocation("conn-1", "docs"));
+    provider.getInfo = vi
+      .fn()
+      .mockRejectedValue({ response: { status: 404, data: { detail: { code: "item_not_found", message: "private source path" } } } });
+    let active = true;
+    provider.getInfo = vi.fn().mockImplementation(async () => {
+      active = current;
+      throw { response: { status: 404, data: { code: "item_not_found" } } };
+    });
+    const missing = vi.fn();
+    const unsubscribe = subscribeMissingPhysicalFiles(missing);
+    try {
+      const message = await verifyViewerSourceAfterFailure("conn-1", "docs/image.png", undefined, providers, () => active);
+      expect(provider.getInfo).toHaveBeenCalledTimes(1);
+      expect(message).toBe(current ? 'File "image.png" was not found. It may have been moved or deleted.' : null);
+      expect(missing).toHaveBeenCalledTimes(current ? 1 : 0);
+      if (current) expect(missing).toHaveBeenCalledWith({ connectionId: "conn-1", path: "docs/image.png" });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("does not report absence when metadata confirms the image still exists", async () => {
+    const providers = createStorageBackedTestContentProviderRegistry();
+    providers.get(physicalLocation("conn-1", "docs")).getInfo = vi.fn().mockResolvedValue({ type: FileType.FILE });
+    const missing = vi.fn();
+    const unsubscribe = subscribeMissingPhysicalFiles(missing);
+    try {
+      expect(await verifyViewerSourceAfterFailure("conn-1", "docs/image.png", undefined, providers, () => true)).toBeNull();
+      expect(missing).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
   const archiveLocation = virtualLocation("zip", "conn-1", physicalLocation("conn-1", "archives/one.zip"), "images");
 
   it("gives physical and virtual locations distinct capability profiles", () => {

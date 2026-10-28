@@ -399,6 +399,7 @@ describe("PDFViewer", () => {
 
     // Mock successful API response by default
     (apiService.getPdfBlob as Mock).mockResolvedValue(new Blob(["mock pdf content"], { type: "application/pdf" }));
+    vi.mocked(apiService.getFileInfo).mockResolvedValue({ type: "file" } as never);
 
     // Reset AbortController to default
     globalThis.AbortController = class MockAbortController {
@@ -703,6 +704,18 @@ describe("PDFViewer", () => {
       expect(screen.getByTestId("pdf-loading-overlay")).toHaveAttribute("aria-hidden", "false");
     });
 
+    it("keeps the PDF password decision accessible", async () => {
+      mockPasswordRequest = true;
+      const user = userEvent.setup();
+      renderPDFViewer();
+      const password = await screen.findByLabelText("PDF password");
+      expect(screen.getByRole("dialog", { name: "Unlock PDF" })).toBeVisible();
+      await user.type(password, "secret");
+      await user.click(screen.getByRole("button", { name: "Open PDF" }));
+      expect(submittedPdfPassword).toBe("secret");
+      expect(apiService.getPdfBlob).toHaveBeenCalledTimes(1);
+    });
+
     it("submits an encrypted PDF password without requesting compatibility mode", async () => {
       mockPasswordRequest = true;
       const user = userEvent.setup();
@@ -761,7 +774,7 @@ describe("PDFViewer", () => {
 
       await waitFor(
         () => {
-          expect(screen.getByText("Access denied")).toBeInTheDocument();
+          expect(screen.getByText("Access to this file was denied. Check your permissions and retry.")).toBeInTheDocument();
         },
         { timeout: 2000 }
       );
@@ -777,7 +790,7 @@ describe("PDFViewer", () => {
       renderPDFViewer();
 
       await waitFor(() => {
-        expect(screen.getByText("PDF request timed out")).toBeInTheDocument();
+        expect(screen.getByText("The file request timed out. Check the connection and retry.")).toBeInTheDocument();
       });
 
       await userEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -1820,13 +1833,13 @@ describe("PDFViewer", () => {
 
       await waitFor(
         () => {
-          expect(screen.getByText("Custom error message")).toBeInTheDocument();
+          expect(screen.getByText("The file could not be opened. Check the connection and retry.")).toBeInTheDocument();
         },
         { timeout: 2000 }
       );
     });
 
-    it("extracts detail field from API errors", async () => {
+    it("does not expose raw API detail or infer absence from an unclassified 404", async () => {
       const error = {
         response: { data: { detail: "File not found" }, status: 404 },
         message: "Request failed with status code 404",
@@ -1837,7 +1850,7 @@ describe("PDFViewer", () => {
 
       await waitFor(
         () => {
-          expect(screen.getByText("File not found")).toBeInTheDocument();
+          expect(screen.getByText("The file could not be opened. Check the connection and retry.")).toBeInTheDocument();
         },
         { timeout: 2000 }
       );
@@ -1869,7 +1882,7 @@ describe("PDFViewer", () => {
             "Failed to fetch PDF",
             expect.objectContaining({
               path: "/test/document.pdf",
-              error,
+              error: expect.objectContaining({ cause: error }),
             })
           );
         },

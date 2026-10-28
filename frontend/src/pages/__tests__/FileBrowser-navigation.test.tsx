@@ -146,11 +146,12 @@ describe("Browser Component - Navigation", () => {
     await user.keyboard("{Enter}");
     await waitFor(() => {
       expectDirectoryLoad("conn-1", "Destination");
-      expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /folder: destination/i })).toHaveAttribute("data-selected", "true");
     });
 
     resolveDestination?.({ items: destinationFiles, path: "Destination", total: destinationFiles.length });
 
+    await screen.findByRole("button", { name: /file: zebra\.txt/i });
     const destinationList = await screen.findByTestId("file-list-container");
     expect(destinationList).toHaveFocus();
 
@@ -189,7 +190,7 @@ describe("Browser Component - Navigation", () => {
     });
   });
 
-  it("retains typeahead focus when revisiting a cached directory with the same item count", async () => {
+  it("retains typeahead focus when freshly validating a revisited directory with the same item count", async () => {
     const destinationFiles = [createFileEntry("Alpha.txt", "Destination/Alpha.txt"), createFileEntry("Zebra.txt", "Destination/Zebra.txt")];
     const rootFiles = [createDirectoryEntry("Destination", "Destination"), createFileEntry("Other.txt", "Other.txt")];
 
@@ -231,10 +232,10 @@ describe("Browser Component - Navigation", () => {
     });
 
     const destinationLoads = vi.mocked(api.listDirectory).mock.calls.filter(([_connectionId, path]) => path === "Destination");
-    expect(destinationLoads).toHaveLength(1);
+    expect(destinationLoads).toHaveLength(2);
   });
 
-  it("does not repaint the previous directory contents while loading a child directory", async () => {
+  it("retains committed rows until a child directory has been listed successfully", async () => {
     const user = userEvent.setup();
     const subfolderFiles: FileInfo[] = [
       {
@@ -271,8 +272,8 @@ describe("Browser Component - Navigation", () => {
       expectDirectoryLoad("conn-1", "Documents");
     });
 
-    expect(screen.queryByText("readme.txt")).not.toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.getByText("readme.txt")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
 
     resolveSubfolder?.({
       items: subfolderFiles,
@@ -282,7 +283,33 @@ describe("Browser Component - Navigation", () => {
 
     const fileEntries = await screen.findAllByText("file1.txt");
     expect(fileEntries.length).toBeGreaterThan(0);
+    expect(screen.queryByText("readme.txt")).not.toBeInTheDocument();
   });
+
+  it.each(["directory_not_found", "directory_access_denied", "directory_timeout"])(
+    "preserves the selected row when a breadcrumb target fails with %s and resets it after Retry",
+    async (code) => {
+      const file = createFileEntry("draft.txt", "Documents/Subfolder/draft.txt");
+      vi.mocked(api.listDirectory).mockResolvedValue({ items: [file], path: "Documents/Subfolder", total: 1 });
+      const user = userEvent.setup();
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents/Subfolder");
+      const list = await screen.findByTestId("file-list-container");
+      list.focus();
+      await user.keyboard(" ");
+      const row = screen.getByRole("button", { name: /file: draft.txt/i });
+      expect(row).toHaveAttribute("data-selected", "true");
+      vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 403, data: { detail: { code } } } });
+      await user.click(
+        screen.getAllByText("Test Server 1").find((element) => element.tagName === "BUTTON" && element.getAttribute("role") !== "combobox")!
+      );
+      await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: /file: draft.txt/i })).toHaveAttribute("data-selected", "true");
+      vi.mocked(api.listDirectory).mockResolvedValue(mockDirectoryListing);
+      await user.click(await screen.findByRole("button", { name: /retry/i }));
+      await waitFor(() => expectDirectoryLoad("conn-1", ""));
+      await waitFor(() => expect(screen.queryByRole("button", { name: /file: draft.txt/i })).not.toBeInTheDocument());
+    }
+  );
 
   it("navigates using breadcrumb links", async () => {
     // Start in a nested path

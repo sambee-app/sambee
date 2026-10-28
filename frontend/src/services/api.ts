@@ -2056,6 +2056,19 @@ class ApiService {
       if (response.status === 404 && isExpiredEditLockResponse(text)) {
         throw new ExpiredEditLockError();
       }
+      if (params?.["editor_operation_id"]) {
+        const { normalizePhysicalFileFailure } = await import("../utils/apiErrors");
+        throw await normalizePhysicalFileFailure(
+          {
+            response: {
+              status: response.status,
+              data: text,
+              headers: { "content-type": response.headers.get("content-type") ?? "" },
+            },
+          },
+          destPath
+        );
+      }
       throw new Error(`Upload failed (${response.status}): ${text}`);
     }
   }

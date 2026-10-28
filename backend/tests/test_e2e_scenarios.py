@@ -450,8 +450,8 @@ class TestErrorRecoveryScenarios:
                 f"/api/viewer/{connection.id}/file?path=folder",
                 headers=auth_headers_user,
             )
-            # Returns 400 Bad Request when path is a directory, not a file
-            assert response.status_code == 400
+            assert response.status_code == 409
+            assert response.json()["detail"]["code"] == "not_a_file"
 
 
 @pytest.mark.integration

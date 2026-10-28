@@ -16,6 +16,7 @@ import { isLocalAbortError } from "../services/backendAvailability";
 import { error as logError, logger, info as logInfo } from "../services/logger";
 import { PreviewUnavailableError } from "../services/previewPolicy";
 import { isApiError } from "../types";
+import { PhysicalFileRequestError } from "../utils/apiErrors";
 import { checkIsTransientError, getTransientErrorMessage } from "./useApiRetry";
 
 // Delay before showing spinner to avoid flicker on fast loads
@@ -75,7 +76,7 @@ export interface UseImageGalleryDataResult {
   showLoadingSpinner: boolean;
   canRetryCurrentImage: boolean;
   markImageAsDecoded: (index: number, source: string) => void;
-  markImageDecodeFailed: (index: number, source: string) => void;
+  markImageDecodeFailed: (index: number, source: string, message?: string) => void;
   cancelCurrentImageLoad: () => void;
   retryCurrentImage: () => void;
   abortControllersRef: React.MutableRefObject<Map<number, AbortController>>;
@@ -189,6 +190,7 @@ function isManuallyRetryableImageFailure(err: unknown): boolean {
 }
 
 function getImageLoadErrorMessage(err: unknown): string {
+  if (err instanceof PhysicalFileRequestError) return err.message;
   if (!isApiError(err)) {
     return IMAGE_LOAD_FAILED_MESSAGE;
   }
@@ -1014,13 +1016,13 @@ export const useCachedImageGallery = ({
   );
 
   const markImageDecodeFailed = useCallback(
-    (index: number, source: string) => {
+    (index: number, source: string, message = IMAGE_LOAD_FAILED_MESSAGE) => {
       updateSessionView(galleryIdentity, pendingSessionGeneration, (prev) => {
         if (sessionResourcesRef.current.imageCache.get(index) !== source) {
           return prev;
         }
 
-        return applyImageLoadFailure(prev, index, IMAGE_LOAD_FAILED_MESSAGE);
+        return applyImageLoadFailure(prev, index, message, { canRetry: true });
       });
     },
     [galleryIdentity, pendingSessionGeneration, updateSessionView]
@@ -1052,6 +1054,13 @@ export const useCachedImageGallery = ({
   const retryCurrentImage = useCallback(() => {
     const resources = sessionResourcesRef.current;
     const index = currentIndexRef.current;
+    const source = resources.imageCache.get(index);
+    if (source) {
+      URL.revokeObjectURL(source);
+      resources.imageCache.delete(index);
+      resources.imageBlobs.delete(index);
+      setImageSourceRevision((revision) => revision + 1);
+    }
 
     resources.currentRetryGate = null;
     void fetchAndCacheImageRef.current(index, { priority: "current" }).finally(() => {

@@ -831,6 +831,20 @@ describe("MarkdownViewer", () => {
     selection.removeAllRanges();
   });
 
+  it("retries a missing content read for the same Markdown file", async () => {
+    const read = vi
+      .spyOn(apiService, "getFileContent")
+      .mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "item_not_found" } } } })
+      .mockResolvedValue("# Recovered\n");
+    renderViewer();
+    await screen.findByText('File "readme.md" was not found. It may have been moved or deleted.');
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Recovered")).toBeInTheDocument();
+    expect(read).toHaveBeenLastCalledWith("conn1", "/docs/readme.md");
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(apiService.acquireEditLock).not.toHaveBeenCalled();
+  });
+
   it("reports a local normalization failure without blaming the server", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Preview");
     vi.spyOn(markdownCodePreparation, "normalizeMarkdownSource").mockRejectedValue(new Error("Markdown worker initialization failed"));
@@ -1151,7 +1165,7 @@ describe("MarkdownViewer", () => {
     const router = createMemoryRouter(
       [
         { path: "/browse", element: <div>Files</div> },
-        { path: "/viewer", element: <RoutedMarkdownViewer /> },
+        { path: "/viewer/*", element: <RoutedMarkdownViewer /> },
       ],
       { initialEntries: ["/browse", "/viewer?file=smb%2Fdemo%2Fdocs%2Freadme.md&viewer=markdown&mode=edit"] }
     );
@@ -1173,6 +1187,47 @@ describe("MarkdownViewer", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
     expect(await screen.findByText("Files")).toBeInTheDocument();
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves edit mode after a failed Save, cancelled Close, and confirmed Discard", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    vi.spyOn(apiService, "heartbeatEditLock").mockResolvedValue();
+    vi.spyOn(logger, "error").mockImplementation(() => {});
+    const save = vi.spyOn(apiService, "saveTextFile").mockRejectedValue(new Error("Disk full"));
+    const release = vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
+    const router = createMemoryRouter(
+      [
+        { path: "/browse", element: <div>Files</div> },
+        { path: "/viewer/*", element: <RoutedMarkdownViewer /> },
+      ],
+      { initialEntries: ["/viewer?file=smb%2Fdemo%2Fdocs%2Freadme.md&viewer=markdown&mode=edit"] }
+    );
+    render(
+      <SambeeThemeProvider>
+        <RouterProvider router={router} />
+      </SambeeThemeProvider>
+    );
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Unsaved\n" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+    fireEvent.click(requireTestValue(screen.getAllByRole("button", { name: "Close" })[0]));
+    let dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument());
+    expect(editor).toHaveValue("# Unsaved\n");
+    expect(release).not.toHaveBeenCalled();
+    fireEvent.click(requireTestValue(screen.getAllByRole("button", { name: "Close" })[0]));
+    dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(router.state.location.search).not.toContain("mode=edit"));
+    expect(await screen.findByText("Readme")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Markdown editor" })).not.toBeInTheDocument();
+    expect(router.state.errors).toBeNull();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
   });
 
   it("does not expose markdown edit mode for read-only connections", async () => {
@@ -1710,7 +1765,7 @@ describe("MarkdownViewer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent("Lock conflict");
+      expect(screen.getByRole("alert")).toHaveTextContent("The file could not be opened. Check the connection and retry.");
       expect(screen.getByRole("alert").closest(".MuiSnackbar-root")).not.toBeNull();
     });
     expect(screen.getByRole("button", { name: "Retry editing" })).toBeEnabled();
@@ -1924,7 +1979,7 @@ describe("MarkdownViewer", () => {
     for (const attempt of [1, 2]) {
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       const failure = await screen.findByRole("alert");
-      expect(failure).toHaveTextContent("Disk full");
+      expect(failure).toHaveTextContent("The file could not be opened. Check the connection and retry.");
       expect(failure.closest(".MuiSnackbar-root")).not.toBeNull();
       expect(apiService.saveTextFile).toHaveBeenCalledTimes(attempt);
       fireEvent.click(within(failure).getByRole("button", { name: "Close" }));
@@ -2274,7 +2329,9 @@ describe("MarkdownViewer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Failed to save markdown changes.: Disk full")).toBeInTheDocument();
+      expect(
+        screen.getByText("Failed to save markdown changes. The file could not be opened. Check the connection and retry.")
+      ).toBeInTheDocument();
     });
     expect(screen.getByRole("textbox", { name: "Markdown editor" })).toBeInTheDocument();
     expect(releaseSpy).not.toHaveBeenCalledWith("conn1", "/docs/readme.md");
@@ -2427,7 +2484,9 @@ describe("MarkdownViewer", () => {
     const rejectWrite = failWrite;
     if (!rejectWrite) throw new Error("Expected a pending Markdown write");
     await act(async () => rejectWrite(new Error("Disk full")));
-    expect(await screen.findByText("Failed to save markdown changes.: Disk full")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Failed to save markdown changes. The file could not be opened. Check the connection and retry.")
+    ).toBeInTheDocument();
     expect(editor).toHaveValue("# Newer unsaved\n");
     expect(editor).not.toHaveAttribute("readonly");
     expect(release).not.toHaveBeenCalled();
@@ -2479,7 +2538,54 @@ describe("MarkdownViewer", () => {
     expect(releaseSpy).not.toHaveBeenCalledWith("conn1", "/docs/readme.md");
   });
 
-  it("shows the backend read-only detail when a stale client save is rejected with 403", async () => {
+  it("keeps the mounted Markdown draft and recovery data after a confirmed missing-target save", async () => {
+    vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "saveTextFile").mockRejectedValueOnce({
+      response: { status: 404, data: { code: "item_not_found", detail: "private OS path" } },
+    });
+    renderViewer();
+    await screen.findByText("Readme");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Unsaved draft\n" } });
+    const acquisitions = vi.mocked(apiService.acquireEditLock).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/File "readme.md" was not found/);
+    expect(screen.getByRole("textbox", { name: "Markdown editor" })).toBe(editor);
+    expect(editor).toHaveValue("# Unsaved draft\n");
+    expect(loadDraft("conn1", "/docs/readme.md", "markdown")?.content).toBe("# Unsaved draft\n");
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(acquisitions);
+    expect(screen.queryByText(/private OS path/)).not.toBeInTheDocument();
+  });
+
+  it("preserves a dirty Markdown editor and lock during a directory-only route replacement", async () => {
+    vi.spyOn(authSession, "getUserId").mockReturnValue("test-user");
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    const router = createMemoryRouter([{ path: "/viewer/*", element: <RoutedMarkdownViewer /> }], {
+      initialEntries: ["/viewer?file=smb%2Fdemo%2Fdocs%2Freadme.md&viewer=markdown&mode=edit"],
+    });
+    render(
+      <SambeeThemeProvider>
+        <RouterProvider router={router} />
+      </SambeeThemeProvider>
+    );
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.change(editor, { target: { value: "# Retained directory draft\n" } });
+    snapshotRegisteredDrafts();
+    const acquisitions = vi.mocked(apiService.acquireEditLock).mock.calls.length;
+    const reads = vi.mocked(apiService.getFileContent).mock.calls.length;
+    await act(async () =>
+      router.navigate({ pathname: "/viewer/recovered-parent", search: router.state.location.search }, { replace: true })
+    );
+    expect(screen.getByRole("textbox", { name: "Markdown editor" })).toBe(editor);
+    expect(editor).toHaveValue("# Retained directory draft\n");
+    expect(loadDraft("conn1", "/docs/readme.md", "markdown")?.content).toBe("# Retained directory draft\n");
+    expect(apiService.acquireEditLock).toHaveBeenCalledTimes(acquisitions);
+    expect(apiService.getFileContent).toHaveBeenCalledTimes(reads);
+  });
+
+  it("shows safe access guidance when a stale client save is rejected with 403", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Readme\n");
     vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
     vi.spyOn(apiService, "acquireEditLock").mockResolvedValueOnce({
@@ -2508,7 +2614,7 @@ describe("MarkdownViewer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
-      expect(screen.getByText("Connection is read-only")).toBeInTheDocument();
+      expect(screen.getByText(/Access to this file was denied/)).toBeInTheDocument();
     });
     expect(screen.getByRole("textbox", { name: "Markdown editor" })).toBeInTheDocument();
     expect(releaseSpy).not.toHaveBeenCalledWith("conn1", "/docs/readme.md");

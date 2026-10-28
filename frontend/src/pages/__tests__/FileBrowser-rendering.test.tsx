@@ -394,7 +394,7 @@ describe("Browser Component - Rendering", () => {
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     // Optimized: Use findByText instead of waitFor + getByText
-    expect(await screen.findByText(/Connection failed/i)).toBeInTheDocument();
+    expect(await screen.findByText("Failed to load directory contents. Please try again.")).toBeInTheDocument();
     expect(screen.queryByText(/This directory is empty/i)).not.toBeInTheDocument();
   });
 
@@ -426,7 +426,7 @@ describe("Browser Component - Rendering", () => {
     expect(screen.queryByText(/The companion /i)).not.toBeInTheDocument();
   });
 
-  it("dismisses the typed companion lifecycle alert and clears the query state", async () => {
+  it("dismisses the typed companion lifecycle alert while retaining recovery access", async () => {
     await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=lock_lost");
 
     expect(await screen.findByText(/The companion lost the active edit lock for this file/i)).toBeInTheDocument();
@@ -436,6 +436,7 @@ describe("Browser Component - Rendering", () => {
     await waitFor(() => {
       expect(screen.queryByText(/The companion lost the active edit lock for this file/i)).not.toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Companion recovery" })).toBeInTheDocument();
   });
 
   it("refreshes the visible pane automatically when backend availability recovers", async () => {
