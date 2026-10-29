@@ -2869,7 +2869,11 @@ mod tests {
             assert_eq!(fs::metadata(directory.path()).unwrap().permissions().mode() & 0o777, 0o700);
         }
         let mut zip = ZipArchive::new(fs::File::open(&path).unwrap()).unwrap();
-        let mut actual_paths: Vec<_> = zip.file_names().map(str::to_owned).collect();
+        let mut actual_paths: Vec<_> = zip
+            .file_names()
+            .map(|name| name.map(|name| name.into_owned()))
+            .collect::<Result<_, _>>()
+            .unwrap();
         actual_paths.sort();
         let mut expected_paths: Vec<_> = scenario["expected_paths"]
             .as_array()
@@ -3574,12 +3578,57 @@ mod tests {
         assert_eq!(read_local_archive_entries(&target).unwrap().len(), 3);
         let mut archive = ZipArchive::new(FsFile::open(&target).unwrap()).unwrap();
         assert_eq!(
-            archive.file_names().collect::<Vec<_>>(),
+            archive.file_names().collect::<Result<Vec<_>, _>>().unwrap(),
             ["source/", "source/empty/", "source/notes.txt"]
         );
         let mut notes = String::new();
         archive.by_name("source/notes.txt").unwrap().read_to_string(&mut notes).unwrap();
         assert_eq!(notes, "notes");
+    }
+
+    #[test]
+    fn streams_unicode_writer_output_through_the_local_reader() {
+        let directory = tempdir().unwrap();
+        let source_root = directory.path().join("source");
+        let member_name = "caf\u{00e9}.txt";
+        let content = "archive contents".repeat(ARCHIVE_COPY_BUFFER_SIZE);
+        fs::create_dir(&source_root).unwrap();
+        fs::write(source_root.join(member_name), &content).unwrap();
+        let target = directory.path().join("archive.zip");
+        let entries = build_local_archive_manifest(&[source_root], &target).unwrap();
+
+        create_local_archive(directory.path(), &target, &entries, || false).unwrap();
+
+        let mut reader = LocalArchiveReader::open_pinned(&target).unwrap();
+        let root = reader.next_entry().unwrap().unwrap();
+        assert!(root.is_directory);
+        let member = reader.next_entry().unwrap().unwrap();
+        assert_eq!(member.path, format!("source/{member_name}"));
+        assert_eq!(member.compression_method, 8);
+        let mut actual = Vec::new();
+        reader.stream_entry(member, &mut actual).unwrap();
+        assert_eq!(actual, content.as_bytes());
+        assert!(reader.next_entry().unwrap().is_none());
+    }
+
+    #[test]
+    fn streams_zip64_directory_count_above_the_classic_limit() {
+        let directory = tempdir().unwrap();
+        let target = directory.path().join("archive.zip");
+        let mut writer = ZipWriter::new_stream(BufWriter::new(FsFile::create(&target).unwrap()));
+        let entry_count = u64::from(ZIP64_SENTINEL_U16) + 1;
+        for index in 0..entry_count {
+            writer.add_directory(format!("directory-{index}/"), directory_options()).unwrap();
+        }
+        writer.finish().unwrap().flush().unwrap();
+
+        let mut reader = LocalArchiveReader::open_pinned(&target).unwrap();
+        for index in 0..entry_count {
+            let entry = reader.next_entry().unwrap().unwrap();
+            assert!(entry.is_directory);
+            assert_eq!(entry.path, format!("directory-{index}"));
+        }
+        assert!(reader.next_entry().unwrap().is_none());
     }
 
     #[test]
