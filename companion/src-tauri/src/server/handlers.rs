@@ -5833,13 +5833,28 @@ fn resolve_safe_path_with_error_mapper(
     // Verify the resolved path is still under the base.
     let canonical_base = std::fs::canonicalize(base).map_err(|_| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
 
-    let canonical_full = std::fs::canonicalize(&full).map_err(|error| map_error(error, &full))?;
+    let canonical_full = std::fs::canonicalize(&full).map_err(|error| map_error(normalize_path_io_error(error, &full), &full))?;
 
     if !canonical_full.starts_with(&canonical_base) {
         return Err(ApiError::Forbidden("Path is outside the drive boundary".to_string()));
     }
 
     Ok(canonical_full)
+}
+
+/// Distinguish missing paths from file parents when the OS reports both as missing.
+fn normalize_path_io_error(error: std::io::Error, path: &std::path::Path) -> std::io::Error {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        for ancestor in path.ancestors().skip(1) {
+            match ancestor.metadata() {
+                Ok(metadata) if !metadata.is_dir() => return std::io::ErrorKind::NotADirectory.into(),
+                Ok(_) => break,
+                Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {}
+                Err(_) => break,
+            }
+        }
+    }
+    error
 }
 
 /// Build an uncanonicalized path under a drive root after rejecting traversal.
@@ -6903,6 +6918,11 @@ mod tests {
             ("missing/child", axum::http::StatusCode::NOT_FOUND, super::DIRECTORY_NOT_FOUND_CODE),
             ("file.txt", axum::http::StatusCode::CONFLICT, super::NOT_A_DIRECTORY_CODE),
             ("file.txt/child", axum::http::StatusCode::CONFLICT, super::NOT_A_DIRECTORY_CODE),
+            (
+                "file.txt/child/grandchild",
+                axum::http::StatusCode::CONFLICT,
+                super::NOT_A_DIRECTORY_CODE,
+            ),
         ] {
             let error = super::browse_list(
                 axum::extract::Path(drive.clone()),
@@ -6913,7 +6933,7 @@ mod tests {
             .await
             .expect_err("invalid directory should fail");
             let response = error.into_response();
-            assert_eq!(response.status(), status);
+            assert_eq!(response.status(), status, "path: {path}");
             let body = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .expect("body should be readable");
@@ -6921,6 +6941,25 @@ mod tests {
             assert_eq!(body["code"], code);
             assert!(!body.to_string().contains(&directory.path().display().to_string()));
         }
+    }
+
+    #[test]
+    fn missing_path_errors_distinguish_file_parents_on_all_platforms() {
+        let directory = tempfile::tempdir().expect("temporary drive should be created");
+        std::fs::write(directory.path().join("file.txt"), b"content").expect("file should be created");
+        for (path, expected) in [
+            ("missing/child", std::io::ErrorKind::NotFound),
+            ("file.txt/child", std::io::ErrorKind::NotADirectory),
+            ("file.txt/child/grandchild", std::io::ErrorKind::NotADirectory),
+        ] {
+            let error = super::normalize_path_io_error(std::io::ErrorKind::NotFound.into(), &directory.path().join(path));
+            assert_eq!(error.kind(), expected, "path: {path}");
+        }
+        let error = super::normalize_path_io_error(
+            std::io::ErrorKind::PermissionDenied.into(),
+            &directory.path().join("file.txt/child"),
+        );
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[tokio::test]
@@ -7209,20 +7248,24 @@ mod tests {
     }
 
     use super::{
-        archive_creation_response, archive_execution_response, browse_list_archive, browse_stream_transfer, build_file_info,
-        build_pair_status_response, classify_link_target, complete_transfer_receipt, copy_regular_file_exclusively, execute_archive_relay,
-        extract_local_archive_to_smb_destination_live, extract_smb_archive_to_local_live, inspection_resolver_call_count,
-        is_retryable_live_archive_stream_failure, map_local_archive_error, map_temporary_archive_error, normalize_drive_relative_path,
-        normalize_windows_display_path, replay_transfer_outcome, reserve_transfer_receipt, reset_inspection_resolver_call_count,
-        resolve_companion_archive_topology, resolve_companion_creation_coordinator, resolve_companion_extraction_coordinator,
-        resolve_companion_inspection_coordinator, resolve_drive_relative_source_path, resolve_link_target_metadata,
+        archive_creation_response, archive_execution_response, browse_list_archive, browse_stream_transfer, build_pair_status_response,
+        complete_transfer_receipt, copy_regular_file_exclusively, execute_archive_relay, extract_local_archive_to_smb_destination_live,
+        extract_smb_archive_to_local_live, inspection_resolver_call_count, is_retryable_live_archive_stream_failure,
+        map_local_archive_error, map_temporary_archive_error, normalize_drive_relative_path, normalize_windows_display_path,
+        replay_transfer_outcome, reserve_transfer_receipt, reset_inspection_resolver_call_count, resolve_companion_archive_topology,
+        resolve_companion_creation_coordinator, resolve_companion_extraction_coordinator, resolve_companion_inspection_coordinator,
         resolve_local_archive_inspection_coordinator, resolve_pair_cancel_origin, resolve_pair_confirm_origin, resolve_pair_status_origin,
-        resolve_safe_path, source_link_kind, transfer_receipt_error, validate_editor_write_target, viewer_archive_member,
-        write_local_archive_member_chunk, ArchiveCreationAdapterBinding, ArchiveCreationMemberCompletion, ArchiveCreationRelay,
-        ArchiveExtractionRelay, ArchiveListQuery, ArchiveMemberQuery, ArchiveRelayBinding, ArchiveRelayFailure, ArchiveRelayTransport,
-        CompanionArchiveCreationPlan, CompanionArchiveExtractionPlan, CopyMoveRequest, FixtureArchiveCreationInvocation,
-        LocalPromotionOutcome, LocalTransferWriteError, StreamTransferQuery, TransferCancellationReservation, TransferReceiptLookup,
-        TransferReceiptOutcome, TransferReceiptReservation, ARCHIVE_RELAY_ACKNOWLEDGEMENT_ATTEMPTS, INSPECTION_RESOLVER_TEST_LOCK,
+        transfer_receipt_error, validate_editor_write_target, viewer_archive_member, write_local_archive_member_chunk,
+        ArchiveCreationAdapterBinding, ArchiveCreationMemberCompletion, ArchiveCreationRelay, ArchiveExtractionRelay, ArchiveListQuery,
+        ArchiveMemberQuery, ArchiveRelayBinding, ArchiveRelayFailure, ArchiveRelayTransport, CompanionArchiveCreationPlan,
+        CompanionArchiveExtractionPlan, CopyMoveRequest, FixtureArchiveCreationInvocation, LocalPromotionOutcome, LocalTransferWriteError,
+        StreamTransferQuery, TransferCancellationReservation, TransferReceiptLookup, TransferReceiptOutcome, TransferReceiptReservation,
+        ARCHIVE_RELAY_ACKNOWLEDGEMENT_ATTEMPTS, INSPECTION_RESOLVER_TEST_LOCK,
+    };
+    #[cfg(unix)]
+    use super::{
+        build_file_info, classify_link_target, resolve_drive_relative_source_path, resolve_link_target_metadata, resolve_safe_path,
+        source_link_kind,
     };
     use crate::server::archive::{
         build_local_archive_manifest, build_local_archive_manifest_for_remote_target, create_local_archive, create_temporary_local_archive,
@@ -7237,9 +7280,9 @@ mod tests {
         ArchiveSessionStatus, LiveLocalArchiveSourcePhase, LiveLocalArchiveSourceSession,
     };
     use crate::server::errors::{ApiError, LOCAL_ARCHIVE_CREATION_PARTIAL_CODE};
-    use crate::server::models::{
-        ArchiveContractVersion, ArchiveCreationResponse, FileType, LinkKind, LinkTargetState, LinkTargetType, PublicPairingStatus,
-    };
+    use crate::server::models::{ArchiveContractVersion, ArchiveCreationResponse, FileType, PublicPairingStatus};
+    #[cfg(unix)]
+    use crate::server::models::{LinkKind, LinkTargetState, LinkTargetType};
     use crate::server::pairing::{PairingState, VerifiedOriginRecordReason};
     use crate::server::target_resolution::TargetResolutionPolicy;
 

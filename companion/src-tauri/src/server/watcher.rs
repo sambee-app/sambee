@@ -19,12 +19,17 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 /// Debounce window — coalesce rapid filesystem events into a single notification.
 const DEBOUNCE_DURATION: Duration = Duration::from_millis(300);
 
+/// Check for deleted targets even when the native watcher reports no event.
+const TARGET_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Maximum number of pending events in the broadcast channel.
 const BROADCAST_CAPACITY: usize = 256;
 
 #[cfg(test)]
 mod tests {
     use super::DirectoryWatcher;
+
+    const EVENT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
     #[tokio::test]
     async fn rejects_missing_and_wrong_type_targets_without_a_watcher() {
@@ -43,19 +48,58 @@ mod tests {
 
     #[tokio::test]
     async fn invalidates_and_retires_a_deleted_directory() {
+        assert_deleted_directory_is_retired(false, false).await;
+    }
+
+    #[tokio::test]
+    async fn invalidates_and_retires_a_deleted_directory_without_native_events() {
+        assert_deleted_directory_is_retired(true, false).await;
+    }
+
+    #[tokio::test]
+    async fn invalidates_and_retires_a_directory_replaced_by_a_file_without_native_events() {
+        assert_deleted_directory_is_retired(true, true).await;
+    }
+
+    async fn assert_deleted_directory_is_retired(disable_native_events: bool, replace_with_file: bool) {
+        use notify::Watcher;
+
         let root = tempfile::tempdir().expect("temporary drive root");
-        std::fs::create_dir(root.path().join("watched")).expect("create watched directory");
+        let target = root.path().join("watched");
+        std::fs::create_dir(&target).expect("create watched directory");
         let watcher = DirectoryWatcher::new();
         let mut events = watcher.subscribe_events();
         watcher.subscribe("test", "watched", root.path()).await.expect("subscribe");
-        std::fs::remove_dir(root.path().join("watched")).expect("remove watched directory");
-        let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
+        if disable_native_events {
+            watcher
+                .entries
+                .lock()
+                .await
+                .get_mut("test:watched")
+                .expect("watch entry")
+                ._watcher
+                .unwatch(&target.canonicalize().expect("canonical target"))
+                .expect("disable native events");
+        }
+        std::fs::remove_dir(&target).expect("remove watched directory");
+        if replace_with_file {
+            std::fs::write(&target, b"replacement").expect("replace directory with file");
+        }
+        let event = tokio::time::timeout(EVENT_TIMEOUT, events.recv())
             .await
             .expect("deletion notification")
             .expect("event");
         assert_eq!(event.drive, "test");
         assert_eq!(event.path, "watched");
         assert!(watcher.entries.lock().await.is_empty());
+        assert!(matches!(events.try_recv(), Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+        watcher.unsubscribe("test", "watched").await;
+        if replace_with_file {
+            std::fs::remove_file(&target).expect("remove replacement file");
+        }
+        std::fs::create_dir(&target).expect("recreate watched directory");
+        watcher.subscribe("test", "watched", root.path()).await.expect("subscribe again");
+        assert_eq!(watcher.entries.lock().await.len(), 1);
     }
 
     #[tokio::test]
@@ -171,26 +215,6 @@ impl DirectoryWatcher {
         let watched_entries = Arc::downgrade(&self.entries);
         let watched_key = key.clone();
 
-        let debounce_handle = tokio::spawn(async move {
-            while let Some(()) = debounce_rx.recv().await {
-                // Wait for the debounce window, draining intermediate events
-                tokio::time::sleep(DEBOUNCE_DURATION).await;
-                while debounce_rx.try_recv().is_ok() {}
-
-                let _ = broadcast_tx.send(DirectoryChangeEvent {
-                    drive: drive_owned.clone(),
-                    path: path_owned.clone(),
-                });
-                if matches!(watched_path.metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound) {
-                    if let Some(entries) = watched_entries.upgrade() {
-                        entries.lock().await.remove(&watched_key);
-                    }
-                    break;
-                }
-            }
-        });
-
-        // ── OS watcher ────────────────────────────────────────────────────
         let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| match res {
             Ok(event) => match event.kind {
                 EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
@@ -209,6 +233,40 @@ impl DirectoryWatcher {
                 notify::ErrorKind::PathNotFound => std::io::Error::from(std::io::ErrorKind::NotFound),
                 _ => std::io::Error::other(error),
             })?;
+
+        let debounce_handle = tokio::spawn(async move {
+            loop {
+                let changed = match tokio::time::timeout(TARGET_CHECK_INTERVAL, debounce_rx.recv()).await {
+                    Ok(Some(())) => {
+                        tokio::time::sleep(DEBOUNCE_DURATION).await;
+                        while debounce_rx.try_recv().is_ok() {}
+                        true
+                    }
+                    Ok(None) => break,
+                    Err(_) => false,
+                };
+
+                let retired = match watched_path.metadata() {
+                    Ok(metadata) => !metadata.is_dir(),
+                    Err(error) => matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory),
+                };
+                if retired {
+                    if let Some(entries) = watched_entries.upgrade() {
+                        entries.lock().await.remove(&watched_key);
+                    }
+                }
+
+                if changed || retired {
+                    let _ = broadcast_tx.send(DirectoryChangeEvent {
+                        drive: drive_owned.clone(),
+                        path: path_owned.clone(),
+                    });
+                }
+                if retired {
+                    break;
+                }
+            }
+        });
 
         info!("Watcher: started watching {key} at {}", watch_path.display());
 
