@@ -1145,6 +1145,7 @@ export const EN_TRANSLATIONS = {
       buttonDeleting: "Deleting…",
     },
     operationContext: {
+      file: "File",
       sourceItem: "Source item",
       destinationDirectory: "Destination directory",
       archive: "Archive",

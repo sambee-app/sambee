@@ -269,6 +269,14 @@ The current shared-toolbar consumers are:
 
 `ViewerControls` also supports generic toolbar actions through the `actions` prop, which can render either text buttons or icon buttons. That is what allows Markdown-specific actions to live inside the same shared toolbar instead of forcing a second toolbar implementation.
 
+### PDF Loading And Password Cancellation
+
+The PDF viewer keeps the document hidden and its controls disabled until the active page's canvas has rendered. The loading indicator and text appear only after 500 ms. A fast load shows neither. Each new document, retry, or compatibility attempt starts a new feedback delay. Readiness does not wait for text extraction or a minimum indicator display time.
+
+Escape, Cancel, and the mobile back action in the password dialog cancel the current PDF load. Cancellation clears the password, unmounts the document to destroy its PDF.js loading task, releases its blob URL, and shows a notice with Retry. It does not submit an empty or null password, and it does not request compatibility processing. Downloading the original remains available through the viewer's existing download action. Only an explicit retry can start a new password request after cancellation.
+
+Password callbacks belong to one load session. The viewer ignores callbacks from canceled or replaced sessions. An incorrect password can request another attempt within the same active session.
+
 ### Search UI Versus Search Engine
 
 The search row is shared, but the search backend is viewer-specific.

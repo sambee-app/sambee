@@ -1,12 +1,5 @@
 # TODO
 
-## Fix soon
-
-- The PDF viewer always seems to display a spinner, even for smaller PDFs.
-- PDF with passwords:
-   - when I cancel the password dialog with ESC, an error is displayed in place of the PDF, but then the password dialog is shown again.
-   - only when pressing ESC a second time does the password dialog go away.
-
 ## Viewers
 
 - Delete: add a delete function to all viewers.
