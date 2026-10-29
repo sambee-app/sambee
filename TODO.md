@@ -1,5 +1,28 @@
 # TODO
 
+## Viewers
+
+- Delete: add a delete function to all viewers.
+   - Toolbar button and keyboard shortcut (Del)
+   - When clicked/pressed, ask for confirmation
+   - If the user confirms, delete the file and then:
+      - Close the viewer (Markdown, PDF)
+      - Advance to the next image (image). If there is no next image, close the viewer.
+
+## Auditing
+
+- Add an auditing feature for changes (but not for read access), comprised of:
+   - Audit log
+      - Deduplicate identical consecutive settings, specifically multiple file writes by the same user (e.g., during editing). In those cases, show only 1 event per 24 h.
+   - Audit log viewer
+      - To be invoked from admin settings
+      - Filtering capabilities (we may be able to reuse what we built for the user list)
+   - Settings:
+      - Which types of access to audit, e.g.: creation, renaming, deletion, content modification
+      - Whether to audit files and/or folders
+      - Retention time of the audit log
+      - Max. number of entries in the audit log
+
 ## Settings
 
 - Settings > File browser: add a setting to control whether dot directories are shown in the list

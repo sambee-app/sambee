@@ -393,27 +393,28 @@ describe("Browser Component - Rendering", () => {
 
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-    // Optimized: Use findByText instead of waitFor + getByText
-    expect(await screen.findByText(/Connection failed/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Failed to load directory contents. Please try again.")).toBeInTheDocument());
     expect(screen.queryByText(/This directory is empty/i)).not.toBeInTheDocument();
   });
 
   it("shows a typed companion lifecycle alert from the route query", async () => {
     await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=renewal_required");
 
-    expect(await screen.findByText(/The companion edit session expired before the file could be finished/i)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/The companion edit session expired before the file could be finished/i)).toBeInTheDocument()
+    );
   });
 
   it("shows the auth-failed companion lifecycle alert from the route query", async () => {
     await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=auth_failed");
 
-    expect(await screen.findByText(/The companion could not finish signing in to the Sambee backend/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/The companion could not finish signing in to the Sambee backend/i)).toBeInTheDocument());
   });
 
   it("shows the recovery-required companion lifecycle alert from the route query", async () => {
     await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=recovery_required");
 
-    expect(await screen.findByText(/The companion has an unfinished recovery item for this file/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/The companion has an unfinished recovery item for this file/i)).toBeInTheDocument());
   });
 
   it("ignores unknown companion lifecycle statuses in the route query", async () => {
@@ -426,16 +427,17 @@ describe("Browser Component - Rendering", () => {
     expect(screen.queryByText(/The companion /i)).not.toBeInTheDocument();
   });
 
-  it("dismisses the typed companion lifecycle alert and clears the query state", async () => {
+  it("dismisses the typed companion lifecycle alert while retaining recovery access", async () => {
     await renderBrowserAndFlush("/browse/smb/test-server-1?companion_status=lock_lost");
 
-    expect(await screen.findByText(/The companion lost the active edit lock for this file/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/The companion lost the active edit lock for this file/i)).toBeInTheDocument());
 
     screen.getByRole("button", { name: "Close" }).click();
 
     await waitFor(() => {
       expect(screen.queryByText(/The companion lost the active edit lock for this file/i)).not.toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "Companion recovery" })).toBeInTheDocument();
   });
 
   it("refreshes the visible pane automatically when backend availability recovers", async () => {
@@ -476,7 +478,9 @@ describe("Browser Component - Rendering", () => {
 
     expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
     expect(screen.queryByText(/This directory is empty/i)).not.toBeInTheDocument();
-    expect(await screen.findByText(/Directory listing timed out. The remote share took too long to respond/i)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/Directory listing timed out. The remote share took too long to respond/i)).toBeInTheDocument()
+    );
     expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
   });
 
@@ -526,7 +530,9 @@ describe("Browser Component - Rendering", () => {
 
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-    expect(await screen.findByText(/Directory listing timed out. The remote share took too long to respond/i)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/Directory listing timed out. The remote share took too long to respond/i)).toBeInTheDocument()
+    );
 
     const retryButton = screen.getByRole("button", { name: "Retry" });
     retryButton.click();

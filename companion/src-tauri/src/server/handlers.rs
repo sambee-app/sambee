@@ -60,11 +60,11 @@ use super::auth;
 use super::drives;
 use super::edit_locks::EDIT_LOCK_LOST_CODE;
 use super::errors::{
-    ApiError, ArchiveV2Error, ArchiveV2Json, ArchiveV2NoQuery, ArchiveV2Query, ARCHIVE_SOURCE_CHANGED_CODE,
-    LOCAL_ARCHIVE_CREATION_PARTIAL_CODE, LOCAL_LINK_TARGET_ACCESS_DENIED_CODE, LOCAL_LINK_TARGET_MISSING_CODE,
+    ApiError, ArchiveV2Error, ArchiveV2Json, ArchiveV2NoQuery, ArchiveV2Query, ARCHIVE_SOURCE_CHANGED_CODE, DIRECTORY_ACCESS_DENIED_CODE,
+    DIRECTORY_NOT_FOUND_CODE, DIRECTORY_UNAVAILABLE_CODE, FILE_ACCESS_DENIED_CODE, FILE_TIMEOUT_CODE, FILE_UNAVAILABLE_CODE,
+    ITEM_NOT_FOUND_CODE, LOCAL_ARCHIVE_CREATION_PARTIAL_CODE, LOCAL_LINK_TARGET_ACCESS_DENIED_CODE, LOCAL_LINK_TARGET_MISSING_CODE,
     LOCAL_LINK_TARGET_UNMAPPED_DRIVE_CODE, LOCAL_LINK_TARGET_UNRESOLVABLE_CODE, LOCAL_LINK_TARGET_UNSUPPORTED_TYPE_CODE,
-    PAIR_CONFIRMATION_PENDING_CODE, RECENT_FILE_NATIVE_LAUNCH_FAILED_CODE, RECENT_FILE_TARGET_MISSING_CODE,
-    RECENT_FILE_TARGET_NOT_FILE_CODE,
+    NOT_A_DIRECTORY_CODE, NOT_A_FILE_CODE, PAIR_CONFIRMATION_PENDING_CODE, RECENT_FILE_NATIVE_LAUNCH_FAILED_CODE,
 };
 use super::links::{resolve_activation_target, LinkResolutionError};
 use super::models::*;
@@ -79,6 +79,7 @@ use super::{AppState, DownloadIntent};
 const FORBIDDEN_NAME_CHARS: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
 /// Prefix used by the frontend for synthetic local-drive connection IDs.
 const LOCAL_DRIVE_PREFIX: &str = "local-drive:";
+const DRIVE_UNAVAILABLE_MESSAGE: &str = "The drive is unavailable. Reconnect the drive and try again.";
 /// Maximum number of potentially blocking local target resolutions per batch.
 const LINK_TARGET_RESOLUTION_CONCURRENCY: usize = 4;
 const ARCHIVE_RELAY_IDEMPOTENCY_HEADER: &str = "Idempotency-Key";
@@ -342,36 +343,54 @@ async fn handle_ws_message(
     match (action, conn_id) {
         (Some("subscribe"), Some(connection_id)) => {
             let drive = connection_id.strip_prefix(LOCAL_DRIVE_PREFIX).unwrap_or(connection_id);
-            let normalized_path = match normalize_drive_relative_path(drive, path) {
-                Ok(normalized) => normalized,
-                Err(e) => {
-                    warn!("WS subscribe failed for {drive}:{path}: {e}");
-                    return Ok(());
+            let result = async {
+                let normalized = normalize_drive_relative_path(drive, path)?;
+                let root = drives::resolve_drive_path(drive).ok_or_else(|| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
+                root.metadata()
+                    .map_err(|_| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
+                let full_path = resolve_safe_path_with_error_mapper(&root, drive, path, map_directory_io_error)?;
+                let key = format!("{drive}:{normalized}");
+                if !subscriptions.contains(&key) {
+                    state
+                        .watcher
+                        .subscribe(drive, &normalized, &root)
+                        .await
+                        .map_err(|error| map_directory_io_error(error, &full_path))?;
+                    subscriptions.insert(key);
                 }
-            };
-            let key = format!("{drive}:{normalized_path}");
-
-            if let Some(root) = drives::resolve_drive_path(drive) {
-                match state.watcher.subscribe(drive, &normalized_path, &root).await {
-                    Ok(()) => {
-                        subscriptions.insert(key);
-                        let reply = serde_json::json!({
-                            "type": "subscribed",
-                            "connection_id": connection_id,
-                            "path": normalized_path,
-                        });
-                        socket
-                            .send(Message::Text(reply.to_string().into()))
-                            .await
-                            .map_err(|e| format!("Send failed: {e}"))?;
-                    }
-                    Err(e) => {
-                        warn!("WS subscribe failed for {key}: {e}");
-                    }
-                }
-            } else {
-                warn!("WS subscribe: unknown drive '{drive}'");
+                Ok::<_, ApiError>(normalized)
             }
+            .await;
+            let mut reply = serde_json::json!({
+                "connection_id": connection_id,
+                "path": path,
+                "request_id": data.get("request_id"),
+            });
+            match result {
+                Ok(normalized) => {
+                    reply["type"] = serde_json::json!("subscribed");
+                    reply["path"] = serde_json::json!(normalized);
+                }
+                Err(error) => {
+                    let (code, message) = match error {
+                        ApiError::NotFoundWithCode { code, message }
+                        | ApiError::ForbiddenWithCode { code, message }
+                        | ApiError::ConflictWithCode { code, message }
+                        | ApiError::InternalWithCode { code, message } => (code, message),
+                        _ => (
+                            DIRECTORY_UNAVAILABLE_CODE,
+                            "Folder monitoring is unavailable. Check the drive and retry.".to_string(),
+                        ),
+                    };
+                    reply["type"] = serde_json::json!("error");
+                    reply["code"] = serde_json::json!(code);
+                    reply["message"] = serde_json::json!(message);
+                }
+            }
+            socket
+                .send(Message::Text(reply.to_string().into()))
+                .await
+                .map_err(|error| format!("Send failed: {error}"))?;
         }
         (Some("unsubscribe"), Some(connection_id)) => {
             let drive = connection_id.strip_prefix(LOCAL_DRIVE_PREFIX).unwrap_or(connection_id);
@@ -574,17 +593,23 @@ pub struct ArchiveV2ListQuery {
 
 /// `GET /api/browse/{drive}/list` — list directory contents.
 pub async fn browse_list(Path(drive): Path<String>, Query(query): Query<BrowseQuery>) -> Result<Json<DirectoryListing>, ApiError> {
-    let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
+    let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
 
     let relative = query.path.as_deref().unwrap_or("");
     let normalized_relative = normalize_drive_relative_path(&drive, relative)?;
-    let full_path = resolve_safe_path(&base_path, &drive, relative)?;
+    let full_path = resolve_safe_path_with_error_mapper(&base_path, &drive, relative, map_directory_io_error)?;
 
     let mut items = Vec::new();
 
-    let mut entries = tokio::fs::read_dir(&full_path).await.map_err(|e| map_io_error(e, &full_path))?;
+    let mut entries = tokio::fs::read_dir(&full_path)
+        .await
+        .map_err(|error| map_directory_io_error(error, &full_path))?;
 
-    while let Some(entry) = entries.next_entry().await.map_err(ApiError::Io)? {
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|error| map_directory_io_error(error, &full_path))?
+    {
         match build_file_info(&entry, &normalized_relative).await {
             Ok(info) => items.push(info),
             Err(e) => {
@@ -718,20 +743,16 @@ pub async fn browse_list_link_targets(
 
 /// `GET /api/browse/{drive}/info` — get metadata for a single file/directory.
 pub async fn browse_info(Path(drive): Path<String>, Query(query): Query<BrowseQuery>) -> Result<Json<FileInfo>, ApiError> {
-    let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
+    let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
 
     let relative = query.path.as_deref().unwrap_or("");
     let normalized_relative = normalize_drive_relative_path(&drive, relative)?;
     let source_path = resolve_drive_relative_source_path(&base_path, &drive, relative)?;
-    let full_path = resolve_safe_path(&base_path, &drive, relative)?;
+    let full_path = resolve_safe_path_with_error_mapper(&base_path, &drive, relative, map_metadata_io_error)?;
 
-    let metadata = tokio::fs::metadata(&full_path).await.map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            ApiError::not_found_code(format!("Path not found: {}", full_path.display()), RECENT_FILE_TARGET_MISSING_CODE)
-        } else {
-            map_io_error(error, &full_path)
-        }
-    })?;
+    let metadata = tokio::fs::metadata(&full_path)
+        .await
+        .map_err(|error| map_metadata_io_error(error, &full_path))?;
 
     let name = source_path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
@@ -748,7 +769,7 @@ pub async fn browse_info(Path(drive): Path<String>, Query(query): Query<BrowseQu
     let is_hidden = name.starts_with('.');
     let link_kind = source_link_kind(&source_path)
         .await
-        .map_err(|error| map_io_error(error, &source_path))?;
+        .map_err(|error| map_metadata_io_error(error, &source_path))?;
 
     Ok(Json(FileInfo {
         name,
@@ -965,7 +986,7 @@ const FALLBACK_MIME: &str = "application/octet-stream";
 pub async fn viewer_file(Path(drive): Path<String>, Query(query): Query<ViewerQuery>) -> Result<Response<Body>, ApiError> {
     let (full_path, mime_type) = resolve_viewer_path(&drive, &query)?;
 
-    let file = File::open(&full_path).await.map_err(|e| map_io_error(e, &full_path))?;
+    let file = File::open(&full_path).await.map_err(|error| map_file_io_error(error, &full_path))?;
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
@@ -994,9 +1015,11 @@ pub async fn viewer_file(Path(drive): Path<String>, Query(query): Query<ViewerQu
 pub async fn viewer_download(Path(drive): Path<String>, Query(query): Query<ViewerQuery>) -> Result<Response<Body>, ApiError> {
     let (full_path, mime_type) = resolve_viewer_path(&drive, &query)?;
 
-    let metadata = tokio::fs::metadata(&full_path).await.map_err(|e| map_io_error(e, &full_path))?;
+    let metadata = tokio::fs::metadata(&full_path)
+        .await
+        .map_err(|error| map_file_io_error(error, &full_path))?;
 
-    let file = File::open(&full_path).await.map_err(|e| map_io_error(e, &full_path))?;
+    let file = File::open(&full_path).await.map_err(|error| map_file_io_error(error, &full_path))?;
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
@@ -1289,15 +1312,18 @@ pub async fn viewer_v2_archive_member(
 
 /// Resolve drive + query path for viewer endpoints, returning the full path and MIME type.
 fn resolve_viewer_path(drive: &str, query: &ViewerQuery) -> Result<(PathBuf, String), ApiError> {
-    let base_path = drives::resolve_drive_path(drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
+    let base_path = drives::resolve_drive_path(drive).ok_or_else(|| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
 
     let relative = query.path.as_deref().unwrap_or("");
-    let full_path = resolve_safe_path(&base_path, drive, relative)?;
+    let full_path = resolve_safe_path_with_error_mapper(&base_path, drive, relative, map_file_io_error)?;
 
     // Viewer endpoints must target files, not directories
-    let metadata = std::fs::metadata(&full_path).map_err(|e| map_io_error(e, &full_path))?;
-    if metadata.is_dir() {
-        return Err(ApiError::BadRequest("Cannot view a directory".to_string()));
+    let metadata = std::fs::metadata(&full_path).map_err(|error| map_file_io_error(error, &full_path))?;
+    if !metadata.is_file() {
+        return Err(ApiError::conflict_code(
+            "This target is not a regular file. Select another file.",
+            NOT_A_FILE_CODE,
+        ));
     }
 
     let mime_type = mime_guess::from_path(&full_path)
@@ -2307,36 +2333,58 @@ pub async fn browse_open(
     Path(drive): Path<String>,
     Json(body): Json<OpenRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
-    let file_path = resolve_safe_path(&base_path, &drive, &body.path)?;
+    let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
+    let file_path = resolve_safe_path_with_error_mapper(&base_path, &drive, &body.path, map_file_io_error)?;
 
-    let metadata = tokio::fs::metadata(&file_path).await.map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            ApiError::not_found_code(format!("Path not found: {}", file_path.display()), RECENT_FILE_TARGET_MISSING_CODE)
-        } else {
-            map_io_error(error, &file_path)
-        }
-    })?;
+    let metadata = tokio::fs::metadata(&file_path)
+        .await
+        .map_err(|error| map_file_io_error(error, &file_path))?;
     if !metadata.is_file() {
-        return Err(ApiError::bad_request_code(
-            format!("Not a file: {}", file_path.display()),
-            RECENT_FILE_TARGET_NOT_FILE_CODE,
+        return Err(ApiError::conflict_code(
+            "This target is not a regular file. Select another file.",
+            NOT_A_FILE_CODE,
         ));
     }
 
     let extension = file_path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
     let selection = commands::open_file::prompt_for_app_selection(&state.app, extension, body.force_picker)
         .await
-        .map_err(ApiError::Internal)?;
+        .map_err(|error| {
+            log::warn!("Native application selection failed: {error}");
+            ApiError::internal_code(
+                "The application picker is unavailable. Select an application and retry.",
+                RECENT_FILE_NATIVE_LAUNCH_FAILED_CODE,
+            )
+        })?;
 
     let Some(selected_app) = selection else {
         log::info!("User cancelled app picker for local file: {}", file_path.display());
         return Ok(StatusCode::NO_CONTENT);
     };
 
+    if !tokio::fs::metadata(&file_path)
+        .await
+        .map_err(|error| map_file_io_error(error, &file_path))?
+        .is_file()
+    {
+        return Err(ApiError::conflict_code(
+            "This target is not a regular file. Select another file.",
+            NOT_A_FILE_CODE,
+        ));
+    }
+
     commands::open_file::open_in_native_app(&state.app, &file_path, &selected_app.executable, selected_app.handler_id.as_deref())
         .await
-        .map_err(|error| ApiError::internal_code(error, RECENT_FILE_NATIVE_LAUNCH_FAILED_CODE))?;
+        .map_err(|error| {
+            log::warn!("Native launch failed: {error}");
+            match std::fs::metadata(&file_path) {
+                Err(error) => map_file_io_error(error, &file_path),
+                Ok(_) => ApiError::internal_code(
+                    "The application could not open this file. Select an application and retry.",
+                    RECENT_FILE_NATIVE_LAUNCH_FAILED_CODE,
+                ),
+            }
+        })?;
 
     log::info!(
         "Opened local file with selected app: {} ({})",
@@ -5500,9 +5548,12 @@ pub struct EditLockPathQuery {
 async fn validate_editor_write_target(dest: &FsPath) -> Result<(), ApiError> {
     match tokio::fs::metadata(dest).await {
         Ok(metadata) if metadata.is_file() => Ok(()),
-        Ok(_) => Err(ApiError::BadRequest("Editor writes cannot replace a directory".to_string())),
+        Ok(_) => Err(ApiError::conflict_code(
+            "This target is not a regular file. Select another file.",
+            NOT_A_FILE_CODE,
+        )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(map_io_error(error, dest)),
+        Err(error) => Err(map_file_io_error(error, dest)),
     }
 }
 
@@ -5518,19 +5569,13 @@ fn lock_response(lock: super::edit_locks::LocalEditLock) -> EditLockResponse {
 }
 
 async fn check_editor_write_access(path: &FsPath) -> Result<(), ApiError> {
-    if !tokio::fs::metadata(path)
-        .await
-        .map_err(|error| map_io_error(error, path))?
-        .is_file()
-    {
-        return Err(ApiError::BadRequest("Edit locks require an existing regular file".to_string()));
-    }
+    validate_editor_write_target(path).await?;
     let probe = tokio::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(path)
         .await
-        .map_err(|error| map_io_error(error, path))?;
+        .map_err(|error| map_file_io_error(error, path))?;
     drop(probe);
     Ok(())
 }
@@ -5542,7 +5587,8 @@ pub async fn browse_acquire_edit_lock(
     Query(query): Query<EditLockPathQuery>,
     headers: HeaderMap,
 ) -> Result<Json<EditLockResponse>, ApiError> {
-    let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
+    let base_path = drives::resolve_drive_path(&drive)
+        .ok_or_else(|| ApiError::internal_code("The local drive is unavailable. Reconnect it and retry.", FILE_UNAVAILABLE_CODE))?;
     let path = normalize_drive_relative_path(&drive, &query.path)?;
     let full_path = resolve_safe_path(&base_path, &drive, &query.path)?;
     check_editor_write_access(&full_path).await?;
@@ -5694,7 +5740,13 @@ pub async fn browse_upload(
     }
 
     let size = data.len() as u64;
-    tokio::fs::write(&dest, &data).await.map_err(|e| map_io_error(e, &dest))?;
+    tokio::fs::write(&dest, &data).await.map_err(|error| {
+        if has_editor_lock_context {
+            map_file_io_error(error, &dest)
+        } else {
+            map_io_error(error, &dest)
+        }
+    })?;
 
     // Read metadata for the response
     let last_modified = tokio::fs::metadata(&dest).await.ok().and_then(|m| m.modified().ok()).map(|t| {
@@ -5767,18 +5819,42 @@ fn normalize_drive_relative_path(drive: &str, path: &str) -> Result<String, ApiE
 
 /// Resolve a relative path against a base path, preventing path traversal.
 fn resolve_safe_path(base: &std::path::Path, drive: &str, relative: &str) -> Result<PathBuf, ApiError> {
+    resolve_safe_path_with_error_mapper(base, drive, relative, map_io_error)
+}
+
+fn resolve_safe_path_with_error_mapper(
+    base: &std::path::Path,
+    drive: &str,
+    relative: &str,
+    map_error: fn(std::io::Error, &std::path::Path) -> ApiError,
+) -> Result<PathBuf, ApiError> {
     let full = resolve_drive_relative_source_path(base, drive, relative)?;
 
     // Verify the resolved path is still under the base.
-    let canonical_base = std::fs::canonicalize(base).map_err(|e| ApiError::NotFound(format!("Drive root inaccessible: {e}")))?;
+    let canonical_base = std::fs::canonicalize(base).map_err(|_| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
 
-    let canonical_full = std::fs::canonicalize(&full).map_err(|e| map_io_error(e, &full))?;
+    let canonical_full = std::fs::canonicalize(&full).map_err(|error| map_error(normalize_path_io_error(error, &full), &full))?;
 
     if !canonical_full.starts_with(&canonical_base) {
         return Err(ApiError::Forbidden("Path is outside the drive boundary".to_string()));
     }
 
     Ok(canonical_full)
+}
+
+/// Distinguish missing paths from file parents when the OS reports both as missing.
+fn normalize_path_io_error(error: std::io::Error, path: &std::path::Path) -> std::io::Error {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        for ancestor in path.ancestors().skip(1) {
+            match ancestor.metadata() {
+                Ok(metadata) if !metadata.is_dir() => return std::io::ErrorKind::NotADirectory.into(),
+                Ok(_) => break,
+                Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {}
+                Err(_) => break,
+            }
+        }
+    }
+    error
 }
 
 /// Build an uncanonicalized path under a drive root after rejecting traversal.
@@ -6080,6 +6156,58 @@ fn map_io_error(err: std::io::Error, path: &std::path::Path) -> ApiError {
         std::io::ErrorKind::NotFound => ApiError::NotFound(format!("Path not found: {path_display}")),
         std::io::ErrorKind::PermissionDenied => ApiError::Forbidden(format!("Permission denied: {path_display}")),
         _ => ApiError::Io(err),
+    }
+}
+
+fn map_file_io_error(error: std::io::Error, path: &std::path::Path) -> ApiError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            ApiError::not_found_code("The item was not found. It may have been moved or deleted.", ITEM_NOT_FOUND_CODE)
+        }
+        std::io::ErrorKind::PermissionDenied => ApiError::forbidden_code(
+            "Access to this file was denied. Check your permissions and retry.",
+            FILE_ACCESS_DENIED_CODE,
+        ),
+        std::io::ErrorKind::IsADirectory | std::io::ErrorKind::NotADirectory => {
+            ApiError::conflict_code("This target is not a regular file. Select another file.", NOT_A_FILE_CODE)
+        }
+        std::io::ErrorKind::TimedOut => {
+            ApiError::internal_code("The file request timed out. Check the drive and retry.", FILE_TIMEOUT_CODE)
+        }
+        _ => {
+            log::error!("File request failed for {}: {error}", path.display());
+            ApiError::internal_code("The file is unavailable. Check the drive and retry.", FILE_UNAVAILABLE_CODE)
+        }
+    }
+}
+
+fn map_metadata_io_error(error: std::io::Error, path: &std::path::Path) -> ApiError {
+    if matches!(error.kind(), std::io::ErrorKind::NotADirectory | std::io::ErrorKind::IsADirectory) {
+        return ApiError::conflict_code(
+            "An item in this path is not a folder. Select another location.",
+            NOT_A_DIRECTORY_CODE,
+        );
+    }
+    map_file_io_error(error, path)
+}
+
+fn map_directory_io_error(error: std::io::Error, path: &std::path::Path) -> ApiError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => ApiError::not_found_code(
+            "The folder was not found. It may have been moved or deleted.",
+            DIRECTORY_NOT_FOUND_CODE,
+        ),
+        std::io::ErrorKind::NotADirectory => ApiError::conflict_code("This item is not a folder.", NOT_A_DIRECTORY_CODE),
+        std::io::ErrorKind::PermissionDenied => {
+            ApiError::forbidden_code("You do not have permission to open this folder.", DIRECTORY_ACCESS_DENIED_CODE)
+        }
+        _ => {
+            log::error!("Directory listing failed for {}: {error}", path.display());
+            ApiError::internal_code(
+                "The folder could not be opened. Check the drive and try again.",
+                DIRECTORY_UNAVAILABLE_CODE,
+            )
+        }
     }
 }
 
@@ -6740,6 +6868,155 @@ async fn rename_noreplace(_source: &FsPath, _destination: &FsPath) -> Result<(),
 #[cfg(test)]
 mod tests {
     #[tokio::test]
+    async fn directory_listing_preserves_drive_boundaries() {
+        let directory = tempfile::tempdir().expect("temporary drive should be created");
+        let drive = format!("directory-boundary-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), directory.path().to_path_buf());
+        let listing = super::browse_list(
+            axum::extract::Path(drive.clone()),
+            axum::extract::Query(super::BrowseQuery { path: None }),
+        )
+        .await
+        .expect("drive root should be listed");
+        assert!(listing.0.items.is_empty());
+
+        let traversal = super::browse_list(
+            axum::extract::Path(drive.clone()),
+            axum::extract::Query(super::BrowseQuery {
+                path: Some("../outside".to_string()),
+            }),
+        )
+        .await;
+        assert!(matches!(traversal, Err(super::ApiError::BadRequest(_))));
+
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().expect("outside directory should be created");
+            std::os::unix::fs::symlink(outside.path(), directory.path().join("outside")).expect("symlink should be created");
+            let escape = super::browse_list(
+                axum::extract::Path(drive),
+                axum::extract::Query(super::BrowseQuery {
+                    path: Some("outside".to_string()),
+                }),
+            )
+            .await;
+            assert!(matches!(escape, Err(super::ApiError::Forbidden(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn directory_listing_errors_have_safe_explicit_codes() {
+        use axum::response::IntoResponse;
+
+        let directory = tempfile::tempdir().expect("temporary drive should be created");
+        let drive = format!("directory-errors-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), directory.path().to_path_buf());
+        std::fs::write(directory.path().join("file.txt"), b"content").expect("file should be created");
+
+        for (path, status, code) in [
+            ("missing", axum::http::StatusCode::NOT_FOUND, super::DIRECTORY_NOT_FOUND_CODE),
+            ("missing/child", axum::http::StatusCode::NOT_FOUND, super::DIRECTORY_NOT_FOUND_CODE),
+            ("file.txt", axum::http::StatusCode::CONFLICT, super::NOT_A_DIRECTORY_CODE),
+            ("file.txt/child", axum::http::StatusCode::CONFLICT, super::NOT_A_DIRECTORY_CODE),
+            (
+                "file.txt/child/grandchild",
+                axum::http::StatusCode::CONFLICT,
+                super::NOT_A_DIRECTORY_CODE,
+            ),
+        ] {
+            let error = super::browse_list(
+                axum::extract::Path(drive.clone()),
+                axum::extract::Query(super::BrowseQuery {
+                    path: Some(path.to_string()),
+                }),
+            )
+            .await
+            .expect_err("invalid directory should fail");
+            let response = error.into_response();
+            assert_eq!(response.status(), status, "path: {path}");
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body should be readable");
+            let body: serde_json::Value = serde_json::from_slice(&body).expect("body should be JSON");
+            assert_eq!(body["code"], code);
+            assert!(!body.to_string().contains(&directory.path().display().to_string()));
+        }
+    }
+
+    #[test]
+    fn missing_path_errors_distinguish_file_parents_on_all_platforms() {
+        let directory = tempfile::tempdir().expect("temporary drive should be created");
+        std::fs::write(directory.path().join("file.txt"), b"content").expect("file should be created");
+        for (path, expected) in [
+            ("missing/child", std::io::ErrorKind::NotFound),
+            ("file.txt/child", std::io::ErrorKind::NotADirectory),
+            ("file.txt/child/grandchild", std::io::ErrorKind::NotADirectory),
+        ] {
+            let error = super::normalize_path_io_error(std::io::ErrorKind::NotFound.into(), &directory.path().join(path));
+            assert_eq!(error.kind(), expected, "path: {path}");
+        }
+        let error = super::normalize_path_io_error(
+            std::io::ErrorKind::PermissionDenied.into(),
+            &directory.path().join("file.txt/child"),
+        );
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn directory_listing_io_errors_do_not_expose_os_details() {
+        use axum::response::IntoResponse;
+
+        for (kind, status, code) in [
+            (
+                std::io::ErrorKind::PermissionDenied,
+                axum::http::StatusCode::FORBIDDEN,
+                super::DIRECTORY_ACCESS_DENIED_CODE,
+            ),
+            (
+                std::io::ErrorKind::Other,
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                super::DIRECTORY_UNAVAILABLE_CODE,
+            ),
+        ] {
+            let response = super::map_directory_io_error(
+                std::io::Error::new(kind, "private OS details"),
+                std::path::Path::new("private-path"),
+            )
+            .into_response();
+            assert_eq!(response.status(), status);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body should be readable");
+            let body: serde_json::Value = serde_json::from_slice(&body).expect("body should be JSON");
+            assert_eq!(body["code"], code);
+            assert!(!body.to_string().contains("private"));
+        }
+    }
+
+    #[tokio::test]
+    async fn directory_listing_unavailable_drive_is_not_a_missing_folder() {
+        for drive in [
+            format!("unknown-{}", uuid::Uuid::new_v4()),
+            format!("removed-{}", uuid::Uuid::new_v4()),
+        ] {
+            let directory = tempfile::tempdir().expect("temporary drive should be created");
+            if drive.starts_with("removed-") {
+                super::drives::register_test_drive_path(drive.clone(), directory.path().to_path_buf());
+            }
+            directory.close().expect("drive should be removed");
+            let error = super::browse_list(
+                axum::extract::Path(drive),
+                axum::extract::Query(super::BrowseQuery {
+                    path: Some("missing".to_string()),
+                }),
+            )
+            .await
+            .expect_err("unavailable drive should fail");
+            assert!(matches!(error, super::ApiError::NotFound(_)));
+        }
+    }
+
+    #[tokio::test]
     async fn editor_access_probe_preserves_existing_content() {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let path = directory.path().join("notes.txt");
@@ -6752,15 +7029,17 @@ mod tests {
     async fn editor_access_probe_does_not_create_missing_files() {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let path = directory.path().join("missing.txt");
-        assert!(matches!(
-            super::check_editor_write_access(&path).await,
-            Err(crate::server::errors::ApiError::NotFound(_))
-        ));
+        let response = super::check_editor_write_access(&path)
+            .await
+            .expect_err("missing target should fail")
+            .into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
         assert!(!path.exists());
-        assert!(matches!(
-            super::check_editor_write_access(directory.path()).await,
-            Err(crate::server::errors::ApiError::BadRequest(_))
-        ));
+        let response = super::check_editor_write_access(directory.path())
+            .await
+            .expect_err("directory target should fail")
+            .into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
     }
 
     #[tokio::test]
@@ -6774,7 +7053,10 @@ mod tests {
         tokio::fs::set_permissions(&path, read_only_permissions).await.unwrap();
         let result = super::check_editor_write_access(&path).await;
         tokio::fs::set_permissions(&path, original_permissions).await.unwrap();
-        assert!(matches!(result, Err(crate::server::errors::ApiError::Forbidden(_))));
+        assert_eq!(
+            result.expect_err("read-only target should fail").into_response().status(),
+            axum::http::StatusCode::FORBIDDEN
+        );
         assert_eq!(tokio::fs::read(&path).await.unwrap(), b"read-only content");
     }
 
@@ -6966,20 +7248,24 @@ mod tests {
     }
 
     use super::{
-        archive_creation_response, archive_execution_response, browse_list_archive, browse_stream_transfer, build_file_info,
-        build_pair_status_response, classify_link_target, complete_transfer_receipt, copy_regular_file_exclusively, execute_archive_relay,
-        extract_local_archive_to_smb_destination_live, extract_smb_archive_to_local_live, inspection_resolver_call_count,
-        is_retryable_live_archive_stream_failure, map_local_archive_error, map_temporary_archive_error, normalize_drive_relative_path,
-        normalize_windows_display_path, replay_transfer_outcome, reserve_transfer_receipt, reset_inspection_resolver_call_count,
-        resolve_companion_archive_topology, resolve_companion_creation_coordinator, resolve_companion_extraction_coordinator,
-        resolve_companion_inspection_coordinator, resolve_drive_relative_source_path, resolve_link_target_metadata,
+        archive_creation_response, archive_execution_response, browse_list_archive, browse_stream_transfer, build_pair_status_response,
+        complete_transfer_receipt, copy_regular_file_exclusively, execute_archive_relay, extract_local_archive_to_smb_destination_live,
+        extract_smb_archive_to_local_live, inspection_resolver_call_count, is_retryable_live_archive_stream_failure,
+        map_local_archive_error, map_temporary_archive_error, normalize_drive_relative_path, normalize_windows_display_path,
+        replay_transfer_outcome, reserve_transfer_receipt, reset_inspection_resolver_call_count, resolve_companion_archive_topology,
+        resolve_companion_creation_coordinator, resolve_companion_extraction_coordinator, resolve_companion_inspection_coordinator,
         resolve_local_archive_inspection_coordinator, resolve_pair_cancel_origin, resolve_pair_confirm_origin, resolve_pair_status_origin,
-        resolve_safe_path, source_link_kind, transfer_receipt_error, validate_editor_write_target, viewer_archive_member,
-        write_local_archive_member_chunk, ArchiveCreationAdapterBinding, ArchiveCreationMemberCompletion, ArchiveCreationRelay,
-        ArchiveExtractionRelay, ArchiveListQuery, ArchiveMemberQuery, ArchiveRelayBinding, ArchiveRelayFailure, ArchiveRelayTransport,
-        CompanionArchiveCreationPlan, CompanionArchiveExtractionPlan, CopyMoveRequest, FixtureArchiveCreationInvocation,
-        LocalPromotionOutcome, LocalTransferWriteError, StreamTransferQuery, TransferCancellationReservation, TransferReceiptLookup,
-        TransferReceiptOutcome, TransferReceiptReservation, ARCHIVE_RELAY_ACKNOWLEDGEMENT_ATTEMPTS, INSPECTION_RESOLVER_TEST_LOCK,
+        transfer_receipt_error, validate_editor_write_target, viewer_archive_member, write_local_archive_member_chunk,
+        ArchiveCreationAdapterBinding, ArchiveCreationMemberCompletion, ArchiveCreationRelay, ArchiveExtractionRelay, ArchiveListQuery,
+        ArchiveMemberQuery, ArchiveRelayBinding, ArchiveRelayFailure, ArchiveRelayTransport, CompanionArchiveCreationPlan,
+        CompanionArchiveExtractionPlan, CopyMoveRequest, FixtureArchiveCreationInvocation, LocalPromotionOutcome, LocalTransferWriteError,
+        StreamTransferQuery, TransferCancellationReservation, TransferReceiptLookup, TransferReceiptOutcome, TransferReceiptReservation,
+        ARCHIVE_RELAY_ACKNOWLEDGEMENT_ATTEMPTS, INSPECTION_RESOLVER_TEST_LOCK,
+    };
+    #[cfg(unix)]
+    use super::{
+        build_file_info, classify_link_target, resolve_drive_relative_source_path, resolve_link_target_metadata, resolve_safe_path,
+        source_link_kind,
     };
     use crate::server::archive::{
         build_local_archive_manifest, build_local_archive_manifest_for_remote_target, create_local_archive, create_temporary_local_archive,
@@ -6994,9 +7280,9 @@ mod tests {
         ArchiveSessionStatus, LiveLocalArchiveSourcePhase, LiveLocalArchiveSourceSession,
     };
     use crate::server::errors::{ApiError, LOCAL_ARCHIVE_CREATION_PARTIAL_CODE};
-    use crate::server::models::{
-        ArchiveContractVersion, ArchiveCreationResponse, FileType, LinkKind, LinkTargetState, LinkTargetType, PublicPairingStatus,
-    };
+    use crate::server::models::{ArchiveContractVersion, ArchiveCreationResponse, FileType, PublicPairingStatus};
+    #[cfg(unix)]
+    use crate::server::models::{LinkKind, LinkTargetState, LinkTargetType};
     use crate::server::pairing::{PairingState, VerifiedOriginRecordReason};
     use crate::server::target_resolution::TargetResolutionPolicy;
 
@@ -9457,16 +9743,49 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory should be created");
         let target = directory.path().join("recreated.md");
 
+        let response = super::check_editor_write_access(&target)
+            .await
+            .expect_err("a lock must not be acquired for a removed target")
+            .into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+
         validate_editor_write_target(&target)
             .await
-            .expect("a missing editor target should be recreatable");
+            .expect("an editor save can recreate a removed target");
+        assert!(!target.exists());
 
         tokio::fs::create_dir(&target).await.expect("target directory should be created");
         let response = validate_editor_write_target(&target)
             .await
             .expect_err("an editor write must not replace a directory")
             .into_response();
-        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        let response = super::check_editor_write_access(&target)
+            .await
+            .expect_err("a lock must not be acquired for a directory")
+            .into_response();
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn file_io_errors_use_safe_named_codes() {
+        for (kind, code) in [
+            (std::io::ErrorKind::NotFound, super::ITEM_NOT_FOUND_CODE),
+            (std::io::ErrorKind::NotADirectory, super::NOT_A_FILE_CODE),
+            (std::io::ErrorKind::IsADirectory, super::NOT_A_FILE_CODE),
+            (std::io::ErrorKind::PermissionDenied, super::FILE_ACCESS_DENIED_CODE),
+            (std::io::ErrorKind::TimedOut, super::FILE_TIMEOUT_CODE),
+            (std::io::ErrorKind::Other, super::FILE_UNAVAILABLE_CODE),
+        ] {
+            let response = super::map_file_io_error(std::io::Error::new(kind, "private OS detail"), std::path::Path::new("private-path"))
+                .into_response();
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("error body should be readable");
+            let payload: serde_json::Value = serde_json::from_slice(&body).expect("error body should be JSON");
+            assert_eq!(payload["code"], code);
+            assert!(!payload.to_string().contains("private"));
+        }
     }
 
     #[tokio::test]

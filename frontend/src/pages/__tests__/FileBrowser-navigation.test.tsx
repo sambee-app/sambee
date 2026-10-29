@@ -5,7 +5,7 @@ import { requireTestValue, uninitializedTestCallback } from "../../test/helpers/
  * Tests for directory navigation, breadcrumbs, URL handling, and connection switching
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
@@ -146,11 +146,12 @@ describe("Browser Component - Navigation", () => {
     await user.keyboard("{Enter}");
     await waitFor(() => {
       expectDirectoryLoad("conn-1", "Destination");
-      expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /folder: destination/i })).toHaveAttribute("data-selected", "true");
     });
 
     resolveDestination?.({ items: destinationFiles, path: "Destination", total: destinationFiles.length });
 
+    await screen.findByRole("button", { name: /file: zebra\.txt/i });
     const destinationList = await screen.findByTestId("file-list-container");
     expect(destinationList).toHaveFocus();
 
@@ -189,12 +190,24 @@ describe("Browser Component - Navigation", () => {
     });
   });
 
-  it("retains typeahead focus when revisiting a cached directory with the same item count", async () => {
+  it("retains typeahead focus when freshly validating a revisited directory with the same item count", async () => {
     const destinationFiles = [createFileEntry("Alpha.txt", "Destination/Alpha.txt"), createFileEntry("Zebra.txt", "Destination/Zebra.txt")];
+    const refreshedDestinationFiles = [
+      createFileEntry("Beta.txt", "Destination/Beta.txt"),
+      createFileEntry("Zebra.txt", "Destination/Zebra.txt"),
+    ];
     const rootFiles = [createDirectoryEntry("Destination", "Destination"), createFileEntry("Other.txt", "Other.txt")];
+    let destinationLoadCount = 0;
+    let resolveDestination: (value: { items: FileInfo[]; path: string; total: number }) => void = uninitializedTestCallback;
 
     vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
       if (path === "Destination") {
+        destinationLoadCount += 1;
+        if (destinationLoadCount === 2) {
+          return new Promise((resolve) => {
+            resolveDestination = resolve;
+          });
+        }
         return { items: destinationFiles, path, total: destinationFiles.length };
       }
 
@@ -204,37 +217,46 @@ describe("Browser Component - Navigation", () => {
     const user = userEvent.setup();
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-    const focusDestinationAndOpen = async () => {
-      const listContainer = await screen.findByTestId("file-list-container");
-      listContainer.focus();
-      await user.keyboard("d");
+    const openDestination = async () => {
+      await user.click(await screen.findByRole("button", { name: /folder: destination/i }));
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /folder: destination/i })).toHaveAttribute("data-selected", "true");
+        expect(screen.getByTestId("router-location").textContent).toBe("/browse/smb/test-server-1/Destination");
+        expect(screen.getByRole("button", { name: /file: zebra\.txt/i })).toBeInTheDocument();
+        expect(screen.getByTestId("file-list-container")).toHaveFocus();
       });
-      await user.keyboard("{Enter}");
-      return screen.findByRole("button", { name: /file: zebra\.txt/i });
     };
 
-    await focusDestinationAndOpen();
+    await openDestination();
 
     await user.click(screen.getByRole("button", { name: /navigate to root directory/i }));
-    await screen.findByRole("button", { name: /folder: destination/i });
+    await waitFor(() => {
+      expect(screen.getByTestId("router-location").textContent).toBe("/browse/smb/test-server-1");
+      expect(screen.getByRole("button", { name: /folder: destination/i })).toBeInTheDocument();
+      expect(screen.getByTestId("file-list-container")).toHaveFocus();
+    });
 
-    await focusDestinationAndOpen();
-    const cachedDestinationList = screen.getByTestId("file-list-container");
-    expect(cachedDestinationList).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: /folder: destination/i }));
+    await waitFor(() => expect(destinationLoadCount).toBe(2));
+    expect(screen.getByRole("button", { name: /folder: destination/i })).toBeInTheDocument();
+    await act(async () => {
+      resolveDestination({ items: refreshedDestinationFiles, path: "Destination", total: refreshedDestinationFiles.length });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("router-location").textContent).toBe("/browse/smb/test-server-1/Destination");
+      expect(screen.getByRole("button", { name: /file: beta\.txt/i })).toBeInTheDocument();
+      expect(screen.getByTestId("file-list-container")).toHaveFocus();
+    });
 
     await user.keyboard("z");
-
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /file: zebra\.txt/i })).toHaveAttribute("data-selected", "true");
     });
 
     const destinationLoads = vi.mocked(api.listDirectory).mock.calls.filter(([_connectionId, path]) => path === "Destination");
-    expect(destinationLoads).toHaveLength(1);
+    expect(destinationLoads).toHaveLength(2);
   });
 
-  it("does not repaint the previous directory contents while loading a child directory", async () => {
+  it("retains committed rows until a child directory has been listed successfully", async () => {
     const user = userEvent.setup();
     const subfolderFiles: FileInfo[] = [
       {
@@ -271,8 +293,8 @@ describe("Browser Component - Navigation", () => {
       expectDirectoryLoad("conn-1", "Documents");
     });
 
-    expect(screen.queryByText("readme.txt")).not.toBeInTheDocument();
-    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.getByText("readme.txt")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
 
     resolveSubfolder?.({
       items: subfolderFiles,
@@ -282,7 +304,33 @@ describe("Browser Component - Navigation", () => {
 
     const fileEntries = await screen.findAllByText("file1.txt");
     expect(fileEntries.length).toBeGreaterThan(0);
+    expect(screen.queryByText("readme.txt")).not.toBeInTheDocument();
   });
+
+  it.each(["directory_not_found", "directory_access_denied", "directory_timeout"])(
+    "preserves the selected row when a breadcrumb target fails with %s and resets it after Retry",
+    async (code) => {
+      const file = createFileEntry("draft.txt", "Documents/Subfolder/draft.txt");
+      vi.mocked(api.listDirectory).mockResolvedValue({ items: [file], path: "Documents/Subfolder", total: 1 });
+      const user = userEvent.setup();
+      await renderBrowserAndFlush("/browse/smb/test-server-1/Documents/Subfolder");
+      const list = await screen.findByTestId("file-list-container");
+      list.focus();
+      await user.keyboard(" ");
+      const row = screen.getByRole("button", { name: /file: draft.txt/i });
+      expect(row).toHaveAttribute("data-selected", "true");
+      vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 403, data: { detail: { code } } } });
+      await user.click(
+        screen.getAllByText("Test Server 1").find((element) => element.tagName === "BUTTON" && element.getAttribute("role") !== "combobox")!
+      );
+      await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+      expect(screen.getByRole("button", { name: /file: draft.txt/i })).toHaveAttribute("data-selected", "true");
+      vi.mocked(api.listDirectory).mockResolvedValue(mockDirectoryListing);
+      await user.click(await screen.findByRole("button", { name: /retry/i }));
+      await waitFor(() => expectDirectoryLoad("conn-1", ""));
+      await waitFor(() => expect(screen.queryByRole("button", { name: /file: draft.txt/i })).not.toBeInTheDocument());
+    }
+  );
 
   it("navigates using breadcrumb links", async () => {
     // Start in a nested path

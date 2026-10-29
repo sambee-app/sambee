@@ -2,8 +2,10 @@ import { startTransition, useCallback, useEffect, useEffectEvent, useRef, useSta
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import type { MobileSettingsView } from "../../components/Settings/settingsNavigation";
 import type { BrowserContentServices } from "../../services/browserContentServices";
+import { publishMissingPhysicalFile } from "../../services/fileRecoveryEvents";
 import type { Connection } from "../../types";
 import { FileType } from "../../types";
+import { normalizePhysicalFileFailure } from "../../utils/apiErrors";
 import { getFileTypeByExtension } from "../../utils/FileTypeRegistry";
 import { type BrowserItem, physicalLocation, virtualItemHandle, virtualLocation } from "./contentProviders";
 import { type BrowseRouteState, buildBrowseRouteTarget, resolveBrowseRouteTarget, serializeBrowseRoute } from "./routing";
@@ -160,7 +162,9 @@ export function useWorkspaceNavigation({
       retry === resolvedRetry.current
     ) {
       setViewerLoading(false);
-      resolveViewerSelection(viewerIdentity);
+      resolvedRetry.current = retry;
+      setResolvedViewerIdentity(viewerIdentity);
+      if (cached && cached.identity !== viewerIdentity) resolveViewerSelection(viewerIdentity);
       return;
     }
     setViewerLoading(true);
@@ -212,8 +216,16 @@ export function useWorkspaceNavigation({
       });
       resolveViewerSelection(viewerIdentity);
     })()
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) setViewerError(error);
+      .catch(async (error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (virtual || !target) {
+          setViewerError(error);
+          return;
+        }
+        const failure = await normalizePhysicalFileFailure(error, path);
+        if (controller.signal.aborted || failure.failure.kind === "cancelled") return;
+        if (failure.failure.kind === "missing") publishMissingPhysicalFile({ connectionId: target.connectionId, path });
+        setViewerError(failure);
       })
       .finally(() => {
         if (!controller.signal.aborted) setViewerLoading(false);

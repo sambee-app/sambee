@@ -205,6 +205,12 @@ export interface UseFileBrowserPaneReturn {
   files: FileEntry[];
   loading: boolean;
   error: string | null;
+  errorOccurrence?: number;
+  notification?: import("../../components/OperationNotifications").OperationNotice | null;
+  dismissNotification?: () => void;
+  monitoredLocation?: { connectionId: string; path: string } | null;
+  handleDirectorySubscribed?: (change: { connectionId: string; path: string }) => void;
+  directoryUnavailable?: boolean;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   companionPairingError: CompanionPairingErrorKind | null;
 
@@ -342,6 +348,10 @@ export interface UseFileBrowserPaneReturn {
    * and triggers a reload if this pane is viewing the affected directory.
    */
   handleDirectoryChanged: (change: DirectoryChange, options?: { invalidateOnly?: boolean }) => void;
+  handleDirectorySubscriptionError?: (change: DirectoryChange, code?: string) => void;
+  directoryMonitorError?: string | null;
+  directoryMonitorErrorSummary?: string;
+  directoryMonitorErrorOccurrence?: number;
 
   // ── Cache Management ───────────────────────────────────────────────────
   /** Clear all directory and navigation caches (e.g. on connection switch). */

@@ -8,7 +8,6 @@ import {
   Fade,
   IconButton,
   InputAdornment,
-  Paper,
   TextField,
   Tooltip,
   Typography,
@@ -18,7 +17,7 @@ import {
 import { animated, useSpring } from "@react-spring/web";
 import { useDrag } from "@use-gesture/react";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Document, Page, pdfjs } from "react-pdf";
 import { PreviewUnavailableError } from "../../services/previewPolicy";
@@ -34,6 +33,7 @@ import {
   readViewerContent,
   readVirtualContent,
   useContentProviderRegistry,
+  verifyViewerSourceAfterFailure,
 } from "../../pages/FileBrowser/contentProviders";
 import { error as logError } from "../../services/logger";
 import { useSambeeTheme } from "../../theme";
@@ -52,6 +52,8 @@ import {
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
 import { createDisplayedShareFile, supportsNativeShare } from "../../utils/nativeShare";
+import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
+import { DialogOperationContext } from "../FileBrowser/DialogOperationContext";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 import { settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
 import { ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
@@ -88,9 +90,10 @@ const PDF_LOADING_SLOW_DELAY_MS = 5000;
 const PDF_REVEAL_DURATION_MS = 160;
 const PDF_LOADING_SPINNER_SIZE = 40;
 const PDF_LOAD_CANCELED_MESSAGE = "PDF loading was canceled. You can still download the original file.";
+const PDF_PASSWORD_CANCELED_MESSAGE = "PDF unlocking was canceled. Retry to enter the password, or download the original file.";
 
 type PdfLoadPhase = "downloading" | "parsing" | "rendering" | "ready" | "error";
-type PdfLoadingStage = "spinner" | "loading" | "phase" | "slow";
+type PdfLoadingStage = "pending" | "loading" | "phase" | "slow";
 
 interface ActivePdfLoad {
   connectionId: string;
@@ -158,6 +161,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 }) => {
   const isReadOnly = connectionIsReadOnly || virtualSource !== undefined;
   const contentProviders = useContentProviderRegistry();
+  const checkedDecodeLoadRef = useRef<ActivePdfLoad | null>(null);
   const { t } = useTranslation();
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -165,7 +169,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [shareFile, setShareFile] = useState<File | null>(null);
   const [pdfLoadPhase, setPdfLoadPhase] = useState<PdfLoadPhase>("downloading");
-  const [pdfLoadingStage, setPdfLoadingStage] = useState<PdfLoadingStage>("spinner");
+  const [pdfLoadingStage, setPdfLoadingStage] = useState<PdfLoadingStage>("pending");
   const [pdfLoadSession, setPdfLoadSession] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -173,6 +177,8 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   const [documentFailure, setDocumentFailure] = useState<string | null>(null);
   const [pdfPasswordCallback, setPdfPasswordCallback] = useState<PdfPasswordCallback | null>(null);
   const [pdfPassword, setPdfPassword] = useState("");
+  const pdfPasswordFormId = useId();
+  const pdfPasswordInputRef = useRef<HTMLInputElement>(null);
   const [showPdfPassword, setShowPdfPassword] = useState(false);
   const [searchText, setSearchText] = useState<string>("");
   const [currentMatch, setCurrentMatch] = useState<number>(0);
@@ -267,7 +273,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   useEffect(() => {
     const loadingSession = pdfLoadSession;
     pdfLoadSessionRef.current = loadingSession;
-    setPdfLoadingStage("spinner");
+    setPdfLoadingStage("pending");
 
     const updateLoadingStage = (stage: PdfLoadingStage) => {
       if (pdfLoadSessionRef.current === loadingSession && pdfLoadPhaseRef.current !== "ready" && pdfLoadPhaseRef.current !== "error") {
@@ -370,12 +376,15 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
         cancelSwipeTransition();
         pdfLoadCanceledRef.current = false;
         setPdfLoadPhase("downloading");
-        setPdfLoadingStage("spinner");
+        setPdfLoadingStage("pending");
         const nextPdfLoadSession = pdfLoadSessionRef.current + 1;
         pdfLoadSessionRef.current = nextPdfLoadSession;
         setPdfLoadSession(nextPdfLoadSession);
         setError(null);
         setShareFile(null);
+        setPdfPasswordCallback(null);
+        setPdfPassword("");
+        setShowPdfPassword(false);
         const previousPdfUrl = activePdfUrlRef.current;
         activePdfUrlRef.current = null;
         setPdfUrl(null);
@@ -482,11 +491,53 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
     setLoadAttempt((attempt) => attempt + 1);
   }, []);
 
-  const handleDocumentPassword = useCallback((callback: PdfPasswordCallback) => {
-    setPdfPassword("");
-    setShowPdfPassword(false);
-    setPdfPasswordCallback(() => callback);
+  const releasePdfUrl = useCallback(() => {
+    if (activePdfUrlRef.current) {
+      URL.revokeObjectURL(activePdfUrlRef.current);
+      activePdfUrlRef.current = null;
+    }
   }, []);
+
+  const cancelPdfLoad = useCallback(
+    (message: string) => {
+      pdfLoadCanceledRef.current = true;
+      const nextPdfLoadSession = pdfLoadSessionRef.current + 1;
+      pdfLoadSessionRef.current = nextPdfLoadSession;
+      setPdfLoadSession(nextPdfLoadSession);
+      const activeLoad = activePdfLoadRef.current;
+      if (activeLoad) {
+        disposePdfLoad(activeLoad);
+      } else {
+        activePdfAbortControllerRef.current?.abort();
+        activePdfAbortControllerRef.current = null;
+      }
+
+      releasePdfUrl();
+      setPdfUrl(null);
+      setShareFile(null);
+      setPdfPasswordCallback(null);
+      setPdfPassword("");
+      setShowPdfPassword(false);
+      setDocumentFailure(null);
+      setPdfLoadPhase("error");
+      setError(message);
+    },
+    [disposePdfLoad, releasePdfUrl]
+  );
+
+  const handleCancelPdfLoad = useCallback(() => cancelPdfLoad(PDF_LOAD_CANCELED_MESSAGE), [cancelPdfLoad]);
+
+  const handleDocumentPassword = useCallback(
+    (callback: PdfPasswordCallback) => {
+      if (pdfLoadSessionRef.current !== pdfLoadSession || pdfLoadCanceledRef.current || !activePdfLoadRef.current) {
+        return;
+      }
+      setPdfPassword("");
+      setShowPdfPassword(false);
+      setPdfPasswordCallback(() => callback);
+    },
+    [pdfLoadSession]
+  );
 
   const handlePdfPasswordSubmit = useCallback(() => {
     if (!pdfPasswordCallback || !pdfPassword) {
@@ -499,11 +550,13 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   }, [pdfPassword, pdfPasswordCallback]);
 
   const handlePdfPasswordCancel = useCallback(() => {
-    pdfPasswordCallback?.(null);
-    setPdfPassword("");
-    setShowPdfPassword(false);
-    setPdfPasswordCallback(null);
-    setError("This PDF is password-protected. Download the original file to open it elsewhere.");
+    cancelPdfLoad(PDF_PASSWORD_CANCELED_MESSAGE);
+  }, [cancelPdfLoad]);
+
+  useEffect(() => {
+    if (!pdfPasswordCallback) return;
+    const frameId = requestAnimationFrame(() => pdfPasswordInputRef.current?.focus());
+    return () => cancelAnimationFrame(frameId);
   }, [pdfPasswordCallback]);
 
   // Measure container dimensions with ResizeObserver
@@ -645,10 +698,31 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
   // Handle document load error
   const handleDocumentLoadError = useCallback(
-    (err: Error) => {
+    async (err: Error) => {
       logError("PDF load error", { error: err.message });
       if (pdfLoadCanceledRef.current) {
         return;
+      }
+
+      const activeLoad = activePdfLoadRef.current;
+      if (activeLoad && checkedDecodeLoadRef.current === activeLoad) return;
+      if (activeLoad && checkedDecodeLoadRef.current !== activeLoad) {
+        checkedDecodeLoadRef.current = activeLoad;
+        const sourceFailure = await verifyViewerSourceAfterFailure(
+          connectionId,
+          path,
+          virtualSource,
+          contentProviders,
+          () => activePdfLoadRef.current === activeLoad && !pdfLoadCanceledRef.current,
+          activeLoad.abortController.signal
+        );
+        if (activePdfLoadRef.current !== activeLoad || activeLoad.abortController.signal.aborted || pdfLoadCanceledRef.current) return;
+        if (sourceFailure) {
+          setDocumentFailure(sourceFailure);
+          setError(sourceFailure);
+          setPdfLoadPhase("error");
+          return;
+        }
       }
 
       const failureMessage = getApiErrorMessage(err, "Failed to load PDF", { includeOriginalMessage: true });
@@ -910,35 +984,6 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
     },
     [connectionId, contentProviders, path, filename, virtualSource]
   );
-
-  const releasePdfUrl = useCallback(() => {
-    if (activePdfUrlRef.current) {
-      URL.revokeObjectURL(activePdfUrlRef.current);
-      activePdfUrlRef.current = null;
-    }
-  }, []);
-
-  const handleCancelPdfLoad = useCallback(() => {
-    pdfLoadCanceledRef.current = true;
-    const nextPdfLoadSession = pdfLoadSessionRef.current + 1;
-    pdfLoadSessionRef.current = nextPdfLoadSession;
-    setPdfLoadSession(nextPdfLoadSession);
-    const activeLoad = activePdfLoadRef.current;
-    if (activeLoad) {
-      disposePdfLoad(activeLoad);
-    } else {
-      activePdfAbortControllerRef.current?.abort();
-      activePdfAbortControllerRef.current = null;
-    }
-
-    releasePdfUrl();
-
-    setPdfUrl(null);
-    setShareFile(null);
-    setDocumentFailure(null);
-    setPdfLoadPhase("error");
-    setError(PDF_LOAD_CANCELED_MESSAGE);
-  }, [disposePdfLoad, releasePdfUrl]);
 
   /**
    * Perform search across all extracted page texts using simple regex approach.
@@ -1344,8 +1389,8 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
   return (
     <Dialog
-      inert={isTransitioning}
-      open={true}
+      aria-busy={isTransitioning}
+      open
       onClose={handleDialogClose}
       maxWidth={false}
       fullScreen
@@ -1479,7 +1524,12 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
         >
           {/* Loading state */}
           {!error && !pdfPasswordCallback && (
-            <Fade in={isPdfLoading} appear={false} timeout={{ enter: 0, exit: revealDuration }} unmountOnExit>
+            <Fade
+              in={isPdfLoading && pdfLoadingStage !== "pending"}
+              appear={false}
+              timeout={{ enter: 0, exit: revealDuration }}
+              unmountOnExit
+            >
               <Box
                 data-testid="pdf-loading-overlay"
                 aria-hidden={!isPdfLoading}
@@ -1495,7 +1545,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                 }}
               >
                 <CircularProgress size={PDF_LOADING_SPINNER_SIZE} />
-                {pdfLoadingStage !== "spinner" && (
+                {pdfLoadingStage !== "pending" && (
                   <Box
                     role="status"
                     aria-live="polite"
@@ -1665,45 +1715,36 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
           )}
 
           {pdfPasswordCallback && (
-            <Box
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="pdf-password-dialog-title"
-              aria-describedby="pdf-password-dialog-description"
-              sx={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 3,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                p: { xs: 2, sm: 3 },
-                backgroundColor: "rgba(31, 38, 43, 0.48)",
-              }}
+            <ResponsiveDialogShell
+              open
+              onClose={handlePdfPasswordCancel}
+              title="Unlock PDF"
+              description="Enter the password to view this PDF."
+              maxWidth="xs"
+              onTransitionEntered={() => pdfPasswordInputRef.current?.focus()}
+              actions={
+                <>
+                  <Button onClick={handlePdfPasswordCancel} variant="outlined" sx={settingsUtilityButtonSx}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" form={pdfPasswordFormId} variant="contained" disabled={!pdfPassword}>
+                    Open PDF
+                  </Button>
+                </>
+              }
             >
-              <Paper
+              <Box
                 component="form"
-                elevation={8}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    handlePdfPasswordCancel();
-                  }
-                }}
+                id={pdfPasswordFormId}
                 onSubmit={(event) => {
                   event.preventDefault();
                   handlePdfPasswordSubmit();
                 }}
-                sx={{ width: "min(100%, 26rem)", p: { xs: 2.5, sm: 3 }, borderRadius: 1 }}
               >
-                <Typography id="pdf-password-dialog-title" component="h2" variant="h6">
-                  Unlock PDF
-                </Typography>
-                <Typography id="pdf-password-dialog-description" color="text.secondary" sx={{ mt: 0.75 }}>
-                  Enter the password to view this PDF.
-                </Typography>
+                <DialogOperationContext entries={[{ label: t("fileBrowser.operationContext.file"), value: filename, kind: "fileName" }]} />
                 <TextField
                   autoFocus
+                  inputRef={pdfPasswordInputRef}
                   fullWidth
                   label="PDF password"
                   type={showPdfPassword ? "text" : "password"}
@@ -1729,16 +1770,8 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                   }}
                   sx={{ mt: 3 }}
                 />
-                <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 1, mt: 3 }}>
-                  <Button onClick={handlePdfPasswordCancel} variant="outlined" sx={settingsUtilityButtonSx}>
-                    Cancel
-                  </Button>
-                  <Button type="submit" variant="contained" disabled={!pdfPassword}>
-                    Open PDF
-                  </Button>
-                </Box>
-              </Paper>
-            </Box>
+              </Box>
+            </ResponsiveDialogShell>
           )}
         </Box>
       </Box>

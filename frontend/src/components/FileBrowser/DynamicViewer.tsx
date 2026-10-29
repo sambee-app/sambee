@@ -12,6 +12,7 @@ import {
   type VirtualItemHandle,
 } from "../../pages/FileBrowser/contentProviders";
 import { logger } from "../../services/logger";
+import { PhysicalFileRequestError } from "../../utils/apiErrors";
 import type { ViewerComponentLoadResult, ViewerComponent as ViewerComponentType } from "../../utils/FileTypeRegistry";
 import { getViewerComponentLoadResult, getViewerLoadErrorDiagnostics } from "../../utils/FileTypeRegistry";
 import { settingsSubduedIconButtonSx, settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
@@ -47,6 +48,7 @@ type DynamicViewerLoadState =
   | { status: "failed"; error: unknown };
 
 function getViewerLoadFailureMessage(error: unknown): string {
+  if (error instanceof PhysicalFileRequestError) return error.message;
   if (error instanceof Error && error.message.trim()) {
     return translate("viewer.fallback.failedMessageWithError", { message: error.message.trim() });
   }
@@ -123,7 +125,7 @@ export const DynamicViewer = memo(function DynamicViewer(props: DynamicViewerPro
   const [loadState, setLoadState] = useState<DynamicViewerLoadState>({ status: "loading" });
   const [retryToken, setRetryToken] = useState(0);
   const latestViewInfoRef = useRef(viewInfo);
-  const presentation = useRef<DynamicViewerProps | null>(null);
+  const presentation = useRef(props);
   const isTransitioning = isPending || (loadState.status === "loaded" && loadState.viewerKey !== viewerKey);
   const pendingShortcutScope = useKeyboardShortcutScope(isTransitioning);
 
@@ -231,11 +233,9 @@ export const DynamicViewer = memo(function DynamicViewer(props: DynamicViewerPro
   const ViewerComponent = loadState.component;
   if (!isTransitioning) presentation.current = props;
   const displayed = presentation.current;
-  if (!displayed) return null;
   const { connectionId, isReadOnly, onIndexChange, hasMoreItems, isLoadingMoreItems, onLoadMoreItems, contentProviders, navigation } =
     displayed;
   const displayedInfo = displayed.viewInfo;
-
   return (
     <ContentProviderRegistryContext.Provider value={contentProviders}>
       {isTransitioning ? (

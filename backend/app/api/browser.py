@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.api._smb_helpers import build_smb_backend, disconnect_backend_safely, require_share_name
+from app.api._smb_helpers import build_smb_backend, disconnect_backend_safely, file_target_http_error, require_share_name
 from app.api.companion import (
     COMPANION_ERROR_LOCK_LOST,
     _generate_lock_capability,
@@ -571,7 +571,12 @@ def _raise_recent_target_error(
     record: RecentFile | None = None,
     session: Session,
 ) -> NoReturn:
-    if record is not None:
+    if record is not None and code in {
+        "recent_file_target_missing",
+        "recent_file_target_not_file",
+        "recent_file_invalid_path",
+        "recent_file_connection_removed",
+    }:
         session.delete(record)
         session.commit()
     raise HTTPException(status_code=status_code, detail={"code": code, "message": message})
@@ -655,6 +660,13 @@ async def validate_recent_file_target(
             code="recent_file_target_missing",
             message="The recent file no longer exists.",
             record=record,
+            session=session,
+        )
+    except PermissionError:
+        _raise_recent_target_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="recent_file_access_denied",
+            message="Access to this recent file was denied. Check your permissions and retry.",
             session=session,
         )
     except TimeoutError:
@@ -917,6 +929,23 @@ async def list_directory(
         logger.debug(f"Successfully listed directory: connection_id={connection_id}, path='{path}', items={len(listing.items)}")
         return listing
 
+    except FileNotFoundError as error:
+        _remove_from_directory_cache(str(connection_id), path or "")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "directory_not_found", "message": "The folder was not found. It may have been moved or deleted."},
+        ) from error
+    except NotADirectoryError as error:
+        _remove_from_directory_cache(str(connection_id), path or "")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "not_a_directory", "message": "This item is not a folder."},
+        ) from error
+    except PermissionError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "directory_access_denied", "message": "You do not have permission to open this folder."},
+        ) from error
     except asyncio.TimeoutError:
         logger.error(
             f"Timed out listing directory: connection_id={connection_id}, path='{path}', host={connection.host}, share={connection.share_name}"
@@ -934,7 +963,7 @@ async def list_directory(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list directory: {str(e)}",
+            detail={"code": "directory_unavailable", "message": "The folder could not be opened. Check the connection and try again."},
         )
 
 
@@ -1009,16 +1038,8 @@ async def get_file_info(
         logger.debug(f"Successfully retrieved file info: connection_id={connection_id}, path='{path}', type={file_info.type}")
         return file_info
 
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path not found: {path}",
-        )
-    except TimeoutError:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="File info request timed out. The remote share did not respond in time.",
-        )
+    except (FileNotFoundError, PermissionError, NotADirectoryError, TimeoutError) as error:
+        raise file_target_http_error(error, requires_file=False) from error
     except Exception as e:
         logger.error(
             f"Failed to get file info: connection_id={connection_id}, path='{path}', "
@@ -1026,10 +1047,7 @@ async def get_file_info(
             f"error={type(e).__name__}: {e}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get file info: {str(e)}",
-        )
+        raise file_target_http_error(e, requires_file=False) from e
 
 
 #
@@ -1180,19 +1198,11 @@ async def acquire_browser_edit_lock(
         try:
             await backend.connect()
             await backend.check_write_access(path)
-        except PermissionError as error:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have write access to this file") from error
-        except FileNotFoundError as error:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File no longer exists") from error
-        except TimeoutError as error:
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Write access check timed out; retry editing"
-            ) from error
+        except (FileNotFoundError, PermissionError, NotADirectoryError, IsADirectoryError, TimeoutError) as error:
+            raise file_target_http_error(error) from error
         except Exception as error:
             logger.exception("Failed to check file write access: connection_id=%s, path=%s", connection_id, path)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to verify file write access; retry editing"
-            ) from error
+            raise file_target_http_error(error) from error
         finally:
             await disconnect_backend_safely(
                 backend, logger=logger, context=f"write access check: connection_id={connection_id}, path='{path}'"
@@ -1423,10 +1433,20 @@ async def upload_file(
 
         await backend.connect()
         try:
-            bytes_written = await backend.write_file(path, file.file)
+            if editor_operation_id:
+                try:
+                    bytes_written = await backend.write_file(path, file.file)
+                except Exception as error:
+                    raise file_target_http_error(error) from error
+            else:
+                bytes_written = await backend.write_file(path, file.file)
 
-            # Re-read metadata after write for the response
-            updated_info = await backend.get_file_info(path)
+            last_modified = None
+            try:
+                updated_info = await backend.get_file_info(path)
+                last_modified = updated_info.modified_at.isoformat() if updated_info.modified_at else None
+            except Exception:
+                logger.warning("Upload completed, but updated file metadata is unavailable", exc_info=True)
         finally:
             await disconnect_backend_safely(
                 backend,
@@ -1439,8 +1459,10 @@ async def upload_file(
             status="ok",
             path=path,
             size=bytes_written,
-            last_modified=updated_info.modified_at.isoformat() if updated_info.modified_at else None,
+            last_modified=last_modified,
         )
+    except HTTPException:
+        raise
     except TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,

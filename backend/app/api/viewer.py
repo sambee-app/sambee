@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete
 from sqlmodel import Session, col, select
 
-from app.api._smb_helpers import build_smb_backend, disconnect_backend_safely
+from app.api._smb_helpers import build_smb_backend, disconnect_backend_safely, file_target_http_error, prepare_file_streamer
 from app.api.companion import (
     COMPANION_ERROR_LOCK_LOST,
     _get_current_companion_operation_user,
@@ -408,36 +408,6 @@ def _get_active_lock(connection_id: uuid.UUID, path: str, session: Session) -> E
 #
 # create_file_streamer
 #
-def create_file_streamer(backend: SMBBackend, path: str) -> AsyncIterator[bytes]:
-    """Create an async generator that streams file contents from SMB backend
-
-    Handles error cases during streaming and ensures backend disconnection.
-    """
-
-    async def file_streamer() -> AsyncIterator[bytes]:
-        try:
-            async for chunk in backend.read_file(path):
-                yield chunk
-        except TimeoutError as e:
-            logger.error(f"Timeout reading file during streaming: {path} - {e}")
-            # Can't raise HTTPException mid-stream, connection will be closed
-            # Client will see incomplete response
-            raise
-        except FileNotFoundError as e:
-            logger.warning(f"File not found during streaming: {path} - {e}")
-            # Can't raise HTTPException mid-stream, connection will be closed
-            # Client will see incomplete response
-            raise
-        except IOError as e:
-            logger.warning(f"File access error during streaming: {path} - {e}")
-            # Can't raise HTTPException mid-stream, connection will be closed
-            raise
-        finally:
-            await disconnect_backend_safely(backend, logger=logger, context=f"streaming '{path}'")
-
-    return file_streamer()
-
-
 async def read_pdf_derivative_source(
     backend: SMBBackend,
     path: str,
@@ -840,6 +810,8 @@ async def read_and_convert_image(
 
     except HTTPException:
         raise
+    except (FileNotFoundError, PermissionError, IsADirectoryError, NotADirectoryError) as error:
+        raise file_target_http_error(error) from error
     except TimeoutError as e:
         logger.error(
             f"Timeout reading file: connection_id={connection_id}, path='{path}', error={e}",
@@ -913,23 +885,12 @@ async def view_file(
             file_info = await backend.get_file_info(path)
             if file_info.type == FileType.DIRECTORY:
                 await disconnect_backend_safely(backend, logger=logger, context=f"view file directory check for '{path}'")
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot view a directory")
+                raise file_target_http_error(IsADirectoryError())
         except HTTPException:
             raise
-        except TimeoutError as e:
-            await disconnect_backend_safely(backend, logger=logger, context=f"view file info timeout for '{path}'")
-            logger.error(f"Timeout getting file info: connection_id={connection_id}, path='{path}', error={e}")
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Timeout reading file from network share",
-            )
-        except FileNotFoundError:
-            await disconnect_backend_safely(backend, logger=logger, context=f"view file missing path '{path}'")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"File not found: {path}")
         except Exception as e:
             await disconnect_backend_safely(backend, logger=logger, context=f"view file info failure for '{path}'")
-            logger.error(f"Failed to get file info: connection_id={connection_id}, path='{path}', error={type(e).__name__}: {e}")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"File not found: {path}")
+            raise file_target_http_error(e) from e
 
         # Check if image needs processing for browser compatibility and viewing speed
         if needs_processing(file_info.name, file_info.size):
@@ -969,7 +930,7 @@ async def view_file(
         # Stream the file (browser-native format or non-image/non-PDF)
         logger.debug(f"Streaming file for viewing: connection_id={connection_id}, path='{path}', mime_type={file_info.mime_type}")
         return StreamingResponse(
-            create_file_streamer(backend, path),
+            await prepare_file_streamer(backend, path),
             media_type=file_info.mime_type,
             headers={
                 "Content-Disposition": build_content_disposition(
@@ -988,10 +949,7 @@ async def view_file(
             f"error={type(e).__name__}: {e}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to read file: {str(e)}",
-        )
+        raise file_target_http_error(e) from e
 
 
 #
@@ -1067,21 +1025,14 @@ async def _stream_download_file(connection_id: uuid.UUID, path: str, current_use
         # Get file info
         try:
             file_info = await backend.get_file_info(path)
-        except TimeoutError as e:
-            await disconnect_backend_safely(backend, logger=logger, context=f"download file info timeout for '{path}'")
-            logger.error(f"Timeout getting download file info: connection_id={connection_id}, path='{path}', error={e}")
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Timeout reading file from network share",
-            )
-        except FileNotFoundError:
-            await disconnect_backend_safely(backend, logger=logger, context=f"download missing path '{path}'")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"File not found: {path}")
+        except Exception as error:
+            await disconnect_backend_safely(backend, logger=logger, context=f"download file info failure for '{path}'")
+            raise file_target_http_error(error) from error
 
         if file_info.type != "file":
             logger.warning(f"Path is not a file: connection_id={connection_id}, path='{path}', type={file_info.type}")
             await disconnect_backend_safely(backend, logger=logger, context=f"download directory check for '{path}'")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Path is not a file")
+            raise file_target_http_error(IsADirectoryError())
 
         # Stream the file
         headers = {"Content-Disposition": build_content_disposition("attachment", file_info.name)}
@@ -1090,7 +1041,7 @@ async def _stream_download_file(connection_id: uuid.UUID, path: str, current_use
 
         logger.info(f"Streaming file for download: connection_id={connection_id}, path='{path}', size={file_info.size}")
         return StreamingResponse(
-            create_file_streamer(backend, path),
+            await prepare_file_streamer(backend, path),
             media_type="application/octet-stream",
             headers=headers,
         )
@@ -1104,7 +1055,4 @@ async def _stream_download_file(connection_id: uuid.UUID, path: str, current_use
             f"error={type(e).__name__}: {e}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to download file: {str(e)}",
-        )
+        raise file_target_http_error(e) from e

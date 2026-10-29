@@ -204,7 +204,8 @@ function validateDirectoryListing(path: string, listing: DirectoryListing): bool
 const PERMANENT_RECENT_NATIVE_OPEN_FAILURE_CODES = new Set([
   "recent_file_target_missing",
   "recent_file_target_not_file",
-  "recent_file_native_launch_failed",
+  "item_not_found",
+  "not_a_file",
 ]);
 
 function isPhysicalLocation(location: ContentLocation): location is PhysicalLocation {
@@ -253,7 +254,8 @@ function getOperationErrorCode(error: unknown): string | null {
   if (!isApiError(error)) {
     return null;
   }
-  const code = error.response?.data?.code;
+  const detail = error.response?.data?.detail;
+  const code = typeof detail === "object" && detail !== null && "code" in detail ? detail.code : error.response?.data?.code;
   return typeof code === "string" ? code : null;
 }
 

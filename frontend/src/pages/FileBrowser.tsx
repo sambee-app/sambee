@@ -19,20 +19,7 @@
  * @see FileBrowserPane — renders a single pane's UI (breadcrumbs, file list, etc.)
  */
 
-import {
-  AppBar,
-  Box,
-  Button,
-  Container,
-  Divider,
-  Menu,
-  MenuItem,
-  Snackbar,
-  Toolbar,
-  Typography,
-  useMediaQuery,
-  useTheme,
-} from "@mui/material";
+import { AppBar, Box, Button, Container, Divider, Menu, MenuItem, Toolbar, Typography, useMediaQuery, useTheme } from "@mui/material";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
@@ -44,7 +31,7 @@ import { DesktopToolbar } from "../components/FileBrowser/DesktopToolbar";
 import { DialogOperationContext } from "../components/FileBrowser/DialogOperationContext";
 import { DynamicViewer, ViewerFallbackDialog } from "../components/FileBrowser/DynamicViewer";
 import type { CompanionLifecycleStatus } from "../components/FileBrowser/FileBrowserAlerts";
-import { FileBrowserAlerts } from "../components/FileBrowser/FileBrowserAlerts";
+import { FileBrowserAlerts, FileBrowserStatus } from "../components/FileBrowser/FileBrowserAlerts";
 import { FileOperationsToolbar } from "../components/FileBrowser/FileOperationsToolbar";
 import { formatConnectionPath } from "../components/FileBrowser/formatConnectionPath";
 import { MobileToolbar } from "../components/FileBrowser/MobileToolbar";
@@ -61,6 +48,7 @@ import { useFileSearchProvider } from "../components/FileBrowser/search/useFileS
 import { KeyboardShortcutsHelp } from "../components/KeyboardShortcutsHelp";
 import HamburgerMenu from "../components/Mobile/HamburgerMenu";
 import { MobileSettingsDrawer } from "../components/Mobile/MobileSettingsDrawer";
+import { NOTICE_DURATION_MS, OperationNotificationProvider, OperationNotifications } from "../components/OperationNotifications";
 import SettingsDialog from "../components/Settings/SettingsDialog";
 import { DEFAULT_SETTINGS_CATEGORY } from "../components/Settings/settingsNavigation";
 import { useNativeSharing } from "../components/Sharing/useNativeSharing";
@@ -174,8 +162,8 @@ const FULL_ARCHIVE_EXTRACTION_SCOPE: ArchiveExtractionScope = { kind: "archive" 
 const SERVER_WEBSOCKET_RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 5_000] as const;
 const COMPANION_WEBSOCKET_RECONNECT_DELAY_MS = 5_000;
 const COMPANION_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
-const TRANSFER_NOTICE_AUTOHIDE_MS = 6_000;
-const COMPACT_SHARE_SNACKBAR_TOP_PX = 132;
+const DIRECTORY_SUBSCRIPTION_ACK_TIMEOUT_MS = 30_000;
+const TRANSFER_NOTICE_AUTOHIDE_MS = NOTICE_DURATION_MS.information;
 
 const COMPANION_STATUS_QUERY_PARAM = "companion_status";
 const IGNORED_REALTIME_MESSAGE_TYPES = new Set(["subscribed", "unsubscribed", "pong"]);
@@ -251,6 +239,7 @@ export function targetResolutionPolicyForConflictResolution(resolution: Conflict
 
 type RealtimeMessage =
   | { type: "directory_changed"; change: DirectoryChange }
+  | { type: "subscribed" | "subscription_error"; change: DirectoryChange; requestId: string; code?: string }
   | { type: "transfer_progress"; transferAttemptId: string; bytesTransferred: number; totalBytes: number | null; itemName: string }
   | { type: "ignored" };
 
@@ -265,6 +254,19 @@ function parseRealtimeMessage(rawMessage: unknown): RealtimeMessage | null {
       return null;
     }
     const message = parsed as Record<string, unknown>;
+    if (
+      (message["type"] === "subscribed" || message["type"] === "error") &&
+      typeof message["request_id"] === "string" &&
+      typeof message["connection_id"] === "string" &&
+      typeof message["path"] === "string"
+    ) {
+      return {
+        type: message["type"] === "error" ? "subscription_error" : "subscribed",
+        change: { connectionId: message["connection_id"], path: message["path"] },
+        requestId: message["request_id"],
+        code: typeof message["code"] === "string" ? message["code"] : undefined,
+      };
+    }
     if (typeof message["type"] === "string" && IGNORED_REALTIME_MESSAGE_TYPES.has(message["type"])) {
       return { type: "ignored" };
     }
@@ -659,24 +661,6 @@ const Browser: React.FC = () => {
   );
   const resolvedRoute = useMemo(() => resolveBrowseRouteState(currentRoute, allConnections), [allConnections, currentRoute]);
 
-  const dismissCompanionLifecycleStatus = useCallback(() => {
-    if (!companionLifecycleStatus) {
-      return;
-    }
-
-    const nextSearchParams = new URLSearchParams(searchParams);
-    nextSearchParams.delete(COMPANION_STATUS_QUERY_PARAM);
-    const nextSearch = nextSearchParams.toString();
-
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextSearch ? `?${nextSearch}` : "",
-      },
-      { replace: true }
-    );
-  }, [companionLifecycleStatus, location.pathname, navigate, searchParams]);
-
   const leftPathNavigateRef = React.useRef<(path: string) => void>(() => undefined);
   const rightPathNavigateRef = React.useRef<(path: string) => void>(() => undefined);
   const leftConnectionNavigateRef = React.useRef<(connectionId: string) => void>(() => undefined);
@@ -698,6 +682,8 @@ const Browser: React.FC = () => {
   const triggerServerReconnectRef = React.useRef<(reason: string) => void>(() => undefined);
   const [serverDirectoryWs, setServerDirectoryWs] = useState<WebSocket | null>(null);
   const serverAppliedSubscriptionsRef = React.useRef<Map<string, DirectorySubscription>>(new Map());
+  const subscriptionRequestsRef = React.useRef(new Map<string, { socket: WebSocket; requestId: string; timeoutId: number }>());
+  const acknowledgedSubscriptionsRef = React.useRef(new Map<string, WebSocket>());
 
   // WebSocket for real-time directory updates (companion / local drives)
   const companionWsRef = React.useRef<WebSocket | null>(null);
@@ -1839,11 +1825,61 @@ const Browser: React.FC = () => {
     rightPane.handleDirectoryChanged(change, { invalidateOnly: deferReload });
   };
 
+  const handleSubscriptionReply = (ws: WebSocket, message: RealtimeMessage) => {
+    if (message.type !== "subscribed" && message.type !== "subscription_error") return;
+    const key = getDirectorySubscriptionKey(message.change);
+    const request = subscriptionRequestsRef.current.get(key);
+    if (request?.socket !== ws || request.requestId !== message.requestId) return;
+    const requested = isLocalDrive(message.change.connectionId)
+      ? companionAppliedSubscriptionsRef.current
+      : serverAppliedSubscriptionsRef.current;
+    if (!requested.has(key)) return;
+    window.clearTimeout(request.timeoutId);
+    if (message.type === "subscribed") {
+      acknowledgedSubscriptionsRef.current.set(key, ws);
+      leftPaneRef.current.handleDirectorySubscribed?.(message.change);
+      rightPaneRef.current.handleDirectorySubscribed?.(message.change);
+      return;
+    }
+    requested.delete(key);
+    subscriptionRequestsRef.current.delete(key);
+    acknowledgedSubscriptionsRef.current.delete(key);
+    if (message.code === "directory_not_found") handleRealtimeDirectoryChange(message.change);
+    else {
+      leftPaneRef.current.handleDirectorySubscriptionError?.(message.change, message.code);
+      rightPaneRef.current.handleDirectorySubscriptionError?.(message.change, message.code);
+    }
+  };
+
+  const clearSocketSubscriptions = (socket: WebSocket) => {
+    for (const [key, request] of subscriptionRequestsRef.current) {
+      if (request.socket !== socket) continue;
+      window.clearTimeout(request.timeoutId);
+      subscriptionRequestsRef.current.delete(key);
+      acknowledgedSubscriptionsRef.current.delete(key);
+    }
+  };
+
+  const requestDirectorySubscription = React.useEffectEvent((socket: WebSocket, sub: DirectorySubscription) => {
+    const requestId = crypto.randomUUID();
+    const timeoutId = window.setTimeout(
+      () =>
+        handleSubscriptionReply(socket, {
+          type: "subscription_error",
+          change: sub,
+          requestId,
+          code: "directory_timeout",
+        }),
+      DIRECTORY_SUBSCRIPTION_ACK_TIMEOUT_MS
+    );
+    subscriptionRequestsRef.current.set(getDirectorySubscriptionKey(sub), { socket, requestId, timeoutId });
+    socket.send(JSON.stringify({ action: "subscribe", connection_id: sub.connectionId, path: sub.path, request_id: requestId }));
+  });
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: WebSocket created once on mount. handleDirectoryChanged refs are stable.
   useEffect(() => {
     let disposed = false;
     let activeWs: WebSocket | null = null;
-    let suppressCloseReconnect = false;
 
     const clearReconnectTimer = () => {
       if (reconnectTimeoutRef.current !== null) {
@@ -1888,7 +1924,7 @@ const Browser: React.FC = () => {
       activeWs = ws;
 
       ws.onopen = () => {
-        if (disposed) {
+        if (disposed || activeWs !== ws) {
           ws.close();
           return;
         }
@@ -1900,12 +1936,17 @@ const Browser: React.FC = () => {
       };
 
       ws.onmessage = (event) => {
+        if (disposed || activeWs !== ws) return;
         const message = parseRealtimeMessage(event.data);
         if (!message) {
           logger.warn("Ignoring malformed WebSocket message", undefined, "websocket");
           return;
         }
-        if (message.type === "directory_changed") {
+        handleSubscriptionReply(ws, message);
+        if (
+          message.type === "directory_changed" &&
+          acknowledgedSubscriptionsRef.current.get(getDirectorySubscriptionKey(message.change)) === ws
+        ) {
           handleRealtimeDirectoryChange(message.change);
         } else if (message.type === "transfer_progress") {
           if (message.transferAttemptId === activeTransferAttemptRef.current && message.bytesTransferred >= 0) {
@@ -1926,18 +1967,9 @@ const Browser: React.FC = () => {
       };
 
       ws.onclose = () => {
+        clearSocketSubscriptions(ws);
+        if (activeWs !== ws) return;
         if (disposed) {
-          if (activeWs === ws) {
-            activeWs = null;
-          }
-          wsRef.current = null;
-          serverAppliedSubscriptionsRef.current = new Map();
-          setServerDirectoryWs((current) => (current === ws ? null : current));
-          return;
-        }
-
-        if (suppressCloseReconnect) {
-          suppressCloseReconnect = false;
           if (activeWs === ws) {
             activeWs = null;
           }
@@ -1970,9 +2002,10 @@ const Browser: React.FC = () => {
       clearReconnectTimer();
 
       if (activeWs) {
-        suppressCloseReconnect = true;
-        activeWs.close();
+        const previousSocket = activeWs;
         activeWs = null;
+        clearSocketSubscriptions(previousSocket);
+        previousSocket.close();
         wsRef.current = null;
         serverAppliedSubscriptionsRef.current = new Map();
         setServerDirectoryWs(null);
@@ -1988,6 +2021,7 @@ const Browser: React.FC = () => {
       clearReconnectTimer();
       // Close the locally-tracked socket — works even if onopen hasn't fired yet
       if (activeWs) {
+        clearSocketSubscriptions(activeWs);
         activeWs.close();
         activeWs = null;
       }
@@ -2071,12 +2105,17 @@ const Browser: React.FC = () => {
       };
 
       ws.onmessage = (event) => {
+        if (disposed || activeWs !== ws) return;
         const message = parseRealtimeMessage(event.data);
         if (!message) {
           logger.warn("Ignoring malformed companion WebSocket message", undefined, "websocket");
           return;
         }
-        if (message.type === "directory_changed") {
+        handleSubscriptionReply(ws, message);
+        if (
+          message.type === "directory_changed" &&
+          acknowledgedSubscriptionsRef.current.get(getDirectorySubscriptionKey(message.change)) === ws
+        ) {
           handleRealtimeDirectoryChange(message.change);
         }
       };
@@ -2086,6 +2125,8 @@ const Browser: React.FC = () => {
       };
 
       ws.onclose = () => {
+        clearSocketSubscriptions(ws);
+        if (activeWs !== ws) return;
         clearConnectTimeout();
         if (disposed) {
           if (activeWs === ws) {
@@ -2119,6 +2160,7 @@ const Browser: React.FC = () => {
         companionReconnectRef.current = null;
       }
       if (activeWs) {
+        clearSocketSubscriptions(activeWs);
         activeWs.close();
         activeWs = null;
       }
@@ -2153,8 +2195,8 @@ const Browser: React.FC = () => {
     }
 
     const desiredSubscriptions = collectDirectorySubscriptions({
-      left: { connectionId: leftPane.connectionId, path: leftPane.currentPath },
-      right: { connectionId: rightPane.connectionId, path: rightPane.currentPath },
+      left: leftPane.monitoredLocation ?? { connectionId: "", path: "" },
+      right: rightPane.monitoredLocation ?? { connectionId: "", path: "" },
       isDualMode,
       includeLocalDrives: false,
     });
@@ -2165,15 +2207,19 @@ const Browser: React.FC = () => {
     );
 
     for (const sub of removedSubscriptions) {
+      const key = getDirectorySubscriptionKey(sub);
+      window.clearTimeout(subscriptionRequestsRef.current.get(key)?.timeoutId);
+      subscriptionRequestsRef.current.delete(key);
+      acknowledgedSubscriptionsRef.current.delete(key);
       serverDirectoryWs.send(JSON.stringify({ action: "unsubscribe", connection_id: sub.connectionId, path: sub.path }));
     }
 
     for (const sub of addedSubscriptions) {
-      serverDirectoryWs.send(JSON.stringify({ action: "subscribe", connection_id: sub.connectionId, path: sub.path }));
+      requestDirectorySubscription(serverDirectoryWs, sub);
     }
 
     serverAppliedSubscriptionsRef.current = nextSubscriptions;
-  }, [leftPane.connectionId, leftPane.currentPath, rightPane.connectionId, rightPane.currentPath, isDualMode, serverDirectoryWs]);
+  }, [leftPane.monitoredLocation, rightPane.monitoredLocation, isDualMode, serverDirectoryWs]);
 
   useEffect(() => {
     if (!companionDirectoryWs) {
@@ -2200,8 +2246,8 @@ const Browser: React.FC = () => {
     }
 
     const desiredSubscriptions = collectDirectorySubscriptions({
-      left: { connectionId: leftPane.connectionId, path: leftPane.currentPath },
-      right: { connectionId: rightPane.connectionId, path: rightPane.currentPath },
+      left: leftPane.monitoredLocation ?? { connectionId: "", path: "" },
+      right: rightPane.monitoredLocation ?? { connectionId: "", path: "" },
       isDualMode,
       includeLocalDrives: true,
     });
@@ -2212,15 +2258,19 @@ const Browser: React.FC = () => {
     );
 
     for (const sub of removedSubscriptions) {
+      const key = getDirectorySubscriptionKey(sub);
+      window.clearTimeout(subscriptionRequestsRef.current.get(key)?.timeoutId);
+      subscriptionRequestsRef.current.delete(key);
+      acknowledgedSubscriptionsRef.current.delete(key);
       companionDirectoryWs.send(JSON.stringify({ action: "unsubscribe", connection_id: sub.connectionId, path: sub.path }));
     }
 
     for (const sub of addedSubscriptions) {
-      companionDirectoryWs.send(JSON.stringify({ action: "subscribe", connection_id: sub.connectionId, path: sub.path }));
+      requestDirectorySubscription(companionDirectoryWs, sub);
     }
 
     companionAppliedSubscriptionsRef.current = nextSubscriptions;
-  }, [leftPane.connectionId, leftPane.currentPath, rightPane.connectionId, rightPane.currentPath, isDualMode, companionDirectoryWs]);
+  }, [leftPane.monitoredLocation, rightPane.monitoredLocation, isDualMode, companionDirectoryWs]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // Dual-Pane Handlers
@@ -4065,603 +4115,654 @@ const Browser: React.FC = () => {
   // ──────────────────────────────────────────────────────────────────────────
 
   return (
-    <Box
-      sx={getMobileViewportShellSx(useCompactLayout)}
-      onKeyDown={handleBrowserKeyDown}
-      onDragOverCapture={(event) => {
-        if (
-          Array.from(event.dataTransfer.types).includes("Files") &&
-          !(event.target instanceof Element && event.target.closest("input, textarea, [contenteditable=true]"))
-        )
-          event.preventDefault();
-      }}
-      onDropCapture={(event) => {
-        if (
-          Array.from(event.dataTransfer.types).includes("Files") &&
-          !(event.target instanceof Element && event.target.closest("input, textarea, [contenteditable=true]"))
-        )
-          event.preventDefault();
-      }}
-    >
-      {/* Hamburger Menu - Mobile Only */}
-      <HamburgerMenu
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        connections={allConnections}
-        selectedConnectionId={activePane.connectionId}
-        onConnectionChange={activePane.handleConnectionChange}
-        onNavigateToRoot={() => {
-          if (effectiveActivePaneId === "right" && paneMode === "dual") {
-            rightPathNavigateRef.current("");
-          } else {
-            leftPathNavigateRef.current("");
-          }
-          activePane.setViewInfo(null);
+    <OperationNotificationProvider>
+      <Box
+        sx={getMobileViewportShellSx(useCompactLayout)}
+        onKeyDown={handleBrowserKeyDown}
+        onDragOverCapture={(event) => {
+          if (
+            Array.from(event.dataTransfer.types).includes("Files") &&
+            !(event.target instanceof Element && event.target.closest("input, textarea, [contenteditable=true]"))
+          )
+            event.preventDefault();
         }}
-        onOpenDocumentation={handleOpenDocumentation}
-        onOpenSettings={handleOpenSettings}
-        onLogout={handleLogout}
-      />
-      <AppBar position="static" elevation={useCompactLayout ? undefined : 0} sx={mobileSafeAreaAppBarSx}>
-        <Toolbar sx={mobileSafeAreaToolbarSx}>
-          {useCompactLayout ? (
-            <MobileToolbar
-              currentDirectoryName={currentDirectoryName}
-              onOpenMenu={() => setDrawerOpen(true)}
-              onNavigateUp={activePane.handleNavigateUp}
-              canNavigateUp={canNavigateUp}
-            />
-          ) : (
-            <DesktopToolbar
-              searchProvider={quickBarProvider}
-              searchActivationToken={quickBarActivationToken}
-              searchRefreshToken={quickBarRefreshToken}
-              searchInputRef={quickBarPane.searchInputRef}
-              showSearch={activePane.connectionId !== ""}
-              onOpenHelp={() => setShowHelp(true)}
-              onOpenDocumentation={handleOpenDocumentation}
-              onOpenSettings={handleOpenSettings}
-              onBlurToFileList={() => quickBarPane.listContainerEl?.focus()}
-              searchQueryValue={quickBarQueryValue}
-              onSearchQueryValueChange={handleQuickBarQueryValueChange}
-              disableSearchDropdown={false}
-              suppressSearchDropdown={suppressQuickBarDropdown}
-              onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
-              disableTabFocus={isDualMode}
-              modeOptions={quickBarModeOptions}
-              showKeyboardHints={showQuickBarKeyboardHints}
-            />
-          )}
-        </Toolbar>
-      </AppBar>
-      {/* Secondary action strip — view mode & sort controls for the active pane (desktop only) */}
-      {!useCompactLayout && (
-        <SecondaryActionStrip
+        onDropCapture={(event) => {
+          if (
+            Array.from(event.dataTransfer.types).includes("Files") &&
+            !(event.target instanceof Element && event.target.closest("input, textarea, [contenteditable=true]"))
+          )
+            event.preventDefault();
+        }}
+      >
+        {/* Hamburger Menu - Mobile Only */}
+        <HamburgerMenu
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
           connections={allConnections}
           selectedConnectionId={activePane.connectionId}
           onConnectionChange={activePane.handleConnectionChange}
-          viewMode={activePane.viewMode}
-          onViewModeChange={activePane.setViewMode}
-          isDualPane={isDualMode}
-          onToggleDualPane={handleToggleDualPane}
-          sortBy={activePane.sortBy}
-          onSortChange={(sortBy) => {
-            activePane.handleClearSelection();
-            activePane.setSortBy(sortBy);
+          onNavigateToRoot={() => {
+            if (effectiveActivePaneId === "right" && paneMode === "dual") {
+              rightPathNavigateRef.current("");
+            } else {
+              leftPathNavigateRef.current("");
+            }
+            activePane.setViewInfo(null);
           }}
-          sortDirection={activePane.sortDirection}
-          onDirectionChange={() => {
-            activePane.handleClearSelection();
-            activePane.setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
-          }}
-          hasFiles={activePane.files.length > 0}
-          onBlurToFileList={() => activePane.listContainerEl?.focus()}
-          disableTabFocus={isDualMode}
-          companionStatus={companion.status}
-          onOpenConnectionsSettings={openConnectionsSettings}
-          connectionButtonRef={connectionSelectorButtonRef}
+          onOpenDocumentation={handleOpenDocumentation}
+          onOpenSettings={handleOpenSettings}
+          onLogout={handleLogout}
         />
-      )}
-
-      <Container
-        maxWidth={false}
-        disableGutters
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          display: "flex",
-          flexDirection: "column",
-          pt: 2,
-          pb: { xs: SAFE_AREA_INSET.BOTTOM, sm: 0 },
-          overflow: "hidden",
-          overscrollBehaviorY: "contain",
-        }}
-      >
-        <FileBrowserAlerts
-          error={leftPane.error}
-          paneLabel={isDualMode ? t("fileBrowser.chrome.alerts.leftPane") : undefined}
-          companionPairingError={leftPane.companionPairingError}
-          onOpenLocalDrivesSettings={openLocalDrivesSettings}
-          companionLifecycleStatus={companionLifecycleStatus}
-          loadingConnections={loadingConnections}
-          connectionsCount={connections.length}
-          backendAvailabilityStatus={backendAvailability.status}
-          onDismissCompanionLifecycleStatus={dismissCompanionLifecycleStatus}
-          onRetry={leftPane.handleRefresh}
-          onOpenConnectionsSettings={openConnectionsSettings}
-        />
-        {isDualMode && rightPane.error && (
-          <FileBrowserAlerts
-            error={rightPane.error}
-            paneLabel={t("fileBrowser.chrome.alerts.rightPane")}
-            companionPairingError={rightPane.companionPairingError}
-            onOpenLocalDrivesSettings={openLocalDrivesSettings}
-            onRetry={rightPane.handleRefresh}
-            loadingConnections={false}
-            connectionsCount={connections.length}
-            backendAvailabilityStatus="available"
-          />
-        )}
-
-        {/* Pane content area — single or dual-pane layout */}
-        {leftPane.connectionId && (
-          <>
-            <Box
-              sx={{
-                display: "flex",
-                flex: 1,
-                minHeight: 0,
-                overflow: "hidden",
-              }}
-            >
-              {/* Left Pane — always visible */}
-              <FileBrowserPane
-                pane={leftPane}
-                paneId="left"
-                dropTargetLabel={
-                  leftPane.currentLocation.kind === "physical"
-                    ? formatConnectionPath(
-                        getConnectionById(allConnections, leftPane.currentLocation.connectionId)?.name ?? "",
-                        leftPane.currentLocation.path
-                      )
-                    : undefined
-                }
-                dropUnavailableReason={getPaneDropUnavailableReason("left")}
-                onFileDrop={(event) => handlePaneFileDrop("left", event)}
-                isActive={effectiveActivePaneId === "left"}
-                paneMode={effectivePaneMode}
-                connections={allConnections}
-                useCompactLayout={useCompactLayout}
-                useTouchSelectionControls={useTouchSelectionControls}
-                compactActionsDisabled={browserOverlayOpen}
-                isUsingKeyboard={isUsingKeyboard}
-                onPaneFocus={() => {
-                  if (paneMode === "dual" && pendingPaneFocusRef.current === null) {
-                    replaceActivePaneInRoute("left");
-                  }
-                }}
-                disableTabFocus={isDualMode}
+        <AppBar position="static" elevation={useCompactLayout ? undefined : 0} sx={mobileSafeAreaAppBarSx}>
+          <Toolbar sx={mobileSafeAreaToolbarSx}>
+            {useCompactLayout ? (
+              <MobileToolbar
+                currentDirectoryName={currentDirectoryName}
+                onOpenMenu={() => setDrawerOpen(true)}
+                onNavigateUp={activePane.handleNavigateUp}
+                canNavigateUp={canNavigateUp}
+              />
+            ) : (
+              <DesktopToolbar
                 searchProvider={quickBarProvider}
                 searchActivationToken={quickBarActivationToken}
                 searchRefreshToken={quickBarRefreshToken}
+                searchInputRef={quickBarPane.searchInputRef}
+                showSearch={activePane.connectionId !== ""}
+                onOpenHelp={() => setShowHelp(true)}
+                onOpenDocumentation={handleOpenDocumentation}
+                onOpenSettings={handleOpenSettings}
+                onBlurToFileList={() => quickBarPane.listContainerEl?.focus()}
                 searchQueryValue={quickBarQueryValue}
                 onSearchQueryValueChange={handleQuickBarQueryValueChange}
                 disableSearchDropdown={false}
                 suppressSearchDropdown={suppressQuickBarDropdown}
                 onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
-                showKeyboardHints={showQuickBarKeyboardHints}
+                disableTabFocus={isDualMode}
                 modeOptions={quickBarModeOptions}
-                getCompactCreateActions={buildCompactCreateActions}
-                getCompactItemActions={buildCompactItemActions}
-                getCompactSelectionActions={buildCompactSelectionActions}
-              />
-
-              {/* Divider + Right Pane — dual mode only */}
-              {isDualMode && rightPane.connectionId && (
-                <>
-                  <Divider orientation="vertical" flexItem />
-                  <FileBrowserPane
-                    pane={rightPane}
-                    paneId="right"
-                    dropTargetLabel={
-                      rightPane.currentLocation.kind === "physical"
-                        ? formatConnectionPath(
-                            getConnectionById(allConnections, rightPane.currentLocation.connectionId)?.name ?? "",
-                            rightPane.currentLocation.path
-                          )
-                        : undefined
-                    }
-                    dropUnavailableReason={getPaneDropUnavailableReason("right")}
-                    onFileDrop={(event) => handlePaneFileDrop("right", event)}
-                    isActive={effectiveActivePaneId === "right"}
-                    paneMode={effectivePaneMode}
-                    connections={allConnections}
-                    useCompactLayout={useCompactLayout}
-                    useTouchSelectionControls={useTouchSelectionControls}
-                    compactActionsDisabled={browserOverlayOpen}
-                    isUsingKeyboard={isUsingKeyboard}
-                    onPaneFocus={() => {
-                      if (pendingPaneFocusRef.current === null) {
-                        replaceActivePaneInRoute("right");
-                      }
-                    }}
-                    disableTabFocus={isDualMode}
-                    searchProvider={quickBarProvider}
-                    searchActivationToken={quickBarActivationToken}
-                    searchRefreshToken={quickBarRefreshToken}
-                    searchQueryValue={quickBarQueryValue}
-                    onSearchQueryValueChange={handleQuickBarQueryValueChange}
-                    disableSearchDropdown={false}
-                    suppressSearchDropdown={suppressQuickBarDropdown}
-                    onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
-                    showKeyboardHints={showQuickBarKeyboardHints}
-                    modeOptions={quickBarModeOptions}
-                    getCompactCreateActions={buildCompactCreateActions}
-                    getCompactItemActions={buildCompactItemActions}
-                    getCompactSelectionActions={buildCompactSelectionActions}
-                  />
-                </>
-              )}
-            </Box>
-            {!useCompactLayout && (
-              <FileOperationsToolbar
-                actions={fileOperationActions}
-                moreLabel={t("fileBrowser.toolbar.more")}
-                onUploadTriggerChange={handleUploadAnchorChange}
+                showKeyboardHints={showQuickBarKeyboardHints}
               />
             )}
-            {!useCompactLayout && (
-              <Box sx={{ display: "flex", minHeight: 0 }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <StatusBar
-                    files={leftPane.sortedFiles}
-                    focusedIndex={leftPane.focusedIndex}
-                    selectedCount={leftPane.selectedFiles.size}
-                    canResolveShortcutTargets={leftPane.contentCapabilities.mutate && isLocalDrive(leftPane.connectionId)}
-                  />
-                </Box>
+            <FileBrowserStatus
+              backendAvailabilityStatus={backendAvailability.status}
+              companionLifecycleStatus={companionLifecycleStatus}
+              onRetry={activePane.handleRefresh}
+              onOpenLocalDrivesSettings={openLocalDrivesSettings}
+            />
+          </Toolbar>
+        </AppBar>
+        {/* Secondary action strip — view mode & sort controls for the active pane (desktop only) */}
+        {!useCompactLayout && (
+          <SecondaryActionStrip
+            connections={allConnections}
+            selectedConnectionId={activePane.connectionId}
+            onConnectionChange={activePane.handleConnectionChange}
+            viewMode={activePane.viewMode}
+            onViewModeChange={activePane.setViewMode}
+            isDualPane={isDualMode}
+            onToggleDualPane={handleToggleDualPane}
+            sortBy={activePane.sortBy}
+            onSortChange={(sortBy) => {
+              activePane.handleClearSelection();
+              activePane.setSortBy(sortBy);
+            }}
+            sortDirection={activePane.sortDirection}
+            onDirectionChange={() => {
+              activePane.handleClearSelection();
+              activePane.setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+            }}
+            hasFiles={activePane.files.length > 0}
+            onBlurToFileList={() => activePane.listContainerEl?.focus()}
+            disableTabFocus={isDualMode}
+            companionStatus={companion.status}
+            onOpenConnectionsSettings={openConnectionsSettings}
+            connectionButtonRef={connectionSelectorButtonRef}
+          />
+        )}
+
+        <Container
+          maxWidth={false}
+          disableGutters
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            pt: 2,
+            pb: { xs: SAFE_AREA_INSET.BOTTOM, sm: 0 },
+            overflow: "hidden",
+            overscrollBehaviorY: "contain",
+          }}
+        >
+          <FileBrowserAlerts
+            error={leftPane.connectionId ? null : leftPane.error}
+            companionPairingError={leftPane.companionPairingError}
+            onOpenLocalDrivesSettings={openLocalDrivesSettings}
+            companionLifecycleStatus={companionLifecycleStatus}
+            loadingConnections={loadingConnections}
+            connectionsCount={connections.length}
+            backendAvailabilityStatus={backendAvailability.status}
+            hasUsableContent={Boolean(leftPane.connectionId) && !leftPane.directoryUnavailable}
+            onReload={() => {
+              if (viewerLeaveGuard?.shouldBlock())
+                viewerLeaveGuard.requestLeave({ proceed: () => window.location.reload(), reset: () => {} });
+              else window.location.reload();
+            }}
+            onRetry={leftPane.handleRefresh}
+            onOpenConnectionsSettings={openConnectionsSettings}
+          />
+
+          {/* Pane content area — single or dual-pane layout */}
+          {leftPane.connectionId && (
+            <>
+              <Box
+                sx={{
+                  display: "flex",
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: "hidden",
+                }}
+              >
+                {/* Left Pane — always visible */}
+                <FileBrowserPane
+                  pane={leftPane}
+                  onOpenLocalDrivesSettings={openLocalDrivesSettings}
+                  onReload={() => {
+                    if (viewerLeaveGuard?.shouldBlock())
+                      viewerLeaveGuard.requestLeave({ proceed: () => window.location.reload(), reset: () => {} });
+                    else window.location.reload();
+                  }}
+                  paneId="left"
+                  dropTargetLabel={
+                    leftPane.currentLocation.kind === "physical"
+                      ? formatConnectionPath(
+                          getConnectionById(allConnections, leftPane.currentLocation.connectionId)?.name ?? "",
+                          leftPane.currentLocation.path
+                        )
+                      : undefined
+                  }
+                  dropUnavailableReason={getPaneDropUnavailableReason("left")}
+                  onFileDrop={(event) => handlePaneFileDrop("left", event)}
+                  isActive={effectiveActivePaneId === "left"}
+                  paneMode={effectivePaneMode}
+                  connections={allConnections}
+                  useCompactLayout={useCompactLayout}
+                  useTouchSelectionControls={useTouchSelectionControls}
+                  compactActionsDisabled={browserOverlayOpen}
+                  isUsingKeyboard={isUsingKeyboard}
+                  onPaneFocus={() => {
+                    if (paneMode === "dual" && pendingPaneFocusRef.current === null) {
+                      replaceActivePaneInRoute("left");
+                    }
+                  }}
+                  disableTabFocus={isDualMode}
+                  searchProvider={quickBarProvider}
+                  searchActivationToken={quickBarActivationToken}
+                  searchRefreshToken={quickBarRefreshToken}
+                  searchQueryValue={quickBarQueryValue}
+                  onSearchQueryValueChange={handleQuickBarQueryValueChange}
+                  disableSearchDropdown={false}
+                  suppressSearchDropdown={suppressQuickBarDropdown}
+                  onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
+                  showKeyboardHints={showQuickBarKeyboardHints}
+                  modeOptions={quickBarModeOptions}
+                  getCompactCreateActions={buildCompactCreateActions}
+                  getCompactItemActions={buildCompactItemActions}
+                  getCompactSelectionActions={buildCompactSelectionActions}
+                />
+
+                {/* Divider + Right Pane — dual mode only */}
                 {isDualMode && rightPane.connectionId && (
                   <>
                     <Divider orientation="vertical" flexItem />
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <StatusBar
-                        files={rightPane.sortedFiles}
-                        focusedIndex={rightPane.focusedIndex}
-                        selectedCount={rightPane.selectedFiles.size}
-                        canResolveShortcutTargets={rightPane.contentCapabilities.mutate && isLocalDrive(rightPane.connectionId)}
-                      />
-                    </Box>
+                    <FileBrowserPane
+                      pane={rightPane}
+                      onOpenLocalDrivesSettings={openLocalDrivesSettings}
+                      onReload={() => {
+                        if (viewerLeaveGuard?.shouldBlock())
+                          viewerLeaveGuard.requestLeave({ proceed: () => window.location.reload(), reset: () => {} });
+                        else window.location.reload();
+                      }}
+                      paneId="right"
+                      dropTargetLabel={
+                        rightPane.currentLocation.kind === "physical"
+                          ? formatConnectionPath(
+                              getConnectionById(allConnections, rightPane.currentLocation.connectionId)?.name ?? "",
+                              rightPane.currentLocation.path
+                            )
+                          : undefined
+                      }
+                      dropUnavailableReason={getPaneDropUnavailableReason("right")}
+                      onFileDrop={(event) => handlePaneFileDrop("right", event)}
+                      isActive={effectiveActivePaneId === "right"}
+                      paneMode={effectivePaneMode}
+                      connections={allConnections}
+                      useCompactLayout={useCompactLayout}
+                      useTouchSelectionControls={useTouchSelectionControls}
+                      compactActionsDisabled={browserOverlayOpen}
+                      isUsingKeyboard={isUsingKeyboard}
+                      onPaneFocus={() => {
+                        if (pendingPaneFocusRef.current === null) {
+                          replaceActivePaneInRoute("right");
+                        }
+                      }}
+                      disableTabFocus={isDualMode}
+                      searchProvider={quickBarProvider}
+                      searchActivationToken={quickBarActivationToken}
+                      searchRefreshToken={quickBarRefreshToken}
+                      searchQueryValue={quickBarQueryValue}
+                      onSearchQueryValueChange={handleQuickBarQueryValueChange}
+                      disableSearchDropdown={false}
+                      suppressSearchDropdown={suppressQuickBarDropdown}
+                      onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
+                      showKeyboardHints={showQuickBarKeyboardHints}
+                      modeOptions={quickBarModeOptions}
+                      getCompactCreateActions={buildCompactCreateActions}
+                      getCompactItemActions={buildCompactItemActions}
+                      getCompactSelectionActions={buildCompactSelectionActions}
+                    />
                   </>
                 )}
               </Box>
-            )}
-          </>
-        )}
-      </Container>
-      {/* Settings Dialog (Desktop only) */}
-      {!useCompactLayout && (
-        <SettingsDialog
-          open={settingsOpen}
-          onClose={handleSettingsClose}
-          initialCategory={settingsInitialCategory}
-          category={settingsInitialCategory}
-          onNavigate={workspace.openSettings}
-          onConnectionsChanged={handleConnectionsChanged}
-        />
-      )}
-      {/* Settings Drawer (Mobile only) */}
-      {useCompactLayout && (
-        <MobileSettingsDrawer
-          open={mobileSettingsOpen}
-          onClose={handleSettingsClose}
-          onConnectionsChanged={handleConnectionsChanged}
-          initialView={mobileSettingsInitialView}
-          view={mobileSettingsInitialView}
-          onNavigate={workspace.openSettings}
-          onBack={workspace.backSettings}
-        />
-      )}
-      {/* Viewer overlay — full-screen, from whichever pane opened it */}
-      {viewerLeaveGuard ? <WorkspaceNavigationGuard guard={viewerLeaveGuard} /> : null}
-      {workspace.viewerError && currentRoute.viewer ? (
-        <ViewerFallbackDialog
-          mode="failed"
-          path={currentRoute.viewer.file.path}
-          error={workspace.viewerError}
-          onClose={workspace.closeViewer}
-          onRetry={workspace.retryViewer}
-        />
-      ) : null}
-      {displayedViewerInfo && (
-        <DynamicViewer
-          connectionId={displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId}
-          isReadOnly={isConnectionReadOnly(
-            getConnectionById(allConnections, displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId)
+              {!useCompactLayout && (
+                <FileOperationsToolbar
+                  actions={fileOperationActions}
+                  moreLabel={t("fileBrowser.toolbar.more")}
+                  onUploadTriggerChange={handleUploadAnchorChange}
+                />
+              )}
+              {!useCompactLayout && (
+                <Box sx={{ display: "flex", minHeight: 0 }}>
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <StatusBar
+                      files={leftPane.sortedFiles}
+                      focusedIndex={leftPane.focusedIndex}
+                      selectedCount={leftPane.selectedFiles.size}
+                      canResolveShortcutTargets={leftPane.contentCapabilities.mutate && isLocalDrive(leftPane.connectionId)}
+                    />
+                  </Box>
+                  {isDualMode && rightPane.connectionId && (
+                    <>
+                      <Divider orientation="vertical" flexItem />
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <StatusBar
+                          files={rightPane.sortedFiles}
+                          focusedIndex={rightPane.focusedIndex}
+                          selectedCount={rightPane.selectedFiles.size}
+                          canResolveShortcutTargets={rightPane.contentCapabilities.mutate && isLocalDrive(rightPane.connectionId)}
+                        />
+                      </Box>
+                    </>
+                  )}
+                </Box>
+              )}
+            </>
           )}
-          isPending={workspace.viewerLoading}
-          viewInfo={displayedViewerInfo}
-          navigation={{
-            selectionKey: workspace.viewerSelectionKey,
-            mode: currentRoute.viewer?.mode ?? "view",
-            onModeChange: workspace.changeMode,
-            onGuardChange: setViewerLeaveGuard,
-          }}
-          onClose={workspace.closeViewer}
-          onIndexChange={(index) => workspace.changeImage(leftPane.viewInfo ? "left" : "right", index)}
-          hasMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveHasMore : false}
-          isLoadingMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveLoadingMore : false}
-          onLoadMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.loadMoreArchive : undefined}
-          contentProviders={browserContentServices.providers}
-        />
-      )}
-      {/* Keyboard Shortcuts Help */}
-      <KeyboardShortcutsHelp
-        open={showHelp}
-        onClose={() => setShowHelp(false)}
-        shortcuts={browserShortcuts}
-        title={t("keyboardShortcutsHelp.titles.fileBrowser")}
-      />
-      <NameInputDialog
-        open={archiveCreateContext !== null}
-        title={t("fileBrowser.archive.createTitle")}
-        description={
-          <Typography variant="body2" sx={{ color: "text.secondary" }}>
-            {t("fileBrowser.archive.createDescription", { count: archiveCreateContext?.sources.length ?? 0 })}
-          </Typography>
-        }
-        operationContext={
-          <DialogOperationContext
-            entries={[
-              ...(archiveCreateContext?.sources.length === 1
-                ? [
-                    {
-                      label: t("fileBrowser.operationContext.sourceItem"),
-                      value: fileName(archiveCreateContext.sources[0]!.path),
-                      kind: "fileName" as const,
-                    },
-                  ]
-                : []),
-              {
-                label: t("fileBrowser.operationContext.destinationDirectory"),
-                value: archiveCreateContext?.destinationLabel ?? "",
-                kind: "path",
-              },
-            ]}
+        </Container>
+        {/* Settings Dialog (Desktop only) */}
+        {!useCompactLayout && (
+          <SettingsDialog
+            open={settingsOpen}
+            onClose={handleSettingsClose}
+            initialCategory={settingsInitialCategory}
+            category={settingsInitialCategory}
+            onNavigate={workspace.openSettings}
+            onConnectionsChanged={handleConnectionsChanged}
           />
-        }
-        inputLabel={t("fileBrowser.archive.nameLabel")}
-        initialValue="archive.zip"
-        submitLabel={t("fileBrowser.archive.buttonCreate")}
-        submittingLabel={t("fileBrowser.archive.buttonCreating")}
-        isSubmitting={isCreatingArchive}
-        isCancelling={isCancellingArchiveCreation}
-        onCancelSubmitting={isCreatingArchive ? () => void cancelArchiveCreation() : undefined}
-        cancelSubmittingLabel={t("fileBrowser.archive.buttonCancelCreation")}
-        onClose={() => {
-          if (!isCreatingArchive) {
-            setArchiveCreateContext(null);
-            setArchiveCreateError(null);
+        )}
+        {/* Settings Drawer (Mobile only) */}
+        {useCompactLayout && (
+          <MobileSettingsDrawer
+            open={mobileSettingsOpen}
+            onClose={handleSettingsClose}
+            onConnectionsChanged={handleConnectionsChanged}
+            initialView={mobileSettingsInitialView}
+            view={mobileSettingsInitialView}
+            onNavigate={workspace.openSettings}
+            onBack={workspace.backSettings}
+          />
+        )}
+        {/* Viewer overlay — full-screen, from whichever pane opened it */}
+        {viewerLeaveGuard ? <WorkspaceNavigationGuard guard={viewerLeaveGuard} /> : null}
+        {workspace.viewerError && currentRoute.viewer ? (
+          <ViewerFallbackDialog
+            mode="failed"
+            path={currentRoute.viewer.file.path}
+            error={workspace.viewerError}
+            onClose={workspace.closeViewer}
+            onRetry={workspace.retryViewer}
+          />
+        ) : null}
+        {displayedViewerInfo && (
+          <DynamicViewer
+            connectionId={displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId}
+            isReadOnly={isConnectionReadOnly(
+              getConnectionById(allConnections, displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId)
+            )}
+            isPending={workspace.viewerLoading}
+            viewInfo={displayedViewerInfo}
+            navigation={{
+              selectionKey: workspace.viewerSelectionKey,
+              mode: currentRoute.viewer?.mode ?? "view",
+              onModeChange: workspace.changeMode,
+              onGuardChange: setViewerLeaveGuard,
+            }}
+            onClose={workspace.closeViewer}
+            onIndexChange={(index) => workspace.changeImage(leftPane.viewInfo ? "left" : "right", index)}
+            hasMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveHasMore : false}
+            isLoadingMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveLoadingMore : false}
+            onLoadMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.loadMoreArchive : undefined}
+            contentProviders={browserContentServices.providers}
+          />
+        )}
+        {/* Keyboard Shortcuts Help */}
+        <KeyboardShortcutsHelp
+          open={showHelp}
+          onClose={() => setShowHelp(false)}
+          shortcuts={browserShortcuts}
+          title={t("keyboardShortcutsHelp.titles.fileBrowser")}
+        />
+        <NameInputDialog
+          open={archiveCreateContext !== null}
+          title={t("fileBrowser.archive.createTitle")}
+          description={
+            <Typography variant="body2" sx={{ color: "text.secondary" }}>
+              {t("fileBrowser.archive.createDescription", { count: archiveCreateContext?.sources.length ?? 0 })}
+            </Typography>
           }
-        }}
-        onConfirm={handleCreateArchiveConfirm}
-        apiError={archiveCreateError}
-        extraValidate={(name) => (name.toLowerCase().endsWith(".zip") ? null : t("fileBrowser.archive.validationExtension"))}
-        autoSelectRange={[0, "archive".length]}
-        submittingContent={<ArchiveOperationProgress operation="create" />}
-        disableRestoreFocus={!useCompactLayout}
-        onTransitionExited={handleFileOperationDialogExited}
-      />
-      <ArchiveExtractDialog
-        archiveName={archiveExtractionContext?.archiveName ?? ""}
-        extractionScope={archiveExtractionContext?.extractionScope ?? FULL_ARCHIVE_EXTRACTION_SCOPE}
-        initialDestinationName={archiveExtractionContext?.initialDestinationName ?? ""}
-        destinationLabel={archiveExtractionContext?.destinationLabel}
-        sourcePathPrefix={
-          archiveExtractionContext
-            ? getLocationDisplayName(
-                archiveExtractionContext.location,
-                (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId
-              )
-            : undefined
-        }
-        targetConnectionName={
-          archiveExtractionContext
-            ? (getConnectionById(
-                allConnections,
-                (archiveExtractionContext.destination ?? archiveExtractionContext.destinationParent).connectionId
-              )?.name ?? (archiveExtractionContext.destination ?? archiveExtractionContext.destinationParent).connectionId)
-            : undefined
-        }
-        requiresDestinationName={archiveExtractionContext?.usesSiblingDirectory ?? true}
-        open={archiveExtractionContext !== null}
-        isExtracting={isExtractingArchive}
-        isCancelling={isCancellingArchiveExtraction}
-        error={archiveExtractionError}
-        memberError={archiveExtractionMemberError}
-        progressSummary={archiveExtractionProgress}
-        conflicts={archiveExtractionConflicts}
-        allowedConflictActions={archiveExtractionAllowedActions}
-        isSubmittingConflictDecision={isSubmittingArchiveExtractionDecision || isCancellingArchiveExtraction}
-        onClose={() => {
-          if (!isExtractingArchive) {
-            setArchiveExtractionContext(null);
-            setArchiveExtractionError(null);
+          operationContext={
+            <DialogOperationContext
+              entries={[
+                ...(archiveCreateContext?.sources.length === 1
+                  ? [
+                      {
+                        label: t("fileBrowser.operationContext.sourceItem"),
+                        value: fileName(archiveCreateContext.sources[0]!.path),
+                        kind: "fileName" as const,
+                      },
+                    ]
+                  : []),
+                {
+                  label: t("fileBrowser.operationContext.destinationDirectory"),
+                  value: archiveCreateContext?.destinationLabel ?? "",
+                  kind: "path",
+                },
+              ]}
+            />
           }
-        }}
-        onConfirm={(destinationName) => void handleArchiveExtractionConfirm(destinationName)}
-        onCancelExtraction={() => void cancelArchiveExtraction()}
-        onMemberErrorDecision={(action) => void handleArchiveExtractionMemberErrorDecision(action)}
-        onConflictDecision={(action, memberPath, targetPath) => void handleArchiveExtractionDecision(action, memberPath, targetPath)}
-        disableRestoreFocus={!useCompactLayout}
-        onTransitionExited={handleFileOperationDialogExited}
-      />
-      {/* Companion app guidance hint */}
-      <Snackbar
-        open={companionHintOpen}
-        autoHideDuration={6000}
-        onClose={() => setCompanionHintOpen(false)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        message={t("fileBrowser.chrome.alerts.companionLaunchHint")}
-      />
-      <Snackbar
-        open={archiveExtractionNotice !== null}
-        autoHideDuration={8000}
-        onClose={() => setArchiveExtractionNotice(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        message={archiveExtractionNotice}
-      />
-      <Snackbar
-        key={unavailableShortcutNotice?.id}
-        open={unavailableShortcutNotice !== null}
-        autoHideDuration={4000}
-        onClose={() => setUnavailableShortcutNotice(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        message={unavailableShortcutNotice?.message}
-      />
-      {/* Copy / Move Dialog (dual-pane F5/F6) */}
-      <CopyMoveDialog
-        open={copyMoveDialogOpen}
-        mode={copyMoveMode}
-        files={copyMoveItems.map((item) => item.entry)}
-        destinationLabel={copyMoveDestinationLabel}
-        isSameDirectory={copyMoveSameDirectory}
-        onConfirm={handleCopyMoveConfirm}
-        onCancel={handleCopyMoveCancel}
-        isProcessing={copyMoveProcessing}
-        progress={copyMoveProgress}
-        transferProgress={copyMoveTransferProgress}
-        error={copyMoveError}
-        warning={copyMoveWarning}
-        isTerminal={!copyMoveProcessing && Boolean(copyMoveError || copyMoveWarning)}
-        disableRestoreFocus={!useCompactLayout}
-        onTransitionExited={handleFileOperationDialogExited}
-      />
-      {/* Overwrite Conflict Dialog (shown per-file during copy/move) */}
-      <OverwriteResolutionDialog
-        open={conflictDialogOpen || uploadConflict !== null}
-        conflict={uploadConflict?.info ?? conflictInfo}
-        operation={uploadConflict ? "upload" : copyMoveMode}
-        uploadKind={uploadConflict?.kind}
-        allowedActions={uploadConflict ? uploadConflict.actions : getCopyMoveConflictActions(conflictInfo)}
-        canApplyToAll={treeConflictAllowsApplyToAll ? () => true : undefined}
-        progress={conflictProgress}
-        sourcePath={
-          uploadConflict
-            ? uploadConflict.path
-            : conflictInfo && copyMoveItems[0]
+          inputLabel={t("fileBrowser.archive.nameLabel")}
+          initialValue="archive.zip"
+          submitLabel={t("fileBrowser.archive.buttonCreate")}
+          submittingLabel={t("fileBrowser.archive.buttonCreating")}
+          isSubmitting={isCreatingArchive}
+          isCancelling={isCancellingArchiveCreation}
+          onCancelSubmitting={isCreatingArchive ? () => void cancelArchiveCreation() : undefined}
+          cancelSubmittingLabel={t("fileBrowser.archive.buttonCancelCreation")}
+          onClose={() => {
+            if (!isCreatingArchive) {
+              setArchiveCreateContext(null);
+              setArchiveCreateError(null);
+            }
+          }}
+          onConfirm={handleCreateArchiveConfirm}
+          apiError={archiveCreateError}
+          extraValidate={(name) => (name.toLowerCase().endsWith(".zip") ? null : t("fileBrowser.archive.validationExtension"))}
+          autoSelectRange={[0, "archive".length]}
+          submittingContent={<ArchiveOperationProgress operation="create" />}
+          disableRestoreFocus={!useCompactLayout}
+          onTransitionExited={handleFileOperationDialogExited}
+        />
+        <ArchiveExtractDialog
+          archiveName={archiveExtractionContext?.archiveName ?? ""}
+          extractionScope={archiveExtractionContext?.extractionScope ?? FULL_ARCHIVE_EXTRACTION_SCOPE}
+          initialDestinationName={archiveExtractionContext?.initialDestinationName ?? ""}
+          destinationLabel={archiveExtractionContext?.destinationLabel}
+          sourcePathPrefix={
+            archiveExtractionContext
               ? getLocationDisplayName(
-                  { kind: "physical", connectionId: copyMoveItems[0].handle.location.connectionId, path: conflictInfo.incoming_file.path },
+                  archiveExtractionContext.location,
                   (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId
                 )
               : undefined
-        }
-        targetDirectoryPath={
-          (uploadConflict?.info ?? conflictInfo) && (uploadConflict || copyMoveDestination)
-            ? getLocationDisplayName(
-                {
-                  kind: "physical",
-                  connectionId: uploadConflict ? uploadConflict.connectionId : copyMoveDestination!.connectionId,
-                  path: parentPath((uploadConflict?.info ?? conflictInfo)!.existing_file.path),
-                },
-                (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId
-              )
-            : undefined
-        }
-        onResolve={handleConflictResolve}
-        onCancel={handleConflictCancel}
-      />
-      <Menu key={uploadMenuOpenId.current} anchorEl={uploadMenu?.anchor} open={Boolean(uploadMenu)} onClose={closeUploadMenu} autoFocus>
-        <MenuItem onClick={() => selectUploadChoice(false)}>{t("fileBrowser.toolbar.uploadChoiceFiles")}</MenuItem>
-        <MenuItem onClick={() => selectUploadChoice(true)}>{t("fileBrowser.toolbar.uploadChoiceFolder")}</MenuItem>
-      </Menu>
-      <Snackbar
-        open={Boolean(fileShareState)}
-        anchorOrigin={{ vertical: "top", horizontal: "center" }}
-        sx={{
-          top: `calc(${COMPACT_SHARE_SNACKBAR_TOP_PX}px + env(safe-area-inset-top))`,
-          "& .MuiSnackbarContent-message": { overflowWrap: "anywhere" },
-        }}
-        autoHideDuration={null}
-        message={
-          fileShareState
-            ? t(
-                fileShareState.status === "preparing"
-                  ? "fileBrowser.share.preparing"
-                  : fileShareState.status === "ready"
-                    ? "fileBrowser.share.ready"
-                    : "fileBrowser.share.sharing",
-                { count: fileShareState.status === "preparing" ? fileShareState.count : fileShareState.files.length }
-              )
-            : ""
-        }
-        action={
-          fileShareState?.status === "ready" ? (
-            <>
-              <Button color="inherit" onClick={cancelFileShare}>
-                {t("common.actions.cancel")}
-              </Button>
-              <Button color="inherit" onClick={() => void finishFileShare()}>
-                {t("common.actions.share")}
-              </Button>
-            </>
-          ) : fileShareState?.status === "preparing" ? (
-            <Button color="inherit" onClick={cancelFileShare}>
-              {t("common.actions.cancel")}
-            </Button>
-          ) : undefined
-        }
-      />
-      {nativeSharing.failureDialog}
-      <Snackbar
-        key={
-          uploadProgress
-            ? "upload-progress"
-            : uploadPreparing
-              ? "upload-preparing"
-              : isDownloading
-                ? "download-progress"
-                : `transfer-${transferNotice}`
-        }
-        open={Boolean(uploadProgress || uploadPreparing || showDownloadNotice || transferNotice)}
-        autoHideDuration={uploadProgress || uploadPreparing || showDownloadNotice ? null : TRANSFER_NOTICE_AUTOHIDE_MS}
-        message={
-          uploadProgress
-            ? t(
-                uploadProgress.phase === "publishing"
-                  ? "fileBrowser.transfers.uploadPublishing"
-                  : uploadProgress.bytes === null
-                    ? "fileBrowser.transfers.uploadSending"
-                    : "fileBrowser.transfers.uploadProgress",
-                {
-                  ...uploadProgress,
-                  bytes: formatFileSize(uploadProgress.bytes ?? 0),
-                  size: formatFileSize(uploadProgress.size),
-                }
-              )
-            : uploadPreparing
-              ? t("fileBrowser.transfers.preparingUpload")
-              : showDownloadNotice
-                ? t(downloadKind === "archive" ? "fileBrowser.transfers.preparingArchive" : "fileBrowser.transfers.downloading")
-                : transferNotice
-        }
-        action={
-          uploadProgress || uploadPreparing || showDownloadNotice ? (
-            <Button
-              color="inherit"
-              onClick={() => {
-                cancelUpload();
-                cancelDownload();
-              }}
-            >
-              {t("common.actions.cancel")}
-            </Button>
-          ) : undefined
-        }
-        onClose={() => {
-          if (!uploadProgress && !uploadPreparing && !showDownloadNotice) setTransferNotice("");
-        }}
-      />
-    </Box>
+          }
+          targetConnectionName={
+            archiveExtractionContext
+              ? (getConnectionById(
+                  allConnections,
+                  (archiveExtractionContext.destination ?? archiveExtractionContext.destinationParent).connectionId
+                )?.name ?? (archiveExtractionContext.destination ?? archiveExtractionContext.destinationParent).connectionId)
+              : undefined
+          }
+          requiresDestinationName={archiveExtractionContext?.usesSiblingDirectory ?? true}
+          open={archiveExtractionContext !== null}
+          isExtracting={isExtractingArchive}
+          isCancelling={isCancellingArchiveExtraction}
+          error={archiveExtractionError}
+          memberError={archiveExtractionMemberError}
+          progressSummary={archiveExtractionProgress}
+          conflicts={archiveExtractionConflicts}
+          allowedConflictActions={archiveExtractionAllowedActions}
+          isSubmittingConflictDecision={isSubmittingArchiveExtractionDecision || isCancellingArchiveExtraction}
+          onClose={() => {
+            if (!isExtractingArchive) {
+              setArchiveExtractionContext(null);
+              setArchiveExtractionError(null);
+            }
+          }}
+          onConfirm={(destinationName) => void handleArchiveExtractionConfirm(destinationName)}
+          onCancelExtraction={() => void cancelArchiveExtraction()}
+          onMemberErrorDecision={(action) => void handleArchiveExtractionMemberErrorDecision(action)}
+          onConflictDecision={(action, memberPath, targetPath) => void handleArchiveExtractionDecision(action, memberPath, targetPath)}
+          disableRestoreFocus={!useCompactLayout}
+          onTransitionExited={handleFileOperationDialogExited}
+        />
+        {/* Companion app guidance hint */}
+        <OperationNotifications
+          notices={
+            companionHintOpen
+              ? [
+                  {
+                    id: "companion-hint",
+                    message: t("fileBrowser.chrome.alerts.companionLaunchHint"),
+                    severity: "info",
+                    duration: TRANSFER_NOTICE_AUTOHIDE_MS,
+                    onExpire: () => setCompanionHintOpen(false),
+                  },
+                ]
+              : []
+          }
+          onDismiss={() => setCompanionHintOpen(false)}
+        />
+        <OperationNotifications
+          notices={
+            archiveExtractionNotice
+              ? [
+                  {
+                    id: "archive-extraction",
+                    message: archiveExtractionNotice,
+                    severity: "info",
+                    duration: TRANSFER_NOTICE_AUTOHIDE_MS,
+                    onExpire: () => setArchiveExtractionNotice(null),
+                  },
+                ]
+              : []
+          }
+          onDismiss={() => setArchiveExtractionNotice(null)}
+        />
+        <OperationNotifications
+          notices={
+            unavailableShortcutNotice
+              ? [
+                  {
+                    id: "unavailable-shortcut",
+                    occurrence: unavailableShortcutNotice.id,
+                    message: unavailableShortcutNotice.message,
+                    severity: "info",
+                    duration: TRANSFER_NOTICE_AUTOHIDE_MS,
+                    onExpire: () => setUnavailableShortcutNotice(null),
+                  },
+                ]
+              : []
+          }
+          onDismiss={() => setUnavailableShortcutNotice(null)}
+        />
+        {/* Copy / Move Dialog (dual-pane F5/F6) */}
+        <CopyMoveDialog
+          open={copyMoveDialogOpen}
+          mode={copyMoveMode}
+          files={copyMoveItems.map((item) => item.entry)}
+          destinationLabel={copyMoveDestinationLabel}
+          isSameDirectory={copyMoveSameDirectory}
+          onConfirm={handleCopyMoveConfirm}
+          onCancel={handleCopyMoveCancel}
+          isProcessing={copyMoveProcessing}
+          progress={copyMoveProgress}
+          transferProgress={copyMoveTransferProgress}
+          error={copyMoveError}
+          warning={copyMoveWarning}
+          isTerminal={!copyMoveProcessing && Boolean(copyMoveError || copyMoveWarning)}
+          disableRestoreFocus={!useCompactLayout}
+          onTransitionExited={handleFileOperationDialogExited}
+        />
+        {/* Overwrite Conflict Dialog (shown per-file during copy/move) */}
+        <OverwriteResolutionDialog
+          open={conflictDialogOpen || uploadConflict !== null}
+          conflict={uploadConflict?.info ?? conflictInfo}
+          operation={uploadConflict ? "upload" : copyMoveMode}
+          uploadKind={uploadConflict?.kind}
+          allowedActions={uploadConflict ? uploadConflict.actions : getCopyMoveConflictActions(conflictInfo)}
+          canApplyToAll={treeConflictAllowsApplyToAll ? () => true : undefined}
+          progress={conflictProgress}
+          sourcePath={
+            uploadConflict
+              ? uploadConflict.path
+              : conflictInfo && copyMoveItems[0]
+                ? getLocationDisplayName(
+                    {
+                      kind: "physical",
+                      connectionId: copyMoveItems[0].handle.location.connectionId,
+                      path: conflictInfo.incoming_file.path,
+                    },
+                    (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId
+                  )
+                : undefined
+          }
+          targetDirectoryPath={
+            (uploadConflict?.info ?? conflictInfo) && (uploadConflict || copyMoveDestination)
+              ? getLocationDisplayName(
+                  {
+                    kind: "physical",
+                    connectionId: uploadConflict ? uploadConflict.connectionId : copyMoveDestination!.connectionId,
+                    path: parentPath((uploadConflict?.info ?? conflictInfo)!.existing_file.path),
+                  },
+                  (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId
+                )
+              : undefined
+          }
+          onResolve={handleConflictResolve}
+          onCancel={handleConflictCancel}
+        />
+        <Menu key={uploadMenuOpenId.current} anchorEl={uploadMenu?.anchor} open={Boolean(uploadMenu)} onClose={closeUploadMenu} autoFocus>
+          <MenuItem onClick={() => selectUploadChoice(false)}>{t("fileBrowser.toolbar.uploadChoiceFiles")}</MenuItem>
+          <MenuItem onClick={() => selectUploadChoice(true)}>{t("fileBrowser.toolbar.uploadChoiceFolder")}</MenuItem>
+        </Menu>
+        <OperationNotifications
+          notices={
+            fileShareState
+              ? [
+                  {
+                    id: "file-share",
+                    severity: "info",
+                    persistent: fileShareState.status !== "sharing",
+                    message: fileShareState
+                      ? t(
+                          fileShareState.status === "preparing"
+                            ? "fileBrowser.share.preparing"
+                            : fileShareState.status === "ready"
+                              ? "fileBrowser.share.ready"
+                              : "fileBrowser.share.sharing",
+                          { count: fileShareState.status === "preparing" ? fileShareState.count : fileShareState.files.length }
+                        )
+                      : "",
+                    action:
+                      fileShareState?.status === "ready" ? (
+                        <>
+                          <Button color="inherit" onClick={cancelFileShare}>
+                            {t("common.actions.cancel")}
+                          </Button>
+                          <Button color="inherit" onClick={() => void finishFileShare()}>
+                            {t("common.actions.share")}
+                          </Button>
+                        </>
+                      ) : fileShareState?.status === "preparing" ? (
+                        <Button color="inherit" onClick={cancelFileShare}>
+                          {t("common.actions.cancel")}
+                        </Button>
+                      ) : undefined,
+                  },
+                ]
+              : []
+          }
+        />
+        {nativeSharing.failureDialog}
+        <OperationNotifications
+          notices={
+            uploadProgress || uploadPreparing || showDownloadNotice || transferNotice
+              ? [
+                  {
+                    severity: "info",
+                    id: uploadProgress
+                      ? "upload-progress"
+                      : uploadPreparing
+                        ? "upload-preparing"
+                        : isDownloading
+                          ? "download-progress"
+                          : `transfer-${transferNotice}`,
+                    persistent: Boolean(uploadProgress || uploadPreparing || showDownloadNotice),
+                    duration: TRANSFER_NOTICE_AUTOHIDE_MS,
+                    onExpire: () => {
+                      if (!uploadProgress && !uploadPreparing && !showDownloadNotice) setTransferNotice("");
+                    },
+                    message: uploadProgress
+                      ? t(
+                          uploadProgress.phase === "publishing"
+                            ? "fileBrowser.transfers.uploadPublishing"
+                            : uploadProgress.bytes === null
+                              ? "fileBrowser.transfers.uploadSending"
+                              : "fileBrowser.transfers.uploadProgress",
+                          {
+                            ...uploadProgress,
+                            bytes: formatFileSize(uploadProgress.bytes ?? 0),
+                            size: formatFileSize(uploadProgress.size),
+                          }
+                        )
+                      : uploadPreparing
+                        ? t("fileBrowser.transfers.preparingUpload")
+                        : showDownloadNotice
+                          ? t(downloadKind === "archive" ? "fileBrowser.transfers.preparingArchive" : "fileBrowser.transfers.downloading")
+                          : transferNotice,
+                    action:
+                      uploadProgress || uploadPreparing || showDownloadNotice ? (
+                        <Button
+                          color="inherit"
+                          onClick={() => {
+                            cancelUpload();
+                            cancelDownload();
+                          }}
+                        >
+                          {t("common.actions.cancel")}
+                        </Button>
+                      ) : undefined,
+                  },
+                ]
+              : []
+          }
+          onDismiss={() => {
+            if (!uploadProgress && !uploadPreparing && !showDownloadNotice) setTransferNotice("");
+          }}
+        />
+      </Box>
+    </OperationNotificationProvider>
   );
 };
 

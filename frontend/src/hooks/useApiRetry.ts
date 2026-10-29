@@ -3,6 +3,7 @@ import { isBackendConnectivityError, isLocalAbortOrClientTimeout } from "../serv
 import { info as logInfo } from "../services/logger";
 import { PreviewUnavailableError } from "../services/previewPolicy";
 import { isApiError } from "../types";
+import { PhysicalFileRequestError } from "../utils/apiErrors";
 
 /**
  * Options for API retry behavior
@@ -21,6 +22,7 @@ interface RetryOptions {
  * Only true network errors (no response at all from server) should trigger retry
  */
 const isTransientError = (err: unknown): boolean => {
+  if (err instanceof PhysicalFileRequestError) return isTransientError(err.cause);
   if (err instanceof PreviewUnavailableError) {
     return false;
   }

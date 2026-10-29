@@ -36,7 +36,7 @@ Finish any input-method composition before saving. Sambee waits for table-cell e
 
 You can keep editing during an ordinary Save. Save writes the revision it captured; edits made afterward remain unsaved. If preparation or writing fails, your changes remain available in the editor.
 
-The Markdown viewer/editor and text editor show operation failures, lock-renewal warnings, and draft-recovery warnings as bottom-center toasts, without resizing the document. Errors and warnings stay until you dismiss them or the problem clears. Only one toast appears at a time, with errors first. Dismissing a toast doesn't resolve the problem or discard your changes. A failed Save inside a recovery or unsaved-changes dialog stays in that dialog instead.
+The Markdown viewer/editor and text editor show operation failures, lock-renewal warnings, and draft-recovery warnings as bottom-center toasts, without resizing the document. These toasts close after 15 seconds. The timer pauses while you point to the toast or use its controls with the keyboard. Only one toast appears at a time, with errors first. Closing a toast, automatically or manually, doesn't resolve the problem or discard your changes. Existing editor controls and unsaved-change safeguards remain available; no extra warning is added after the toast closes. A failed Save inside a recovery or unsaved-changes dialog stays in that dialog instead.
 
 If Sambee must send you through OIDC sign-in while you are editing, it saves an eligible unsaved Markdown draft in this browser tab before leaving the page. See [Recover Unsaved In-Browser Edits](../recover-unsaved-edits/) for how recovery works.
 

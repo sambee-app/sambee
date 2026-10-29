@@ -14,12 +14,25 @@ import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from smbprotocol.exceptions import SMBOSError
+from smbprotocol.header import NtStatus
 
 from app.services.directory_monitor import DirectoryMonitor, MonitoredDirectory
 
 
 class TestDirectoryMonitorLifecycle:
     """Test directory monitor lifecycle operations."""
+
+    @pytest.mark.parametrize("error_status", [NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND])
+    def test_missing_monitor_target_is_translated_and_released(self, error_status, caplog):
+        monitor = DirectoryMonitor()
+        with patch("app.services.directory_monitor.MonitoredDirectory") as monitored:
+            monitored.return_value.start.side_effect = SMBOSError(error_status, "missing")
+            with pytest.raises(FileNotFoundError):
+                monitor.start_monitoring("conn-123", "missing", "server", "share", "user", "password")
+        assert monitor._monitors == {}
+        assert monitor._starting == {}
+        assert not any(record.exc_info for record in caplog.records)
 
     def test_monitor_initialization(self):
         """Test DirectoryMonitor initialization."""
@@ -448,6 +461,21 @@ class TestMonitoredDirectoryLifecycle:
 
 class TestChangeNotifications:
     """Test change notification handling."""
+
+    @pytest.mark.parametrize("status", [NtStatus.STATUS_DELETE_PENDING, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND])
+    def test_deleted_watch_invalidates_and_retires(self, status, caplog):
+        callback = AsyncMock()
+        monitored = MonitoredDirectory("conn-123", "documents", "server", "share", "user", "password", 445, callback)
+        monitored._watcher = MagicMock()
+        monitored._watcher.wait.side_effect = SMBOSError(status, "documents")
+        retired = MagicMock()
+        monitored.on_stopped = retired
+        with patch.object(monitored, "_cleanup") as cleanup:
+            monitored._monitor_loop()
+        callback.assert_awaited_once_with("conn-123", "documents")
+        retired.assert_called_once()
+        cleanup.assert_called_once()
+        assert not any(record.exc_info for record in caplog.records)
 
     def test_file_list_watcher_only_watches_immediate_children(self):
         """Descendant writes must not invalidate the visible directory listing."""

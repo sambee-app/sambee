@@ -1270,6 +1270,28 @@ def mock_smb_backend():
 class TestListDirectory:
     """Test directory listing endpoint."""
 
+    @pytest.mark.parametrize(
+        ("error", "expected_status", "expected_code"),
+        [
+            (FileNotFoundError("private SMB path"), 404, "directory_not_found"),
+            (NotADirectoryError("private SMB path"), 409, "not_a_directory"),
+            (PermissionError("private SMB path"), 403, "directory_access_denied"),
+            (RuntimeError("private SMB path"), 500, "directory_unavailable"),
+        ],
+    )
+    def test_list_directory_safe_target_errors(
+        self, client, auth_headers_user, test_connection, mock_smb_backend, error, expected_status, expected_code
+    ):
+        _, backend = mock_smb_backend
+        backend.list_directory.side_effect = error
+        with patch("app.api.browser._remove_from_directory_cache") as remove_cached:
+            response = client.get(f"/api/browse/{test_connection.id}/list", headers=auth_headers_user, params={"path": "missing"})
+        assert response.status_code == expected_status
+        assert response.json()["detail"]["code"] == expected_code
+        assert "private SMB path" not in response.text
+        assert remove_cached.call_count == int(isinstance(error, (FileNotFoundError, NotADirectoryError)))
+        backend.disconnect.assert_called_once()
+
     def test_list_root_directory(
         self,
         client: TestClient,
@@ -1824,7 +1846,27 @@ class TestGetFileInfo:
         )
 
         assert response.status_code == 404
-        assert response.json()["detail"] == "Path not found: /missing.txt"
+        assert response.json()["detail"]["code"] == "item_not_found"
+        assert "/missing.txt" not in response.json()["detail"]["message"]
+
+    @pytest.mark.parametrize(
+        "error,status_code,code",
+        [
+            (PermissionError("private SMB path"), 403, "file_access_denied"),
+            (NotADirectoryError("private SMB path"), 409, "not_a_directory"),
+            (TimeoutError("private SMB path"), 504, "file_timeout"),
+            (RuntimeError("private SMB path"), 503, "file_unavailable"),
+        ],
+    )
+    def test_file_info_returns_safe_classified_errors(
+        self, client, auth_headers_user, test_connection, mock_smb_backend, error, status_code, code
+    ):
+        _, backend = mock_smb_backend
+        backend.get_file_info.side_effect = error
+        response = client.get(f"/api/browse/{test_connection.id}/info", headers=auth_headers_user, params={"path": "missing.txt"})
+        assert response.status_code == status_code
+        assert response.json()["detail"]["code"] == code
+        assert "private SMB path" not in response.text
 
     def test_get_file_info_accepts_companion_operation_context(
         self,
@@ -1912,6 +1954,34 @@ class TestGetFileInfo:
 @pytest.mark.integration
 class TestBrowserEditLocks:
     """Test browser-authenticated edit lock lifecycle endpoints."""
+
+    @pytest.mark.parametrize(
+        ("error", "status_code", "code"),
+        [
+            (FileNotFoundError("private path"), 404, "item_not_found"),
+            (NotADirectoryError("private parent"), 409, "not_a_file"),
+            (IsADirectoryError("private target"), 409, "not_a_file"),
+            (PermissionError("private identity"), 403, "file_access_denied"),
+            (TimeoutError("private server"), 504, "file_timeout"),
+            (OSError("private transport"), 503, "file_unavailable"),
+        ],
+    )
+    def test_write_access_failures_are_safe_and_create_no_lock(
+        self, client, auth_headers_user, test_connection, session, error, status_code, code
+    ) -> None:
+        backend = AsyncMock()
+        backend.check_write_access.side_effect = error
+        with patch("app.api.browser.SMBBackend", return_value=backend):
+            response = client.post(
+                f"/api/browse/{test_connection.id}/lock",
+                headers=auth_headers_user,
+                params={"path": "docs/readme.txt", "check_write_access": "true"},
+            )
+        assert response.status_code == status_code
+        assert response.json()["detail"]["code"] == code
+        assert "private" not in response.text
+        assert not session.exec(select(EditLock).where(EditLock.connection_id == test_connection.id)).all()
+        backend.disconnect.assert_awaited_once()
 
     @pytest.mark.parametrize("denied", [False, True])
     def test_acquire_checks_file_write_access_before_creating_lock(
@@ -2145,7 +2215,7 @@ class TestBrowserEditLocks:
         )
 
         assert response.status_code == 504
-        assert response.json()["detail"] == "File info request timed out. The remote share did not respond in time."
+        assert response.json()["detail"]["code"] == "file_timeout"
         mock_instance.disconnect.assert_called_once()
 
 
@@ -3163,6 +3233,31 @@ class TestValidateItemName:
 class TestUploadFile:
     """Tests for POST /api/browse/{connection_id}/upload"""
 
+    def test_completed_editor_write_survives_metadata_read_failure(self, client, auth_headers_user, test_connection):
+        """A failed metadata refresh must not turn a completed write into a failed save."""
+        path = "/docs/readme.md"
+        lock = client.post(f"/api/browse/{test_connection.id}/lock", headers=auth_headers_user, params={"path": path}).json()
+        with patch("app.api.browser.SMBBackend") as backend_class:
+            backend = backend_class.return_value = AsyncMock()
+            backend.write_file.return_value = 7
+            backend.get_file_info.side_effect = PermissionError("private storage detail")
+            response = client.post(
+                f"/api/browse/{test_connection.id}/upload",
+                headers=auth_headers_user,
+                params={
+                    "path": path,
+                    "editor_operation_id": lock["operation_id"],
+                    "editor_lock_id": lock["lock_id"],
+                    "editor_lock_capability": lock["lock_capability"],
+                },
+                files={"file": ("readme.md", b"updated", "text/markdown")},
+            )
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "path": path, "size": 7, "last_modified": None}
+        assert "private storage detail" not in response.text
+        backend.write_file.assert_awaited_once()
+        backend.disconnect.assert_awaited_once()
+
     def test_editor_upload_accepts_matching_browser_lock(
         self,
         client: TestClient,
@@ -3201,18 +3296,22 @@ class TestUploadFile:
         client: TestClient,
         auth_headers_user: dict,
         test_connection: Connection,
+        tmp_path: Path,
     ):
         path = "/docs/recreated.md"
+        target = tmp_path / "recreated.md"
+        target.write_bytes(b"original")
         lock = client.post(
             f"/api/browse/{test_connection.id}/lock",
             headers=auth_headers_user,
             params={"path": path},
         ).json()
-        mock_info = FileInfo(name="recreated.md", path=path, type=FileType.FILE, size=8)
+        target.unlink()
+        mock_info = FileInfo(name="recreated.md", path=path, type=FileType.FILE, size=7)
 
         with patch("app.api.browser.SMBBackend") as mock_backend:
             backend = AsyncMock()
-            backend.write_file = AsyncMock(return_value=8)
+            backend.write_file = AsyncMock(side_effect=lambda _path, data: target.write_bytes(data.read()))
             backend.get_file_info = AsyncMock(return_value=mock_info)
             mock_backend.return_value = backend
             response = client.post(
@@ -3229,6 +3328,7 @@ class TestUploadFile:
 
         assert response.status_code == 200
         backend.write_file.assert_awaited_once()
+        assert target.read_bytes() == b"updated"
 
     def test_editor_upload_rejects_mismatched_browser_lock(
         self,

@@ -8,6 +8,7 @@ interface DialogIdentifierDisplayProps {
   value: string;
   kind: DialogOperationIdentifierKind;
   testId?: string;
+  appearance?: "code" | "text";
 }
 
 function measureText(element: HTMLElement, value: string): number {
@@ -19,14 +20,14 @@ function measureText(element: HTMLElement, value: string): number {
   return context.measureText(value).width;
 }
 
-export function DialogIdentifierDisplay({ value, kind, testId }: DialogIdentifierDisplayProps) {
+export function DialogIdentifierDisplay({ value, kind, testId, appearance = "code" }: DialogIdentifierDisplayProps) {
   const valueRef = useRef<HTMLElement>(null);
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
 
   useLayoutEffect(() => {
     const element = valueRef.current;
     if (!element) return;
-    const updateWidth = () => setAvailableWidth(element.getBoundingClientRect().width);
+    const updateWidth = () => setAvailableWidth(element.clientWidth);
     updateWidth();
     const observer = new ResizeObserver(updateWidth);
     observer.observe(element);
@@ -37,7 +38,7 @@ export function DialogIdentifierDisplay({ value, kind, testId }: DialogIdentifie
     if (!document.fonts) return;
     void document.fonts.ready.then(() => {
       const element = valueRef.current;
-      if (element) setAvailableWidth(element.getBoundingClientRect().width);
+      if (element) setAvailableWidth(element.clientWidth);
     });
   }, []);
 
@@ -51,13 +52,13 @@ export function DialogIdentifierDisplay({ value, kind, testId }: DialogIdentifie
   const identifier = (
     <Box component="bdi" data-testid={testId} dir="auto" aria-label={value} sx={{ display: "block", maxWidth: "100%", minWidth: 0 }}>
       <Box
-        component="code"
+        component={appearance === "text" ? "span" : "code"}
         ref={valueRef}
         sx={{
-          color: "text.primary",
+          color: appearance === "text" ? "inherit" : "text.primary",
           display: "block",
-          fontFamily: "monospace",
-          fontSize: "0.875em",
+          fontFamily: appearance === "text" ? "inherit" : "monospace",
+          fontSize: appearance === "text" ? "inherit" : "0.875em",
           maxWidth: "100%",
           minWidth: 0,
           overflow: "hidden",
@@ -70,11 +71,9 @@ export function DialogIdentifierDisplay({ value, kind, testId }: DialogIdentifie
     </Box>
   );
 
-  return isShortened ? (
-    <Tooltip title={value} disableFocusListener disableTouchListener>
+  return (
+    <Tooltip title={isShortened ? value : ""} disableFocusListener disableTouchListener>
       {identifier}
     </Tooltip>
-  ) : (
-    identifier
   );
 }

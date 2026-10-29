@@ -17,6 +17,7 @@ import FileBrowser from "../FileBrowser";
 const mockUseCompanion = vi.fn<() => UseCompanionResult>();
 const mockBuildCompanionWsUrl = vi.fn<() => Promise<string | null>>();
 const mockCopyMoveDialog = vi.fn();
+const SUBSCRIPTION_ACK_TIMEOUT_MS = 30_000;
 
 vi.mock("../../services/api");
 vi.mock("../../components/FileBrowser/CopyMoveDialog", () => ({
@@ -74,10 +75,26 @@ class InspectableWebSocket {
 }
 
 const parseSentMessages = (socket: InspectableWebSocket | undefined) =>
-  socket ? socket.sentMessages.map((message) => JSON.parse(message) as { action: string; connection_id: string; path: string }) : [];
+  socket
+    ? socket.sentMessages.map((message) => {
+        const { request_id: _requestId, ...payload } = JSON.parse(message);
+        return payload as { action: string; connection_id: string; path: string };
+      })
+    : [];
 
 const isServerSocket = (socket: InspectableWebSocket) => socket.url.includes("token=fake-token");
 const isCompanionSocket = (socket: InspectableWebSocket) => socket.url.includes("21549");
+
+async function acknowledgeSubscriptions(socket: InspectableWebSocket | undefined) {
+  await waitFor(() => expect(socket?.sentMessages.length).toBeGreaterThan(0));
+  act(() => {
+    for (const payload of socket?.sentMessages ?? []) {
+      const request = JSON.parse(payload);
+      if (request.action === "subscribe")
+        socket?.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ ...request, type: "subscribed" }) }));
+    }
+  });
+}
 
 function renderBrowserWithNavigator(initialPath: string) {
   let navigateFn: NavigateFunction | null = null;
@@ -216,6 +233,14 @@ describe("FileBrowser WebSocket behavior", () => {
     }).not.toThrow();
     expect(warnSpy).toHaveBeenCalledWith("Ignoring malformed WebSocket message", undefined, "websocket");
 
+    act(() =>
+      backendSocket?.onmessage?.(
+        new MessageEvent("message", { data: JSON.stringify({ type: "directory_changed", connection_id: "conn-1", path: "" }) })
+      )
+    );
+    expect(api.listDirectory).toHaveBeenCalledTimes(1);
+    await acknowledgeSubscriptions(backendSocket);
+
     act(() => {
       backendSocket?.onmessage?.(
         new MessageEvent("message", { data: JSON.stringify({ type: "directory_changed", connection_id: "conn-1", path: "" }) })
@@ -225,6 +250,113 @@ describe("FileBrowser WebSocket behavior", () => {
     await waitFor(() => {
       expect(api.listDirectory).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("refreshes a missing subscription target only for its matching request", async () => {
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
+    const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sentMessages.length).toBeGreaterThan(0));
+    const request = JSON.parse(requireTestValue(socket.sentMessages[0]));
+    const initialCalls = vi.mocked(api.listDirectory).mock.calls.length;
+    const reply = { ...request, type: "error", code: "directory_not_found" };
+    act(() => socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ ...reply, request_id: "old-request" }) })));
+    expect(api.listDirectory).toHaveBeenCalledTimes(initialCalls);
+    act(() => socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify(reply) })));
+    await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(initialCalls + 1));
+  });
+
+  it("ignores subscription errors after navigation unsubscribes the old location", async () => {
+    const browser = renderBrowserWithNavigator("/browse/smb/test-server-1");
+    await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
+    const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sentMessages.length).toBeGreaterThan(0));
+    const request = JSON.parse(requireTestValue(socket.sentMessages[0]));
+    browser.navigate("/browse/smb/test-server-1/Documents");
+    await waitFor(() => expect(parseSentMessages(socket).some((message) => message.action === "unsubscribe")).toBe(true));
+    const calls = vi.mocked(api.listDirectory).mock.calls.length;
+    act(() =>
+      socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ ...request, type: "error", code: "directory_not_found" }) }))
+    );
+    expect(api.listDirectory).toHaveBeenCalledTimes(calls);
+  });
+
+  it.each(["server", "companion"])("keeps rows and retries a denied %s subscription only after user action", async (transport) => {
+    mockUseCompanion.mockReturnValue({
+      ...buildDefaultCompanionResult(),
+      status: "paired",
+      drives: [{ id: "local-drive:c", name: "Drive C", drive_type: "fixed" }],
+    });
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
+    await renderBrowserAndFlush(transport === "server" ? "/browse/smb/test-server-1" : "/browse/local/c/Users");
+    const matches = transport === "server" ? isServerSocket : isCompanionSocket;
+    await waitFor(() => expect(InspectableWebSocket.instances.some(matches)).toBe(true));
+    const socket = requireTestValue(InspectableWebSocket.instances.find(matches));
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sentMessages.length).toBeGreaterThan(0));
+    const request = JSON.parse(requireTestValue(socket.sentMessages[0]));
+    const refreshControl = screen.getByRole("button", { name: "Refresh" });
+    act(() =>
+      socket.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({ ...request, type: "error", code: "directory_access_denied" }),
+        })
+      )
+    );
+    await waitFor(() => expect(screen.getByText("You do not have permission to open this folder.")).toBeInTheDocument());
+    expect(refreshControl).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(parseSentMessages(socket).filter((message) => message.action === "subscribe")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText("You do not have permission to open this folder.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Automatic updates stopped" }));
+    await waitFor(() => expect(parseSentMessages(socket).filter((message) => message.action === "subscribe")).toHaveLength(2));
+    const retryRequest = JSON.parse(requireTestValue(socket.sentMessages.at(-1)));
+    expect(retryRequest.request_id).not.toBe(request.request_id);
+    act(() =>
+      socket.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({ ...retryRequest, type: "error", code: "directory_access_denied" }),
+        })
+      )
+    );
+    await waitFor(() => expect(screen.getByText("You do not have permission to open this folder.")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    await waitFor(() => expect(parseSentMessages(socket).filter((message) => message.action === "subscribe")).toHaveLength(3));
+    const recoveryRequest = JSON.parse(requireTestValue(socket.sentMessages.at(-1)));
+    act(() =>
+      socket.onmessage?.(
+        new MessageEvent("message", {
+          data: JSON.stringify({ ...recoveryRequest, type: "subscribed" }),
+        })
+      )
+    );
+    expect(screen.queryByText("You do not have permission to open this folder.")).not.toBeInTheDocument();
+  });
+
+  it("keeps timeout recovery visible and ignores a late acknowledgement", async () => {
+    const timer = vi.spyOn(window, "setTimeout");
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
+    const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
+    act(() => socket.open());
+    await waitFor(() => expect(socket.sentMessages.length).toBeGreaterThan(0));
+    const request = JSON.parse(requireTestValue(socket.sentMessages[0]));
+    const timeout = requireTestValue(timer.mock.calls.find(([, delay]) => delay === SUBSCRIPTION_ACK_TIMEOUT_MS));
+    act(() => {
+      if (typeof timeout[0] === "function") timeout[0]();
+    });
+    const message = "Directory monitoring did not start in time. Refresh the folder to retry.";
+    await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+    act(() => socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ ...request, type: "subscribed" }) })));
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(parseSentMessages(socket).filter((entry) => entry.action === "subscribe")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /retry/i })).toBeEnabled();
+    timer.mockRestore();
   });
 
   it("coalesces directory notifications during an upload into one final listing refresh", async () => {
@@ -248,6 +380,7 @@ describe("FileBrowser WebSocket behavior", () => {
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
       backendSocket?.open();
+      await acknowledgeSubscriptions(backendSocket);
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       await waitFor(() => expect(finishUpload).toBeDefined());
@@ -296,6 +429,7 @@ describe("FileBrowser WebSocket behavior", () => {
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
       backendSocket?.open();
+      await acknowledgeSubscriptions(backendSocket);
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
       await waitFor(() => expect(api.publishBrowserFile).toHaveBeenCalledOnce());

@@ -177,7 +177,12 @@ describe("ImageViewer", () => {
     const share = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { share, canShare: () => true });
     const displayed = new Blob(["displayed PNG"], { type: "image/png" });
-    mockUseCachedImageGallery.mockReturnValue({ ...createGalleryMock(), filename: "photo.heic", getCachedImageBlob: () => displayed });
+    mockUseCachedImageGallery.mockReturnValue({
+      ...createGalleryMock(),
+      filename: "photo.heic",
+      getCachedImageSrc: () => "blob:displayed-image",
+      getCachedImageBlob: () => displayed,
+    });
     vi.mocked(window.matchMedia).mockImplementation((query) => ({
       matches: query.includes("max-width"),
       media: query,
@@ -227,6 +232,7 @@ describe("ImageViewer", () => {
     const gallery = {
       ...createGalleryMock(),
       currentImageLoadPhase: "ready" as ImageLoadPhase,
+      getCachedImageSrc: () => "blob:displayed-image",
       getCachedImageBlob: () => new Blob(["displayed original JPEG"], { type: "image/jpeg" }),
     };
     const original = gallery.getCachedImageBlob();

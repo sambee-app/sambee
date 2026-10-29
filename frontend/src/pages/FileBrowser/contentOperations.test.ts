@@ -1383,7 +1383,7 @@ describe("content operations", () => {
     expect(archiveOperations.start).toHaveBeenCalledWith(expect.objectContaining({ name: "archive.zip" }));
   });
 
-  it("removes permanently invalid recent records when local native launch fails", async () => {
+  it("retains recent records when local native launch fails without confirmed absence", async () => {
     const nativeLaunchError = { response: { data: { code: "recent_file_native_launch_failed" } } };
     const resolvedTarget = {
       target: { kind: "local", driveId: "c" },
@@ -1409,6 +1409,6 @@ describe("content operations", () => {
       )
     ).rejects.toEqual(nativeLaunchError);
 
-    expect(api.removeRecentFile).toHaveBeenCalledWith("recent-1");
+    expect(api.removeRecentFile).not.toHaveBeenCalled();
   });
 });

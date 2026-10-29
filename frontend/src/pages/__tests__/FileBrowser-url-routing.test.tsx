@@ -20,6 +20,7 @@ import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { FileType } from "../../types";
+import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { type BrowseRouteState, parseBrowseRoute, serializeBrowseRoute } from "../FileBrowser/routing";
 import { ACTIVE_PANE_QUERY_KEY, RIGHT_PANE_QUERY_KEY } from "../FileBrowser/types";
 import { mockDirectoryListing, renderBrowserAndFlush } from "./FileBrowser.test.utils";
@@ -40,30 +41,22 @@ vi.mock("../AccountSettings", () => ({ AccountSettings: () => <div>Account conte
 
 // Mock components using lazy mock factories
 vi.mock("../../components/Viewer/MarkdownViewer", () => ({
-  default: ({
-    onClose,
-    navigation,
-    path,
-    isTransitioning,
-  }: {
-    onClose: () => void;
-    path: string;
-    isTransitioning?: boolean;
-    navigation?: { mode: string; onModeChange: (mode: "view" | "edit") => void };
-  }) => (
-    <div role="dialog" data-testid="markdown-viewer" data-mode={navigation?.mode} data-path={path} data-pending={isTransitioning}>
-      Markdown Viewer
-      <button type="button" onClick={() => navigation?.onModeChange("edit")}>
-        Enter editor
-      </button>
-      <button type="button" onClick={() => navigation?.onModeChange("view")}>
-        Leave editor
-      </button>
-      <button type="button" onClick={onClose}>
-        Close Viewer
-      </button>
-    </div>
-  ),
+  default: ({ onClose, navigation, path, isTransitioning }: ViewerComponentProps) => {
+    return (
+      <div role="dialog" data-testid="markdown-viewer" data-mode={navigation?.mode} data-path={path} data-pending={isTransitioning}>
+        Markdown Viewer
+        <button type="button" onClick={() => navigation?.onModeChange("edit")}>
+          Enter editor
+        </button>
+        <button type="button" onClick={() => navigation?.onModeChange("view")}>
+          Leave editor
+        </button>
+        <button type="button" onClick={onClose}>
+          Close Viewer
+        </button>
+      </div>
+    );
+  },
 }));
 vi.mock("../../components/Settings/SettingsDialog", () => ({
   default: ({
@@ -421,6 +414,25 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "readme.md"));
     });
 
+    it("preserves the outgoing viewer after failed replacement and retries the failed identity", async () => {
+      const user = userEvent.setup();
+      const directory = "/browse/smb/test-server-1?p2=smb%2Ftest-server-1%2FDocuments";
+      const { router } = await renderBrowserAndFlush(`${directory}&file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown`);
+      const outgoing = await screen.findByTestId("markdown-viewer");
+      vi.mocked(api.getFileInfo).mockRejectedValueOnce({
+        response: { status: 403, data: { detail: { code: "file_access_denied", message: "private server detail" } } },
+      });
+      await act(() => router.navigate(`${directory}&file=smb%2Ftest-server-1%2Fother.md&viewer=markdown`));
+      await screen.findByRole("button", { name: /^retry$/i });
+      expect(screen.getByTestId("markdown-viewer")).toBe(outgoing);
+      expect(outgoing).toHaveAttribute("data-path", "readme.md");
+      expect(screen.queryByText(/private server detail/)).not.toBeInTheDocument();
+      expect(new URLSearchParams(router.state.location.search).get("p2")).toBe("smb/test-server-1/Documents");
+      await user.click(screen.getByRole("button", { name: /^retry$/i }));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "other.md"));
+      expect(api.getFileInfo).toHaveBeenLastCalledWith("conn-1", "other.md", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    });
+
     it("cancels a pending file change on Escape and ignores its late metadata", async () => {
       const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
       await screen.findByTestId("markdown-viewer");
@@ -443,7 +455,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       const user = userEvent.setup();
       vi.mocked(api.getFileInfo).mockRejectedValueOnce(new Error("File unavailable"));
       const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
-      expect(await screen.findByText(/File unavailable/)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("The file could not be opened. Check the connection and retry.")).toBeInTheDocument());
       await user.click(screen.getByRole("button", { name: /retry/i }));
       expect(await screen.findByTestId("markdown-viewer")).toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "Close Viewer" }));
@@ -458,7 +470,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       }
       const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
       for (let attempt = 0; attempt < failures; attempt += 1) {
-        await screen.findByText(/File unavailable/);
+        await screen.findByText("The file could not be opened. Check the connection and retry.");
         await user.click(screen.getByRole("button", { name: /retry/i }));
       }
       await screen.findByTestId("markdown-viewer");
@@ -1036,7 +1048,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
       await renderBrowserAndFlush("/browse/local/c/Users");
 
-      expect(await screen.findByText(/Sambee Companion rejected this browser's pairing/i)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/Sambee Companion rejected this browser's pairing/i)).toBeInTheDocument());
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Reload Sambee" })).toBeInTheDocument();
       await userEvent.setup().click(screen.getByRole("button", { name: "Local Drives" }));
@@ -1054,7 +1066,8 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1?p2=local/c/Users");
 
       const alert = (await screen.findByText(/Sambee Companion rejected this browser's pairing/i)).closest("[role='alert']");
-      expect(alert).toHaveTextContent("Right pane:");
+      expect(alert?.closest("[data-pane-id]")).toHaveAttribute("data-pane-id", "right");
+      expect(alert).not.toHaveTextContent("Right pane:");
       expect(alert).toHaveTextContent(/Sambee Companion rejected this browser's pairing/i);
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     });
@@ -1069,7 +1082,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
       await renderBrowserAndFlush("/browse/local/c/Users");
 
-      expect(await screen.findByText(/Sambee Companion rejected this browser's pairing/i)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/Sambee Companion rejected this browser's pairing/i)).toBeInTheDocument());
       expect(screen.getByRole("button", { name: "Reload Sambee" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     });
@@ -1082,7 +1095,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
       await renderBrowserAndFlush("/browse/local/c/Users");
 
-      expect(await screen.findByText(/This browser is not paired with Sambee Companion/i)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/This browser is not paired with Sambee Companion/i)).toBeInTheDocument());
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Reload Sambee" })).not.toBeInTheDocument();
       await userEvent.setup().click(screen.getByRole("button", { name: "Local Drives" }));
@@ -1094,7 +1107,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
       await renderBrowserAndFlush("/browse/local/c/Users");
 
-      expect(await screen.findByText(/This browser is not paired with Sambee Companion/i)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/This browser is not paired with Sambee Companion/i)).toBeInTheDocument());
       expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Reload Sambee" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Local Drives" })).toBeInTheDocument();
@@ -1106,7 +1119,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
       await renderBrowserAndFlush("/browse/local/c/Users");
 
-      expect(await screen.findByText("Permission denied")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("You do not have permission to open this folder.")).toBeInTheDocument());
       expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Local Drives" })).not.toBeInTheDocument();
     });

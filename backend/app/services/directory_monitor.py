@@ -16,6 +16,7 @@ from smbprotocol.change_notify import (
     FileSystemWatcher,
 )
 from smbprotocol.connection import Connection
+from smbprotocol.header import NtStatus
 from smbprotocol.open import (
     CreateDisposition,
     CreateOptions,
@@ -29,6 +30,7 @@ from smbprotocol.session import Session
 from smbprotocol.tree import TreeConnect
 
 from app.services.system_settings import get_smbclient_policy_kwargs
+from app.storage.smb_errors import translate_smb_target_error
 
 logger = logging.getLogger(__name__)
 
@@ -133,18 +135,30 @@ class DirectoryMonitor:
             port=port,
             on_change_callback=on_change_callback,
         )
+        monitor_stopped = threading.Event()
+
+        def retire_monitor() -> None:
+            monitor_stopped.set()
+            with self._lock:
+                if self._monitors.get(key) is monitor:
+                    del self._monitors[key]
+
+        monitor.on_stopped = retire_monitor
         try:
             monitor.start()
         except Exception as error:
             with self._lock:
                 self._starting.pop(key, None)
                 start_event.set()
-            logger.error(f"Failed to start monitoring {key}: {error}", exc_info=True)
+            translated = translate_smb_target_error(error, path)
+            if translated is not error:
+                raise translated from error
             raise
 
         with self._lock:
             connection_retired = self._connection_generations.get(connection_id, 0) != connection_generation
-            if not connection_retired:
+            stopped_during_start = monitor_stopped.is_set()
+            if not connection_retired and not stopped_during_start:
                 self._monitors[key] = monitor
             self._starting.pop(key, None)
             start_event.set()
@@ -152,6 +166,8 @@ class DirectoryMonitor:
         if connection_retired:
             monitor.stop()
             raise RuntimeError(f"Connection was retired while monitor {key} was starting")
+        if stopped_during_start:
+            raise RuntimeError("Directory monitoring stopped during startup")
 
         logger.debug(f"Started monitoring: {key}")
 
@@ -206,14 +222,15 @@ class DirectoryMonitor:
 
             if monitor.subscriber_count <= 0:
                 logger.debug(f"Stopping monitoring: {key}")
-                try:
-                    monitor.stop()
-                except Exception as e:
-                    logger.error(f"Error stopping monitor {key}: {e}", exc_info=True)
-                finally:
-                    del self._monitors[key]
+                del self._monitors[key]
             else:
                 logger.debug(f"Decreased subscriber count for {key} to {monitor.subscriber_count}")
+                return
+
+        try:
+            monitor.stop()
+        except Exception:
+            logger.error("Error stopping monitor %s", key, exc_info=True)
 
     def stop_connection(self, connection_id: str) -> None:
         """Stop every active monitor associated with a connection."""
@@ -260,17 +277,14 @@ class DirectoryMonitor:
 
         with self._lock:
             self._running = False
-            keys = list(self._monitors.keys())
+            monitors = list(self._monitors.items())
+            self._monitors.clear()
 
-        for key in keys:
+        for key, monitor in monitors:
             try:
-                monitor = self._monitors[key]
                 monitor.stop()
             except Exception as e:
                 logger.error(f"Error stopping monitor {key}: {e}", exc_info=True)
-
-        with self._lock:
-            self._monitors.clear()
 
         logger.info("All directory monitors stopped")
 
@@ -304,6 +318,7 @@ class MonitoredDirectory:
         self.port = port
         self.on_change_callback = on_change_callback
         self.subscriber_count = 1
+        self.on_stopped: Callable[[], None] | None = None
 
         # SMB resources - must be cleaned up
         self._connection: Optional[Connection] = None
@@ -468,6 +483,13 @@ class MonitoredDirectory:
                 filename,
             )
 
+        self._notify_change()
+
+        # Restart watcher for next change using a fresh watcher instance.
+        self._watcher = FileSystemWatcher(self._open)
+
+    def _notify_change(self) -> None:
+        """Send one invalidation from the monitoring thread."""
         if self.on_change_callback:
             loop = asyncio.new_event_loop()
             try:
@@ -478,9 +500,6 @@ class MonitoredDirectory:
             finally:
                 asyncio.set_event_loop(None)
                 loop.close()
-
-        # Restart watcher for next change using a fresh watcher instance.
-        self._watcher = FileSystemWatcher(self._open)
 
     #
     # _monitor_loop
@@ -504,15 +523,14 @@ class MonitoredDirectory:
                     break
 
                 # Start the watcher (this is a blocking call until change occurs)
-                self._watcher.start(
-                    completion_filter=completion_filter,
-                    flags=DIRECTORY_ONLY_NOTIFY_FLAGS,
-                    output_buffer_length=4096,
-                    send=True,
-                )
-
                 # Wait for response (blocking)
                 try:
+                    self._watcher.start(
+                        completion_filter=completion_filter,
+                        flags=DIRECTORY_ONLY_NOTIFY_FLAGS,
+                        output_buffer_length=4096,
+                        send=True,
+                    )
                     result = self._watcher.wait()
 
                     if self._stop_event.is_set():
@@ -528,13 +546,18 @@ class MonitoredDirectory:
                         # STATUS_DELETE_PENDING (0xc0000056) means the
                         # directory we are watching was deleted.  This is
                         # normal — stop monitoring instead of retrying.
-                        is_delete_pending = "0xc0000056" in error_msg or "deletepending" in error_type.lower()
-                        if is_delete_pending:
+                        status = getattr(e, "ntstatus", getattr(e, "status", None))
+                        if status in (
+                            NtStatus.STATUS_DELETE_PENDING,
+                            NtStatus.STATUS_OBJECT_NAME_NOT_FOUND,
+                            NtStatus.STATUS_OBJECT_PATH_NOT_FOUND,
+                        ) or isinstance(e, FileNotFoundError):
                             logger.info(
                                 "Watched directory deleted, stopping monitor: %s:%s",
                                 self.connection_id,
                                 self.path,
                             )
+                            self._notify_change()
                             break
 
                         logger.error(
@@ -598,6 +621,9 @@ class MonitoredDirectory:
                 exc_info=True,
             )
         finally:
+            self._cleanup()
+            if self.on_stopped and not self._stop_event.is_set():
+                self.on_stopped()
             logger.debug("Monitor loop stopped for %s:%s", self.connection_id, self.path)
 
     #

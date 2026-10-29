@@ -11,7 +11,12 @@ import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../con
 import { useCachedImageGallery } from "../../hooks/useCachedImageGallery";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
-import { readViewerContent, readVirtualContent, useContentProviderRegistry } from "../../pages/FileBrowser/contentProviders";
+import {
+  readViewerContent,
+  readVirtualContent,
+  useContentProviderRegistry,
+  verifyViewerSourceAfterFailure,
+} from "../../pages/FileBrowser/contentProviders";
 import { error as logError, info as logInfo } from "../../services/logger";
 import { useSambeeTheme } from "../../theme";
 import { getViewerColors } from "../../theme/viewerStyles";
@@ -157,8 +162,17 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   });
   const [imageLoadingFeedbackStage, setImageLoadingFeedbackStage] = useState<ImageLoadingFeedbackStage>("spinner");
   const isCurrentImageLoading = currentImageLoadPhase === "fetching" || currentImageLoadPhase === "decoding";
-  const isCurrentImageReady = currentImageLoadPhase === "ready";
+  const isCurrentImageReady = currentImageLoadPhase === "ready" && Boolean(getCachedImageSrc(currentIndex));
   const currentImageError = errorStates.get(currentIndex) ?? null;
+  const imageDecodeChecksRef = useRef({ connectionId, path: currentPath, contentProviders, requests: new Map<string, AbortController>() });
+  useEffect(() => {
+    const checks = { connectionId, path: currentPath, contentProviders, requests: new Map<string, AbortController>() };
+    imageDecodeChecksRef.current = checks;
+    return () => {
+      for (const controller of checks.requests.values()) controller.abort();
+      checks.requests.clear();
+    };
+  }, [connectionId, currentPath, contentProviders]);
   const displayedBlob = isCurrentImageReady ? getCachedImageBlob(currentIndex) : undefined;
   const displayedShareFile = useMemo(
     () => (displayedBlob ? createDisplayedShareFile(displayedBlob, filename) : null),
@@ -490,11 +504,27 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
         onErrorCapture: () => {
           if (source && typedSlide.src === source) {
             markImageDecodeFailed(typedSlide.imageIndex, source);
+            if (imageDecodeChecksRef.current.requests.has(source)) return;
+            const controller = new AbortController();
+            imageDecodeChecksRef.current.requests.set(source, controller);
+            const imagePath = images[typedSlide.imageIndex];
+            if (!imagePath) return;
+            const isCurrent = () => !controller.signal.aborted && getCachedImageSrc(typedSlide.imageIndex) === source;
+            void verifyViewerSourceAfterFailure(
+              connectionId,
+              imagePath,
+              virtualSource,
+              contentProviders,
+              isCurrent,
+              controller.signal
+            ).then((message) => {
+              if (message && isCurrent()) markImageDecodeFailed(typedSlide.imageIndex, source, message);
+            });
           }
         },
       };
     },
-    [getCachedImageSrc, markImageAsDecoded, markImageDecodeFailed]
+    [connectionId, contentProviders, images, virtualSource, getCachedImageSrc, markImageAsDecoded, markImageDecodeFailed]
   );
 
   const imageShortcuts = useMemo(
@@ -582,8 +612,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       {/* Full-screen dialog overlay — consistent with PDFViewer and MarkdownViewer.
           Provides built-in focus trapping, aria-modal, and portal isolation. */}
       <Dialog
-        inert={isTransitioning}
-        open={true}
+        aria-busy={isTransitioning}
+        open
         onClose={handleDialogClose}
         maxWidth={false}
         fullScreen
@@ -674,10 +704,12 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
           sx={{
             flex: 1,
             position: "relative",
+            pointerEvents: isTransitioning ? "none" : undefined,
           }}
         >
           {portalElement && (
             <Lightbox
+              key={isTransitioning ? "retained" : "interactive"}
               open={true}
               close={handleClose}
               index={currentIndex}

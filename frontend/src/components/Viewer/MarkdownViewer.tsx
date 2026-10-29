@@ -37,6 +37,7 @@ import {
 } from "../../pages/FileBrowser/contentProviders";
 import { useTextEditorWordWrapPreference } from "../../pages/FileBrowser/preferences";
 import { clearDraft, type DraftSnapshot, loadDraft, registerDraftSnapshot, saveDraft } from "../../services/draftRecovery";
+import { publishMissingPhysicalFile } from "../../services/fileRecoveryEvents";
 import { error as logError, info as logInfo } from "../../services/logger";
 import { ExpiredEditLockError } from "../../services/storageContracts";
 import { useSambeeTheme } from "../../theme";
@@ -52,7 +53,7 @@ import {
   VIEWER_SCROLL_END_PADDING,
 } from "../../theme/viewerStyles";
 import { isApiError } from "../../types";
-import { getApiErrorMessage } from "../../utils/apiErrors";
+import { classifyFileFailure, getApiErrorMessage } from "../../utils/apiErrors";
 import { openExternalUrl } from "../../utils/externalLinks";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
@@ -100,6 +101,7 @@ import {
   useViewerOperationError,
   VIEWER_EDIT_HEARTBEAT_FAILURE_THRESHOLD,
   VIEWER_EDIT_HEARTBEAT_MS,
+  VIEWER_LOCK_NOTICE_DURATION_MS,
   ViewerEditAcquisitionStatus,
   type ViewerNotice,
   ViewerNotifications,
@@ -313,6 +315,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const [draftContent, setDraftContent] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [contentLoadAttempt, setContentLoadAttempt] = useState(0);
   const [editError, setEditError, editErrorOccurrence] = useViewerOperationError();
   const [printError, setPrintError, printErrorOccurrence] = useViewerOperationError();
   const [shareRevision, setShareRevision] = useState(0);
@@ -620,9 +623,10 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     setEditBaselineContent,
   });
 
-  // Load markdown content only when the viewed file changes.
+  // Load content for resource changes or explicit Retry.
   // Entering edit mode is a local UI transition and must not re-trigger loading,
   // otherwise the editor subtree is briefly replaced by the loading state.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Explicit Retry must read the same resource again.
   useEffect(() => {
     const abortController = new AbortController();
 
@@ -689,7 +693,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
           detail: isApiError(err) ? err.response?.data?.detail : undefined,
         });
       } finally {
-        setLoading(false);
+        if (!abortController.signal.aborted) setLoading(false);
       }
     };
 
@@ -699,7 +703,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       abortController.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, contentProviders, fetchWithRetry, isReadOnly, path, setEditBaselineContent, virtualSource]);
+  }, [connectionId, contentProviders, fetchWithRetry, isReadOnly, path, setEditBaselineContent, virtualSource, contentLoadAttempt]);
 
   const snapshotDraft = useCallback(() => {
     if (!isEditingRef.current) {
@@ -1298,6 +1302,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
       setEditError(null);
       setIsSaving(true);
+      let writingTarget = false;
 
       try {
         const editor = editorRef.current;
@@ -1313,6 +1318,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         });
 
         if (!editSession) throw new Error("Edit session is no longer active");
+        writingTarget = true;
         await editSession.writeText(savedContent, { mimeType: "text/markdown;charset=utf-8", reacquireExpiredLock: false });
         emitMarkdownDebugTrace("MarkdownViewer", "persistDraft:save-resolved", {
           savedContentLength: savedContent.length,
@@ -1351,12 +1357,22 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         emitMarkdownDebugTrace("MarkdownViewer", "persistDraft:error", {
           message: err instanceof Error ? err.message : String(err),
         });
+        const failure = classifyFileFailure(err, path);
+        snapshotDraft();
+        if (failure.kind === "missing") {
+          publishMissingPhysicalFile({ connectionId, path });
+          setReadOnlyReason("unavailable");
+          await releaseEditSession();
+        }
         if (err instanceof ExpiredEditLockError || (isApiError(err) && [403, 409].includes(err.response?.status ?? 0))) {
-          snapshotDraft();
           setReadOnlyReason(err instanceof ExpiredEditLockError ? "lost" : err.response?.status === 403 ? "permission-denied" : "locked");
           await releaseEditSession();
         }
-        setEditError(getApiErrorMessage(err, t("viewer.edit.saveFailed"), { includeOriginalMessage: true }));
+        setEditError(
+          writingTarget
+            ? `${t("viewer.edit.saveFailed")} ${failure.message}`
+            : getApiErrorMessage(err, t("viewer.edit.saveFailed"), { includeOriginalMessage: true })
+        );
         logError("Failed to save markdown", { error: err, path, connectionId });
         return false;
       } finally {
@@ -2160,8 +2176,8 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       {!isEditing && !loading && !error && <GlobalStyles styles={MARKDOWN_VIEWER_PRINT_STYLES} />}
       <Dialog
         data-markdown-print-viewer={!isEditing && !loading && !error ? "true" : undefined}
-        inert={isTransitioning}
-        open={true}
+        aria-busy={isTransitioning}
+        open
         onClose={handleDialogClose}
         maxWidth={false}
         fullScreen
@@ -2300,7 +2316,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
           <ViewerNotifications
             key={JSON.stringify([connectionId, path])}
-            notices={notices}
+            notices={notices.map((notice) => ({ ...notice, duration: VIEWER_LOCK_NOTICE_DURATION_MS }))}
             toolbarBackground={toolbarBg}
             toolbarText={toolbarText}
             suppressed={Boolean(unsavedChangesDialogOpen || recoveryDraft || conflict)}
@@ -2340,7 +2356,22 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
               </Box>
             ) : error ? (
               <Box sx={{ p: 2 }}>
-                <Alert severity="error">{error}</Alert>
+                <Alert
+                  severity="error"
+                  sx={{ overflowWrap: "anywhere" }}
+                  action={
+                    <Button
+                      color="inherit"
+                      size="small"
+                      startIcon={<Refresh />}
+                      onClick={() => setContentLoadAttempt((attempt) => attempt + 1)}
+                    >
+                      {t("common.actions.retry")}
+                    </Button>
+                  }
+                >
+                  {error}
+                </Alert>
               </Box>
             ) : isEditing ? (
               <Box

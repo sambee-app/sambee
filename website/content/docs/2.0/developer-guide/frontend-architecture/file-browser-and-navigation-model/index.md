@@ -44,6 +44,44 @@ Visual state also matters:
 
 ## Real-Time Directory Refresh
 
+### Directory Navigation Failures
+
+Physical directory navigation has a pending target and a displayed location. Load the target through the content provider before committing its connection, path, rows, and route. A failed navigation keeps the previous displayed location, selection, and scroll state. Request cancellation and location guards reject late responses, including responses from automatic parent recovery.
+
+Only successfully loaded physical directories become file-list subscription targets. Missing initial locations and deleted current directories recover to an accessible parent, or clear stale rows and keep recovery controls visible. Canonical recovery replaces the affected route; it does not use browser Back or change the other pane.
+
+The SMB storage boundary translates named missing-name, missing-parent, access-denied, and wrong-type statuses into typed storage errors. Directory listing returns a structured API code and a safe message. Only a confirmed `directory_not_found` result permits stale history and directory-index removal. A connection-level HTTP 404 is not proof that a folder was deleted.
+
+Companion directory listings use the same `directory_not_found`, `directory_access_denied`, `not_a_directory`, and `directory_unavailable` codes. Companion responses put `code` beside the safe `detail` string; SMB responses put the code inside `detail`. The pane accepts both formats. Local path validation and directory reads use the directory error mapper, while unavailable drive roots remain separate from missing folders. Do not remove folder history for an unavailable drive. The existing drive-boundary and path-traversal checks still apply.
+
+`components/OperationNotifications.tsx` provides one viewport-centered notification host for both panes, viewers, and page operations. `OperationNotificationProvider` collects active notices from their existing owners. It does not own navigation, history, editor text, or locks. The host moves inside the top open dialog for modal focus access. It does not change file-row geometry.
+
+Errors precede warnings and information. Equal-priority sources retain registration order. Only one toast is visible; Next notification exposes other active failures without dismissing the current failure. There is no historical event queue. Pending notices come only from mounted owners' current state, and resolved or unmounted sources retire their notices. Optional failure keys deduplicate one failure across owners without merging different targets.
+
+Toasts have a finite duration by default. `NOTICE_DURATION_MS` defines 6 seconds for information and completed results, 10 seconds for browser failures and service status, and 15 seconds for editor errors and safety warnings. Folder-recovery results use 6 seconds even though their severity is warning. Retry and Settings actions do not make a toast persistent.
+
+Set `persistent: true` only for an active upload or download with Cancel, share preparation with Cancel, or a ready-to-share decision with Share and Cancel. Sharing after confirmation uses the 6-second information timeout. These exceptions use the existing toast controls; they do not add another progress or status surface. Unsaved-change, conflict, password, and draft-recovery dialogs keep their existing decision behavior.
+
+A timer starts when its toast becomes visible, pauses during hover or keyboard focus, and does not restart for routine message updates. Expiry hides the toast without calling its `onDismiss` callback or its source's dismissal callback. Only completed informational results use `onExpire` to clear their display flags, so a later identical result can appear again. Expiry must not clear unresolved errors, cancel operations, discard drafts, or mark pairing or monitoring as healthy. Occurrence identities allow a new attempt to show the same error after expiry or dismissal. Retry retains its original target rather than following the active pane or selected row.
+
+Target-specific notices show the message first, followed by smaller, regular-weight context on a separate line. `formatNoticeTarget` captures the connection name and full connection-relative path, including the failed file or folder. The root is `/`. Render this context with `DialogIdentifierDisplay` in its text appearance. It uses the shared grapheme-aware `abbreviatePath` algorithm to fit the visual path on one line, preserving the connection prefix and useful trailing segments where space permits. It recalculates when the available width changes. The complete value remains in the accessible name and a hover-only tooltip; shortening must not change failure identity or the Retry target. Bidirectional text is isolated. These paths do not expose the server's physical filesystem root. Global notices without a target have no context line. Known missing-file and missing-folder errors use short toast summaries without repeating the target name; inline errors and dialogs keep their detailed messages. Other error text is not rewritten.
+
+Each failure captures its own target rather than following the active pane or selected row. A recovery result identifies the original missing path, even after an accessible parent loads. If a parent fails during recovery, its failure notice identifies that parent instead. Refresh always reloads the displayed folder; it does not replay a failed navigation or native launch. Native Retry uses the item resolved by the original attempt. Backend and Companion status recovery remains available from the existing header warning menu after notification expiry or dismissal, without covering bottom file actions. The existing monitoring control and initial-folder error state also remain available. No additional inline editor warning or progress control is added when a toast expires.
+
+An unavailable initial directory uses an unframed error state in the list area, with the original location and recovery actions. A usable previous listing, including an empty folder, remains visible after a failed target request. Loading and onboarding have their own content states. Stopped automatic updates retain a compact recovery control after toast dismissal. Backend outages have one transition notice and a persistent status control; a brief reconnection does not start another notice cycle. Expected monitor startup failures do not produce duplicate tracebacks.
+
+Automatic parent recovery skips missing, inaccessible, and wrong-type parents within the configured root. It stops on cancellation, a newer request, pairing failure, timeout, or unavailable storage. A directory-only route replacement retains the active viewer identity and selection revision. It must not reload content, unmount a dirty editor, or acquire another edit lock.
+
+### Subscription Acknowledgements
+
+Both WebSocket transports attach a request ID to each directory subscription. Requested and acknowledged subscriptions are separate. A reply is accepted only for the current socket, request ID, and requested location. Unsubscribe and socket cleanup retire that state and its bounded acknowledgement timer.
+
+Directory-change events are accepted only from the socket that acknowledged the current subscription. Events before acknowledgement, after failure, or after retirement cannot refresh the pane. A successful directory refresh alone does not clear a monitor failure; the matching acknowledgement clears it.
+
+Subscription errors include the connection, path, request ID, and a safe code. Confirmed absence invalidates that exact location through the pane refresh scheduler; the fresh listing decides whether parent recovery is needed. Other subscription failures retain valid rows and show persistent Retry controls. They do not prove deletion or start an automatic subscribe/reload loop. A running monitor invalidates its deleted directory before retiring its watcher state.
+
+### Refresh Scheduling
+
 Each pane handles directory-change notifications independently. An automatic refresh keeps an already loaded physical-directory listing mounted, including an empty listing, so unchanged rows retain selection, keyboard focus, and scroll position. Initial loading and navigation without a usable snapshot still show loading feedback.
 
 Notifications don't cancel an active listing request. Instead, the pane remembers that another refresh is needed and starts one follow-up request after the active request finishes. Automatic refreshes start at most once per second. Further notifications don't move an existing deadline, so continuous writes still produce periodic updates. Navigation and unmount cancel queued work.
@@ -95,11 +133,27 @@ Viewer links resolve metadata through the storage registry or content provider, 
 
 The incoming URL always wins over a browser recovery snapshot. Snapshot hydration matches each pane's resource identity, clears legacy viewer state, and ignores unmatched panes. A bare `/browse` uses normal default navigation. Captured snapshots use the current canonical workspace URL and contain neither callback fragments nor edit-session tokens.
 
+### Physical File Failures
+
+`utils/apiErrors.ts` classifies nested SMB codes and top-level Companion codes. `item_not_found` means confirmed physical absence. Metadata also serves directories; `not_a_file` is reserved for operations that require a regular file. Missing connections, unavailable drive roots, archive members, pairing failures, and expired tokens remain separate. An HTTP 404 alone is not evidence that a physical file was deleted.
+
+Physical viewer reads decode a structured binary error only when its content type is JSON and its size is bounded. An ambiguous image or PDF decode failure can make one guarded metadata request for the current resource. Existing metadata does not turn a decode failure into a deletion. Abort signals, viewer identities, and source URLs reject stale results.
+
+`services/fileRecoveryEvents.ts` carries confirmed absence to the existing pane refresh owner. Each pane invalidates the physical parent cache; only a pane still displaying that connection and parent schedules a refresh. This event does not own notices, history deletion, or editor recovery. Activation errors use pane notices. Viewer errors use the existing viewer controls, without an additional toast.
+
+Recent-file validation removes only the identified record for confirmed absence, a non-file target, an invalid stored target, or an authoritatively deleted stored connection. Item-level and connection-level access denial, generic launch failure, timeout, cancellation, pairing failure, unavailable storage, and unknown errors retain history. Publish the cross-tab change event only after actual cleanup. Recent-directory cleanup still requires an explicit missing-directory result.
+
+Browser editor writes use ordinary create-or-overwrite behavior with the active editor lease. Save can recreate a deleted file at its original path. New lock acquisition still requires an existing regular file and must not create or truncate it. SMB requires existing parent directories; Companion uploads retain their normal parent-directory creation behavior within the available drive. A normal write can overwrite changes made at the same path; it does not compare the file with the editor baseline before writing. A failed save keeps the draft and dirty state. After a successful upload, a failed metadata refresh leaves the upload successful with an unknown modified timestamp. It must not cause an automatic repeat of the write. Native URI dispatch is not a launch acknowledgement. Do not infer later application success or failure from that handoff.
+
 ### Viewer Loading and Transitions
 
 Loading feedback belongs to the selected image, PDF, text, or Markdown viewer. Workspace metadata resolution and dynamic component imports do not show an intermediate full-screen loading dialog. On an initial opening, the browser remains visible until metadata and the viewer component are available; the viewer then displays its existing content-loading feedback.
 
-During file-to-file or history navigation, keep the outgoing viewer presentation mounted until the replacement metadata and component are ready. Do not expose the directory between viewers or pass the new target's props to the old viewer component. Outgoing controls and shortcuts are suspended during the handoff, while Escape can cancel the pending opening. The existing error dialogs retain Retry and Close actions. Cancellation rejects late results rather than reopening a dismissed viewer.
+One viewer component is mounted at a time. Metadata resolution and component imports can retain the displayed resource while controls and shortcuts are suspended; Escape remains available. Once the selected component and metadata are available, that viewer owns content loading and errors. There is no hidden candidate viewer or content-readiness promotion. The editor leave guard remains the sole owner of dirty-navigation decisions.
+
+Image-gallery navigation updates the current index in the same viewer instance and publishes it to the route. The gallery keeps its local bounded cache and preloading; no image-byte cache is shared between viewer instances. An image is ready only when its decoded source exists. A failed image uses the selected image's error controls without displaying the previous image under a new filename. Explicit Retry invalidates failed local bytes and makes a fresh request. Encrypted PDFs retain the standard responsive password dialog.
+
+Viewer content failures use the selected viewer's error state with Retry and Close, not a generic replacement toast. Individual loaders reject late results after a newer selection or close. There is no guarantee that a previous document remains displayed until the next document's content is ready.
 
 One dynamic viewer host serves both panes. An explicit viewer ID, not an image's changing MIME type, controls component loading. Text and Markdown still reset resource-local state when the actual file changes; mode-only and settings-only navigation do not restart the viewer.
 

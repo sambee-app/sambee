@@ -1,6 +1,8 @@
 import { createContext, useContext } from "react";
 import api from "../../services/api";
 import { isLocalDrive } from "../../services/backendRouter";
+import { publishMissingPhysicalFile } from "../../services/fileRecoveryEvents";
+import { PreviewUnavailableError } from "../../services/previewPolicy";
 import type {
   ResolvedStorageDirectoryLocation,
   StorageBackendRegistry,
@@ -9,6 +11,7 @@ import type {
 } from "../../services/storageContracts";
 import type { ArchiveEntryInfo, ArchiveExtractionDecisionAction, FileEntry } from "../../types";
 import { FileType } from "../../types";
+import { classifyFileFailure, normalizePhysicalFileFailure } from "../../utils/apiErrors";
 
 export type VirtualContentProviderId = "zip" | (string & {});
 
@@ -66,7 +69,7 @@ export interface ContentTextWriteOptions {
 
 export interface ContentEditSession {
   heartbeat(): Promise<void>;
-  /** Writes the editor content, recreating the target when it was deleted during the edit session. */
+  /** Writes the editor content, recreating a deleted target. A normal write can overwrite changes at the same path. */
   writeText(content: string, options?: ContentTextWriteOptions): Promise<void>;
   release(): Promise<void>;
 }
@@ -158,6 +161,7 @@ export interface ContentProvider {
   readonly id: "physical" | VirtualContentProviderId;
   list(location: ContentLocation, options?: { cursor?: string; pageSize?: number; signal?: AbortSignal }): Promise<ProviderListResult>;
   getCapabilities(location: ContentLocation): ContentCapabilities;
+  getInfo?(item: ContentItemHandle, options?: { signal?: AbortSignal }): Promise<Pick<FileEntry, "type">>;
   read(item: ContentItemHandle, request: ContentReadRequest, options?: ContentReadOptions): Promise<Blob>;
   beginEdit(item: ContentItemHandle): Promise<ContentEditStartResult>;
   invalidatePdfDerivative(item: ContentItemHandle, screenProfile?: PdfScreenProfile): Promise<void>;
@@ -301,6 +305,11 @@ export function createStorageBackedContentProviderRegistry(registry: StorageBack
       return { items: listing.items.map((entry) => physicalItem(location, entry)), total: listing.total, nextCursor: null };
     },
     getCapabilities: (location) => (location.kind === "physical" ? storageCapabilities(location, registry) : PHYSICAL_CAPABILITIES),
+    async getInfo(item, options) {
+      if (item.kind !== "physical") throw new Error("Physical provider requires a physical item");
+      const resolved = registry.resolveItem({ connectionId: item.location.connectionId, path: item.path });
+      return registry.getBackend(resolved.target).getInfo(resolved, options);
+    },
     async read(item, request, options) {
       if (item.kind !== "physical") throw new Error("Physical provider requires a physical item");
       const resolved = registry.resolveItem({ connectionId: item.location.connectionId, path: item.path });
@@ -419,7 +428,7 @@ export function readContent(
   return registry.get(item.location).read(item, request, options);
 }
 
-export function readViewerContent(
+export async function readViewerContent(
   connectionId: string,
   path: string,
   request: ContentReadRequest,
@@ -427,7 +436,15 @@ export function readViewerContent(
   registry: ContentProviderRegistry
 ): Promise<Blob> {
   const item = options?.virtualSource ? virtualItemHandle(options.virtualSource.location, path) : physicalItemHandle(connectionId, path);
-  return readContent(item, request, options, registry);
+  try {
+    return await readContent(item, request, options, registry);
+  } catch (error) {
+    if (item.kind === "virtual" || options?.signal?.aborted || error instanceof PreviewUnavailableError) throw error;
+    const failure = await normalizePhysicalFileFailure(error, path);
+    if (options?.signal?.aborted || failure.failure.kind === "cancelled") throw error;
+    if (failure.failure.kind === "missing") publishMissingPhysicalFile({ connectionId, path });
+    throw failure;
+  }
 }
 
 export async function beginViewerTextEdit(
@@ -436,7 +453,38 @@ export async function beginViewerTextEdit(
   registry: ContentProviderRegistry
 ): Promise<ContentEditStartResult> {
   const item = physicalItemHandle(connectionId, path);
-  return registry.get(item.location).beginEdit(item);
+  try {
+    return await registry.get(item.location).beginEdit(item);
+  } catch (error) {
+    const failure = await normalizePhysicalFileFailure(error, path);
+    if (failure.failure.kind === "missing") publishMissingPhysicalFile({ connectionId, path });
+    throw failure;
+  }
+}
+
+export async function verifyViewerSourceAfterFailure(
+  connectionId: string,
+  path: string,
+  virtualSource: VirtualItemHandle | undefined,
+  registry: ContentProviderRegistry,
+  isCurrent: () => boolean,
+  signal?: AbortSignal
+): Promise<string | null> {
+  if (virtualSource || !isCurrent() || signal?.aborted) return null;
+  const item = physicalItemHandle(connectionId, path);
+  try {
+    const provider = registry.get(item.location);
+    if (!provider.getInfo) return null;
+    const metadata = await provider.getInfo(item, { signal });
+    if (!isCurrent() || signal?.aborted) return null;
+    if (metadata.type !== FileType.FILE) return classifyFileFailure({ response: { data: { code: "not_a_file" } } }, path).message;
+    return null;
+  } catch (error) {
+    const failure = await normalizePhysicalFileFailure(error, path);
+    if (!isCurrent() || signal?.aborted || failure.failure.kind === "cancelled") return null;
+    if (failure.failure.kind === "missing") publishMissingPhysicalFile({ connectionId, path });
+    return failure.message;
+  }
 }
 
 export function invalidateViewerPdfDerivative(

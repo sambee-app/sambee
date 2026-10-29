@@ -49,15 +49,17 @@ Acquisition uses an activation generation to release obsolete results, and a pen
 
 Text and Markdown saves pass `reacquireExpiredLock: false`; they must not silently reacquire an expired lock and overwrite a changed file. Save acknowledges only the captured revision, preserving newer edits as dirty. The routed leave guard protects dirty navigation and pending operations. Text Close goes directly to the file list after release, and Discard commits a clean state before navigation so the guard doesn't prompt twice.
 
+Save from a valid active session can recreate a file deleted at the original path. It can also overwrite changes made at that path; it does not detect replacement files. Failed writes retain the draft. The dynamic host mounts one viewer, not a hidden candidate alongside the current document. Each viewer owns its load and error state; the image gallery reuses only its own local cache.
+
 Read-only disables typing, Save, and Replace, not Find, selection, copying, wrapping, download, or sharing. Recovery is resolved before automatic activation. Keep regressions for late acquisition, Strict Mode, read-only and conflict states, history navigation, and Markdown's separate lifecycle when changing this shared path.
 
 ## Shared Viewer Notifications
 
-`ViewerNotifications.tsx` provides the viewer-local toast host, shared edit-lock message mapping, and delayed acquisition indicator for text and Markdown. Markdown retains its preview/edit lifecycle, but uses the same lock/read-only notification, filename badge, explicit Retry action, and retained-draft conflict decision. Lock release completes before another acquisition starts; obsolete acquisition results are released without publishing errors.
+`ViewerNotifications.tsx` reuses the application notification host, shared edit-lock message mapping, and delayed acquisition indicator for text and Markdown. There is no viewer-corner or pane-local toast host in the file browser. Markdown retains its preview/edit lifecycle, but uses the same lock/read-only notification, filename badge, explicit Retry action, and retained-draft conflict decision. Lock release completes before another acquisition starts; obsolete acquisition results are released without publishing errors.
 
-Each viewer supplies active notices with stable IDs, severity, and operation occurrence numbers. The host displays one bottom-center toast at a time, prioritizing errors over warnings and information. Dismissed heartbeat and draft-storage conditions stay dismissed until resolution or a changed condition. A new operation failure can notify again even when its message is unchanged. Resolved notices leave the queue, and viewer identity keys isolate dismissal state between files.
+Each viewer supplies active notices with stable IDs, severity, and operation occurrence numbers. One host displays one bottom-center toast across both panes and all viewer and page operations, prioritizing errors over warnings and information. Next notification exposes another pending condition. Dismissed heartbeat and draft-storage conditions stay dismissed until resolution or a changed condition. A new operation failure can notify again even when its message is unchanged. Resolved notices leave the active set, and source identities isolate dismissal state between files. Moving the host into a modal does not reset dismissal state.
 
-Informational lock notices auto-dismiss after 15 seconds. Errors and safety warnings remain until dismissed or resolved. Toasts don't take focus or change document geometry, and dismissal never changes the owning edit, lock, or recovery state. Recovery and unsaved-changes dialogs retain their own failure notices and suppress viewer toasts while open. Document-load failures, file-size limits, search validation, and editor-load/crash recovery remain in context rather than moving into the toast queue.
+All Text and Markdown editor toasts expire after 15 seconds, including informational lock notices, edit and save errors, print errors, heartbeat warnings, and draft-storage warnings. Hover or keyboard focus pauses expiry. Expiry hides only the notification; it does not clear the error, release a lock, discard a draft, or change the edit session. There is no additional inline warning after expiry. Existing editor controls and unsaved-change safeguards remain available. Toasts don't take focus or change document geometry. Recovery and unsaved-changes dialogs retain their own failure notices and suppress viewer toasts while open. Document-load failures, file-size limits, search validation, and editor-load/crash recovery remain in context rather than moving into the toast queue.
 
 ## Browser-Native Versus Server-Converted Images
 
@@ -92,6 +94,8 @@ The viewer endpoint then follows this rule:
 
 - if the image can stream safely as-is, return a streaming response
 - if it requires conversion, read it, convert it, and return the converted bytes with the converted MIME type
+
+Physical streams read their first chunk before sending response headers. An initial read failure can therefore return a safe structured error. A later read failure terminates the stream and closes the backend; it cannot replace an already committed HTTP response with JSON. PDF derivative preparation reads its source before returning bytes, so a source failure during that buffered read can still use the structured error boundary. Native-download intent redemption uses the same prepared-stream boundary.
 
 That means preview behavior for formats such as TIFF, HEIC, BMP, ICO, and similar formats depends on backend conversion policy, not just on frontend MIME recognition.
 
@@ -264,6 +268,14 @@ The current shared-toolbar consumers are:
 - `MarkdownViewer`, which reuses the same shell for download, optional mobile share, shared search UI, and viewer-specific action buttons such as editing flows
 
 `ViewerControls` also supports generic toolbar actions through the `actions` prop, which can render either text buttons or icon buttons. That is what allows Markdown-specific actions to live inside the same shared toolbar instead of forcing a second toolbar implementation.
+
+### PDF Loading And Password Cancellation
+
+The PDF viewer keeps the document hidden and its controls disabled until the active page's canvas has rendered. The loading indicator and text appear only after 500 ms. A fast load shows neither. Each new document, retry, or compatibility attempt starts a new feedback delay. Readiness does not wait for text extraction or a minimum indicator display time.
+
+Escape, Cancel, and the mobile back action in the password dialog cancel the current PDF load. Cancellation clears the password, unmounts the document to destroy its PDF.js loading task, releases its blob URL, and shows a notice with Retry. It does not submit an empty or null password, and it does not request compatibility processing. Downloading the original remains available through the viewer's existing download action. Only an explicit retry can start a new password request after cancellation.
+
+Password callbacks belong to one load session. The viewer ignores callbacks from canceled or replaced sessions. An incorrect password can request another attempt within the same active session.
 
 ### Search UI Versus Search Engine
 

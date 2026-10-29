@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pytest import MonkeyPatch
 from sqlmodel import Session
@@ -305,6 +307,38 @@ class TestRecentFilesApi:
         assert [entry["id"] for entry in client.get("/api/browse/recent-files", headers=auth_headers_user).json()["results"]] == [
             record["id"]
         ]
+
+    @pytest.mark.parametrize("connection_denied", [False, True])
+    def test_access_denial_retains_the_persisted_record_and_allows_recovery(
+        self, client, auth_headers_user, test_connection, monkeypatch, session, connection_denied
+    ) -> None:
+        import app.api.browser as browser_api
+
+        record = client.post(
+            "/api/browse/recent-files",
+            headers=auth_headers_user,
+            json={"connection_id": str(test_connection.id), "path": "retained.txt", "is_regular_file": True},
+        ).json()
+        with monkeypatch.context() as denial:
+            if connection_denied:
+
+                def deny_connection(*_args, **_kwargs):
+                    raise HTTPException(status_code=404, detail="Connection unavailable")
+
+                denial.setattr(browser_api, "get_accessible_connection_or_404", deny_connection)
+            else:
+                from unittest.mock import AsyncMock
+
+                backend = AsyncMock()
+                backend.get_file_info.side_effect = PermissionError("private SMB path")
+                denial.setattr(browser_api, "build_smb_backend", lambda *_args, **_kwargs: backend)
+            response = client.get(f"/api/browse/recent-files/{record['id']}/target", headers=auth_headers_user)
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "recent_file_access_denied"
+        assert session.get(RecentFile, uuid.UUID(record["id"])) is not None
+        assert "private SMB path" not in response.text
+        restored = client.get(f"/api/browse/recent-files/{record['id']}/target", headers=auth_headers_user)
+        assert restored.status_code == 200
 
     def test_validation_returns_authoritative_file_info(
         self, client: TestClient, auth_headers_user: dict[str, str], test_connection: Connection, monkeypatch: MonkeyPatch
