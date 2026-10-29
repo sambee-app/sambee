@@ -5,7 +5,7 @@ import { requireTestValue, uninitializedTestCallback } from "../../test/helpers/
  * Tests for directory navigation, breadcrumbs, URL handling, and connection switching
  */
 
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
@@ -192,10 +192,22 @@ describe("Browser Component - Navigation", () => {
 
   it("retains typeahead focus when freshly validating a revisited directory with the same item count", async () => {
     const destinationFiles = [createFileEntry("Alpha.txt", "Destination/Alpha.txt"), createFileEntry("Zebra.txt", "Destination/Zebra.txt")];
+    const refreshedDestinationFiles = [
+      createFileEntry("Beta.txt", "Destination/Beta.txt"),
+      createFileEntry("Zebra.txt", "Destination/Zebra.txt"),
+    ];
     const rootFiles = [createDirectoryEntry("Destination", "Destination"), createFileEntry("Other.txt", "Other.txt")];
+    let destinationLoadCount = 0;
+    let resolveDestination: (value: { items: FileInfo[]; path: string; total: number }) => void = uninitializedTestCallback;
 
     vi.mocked(api.listDirectory).mockImplementation(async (_connectionId, path) => {
       if (path === "Destination") {
+        destinationLoadCount += 1;
+        if (destinationLoadCount === 2) {
+          return new Promise((resolve) => {
+            resolveDestination = resolve;
+          });
+        }
         return { items: destinationFiles, path, total: destinationFiles.length };
       }
 
@@ -205,28 +217,37 @@ describe("Browser Component - Navigation", () => {
     const user = userEvent.setup();
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-    const focusDestinationAndOpen = async () => {
-      const listContainer = await screen.findByTestId("file-list-container");
-      listContainer.focus();
-      await user.keyboard("d");
+    const openDestination = async () => {
+      await user.click(await screen.findByRole("button", { name: /folder: destination/i }));
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /folder: destination/i })).toHaveAttribute("data-selected", "true");
+        expect(screen.getByTestId("router-location").textContent).toBe("/browse/smb/test-server-1/Destination");
+        expect(screen.getByRole("button", { name: /file: zebra\.txt/i })).toBeInTheDocument();
+        expect(screen.getByTestId("file-list-container")).toHaveFocus();
       });
-      await user.keyboard("{Enter}");
-      return screen.findByRole("button", { name: /file: zebra\.txt/i });
     };
 
-    await focusDestinationAndOpen();
+    await openDestination();
 
     await user.click(screen.getByRole("button", { name: /navigate to root directory/i }));
-    await screen.findByRole("button", { name: /folder: destination/i });
+    await waitFor(() => {
+      expect(screen.getByTestId("router-location").textContent).toBe("/browse/smb/test-server-1");
+      expect(screen.getByRole("button", { name: /folder: destination/i })).toBeInTheDocument();
+      expect(screen.getByTestId("file-list-container")).toHaveFocus();
+    });
 
-    await focusDestinationAndOpen();
-    const cachedDestinationList = screen.getByTestId("file-list-container");
-    expect(cachedDestinationList).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: /folder: destination/i }));
+    await waitFor(() => expect(destinationLoadCount).toBe(2));
+    expect(screen.getByRole("button", { name: /folder: destination/i })).toBeInTheDocument();
+    await act(async () => {
+      resolveDestination({ items: refreshedDestinationFiles, path: "Destination", total: refreshedDestinationFiles.length });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("router-location").textContent).toBe("/browse/smb/test-server-1/Destination");
+      expect(screen.getByRole("button", { name: /file: beta\.txt/i })).toBeInTheDocument();
+      expect(screen.getByTestId("file-list-container")).toHaveFocus();
+    });
 
     await user.keyboard("z");
-
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /file: zebra\.txt/i })).toHaveAttribute("data-selected", "true");
     });

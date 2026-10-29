@@ -306,7 +306,7 @@ describe("FileBrowser WebSocket behavior", () => {
         })
       )
     );
-    expect(await screen.findByText("You do not have permission to open this folder.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("You do not have permission to open this folder.")).toBeInTheDocument());
     expect(refreshControl).toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(parseSentMessages(socket).filter((message) => message.action === "subscribe")).toHaveLength(1);
@@ -323,7 +323,7 @@ describe("FileBrowser WebSocket behavior", () => {
         })
       )
     );
-    expect(await screen.findByText("You do not have permission to open this folder.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("You do not have permission to open this folder.")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await waitFor(() => expect(parseSentMessages(socket).filter((message) => message.action === "subscribe")).toHaveLength(3));
     const recoveryRequest = JSON.parse(requireTestValue(socket.sentMessages.at(-1)));
@@ -351,7 +351,7 @@ describe("FileBrowser WebSocket behavior", () => {
       if (typeof timeout[0] === "function") timeout[0]();
     });
     const message = "Directory monitoring did not start in time. Refresh the folder to retry.";
-    expect(await screen.findByText(message)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
     act(() => socket.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ ...request, type: "subscribed" }) })));
     expect(screen.getByText(message)).toBeInTheDocument();
     expect(parseSentMessages(socket).filter((entry) => entry.action === "subscribe")).toHaveLength(1);

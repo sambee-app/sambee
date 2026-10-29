@@ -280,7 +280,7 @@ describe("Browser Component - Interactions", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Files" }));
 
       expect(pickerClick).not.toHaveBeenCalled();
-      expect(await screen.findByText(/destination changed/i)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/destination changed/i)).toBeInTheDocument());
     } finally {
       pickerClick.mockRestore();
     }
@@ -328,7 +328,7 @@ describe("Browser Component - Interactions", () => {
 
       Object.defineProperty(picker!, "files", { value: [new File(["data"], "report.txt")] });
       picker!.dispatchEvent(new Event("change", { bubbles: true }));
-      expect(await screen.findByText(/destination changed/i)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/destination changed/i)).toBeInTheDocument());
       expect(api.publishBrowserFile).not.toHaveBeenCalled();
     } finally {
       pickerClick.mockRestore();
@@ -346,7 +346,7 @@ describe("Browser Component - Interactions", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
-      expect(await screen.findByText(/did not provide usable folder paths/)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/did not provide usable folder paths/)).toBeInTheDocument());
       expect(api.getFileInfo).not.toHaveBeenCalled();
       expect(api.createItem).not.toHaveBeenCalled();
       expect(api.publishBrowserFile).not.toHaveBeenCalled();
@@ -533,7 +533,7 @@ describe("Browser Component - Interactions", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Folder" }));
 
-      expect(await screen.findByText(/Inspect the destination before retrying/)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/Inspect the destination before retrying/)).toBeInTheDocument());
       expect(api.publishBrowserFile).toHaveBeenCalledOnce();
       expect(api.publishBrowserFile).toHaveBeenCalledWith(expect.any(File), "conn-1", "Documents/one.txt", "ask", expect.any(Object));
     } finally {
@@ -597,7 +597,7 @@ describe("Browser Component - Interactions", () => {
 
     await waitFor(() => expect(api.publishBrowserFile).toHaveBeenCalledTimes(3));
     expect(vi.mocked(api.publishBrowserFile).mock.calls.map(([, , path]) => path)).toEqual(["a.txt", "b.txt", "Folder/child.txt"]);
-    expect(await screen.findByText(/Uploaded 2 files.*1 outcome uncertain/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/Uploaded 2 files.*1 outcome uncertain/)).toBeInTheDocument());
   });
 
   it("shows sent bytes and publishing separately from confirmed upload completion", async () => {
@@ -627,7 +627,7 @@ describe("Browser Component - Interactions", () => {
       act(() => options?.onUploadSent?.());
       expect(screen.getByText(/Publishing/)).toBeInTheDocument();
       act(() => completeUpload?.(completedTransferResult));
-      expect(await screen.findByText(/Uploaded 1 file/)).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/Uploaded 1 file/)).toBeInTheDocument());
     } finally {
       pickerClick.mockRestore();
     }
@@ -1440,8 +1440,8 @@ describe("Browser Component - Interactions", () => {
       await user.keyboard("{F5}");
       await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Copy" }));
 
-      expect(await screen.findByText(/Destination was created but the original could not be removed/)).toBeInTheDocument();
-      expect(await screen.findByText("Content transfer failed: transport")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText(/Destination was created but the original could not be removed/)).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Content transfer failed: transport")).toBeInTheDocument());
     });
 
     it("offers all regular-file conflict actions when replacement is available", async () => {
@@ -1619,7 +1619,7 @@ describe("Browser Component - Interactions", () => {
       expect(event.defaultPrevented).toBe(true);
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(api.copyItem).not.toHaveBeenCalled();
-      expect(await screen.findByText("This location is read-only.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("This location is read-only.")).toBeInTheDocument());
     });
 
     it("explains unavailable F5, F6, and Alt+F5 when no item is selected", async () => {
@@ -1632,17 +1632,17 @@ describe("Browser Component - Interactions", () => {
       const copyEvent = createEvent.keyDown(document, { key: "F5" });
       fireEvent(document, copyEvent);
       expect(copyEvent.defaultPrevented).toBe(true);
-      expect(await screen.findByText("Select one or more items to copy.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Select one or more items to copy.")).toBeInTheDocument());
 
       const moveEvent = createEvent.keyDown(document, { key: "F6" });
       fireEvent(document, moveEvent);
       expect(moveEvent.defaultPrevented).toBe(true);
-      expect(await screen.findByText("Select one or more items to move.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Select one or more items to move.")).toBeInTheDocument());
 
       const archiveEvent = createEvent.keyDown(document, { key: "F5", altKey: true });
       fireEvent(document, archiveEvent);
       expect(archiveEvent.defaultPrevented).toBe(true);
-      expect(await screen.findByText("Select items that can be added to an archive.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Select items that can be added to an archive.")).toBeInTheDocument());
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
@@ -1655,7 +1655,7 @@ describe("Browser Component - Interactions", () => {
       fireEvent(document, event);
 
       expect(event.defaultPrevented).toBe(true);
-      expect(await screen.findByText("Copy requires dual-pane mode.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Copy requires dual-pane mode.")).toBeInTheDocument());
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
@@ -1669,7 +1669,7 @@ describe("Browser Component - Interactions", () => {
       const directoryEvent = createEvent.keyDown(document, { key: "F7" });
       fireEvent(document, directoryEvent);
       expect(directoryEvent.defaultPrevented).toBe(true);
-      expect(await screen.findByText("This location is read-only.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("This location is read-only.")).toBeInTheDocument());
 
       const fileEvent = createEvent.keyDown(document, { key: "F7", shiftKey: true });
       fireEvent(document, fileEvent);
@@ -1990,7 +1990,7 @@ describe("Browser Component - Interactions", () => {
       expect(screen.queryByText(/will be permanently deleted/i)).not.toBeInTheDocument();
       expect(screen.queryByRole("dialog", { name: /rename/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("dialog", { name: /create/i })).not.toBeInTheDocument();
-      expect(await screen.findByText("Archive contents cannot be modified.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Archive contents cannot be modified.")).toBeInTheDocument());
     });
 
     it("disables archive-wide extraction with Alt+F9 inside an archive and lists it in keyboard help", async () => {
@@ -2029,7 +2029,7 @@ describe("Browser Component - Interactions", () => {
 
       fireEvent.keyDown(document, { key: "F9", altKey: true });
       expect(screen.queryByRole("dialog", { name: "Extract from ZIP Archive" })).not.toBeInTheDocument();
-      expect(await screen.findByText("Select an archive to extract.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Select an archive to extract.")).toBeInTheDocument());
 
       await user.keyboard("{Control>}p{/Control}");
       const commandInput = await screen.findByPlaceholderText("Run a command");
@@ -2166,7 +2166,7 @@ describe("Browser Component - Interactions", () => {
       await waitFor(() => {
         expect(api.prepareArchiveOperation).toHaveBeenCalledWith(expect.objectContaining({ selected_member_paths: ["inside.txt"] }));
       });
-      expect(await screen.findByText("Archive extraction completed.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Archive extraction completed.")).toBeInTheDocument());
       expect(api.copyItem).not.toHaveBeenCalled();
       expect(api.moveItem).not.toHaveBeenCalled();
       expect(api.executeArchiveCreation).not.toHaveBeenCalled();
@@ -2193,7 +2193,7 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{F5}");
 
-      expect(await screen.findByRole("status")).toHaveTextContent("This location is read-only.");
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("This location is read-only."));
       expect(screen.queryByRole("dialog", { name: "Extract from ZIP Archive" })).not.toBeInTheDocument();
     });
 
@@ -2220,7 +2220,7 @@ describe("Browser Component - Interactions", () => {
       const extractDialog = await screen.findByRole("dialog", { name: "Extract from ZIP Archive" });
       await user.click(within(extractDialog).getByRole("button", { name: "Extract" }));
 
-      expect(await screen.findByText("Archive extraction was cancelled.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Archive extraction was cancelled.")).toBeInTheDocument());
     });
 
     it("opens the saved preferred Sambee viewer on Enter even when it is outside the default compatible subset", async () => {
@@ -4263,7 +4263,7 @@ describe("Browser Component - Interactions", () => {
       expect(event.defaultPrevented).toBe(true);
       expect(screen.queryByLabelText(/new name/i)).not.toBeInTheDocument();
       expect(api.renameItem).not.toHaveBeenCalled();
-      expect(await screen.findByText("This location is read-only.")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("This location is read-only.")).toBeInTheDocument());
     });
   });
 });
