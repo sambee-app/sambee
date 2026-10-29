@@ -178,6 +178,7 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 
 ### Dependency Security
 
+- Companion: upgraded ZIP from 4.6.1 to 9.1.3 and the updater to 2.14.1. The Windows updater now uses ZIP 9, which includes archive extraction security fixes.
 - Updated all dependencies with known issues or vulnerabilities to fixed versions.
 - Pinned all third-party GitHub Actions workflows to commit SHAs.
 - Frontend: removed `patch-package` to get rid of vulnerable transisitve dependency `braces`.
