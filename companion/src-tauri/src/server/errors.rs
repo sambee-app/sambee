@@ -38,28 +38,28 @@ pub const LOCAL_ARCHIVE_CREATION_PARTIAL_CODE: &str = "local_archive_creation_pa
 /// Stable V2 archive error code when a source identity no longer matches its preflight manifest.
 pub const ARCHIVE_SOURCE_CHANGED_CODE: &str = "source_changed";
 
-fn archive_v2_contract_code(code: &'static str, fallback: &'static str) -> &'static str {
-    match code {
-        "invalid_manifest"
-        | "invalid_checkpoint"
-        | "invalid_contract_version"
-        | "invalid_member_path"
-        | "collision"
-        | "partial_output"
-        | "source_changed"
-        | "transport_failure"
-        | "cancelled"
-        | "idempotency_conflict"
-        | "capability_invalid"
-        | "capability_version_mismatch"
-        | "invalid_request"
-        | "authentication_invalid"
-        | "authorization_denied"
-        | "not_found"
-        | "invalid_operation_state"
-        | "operation_unavailable" => code,
-        _ => fallback,
-    }
+pub(super) fn archive_v2_contract_code(code: &str, fallback: &'static str) -> &'static str {
+    const CODES: &[&str] = &[
+        "invalid_manifest",
+        "invalid_checkpoint",
+        "invalid_contract_version",
+        "invalid_member_path",
+        "collision",
+        "partial_output",
+        "source_changed",
+        "transport_failure",
+        "cancelled",
+        "idempotency_conflict",
+        "capability_invalid",
+        "capability_version_mismatch",
+        "invalid_request",
+        "authentication_invalid",
+        "authorization_denied",
+        "not_found",
+        "invalid_operation_state",
+        "operation_unavailable",
+    ];
+    CODES.iter().copied().find(|candidate| *candidate == code).unwrap_or(fallback)
 }
 
 /// V2-only failure that always serializes to the language-neutral archive contract envelope.

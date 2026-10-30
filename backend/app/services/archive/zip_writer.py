@@ -6,7 +6,7 @@ import unicodedata
 import zlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.services.archive.telemetry import log_archive_operation_metrics
 from app.services.archive.zip_reader import ArchiveFormatError
@@ -44,9 +44,10 @@ class _WrittenEntry:
 
 
 def _dos_time_and_date(modified_at: datetime | None) -> tuple[int, int]:
+    """Write UTC clock fields; timezone-free inputs follow the DOS UTC fallback."""
     if modified_at is None:
         return 0, 0
-    timestamp = modified_at.replace(tzinfo=None)
+    timestamp = modified_at.replace(tzinfo=timezone.utc) if modified_at.tzinfo is None else modified_at.astimezone(timezone.utc)
     if timestamp.year < 1980:
         return 0, 0
     year = min(timestamp.year, 2107) - 1980

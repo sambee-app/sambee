@@ -936,10 +936,10 @@ async def test_replace_older_policy_replaces_only_strictly_older_destination() -
 
 
 @pytest.mark.asyncio
-async def test_replace_older_policy_skips_incomparable_timestamps() -> None:
+async def test_replace_older_policy_skips_timezone_free_target_timestamps() -> None:
     backend = MemoryExtractionBackend(_archive_bytes())
     backend.files["output/root.txt"] = b"existing"
-    backend.modified_at["output/root.txt"] = datetime(1979, 1, 1, tzinfo=timezone.utc)
+    backend.modified_at["output/root.txt"] = datetime(1979, 1, 1)
 
     result = await extract_archive_to_new_paths(
         backend, archive_path="input.zip", destination_root="output", existing_file_policy="replace_older"
@@ -979,7 +979,7 @@ async def test_replace_older_skips_a_newer_target_created_after_preflight() -> N
 
     async def create_newer_competing_file(path: str, _stream: AsyncIterator[bytes], **_kwargs: object) -> int:
         backend.files[path] = b"existing"
-        backend.modified_at[path] = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        backend.modified_at[path] = datetime.max.replace(tzinfo=timezone.utc)
         raise TargetExistsBeforeContent(path)
 
     backend.write_file_from_stream = create_newer_competing_file  # type: ignore[method-assign]

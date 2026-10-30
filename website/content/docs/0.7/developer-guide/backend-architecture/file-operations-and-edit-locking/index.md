@@ -42,6 +42,20 @@ The browser file-management path depends on typed request models and clear stora
 
 The backend should stay authoritative here, even when the frontend tries to make the operation feel immediate.
 
+### Storage Timestamps
+
+Storage metadata must use timezone-aware UTC timestamps. Directory listings, path-based metadata lookup, and metadata read from an open file handle must use the same time basis. Convert Unix timestamps with an explicit UTC timezone, not the backend process timezone.
+
+Source-change checks, overwrite-older decisions, and modification-time preservation depend on this rule. A local timestamp without timezone information can produce a false source-change error or an incorrect conflict decision when the backend container uses a non-UTC timezone.
+
+Test metadata conversion with UTC and a non-UTC process timezone. Include standard time and daylight saving time.
+
+### API Error Details
+
+Preserve the error code and message when an operation passes through a relay. Read the API's error envelope: a response with top-level `code` and `message` fields must not lose its message because a caller expects a legacy `detail` field. Keep legacy error support where the caller serves both API formats. Use a specific fallback when the response has no usable message.
+
+Show the operation's error message in its dialog. Log the response status, code, and message without the full HTTP client error object, which can contain authentication headers or operation tokens.
+
 ## Why Edit Locking Exists
 
 Native-app editing of SMB-backed files is a coordination problem, not just a download-and-upload shortcut.

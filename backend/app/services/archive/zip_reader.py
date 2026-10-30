@@ -7,7 +7,7 @@ import struct
 import zlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from app.storage.base import RandomAccessReader
@@ -252,6 +252,7 @@ def _has_supported_file_type(version_made_by: int, external_attributes: int) -> 
 
 
 def _dos_datetime(date_value: int, time_value: int) -> datetime | None:
+    """Interpret DOS-only dates as UTC, consistently with the Companion reader."""
     year = ((date_value >> 9) & 0x7F) + 1980
     month = (date_value >> 5) & 0x0F
     day = date_value & 0x1F
@@ -259,7 +260,7 @@ def _dos_datetime(date_value: int, time_value: int) -> datetime | None:
     minute = (time_value >> 5) & 0x3F
     second = (time_value & 0x1F) * 2
     try:
-        return datetime(year, month, day, hour, minute, second)
+        return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
     except ValueError:
         return None
 

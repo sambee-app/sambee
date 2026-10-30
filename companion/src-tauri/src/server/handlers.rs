@@ -5301,13 +5301,37 @@ async fn relay_archive_response(response: ReqwestResponse, action: &str) -> Resu
     if let Some(message) = classify_proxy_auth_intercept("Archive relay", Some(status), content_type.as_deref(), &body) {
         return Err(ApiError::Forbidden(message));
     }
-    let detail = serde_json::from_str::<serde_json::Value>(&body)
-        .ok()
-        .and_then(|value| value.get("detail").and_then(serde_json::Value::as_str).map(str::to_owned));
+    let problem = serde_json::from_str::<serde_json::Value>(&body).ok();
+    let detail = problem.as_ref().and_then(|value| {
+        ["message", "detail"].into_iter().find_map(|field| {
+            value
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .filter(|message| !message.trim().is_empty())
+        })
+    });
+    let code = problem
+        .as_ref()
+        .and_then(|value| value.get("code"))
+        .and_then(serde_json::Value::as_str);
     let message = match detail {
         Some(detail) => format!("Archive relay could not {action}: backend returned HTTP {status}: {detail}"),
         None => format!("Archive relay could not {action}: backend returned HTTP {status}"),
     };
+    if let Some(code) = code {
+        return Err(match status {
+            reqwest::StatusCode::CONFLICT => {
+                ApiError::conflict_code(message, super::errors::archive_v2_contract_code(code, "invalid_operation_state"))
+            }
+            reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
+                ApiError::forbidden_code(message, super::errors::archive_v2_contract_code(code, "authorization_denied"))
+            }
+            reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+                ApiError::bad_request_code(message, super::errors::archive_v2_contract_code(code, "invalid_request"))
+            }
+            _ => ApiError::internal_code(message, super::errors::archive_v2_contract_code(code, "transport_failure")),
+        });
+    }
     match status {
         reqwest::StatusCode::CONFLICT => Err(ApiError::conflict_message(message)),
         reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => Err(ApiError::Forbidden(message)),
@@ -8736,7 +8760,34 @@ mod tests {
                 "/member-complete",
                 axum::routing::post(|| async { (StatusCode::OK, "ignored response") }),
             )
-            .route("/fail", axum::routing::post(|| async { StatusCode::CONFLICT }));
+            .route("/fail", axum::routing::post(|| async { StatusCode::CONFLICT }))
+            .route(
+                "/v2-error",
+                axum::routing::post(|| async {
+                    (
+                        StatusCode::CONFLICT,
+                        axum::Json(serde_json::json!({"code": "source_changed", "message": "Archive creation source changed"})),
+                    )
+                }),
+            )
+            .route(
+                "/legacy-error",
+                axum::routing::post(|| async {
+                    (
+                        StatusCode::CONFLICT,
+                        axum::Json(serde_json::json!({"detail": "Archive operation was cancelled"})),
+                    )
+                }),
+            )
+            .route(
+                "/unknown-code",
+                axum::routing::post(|| async {
+                    (
+                        StatusCode::CONFLICT,
+                        axum::Json(serde_json::json!({"code": "future_code", "message": "Future backend failure"})),
+                    )
+                }),
+            );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("relay transport test server should bind");
@@ -8820,6 +8871,33 @@ mod tests {
         assert!(
             matches!(failure_error, ApiError::Conflict(message) if message.as_str().is_some_and(|value| value.contains("record failure")))
         );
+    }
+
+    #[tokio::test]
+    async fn archive_relay_transport_preserves_error_envelopes() {
+        let transport = ArchiveRelayTransport::new(
+            reqwest::Client::new(),
+            spawn_archive_relay_transport_test_server().await,
+            "test-token".to_string(),
+        );
+        for (path, code, message) in [
+            ("v2-error", "source_changed", "Archive creation source changed"),
+            ("legacy-error", "cancelled", "Archive operation was cancelled"),
+            ("unknown-code", "invalid_operation_state", "Future backend failure"),
+        ] {
+            let error = transport
+                .post_json_without_result(path, &serde_json::json!({}), "Archive test", "read member")
+                .await
+                .expect_err("failed relay responses must return their problem details");
+            let response = super::ArchiveV2Error::from(error).into_response();
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("problem response should be readable");
+            let problem: serde_json::Value = serde_json::from_slice(&body).expect("problem response should be JSON");
+            assert_eq!(problem["code"], code);
+            assert!(problem["message"].as_str().is_some_and(|text| text.contains(message)));
+        }
     }
 
     #[tokio::test]

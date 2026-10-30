@@ -2804,6 +2804,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dos_member_timestamps_use_utc() {
+        for month in [1, 7] {
+            let date = ((2026 - 1980) << 9) | (month << 5) | 15;
+            let time = (11 << 11) | (52 << 5) | 1;
+            let expected = DateTime::parse_from_rfc3339(&format!("2026-{month:02}-15T11:52:02Z"))
+                .expect("test timestamp must be valid")
+                .with_timezone(&Utc);
+            assert_eq!(dos_datetime(date, time), Some(expected));
+        }
+        assert_eq!(dos_datetime(0, 0), None);
+    }
+
+    #[test]
     fn temporary_archive_writer_rejects_chunks_before_exceeding_limit() {
         let mut output = SizeLimitedArchiveWriter::new(Vec::new(), 5);
         output.write_all(b"hello").unwrap();

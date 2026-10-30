@@ -11,10 +11,10 @@ Tests cover:
 
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -79,6 +79,22 @@ class TestCORSMiddleware:
 @pytest.mark.integration
 class TestRequestLoggingMiddleware:
     """Test request logging middleware."""
+
+    @pytest.mark.asyncio
+    async def test_failed_request_duration_uses_monotonic_time(self, caplog):
+        from app.main import log_requests
+
+        request = Request({"type": "http", "method": "GET", "path": "/api/health", "headers": [], "query_string": b""})
+        failure = RuntimeError("request failed")
+        with (
+            patch("app.main.monotonic", side_effect=[1000.0, 1000.125]),
+            patch("app.main.datetime") as wall_clock,
+            caplog.at_level(logging.ERROR, logger="app.main"),
+        ):
+            wall_clock.now.side_effect = AssertionError("Elapsed time must not use a wall clock")
+            with pytest.raises(RuntimeError, match="request failed"):
+                await log_requests(request, AsyncMock(side_effect=failure))
+        assert "failed after 125ms: request failed" in caplog.text
 
     def test_smb_pool_logger_inherits_application_log_level(self):
         """Allow SMB pool diagnostics when the application log level is DEBUG."""

@@ -15,12 +15,13 @@ import asyncio
 import io
 import os
 import stat as stat_module
+import time
 import uuid
 import zipfile
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Event, get_ident
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
@@ -34,6 +35,7 @@ from smbprotocol.open import FileInformationClass, FilePipePrinterAccessMask, SM
 from smbprotocol.structure import DateTimeField
 
 from app.models.file import DirectoryListing, FileInfo, FileType
+from app.services.archive.creation import normalize_archive_creation_source_modified_at
 from app.services.archive.extraction import extract_archive_to_new_paths
 from app.services.archive.target_write import TargetWriteFailure
 from app.services.content_transfer import SourceDeleteError, SourceDeletionOutcomeUnknown
@@ -42,6 +44,20 @@ from app.storage.smb import SMB_FILETIME_TICKS_PER_SECOND, SMBBackend
 
 _LIVE_SMB_ENVIRONMENT_VARIABLES = ("TEST_SMB_HOST", "TEST_SMB_SHARE", "TEST_SMB_USERNAME", "TEST_SMB_PASSWORD")
 _LIVE_SMB_ENABLED = all(os.environ.get(name) for name in _LIVE_SMB_ENVIRONMENT_VARIABLES)
+
+
+@pytest.fixture(params=["UTC", "Europe/Berlin"])
+def smb_timezone(request, monkeypatch):
+    """Exercise metadata conversion with different backend process timezones."""
+    if not hasattr(time, "tzset"):
+        pytest.skip("Process timezone changes require time.tzset")
+    try:
+        with monkeypatch.context() as environment:
+            environment.setenv("TZ", request.param)
+            time.tzset()
+            yield
+    finally:
+        time.tzset()
 
 
 @pytest.mark.asyncio
@@ -128,6 +144,9 @@ class _MemoryArchiveSource:
             raise FileNotFoundError(path)
         return _MemoryArchiveReader(self._data)
 
+    async def open_archive_source_reader(self, path: str) -> _MemoryArchiveReader:
+        return await self.open_random_access_reader(path)
+
 
 class _CountingExtractionDestination:
     def __init__(self, backend: SMBBackend) -> None:
@@ -203,6 +222,33 @@ async def test_write_file_from_stream_retries_short_native_writes(mock_open: Mag
     assert int(result) == 5
     assert mock_file.write.call_args_list == [call(b"hello"), call(b"llo")]
     mock_file.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("month", [1, 7])
+async def test_zip_extraction_preserves_utc_mtime(smb_timezone, month):
+    modified = datetime(2026, month, 15, 11, 52, 2, tzinfo=timezone.utc)
+    archive_buffer = io.BytesIO()
+    with zipfile.ZipFile(archive_buffer, "w") as archive:
+        member = zipfile.ZipInfo("file.txt", date_time=modified.timetuple()[:6])
+        archive.writestr(member, b"content")
+    destination = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+    handle = MagicMock()
+    handle.write.side_effect = len
+    with (
+        patch("app.storage.smb.smbclient.stat", side_effect=FileNotFoundError),
+        patch("app.storage.smb.smbclient.open_file", return_value=handle),
+        patch("app.storage.smb.smbclient.utime") as set_mtime,
+    ):
+        result = await extract_archive_to_new_paths(
+            _MemoryArchiveSource(archive_buffer.getvalue()),
+            destination=destination,
+            archive_path="source.zip",
+            destination_root="",
+        )
+    assert result.files_extracted == 1
+    expected_ns = int(modified.timestamp() * 1_000_000_000)
+    assert set_mtime.call_args.kwargs["ns"] == (expected_ns, expected_ns)
 
 
 @pytest.mark.asyncio
@@ -919,6 +965,42 @@ class TestFileInfoRetrieval:
     """Test getting file information."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("month", [1, 7])
+    async def test_listing_and_lookup_keep_utc_timestamps(self, smb_timezone, month):
+        modified = datetime(2026, month, 15, 11, 52, tzinfo=timezone.utc)
+        created = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        entry = MagicMock()
+        entry.name = "file.txt"
+        entry.smb_info = MagicMock(
+            file_attributes=FileAttributes.FILE_ATTRIBUTE_NORMAL,
+            end_of_file=7,
+            last_write_time=modified,
+            creation_time=created,
+        )
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.smbclient.scandir", return_value=iter([entry])),
+            patch(
+                "app.storage.smb.smbclient.stat",
+                return_value=MagicMock(
+                    st_mode=stat_module.S_IFREG,
+                    st_size=7,
+                    st_mtime=modified.timestamp(),
+                    st_ctime=created.timestamp(),
+                ),
+            ),
+        ):
+            listing = await backend.list_directory("docs")
+            observed = await backend.get_file_info("docs/file.txt")
+        assert observed.modified_at == listing.items[0].modified_at == modified
+        assert observed.created_at == listing.items[0].created_at == created
+        assert observed.modified_at.tzinfo == timezone.utc
+        assert observed.created_at.tzinfo == timezone.utc
+        assert normalize_archive_creation_source_modified_at(observed.modified_at) == normalize_archive_creation_source_modified_at(
+            listing.items[0].modified_at
+        )
+
+    @pytest.mark.asyncio
     @patch("app.storage.smb.smbclient.stat")
     async def test_get_file_info_for_file(self, mock_stat):
         """Test getting info for a file."""
@@ -1396,9 +1478,10 @@ class TestRandomAccessReading:
         await reader.close()
 
     @pytest.mark.asyncio
-    async def test_move_metadata_queries_the_opened_object(self):
+    @pytest.mark.parametrize("month", [1, 7])
+    async def test_move_metadata_queries_the_opened_object(self, smb_timezone, month):
         handle = MagicMock(spec=["fd", "close", "seek", "read"])
-        modified = datetime(2025, 1, 1)
+        modified = datetime(2025, month, 1, tzinfo=timezone.utc)
         values = [
             {
                 "last_write_time": MagicMock(

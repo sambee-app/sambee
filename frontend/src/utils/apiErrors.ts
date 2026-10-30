@@ -107,6 +107,9 @@ export function getApiErrorMessage(error: unknown, fallback: string, options: Ap
   if (isOidcMappingValidationDetail(detail)) {
     return detail.errors.map((mappingError) => mappingError.message).join(" ");
   }
+  if (isMessageDetail(error.response?.data)) {
+    return error.response.data.message;
+  }
 
   if (options.includeOriginalMessage && typeof error.message === "string" && error.message.trim()) {
     return `${fallback}: ${error.message}`;

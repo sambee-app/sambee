@@ -5,6 +5,7 @@ import logging
 import struct
 import zipfile
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -121,6 +122,24 @@ class MemoryCreationDestination:
 async def _chunks(data: bytes) -> AsyncIterator[bytes]:
     for position in range(0, len(data), 3):
         yield data[position : position + 3]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "modified",
+    [
+        datetime(2026, 1, 15, 11, 52, 2, tzinfo=timezone.utc),
+        datetime(2026, 1, 15, 13, 52, 2, tzinfo=timezone(timedelta(hours=2))),
+        datetime(2026, 1, 15, 11, 52, 2),
+    ],
+)
+async def test_writer_encodes_utc_dos_clock_fields(modified):
+    target = MemoryExclusiveWriter()
+    writer = PortableZipWriter(target)
+    await writer.add_file("file.txt", _chunks(b"content"), modified_at=modified)
+    await writer.close()
+    with zipfile.ZipFile(io.BytesIO(target.data)) as archive:
+        assert archive.getinfo("file.txt").date_time == (2026, 1, 15, 11, 52, 2)
 
 
 @pytest.mark.asyncio
