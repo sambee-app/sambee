@@ -13,12 +13,26 @@ The version scope still needs a decision. The proposals are not permission to ch
 ## Goals
 
 - Explain what Sambee is in a short, accurate, standalone definition.
+- Preserve the current structure of What Is Sambee? Improve its wording and accuracy within the existing sections.
 - Show concrete benefits before detailed controls and technical explanations.
 - Help a new user open and use a file without first learning account administration or installing Companion.
 - Make everyday tasks easy to find by their names.
+- Omit obvious instructions and unnecessary detail. Explain only user value, relevant Sambee concepts, non-obvious behavior, task limits, and recovery actions.
 - Keep desktop enhancements optional and explain their requirements.
 - Preserve warnings that prevent data loss, incomplete transfers, and incorrect assumptions about access.
 - Use version inheritance to avoid unnecessary copies of documentation.
+
+## Brevity Rules
+
+The [Docs Style Guide](../website/content/docs/0.7/website-dev-guide/authoring-and-tooling/docs-style-guide/index.md#user-guide-value-without-unnecessary-detail) is the source for these rules. The docs-update skill requires authors and AI agents to read and apply it. The rules are accepted authoring requirements; the guide reorganization below remains a proposal.
+
+Keep content only when it explains a concrete benefit or relevant Sambee concept, a non-obvious action or behavior, a task limit or requirement, or an actionable recovery step. Remove content that meets none of these tests, rather than move it to Reference.
+
+Do not explain familiar browsing, standard viewer controls, text entry, or clearly labeled buttons unless Sambee behaves differently. Prefer short task notes over numbered tutorials. Use steps only where a non-obvious workflow requires a specific order.
+
+Keep related short topics on one page with clear headings. A missing page is not automatically a documentation gap; add a page only when distinct user value or non-obvious behavior justifies it. Link to in-app help and existing procedures instead of repeating control and shortcut lists.
+
+Keep important warnings at the relevant action, explain each once, and link to shared recovery guidance. This planning document can be detailed; the resulting user guide must be concise.
 
 ## Scope
 
@@ -30,14 +44,14 @@ They do not include a new marketing website, application changes, new product ca
 
 | Problem | Evidence | Proposed Response |
 |---|---|---|
-| Account management is the second Getting Started page. | [Current navigation](../website/data/docs-nav/2.0.toml) lists the overview, then account management. | Replace the second position with a first-use walkthrough. Move account management later. |
-| The overview lists capabilities but gives no first task sequence. | [What Is Sambee?](../website/content/docs/1.0/user-guide/getting-started/what-is-sambee/index.md) describes viewers, editors, and desktop integration. | Keep this as the definition page, add benefits and task links, then link to a walkthrough. |
+| Account management is the second Getting Started page. | [Current navigation](../website/data/docs-nav/2.0.toml) lists the overview, then account management. | Use the second position for What Can You Do With Sambee? Move account management later. |
+| Practical outcomes need more emphasis alongside the overview. | [What Is Sambee?](../website/content/docs/1.0/user-guide/getting-started/what-is-sambee/index.md) has a sound structure and describes viewers, editors, and desktop integration. | Improve the existing page without restructuring it. Add a separate benefits page with task links. |
 | Connection setup comes before using a connection. | [Connect to an SMB Share](../website/content/docs/0.7/user-guide/accessing-files/connect-to-an-smb-share/index.md) starts with settings and adding a connection. | Explain how to open an available connection first. Keep adding a connection as a separate procedure. |
 | Basic tasks are grouped under feature names. | Selection is in [Smart Navigation and the Quick Bar](../website/content/docs/2.0/user-guide/browsing-and-navigation/smart-navigation-and-the-quick-bar/index.md). Copy, move, and extraction are in [Dual-Pane Mode](../website/content/docs/2.0/user-guide/browsing-and-navigation/dual-pane-mode/index.md). | Give these tasks explicit navigation entries or clear task headings in suitable pages. |
 | File transfers are grouped with viewing and editing. | [Download and Upload Files](../website/content/docs/1.0/user-guide/viewing-and-editing-files/download-and-upload-files/index.md) is in Viewing & Editing Files. | Move it to Organize and Transfer Files. |
-| User instructions contain detailed operational explanations. | The Quick Bar page covers history ranking, retention policy, administrator settings, and many recovery cases. | Keep the user steps and limits visible. Move administrator policy details to the Admin Guide and place deeper behavior after basic tasks. |
-| Text editing has no dedicated task page. | The overview describes text editing, but the navigation has a Markdown page and text-format reference rather than a text-editing procedure. | Add View and Edit Text Files, linked to the format reference. |
-| Some preview details precede the user actions. | [View Images & Read Documents](../website/content/docs/0.7/user-guide/viewing-and-editing-files/view-images-and-read-documents/index.md) explains image processing before viewer controls. | Explain opening and using the viewer first. Keep processing details later where they help explain visible behavior. |
+| User instructions contain detailed operational explanations. | The Quick Bar page covers history ranking, retention policy, administrator settings, and many recovery cases. | Keep task limits and recovery actions. Remove unnecessary algorithm details and move administrator policy to the Admin Guide. |
+| Text editing is not easy to find as a task. | The overview describes text editing, but the navigation has a Markdown page and text-format reference rather than a named text-editing topic. | Add a short text-editing topic; create a page only if non-obvious behavior justifies it. |
+| Some preview details precede useful user information. | [View Images & Read Documents](../website/content/docs/0.7/user-guide/viewing-and-editing-files/view-images-and-read-documents/index.md) explains image processing before viewer controls. | Remove internal processing detail unless it explains a task-relevant difference. Do not replace it with a tutorial on standard controls. |
 
 ## Proposed Guide Structure
 
@@ -45,7 +59,7 @@ Use the following section order. Page titles below are proposed editorial titles
 
 | Order | Section | Proposed Pages or Topics |
 |---|---|---|
-| 1 | Getting Started | What Is Sambee?; Open Your First File |
+| 1 | Getting Started | What Is Sambee?; What Can You Do With Sambee? |
 | 2 | Find and Browse Files | Open Connections and Browse Folders; Select Files and Folders; Find Files and Return to Recent Locations; Mobile Navigation; Dual-Pane Mode; Keyboard Navigation and Shortcuts |
 | 3 | Organize and Transfer Files | Copy and Move Files; Download and Upload Files; Work with ZIP Archives; Share Files and Links |
 | 4 | View and Edit Files | View Images and Read Documents; View and Edit Text Files; Edit Markdown; File Locking and Conflict Resolution; Recover Unsaved Edits |
@@ -56,6 +70,7 @@ Use the following section order. Page titles below are proposed editorial titles
 
 ### Structural Decisions
 
+- Preserve the current section structure of What Is Sambee? Add What Can You Do With Sambee? as the second Getting Started page, not as a replacement definition or a generic walkthrough.
 - Remove the separate Accessing Files section. Opening SMB connections belongs with browsing. Local-drive setup belongs with the optional desktop features.
 - Rename Browsing and Navigation to Find and Browse Files.
 - Add Organize and Transfer Files so readers can find operations without knowing about dual-pane mode.
@@ -65,15 +80,15 @@ Use the following section order. Page titles below are proposed editorial titles
 - Keep Troubleshooting before Reference and link to it from failure points in task pages.
 - Keep one procedure for each task. Related pages link to it rather than repeat it.
 
-The page list is a content map, not a requirement to create a separate page for every small topic. Combine closely related procedures when this improves reading and does not hide a main task.
+The page list is a content map, not a requirement to create a separate page for every topic. Selection can be a clear subsection of browsing, text editing can be a short subsection of browser editing, and app selection can be part of desktop editing. Keep separate pages only where distinct user value or non-obvious behavior justifies them. Task headings and links must remain easy to find.
 
 ## Canonical Definition Page
 
 ### Role and Identity
 
-Keep What Is Sambee? as the first page in Getting Started. Do not replace its title with What You Can Do With Sambee and do not create a second competing introduction.
+Keep What Is Sambee? as the first page in Getting Started, with its current title, section order, and heading hierarchy. Improve the definition, wording, and accuracy within the existing sections; do not replace the page with a new outline.
 
-This page is the editorial source for the product definition. The guide landing page provides task links and a brief introduction; it does not repeat the full definition and feature explanation.
+This page is the editorial source for the product definition and capability overview. The second page, What Can You Do With Sambee?, explains practical outcomes and links to tasks. It is not a second definition or a duplicate feature catalog. The guide landing page links to both without repeating their content.
 
 Editorial canonical status is not an instruction to change HTML canonical URLs. Published version URLs and their metadata must continue to follow the website's version-aware rules.
 
@@ -83,30 +98,18 @@ Editorial canonical status is not an instruction to change HTML canonical URLs. 
 
 This is draft copy for versions that support all listed capabilities. Check the capability history before applying it to an older version.
 
-The opening must stand on its own. It names the product, the product category, the storage it uses, the main browser tasks, and the role of Companion.
+The opening must stand on its own. It names the product, the product category, the storage it uses, the main browser tasks, and the role of Companion. Place the improved copy in the current opening section; no new section is required.
 
-### Proposed Page Outline
+### Improvements Within the Existing Structure
 
-| Part | Purpose | Content |
+| Existing Section | Keep | Improve |
 |---|---|---|
-| Opening definition | Answer What is Sambee? directly. | Use the short definition above, without an extra heading that repeats the page title. |
-| What Can You Do With Sambee? | Explain the value through tasks. | Give concrete benefits and link to the matching guide pages. |
-| How Does Sambee Access Your Files? | Explain the storage model. | Explain existing SMB storage, the self-hosted server, and local access through Companion. |
-| Where Can You Use It? | Set correct device expectations. | Distinguish desktop browser, phone, and tablet tasks from supported desktop-only Companion tasks. |
-| Get Started | Turn interest into action. | Link to Open Your First File, then to optional desktop setup. |
+| Sambee Turns Your Storage Into a Modern Workspace | The opening section and its position. | Make the opening a short, accurate definition suitable for quotation. |
+| Browser-Based File Manager | The device and storage subsections. | Clarify browser capabilities and Companion requirements. Qualify broad replacement claims and simplify server explanations without changing the structure. |
+| View and Edit Files | The image/PDF, Markdown/text, and desktop integration subsections. | Improve capability wording and accuracy. State the explicit desktop-edit upload requirement without adding a full procedure. |
+| Free & Open Source | The licensing and self-hosting section. | Keep it brief and accurate; link to deployment guidance rather than expand it. |
 
-### Benefits to Explain
-
-- Access existing network files from a PC, phone, or tablet through the Sambee site.
-- Read documents and browse photos without downloading each file first.
-- Find a folder again through navigation and recent locations.
-- Organize files across storage locations with copy and move operations.
-- Edit text and Markdown in the browser.
-- Use installed desktop applications to edit network files without manually downloading and uploading copies.
-
-Use examples such as reading a PDF, inspecting a photo collection, changing a Markdown document, or editing an office document in an installed application. Do not imply that a named application is bundled or available on every device.
-
-Keep the free and open source statement, but do not let licensing or deployment instructions replace the explanation of user value.
+These section names describe the current 1.0 source inherited by later versions. Preserve the applicable version's existing structure when improving older content. Add a short link to the benefits page without creating a new introduction section.
 
 ### Search and AI Readability
 
@@ -120,52 +123,54 @@ Keep the free and open source statement, but do not let licensing or deployment 
 
 During implementation, verify the generated page title, description if supported, indexability, and version-aware canonical behavior. Use the existing website mechanisms. Do not introduce structured data or template changes without a verified need.
 
-## First-Use Walkthrough
+## Benefits Page
 
-### Open Your First File
+### What Can You Do With Sambee?
 
-The second Getting Started page must produce a useful result without requiring connection administration or Companion installation.
+Make this the second Getting Started page. It answers How is Sambee useful to me? while What Is Sambee? remains the definition and capability overview.
 
-Recommended sequence:
+Use short outcome-focused sections, each with a concrete example and a link to the relevant task. Do not repeat the product definition or describe the same viewer and editor features again.
 
-1. Open the Sambee address provided for the installation. Sign in if the site requests it.
-2. Choose an available SMB connection from the Connection List.
-3. Open a folder and select a suitable image, PDF, text file, or Markdown file.
-4. Open the file in the browser and use a relevant viewer control.
-5. Download the file if a local copy is useful.
-6. Return to the folder and choose a next task from the guide.
+| Outcome | Benefit to Explain | Task Links |
+|---|---|---|
+| Read network documents and browse photos from a phone or tablet | Inspect existing files without downloading each one first or installing a desktop application. | Browsing, image/PDF viewing, and mobile guidance. |
+| Edit text and Markdown in the browser | Make a quick change without switching to a desktop editor. | Text and Markdown editing guidance. |
+| Organize files across storage locations | Copy or move files between supported locations from one workspace. | Copy and move tasks, with local-drive requirements where relevant. |
+| Edit network files in installed desktop applications | Use familiar applications without manually downloading and uploading file copies. | Companion setup and desktop editing, including the explicit upload step. |
 
-Before writing the final procedure, verify the visible controls and device-specific actions. Use the mouse or touch path first; give shortcuts as alternatives.
+Returning to recent files or folders can be a brief additional example where useful. Do not turn the page into an exhaustive list of features. Do not imply that named desktop applications are bundled or available on every device.
 
-Explain the empty-connection case briefly. Link to the connection procedure if the user can add a connection, or tell the user to ask an administrator for access. Do not assume every new user must create a connection.
+Keep browser-only benefits first. Mention Companion only for outcomes that require it, and keep access and device limits beside the relevant benefit. Read-only users must still see useful outcomes.
 
-Do not ask the reader to edit or move a file in the introductory walkthrough. Read-only access must still provide a useful first experience.
+### Brief Starting Point
 
-Keep sign-in help short. Link to Manage Your Account for password changes and session control. Link to troubleshooting if sign-in or access fails.
+End the benefits page with a short starting point if useful: choose an available SMB connection from the Connection List and open an image, PDF, text file, or Markdown file. Link to connection guidance for missing connections or access, and to useful next tasks.
+
+Do not create a separate generic first-file tutorial. Do not add steps for opening the website, browsing familiar folders, using standard controls, or returning to the file list. Sign-in and account details remain in linked account or troubleshooting guidance.
 
 ## Guide Landing Page
 
 Rewrite the current [User Guide landing page](../website/content/docs/0.7/user-guide/_index.md) as a short task directory.
 
-- Give readers a clear choice between learning what Sambee is and opening their first file.
+- Link to What Is Sambee? for the definition and What Can You Do With Sambee? for practical benefits.
 - Offer links for finding files, organizing files, viewing and editing, optional desktop features, and help.
 - Use outcome descriptions rather than explain the guide itself through a list of generic learning goals.
 - Keep links to the Admin Guide and Developer Guide for deployment, policy, and implementation questions.
-- Do not duplicate the canonical product definition or create another long feature list.
+- Do not duplicate the canonical product definition, the benefits page, or a long feature list.
 
 ## Page-Level Changes
 
 ### Connections and Browsing
 
-Change Connect to an SMB Share into a page that starts with opening an available connection and browsing its folders. Keep Add a Connection as a later procedure with its current settings guidance where still accurate.
+Start Connect to an SMB Share with a short note about choosing an available connection. Do not teach familiar folder navigation. Keep Add a Connection as a later procedure with only non-obvious settings guidance where still accurate.
 
-Explain why the reader would choose a connection and what to do when none is available. Keep the distinction between shared visibility, user access, and read-only operation clear.
+Explain what to do when no connection is available. Keep the distinction between shared visibility, user access, and read-only operation clear where it affects a task.
 
 SMB access through Sambee does not require Companion. State this near the beginning, not only in desktop setup documentation.
 
 ### Selection, Search, and Navigation
 
-Move desktop and touch selection instructions out of the Quick Bar page into Select Files and Folders, or a clearly named basic browsing page. Preserve the difference between opening an item and selecting it for a bulk action.
+Move selection guidance out of the Quick Bar page into a clearly named browsing topic. Explain the non-obvious difference between opening an item and selecting it for a bulk action. A standalone page is optional; do not repeat standard mouse or keyboard behavior unless Sambee differs.
 
 Refocus the Quick Bar content on finding files, jumping to folders, returning to recent locations, and locating commands. The visible title should explain these tasks. Keep Quick Bar as the name of the control in the procedure.
 
@@ -173,7 +178,7 @@ Keep the search boundary near the search steps: File Search uses files loaded in
 
 Move administrator retention and exclusion policy instructions to suitable Admin Guide content. Keep personal history clearing in Account and Preferences, with a link from the navigation page.
 
-Put ranking details and extended recovery behavior after the core steps or in linked reference material. Do not remove the explanation that deleting a history entry does not delete a file or folder.
+Remove ranking algorithm details from the user guide, including Reference. Keep only behavior that affects a user decision and concise recovery actions. Preserve the explanation that deleting a history entry does not delete a file or folder.
 
 ### Copy, Move, Upload, Download, and Archives
 
@@ -185,13 +190,13 @@ Group ZIP browsing, selected-member downloads, extraction, and persistent archiv
 
 Keep capability limits beside the relevant steps. Archive members cannot be moved, and archive creation has destination restrictions. Do not infer unsupported local-drive or cross-connection behavior.
 
-Preserve warnings about partial moves, cancellations, retained sources, and uncertain results. Put common outcomes first, with detailed recovery guidance below. Reorganization must not weaken data-safety instructions.
+Preserve concise warnings about partial moves, cancellations, retained sources, and uncertain results at the relevant actions. Link to shared recovery guidance instead of repeating failure details or transfer internals. Reorganization must not weaken data-safety instructions.
 
 ### Viewing and Browser Editing
 
-Start image and document guidance with how to open a file and use the controls. Put format conversion and PDF normalization details later. Keep the distinction between displayed resources and original downloads.
+Keep image and document guidance focused on useful capabilities and non-obvious behavior. Do not explain standard zoom, scrolling, or clearly labeled viewer controls. Remove conversion and PDF processing internals; keep task-relevant differences between displayed resources and originals.
 
-Add View and Edit Text Files. Cover opening, editing, search and replace, saving, and handling unsaved changes after verifying the current controls. Link to Text File Support and Syntax Highlighting for format details.
+Add a discoverable text-editing topic focused on storage, saving, locks, and unsaved-change behavior where they differ from user expectations. Do not teach typing or standard search and replace. Create a separate page only if the non-obvious behavior warrants one; otherwise use a subsection and link to existing recovery and format guidance.
 
 Keep Markdown editing as a dedicated procedure. Link from the viewing page rather than duplicate it.
 
@@ -201,11 +206,11 @@ Keep lock handling, conflict resolution, and draft recovery easy to reach from e
 
 Keep Mobile Navigation focused on the compact interface and device differences. Make sharing discoverable through Share Files and Links in Organize and Transfer Files.
 
-Consolidate, rather than duplicate, the detailed sharing procedure. Explain the differences between sharing stored files, displayed viewer resources, current text, and a location link.
+Consolidate sharing guidance and explain only consequential differences between stored files, displayed viewer resources, current text, and a location link. Do not teach the device's standard share sheet.
 
 Keep browser and device limits, the download fallback, and the distinction between saved files and unsaved text. A shared location link does not grant access to its connection or file.
 
-Browser Back and bookmarks are not only mobile features. Put their general behavior in basic browsing guidance, then link from the mobile page. Keep warnings that navigation history does not undo saved changes or restore discarded edits.
+Do not teach standard browser Back or bookmarks. Document only Sambee-specific navigation behavior and the warning that history does not undo saved changes or restore discarded edits. Link to shared guidance from mobile content where needed.
 
 ### Optional Desktop Features
 
@@ -223,7 +228,7 @@ Explain supported desktop, pairing, and installed-application requirements. Do n
 
 Move [Manage Your Account](../website/content/docs/2.0/user-guide/getting-started/manage-your-account/index.md) out of Getting Started.
 
-Keep identity review, sign-out, local password changes, and other-session revocation in this page. A brief sign-in section can remain here as reference, but it must not replace the first-use walkthrough.
+Keep identity review, sign-out, local password changes, and other-session revocation in this page. A brief sign-in section can remain here as reference, but account instructions must not interrupt the benefits page.
 
 Use action-focused explanations for password and OIDC users. Preserve distinctions between clearing a local browser token, revoking an OIDC browser session, and signing out of the identity provider.
 
@@ -271,15 +276,15 @@ Before implementation, choose whether the structural reorganization applies acro
 
 1. Confirm the target versions and final section titles.
 2. Check each affected page's inherited source and authored overrides.
-3. Confirm which topics need new pages and which can share an existing page.
-4. Verify feature availability and current controls for the first-use and text-editing procedures.
+3. Apply the brevity content test and confirm which topics justify new pages rather than subsections.
+4. Verify feature availability for the benefits examples and identify only non-obvious starting-point and text-editing behavior that needs explanation.
 
 ### Phase 2: Establish the Introduction
 
-1. Update What Is Sambee? with the definition, benefits, limits, and task links.
-2. Add Open Your First File.
-3. Update the guide landing page without duplicating the definition.
-4. Check that a read-only user can complete the introductory task.
+1. Improve What Is Sambee? within its current sections, preserving their order and heading hierarchy.
+2. Add What Can You Do With Sambee? as the second page, with concise outcomes, task links, and an optional brief starting point.
+3. Update the guide landing page without duplicating the definition or benefits.
+4. Check that browser-only and read-only users can identify useful outcomes without Companion setup.
 
 ### Phase 3: Reorganize the Guide
 
@@ -290,8 +295,8 @@ Before implementation, choose whether the structural reorganization applies acro
 
 ### Phase 4: Improve the Procedures
 
-1. Add text-editing guidance.
-2. Put normal user steps before internal explanations.
+1. Add concise text-editing guidance as a subsection or justified standalone page.
+2. Remove obvious instructions and unnecessary technical detail instead of moving them later or into Reference.
 3. Consolidate duplicated instructions and preserve data-safety warnings.
 4. Relocate administrator policy guidance and update cross-guide links.
 5. Review mobile paths and optional desktop requirements.
@@ -302,8 +307,8 @@ Before implementation, choose whether the structural reorganization applies acro
 2. Refresh required derived documentation artifacts through the repository workflow.
 3. Inspect generated navigation, moved-page links, redirects, and inherited content in each affected version.
 4. Review the rendered definition page and its metadata.
-5. Perform the first-use walkthrough against the application.
-6. Review the guide as a new user and check the accuracy requirements above.
+5. Verify the benefits examples and any brief starting-point instructions against the application.
+6. Apply the style guide's content test and Author and AI Review check, then verify the accuracy requirements above.
 
 Use the [Docs Editor Tool](../website/content/docs/0.9/website-dev-guide/authoring-and-tooling/docs-editor-tool/index.md) for published page, section, and book structural changes. Preview each operation before applying it. The tool runs docs validation after a successful apply. Update Markdown links and managed redirects separately where needed.
 
@@ -314,29 +319,35 @@ For application checks in the VS Code browser, use only `http://localhost:3000/b
 ## Acceptance Criteria
 
 - What Is Sambee? remains the first page and contains a short definition that can be understood without surrounding text.
+- Its current section order and heading hierarchy are preserved; improvements do not replace the page's structure.
 - The definition names the product category, existing storage, browser tasks, and the optional Companion role.
 - Benefits use concrete tasks and link to the relevant instructions.
+- Every passage passes the style guide's content test; obvious controls and unnecessary implementation detail are not explained.
+- Numbered steps are used only for non-obvious workflows where order matters.
+- Short related topics use subsections unless a distinct page is justified, and control lists or shortcut tables are not duplicated.
 - There is no competing full product introduction in the user guide.
-- Open Your First File is the second Getting Started page and is useful without Companion or write access.
+- What Can You Do With Sambee? is the second Getting Started page and explains practical outcomes without repeating the definition or feature catalog.
+- A brief starting point may appear at the end of the benefits page; no separate generic first-file tutorial is added.
+- Browser-only and read-only users can identify useful benefits without Companion setup.
 - Manage Your Account appears later under Account and Preferences.
 - Selection, search, copy, move, upload, download, and archive tasks can be found without knowing a control or layout name.
-- Text editing has a task procedure, not only a format reference.
+- Text editing has concise, discoverable task guidance, not a tutorial on standard editor controls.
 - Mobile sharing is easy to find and does not imply universal device support or access grants.
 - Administrator policy instructions do not interrupt basic user procedures.
 - Local-drive and desktop-app requirements remain explicit.
 - Upload, conflict, cancellation, lock, and recovery warnings remain accurate and accessible.
 - Inheritance and authored overrides are preserved for every affected version.
 - Moved URLs have the required link and redirect updates.
-- Required docs checks pass, and the first-use steps match the application.
+- Required docs checks pass, and the benefits examples and any starting-point instructions match the application.
 
 ## Decisions Still Needed
 
 | Decision | Recommended Default |
 |---|---|
 | Version scope | Apply general improvements at the earliest applicable version and preserve later feature-specific overrides; confirm the scope before structural changes. |
-| Product definition title | Keep What Is Sambee? and its stable identity. |
+| Getting Started page roles | Keep What Is Sambee? and its current structure; add What Can You Do With Sambee? as the benefits-focused second page. |
 | Section names | Use the task-based names in this plan. |
-| Page count | Create pages for substantial missing tasks, but combine closely related short procedures. |
+| Page count | Prefer clear subsections; create pages only for distinct user value or substantial non-obvious behavior. |
 | Personal preferences | Keep them together under Account and Preferences; verify ownership before moving settings guidance. |
 | Search metadata changes | Inspect existing output first; change templates only for a demonstrated problem. |
 
