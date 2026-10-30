@@ -116,7 +116,7 @@
     {
       "name": "replace_older_replaces_strictly_older_destination",
       "existing_file_policy": "replace_older",
-      "target_modified_at": "1979-01-01T00:00:00",
+      "target_modified_at": "1979-01-01T00:00:00Z",
       "terminal_phase": "completed",
       "progress": {
         "files_extracted": 2,

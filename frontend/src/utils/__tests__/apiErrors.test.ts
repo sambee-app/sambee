@@ -55,6 +55,21 @@ describe("physical file failure classification", () => {
   );
 });
 
+describe("Archive V2 API errors", () => {
+  it("extracts top-level messages from V2 responses", () => {
+    const message = "Archive creation source changed after manifest validation";
+    expect(getApiErrorMessage({ response: { status: 409, data: { code: "source_changed", message } } }, "fallback")).toBe(message);
+  });
+
+  it.each([undefined, null, "", "  ", 409, {}])("ignores invalid V2 message %j", (message) => {
+    expect(getApiErrorMessage({ response: { status: 409, data: { message } } }, "fallback")).toBe("fallback");
+  });
+
+  it("keeps support for legacy detail messages", () => {
+    expect(getApiErrorMessage({ response: { data: { detail: "Legacy error", message: "V2 error" } } }, "fallback")).toBe("Legacy error");
+  });
+});
+
 describe("OIDC mapping API errors", () => {
   it("extracts all row-keyed validation errors and their messages", () => {
     const errors = [

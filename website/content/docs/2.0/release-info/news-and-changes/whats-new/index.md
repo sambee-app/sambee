@@ -44,6 +44,8 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 - When transferring a folder, a problem with one file no longer hides files already copied, moved, or replaced from the summary.
 - Interrupted SMB moves now release files safely, without leaving them open or interrupting work still in progress.
 - Pressing Enter after a transfer finishes no longer starts the same transfer again.
+- SMB file metadata timezones and ZIP creation now consistently use UTC.
+- SMB connection idle cleanup and failed-request duration logs now use a monotonic clock, so daylight saving time and system clock changes do not affect elapsed-time calculations.
 
 #### SMB Change Monitoring Fixes
 

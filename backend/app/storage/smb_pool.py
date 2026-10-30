@@ -18,8 +18,9 @@ import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import partial
+from time import monotonic
 from typing import Any, Optional
 
 import smbclient
@@ -53,7 +54,7 @@ class PooledConnection:
     username: str
     share_name: str
     created_at: datetime
-    last_used: datetime
+    last_used_monotonic: float
     reference_count: int
     connection_cache: dict[str, Any]
     retire_when_idle: bool = False
@@ -143,7 +144,7 @@ class SMBConnectionPool:
                 if conn.retire_when_idle:
                     raise RuntimeError("SMB connection context is being retired")
                 conn.reference_count += 1
-                conn.last_used = datetime.now()
+                conn.last_used_monotonic = monotonic()
                 logger.debug(f"Reusing pooled connection: {host}:{port}/{share_name} (refs={conn.reference_count})")
             else:
                 # Create new connection
@@ -175,8 +176,8 @@ class SMBConnectionPool:
                     port=port,
                     username=username,
                     share_name=share_name,
-                    created_at=datetime.now(),
-                    last_used=datetime.now(),
+                    created_at=datetime.now(timezone.utc),
+                    last_used_monotonic=monotonic(),
                     reference_count=1,
                     connection_cache=connection_cache,
                 )
@@ -207,7 +208,7 @@ class SMBConnectionPool:
             if conn is None:
                 return
             conn.reference_count += 1
-            conn.last_used = datetime.now()
+            conn.last_used_monotonic = monotonic()
 
         def release_when_complete(_future: asyncio.Future[Any]) -> None:
             asyncio.create_task(self._release_connection_reference(pool_key, conn.host, conn.port, conn.share_name))
@@ -224,7 +225,7 @@ class SMBConnectionPool:
                 return
 
             conn.reference_count -= 1
-            conn.last_used = datetime.now()
+            conn.last_used_monotonic = monotonic()
             logger.debug(f"Released pooled connection: {host}:{port}/{share_name} (refs={conn.reference_count})")
 
             if conn.reference_count == 0 and conn.retire_when_idle:
@@ -247,22 +248,21 @@ class SMBConnectionPool:
         """Remove connections that have been idle for too long."""
 
         async with self._lock:
-            now = datetime.now()
+            now = monotonic()
             to_remove = []
 
             for pool_key, conn in self._connections.items():
                 # Only remove if not actively in use
                 if conn.reference_count == 0:
-                    idle_time = now - conn.last_used
-                    if idle_time > self._max_idle_time:
+                    idle_time = now - conn.last_used_monotonic
+                    if idle_time > self._max_idle_time.total_seconds():
                         to_remove.append(pool_key)
 
             # Remove idle connections
             for pool_key in to_remove:
                 conn = self._connections[pool_key]
                 logger.debug(
-                    f"Removing idle connection: {conn.host}:{conn.port}/{conn.share_name} "
-                    f"(idle for {(now - conn.last_used).total_seconds():.0f}s)"
+                    f"Removing idle connection: {conn.host}:{conn.port}/{conn.share_name} (idle for {now - conn.last_used_monotonic:.0f}s)"
                 )
 
                 # Disconnect only this backend's private smbclient cache.

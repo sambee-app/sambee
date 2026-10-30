@@ -6,10 +6,11 @@ import math
 import struct
 import zipfile
 import zlib
+from datetime import datetime, timezone
 
 import pytest
 
-from app.services.archive.zip_reader import ArchiveFormatError, ZipReader
+from app.services.archive.zip_reader import ArchiveFormatError, ZipReader, _dos_datetime
 
 
 class MemoryRandomAccessReader:
@@ -78,6 +79,25 @@ def _duplicate_name_zip_bytes() -> bytes:
         with pytest.warns(UserWarning, match=r"^Duplicate name: 'duplicate\.txt'$"):
             archive.writestr("duplicate.txt", b"second entry")
     return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("month", [1, 7])
+async def test_dos_member_timestamps_use_utc(month):
+    expected = datetime(2026, month, 15, 11, 52, 2, tzinfo=timezone.utc)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(zipfile.ZipInfo("file.txt", date_time=expected.timetuple()[:6]), b"content")
+    data = buffer.getvalue()
+    reader = ZipReader(MemoryRandomAccessReader(data), len(data))
+    entry = await reader.next_entry()
+    assert entry is not None
+    assert entry.modified_at == expected
+    assert entry.modified_at.tzinfo == timezone.utc
+
+
+def test_invalid_dos_timestamp_is_unavailable():
+    assert _dos_datetime(0, 0) is None
 
 
 @pytest.mark.asyncio

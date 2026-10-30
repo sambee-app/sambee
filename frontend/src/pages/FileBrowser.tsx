@@ -82,6 +82,7 @@ import { FILE_BROWSER_ROW_HEIGHT } from "../theme/constants";
 import { getMobileViewportShellSx, mobileSafeAreaAppBarSx, mobileSafeAreaToolbarSx, SAFE_AREA_INSET } from "../theme/mobileShell";
 import type { ConflictInfo, Connection, FileEntry } from "../types";
 import { FileType, isApiError } from "../types";
+import { getApiErrorMessage, getStorageErrorCode } from "../utils/apiErrors";
 import { openExternalUrl } from "../utils/externalLinks";
 import { compareLocalizedStrings } from "../utils/localeFormatting";
 import { createShareFile, supportsNativeShare } from "../utils/nativeShare";
@@ -2773,14 +2774,22 @@ const Browser: React.FC = () => {
         }
         const detail = hasPartialArchiveOutput
           ? t("fileBrowser.archive.createPartialOutputError")
-          : isApiError(error) && typeof error.response?.data?.detail === "string"
-            ? error.response.data.detail
-            : t("fileBrowser.archive.errorGeneric");
+          : getApiErrorMessage(error, t("fileBrowser.archive.errorGeneric"));
         setArchiveCreateError(detail);
         if (hasPartialArchiveOutput) {
           (archiveCreateContext.destinationPaneId === "right" ? rightPane : leftPane).handleRefresh();
         }
-        logger.error("Archive creation failed", { error, archiveName, destination: archiveCreateContext.destinationLabel }, "file-browser");
+        logger.error(
+          "Archive creation failed",
+          {
+            message: getApiErrorMessage(error, t("fileBrowser.archive.errorGeneric")),
+            code: getStorageErrorCode(error),
+            status: isApiError(error) ? error.response?.status : undefined,
+            archiveName,
+            destination: archiveCreateContext.destinationLabel,
+          },
+          "file-browser"
+        );
       } finally {
         archiveCreationExecutionRef.current = null;
         setIsCancellingArchiveCreation(false);

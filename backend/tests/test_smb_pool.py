@@ -6,6 +6,7 @@ Verifies that SMB connections are properly pooled and reused across requests.
 
 import asyncio
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -365,6 +366,34 @@ async def test_pool_cleanup_removes_idle_connections():
         stats = pool.get_stats()
         assert stats["total_connections"] == 0
         assert mock_reset.call_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("wall_clock_shift", [timedelta(hours=1), timedelta(hours=-1)])
+async def test_pool_idle_timeout_ignores_wall_clock_changes(wall_clock_shift):
+    """Clock changes must not shorten or extend the five-minute idle timeout."""
+    pool = SMBConnectionPool(max_idle_time=timedelta(minutes=5))
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with (
+        patch("smbclient.register_session"),
+        patch("smbclient.reset_connection_cache") as reset,
+        patch("app.storage.smb_pool.monotonic", return_value=0.0) as elapsed,
+        patch("app.storage.smb_pool.datetime") as wall_clock,
+    ):
+        wall_clock.now.return_value = created
+        async with pool.get_connection(host="test-host", port=445, username="user", password="pass", share_name="share"):
+            pass
+        assert next(iter(pool._connections.values())).created_at == created
+        wall_clock.now.return_value = created + wall_clock_shift
+        elapsed.return_value = timedelta(minutes=2).total_seconds()
+        await pool.cleanup_idle_connections()
+        assert pool.get_stats()["idle_connections"] == 1
+        reset.assert_not_called()
+
+        elapsed.return_value = timedelta(minutes=6).total_seconds()
+        await pool.cleanup_idle_connections()
+        assert pool.get_stats()["total_connections"] == 0
+        reset.assert_called_once()
 
 
 @pytest.mark.asyncio

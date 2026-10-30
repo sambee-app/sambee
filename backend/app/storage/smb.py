@@ -3,7 +3,7 @@ import logging
 import stat
 import uuid
 from collections.abc import AsyncIterator, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from time import monotonic
 from typing import Any, Awaitable, BinaryIO, TypeVar, cast
@@ -151,7 +151,8 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
                     type=FileType.DIRECTORY if standard["directory"].get_value() else FileType.FILE,
                     size=standard["end_of_file"].get_value(),
                     modified_at=datetime.fromtimestamp(
-                        (basic["last_write_time"].get_value() - DateTimeField.EPOCH_FILETIME) / SMB_FILETIME_TICKS_PER_SECOND
+                        (basic["last_write_time"].get_value() - DateTimeField.EPOCH_FILETIME) / SMB_FILETIME_TICKS_PER_SECOND,
+                        tz=timezone.utc,
                     ),
                     stable_id=str(internal["index_number"].get_value()),
                 )
@@ -728,8 +729,8 @@ class SMBBackend(StorageBackend):
                     type=FileType.DIRECTORY if is_dir else FileType.FILE,
                     size=stat_info.st_size if not is_dir else None,
                     mime_type=None if is_dir else get_mime_type(filename),
-                    modified_at=datetime.fromtimestamp(stat_info.st_mtime),
-                    created_at=datetime.fromtimestamp(stat_info.st_ctime),
+                    modified_at=datetime.fromtimestamp(stat_info.st_mtime, tz=timezone.utc),
+                    created_at=datetime.fromtimestamp(stat_info.st_ctime, tz=timezone.utc),
                     stable_id=str(stat_info.st_ino) if getattr(stat_info, "st_ino", 0) else None,
                     is_hidden=filename.startswith("."),
                 )

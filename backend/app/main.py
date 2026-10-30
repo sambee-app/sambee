@@ -8,6 +8,7 @@ from datetime import datetime
 from os import PathLike
 from os import stat_result as os_stat_result
 from pathlib import Path
+from time import monotonic
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -431,7 +432,7 @@ async def sambee_error_handler(request: Request, exc: SambeeError) -> JSONRespon
 async def log_requests(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """Log all HTTP requests with request ID and user context"""
 
-    start_time = datetime.now()
+    start_time = monotonic()
 
     # Set request ID for this request context
     request_id = set_request_id()
@@ -454,7 +455,7 @@ async def log_requests(request: Request, call_next: Callable[[Request], Awaitabl
 
         return response
     except Exception as e:
-        duration = (datetime.now() - start_time).total_seconds() * 1000
+        duration = (monotonic() - start_time) * 1000
         logger.error(
             f"❌ {request.method} {request.url.path} failed after {duration:.0f}ms: {e}{path_suffix}",
             exc_info=True,

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vite
 import * as viewerContent from "../../components/Viewer/viewerContent";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
+import { logger } from "../../services/logger";
 import { RECENT_DIRECTORIES_CHANGED_EVENT } from "../../services/recentDirectoriesSync";
 import { RECENT_FILES_CHANGED_EVENT } from "../../services/recentFilesSync";
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
@@ -1060,6 +1061,37 @@ describe("Browser Component - Interactions", () => {
 
       fireEvent.keyDown(document, { key: "Tab" });
       expect(localStorage.getItem("active-pane")).toBe("right");
+    });
+
+    it("shows and logs the V2 archive creation error without request credentials", async () => {
+      const user = userEvent.setup();
+      const message = "Archive creation source changed after manifest validation";
+      const logError = vi.spyOn(logger, "error").mockImplementation(() => {});
+      vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "archive-error" } as never);
+      vi.mocked(api.executeArchiveCreation).mockRejectedValueOnce({
+        response: { status: 409, data: { code: "source_changed", message } },
+        config: { headers: { Authorization: "private-token" } },
+      });
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
+      await screen.findByRole("button", { name: /folder: documents/i });
+      await user.click(screen.getByTestId("virtual-list"));
+      fireEvent.keyDown(document, { key: "F5", altKey: true });
+      const dialog = await screen.findByRole("dialog", { name: "Create ZIP Archive" });
+      await user.click(within(dialog).getByRole("button", { name: "Create archive" }));
+
+      await waitFor(() => expect(within(dialog).getByText(message)).toBeInTheDocument());
+      expect(logError).toHaveBeenCalledWith(
+        "Archive creation failed",
+        {
+          message,
+          code: "source_changed",
+          status: 409,
+          archiveName: expect.any(String),
+          destination: expect.any(String),
+        },
+        "file-browser"
+      );
+      expect(JSON.stringify(logError.mock.calls)).not.toContain("private-token");
     });
 
     it("reuses the current left-pane directory contents when opening dual-pane on the same target", async () => {

@@ -21,6 +21,13 @@ are RFC 3339 UTC strings ending in `Z`, or `null` only where a source timestamp
 is unavailable. Counts and byte sizes are non-negative integers. Inspection
 pages contain 1 through 500 items.
 
+ZIP DOS date fields have no timezone. Both executors interpret these fields as
+UTC. This deterministic fallback does not recover the original local timezone
+of a third-party archive. Invalid or unavailable DOS dates produce a `null`
+timestamp. Writers convert timezone-aware source timestamps to UTC before
+encoding DOS fields; timezone-free source values use the same UTC fallback.
+DOS fields retain their two-second precision.
+
 An inspection entry state describes whether that entry can be activated.
 Directories are always `readable` because they can be navigated. Files are
 `blocked` when encrypted, `readable` when their bytes can be served by the
