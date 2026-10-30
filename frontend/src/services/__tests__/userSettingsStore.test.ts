@@ -216,7 +216,9 @@ describe("userSettingsStore", () => {
     });
 
     expect(result.current.confirmedValue).toBe("sambee-dark");
-    resolveRefresh?.({ ...settings, appearance: { ...settings.appearance, theme_id: "sambee-dark" } });
+    await act(async () => {
+      resolveRefresh?.({ ...settings, appearance: { ...settings.appearance, theme_id: "sambee-dark" } });
+    });
     await vi.waitFor(() => expect(getCurrentUserSettingsMock).toHaveBeenCalledTimes(2));
   });
 
@@ -233,14 +235,18 @@ describe("userSettingsStore", () => {
     getCurrentUserSettingsMock.mockResolvedValue({ ...settings, appearance: { ...settings.appearance, theme_id: "sambee-dark" } });
     updateCurrentUserSettingsMock.mockResolvedValue({ field: "appearance.theme_id", value: "sambee-dark" });
     const { result } = renderHook(() => useSambeeTheme(), { wrapper: themeProviderWrapper });
-    await vi.waitFor(() => expect(getCurrentUserSettingsMock).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await vi.waitFor(() => expect(getCurrentUserSettingsMock).toHaveBeenCalledTimes(1));
+    });
 
     await act(async () => {
       await userSettingsStore.getValue("appearance.theme_id").commit("sambee-dark");
     });
 
     expect(result.current.currentTheme.id).toBe("sambee-dark");
-    resolveRefresh?.({ ...settings, appearance: { ...settings.appearance, theme_id: "sambee-dark" } });
+    await act(async () => {
+      resolveRefresh?.({ ...settings, appearance: { ...settings.appearance, theme_id: "sambee-dark" } });
+    });
     await vi.waitFor(() => expect(getCurrentUserSettingsMock).toHaveBeenCalledTimes(2));
   });
 

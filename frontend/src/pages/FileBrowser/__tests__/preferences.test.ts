@@ -1,11 +1,19 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { wordWrapCommitMock } = vi.hoisted(() => ({ wordWrapCommitMock: vi.fn() }));
+const { wordWrapCommitMock, wordWrapSetting } = vi.hoisted(() => ({
+  wordWrapCommitMock: vi.fn(),
+  wordWrapSetting: { value: null as boolean | null },
+}));
 
 vi.mock("../../../services/userSettingsStore", () => ({
   useCurrentUserSetting: (field: string) => ({
-    confirmedValue: field === "text_editor.word_wrap_enabled" ? null : field === "text_editor.max_file_size_bytes" ? 52428800 : undefined,
+    confirmedValue:
+      field === "text_editor.word_wrap_enabled"
+        ? wordWrapSetting.value
+        : field === "text_editor.max_file_size_bytes"
+          ? 52428800
+          : undefined,
     pending: false,
     error: null,
     commit: wordWrapCommitMock,
@@ -29,7 +37,10 @@ describe("File Browser preferences", () => {
     localStorage.clear();
     sessionStorage.clear();
     authSession.clear();
-    wordWrapCommitMock.mockResolvedValue(undefined);
+    wordWrapSetting.value = null;
+    wordWrapCommitMock.mockImplementation(async (value: boolean) => {
+      wordWrapSetting.value = value;
+    });
   });
 
   afterEach(() => {
@@ -53,9 +64,11 @@ describe("File Browser preferences", () => {
       expect(markdownPreference.result.current[0]).toBe(true);
     });
 
-    act(() => {
+    await act(async () => {
       markdownPreference.result.current[1](false);
     });
+    textPreference.rerender();
+    markdownPreference.rerender();
 
     expect(textPreference.result.current[0]).toBe(false);
     expect(markdownPreference.result.current[0]).toBe(false);
@@ -64,7 +77,7 @@ describe("File Browser preferences", () => {
   it("applies word-wrap changes immediately through its field store", async () => {
     const { result } = renderHook(() => useTextEditorWordWrapPreference(false));
 
-    act(() => {
+    await act(async () => {
       result.current[1](false);
     });
 

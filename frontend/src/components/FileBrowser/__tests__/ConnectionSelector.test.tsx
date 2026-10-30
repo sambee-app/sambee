@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../../i18n";
@@ -9,6 +9,7 @@ import { ConnectionSelector } from "../ConnectionSelector";
 
 describe("ConnectionSelector", () => {
   afterEach(async () => {
+    cleanup();
     await setLocale("en");
   });
 
@@ -51,7 +52,9 @@ describe("ConnectionSelector", () => {
     );
 
     const trigger = screen.getByRole("combobox", { name: "Select connection" });
-    trigger.focus();
+    await act(async () => {
+      trigger.focus();
+    });
 
     await user.keyboard(sequence);
 

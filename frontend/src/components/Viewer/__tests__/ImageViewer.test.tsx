@@ -15,8 +15,8 @@ function ContentProviderTestWrapper({ children }: { children: ReactNode }) {
   return <ContentProviderRegistryContext.Provider value={contentProviders}>{children}</ContentProviderRegistryContext.Provider>;
 }
 
-function render(ui: ReactNode) {
-  return renderBase(ui, { wrapper: ContentProviderTestWrapper });
+async function render(ui: ReactNode) {
+  return act(async () => renderBase(ui, { wrapper: ContentProviderTestWrapper }));
 }
 
 vi.mock("yet-another-react-lightbox", () => ({
@@ -131,9 +131,9 @@ describe("ImageViewer", () => {
     });
   });
 
-  it("closes exactly once on Escape from lightbox content", () => {
+  it("closes exactly once on Escape from lightbox content", async () => {
     const onClose = vi.fn();
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
       </SambeeThemeProvider>
@@ -145,9 +145,9 @@ describe("ImageViewer", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("blurs toolbar focus on the first Escape and closes once on the next", () => {
+  it("blurs toolbar focus on the first Escape and closes once on the next", async () => {
     const onClose = vi.fn();
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
       </SambeeThemeProvider>
@@ -163,8 +163,8 @@ describe("ImageViewer", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a read-only badge in the toolbar when opened in read-only mode", () => {
-    render(
+  it("shows a read-only badge in the toolbar when opened in read-only mode", async () => {
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} isReadOnly={true} />
       </SambeeThemeProvider>
@@ -194,12 +194,14 @@ describe("ImageViewer", () => {
       dispatchEvent: vi.fn(),
     }));
     try {
-      render(
+      await render(
         <SambeeThemeProvider>
           <ImageViewer connectionId="conn-1" path="photo.heic" onClose={() => {}} />
         </SambeeThemeProvider>
       );
-      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      });
       expect(share).toHaveBeenCalledExactlyOnceWith({
         files: [expect.objectContaining({ name: "photo.png", type: "image/png", size: displayed.size })],
         title: "photo.png",
@@ -244,7 +246,7 @@ describe("ImageViewer", () => {
       </SambeeThemeProvider>
     );
     try {
-      const { rerender } = render(viewer);
+      const { rerender } = await render(viewer);
       fireEvent.click(screen.getByRole("button", { name: "Share" }));
       await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
       expect(await readBlobAsText(share.mock.calls[0]?.[0]?.files[0])).toBe("displayed original JPEG");
@@ -286,7 +288,7 @@ describe("ImageViewer", () => {
     }
   });
 
-  it("updates a preloaded slide source before marking it decoded", () => {
+  it("updates a preloaded slide source before marking it decoded", async () => {
     const markImageAsDecoded = vi.fn();
     const gallery = {
       ...createGalleryMock(),
@@ -297,7 +299,7 @@ describe("ImageViewer", () => {
     };
     mockUseCachedImageGallery.mockImplementation(() => gallery);
 
-    const { rerender } = render(
+    const { rerender } = await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="archive/image.png" onClose={() => {}} />
       </SambeeThemeProvider>
@@ -319,10 +321,10 @@ describe("ImageViewer", () => {
     expect(markImageAsDecoded).toHaveBeenCalledWith(0, "blob:preloaded-image");
   });
 
-  it("requests the next virtual page when the gallery reaches its loaded tail", () => {
+  it("requests the next virtual page when the gallery reaches its loaded tail", async () => {
     const onLoadMoreItems = vi.fn();
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer
           connectionId="conn-1"
@@ -338,8 +340,8 @@ describe("ImageViewer", () => {
     expect(onLoadMoreItems).toHaveBeenCalledOnce();
   });
 
-  it.each(["ArrowLeft", "ArrowRight"])("leaves Alt+%s to browser history while forwarding the plain arrow to the lightbox", (key) => {
-    render(
+  it.each(["ArrowLeft", "ArrowRight"])("leaves Alt+%s to browser history while forwarding the plain arrow to the lightbox", async (key) => {
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} />
       </SambeeThemeProvider>
@@ -362,7 +364,7 @@ describe("ImageViewer", () => {
   it("closes shortcuts help on Escape without closing the viewer", async () => {
     const onClose = vi.fn();
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
       </SambeeThemeProvider>
@@ -388,14 +390,14 @@ describe("ImageViewer", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("renders slide sources from the hook cache accessor instead of the raw cache ref", () => {
+  it("renders slide sources from the hook cache accessor instead of the raw cache ref", async () => {
     mockUseCachedImageGallery.mockReturnValue({
       ...createGalleryMock(),
       imageCacheRef: { current: new Map([[0, "blob:stale-ref"]]) },
       getCachedImageSrc: (index: number) => (index === 0 ? "blob:fresh-accessor" : undefined),
     });
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} images={["/images/photo.jpg"]} />
       </SambeeThemeProvider>
@@ -404,7 +406,7 @@ describe("ImageViewer", () => {
     expect(screen.getByTestId("image-lightbox")).toHaveAttribute("data-current-src", "blob:fresh-accessor");
   });
 
-  it("marks an image ready only after its native load event", () => {
+  it("marks an image ready only after its native load event", async () => {
     const markImageAsDecoded = vi.fn();
     mockUseCachedImageGallery.mockReturnValue({
       ...createGalleryMock(),
@@ -413,7 +415,7 @@ describe("ImageViewer", () => {
       markImageAsDecoded,
     });
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} images={["/images/photo.jpg"]} />
       </SambeeThemeProvider>
@@ -424,14 +426,14 @@ describe("ImageViewer", () => {
     expect(markImageAsDecoded).toHaveBeenCalledWith(0, "blob:decoded-image");
   });
 
-  it("hides the lightbox error placeholder while showing the shared image error", () => {
+  it("hides the lightbox error placeholder while showing the shared image error", async () => {
     mockUseCachedImageGallery.mockReturnValue({
       ...createGalleryMock(),
       errorStates: new Map([[0, "Failed to load image"]]),
       currentImageLoadPhase: "error",
     });
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/invalid.psd" onClose={() => {}} />
       </SambeeThemeProvider>
@@ -441,7 +443,7 @@ describe("ImageViewer", () => {
     expect(screen.getByTestId("image-lightbox").parentElement).toHaveClass("image-viewer-load-error");
   });
 
-  it("offers manual retry only for recoverable image errors", () => {
+  it("offers manual retry only for recoverable image errors", async () => {
     const retryCurrentImage = vi.fn();
     mockUseCachedImageGallery.mockReturnValue({
       ...createGalleryMock(),
@@ -451,7 +453,7 @@ describe("ImageViewer", () => {
       retryCurrentImage,
     });
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} />
       </SambeeThemeProvider>
@@ -461,14 +463,14 @@ describe("ImageViewer", () => {
     expect(retryCurrentImage).toHaveBeenCalledOnce();
   });
 
-  it("does not offer retry for a local preview policy error", () => {
+  it("does not offer retry for a local preview policy error", async () => {
     mockUseCachedImageGallery.mockReturnValue({
       ...createGalleryMock(),
       errorStates: new Map([[0, "This image format requires server-side conversion."]]),
       currentImageLoadPhase: "error",
     });
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="local-conn-1" path="/images/photo.psd" onClose={() => {}} />
       </SambeeThemeProvider>
@@ -477,7 +479,7 @@ describe("ImageViewer", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
   });
 
-  it("shows cancel feedback only after slow image loading and invokes cancellation", () => {
+  it("shows cancel feedback only after slow image loading and invokes cancellation", async () => {
     vi.useFakeTimers();
     const cancelCurrentImageLoad = vi.fn();
     mockUseCachedImageGallery.mockReturnValue({
@@ -488,7 +490,7 @@ describe("ImageViewer", () => {
       cancelCurrentImageLoad,
     });
 
-    render(
+    await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} />
       </SambeeThemeProvider>

@@ -124,10 +124,24 @@ export const handlers = [
 
   // Auth - Get auth config
   http.get(`${API_BASE}/auth/config`, () => {
-    console.log("MSW: Auth config request received");
     return HttpResponse.json({
       sign_in_mode: "password_only",
       oidc: null,
+    });
+  }),
+
+  http.get(`${API_BASE}/themes`, () => {
+    return HttpResponse.json({ themes: [], site_default_id: "sambee-light" });
+  }),
+
+  http.post(`${API_BASE}/auth/oidc/refresh`, () => {
+    return HttpResponse.json({
+      access_token: "mock-user-token",
+      token_type: "bearer",
+      user_id: "user-id",
+      username: "testuser",
+      role: "editor",
+      must_change_password: false,
     });
   }),
 
@@ -137,10 +151,7 @@ export const handlers = [
     const username = body.get("username");
     const password = body.get("password");
 
-    console.log("MSW: Login request received", { username, password });
-
     if (username === "admin" && password === "admin") {
-      console.log("MSW: Returning admin token");
       return HttpResponse.json({
         access_token: "mock-admin-token",
         token_type: "bearer",
@@ -152,7 +163,6 @@ export const handlers = [
     }
 
     if (username === "testuser" && password === "testpass") {
-      console.log("MSW: Returning user token");
       return HttpResponse.json({
         access_token: "mock-user-token",
         token_type: "bearer",
@@ -163,7 +173,6 @@ export const handlers = [
       });
     }
 
-    console.log("MSW: Invalid credentials");
     return HttpResponse.json({ detail: "Incorrect username or password" }, { status: 401 });
   }),
 

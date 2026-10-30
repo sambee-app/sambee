@@ -1,10 +1,36 @@
 import "@testing-library/jest-dom";
 import * as events from "node:events";
 import { cleanup } from "@testing-library/react";
-import { afterAll, afterEach, beforeAll, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, onTestFinished, vi } from "vitest";
 import { server } from "./mocks/server";
 
 const TEST_EVENT_TARGET_MAX_LISTENERS = 0;
+
+beforeEach(() => {
+  const consoleError = console.error;
+  const consoleWarn = console.warn;
+  const unexpectedWarnings: string[] = [];
+  const captureWarnings =
+    (output: typeof console.error) =>
+    (...args: unknown[]) => {
+      const message = args.map(String).join(" ");
+      unexpectedWarnings.push(message);
+      output(...args);
+    };
+  console.error = captureWarnings(consoleError);
+  console.warn = captureWarnings(consoleWarn);
+  onTestFinished(() => {
+    try {
+      expect(
+        unexpectedWarnings,
+        "Unexpected console.warn or console.error output. Fix its cause or explicitly mock and assert an expected diagnostic in this test."
+      ).toEqual([]);
+    } finally {
+      console.error = consoleError;
+      console.warn = consoleWarn;
+    }
+  });
+});
 
 events.setMaxListeners(TEST_EVENT_TARGET_MAX_LISTENERS);
 

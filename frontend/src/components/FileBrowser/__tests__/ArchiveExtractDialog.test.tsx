@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ArchiveExtractDialog } from "../ArchiveExtractDialog";
@@ -245,15 +245,17 @@ describe("ArchiveExtractDialog", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "fileBrowser.archive.buttonIgnoreMemberError" }));
-    rerender(
-      <ArchiveExtractDialog
-        {...defaultProps}
-        isExtracting={true}
-        error="fileBrowser.archive.extractError"
-        memberError={memberError}
-        onMemberErrorDecision={onMemberErrorDecision}
-      />
-    );
+    await act(async () => {
+      rerender(
+        <ArchiveExtractDialog
+          {...defaultProps}
+          isExtracting={true}
+          error="fileBrowser.archive.extractError"
+          memberError={memberError}
+          onMemberErrorDecision={onMemberErrorDecision}
+        />
+      );
+    });
 
     expect(screen.getByText("Disk full")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "fileBrowser.archive.buttonIgnoreMemberError" })).toBeEnabled();

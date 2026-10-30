@@ -1,4 +1,4 @@
-import { render as renderBase, screen, waitFor, within } from "@testing-library/react";
+import { act, render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -1872,19 +1872,21 @@ describe("UserManagementSettings", () => {
     expect(screen.getByRole("button", { name: /create user/i })).toHaveTextContent(/create user/i);
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
 
-    resolveCreateUser({
-      id: "user-2",
-      username: "new-admin",
-      role: "editor",
-      is_active: true,
-      must_change_password: true,
-      has_local_password: true,
-      oidc_role_assignment: null,
-      oidc: null,
-      pending_oidc: null,
-      created_at: "2026-03-01T10:00:00Z",
-      updated_at: "2026-03-01T10:00:00Z",
-      temporary_password: null,
+    await act(async () => {
+      resolveCreateUser({
+        id: "user-2",
+        username: "new-admin",
+        role: "editor",
+        is_active: true,
+        must_change_password: true,
+        has_local_password: true,
+        oidc_role_assignment: null,
+        oidc: null,
+        pending_oidc: null,
+        created_at: "2026-03-01T10:00:00Z",
+        updated_at: "2026-03-01T10:00:00Z",
+        temporary_password: null,
+      });
     });
   });
 });

@@ -848,6 +848,7 @@ describe("TextCodeEditor", () => {
       "Worker",
       class {
         addEventListener() {}
+        removeEventListener() {}
         terminate() {}
       }
     );

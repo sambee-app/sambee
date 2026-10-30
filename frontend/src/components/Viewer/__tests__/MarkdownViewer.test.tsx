@@ -1,6 +1,6 @@
 import type { ViewUpdate } from "@codemirror/view";
 import { createTheme, ThemeProvider } from "@mui/material";
-import { act, configure, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, configure, fireEvent, render as renderBase, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, type ReactNode, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from "react-router-dom";
@@ -591,9 +591,15 @@ describe("test-only retained Markdown host", () => {
 });
 
 describe("MarkdownViewer", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(async () => {
+    cleanup();
+    await act(async () => {});
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
 
   it("shares canonical unsaved Markdown rather than rendered HTML or stale draft state", async () => {
+    const user = userEvent.setup();
     const share = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
     vi.stubGlobal("navigator", { share, canShare: () => true });
@@ -622,15 +628,17 @@ describe("MarkdownViewer", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
     mockMarkdownEditorBehavior.canonicalMarkdownOverride = "# Latest unsaved\n";
-    fireEvent.click(screen.getByRole("button", { name: "Share" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Share as text" }));
+    await user.click(screen.getByRole("button", { name: "Share" }));
+    await user.click(screen.getByRole("menuitem", { name: "Share as text" }));
     expect(share).toHaveBeenCalledExactlyOnceWith({ text: "# Latest unsaved\n" });
     expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    await user.click(screen.getByRole("button", { name: "Share" }));
     const savedChoice = screen.getByRole("menuitem", { name: "Share as file" });
     await waitFor(() => expect(savedChoice).not.toHaveAttribute("aria-disabled", "true"));
-    fireEvent.click(savedChoice);
+    await user.click(savedChoice);
+    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
     expect(await readBlobAsText(share.mock.calls[1]?.[0]?.files[0])).toBe("# Saved\n");
     expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
     expect(raw).toHaveBeenCalledTimes(1);
@@ -641,14 +649,15 @@ describe("MarkdownViewer", () => {
     await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(raw).toHaveBeenCalledTimes(2));
     share.mockRejectedValueOnce(new DOMException("blocked", "NotAllowedError"));
-    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    await user.click(screen.getByRole("button", { name: "Share" }));
     const updatedChoice = screen.getByRole("menuitem", { name: "Share as file" });
     await waitFor(() => expect(updatedChoice).not.toHaveAttribute("aria-disabled", "true"));
-    fireEvent.click(updatedChoice);
+    await user.click(updatedChoice);
+    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
     expect(await readBlobAsText(share.mock.calls[2]?.[0]?.files[0])).toBe("# Latest unsaved\n");
-    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    await user.click(await screen.findByRole("button", { name: "Details" }));
     await screen.findByText(/"reason": "NotAllowedError"/);
-    await userEvent.keyboard("{Escape}");
+    await user.keyboard("{Escape}");
     const details = await screen.findByRole("button", { name: "Details" });
     await waitFor(() => expect(details).toHaveFocus());
     expect(onClose).not.toHaveBeenCalled();
@@ -685,12 +694,14 @@ describe("MarkdownViewer", () => {
   }
 
   function suppressExpectedRenderCrashNoise(message: string): () => void {
+    const consoleError = console.error;
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
       const combinedMessage = args.map((value) => (value instanceof Error ? value.message : String(value))).join(" ");
 
       if (combinedMessage.includes(message)) {
         return;
       }
+      consoleError(...args);
     });
 
     const handleWindowError = (event: ErrorEvent) => {
@@ -711,8 +722,8 @@ describe("MarkdownViewer", () => {
     localStorage.clear();
     sessionStorage.clear();
     localStorage.setItem("access_token", "mock-token");
-    vi.restoreAllMocks();
     vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
+    vi.spyOn(apiService, "releaseEditLock").mockResolvedValue();
     vi.spyOn(apiService, "writeTextWithEditLock").mockImplementation(async (connectionId, path, content, _lockInfo, options) => {
       await apiService.saveTextFile(connectionId, path, content, {
         filename: path.split("/").pop() ?? path,
@@ -1863,12 +1874,15 @@ describe("MarkdownViewer", () => {
     vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
     const interval = vi.spyOn(window, "setInterval");
     let finish!: () => void;
-    const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        })
-    );
+    const heartbeatRequest = vi
+      .spyOn(apiService, "heartbeatEditLock")
+      .mockResolvedValue(undefined)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      );
     renderViewer();
     await screen.findByText("Readme");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -2433,6 +2447,7 @@ describe("MarkdownViewer", () => {
       finishSnapshot = resolve;
     });
     renderViewer();
+    await screen.findByText("Readme");
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
     fireEvent.change(editor, { target: { value: "# Captured\n" } });
@@ -2572,7 +2587,7 @@ describe("MarkdownViewer", () => {
     );
     const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
     fireEvent.change(editor, { target: { value: "# Retained directory draft\n" } });
-    snapshotRegisteredDrafts();
+    await act(async () => snapshotRegisteredDrafts());
     const acquisitions = vi.mocked(apiService.acquireEditLock).mock.calls.length;
     const reads = vi.mocked(apiService.getFileContent).mock.calls.length;
     await act(async () =>
@@ -3873,7 +3888,7 @@ describe("MarkdownViewer", () => {
 
     await screen.findByText("Alpha");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await vi.dynamicImportSettled();
+    await act(() => vi.dynamicImportSettled());
 
     await screen.findByText("Editor unavailable");
 
@@ -3896,7 +3911,7 @@ describe("MarkdownViewer", () => {
 
     await screen.findByText("Alpha");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await vi.dynamicImportSettled();
+    await act(() => vi.dynamicImportSettled());
     await screen.findByRole("textbox", { name: "Markdown editor" });
 
     fireEvent.keyDown(document, { key: "E", ctrlKey: true, shiftKey: true });

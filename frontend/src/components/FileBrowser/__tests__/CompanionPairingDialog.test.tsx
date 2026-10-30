@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { COMPANION_PAIRING_DIALOG_COPY } from "../../Settings/localDrivesCopy";
@@ -23,7 +23,7 @@ describe("CompanionPairingDialog", () => {
     );
 
     const startButton = screen.getByRole("button", { name: COMPANION_PAIRING_DIALOG_COPY.startButton });
-    startButton.focus();
+    act(() => startButton.focus());
 
     fireEvent.keyDown(startButton, { key });
 

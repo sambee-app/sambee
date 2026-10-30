@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LOCAL_DRIVES_PAGE_COPY } from "../../components/Settings/localDrivesCopy";
@@ -117,11 +117,13 @@ describe("LocalDrivesSettings", () => {
     );
   };
 
-  it("does not flash the unavailable warning before the first load resolves", () => {
+  it("does not flash the unavailable warning before the first load resolves", async () => {
     mockCheckHealth.mockReturnValue(new Promise(() => undefined));
     mockHasStoredSecret.mockReturnValue(false);
 
-    renderSettings();
+    await act(async () => {
+      renderSettings();
+    });
 
     expect(screen.queryByText(LOCAL_DRIVES_PAGE_COPY.statusUnavailable)).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();

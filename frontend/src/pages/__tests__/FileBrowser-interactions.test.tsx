@@ -174,11 +174,15 @@ describe("Browser Component - Interactions", () => {
 
       expect(pickers).toHaveLength(2);
       Object.defineProperty(pickers[0], "files", { value: [new File(["old"], "old.txt")] });
-      pickers[0]!.dispatchEvent(new Event("change", { bubbles: true }));
+      await act(async () => {
+        pickers[0]!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       expect(api.publishBrowserFile).not.toHaveBeenCalled();
 
       Object.defineProperty(pickers[1], "files", { value: [new File(["new"], "new.txt")] });
-      pickers[1]!.dispatchEvent(new Event("change", { bubbles: true }));
+      await act(async () => {
+        pickers[1]!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       await waitFor(() => expect(api.publishBrowserFile).toHaveBeenCalledOnce());
       expect(api.publishBrowserFile).toHaveBeenCalledWith(expect.any(File), "conn-1", "new.txt", "ask", expect.any(Object));
     } finally {
@@ -327,7 +331,9 @@ describe("Browser Component - Interactions", () => {
       await waitFor(() => expectDirectoryLoad("conn-1", "Documents"));
 
       Object.defineProperty(picker!, "files", { value: [new File(["data"], "report.txt")] });
-      picker!.dispatchEvent(new Event("change", { bubbles: true }));
+      await act(async () => {
+        picker!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       await waitFor(() => expect(screen.getByText(/destination changed/i)).toBeInTheDocument());
       expect(api.publishBrowserFile).not.toHaveBeenCalled();
     } finally {
@@ -756,10 +762,18 @@ describe("Browser Component - Interactions", () => {
         ],
         total: 1,
       });
+      vi.mocked(api.getFileContent).mockResolvedValue("viewer text");
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await user.click(await screen.findByRole("button", { name: new RegExp(`file: ${name}`, "i") }));
-      await screen.findByRole("dialog");
+      await act(() => vi.dynamicImportSettled());
+      if (mimeType === "image/png") {
+        await screen.findByRole("img", { name });
+      } else {
+        await screen.findByRole("dialog");
+      }
+      if (mimeType === "text/plain") await screen.findByText("viewer text");
+      if (mimeType === "application/pdf") await screen.findByRole("alert");
 
       const event = createEvent.keyDown(document, { key: "F5" });
       fireEvent(document, event);
@@ -1127,7 +1141,9 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{Control>}b{/Control}");
 
-      (leftPaneList as HTMLElement).focus();
+      await act(async () => {
+        (leftPaneList as HTMLElement).focus();
+      });
 
       await user.keyboard("{Control>}b{/Control}");
 
@@ -1627,7 +1643,9 @@ describe("Browser Component - Interactions", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("file-list-container");
-      requireTestValue(listContainer).focus();
+      await act(async () => {
+        requireTestValue(listContainer).focus();
+      });
 
       const copyEvent = createEvent.keyDown(document, { key: "F5" });
       fireEvent(document, copyEvent);
@@ -2045,6 +2063,7 @@ describe("Browser Component - Interactions", () => {
     });
 
     it("opens archive extraction with Alt+F9 for a focused ZIP file", async () => {
+      const user = userEvent.setup();
       vi.mocked(api.listDirectory).mockResolvedValue({
         path: "",
         items: [
@@ -2075,14 +2094,16 @@ describe("Browser Component - Interactions", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1?p2=smb/test-server-2");
 
       const [listContainer] = await screen.findAllByTestId("file-list-container");
-      requireTestValue(listContainer).focus();
-      fireEvent.keyDown(document, { key: "F9", altKey: true });
+      await act(async () => {
+        requireTestValue(listContainer).focus();
+      });
+      await user.keyboard("{Alt>}{F9}{/Alt}");
       expect(screen.queryByRole("dialog", { name: "Extract from ZIP Archive" })).not.toBeInTheDocument();
 
-      fireEvent.keyDown(document, { key: "ArrowDown" });
+      await user.keyboard("{ArrowDown}");
       await waitFor(() => expect(screen.getAllByRole("button", { name: /file: temp\.zip/i })[0]).toHaveAttribute("data-selected", "true"));
       expect(screen.getByRole("button", { name: "Extract archive" })).toBeEnabled();
-      fireEvent.keyDown(document, { key: "F9", altKey: true });
+      await user.keyboard("{Alt>}{F9}{/Alt}");
 
       const extractDialog = await screen.findByRole("dialog", { name: "Extract from ZIP Archive" });
       expect(within(extractDialog).getByText("Destination directory:")).toBeInTheDocument();
@@ -2092,7 +2113,7 @@ describe("Browser Component - Interactions", () => {
       expect(unavailableEvent.defaultPrevented).toBe(false);
       expect(screen.queryByText("Copy requires dual-pane mode.")).not.toBeInTheDocument();
       const locationBeforeTab = screen.getByTestId("router-location").textContent;
-      fireEvent.keyDown(document, { key: "Tab" });
+      await user.tab();
       expect(screen.getByTestId("router-location")).toHaveTextContent(locationBeforeTab ?? "");
     });
 
@@ -2447,13 +2468,13 @@ describe("Browser Component - Interactions", () => {
             "Folder: Pictures (selected)",
             "File: readme.txt (selected)",
           ]);
-          act(() => {
+          await act(async () => {
             for (const callback of frames.splice(0)) callback(performance.now());
           });
           expect(within(list).getByRole("button", { name: targetName })).toHaveAttribute("data-selected", "true");
         } finally {
           animationFrame.mockRestore();
-          act(() => {
+          await act(async () => {
             for (const callback of frames) callback(performance.now());
           });
         }
@@ -2495,7 +2516,9 @@ describe("Browser Component - Interactions", () => {
         expect(selectedNames(list)).toEqual([]);
 
         const settingsButton = screen.getByRole("button", { name: /open settings/i });
-        settingsButton.focus();
+        await act(async () => {
+          settingsButton.focus();
+        });
         await user.keyboard(`{Shift>}{${key}}{/Shift}`);
         expect(settingsButton).toHaveFocus();
         expect(selectedNames(list)).toEqual([]);
@@ -2559,7 +2582,9 @@ describe("Browser Component - Interactions", () => {
       });
 
       const quickBarInput = screen.getByPlaceholderText("Navigate to any directory");
-      quickBarInput.focus();
+      await act(async () => {
+        quickBarInput.focus();
+      });
       expect(quickBarInput).toHaveFocus();
 
       await user.keyboard("{Control>}{ArrowDown}{/Control}");
@@ -2670,7 +2695,9 @@ describe("Browser Component - Interactions", () => {
       });
 
       const callsBeforeRefresh = vi.mocked(api.searchRecentFiles).mock.calls.length;
-      triggerRefresh();
+      await act(async () => {
+        triggerRefresh();
+      });
 
       await waitFor(() => {
         expect(api.searchRecentFiles).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
@@ -2697,7 +2724,9 @@ describe("Browser Component - Interactions", () => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       const callsBeforeRefresh = vi.mocked(api.searchRecentFiles).mock.calls.length;
 
-      triggerRefresh();
+      await act(async () => {
+        triggerRefresh();
+      });
 
       await waitFor(() => {
         expect(api.searchRecentFiles).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
@@ -2726,7 +2755,9 @@ describe("Browser Component - Interactions", () => {
       });
 
       const callsBeforeRefresh = vi.mocked(api.searchRecentDirectories).mock.calls.length;
-      triggerRefresh();
+      await act(async () => {
+        triggerRefresh();
+      });
 
       await waitFor(() => {
         expect(api.searchRecentDirectories).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
@@ -2757,7 +2788,9 @@ describe("Browser Component - Interactions", () => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       const callsBeforeRefresh = vi.mocked(api.searchRecentDirectories).mock.calls.length;
 
-      window.dispatchEvent(new Event(RECENT_DIRECTORIES_CHANGED_EVENT));
+      await act(async () => {
+        window.dispatchEvent(new Event(RECENT_DIRECTORIES_CHANGED_EVENT));
+      });
 
       await waitFor(() => {
         expect(api.searchRecentDirectories).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
@@ -2783,8 +2816,10 @@ describe("Browser Component - Interactions", () => {
       });
 
       const callsBeforeTabReturn = vi.mocked(api.searchRecentFiles).mock.calls.length;
-      fireEvent(window, new Event("focus"));
-      fireEvent(document, new Event("visibilitychange"));
+      await act(async () => {
+        fireEvent(window, new Event("focus"));
+        fireEvent(document, new Event("visibilitychange"));
+      });
 
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       expect(api.searchRecentFiles).toHaveBeenCalledTimes(callsBeforeTabReturn);

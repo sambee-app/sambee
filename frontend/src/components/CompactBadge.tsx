@@ -3,10 +3,10 @@ import { truncateTextByGrapheme } from "../utils/pathDisplay";
 
 export const MAX_BADGE_LABEL_LENGTH = 18;
 
-export function CompactBadge({ label, sx, ...props }: Omit<ChipProps, "label"> & { label: string }) {
+export function CompactBadge({ label, title, sx, ...props }: Omit<ChipProps, "label"> & { label: string }) {
   const shortLabel = truncateTextByGrapheme(label, MAX_BADGE_LABEL_LENGTH);
   return (
-    <Tooltip title={shortLabel === label ? "" : label}>
+    <Tooltip title={title ?? (shortLabel === label ? "" : label)}>
       <Chip
         {...props}
         label={shortLabel}

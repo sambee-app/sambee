@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
@@ -269,6 +269,7 @@ function renderWithProvider(component: React.ReactElement) {
 
 describe("UnifiedSearchBar", () => {
   afterEach(async () => {
+    cleanup();
     virtualizerSizeCache.clear();
     await setLocale("en");
   });
@@ -606,7 +607,7 @@ describe("UnifiedSearchBar", () => {
     });
 
     const outsideTarget = screen.getByRole("button", { name: "File list focus target" });
-    outsideTarget.focus();
+    await user.click(outsideTarget);
     expect(outsideTarget).toHaveFocus();
 
     rerender(
@@ -666,7 +667,7 @@ describe("UnifiedSearchBar", () => {
     expect(searchInput).toHaveValue("ab");
 
     const outsideTarget = screen.getByRole("button", { name: "Outside focus target" });
-    outsideTarget.focus();
+    await user.click(outsideTarget);
     expect(outsideTarget).toHaveFocus();
 
     rerender(

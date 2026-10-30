@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearCachedAsyncData } from "../../hooks/useCachedAsyncData";
@@ -78,10 +78,12 @@ describe("ConnectionSettings", () => {
       </SambeeThemeProvider>
     );
 
-  it("shows a loading state instead of flashing the empty state before connections load", () => {
+  it("shows a loading state instead of flashing the empty state before connections load", async () => {
     vi.mocked(api.getConnections).mockReturnValue(new Promise(() => undefined));
 
-    renderSettings();
+    await act(async () => {
+      renderSettings();
+    });
 
     expect(screen.queryByText(/no connections configured/i)).not.toBeInTheDocument();
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
@@ -101,7 +103,7 @@ describe("ConnectionSettings", () => {
     expect(api.getCurrentUser).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps Add connection in the footer when the parent renders the page header", () => {
+  it("keeps Add connection in the footer when the parent renders the page header", async () => {
     vi.mocked(api.getConnections).mockReturnValue(new Promise(() => undefined));
 
     render(
@@ -111,6 +113,7 @@ describe("ConnectionSettings", () => {
     );
 
     expect(screen.getByRole("button", { name: /add connection/i })).toBeInTheDocument();
+    await waitFor(() => expect(api.getCurrentUser).toHaveBeenCalled());
   });
 
   it("shows backend-defined visibility options when the dialog opens", async () => {

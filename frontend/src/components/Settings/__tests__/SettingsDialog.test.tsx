@@ -102,8 +102,10 @@ describe("SettingsDialog Component", () => {
     return render(<SambeeThemeProvider>{ui}</SambeeThemeProvider>);
   };
 
-  it("does not check user status when dialog is closed", () => {
-    renderWithTheme(<SettingsDialog open={false} onClose={mockOnClose} />);
+  it("does not check user status when dialog is closed", async () => {
+    await act(async () => {
+      renderWithTheme(<SettingsDialog open={false} onClose={mockOnClose} />);
+    });
 
     expect(api.getCurrentUser).toHaveBeenCalledTimes(1);
   });
@@ -361,7 +363,7 @@ describe("SettingsDialog Component", () => {
     );
     renderWithTheme(<SettingsDialog open={true} onClose={mockOnClose} />);
     const input = await screen.findByRole("textbox", { name: "Appearance preference" });
-    input.focus();
+    act(() => input.focus());
     await act(async () => resolveUser({ id: "admin-id", username: "admin", role: "admin" }));
     await screen.findByRole("option", { name: /^about$/i });
     expect(input).toHaveFocus();
@@ -468,7 +470,7 @@ describe("SettingsDialog Component", () => {
     });
 
     const connectionsOption = screen.getByRole("option", { name: /^connections$/i });
-    connectionsOption.focus();
+    act(() => connectionsOption.focus());
 
     await user.keyboard("{End}");
 
@@ -494,7 +496,7 @@ describe("SettingsDialog Component", () => {
     await screen.findByRole("option", { name: /system/i });
 
     const appearanceOption = screen.getByRole("option", { name: /appearance/i });
-    appearanceOption.focus();
+    act(() => appearanceOption.focus());
 
     await user.keyboard("{PageDown}");
 
@@ -518,8 +520,10 @@ describe("SettingsDialog Component", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
-  it("does not load an admin-only category for a non-admin user", () => {
-    renderWithTheme(<SettingsCategoryContent item="admin-network" isAdmin={false} />);
+  it("does not load an admin-only category for a non-admin user", async () => {
+    await act(async () => {
+      renderWithTheme(<SettingsCategoryContent item="admin-network" isAdmin={false} />);
+    });
 
     expect(networkModule.load).not.toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

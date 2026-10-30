@@ -881,6 +881,7 @@ describe("useCachedImageGallery", () => {
     expect(result.current.currentIndex).toBe(1);
     expect(result.current.getCachedImageSrc(1)).toBeUndefined();
     expect(result.current.imageCacheRef.current.has(1)).toBe(false);
+    await waitFor(() => expect(result.current.loadingStates.get(1)).toBe(true));
   });
 
   it("does not expose the previous gallery loading state at the same index on the first render after a gallery switch", async () => {
@@ -918,6 +919,7 @@ describe("useCachedImageGallery", () => {
 
     expect(result.current.currentIndex).toBe(1);
     expect(result.current.loadingStates.get(1)).toBeUndefined();
+    await waitFor(() => expect(result.current.loadingStates.get(1)).toBe(true));
   });
 
   it("does not expose the previous gallery error state at the same index on the first render after a gallery switch", async () => {
@@ -965,6 +967,7 @@ describe("useCachedImageGallery", () => {
 
     expect(result.current.currentIndex).toBe(1);
     expect(result.current.errorStates.get(1)).toBeUndefined();
+    await waitFor(() => expect(result.current.loadingStates.get(1)).toBe(true));
   });
 
   it("does not immediately relaunch a non-transient current-image failure before the retry gate opens", async () => {

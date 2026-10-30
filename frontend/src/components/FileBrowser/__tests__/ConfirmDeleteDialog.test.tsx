@@ -9,7 +9,7 @@
  * - Uses centralized string constants
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { FileType } from "../../../types";
@@ -131,7 +131,7 @@ describe("ConfirmDeleteDialog", () => {
       expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
     });
 
-    screen.getByRole("button", { name: "Delete" }).focus();
+    act(() => screen.getByRole("button", { name: "Delete" }).focus());
     await user.keyboard("{Enter}");
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });

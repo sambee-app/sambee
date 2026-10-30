@@ -44,11 +44,12 @@ describe("ThemeContext", () => {
     }));
   });
 
-  it("uses the built-in default while appearance settings are unavailable", () => {
+  it("uses the built-in default while appearance settings are unavailable", async () => {
     const { result } = renderHook(() => useSambeeTheme(), { wrapper: createWrapper() });
 
     expect(result.current.currentTheme.id).toBe("sambee-light");
     expect(result.current.availableThemes.map((theme) => theme.id)).toEqual(["sambee-light", "sambee-dark"]);
+    await waitFor(() => expect(refreshSettingsMock).toHaveBeenCalled());
   });
 
   it("uses the default theme color for PWA and document metadata", () => {
@@ -88,7 +89,7 @@ describe("ThemeContext", () => {
     expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute("content", "#123456");
   });
 
-  it("falls back safely when a confirmed theme ID is absent from the registry", () => {
+  it("falls back safely when a confirmed theme ID is absent from the registry", async () => {
     useCurrentUserSettingMock.mockImplementation((field: string) => ({
       confirmedValue: field === "appearance.theme_id" ? "missing" : [],
       pending: false,
@@ -100,6 +101,7 @@ describe("ThemeContext", () => {
     const { result } = renderHook(() => useSambeeTheme(), { wrapper: createWrapper() });
 
     expect(result.current.currentTheme.id).toBe("sambee-light");
+    await waitFor(() => expect(refreshSettingsMock).toHaveBeenCalled());
   });
 
   it("refreshes the site default on focus and after a local write", async () => {
@@ -118,14 +120,18 @@ describe("ThemeContext", () => {
   it("reloads themes and user settings once for a same-user login, not for a token refresh", async () => {
     const { unmount } = renderHook(() => useSambeeTheme(), { wrapper: createWrapper() });
     await waitFor(() => expect(getThemesMock).toHaveBeenCalledTimes(1));
-    authSession.setAuthenticated(createMockAuthToken({ access_token: "a", token_type: "bearer", user_id: "same-user" }), true);
+    await act(async () => {
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "a", token_type: "bearer", user_id: "same-user" }), true);
+    });
     await waitFor(() => expect(getThemesMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(refreshSettingsMock).toHaveBeenCalledTimes(2));
     authSession.setAuthenticated(createMockAuthToken({ access_token: "refreshed", token_type: "bearer", user_id: "same-user" }), true);
     expect(getThemesMock).toHaveBeenCalledTimes(2);
     expect(refreshSettingsMock).toHaveBeenCalledTimes(2);
-    authSession.setAuthenticated(createMockAuthToken({ access_token: "b", token_type: "bearer", user_id: "same-user" }), true);
-    authSession.notifyNewLogin();
+    await act(async () => {
+      authSession.setAuthenticated(createMockAuthToken({ access_token: "b", token_type: "bearer", user_id: "same-user" }), true);
+      authSession.notifyNewLogin();
+    });
     await waitFor(() => expect(getThemesMock).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(refreshSettingsMock).toHaveBeenCalledTimes(3));
     expect(getCurrentUserMock).toHaveBeenCalledTimes(3);

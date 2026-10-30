@@ -19,6 +19,7 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import NameInputDialog from "../NameInputDialog";
 import { NAME_DIALOG_STRINGS } from "../nameDialogStrings";
@@ -379,21 +380,32 @@ describe("NameInputDialog", () => {
   // ── Reset on re-open ──────────────────────────────────────────────────
 
   it("resets value and validation error when dialog reopens", async () => {
+    function ReopenableDialog() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open name dialog
+          </button>
+          <NameInputDialog {...defaultProps} initialValue="original" open={open} onClose={() => setOpen(false)} />
+        </>
+      );
+    }
     const user = userEvent.setup();
-    const { rerender } = render(<NameInputDialog {...defaultProps} initialValue="original" />);
-
-    // Change the value
+    render(<ReopenableDialog />);
+    await user.click(screen.getByRole("button", { name: "Open name dialog" }));
     const input = screen.getByLabelText("Name");
     await waitFor(() => expect(input).toHaveFocus());
     await user.clear(input);
     await user.type(input, "modified");
 
-    // Close and reopen
-    rerender(<NameInputDialog {...defaultProps} initialValue="original" open={false} />);
-    rerender(<NameInputDialog {...defaultProps} initialValue="original" open={true} />);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByLabelText("Name")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Open name dialog" }));
 
     await waitFor(() => {
       expect(screen.getByLabelText("Name")).toHaveValue("original");
+      expect(screen.getByLabelText("Name")).toHaveFocus();
     });
   });
 });

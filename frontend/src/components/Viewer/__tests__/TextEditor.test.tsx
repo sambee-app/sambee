@@ -225,7 +225,7 @@ describe("TextEditor", () => {
     const router = renderRoutedViewer();
     const editor = await enterEditMode();
     fireEvent.change(editor, { target: { value: "retained directory recovery draft" } });
-    snapshotRegisteredDrafts();
+    act(() => snapshotRegisteredDrafts());
     const acquisitions = vi.mocked(apiService.acquireEditLock).mock.calls.length;
     const reads = vi.mocked(apiService.getFileContent).mock.calls.length;
     await act(async () =>
@@ -515,20 +515,26 @@ describe("TextEditor", () => {
     const editor = await enterEditMode();
     fireEvent.change(editor, { target: { value: "unsaved text" } });
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Share as text" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Share as text" }));
+    });
     expect(share).toHaveBeenCalledExactlyOnceWith({ text: "unsaved text" });
     expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
     const fileChoice = screen.getByRole("menuitem", { name: "Share as file" });
     await waitFor(() => expect(fileChoice).not.toHaveAttribute("aria-disabled", "true"));
-    fireEvent.click(fileChoice);
+    await act(async () => {
+      fireEvent.click(fileChoice);
+    });
     expect(share).toHaveBeenLastCalledWith({
       files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 11 })],
       title: "readme.txt",
     });
     expect(raw).toHaveBeenCalledTimes(1);
     expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
     const previousAttachment = share.mock.calls[1]?.[0]?.files[0];
     expect(await readBlobAsText(previousAttachment)).toBe("saved bytes");
@@ -539,12 +545,15 @@ describe("TextEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
     const savedChoice = screen.getByRole("menuitem", { name: "Share as file" });
     await waitFor(() => expect(savedChoice).not.toHaveAttribute("aria-disabled", "true"));
-    fireEvent.click(savedChoice);
+    await act(async () => {
+      fireEvent.click(savedChoice);
+    });
     expect(share).toHaveBeenLastCalledWith({
       files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 12 })],
       title: "readme.txt",
     });
     expect(share.mock.calls[2]?.[0]?.files[0]).not.toBe(previousAttachment);
+    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
     expect(await readBlobAsText(share.mock.calls[2]?.[0]?.files[0])).toBe("unsaved text");
     await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
   });
@@ -1129,12 +1138,15 @@ describe("TextEditor", () => {
   it("does not overlap heartbeat requests", async () => {
     const interval = vi.spyOn(window, "setInterval");
     let finish!: () => void;
-    const heartbeatRequest = vi.spyOn(apiService, "heartbeatEditLock").mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        })
-    );
+    const heartbeatRequest = vi
+      .spyOn(apiService, "heartbeatEditLock")
+      .mockResolvedValue(undefined)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      );
     renderViewer();
     await enterEditMode();
     const heartbeat = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
@@ -1354,7 +1366,7 @@ describe("TextEditor", () => {
     fireEvent.keyDown(replaceInput, { key: "ArrowDown" });
     expect(replaceInput).toHaveValue("draft replacement");
 
-    findInput.focus();
+    await act(async () => findInput.focus());
     fireEvent.keyDown(findInput, { key: "ArrowDown" });
     expect(findInput).toHaveValue("");
     fireEvent.keyDown(findInput, { key: "ArrowUp" });
@@ -1392,14 +1404,14 @@ describe("TextEditor", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("Toggle case-sensitive matching (Alt+C)");
 
     const replaceAllButton = screen.getByRole("button", { name: "Replace all" });
-    replaceAllButton.focus();
+    await act(async () => replaceAllButton.focus());
     await user.keyboard("{Tab}");
     expect(findInput).toHaveFocus();
     await user.keyboard("{Shift>}{Tab}{/Shift}");
     expect(replaceAllButton).toHaveFocus();
 
     fireEvent.change(replaceInput, { target: { value: "goodbye" } });
-    replaceInput.focus();
+    await act(async () => replaceInput.focus());
     fireEvent.keyDown(replaceInput, { key: "Enter" });
     expect(replaceInput).toHaveFocus();
     fireEvent.keyDown(replaceInput, { altKey: true, ctrlKey: true, key: "Enter" });
