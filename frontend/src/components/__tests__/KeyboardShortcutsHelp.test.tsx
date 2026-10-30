@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KeyboardShortcut } from "../../hooks/useKeyboardShortcuts";
@@ -14,6 +14,7 @@ describe("KeyboardShortcutsHelp", () => {
   });
 
   afterEach(async () => {
+    cleanup();
     vi.unstubAllGlobals();
     await setLocale("en");
   });

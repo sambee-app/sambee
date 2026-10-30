@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DialogOperationContext } from "../DialogOperationContext";
@@ -104,11 +104,11 @@ describe("DialogOperationContext", () => {
     const identifier = screen.getByTestId("source");
     expect(identifier).not.toHaveTextContent(value);
 
-    ResizeObserverMock.resize(100);
+    act(() => ResizeObserverMock.resize(100));
     await waitFor(() => expect(screen.getByTestId("source")).toHaveTextContent(value));
     expect(screen.getByTestId("source")).toBe(identifier);
 
-    ResizeObserverMock.resize(12);
+    act(() => ResizeObserverMock.resize(12));
     await waitFor(() => expect(screen.getByTestId("source")).not.toHaveTextContent(value));
     expect(screen.getByTestId("source")).toBe(identifier);
   });

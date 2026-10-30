@@ -1,5 +1,6 @@
 import type { Virtualizer } from "@tanstack/react-virtual";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { requireTestValue } from "../../../test/helpers/assertions";
@@ -23,6 +24,7 @@ const fileRowStylesStub = {
 
 describe("FileList", () => {
   afterEach(async () => {
+    cleanup();
     await setLocale("en");
   });
 
@@ -153,7 +155,8 @@ describe("FileList", () => {
     expect(measureElement).not.toHaveBeenCalled();
   });
 
-  it("opens compact item actions from the visible more actions button", () => {
+  it("opens compact item actions from the visible more actions button", async () => {
+    const user = userEvent.setup();
     const files: FileEntry[] = [
       {
         name: "readme.txt",
@@ -195,8 +198,8 @@ describe("FileList", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for readme.txt" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Select" }));
+    await user.click(screen.getByRole("button", { name: "More actions for readme.txt" }));
+    await user.click(screen.getByRole("menuitem", { name: "Select" }));
 
     expect(onSelectItem).toHaveBeenCalledWith(files[0], 0);
     expect(onFileClick).not.toHaveBeenCalled();

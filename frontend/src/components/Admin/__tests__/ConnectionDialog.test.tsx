@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockConnection } from "../../../test/fixtures/connections";
@@ -93,8 +93,9 @@ describe("ConnectionDialog Component", () => {
     vi.mocked(api.getConnectionVisibilityOptions).mockResolvedValue(mockVisibilityOptions);
   });
 
-  it("uses consistent field descriptions in add and edit modes", () => {
+  it("uses consistent field descriptions in add and edit modes", async () => {
     const addDialog = render(<ConnectionDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />);
+    await waitFor(() => expect(api.getConnectionVisibilityOptions).toHaveBeenCalled());
     const addDescriptions = [
       "A name to identify this connection in Sambee",
       "IP address or hostname of the SMB server",
@@ -111,13 +112,16 @@ describe("ConnectionDialog Component", () => {
     }
 
     addDialog.unmount();
-    render(<ConnectionDialog open={true} onClose={mockOnClose} onSave={mockOnSave} connection={mockConnection} />);
+    await act(async () => {
+      render(<ConnectionDialog open={true} onClose={mockOnClose} onSave={mockOnSave} connection={mockConnection} />);
+    });
 
     expect(screen.getByText("Leave blank to keep existing password")).toHaveClass("MuiFormHelperText-root");
   });
 
-  it("renders form fields for new connection", () => {
+  it("renders form fields for new connection", async () => {
     render(<ConnectionDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />);
+    await waitFor(() => expect(api.getConnectionVisibilityOptions).toHaveBeenCalled());
 
     expect(screen.getByRole("heading", { name: /add connection/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/connection name/i)).toBeInTheDocument();
@@ -132,12 +136,13 @@ describe("ConnectionDialog Component", () => {
     expect(screen.getByRole("combobox", { name: /access mode/i })).toBeInTheDocument();
   });
 
-  it("uses the shared one-column form design in a small-width dialog", () => {
+  it("uses the shared one-column form design in a small-width dialog", async () => {
     const restoreViewport = mockViewportWidth(800);
 
     try {
       render(<ConnectionDialog open={true} onClose={mockOnClose} onSave={mockOnSave} />);
 
+      await waitFor(() => expect(api.getConnectionVisibilityOptions).toHaveBeenCalled());
       const nameLabel = screen.getByText("Connection name", { selector: "label" });
       const nameInput = screen.getByLabelText(/connection name/i);
 
@@ -255,8 +260,9 @@ describe("ConnectionDialog Component", () => {
     expect(api.getConnectionVisibilityOptions).toHaveBeenCalled();
   });
 
-  it("renders form with existing connection data in edit mode", () => {
+  it("renders form with existing connection data in edit mode", async () => {
     render(<ConnectionDialog open={true} onClose={mockOnClose} onSave={mockOnSave} connection={mockConnection} />);
+    await waitFor(() => expect(api.getConnectionVisibilityOptions).toHaveBeenCalled());
 
     expect(screen.getByRole("heading", { name: /edit connection/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/connection name/i)).toHaveValue("Test Server");
@@ -484,7 +490,9 @@ describe("ConnectionDialog Component", () => {
     expect(screen.getByRole("button", { name: /^save$/i })).toHaveTextContent(/^save$/i);
     expect(screen.getByRole("progressbar")).toBeInTheDocument();
 
-    resolveCreate?.(mockConnection);
+    await act(async () => {
+      resolveCreate(mockConnection);
+    });
   });
 
   it("closes dialog on cancel", async () => {

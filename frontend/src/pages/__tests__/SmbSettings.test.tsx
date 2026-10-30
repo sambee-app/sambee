@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearCachedAsyncData } from "../../hooks/useCachedAsyncData";
@@ -131,13 +131,15 @@ describe("SmbSettings", () => {
     );
 
     const protection = await screen.findByRole("combobox", { name: "Transport protection" });
-    protection.focus();
+    act(() => protection.focus());
     await user.click(protection);
     await user.click(screen.getByRole("option", { name: "Signing and encryption (SMB 3+)" }));
 
     await waitFor(() => expect(protection).toHaveAttribute("aria-disabled", "true"));
-    protection.blur();
-    resolveUpdate?.({ field: "encryption_mode", value: "encryption_required" });
+    await act(async () => {
+      protection.blur();
+      resolveUpdate?.({ field: "encryption_mode", value: "encryption_required" });
+    });
 
     await waitFor(() => expect(protection).toHaveFocus());
   });

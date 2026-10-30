@@ -207,7 +207,9 @@ describe("FileBrowser WebSocket behavior", () => {
     const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
     expect(backendSocket?.url).toBe("ws://localhost:3000/api/ws?token=fake-token");
 
-    backendSocket?.close();
+    await act(async () => {
+      backendSocket?.close();
+    });
 
     expect(getBackendAvailabilitySnapshot().status).toBe("available");
   });
@@ -224,7 +226,9 @@ describe("FileBrowser WebSocket behavior", () => {
     });
     const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
     expect(backendSocket).toBeDefined();
-    backendSocket?.open();
+    await act(async () => {
+      backendSocket?.open();
+    });
 
     expect(() => {
       act(() => {
@@ -299,7 +303,7 @@ describe("FileBrowser WebSocket behavior", () => {
     await waitFor(() => expect(socket.sentMessages.length).toBeGreaterThan(0));
     const request = JSON.parse(requireTestValue(socket.sentMessages[0]));
     const refreshControl = screen.getByRole("button", { name: "Refresh" });
-    act(() =>
+    await act(async () =>
       socket.onmessage?.(
         new MessageEvent("message", {
           data: JSON.stringify({ ...request, type: "error", code: "directory_access_denied" }),
@@ -316,7 +320,7 @@ describe("FileBrowser WebSocket behavior", () => {
     await waitFor(() => expect(parseSentMessages(socket).filter((message) => message.action === "subscribe")).toHaveLength(2));
     const retryRequest = JSON.parse(requireTestValue(socket.sentMessages.at(-1)));
     expect(retryRequest.request_id).not.toBe(request.request_id);
-    act(() =>
+    await act(async () =>
       socket.onmessage?.(
         new MessageEvent("message", {
           data: JSON.stringify({ ...retryRequest, type: "error", code: "directory_access_denied" }),
@@ -327,7 +331,7 @@ describe("FileBrowser WebSocket behavior", () => {
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
     await waitFor(() => expect(parseSentMessages(socket).filter((message) => message.action === "subscribe")).toHaveLength(3));
     const recoveryRequest = JSON.parse(requireTestValue(socket.sentMessages.at(-1)));
-    act(() =>
+    await act(async () =>
       socket.onmessage?.(
         new MessageEvent("message", {
           data: JSON.stringify({ ...recoveryRequest, type: "subscribed" }),
@@ -379,7 +383,9 @@ describe("FileBrowser WebSocket behavior", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1");
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
-      backendSocket?.open();
+      await act(async () => {
+        backendSocket?.open();
+      });
       await acknowledgeSubscriptions(backendSocket);
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
@@ -394,7 +400,9 @@ describe("FileBrowser WebSocket behavior", () => {
       });
       expect(api.listDirectory).toHaveBeenCalledTimes(1);
 
-      act(() => finishUpload!({ status: "completed", replaced: false, effects: { source: "unchanged", destination: "mutated" } }));
+      await act(async () => {
+        finishUpload!({ status: "completed", replaced: false, effects: { source: "unchanged", destination: "mutated" } });
+      });
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(2));
       act(() => {
         backendSocket?.onmessage?.(
@@ -428,7 +436,9 @@ describe("FileBrowser WebSocket behavior", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1");
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
-      backendSocket?.open();
+      await act(async () => {
+        backendSocket?.open();
+      });
       await acknowledgeSubscriptions(backendSocket);
       fireEvent.click(screen.getByRole("button", { name: "Upload" }));
       fireEvent.click(await screen.findByRole("menuitem", { name: "Files" }));
@@ -458,7 +468,9 @@ describe("FileBrowser WebSocket behavior", () => {
     });
     const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
     expect(backendSocket).toBeDefined();
-    backendSocket?.open();
+    await act(async () => {
+      backendSocket?.open();
+    });
     warnSpy.mockClear();
     mockCopyMoveDialog.mockClear();
 
@@ -534,8 +546,12 @@ describe("FileBrowser WebSocket behavior", () => {
     expect(backendSocket).toBeDefined();
     expect(companionSocket).toBeDefined();
 
-    backendSocket?.open();
-    companionSocket?.open();
+    await act(async () => {
+      backendSocket?.open();
+    });
+    await act(async () => {
+      companionSocket?.open();
+    });
 
     await waitFor(() => {
       expect(parseSentMessages(backendSocket)).toContainEqual({
@@ -552,7 +568,9 @@ describe("FileBrowser WebSocket behavior", () => {
 
     const companionMessageCountBeforeReconnect = companionSocket?.sentMessages.length ?? 0;
 
-    backendSocket?.close();
+    await act(async () => {
+      backendSocket?.close();
+    });
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.filter(isServerSocket).length).toBeGreaterThanOrEqual(2);
@@ -564,7 +582,9 @@ describe("FileBrowser WebSocket behavior", () => {
 
     expect(replacementBackendSocket).toBeDefined();
 
-    replacementBackendSocket?.open();
+    await act(async () => {
+      replacementBackendSocket?.open();
+    });
 
     await waitFor(() => {
       expect(parseSentMessages(replacementBackendSocket)).toContainEqual({
@@ -589,7 +609,9 @@ describe("FileBrowser WebSocket behavior", () => {
     const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
     expect(backendSocket).toBeDefined();
 
-    backendSocket?.open();
+    await act(async () => {
+      backendSocket?.open();
+    });
 
     await waitFor(() => {
       const subscribeMessages = parseSentMessages(backendSocket).filter((message) => message.action === "subscribe");
@@ -613,7 +635,9 @@ describe("FileBrowser WebSocket behavior", () => {
     const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
     expect(backendSocket).toBeDefined();
 
-    backendSocket?.open();
+    await act(async () => {
+      backendSocket?.open();
+    });
 
     await waitFor(() => {
       expect(parseSentMessages(backendSocket)).toContainEqual({
@@ -671,7 +695,9 @@ describe("FileBrowser WebSocket behavior", () => {
     const companionSocket = InspectableWebSocket.instances.find(isCompanionSocket);
     expect(companionSocket).toBeDefined();
 
-    companionSocket?.open();
+    await act(async () => {
+      companionSocket?.open();
+    });
 
     await waitFor(() => {
       expect(parseSentMessages(companionSocket)).toContainEqual({

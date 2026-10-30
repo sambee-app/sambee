@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
@@ -21,6 +21,7 @@ function renderWithProvider(component: React.ReactElement) {
 
 describe("StatusBar", () => {
   afterEach(async () => {
+    cleanup();
     await setLocale("en");
   });
 
@@ -46,7 +47,9 @@ describe("StatusBar", () => {
     expect(screen.queryByTestId("status-bar-focused-file-name")).not.toBeInTheDocument();
     expect(screen.getByText("1 item")).toBeInTheDocument();
 
-    await setLocale("en-XA");
+    await act(async () => {
+      await setLocale("en-XA");
+    });
     rerender(
       <SambeeThemeProvider>
         <StatusBar files={[baseFile]} focusedIndex={0} selectedCount={2} canResolveShortcutTargets={false} />

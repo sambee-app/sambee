@@ -220,10 +220,13 @@ describe("Browser - Image View Integration", () => {
     await renderBrowser();
     fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
     await screen.findByTestId("image-view");
+    await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
-    await screen.findByRole("alert");
-    expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg");
-    expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "two.jpg");
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+      expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg");
+      expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "two.jpg");
+    });
     const attempts = loadImageBlob.mock.calls.length;
     loadImageBlob.mockResolvedValue(new Blob(["restored image"], { type: "image/jpeg" }));
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));

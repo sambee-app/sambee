@@ -1849,7 +1849,9 @@ describe("PDFViewer", () => {
       });
 
       const settledRenderCount = mockPageRenderCounts.get(3);
-      await new Promise((resolve) => window.setTimeout(resolve, 150));
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+      });
       expect(mockPageRenderCounts.get(3)).toBe(settledRenderCount);
     });
 
@@ -1874,7 +1876,9 @@ describe("PDFViewer", () => {
       });
 
       const settledRenderCount = mockPageRenderCounts.get(3);
-      await new Promise((resolve) => window.setTimeout(resolve, 150));
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+      });
       expect(mockPageRenderCounts.get(3)).toBe(settledRenderCount);
     });
 

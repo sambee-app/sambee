@@ -1,4 +1,4 @@
-import { act, createEvent, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { formatDate, formatFileSize } from "../../../pages/FileBrowser/formatters";
@@ -44,6 +44,7 @@ function createDefaultFileRowProps() {
 
 describe("FileRow", () => {
   afterEach(async () => {
+    cleanup();
     vi.useRealTimers();
     await setLocale("en");
   });

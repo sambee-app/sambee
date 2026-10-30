@@ -347,37 +347,41 @@ describe("Browser Component - Rendering", () => {
     });
   });
 
-  it("shows reconnecting banner while backend realtime connection is recovering", () => {
-    render(
-      <SambeeThemeProvider>
-        <FileBrowserAlerts
-          error={null}
-          companionLifecycleStatus={null}
-          loadingConnections={false}
-          connectionsCount={1}
-          backendAvailabilityStatus="reconnecting"
-        />
-      </SambeeThemeProvider>
-    );
+  it("shows reconnecting banner while backend realtime connection is recovering", async () => {
+    await act(async () => {
+      render(
+        <SambeeThemeProvider>
+          <FileBrowserAlerts
+            error={null}
+            companionLifecycleStatus={null}
+            loadingConnections={false}
+            connectionsCount={1}
+            backendAvailabilityStatus="reconnecting"
+          />
+        </SambeeThemeProvider>
+      );
+    });
 
     expect(screen.getByText(/reconnecting to backend/i)).toBeInTheDocument();
   });
 
-  it("gives a standard user the linked connection onboarding when no connections are available", () => {
+  it("gives a standard user the linked connection onboarding when no connections are available", async () => {
     const openConnectionsSettings = vi.fn();
 
-    render(
-      <SambeeThemeProvider>
-        <FileBrowserAlerts
-          error={null}
-          companionLifecycleStatus={null}
-          loadingConnections={false}
-          connectionsCount={0}
-          backendAvailabilityStatus="available"
-          onOpenConnectionsSettings={openConnectionsSettings}
-        />
-      </SambeeThemeProvider>
-    );
+    await act(async () => {
+      render(
+        <SambeeThemeProvider>
+          <FileBrowserAlerts
+            error={null}
+            companionLifecycleStatus={null}
+            loadingConnections={false}
+            connectionsCount={0}
+            backendAvailabilityStatus="available"
+            onOpenConnectionsSettings={openConnectionsSettings}
+          />
+        </SambeeThemeProvider>
+      );
+    });
 
     const connectionLink = screen.getByRole("button", { name: "adding your first SMB network share" });
     fireEvent.click(connectionLink);
@@ -432,7 +436,7 @@ describe("Browser Component - Rendering", () => {
 
     await waitFor(() => expect(screen.getByText(/The companion lost the active edit lock for this file/i)).toBeInTheDocument());
 
-    screen.getByRole("button", { name: "Close" }).click();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     await waitFor(() => {
       expect(screen.queryByText(/The companion lost the active edit lock for this file/i)).not.toBeInTheDocument();
@@ -535,7 +539,7 @@ describe("Browser Component - Rendering", () => {
     );
 
     const retryButton = screen.getByRole("button", { name: "Retry" });
-    retryButton.click();
+    fireEvent.click(retryButton);
 
     expect((await screen.findAllByText("Documents")).length).toBeGreaterThan(0);
     expect(api.listDirectory).toHaveBeenCalledTimes(2);

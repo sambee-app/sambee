@@ -15,7 +15,7 @@
  * - Error message displayed when present
  */
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import i18n from "../../../i18n";
@@ -130,6 +130,7 @@ describe("CopyMoveDialog", () => {
       expect(screen.getByText("عنصر المصدر:")).toBeInTheDocument();
       expect(screen.getByLabelText("تقارير/annual-report.pdf")).toHaveAttribute("dir", "auto");
     } finally {
+      cleanup();
       await i18n.changeLanguage("en");
     }
   });

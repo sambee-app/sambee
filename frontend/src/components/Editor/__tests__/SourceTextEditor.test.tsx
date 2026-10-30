@@ -4,7 +4,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, useLayoutEffect, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -477,7 +477,9 @@ describe("SourceTextEditor", () => {
       expect(editor.textContent).toContain("Hello!");
     });
 
-    expect(editorRef.current?.runCommand(undo)).toBe(true);
+    await act(async () => {
+      expect(editorRef.current?.runCommand(undo)).toBe(true);
+    });
 
     await waitFor(() => {
       expect(editor.textContent).toContain("Hello");

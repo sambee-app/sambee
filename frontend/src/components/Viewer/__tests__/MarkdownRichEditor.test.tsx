@@ -534,24 +534,29 @@ describe("MarkdownRichEditor", () => {
     const handle = editorRef.current;
     if (!nested || !nestedView || !handle) throw new Error("Expected a mounted nested table editor");
     if (clipboardEvent === "cut") {
-      nestedView.dispatch({ changes: { from: nestedView.state.doc.length, insert: whitespace }, userEvent: "input" });
+      await act(async () => {
+        nestedView.dispatch({ changes: { from: nestedView.state.doc.length, insert: whitespace }, userEvent: "input" });
+      });
     }
     const original = await handle.captureSnapshot();
     if (clipboardEvent) {
       signalClipboardPreflight(nested, clipboardEvent);
     }
-    nested.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType, data: whitespace }));
-    nestedView.dispatch({
-      changes:
-        clipboardEvent === "cut"
-          ? { from: nestedView.state.doc.length - whitespace.length, to: nestedView.state.doc.length }
-          : { from: nestedView.state.doc.length, insert: whitespace },
-      userEvent: "input",
+    await act(async () => {
+      nested.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType, data: whitespace }));
+      nestedView.dispatch({
+        changes:
+          clipboardEvent === "cut"
+            ? { from: nestedView.state.doc.length - whitespace.length, to: nestedView.state.doc.length }
+            : { from: nestedView.state.doc.length, insert: whitespace },
+        userEvent: "input",
+      });
     });
-    await Promise.resolve();
     vi.useFakeTimers();
     try {
-      const [snapshot] = await Promise.all([handle.captureSnapshot(), vi.advanceTimersByTimeAsync(DRAFT_TRANSITION_FLUSH_MS)]);
+      const [snapshot] = await act(async () =>
+        Promise.all([handle.captureSnapshot(), vi.advanceTimersByTimeAsync(DRAFT_TRANSITION_FLUSH_MS)])
+      );
       expect(snapshot.serialize()).toBe(original.serialize());
       expect(snapshot.revision).toBe(original.revision);
       expect(handle.getCanonicalMarkdown()).toBe(original.serialize());
@@ -559,8 +564,11 @@ describe("MarkdownRichEditor", () => {
     } finally {
       vi.useRealTimers();
     }
-    nestedView.dispatch({ changes: { from: 0, to: nestedView.state.doc.length, insert: "recovered" }, userEvent: "input" });
-    expect((await handle.captureSnapshot()).serialize()).toContain("recovered");
+    const recovered = await act(async () => {
+      nestedView.dispatch({ changes: { from: 0, to: nestedView.state.doc.length, insert: "recovered" }, userEvent: "input" });
+      return handle.captureSnapshot();
+    });
+    expect(recovered.serialize()).toContain("recovered");
   });
 
   it.each([null, "paste"])("does not acknowledge an older unpublished input after clipboard preflight %j", async (clipboardEvent) => {
@@ -666,12 +674,15 @@ describe("MarkdownRichEditor", () => {
     const nested = document.querySelector<HTMLElement>(".tbl-cell-editor .cm-content");
     const nestedView = nested && EditorView.findFromDOM(nested);
     if (!nested || !nestedView) throw new Error("Expected the real nested CodeMirror editor");
-    nested.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: "changed" }));
-    const snapshot = editorRef.current?.captureSnapshot();
-    nestedView.dispatch({ changes: { from: 0, to: nestedView.state.doc.length, insert: "changed" }, userEvent: "input" });
+    const snapshot = await act(async () => {
+      nested.dispatchEvent(new InputEvent("beforeinput", { bubbles: true, inputType: "insertText", data: "changed" }));
+      const pendingSnapshot = editorRef.current?.captureSnapshot();
+      nestedView.dispatch({ changes: { from: 0, to: nestedView.state.doc.length, insert: "changed" }, userEvent: "input" });
+      return pendingSnapshot;
+    });
 
-    expect((await snapshot)?.serialize()).toContain("changed");
-    expect((await snapshot)?.serialize()).not.toContain("foo");
+    expect(snapshot?.serialize()).toContain("changed");
+    expect(snapshot?.serialize()).not.toContain("foo");
   });
 
   it("keeps snapshot source and canonical table formatting stable across later edits", async () => {
@@ -1007,15 +1018,19 @@ describe("MarkdownRichEditor", () => {
     });
 
     const replaceInput = screen.getByRole("textbox", { name: "Replace" });
-    replaceInput.focus();
-    editorRef.current?.replaceCurrentSearchResult();
+    await act(async () => {
+      replaceInput.focus();
+      editorRef.current?.replaceCurrentSearchResult();
+    });
 
     await waitFor(() => {
       expect(editorRef.current?.getCanonicalMarkdown()).toBe("done beta alpha");
     });
     expect(replaceInput).toHaveFocus();
 
-    editorRef.current?.replaceAllSearchResults();
+    await act(async () => {
+      editorRef.current?.replaceAllSearchResults();
+    });
 
     await waitFor(() => {
       expect(editorRef.current?.getCanonicalMarkdown()).toBe("done beta done");
@@ -1035,20 +1050,26 @@ describe("MarkdownRichEditor", () => {
     const editor = await screen.findByLabelText("Markdown editor");
     await user.click(editor);
 
-    editorRef.current?.createLink();
+    await act(async () => {
+      editorRef.current?.createLink();
+    });
 
     await waitFor(() => {
       expect(onChange).toHaveBeenCalled();
     });
 
     expect(editorRef.current?.getCanonicalMarkdown()).toContain("[");
-    editorRef.current?.insertTable();
+    await act(async () => {
+      editorRef.current?.insertTable();
+    });
     expect(editorRef.current?.getCanonicalMarkdown()).toContain("|   |   |");
     expect(editorRef.current?.getCanonicalMarkdown()).toContain("| - | - |");
     expect(editorRef.current?.getCanonicalMarkdown()).not.toContain("Column 1");
-    editorRef.current?.toggleInlineCode();
-    editorRef.current?.insertCodeBlock();
-    editorRef.current?.insertThematicBreak();
+    await act(async () => {
+      editorRef.current?.toggleInlineCode();
+      editorRef.current?.insertCodeBlock();
+      editorRef.current?.insertThematicBreak();
+    });
   });
 
   it("toggles bold and italic Markdown delimiters", async () => {
@@ -1063,16 +1084,16 @@ describe("MarkdownRichEditor", () => {
     await user.click(editor);
     await user.keyboard("{Control>}a{/Control}");
 
-    editorRef.current?.toggleBold();
+    await act(async () => editorRef.current?.toggleBold());
     expect(editorRef.current?.getCanonicalMarkdown()).toBe("**text**");
 
-    editorRef.current?.toggleBold();
+    await act(async () => editorRef.current?.toggleBold());
     expect(editorRef.current?.getCanonicalMarkdown()).toBe("text");
 
-    editorRef.current?.toggleItalic();
+    await act(async () => editorRef.current?.toggleItalic());
     expect(editorRef.current?.getCanonicalMarkdown()).toBe("*text*");
 
-    editorRef.current?.toggleItalic();
+    await act(async () => editorRef.current?.toggleItalic());
     expect(editorRef.current?.getCanonicalMarkdown()).toBe("text");
   });
 

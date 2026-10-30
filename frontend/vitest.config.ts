@@ -10,6 +10,11 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    server: {
+      deps: {
+        inline: ["react-pdf"],
+      },
+    },
     css: true,
     exclude: ["e2e/**", "node_modules/**", "dist/**"],
     // Enable parallel file execution for better performance
@@ -36,8 +41,9 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-    },
+    alias: [
+      { find: /^pdfjs-dist$/, replacement: "pdfjs-dist/legacy/build/pdf.mjs" },
+      { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+    ],
   },
 });

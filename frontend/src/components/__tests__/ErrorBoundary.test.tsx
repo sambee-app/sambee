@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../i18n";
 import ErrorBoundary from "../ErrorBoundary";
@@ -38,6 +38,7 @@ describe("ErrorBoundary", () => {
   });
 
   afterEach(async () => {
+    cleanup();
     restoreCrashNoiseSuppression?.();
     restoreCrashNoiseSuppression = null;
     await setLocale("en");
