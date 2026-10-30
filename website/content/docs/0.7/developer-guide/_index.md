@@ -2,8 +2,6 @@
 title = "Developer Guide"
 +++
 
-Use this guide to understand how Sambee is built across the backend, frontend, and companion, work safely in the repository and choose the right contributor workflow, understand the architecture and cross-cutting systems before changing code, and validate changes with the right checks before review or release.
-
 ## Start Here if You Want To
 
 - Understand how the browser app, backend, and companion fit together.

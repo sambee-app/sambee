@@ -12,9 +12,7 @@ Sambee's frontend supports the latest versions of desktop and mobile browsers, i
 - Mozilla Firefox
 - Apple Safari
 
-Web Workers must be available. If a browser lacks this or another required modern capability, Sambee shows a browser compatibility message instead of loading the app. This checks a few key capabilities, not every feature Sambee uses. Browser or security policies that prevent a worker from starting can still cause a feature-specific error after the app loads.
-
-To preview this message on the development server, open `http://localhost:3000/browse/smb/demo?simulateUnsupportedBrowser`. Remove the query parameter to load the app normally. This flag has no effect in production builds.
+Modern browser technologies such as web workers are required. If a browser lacks this or another required capability, Sambee shows a browser compatibility message instead of loading the app.
 
 ### HTTPS
 
@@ -24,4 +22,4 @@ Companion pairing and operations are only available over HTTPS (or `http://local
 
 ## Sambee Companion
 
-Sambee Companion is currently available for Windows 11 on x64 and ARM64.
+Sambee Companion is currently available for Windows 11 on x64.

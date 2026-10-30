@@ -2,8 +2,6 @@
 title = "User Guide"
 +++
 
-Use this guide to access files on network shares, explore files on your computer, view files in the browser, edit Markdown in the browser, or open files in desktop apps and upload your changes back.
-
 ## Start Here If You Want To
 
 - Find out what Sambee is.
