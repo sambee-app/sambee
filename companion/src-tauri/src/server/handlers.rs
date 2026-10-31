@@ -1252,9 +1252,7 @@ pub async fn viewer_archive_member(Path(drive): Path<String>, Query(query): Quer
     .await
     .map_err(|error| ApiError::Internal(format!("Local archive validation task failed: {error}")))??;
     if member.delivery == ArchiveMemberReadDelivery::PreviewUnavailable {
-        return Err(ApiError::PayloadTooLarge(
-            "Archive member exceeds the inline preview size limit".to_string(),
-        ));
+        return Err(ApiError::BadRequest("Archive member is not eligible for preview".to_string()));
     }
     let validated_member =
         validated_member.ok_or_else(|| ApiError::Internal("Archive inspection did not produce a streaming descriptor".to_string()))?;
@@ -7297,7 +7295,7 @@ mod tests {
         ArchiveCreationManifestMember, ArchiveDirectoryListingPresentation, ArchiveInspectionPlan, ArchiveInspectionPresentation,
         CompanionArchiveBinding, CompanionArchiveExecutionDriver, CompanionArchiveOperationKind, CompanionArchiveTopology,
         CompanionArchiveTopologyPlan, LocalArchiveCreationResult, LocalArchiveEntry, LocalArchiveError, LocalArchiveExtractionMemberError,
-        LocalArchiveExtractionResult, LocalArchiveInspectionSource, LocalArchiveReadError, ARCHIVE_INLINE_PREVIEW_MAX_BYTES,
+        LocalArchiveExtractionResult, LocalArchiveInspectionSource, LocalArchiveReadError,
     };
     use crate::server::archive_sessions::{
         ArchiveSessionKind, ArchiveSessionManager, ArchiveSessionPendingDecision, ArchiveSessionPhase, ArchiveSessionProgress,
@@ -8236,11 +8234,12 @@ mod tests {
 
         let large_source = directory.path().join("large.txt");
         let large_target = directory.path().join("large.zip");
-        std::fs::write(&large_source, vec![b'x'; (ARCHIVE_INLINE_PREVIEW_MAX_BYTES + 1) as usize])
-            .expect("large source file should be written");
+        const LARGE_MEMBER_TEST_BYTES: usize = 6 * 1024 * 1024;
+        let content = vec![b'x'; LARGE_MEMBER_TEST_BYTES];
+        std::fs::write(&large_source, &content).expect("large source file should be written");
         let large_entries = build_local_archive_manifest(&[large_source], &large_target).expect("large archive manifest should be built");
         create_local_archive(directory.path(), &large_target, &large_entries, || false).expect("large archive should be created");
-        let oversized_preview = viewer_archive_member(
+        let large_preview = viewer_archive_member(
             Path(drive_id),
             Query(ArchiveMemberQuery {
                 archive_path: "large.zip".to_string(),
@@ -8249,8 +8248,12 @@ mod tests {
             }),
         )
         .await
-        .expect_err("oversized archive preview should be rejected");
-        assert!(matches!(oversized_preview, ApiError::PayloadTooLarge(message) if message.contains("inline preview size limit")));
+        .expect("large archive preview should succeed");
+        assert_eq!(large_preview.headers()["content-length"], content.len().to_string());
+        assert_eq!(
+            to_bytes(large_preview.into_body(), LARGE_MEMBER_TEST_BYTES).await.unwrap().as_ref(),
+            content
+        );
         assert_eq!(inspection_resolver_call_count(), 8);
     }
 

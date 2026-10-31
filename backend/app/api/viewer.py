@@ -242,9 +242,7 @@ async def stream_archive_member(
         inspection_member = _inspection_member(member)
         inspection_projection = presentation.project_member(inspection_member)
         if inspection_projection.delivery == "preview_unavailable":
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail="Archive member exceeds the inline preview size limit"
-            )
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Archive member is not eligible for preview")
         member_name = inspection_member.path.rsplit("/", 1)[-1]
 
         async def read_member_source() -> tuple[bytes, PDFSourceRevision]:

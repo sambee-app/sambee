@@ -60,7 +60,6 @@ import * as backendRouter from "../backendRouter";
 import { companionSession } from "../companionSession";
 import * as draftRecovery from "../draftRecovery";
 import { logger } from "../logger";
-import { ARCHIVE_PREVIEW_SIZE_LIMIT_MESSAGE, PreviewUnavailableError } from "../previewPolicy";
 
 const mockedAxios = vi.mocked(axios);
 const mockAxiosInstance = mockedAxios.create() as ReturnType<typeof mockedAxios.create> & {
@@ -1912,16 +1911,27 @@ describe("API Service", () => {
       );
     });
 
-    it.each(["conn1", "local-drive:c"])("reports an actionable archive preview size limit for %s", async (connectionId) => {
+    it.each(["conn1", "local-drive:c"])("preserves configured conversion-limit errors for %s", async (connectionId) => {
       localStorage.setItem("companion_secret", "test-companion-secret");
+      const data = { detail: "PDF exceeds the configured source size limit" };
       mockAxiosInstance.get.mockRejectedValueOnce({
         isAxiosError: true,
-        response: { status: 413, data: new Blob([JSON.stringify({ detail: "Archive member exceeds the inline preview size limit" })]) },
+        response: { status: 413, data: new Blob([JSON.stringify(data)]) },
       });
 
-      await expect(apiService.getArchiveMember(connectionId, "files.zip", "large.pdf", { request: { kind: "pdf" } })).rejects.toEqual(
-        new PreviewUnavailableError(ARCHIVE_PREVIEW_SIZE_LIMIT_MESSAGE)
+      await expect(apiService.getArchiveMember(connectionId, "files.zip", "large.pdf", { request: { kind: "pdf" } })).rejects.toMatchObject(
+        {
+          response: { status: 413, data },
+        }
       );
+    });
+
+    it.each(["conn1", "local-drive:c"])("returns large archive preview content for %s", async (connectionId) => {
+      localStorage.setItem("companion_secret", "test-companion-secret");
+      const blob = new Blob([new Uint8Array(6 * 1024 * 1024)]);
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: blob, headers: {} } as AxiosResponse);
+
+      await expect(apiService.getArchiveMember(connectionId, "files.zip", "large.pdf", { request: { kind: "pdf" } })).resolves.toBe(blob);
     });
 
     it("does not classify an archive download limit as a preview limit", async () => {

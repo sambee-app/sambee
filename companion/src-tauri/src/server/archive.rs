@@ -35,7 +35,6 @@ const TEMPORARY_ARCHIVE_DIRECTORY: &str = "sambee-archive-downloads";
 const TEMPORARY_ARCHIVE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 const TEMPORARY_DOWNLOAD_PREFIX: &str = "sambee-download-";
 const TEMPORARY_SOURCE_PREFIX: &str = "sambee-zip-source-";
-pub const ARCHIVE_INLINE_PREVIEW_MAX_BYTES: u64 = 5 * 1024 * 1024;
 const STORED_SAVINGS_BYTES: usize = 1024;
 const STORED_SAVINGS_RATIO: f64 = 0.05;
 const ZIP_MIN_YEAR: i32 = 1980;
@@ -414,10 +413,7 @@ impl ArchiveMemberReadPresentation {
 
     fn present(&self, member: &LocalArchiveReadEntry) -> Result<ArchiveMemberReadProjection, LocalArchiveReadError> {
         let member_name = self.member_path.rsplit('/').next().unwrap_or("download");
-        let inline_preview_eligible = !member.is_directory
-            && !member.encrypted
-            && matches!(member.compression_method, 0 | 8 | 12)
-            && member.uncompressed_size <= ARCHIVE_INLINE_PREVIEW_MAX_BYTES;
+        let inline_preview_eligible = !member.is_directory && !member.encrypted && matches!(member.compression_method, 0 | 8 | 12);
         Ok(ArchiveMemberReadProjection {
             member_path: member.path.clone(),
             inline_preview_eligible,
@@ -4075,10 +4071,11 @@ mod tests {
     }
 
     #[test]
-    fn large_archive_members_remain_readable_above_the_preview_limit() {
+    fn large_archive_members_can_be_previewed() {
+        const LARGE_MEMBER_TEST_BYTES: usize = 6 * 1024 * 1024;
         let directory = tempdir().unwrap();
         let target = directory.path().join("archive.zip");
-        let content = vec![b'x'; ARCHIVE_INLINE_PREVIEW_MAX_BYTES as usize + 1];
+        let content = vec![b'x'; LARGE_MEMBER_TEST_BYTES];
         let mut archive = ZipWriter::new(FsFile::create(&target).unwrap());
         archive
             .start_file("large.pdf", regular_file_options(&content[..ARCHIVE_COPY_BUFFER_SIZE]).unwrap())
@@ -4093,11 +4090,7 @@ mod tests {
 
         let mut reader = LocalArchiveReader::open_pinned(&target).unwrap();
         let member = find_local_archive_member(&mut reader, "large.pdf").unwrap();
-        for size in [
-            ARCHIVE_INLINE_PREVIEW_MAX_BYTES - 1,
-            ARCHIVE_INLINE_PREVIEW_MAX_BYTES,
-            ARCHIVE_INLINE_PREVIEW_MAX_BYTES + 1,
-        ] {
+        for size in [0, LARGE_MEMBER_TEST_BYTES as u64, u64::MAX] {
             let mut entry = member.clone();
             entry.uncompressed_size = size;
             for method in [0, 8, 12, 99] {
@@ -4133,7 +4126,7 @@ mod tests {
                 .present(&member)
                 .unwrap()
                 .delivery,
-            ArchiveMemberReadDelivery::PreviewUnavailable
+            ArchiveMemberReadDelivery::Stream
         );
         assert_eq!(
             ArchiveMemberReadPresentation::new("large.pdf".to_string(), true)

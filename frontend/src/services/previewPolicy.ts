@@ -5,9 +5,6 @@ export const LOCAL_IMAGE_CONVERSION_UNAVAILABLE_MESSAGE =
   "This image format requires server-side conversion, which is unavailable for local drives. You can still download or open the original file locally.";
 export const LOCAL_PDF_NORMALIZATION_UNAVAILABLE_MESSAGE =
   "PDF compatibility processing is unavailable for local drives. You can still download or open the original file locally.";
-export const ARCHIVE_PREVIEW_SIZE_LIMIT_MESSAGE =
-  "This archive member exceeds the inline preview size limit (5 MiB). Download or extract the member to open it.";
-
 export class PreviewUnavailableError extends Error {
   readonly code = "preview_transformation_unavailable";
 

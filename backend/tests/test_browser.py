@@ -23,6 +23,7 @@ from app.api import browser as browser_api
 from app.api import viewer as viewer_api
 from app.api.companion import COMPANION_OPERATION_PURPOSE, COMPANION_TOKEN_CLAIM, COMPANION_TOKEN_CLASS
 from app.core.security import create_access_token
+from app.core.system_setting_definitions import SystemSettingKey
 from app.models.connection import Connection, ConnectionScope
 from app.models.edit_lock import EditLock
 from app.models.file import ContentTransferEffects, ContentTransferResult, CopyMoveRequest, DirectoryListing, FileInfo, FileType
@@ -1621,13 +1622,17 @@ class TestStreamArchiveMember:
         assert error_message in response.json()["detail"]["message"]
         assert archive_reader.closed is True
 
-    def test_rejects_oversized_archive_preview_through_inspection_resolver(
+    @pytest.mark.parametrize(("member_path", "view_kind"), [("large.txt", "text"), ("large.pdf", "pdf")])
+    def test_previews_large_archive_members_through_inspection_resolver(
         self,
         client: TestClient,
         auth_headers_user: dict,
         test_connection: Connection,
+        member_path: str,
+        view_kind: str,
     ):
-        archive_data = _archive_bytes({"large.txt": b"x" * (5 * 1024 * 1024 + 1)})
+        content = b"x" * (6 * 1024 * 1024)
+        archive_data = _archive_bytes({member_path: content})
         archive_reader = _MemoryRandomAccessReader(archive_data)
         backend = AsyncMock()
         backend.connect.return_value = None
@@ -1639,11 +1644,11 @@ class TestStreamArchiveMember:
             response = client.get(
                 f"/api/viewer/{test_connection.id}/archive/member",
                 headers=auth_headers_user,
-                params={"archive_path": "backup.zip", "member_path": "large.txt", "view_kind": "text"},
+                params={"archive_path": "backup.zip", "member_path": member_path, "view_kind": view_kind},
             )
 
-        assert response.status_code == 413
-        assert response.json()["detail"] == "Archive member exceeds the inline preview size limit"
+        assert response.status_code == 200
+        assert response.content == content
         assert archive_reader.closed is True
 
     def test_invalidates_archive_pdf_derivative_through_inspection_resolver(
@@ -1714,7 +1719,8 @@ class TestStreamArchiveMember:
         auth_headers_user: dict,
         test_connection: Connection,
     ):
-        data = _archive_bytes({"images/photo.jxl": b"valid JPEG XL"})
+        content = b"x" * (6 * 1024 * 1024)
+        data = _archive_bytes({"images/photo.jxl": content})
         archive_reader = _MemoryRandomAccessReader(data)
         backend = AsyncMock()
         backend.connect.return_value = None
@@ -1729,7 +1735,7 @@ class TestStreamArchiveMember:
 
         with (
             patch("app.api.viewer.SMBBackend", return_value=backend),
-            patch("app.api.viewer.convert_image_for_viewer", return_value=(b"converted", "image/webp", "libvips", 1)),
+            patch("app.api.viewer.convert_image_for_viewer", return_value=(b"converted", "image/webp", "libvips", 1)) as convert_image,
         ):
             response = client.get(
                 f"/api/viewer/{test_connection.id}/archive/member",
@@ -1746,6 +1752,35 @@ class TestStreamArchiveMember:
         assert response.status_code == 200
         assert response.content == b"converted"
         assert response.headers["content-type"].startswith("image/webp")
+        convert_image.assert_called_once_with(content, "photo.jxl", max_width=1280, max_height=720, output_format="auto")
+        assert archive_reader.closed is True
+
+    def test_archive_pdf_conversion_uses_the_configured_source_size_limit(
+        self,
+        client: TestClient,
+        auth_headers_user: dict,
+        test_connection: Connection,
+    ):
+        data = _archive_bytes({"large.pdf": b"x" * (6 * 1024 * 1024)})
+        archive_reader = _MemoryRandomAccessReader(data)
+        backend = AsyncMock()
+        backend.get_file_info.return_value = FileInfo(name="backup.zip", path="backup.zip", type=FileType.FILE, size=len(data))
+        backend.open_random_access_reader = AsyncMock(return_value=archive_reader)
+
+        with (
+            patch("app.api.viewer.SMBBackend", return_value=backend),
+            patch("app.api.viewer.is_pdf_normalization_available", return_value=True),
+            patch("app.api.viewer.get_integer_setting_value", return_value=4 * 1024 * 1024) as get_limit,
+        ):
+            response = client.get(
+                f"/api/viewer/{test_connection.id}/archive/member",
+                headers=auth_headers_user,
+                params={"archive_path": "backup.zip", "member_path": "large.pdf", "view_kind": "pdf", "pdf_variant": "normalized"},
+            )
+
+        assert response.status_code == 413
+        assert response.json()["detail"] == "This PDF exceeds the configured compatibility-processing size limit."
+        get_limit.assert_called_once_with(SystemSettingKey.PDF_NORMALIZER_MAX_SOURCE_SIZE_BYTES)
         assert archive_reader.closed is True
 
     def test_normalizes_archive_pdf_through_the_shared_derivative_pipeline(
