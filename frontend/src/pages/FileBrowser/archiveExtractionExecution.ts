@@ -24,6 +24,17 @@ function nonNegativeCounter(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
+function skippedMemberReasons(
+  aggregate?: object
+): Pick<ArchiveExtractionSummary, "encryptedMembersSkipped" | "unsupportedCompressionMembersSkipped"> {
+  const encrypted = nonNegativeCounter(aggregate && Reflect.get(aggregate, "encrypted_members_skipped"));
+  const unsupportedCompression = nonNegativeCounter(aggregate && Reflect.get(aggregate, "unsupported_compression_members_skipped"));
+  return {
+    ...(encrypted > 0 ? { encryptedMembersSkipped: encrypted } : {}),
+    ...(unsupportedCompression > 0 ? { unsupportedCompressionMembersSkipped: unsupportedCompression } : {}),
+  };
+}
+
 function archiveExtractionSummary(checkpointJson: string | undefined): ArchiveExtractionSummary {
   try {
     const checkpoint: unknown = JSON.parse(checkpointJson ?? "{}");
@@ -41,6 +52,7 @@ function archiveExtractionSummary(checkpointJson: string | undefined): ArchiveEx
       membersProcessed: nonNegativeCounter(Reflect.get(aggregate, "members_processed")),
       filesSkipped: nonNegativeCounter(Reflect.get(aggregate, "members_skipped")),
       filesReplaced: nonNegativeCounter(Reflect.get(aggregate, "files_replaced")),
+      ...skippedMemberReasons(aggregate),
       partialMembers: 0,
     };
   } catch {
@@ -74,6 +86,7 @@ function responseExtractionSummary(result: {
     membersProcessed: nonNegativeCounter(aggregate?.members_processed),
     filesSkipped: nonNegativeCounter(aggregate?.members_skipped),
     filesReplaced: nonNegativeCounter(aggregate?.files_replaced),
+    ...skippedMemberReasons(aggregate),
     partialMembers: 0,
   };
 }

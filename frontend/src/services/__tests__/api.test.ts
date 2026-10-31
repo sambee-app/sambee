@@ -1911,6 +1911,36 @@ describe("API Service", () => {
       );
     });
 
+    it.each(["conn1", "local-drive:c"])("preserves configured conversion-limit errors for %s", async (connectionId) => {
+      localStorage.setItem("companion_secret", "test-companion-secret");
+      const data = { detail: "PDF exceeds the configured source size limit" };
+      mockAxiosInstance.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 413, data: new Blob([JSON.stringify(data)]) },
+      });
+
+      await expect(apiService.getArchiveMember(connectionId, "files.zip", "large.pdf", { request: { kind: "pdf" } })).rejects.toMatchObject(
+        {
+          response: { status: 413, data },
+        }
+      );
+    });
+
+    it.each(["conn1", "local-drive:c"])("returns large archive preview content for %s", async (connectionId) => {
+      localStorage.setItem("companion_secret", "test-companion-secret");
+      const blob = new Blob([new Uint8Array(6 * 1024 * 1024)]);
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: blob, headers: {} } as AxiosResponse);
+
+      await expect(apiService.getArchiveMember(connectionId, "files.zip", "large.pdf", { request: { kind: "pdf" } })).resolves.toBe(blob);
+    });
+
+    it("does not classify an archive download limit as a preview limit", async () => {
+      const error = { isAxiosError: true, response: { status: 413, data: { detail: "Download exceeds its size limit" } } };
+      mockAxiosInstance.get.mockRejectedValueOnce(error);
+
+      await expect(apiService.getArchiveMember("conn1", "files.zip", "large.pdf", { download: true })).rejects.toBe(error);
+    });
+
     it("getFileContent() fetches file content as text", async () => {
       localStorage.setItem("access_token", "content-token");
 

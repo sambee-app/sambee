@@ -14,7 +14,7 @@ import { formatDate, formatFileSize } from "../../pages/FileBrowser/formatters";
 import type { ViewMode } from "../../pages/FileBrowser/types";
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
 import type { FileEntry } from "../../types";
-import { isShortcutFile } from "../../utils/fileEntries";
+import { getArchiveMemberUnavailableMessageKey, isShortcutFile } from "../../utils/fileEntries";
 import { getFileIcon } from "../../utils/fileIcons";
 import { abbreviatePath } from "../../utils/pathDisplay";
 import { FileRowButton } from "./FileRowButton";
@@ -156,6 +156,8 @@ export const FileRow = React.memo(
       const linkTarget = file.link_target?.target;
       const isShortcut = isShortcutFile(file);
       const isUnavailableArchiveEntry = file.archive_entry_state !== undefined && !file.is_readable;
+      const unavailableMessageKey = getArchiveMemberUnavailableMessageKey(file);
+      const unavailableMessage = unavailableMessageKey ? t(unavailableMessageKey) : undefined;
       const rowTextSx = useCompactLayout ? { fontSize: `${COMPACT_LAYOUT_SIZE.FILE_ROW_TEXT_PX}px` } : undefined;
       const fileIconSize = useCompactLayout ? COMPACT_LAYOUT_SIZE.FILE_ROW_ICON_PX : 24;
       const compactMetadata = useCompactLayout ? getCompactFileMetadata(file) : null;
@@ -188,7 +190,7 @@ export const FileRow = React.memo(
             variant="body2"
             component="span"
             noWrap
-            title={file.name}
+            title={unavailableMessage ?? file.name}
             sx={{ ...rowTextSx, color: "text.primary", flex: linkTargetPath ? "0 1 auto" : 1, minWidth: 0 }}
           >
             {file.name}
@@ -276,6 +278,7 @@ export const FileRow = React.memo(
         <div
           ref={ref}
           data-index={index}
+          title={unavailableMessage}
           style={{
             position: "absolute",
             top: 0,
@@ -320,7 +323,7 @@ export const FileRow = React.memo(
             disabled={isUnavailableArchiveEntry}
             sx={[rowStyle, canOpenItemActions ? { pr: 7 } : {}, isUnavailableArchiveEntry ? { cursor: "not-allowed", opacity: 0.5 } : {}]}
             dataSelected={isSelected ? "true" : undefined}
-            ariaLabel={ariaLabel}
+            ariaLabel={unavailableMessage ? `${ariaLabel}. ${unavailableMessage}` : ariaLabel}
             ariaPressed={useTouchSelectionControls && selectionMode ? isMultiSelected : undefined}
           >
             {/* Selection mode uses an explicit selected/unselected icon pair. */}

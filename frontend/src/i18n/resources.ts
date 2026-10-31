@@ -925,6 +925,12 @@ export const EN_TRANSLATIONS = {
     list: {
       emptyDirectory: "This directory is empty",
     },
+    archiveMembers: {
+      encrypted: "This archive member is encrypted. Use an archive tool with the password to preview or extract it.",
+      unsupportedCompression:
+        "Sambee does not support this member's compression method. Use another archive tool to preview or extract it.",
+      unavailable: "This archive member is unavailable. Use another archive tool to inspect it.",
+    },
     row: {
       openInCompanionApp: "Open in native app",
       openInBrowserViewer: "Open in Sambee",
@@ -1230,8 +1236,12 @@ export const EN_TRANSLATIONS = {
       summaryFilesSkipped: "Files skipped",
       summaryFilesReplaced: "Files replaced",
       summaryPartialMembers: "Partial members",
-      extractPartialSuccess_one: "Archive extraction completed with 1 unavailable member skipped.",
-      extractPartialSuccess_other: "Archive extraction completed with {{count}} unavailable members skipped.",
+      extractPartialSuccess_one: "Archive extraction completed with 1 member skipped.",
+      extractPartialSuccess_other: "Archive extraction completed with {{count}} members skipped.",
+      extractEncryptedSkipped_one: "1 encrypted member was skipped.",
+      extractEncryptedSkipped_other: "{{count}} encrypted members were skipped.",
+      extractUnsupportedCompressionSkipped_one: "1 member with unsupported compression was skipped.",
+      extractUnsupportedCompressionSkipped_other: "{{count}} members with unsupported compression were skipped.",
       extractCancelled: "Archive extraction was cancelled.",
       extractInterrupted: "Archive extraction was interrupted. The destination may contain partial output.",
       extractConflictPending: "Archive extraction is waiting for a collision decision.",

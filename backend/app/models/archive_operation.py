@@ -275,6 +275,8 @@ class ArchiveExtractionAggregate(ArchiveV2Payload):
     members_processed: StrictInt = Field(ge=0, lt=1 << 63)
     members_completed: StrictInt = Field(ge=0, lt=1 << 63)
     members_skipped: StrictInt = Field(ge=0, lt=1 << 63)
+    encrypted_members_skipped: StrictInt = Field(default=0, ge=0, lt=1 << 63)
+    unsupported_compression_members_skipped: StrictInt = Field(default=0, ge=0, lt=1 << 63)
     members_failed: StrictInt = Field(ge=0, lt=1 << 63)
     files_extracted: StrictInt = Field(ge=0, lt=1 << 63)
     directories_created: StrictInt = Field(ge=0, lt=1 << 63)
@@ -285,6 +287,8 @@ class ArchiveExtractionAggregate(ArchiveV2Payload):
     def _validate_member_outcomes(self) -> "ArchiveExtractionAggregate":
         if self.members_processed != self.members_completed + self.members_skipped + self.members_failed:
             raise ValueError("Archive aggregate member counters are invalid")
+        if self.encrypted_members_skipped + self.unsupported_compression_members_skipped > self.members_skipped:
+            raise ValueError("Archive skipped member reason counters exceed the skipped total")
         return self
 
 
@@ -353,6 +357,8 @@ class ArchiveCompanionLiveExtractionSummary(ArchiveV2Payload):
     members_processed: StrictInt = Field(ge=0, lt=1 << 63)
     members_completed: StrictInt = Field(ge=0, lt=1 << 63)
     members_skipped: StrictInt = Field(ge=0, lt=1 << 63)
+    encrypted_members_skipped: StrictInt = Field(default=0, ge=0, lt=1 << 63)
+    unsupported_compression_members_skipped: StrictInt = Field(default=0, ge=0, lt=1 << 63)
     members_failed: StrictInt = Field(ge=0, lt=1 << 63)
     files_extracted: StrictInt = Field(ge=0, lt=1 << 63)
     directories_created: StrictInt = Field(ge=0, lt=1 << 63)
@@ -363,6 +369,8 @@ class ArchiveCompanionLiveExtractionSummary(ArchiveV2Payload):
     def _validate_member_outcomes(self) -> "ArchiveCompanionLiveExtractionSummary":
         if self.members_processed != self.members_completed + self.members_skipped + self.members_failed:
             raise ValueError("Archive aggregate member counters are invalid")
+        if self.encrypted_members_skipped + self.unsupported_compression_members_skipped > self.members_skipped:
+            raise ValueError("Archive skipped member reason counters exceed the skipped total")
         return self
 
 

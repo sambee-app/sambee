@@ -36,7 +36,7 @@ import type { FileEntry, RecentFileValidationError } from "../../types";
 import { FileType, isApiError } from "../../types";
 import { classifyFileFailure, type FileFailureKind, getApiErrorMessage, getStorageErrorCode } from "../../utils/apiErrors";
 import { getAllViewerIds, getCompatibleViewerIds, getFileTypeByExtension, isImageFile, type ViewerId } from "../../utils/FileTypeRegistry";
-import { isShortcutFile } from "../../utils/fileEntries";
+import { getArchiveMemberUnavailableMessageKey, isShortcutFile } from "../../utils/fileEntries";
 import { compareLocalizedStrings } from "../../utils/localeFormatting";
 import { getConnectionById, isConnectionReadOnly } from "./access";
 import {
@@ -2307,7 +2307,8 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       }
 
       if (!file.is_readable) {
-        setError(ARCHIVE_MEMBER_OPEN_ERROR);
+        const messageKey = getArchiveMemberUnavailableMessageKey(file);
+        setError(messageKey ? translate(messageKey) : ARCHIVE_MEMBER_OPEN_ERROR);
         return;
       }
 
@@ -3167,7 +3168,8 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
             (entry) => (currentPathRef.current ? `${currentPathRef.current}/${entry.name}` : entry.name) === pickerState.filePath
           );
       if (pickerState.virtualSource && !activeDirectoryFile?.is_readable) {
-        setError(ARCHIVE_MEMBER_OPEN_ERROR);
+        const messageKey = activeDirectoryFile ? getArchiveMemberUnavailableMessageKey(activeDirectoryFile) : null;
+        setError(messageKey ? translate(messageKey) : ARCHIVE_MEMBER_OPEN_ERROR);
         return;
       }
 

@@ -178,6 +178,8 @@ type FileListShortcutUnavailableReason =
   | "no-selection"
   | "dual-pane-required"
   | "archive-content-immutable"
+  | "encrypted-archive-member"
+  | "unsupported-archive-compression"
   | "read-only-location"
   | "unsupported-source"
   | "unsupported-destination"
@@ -1074,9 +1076,13 @@ const Browser: React.FC = () => {
       }
 
       if (action === "copy" && sourceLocation.kind === "virtual" && sourceLocation.providerId === "zip") {
-        const readableMembers = context.items.filter((item) => item.entry.is_readable);
         if (!isDualMode) return unavailableFileListShortcut("dual-pane-required");
-        if (readableMembers.length === 0) return unavailableFileListShortcut("no-selection");
+        const unavailableMember = context.items.find((item) => !item.entry.is_readable);
+        if (unavailableMember)
+          return unavailableFileListShortcut(
+            unavailableMember.entry.archive_entry_state === "blocked" ? "encrypted-archive-member" : "unsupported-archive-compression"
+          );
+        if (context.items.length === 0) return unavailableFileListShortcut("no-selection");
         return getArchiveExtractionShortcutAvailability(sourceLocation, destination);
       }
 
@@ -1129,6 +1135,8 @@ const Browser: React.FC = () => {
     (action: FileListShortcutAction, reason: FileListShortcutUnavailableReason): string => {
       if (reason === "dual-pane-required") return t("fileBrowser.unavailableShortcuts.dualPaneRequired");
       if (reason === "archive-content-immutable") return t("fileBrowser.unavailableShortcuts.archiveContentImmutable");
+      if (reason === "encrypted-archive-member") return t("fileBrowser.archiveMembers.encrypted");
+      if (reason === "unsupported-archive-compression") return t("fileBrowser.archiveMembers.unsupportedCompression");
       if (reason === "read-only-location") return t("fileBrowser.unavailableShortcuts.readOnlyLocation");
       if (reason === "companion-unavailable") return t("fileBrowser.unavailableShortcuts.companionUnavailable");
       if (reason === "interaction-blocked") return t("fileBrowser.unavailableShortcuts.interactionBlocked");
@@ -2892,11 +2900,20 @@ const Browser: React.FC = () => {
       }
 
       if (outcome.status === "completed") {
-        setArchiveExtractionNotice(
+        const messages: string[] = [
           outcome.filesSkipped > 0
             ? t("fileBrowser.archive.extractPartialSuccess", { count: outcome.filesSkipped })
-            : t("fileBrowser.archive.extractSuccess")
-        );
+            : t("fileBrowser.archive.extractSuccess"),
+        ];
+        if (outcome.summary.encryptedMembersSkipped) {
+          messages.push(t("fileBrowser.archive.extractEncryptedSkipped", { count: outcome.summary.encryptedMembersSkipped }));
+        }
+        if (outcome.summary.unsupportedCompressionMembersSkipped) {
+          messages.push(
+            t("fileBrowser.archive.extractUnsupportedCompressionSkipped", { count: outcome.summary.unsupportedCompressionMembersSkipped })
+          );
+        }
+        setArchiveExtractionNotice(messages.join(" "));
       } else if (outcome.status === "cancelled") {
         setArchiveExtractionNotice(t("fileBrowser.archive.extractCancelled"));
       } else {

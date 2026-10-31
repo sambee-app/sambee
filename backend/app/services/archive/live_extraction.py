@@ -106,6 +106,8 @@ class LiveExtractionAggregate:
     members_processed: int = 0
     members_completed: int = 0
     members_skipped: int = 0
+    encrypted_members_skipped: int = 0
+    unsupported_compression_members_skipped: int = 0
     members_failed: int = 0
     files_extracted: int = 0
     directories_created: int = 0
@@ -154,6 +156,8 @@ class LiveExtractionAggregate:
             "directories_created": self.directories_created,
             "extracted_bytes": self.extracted_bytes,
             "files_replaced": self.files_replaced,
+            "encrypted_members_skipped": self.encrypted_members_skipped,
+            "unsupported_compression_members_skipped": self.unsupported_compression_members_skipped,
         }
 
 
@@ -286,6 +290,13 @@ class LiveSourceSession:
         if self.phase != LiveSourceSessionPhase.READY or self._current is not None:
             raise LiveSourceSessionError("Source-only outcome is not valid for the current session state")
         self.aggregate.record(outcome)
+        if outcome == "skipped":
+            if entry.encrypted:
+                self.aggregate.encrypted_members_skipped = _checked_add(self.aggregate.encrypted_members_skipped, 1)
+            elif entry.compression_method not in {0, 8, 12}:
+                self.aggregate.unsupported_compression_members_skipped = _checked_add(
+                    self.aggregate.unsupported_compression_members_skipped, 1
+                )
 
     async def stream_current_member(
         self,

@@ -3,6 +3,7 @@
 import asyncio
 import io
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -142,6 +143,25 @@ async def test_live_source_session_skips_known_unsupported_entries_without_deliv
     assert member.delivery_sequence == 1
     assert session.aggregate.members_processed == 1
     assert session.aggregate.members_skipped == 1
+    assert session.aggregate.unsupported_compression_members_skipped == 1
+    assert session.aggregate.encrypted_members_skipped == 0
+    assert session.aggregate.checkpoint_payload()["unsupported_compression_members_skipped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_live_source_session_records_encrypted_skip_reason_before_unsupported_compression() -> None:
+    data = _zip_bytes()
+    reader = ZipReader(MemoryRandomAccessReader(data), len(data))
+    entries, _ = await reader.extraction_entries()
+    entry = replace(entries[0], encrypted=True, compression_method=zipfile.ZIP_LZMA)
+    session = LiveSourceSession(reader)
+
+    session.finalize_source_outcome(entry, "skipped")
+
+    assert session.aggregate.members_skipped == 1
+    assert session.aggregate.encrypted_members_skipped == 1
+    assert session.aggregate.unsupported_compression_members_skipped == 0
+    assert session.aggregate.checkpoint_payload()["encrypted_members_skipped"] == 1
 
 
 @pytest.mark.asyncio

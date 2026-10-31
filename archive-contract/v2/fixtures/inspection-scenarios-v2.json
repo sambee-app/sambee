@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "preview_max_bytes": 5242880,
   "scenarios": [
     {
       "fixture": "portable-v2.zip",
@@ -113,7 +112,7 @@
           "uncompressed_size": 5242881,
           "is_safe": true,
           "preview_state": "readable",
-          "inline_preview_eligible": false
+          "inline_preview_eligible": true
         }
       ]
     },

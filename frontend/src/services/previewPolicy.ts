@@ -5,7 +5,6 @@ export const LOCAL_IMAGE_CONVERSION_UNAVAILABLE_MESSAGE =
   "This image format requires server-side conversion, which is unavailable for local drives. You can still download or open the original file locally.";
 export const LOCAL_PDF_NORMALIZATION_UNAVAILABLE_MESSAGE =
   "PDF compatibility processing is unavailable for local drives. You can still download or open the original file locally.";
-
 export class PreviewUnavailableError extends Error {
   readonly code = "preview_transformation_unavailable";
 

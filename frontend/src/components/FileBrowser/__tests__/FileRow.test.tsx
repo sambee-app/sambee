@@ -127,14 +127,20 @@ describe("FileRow", () => {
     expect(rowButton).toHaveStyle({ backgroundColor: "rgb(4, 5, 6)" });
   });
 
-  it("disables unavailable archive entries and hides their actions", () => {
+  it.each([
+    ["blocked", "fileBrowser.archiveMembers.encrypted"],
+    ["unavailable", "fileBrowser.archiveMembers.unsupportedCompression"],
+  ] as const)("explains why an archive member is %s and hides its actions", (state, messageKey) => {
     const props = createDefaultFileRowProps();
-    props.file = { ...props.file, is_readable: false, archive_entry_state: "blocked" };
+    props.file = { ...props.file, is_readable: false, archive_entry_state: state };
 
     render(<FileRow {...props} />);
 
     const rowButton = screen.getByRole("button", { name: /report\.pdf/i });
     expect(rowButton).toBeDisabled();
+    expect(rowButton).toHaveAccessibleName(expect.stringContaining(translate(messageKey)));
+    expect(screen.getByText("report.pdf")).toHaveAttribute("title", translate(messageKey));
+    expect(rowButton.parentElement).toHaveAttribute("title", translate(messageKey));
     fireEvent.click(rowButton);
     fireEvent.contextMenu(rowButton);
 

@@ -2190,7 +2190,13 @@ describe("Browser Component - Interactions", () => {
       expect(api.executeArchiveCreation).not.toHaveBeenCalled();
     });
 
-    it("extracts the selected ZIP member to the other pane from the Copy toolbar command", async () => {
+    it.each([
+      [{}, "Archive extraction completed."],
+      [
+        { members_skipped: 3, encrypted_members_skipped: 1, unsupported_compression_members_skipped: 2 },
+        "Archive extraction completed with 3 members skipped. 1 encrypted member was skipped. 2 members with unsupported compression were skipped.",
+      ],
+    ])("extracts the selected ZIP member and reports skipped reasons: %j", async (aggregate, expectedNotice) => {
       const user = userEvent.setup();
       vi.mocked(api.listArchiveDirectory).mockResolvedValue({
         archive: { path: "archive.zip", size: 1 },
@@ -2200,7 +2206,10 @@ describe("Browser Component - Interactions", () => {
         page_size: 100,
       });
       vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-selected" } as never);
-      vi.mocked(api.executeArchiveExtraction).mockResolvedValueOnce({ phase: "completed", checkpoint_json: "{}" } as never);
+      vi.mocked(api.executeArchiveExtraction).mockResolvedValueOnce({
+        phase: "completed",
+        checkpoint_json: JSON.stringify({ aggregate_counters: aggregate }),
+      } as never);
       await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
 
       const archiveMember = await screen.findByRole("button", { name: /file: inside\.txt/i });
@@ -2223,10 +2232,31 @@ describe("Browser Component - Interactions", () => {
       await waitFor(() => {
         expect(api.prepareArchiveOperation).toHaveBeenCalledWith(expect.objectContaining({ selected_member_paths: ["inside.txt"] }));
       });
-      await waitFor(() => expect(screen.getByText("Archive extraction completed.")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText(expectedNotice)).toBeInTheDocument());
       expect(api.copyItem).not.toHaveBeenCalled();
       expect(api.moveItem).not.toHaveBeenCalled();
       expect(api.executeArchiveCreation).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["blocked", "This archive member is encrypted."],
+      ["unavailable", "Sambee does not support this member's compression method."],
+    ] as const)("explains why a %s ZIP member cannot be extracted with F5", async (state, message) => {
+      const user = userEvent.setup();
+      vi.mocked(api.listArchiveDirectory).mockResolvedValue({
+        archive: { path: "archive.zip", size: 1 },
+        path: "",
+        items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state, is_hidden: false }],
+        page_size: 100,
+      });
+      await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
+      const archiveMember = await screen.findByRole("button", { name: /file: inside\.txt/i });
+      const archiveList = archiveMember.closest('[data-testid="virtual-list"]') as HTMLElement;
+      await user.click(archiveList);
+      await user.keyboard(" ");
+      await user.keyboard("{F5}");
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(message));
+      expect(screen.queryByRole("dialog", { name: "Extract from ZIP Archive" })).not.toBeInTheDocument();
     });
 
     it("reports a read-only destination when ZIP-member F5 extraction is unavailable", async () => {

@@ -3802,7 +3802,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sambee-companion"
-version = "2.0.25"
+version = "2.0.26"
 dependencies = [
  "axum",
  "base64 0.22.1",

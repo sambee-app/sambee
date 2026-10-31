@@ -407,9 +407,13 @@ describe("content providers", () => {
         execution_id: "cross-drive-extract-1",
         phase: "completed",
         revision: 2,
-        progress: localArchiveProgress(1, 0, 1, 5),
+        progress: localArchiveProgress(1, 3, 4, 5),
         cancellation_requested: false,
-        aggregate_counters: extractionAggregate(1, 0, 5),
+        aggregate_counters: {
+          ...extractionAggregate(1, 0, 5, 3),
+          encrypted_members_skipped: 1,
+          unsupported_compression_members_skipped: 2,
+        },
       })
     );
 
@@ -418,7 +422,10 @@ describe("content providers", () => {
         source: localArchiveLocation,
         destination: physicalLocation("local-drive:d", "output"),
       }).result
-    ).resolves.toMatchObject({ status: "completed" });
+    ).resolves.toMatchObject({
+      status: "completed",
+      summary: { filesSkipped: 3, encryptedMembersSkipped: 1, unsupportedCompressionMembersSkipped: 2 },
+    });
 
     expect(api.startLocalArchiveExtraction).toHaveBeenCalledWith("local-drive:c", "archives/one.zip", "output", undefined, "local-drive:d");
   });

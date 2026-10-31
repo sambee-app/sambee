@@ -521,6 +521,15 @@ impl LiveLocalArchiveSourceSession {
             }
             if entry.encrypted || !matches!(entry.compression_method, 0 | 8 | 12) {
                 self.record_source_terminal(true)?;
+                if entry.encrypted {
+                    self.aggregate.encrypted_members_skipped =
+                        Self::checked_increment(self.aggregate.encrypted_members_skipped, "Archive encrypted skip count overflowed")?;
+                } else {
+                    self.aggregate.unsupported_compression_members_skipped = Self::checked_increment(
+                        self.aggregate.unsupported_compression_members_skipped,
+                        "Archive unsupported compression skip count overflowed",
+                    )?;
+                }
                 continue;
             }
             if let Err(error) = self.reader.validate_entry(entry.clone()) {
@@ -903,6 +912,8 @@ impl ArchiveSessionWork {
                 members_processed: 0,
                 members_completed: 0,
                 members_skipped: 0,
+                encrypted_members_skipped: 0,
+                unsupported_compression_members_skipped: 0,
                 members_failed: 0,
                 files_extracted: 0,
                 directories_created: 0,
@@ -2236,6 +2247,45 @@ mod tests {
         assert_eq!(member.delivery_sequence, 1);
         assert_eq!(source.aggregate().members_failed, 1);
         assert_eq!(source.aggregate().members_processed, 1);
+    }
+
+    #[test]
+    fn source_only_unavailable_members_report_skip_reasons() {
+        const CENTRAL_FLAGS_OFFSET: usize = 8;
+        const CENTRAL_COMPRESSION_OFFSET: usize = 10;
+        const ENCRYPTED_FLAG: u16 = 1;
+        const UNSUPPORTED_COMPRESSION: u16 = 99;
+
+        for encrypted in [true, false] {
+            let directory = tempdir().unwrap();
+            let archive_path = directory.path().join("archive.zip");
+            let mut archive = ZipWriter::new(fs::File::create(&archive_path).unwrap());
+            archive.start_file("entry.txt", SimpleFileOptions::default()).unwrap();
+            archive.write_all(b"entry").unwrap();
+            archive.finish().unwrap();
+
+            let mut archive_bytes = fs::read(&archive_path).unwrap();
+            let central_offset = archive_bytes
+                .windows(b"PK\x01\x02".len())
+                .position(|bytes| bytes == b"PK\x01\x02")
+                .unwrap();
+            let (field_offset, value) = if encrypted {
+                (CENTRAL_FLAGS_OFFSET, ENCRYPTED_FLAG)
+            } else {
+                (CENTRAL_COMPRESSION_OFFSET, UNSUPPORTED_COMPRESSION)
+            };
+            let encoded = value.to_le_bytes();
+            let offset = central_offset + field_offset;
+            archive_bytes[offset..offset + encoded.len()].copy_from_slice(&encoded);
+            fs::write(&archive_path, archive_bytes).unwrap();
+
+            let mut source = LiveLocalArchiveSourceSession::open(&archive_path).unwrap();
+            assert!(source.next_member().unwrap().is_none());
+            assert_eq!(source.aggregate().members_skipped, 1);
+            assert_eq!(source.aggregate().encrypted_members_skipped, u64::from(encrypted));
+            assert_eq!(source.aggregate().unsupported_compression_members_skipped, u64::from(!encrypted));
+            assert_eq!(source.phase(), LiveLocalArchiveSourcePhase::Completed);
+        }
     }
 
     #[test]

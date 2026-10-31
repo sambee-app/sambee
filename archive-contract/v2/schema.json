@@ -779,6 +779,16 @@
           "minimum": 0,
           "maximum": 9223372036854775807
         },
+        "encrypted_members_skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "unsupported_compression_members_skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
         "members_failed": {
           "type": "integer",
           "minimum": 0,
@@ -1152,6 +1162,16 @@
           "minimum": 0,
           "maximum": 9223372036854775807
         },
+        "encrypted_members_skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "unsupported_compression_members_skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
         "members_failed": {
           "type": "integer",
           "minimum": 0,
@@ -1320,6 +1340,16 @@
           "maximum": 9223372036854775807
         },
         "members_skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "encrypted_members_skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        },
+        "unsupported_compression_members_skipped": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9223372036854775807

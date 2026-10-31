@@ -145,7 +145,11 @@ def test_live_extraction_aggregate_requires_exact_valid_counters() -> None:
         "files_replaced": 1,
     }
 
-    assert ArchiveExtractionAggregate.model_validate(aggregate).model_dump() == aggregate
+    assert ArchiveExtractionAggregate.model_validate(aggregate).model_dump() == {
+        **aggregate,
+        "encrypted_members_skipped": 0,
+        "unsupported_compression_members_skipped": 0,
+    }
     for invalid in (
         {**aggregate, "members_processed": True},
         {**aggregate, "members_processed": 2},
@@ -154,6 +158,31 @@ def test_live_extraction_aggregate_requires_exact_valid_counters() -> None:
     ):
         with pytest.raises(ValidationError):
             ArchiveExtractionAggregate.model_validate(invalid)
+
+
+@pytest.mark.parametrize("reason", ["encrypted_members_skipped", "unsupported_compression_members_skipped"])
+def test_v2_skipped_reason_counters_are_optional_checked_and_bounded_by_total(reason: str) -> None:
+    checkpoint = valid_checkpoint()
+    aggregate = ArchiveExtractionAggregate.model_validate(checkpoint["aggregate_counters"]).model_dump()
+    aggregate.update(members_processed=1, members_skipped=1)
+    aggregate[reason] = 1
+    checkpoint["aggregate_counters"] = aggregate
+    assert validate_v2_extraction_checkpoint(checkpoint) == checkpoint
+    assert ArchiveExtractionAggregate.model_validate(aggregate).model_dump()[reason] == 1
+    assert (
+        ArchiveCompanionLiveExtractionSummary.model_validate({**aggregate, "source_session_id": "source-session"}).model_dump()[reason] == 1
+    )
+
+    for invalid in (
+        *({**aggregate, reason: value} for value in (True, -1, 2, 1 << 63)),
+        {**aggregate, "encrypted_members_skipped": 1, "unsupported_compression_members_skipped": 1},
+    ):
+        with pytest.raises(HTTPException, match="Archive V2 checkpoint"):
+            validate_v2_extraction_checkpoint({**checkpoint, "aggregate_counters": invalid})
+        with pytest.raises(ValidationError):
+            ArchiveExtractionAggregate.model_validate(invalid)
+        with pytest.raises(ValidationError):
+            ArchiveCompanionLiveExtractionSummary.model_validate({**invalid, "source_session_id": "source-session"})
 
 
 def test_v2_creation_checkpoint_rejects_aggregate_counters() -> None:

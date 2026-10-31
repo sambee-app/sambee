@@ -1558,6 +1558,25 @@ describe("useFileBrowserPane", () => {
     });
   });
 
+  it.each([
+    ["blocked", "This archive member is encrypted."],
+    ["unavailable", "Sambee does not support this member's compression method."],
+  ] as const)("explains why a %s archive member cannot be previewed", async (state, message) => {
+    vi.mocked(api.listArchiveDirectory).mockResolvedValue({
+      archive: { path: "backup.zip", size: 1 },
+      path: "",
+      items: [{ name: "notes.txt", path: "notes.txt", type: FileType.FILE, state, is_hidden: false }],
+      page_size: 100,
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.connectionId).toBe("conn-1"));
+    act(() => result.current.openArchive("backup.zip"));
+    await waitFor(() => expect(result.current.files).toHaveLength(1));
+    act(() => result.current.handleOpenFileForFile(requireTestValue(result.current.files[0]), 0));
+    expect(result.current.error).toContain(message);
+  });
+
   it("exits an archive before switching connections", async () => {
     const archive = { name: "backup.zip", path: "backup.zip", type: FileType.FILE, is_readable: true, is_hidden: false };
     const otherConnection = { ...requireTestValue(mockConnections[0]), id: "conn-2", name: "Other Server", slug: "other-server" };
