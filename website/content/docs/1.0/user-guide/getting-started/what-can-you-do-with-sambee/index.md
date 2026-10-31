@@ -1,35 +1,29 @@
 +++
 title = "What Can You Do With Sambee?"
-description = "Keep files on your existing storage. Preview designs, inspect ZIPs, edit Markdown tables, and return desktop edits to the original share."
 +++
 
-Keep your files where they are and do more with them. Browse design files from your phone, look inside a ZIP without unpacking it, change a Markdown table without editing its markup, or open a network file in your favorite desktop app. Sambee brings these workflows to the storage you already use.
+Work more easily with your files on the storage you already have. Preview image files on your phone, browse a ZIP without unpacking it, edit a Markdown table effortlessly, or open a network file in your favorite desktop app. Sambee brings all of this to the storage you already have.
 
 ## Give Your Existing Storage a Modern Workspace
 
-Keep project files on your NAS or Windows file server, without migrating to a cloud library or maintaining a separate synchronized collection. [Open an SMB connection](../../find-and-browse-files/connect-to-an-smb-share/). With Companion, [bring local drives into the workspace](../../use-local-drives-and-desktop-apps/access-local-drives/) and [copy files between drives and shares](../../organize-and-transfer-files/copy-and-move-files/).
+Your project files can stay on your NAS or Windows file server. There's no cloud to migrate to and no synced copy to maintain. Just [connect to an SMB share](../../find-and-browse-files/connect-to-an-smb-share/) and start working. Add Companion to [bring local drives into the same workspace](../../use-local-drives-and-desktop-apps/access-local-drives/) and [copy files between drives and shares](../../organize-and-transfer-files/copy-and-move-files/).
 
-## Preview Design Files from Your Phone
+## Preview Design Files on Your Phone
 
-Check a Photoshop design or HEIC photo on a network share without installing its desktop app or downloading it first. Swipe through a large image collection, including formats your browser cannot display on its own. See [View Images and Read Documents](../../view-and-edit-files/view-images-and-read-documents/), [Supported File Formats](../../reference/supported-file-formats/), and [Mobile Navigation](../../find-and-browse-files/mobile-navigation/).
+Check a Photoshop design or a HEIC photo straight from a network share. You don't need the desktop app, and you don't need to download the file first. Swipe through large image collections, including formats your browser can't display natively. See [View Images and Read Documents](../../view-and-edit-files/view-images-and-read-documents/), [Supported File Formats](../../reference/supported-file-formats/), and [Mobile Navigation](../../find-and-browse-files/mobile-navigation/).
 
 ## Look Inside a ZIP Without Unpacking It
 
-Open a ZIP as a virtual folder and view an image or document inside it. Find what you need without extracting the whole archive; download or extract selected contents when useful. See [Work with ZIP Archives](../../organize-and-transfer-files/work-with-zip-archives/).
+Open a ZIP like a folder and view the images and documents inside. Find what you need without extracting the whole archive, then download or extract only the files you want. This works even with read-only access to an SMB share, and you don't need Companion. See [Work with ZIP Archives](../../organize-and-transfer-files/work-with-zip-archives/).
 
-## Change Markdown Tables Without Fighting the Markup
+## Edit Markdown Tables Without Fighting the Markup
 
-Update a project checklist or comparison table in its rendered table view, instead of aligning pipes and rows in source text. Your document stays a Markdown file in its existing storage. See [Edit Markdown](../../view-and-edit-files/edit-markdown/).
+Update a project checklist or comparison table in a rendered table view instead of lining up pipes in source text. The document stays a plain Markdown file, right where it was. See [Edit Markdown](../../view-and-edit-files/edit-markdown/).
 
 ## Stop Digging Through Folder Trees
 
-Type part of a directory name and jump to the matching folder. [Find files and return to recent locations](../../find-and-browse-files/smart-navigation-and-the-quick-bar/), then use [two panes](../../find-and-browse-files/dual-pane-mode/) to compare folders or [transfer files](../../organize-and-transfer-files/copy-and-move-files/) on desktop.
+Type part of a folder name and jump straight to it. [Get back to recent files and locations](../../find-and-browse-files/smart-navigation-and-the-quick-bar/) in a few keystrokes. On desktop, use [two panes](../../find-and-browse-files/dual-pane-mode/) to compare folders side by side or [move files between them](../../organize-and-transfer-files/copy-and-move-files/).
 
-## Edit in Your Desktop Apps. Return Changes to the Original Share.
+## Edit in Your Desktop Apps, Save Back to the Share
 
-Work on network files in Word, Photoshop, LibreOffice, or another installed app. Sambee Companion handles the file handoff and uploads your finished edits back to their source, so you do not have to manage a separate download-and-upload workflow. See [Companion setup](../../use-local-drives-and-desktop-apps/install-and-pair-the-companion-app/) and [Edit Files in Desktop Apps](../../use-local-drives-and-desktop-apps/edit-files-in-desktop-apps/).
-
-## Start Inside an Archive
-
-[Inspect a ZIP without extracting it](../../organize-and-transfer-files/work-with-zip-archives/#look-inside-a-zip), even with read-only access and without Companion on an SMB share. If no connection is available, see [connection guidance](../../find-and-browse-files/connect-to-an-smb-share/).
-
+Open network files in Word, Photoshop, LibreOffice, or any other installed app. Sambee Companion handles the handoff and uploads your changes back to the original location, so you don't have to juggle downloads and uploads yourself. See [Install and Pair the Companion App](../../use-local-drives-and-desktop-apps/install-and-pair-the-companion-app/) and [Edit Files in Desktop Apps](../../use-local-drives-and-desktop-apps/edit-files-in-desktop-apps/).

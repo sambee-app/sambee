@@ -19,4 +19,3 @@ The text editor closes directly to the file list. With unsaved changes, **Save**
 If sign-in interrupts editing, eligible drafts can be stored in this browser tab. Recovery is not a substitute for saving. See [Recover Unsaved Edits](../recover-unsaved-edits/).
 
 For an installed application instead, see [Edit Files in Desktop Apps](../../use-local-drives-and-desktop-apps/edit-files-in-desktop-apps/).
-

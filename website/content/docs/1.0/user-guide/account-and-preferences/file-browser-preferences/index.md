@@ -15,4 +15,3 @@ These **Settings > File Browser** options apply to your browser preferences, not
 ## Clear Personal History
 
 Clear file history under **File Search** or directory history under **Directory Navigation**. This removes history records, not files or folders. History is private to your account. Server retention and exclusions are [administrator policy](../../../admin-guide/reference/configuration-file-reference/#file-search-and-history-policy).
-

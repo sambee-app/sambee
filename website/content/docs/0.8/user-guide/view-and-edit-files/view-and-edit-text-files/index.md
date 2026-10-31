@@ -11,4 +11,3 @@ Use the text editor for supported text formats and [Edit Markdown](../edit-markd
 **Save** writes your changes to the original file. Changes not yet saved are not in storage. Editing obtains a file lock; if the file is locked or your session loses its lock, see [File Locking and Conflict Resolution](../file-locking-and-conflict-resolution/). Keep your draft until you can save it or preserve a separate copy.
 
 Leaving with unsaved changes asks whether to save them. Do not treat browser navigation as an undo of changes already saved.
-

@@ -57,7 +57,7 @@ items = [
   "copy-and-move-files",
   "download-and-upload-files",
   "work-with-zip-archives",
-  "share-files-and-links",
+  "share-files-on-phones-and-tablets",
 ]
 
 [[sections.user-guide.items]]

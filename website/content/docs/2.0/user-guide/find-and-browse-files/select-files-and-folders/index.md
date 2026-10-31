@@ -19,4 +19,3 @@ On phones, select from **More actions** or touch and hold a row. Tap additional 
 See [Keyboard Navigation and Shortcuts](../keyboard-navigation-and-shortcuts/#selection-and-dual-pane-workflows) for the selection commands.
 
 Continue with [Copy and Move Files](../../organize-and-transfer-files/copy-and-move-files/) or [Download and Upload Files](../../organize-and-transfer-files/download-and-upload-files/).
-

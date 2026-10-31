@@ -18,4 +18,3 @@ Hints and tips:
 - **Path prefix:** If you specify a subdirectory in the share, Sambee's connection root will start in that subdirectory.
 - **Visibility:** Connections can be for your account only or for all users on the Sambee server.
 - **Access mode:** If you want to prevent modifications to the data on the share, set this to **read only**.
-

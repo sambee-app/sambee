@@ -11,4 +11,3 @@ If a destination item exists, use **Target already exists** to skip it or choose
 ## Partial Moves and Cancellation
 
 If Sambee creates the destination but cannot remove the original, it reports a partial move and keeps the original. Cancellation or failure does not undo earlier completed items. Review both locations before retrying or deleting a retained source. See [transfer recovery](../../troubleshooting/common-user-problems/#cannot-complete-a-transfer).
-

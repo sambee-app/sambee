@@ -22,4 +22,3 @@ For moves between SMB connections, the destination file is complete before sourc
 Directories can be partially moved. Earlier completed files and replacements are not rolled back. An uncertain item stops the remaining batch; a retained-source warning can allow later items to continue. Each selected directory uses the destination parent captured when the confirmation opened.
 
 Inspect both locations before retrying. Do not assume an uncertain source was retained. The completed dialog offers **Close**, not a repeat of the batch. If source validation fails after a copy was published, the destination remains and the failure is reported. See [transfer recovery](../../troubleshooting/common-user-problems/#cannot-complete-a-transfer).
-

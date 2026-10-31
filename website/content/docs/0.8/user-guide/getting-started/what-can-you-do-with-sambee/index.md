@@ -1,6 +1,5 @@
 +++
 title = "What Can You Do With Sambee?"
-description = "Keep files on your existing storage. Preview designs, edit rendered Markdown tables, and return desktop edits to the original share."
 +++
 
 Keep your files where they are and do more with them. Preview design files from your phone, change a Markdown table without editing its markup, or open a network file in your favorite desktop app.
@@ -28,4 +27,3 @@ Work on network files in Word, Photoshop, LibreOffice, or another installed app.
 ## Start with a Preview
 
 [Preview a design or photo](../../view-and-edit-files/view-images-and-read-documents/), even with read-only access and without Companion. If no connection is available, see [connection guidance](../../find-and-browse-files/connect-to-an-smb-share/).
-

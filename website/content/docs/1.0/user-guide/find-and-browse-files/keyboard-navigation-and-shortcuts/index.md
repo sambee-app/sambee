@@ -2,16 +2,7 @@
 title = "Keyboard Navigation and Shortcuts"
 +++
 
-Keyboard navigation is a first-class part of Sambee.
-
-## Keyboard-First Principles
-
-- Focus matters: Shortcuts act on the item that currently has focus.
-- The active pane matters: In dual-pane mode, many file browser commands target the currently active pane.
-- Important actions stay discoverable: The same actions are also available through visible controls and the in-app shortcuts help.
-- Safety still wins: Shortcuts that would be unsafe in text fields, dialogs, or incompatible states are intentionally blocked.
-
-If you want the live in-app list, press <kbd>?</kbd> or <kbd>F1</kbd>. While editing Markdown or text, use <kbd>F1</kbd> so you can type question marks normally.
+Keyboard navigation is a first-class part of Sambee. Press <kbd>?</kbd> or <kbd>F1</kbd> for a searchable list of shortcuts in the app.
 
 ## File List and Main UI
 

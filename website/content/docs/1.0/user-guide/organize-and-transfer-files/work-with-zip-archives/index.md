@@ -23,4 +23,3 @@ Unlike a generated download, **Create archive** writes a persistent ZIP into the
 For ordinary stored files or folders, select the source items and choose **Create archive** with a writable physical destination. Source items must belong to one connection. The action is unavailable for unsupported source or destination combinations; a ZIP virtual folder cannot be the destination.
 
 Cancellation or failure can leave partial results. Inspect the destination and the final operation status before retrying.
-

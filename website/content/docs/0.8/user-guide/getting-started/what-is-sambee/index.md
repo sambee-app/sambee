@@ -1,6 +1,5 @@
 +++
 title = "What Is Sambee?"
-description = "Sambee is a self-hosted browser-based file manager for SMB shares. Preview and edit files in your browser; use optional Companion for local drives and desktop apps."
 +++
 
 ## Browser-Based File Manager
@@ -9,7 +8,7 @@ Sambee is a self-hosted, browser-based file manager for files on SMB network sha
 
 Sambee can replace traditional tools like Windows File Explorer. Single-pane and dual-pane views bring your existing storage into one workspace.
 
-See [What Can You Do With Sambee?](../what-can-you-do-with-sambee/) for practical outcomes.
+See [What Can You Do With Sambee?](../what-can-you-do-with-sambee/) for examples.
 
 ### Supports SMB Shares and Local Drives
 

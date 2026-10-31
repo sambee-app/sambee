@@ -16,7 +16,7 @@ You can also drag files and folders from your computer onto a file list. The dro
 
 Uploaded folders keep their names and internal structure. If a folder with the same name already exists, Sambee merges into it without removing files already there. If a file blocks a folder, or a folder blocks a file, you can skip or rename the incoming item; a folder isn't overwritten. Individual file conflicts can be skipped, renamed, or replaced.
 
-Files upload one at a time. The progress notice shows the current file and path, and the final notice reports completed, skipped, failed, or uncertain results and folder counts. Cancelling or failing partway through doesn't undo files or folders already created. If a folder upload has an uncertain outcome, Sambee stops the remaining transfers; inspect the destination before trying again.
+Files upload one at a time. The progress notice shows the current file and path, and the final notice reports completed, skipped, failed, or uncertain results and folder counts. Cancelling or failing partway through doesn't undo files or folders already created. If Sambee cannot confirm whether a folder upload succeeded, Sambee stops the remaining transfers; inspect the destination before trying again.
 
 See [transfer recovery](../../troubleshooting/common-user-problems/#cannot-complete-a-transfer) before retrying a partial or uncertain upload.
 

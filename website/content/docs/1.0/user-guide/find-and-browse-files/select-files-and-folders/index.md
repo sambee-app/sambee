@@ -15,4 +15,3 @@ Larger touch devices can use the same behavior without switching to the phone la
 **Space** or **Insert** toggles selection on the focused row and moves down. See [Keyboard Navigation and Shortcuts](../keyboard-navigation-and-shortcuts/#selection-and-dual-pane-workflows) rather than a second shortcut list here.
 
 Continue with [Copy and Move Files](../../organize-and-transfer-files/copy-and-move-files/) or [Download and Upload Files](../../organize-and-transfer-files/download-and-upload-files/).
-

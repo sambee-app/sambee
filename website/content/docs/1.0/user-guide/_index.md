@@ -14,4 +14,3 @@ Start with [What Is Sambee?](./getting-started/what-is-sambee/) for the definiti
 - [Check formats](./reference/supported-file-formats/): Find preview support and format limits.
 
 For deployment and policy, use the [Admin Guide](../admin-guide/). For implementation, use the [Developer Guide](../developer-guide/).
-

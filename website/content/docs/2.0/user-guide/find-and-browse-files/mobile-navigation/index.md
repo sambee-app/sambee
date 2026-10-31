@@ -22,7 +22,6 @@ Compared with desktop, mobile navigation is more compact:
 - Opening files in natively installed apps is not available.
 - Local drive access is not available.
 
-For stored files, viewer resources, unsaved text, and location links, see [Share Files and Links](../../organize-and-transfer-files/share-files-and-links/).
+For sharing stored files, viewer copies, and unsaved text, see [Share Files on Phones and Tablets](../../organize-and-transfer-files/share-files-on-phones-and-tablets/).
 
 With unsaved edits, navigation offers **Save**, **Discard**, or **Cancel**. Cancel keeps the draft and current location; a failed Save keeps the editor open. Browser history does not undo saved changes or restore discarded edits. See [Recover Unsaved Edits](../../view-and-edit-files/recover-unsaved-edits/).
-

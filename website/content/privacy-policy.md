@@ -1,6 +1,5 @@
 +++
 title = "Privacy Policy"
-description = "Privacy and data-processing information for this site."
 layout = "standalone"
 eyebrow = "Legal"
 +++

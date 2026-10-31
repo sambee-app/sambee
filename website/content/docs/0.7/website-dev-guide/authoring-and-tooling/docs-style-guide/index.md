@@ -7,13 +7,19 @@ Use this page as the canonical copy style reference for published docs.
 ## Language and Writing Style
 
 - Clarity and readability are paramount.
-- Use simple but correct language.
+- Use simple but correct language that sounds natural.
 - Don't be nitpicky or wordy.
 - Use contracted instead of expanded forms, e.g. `we're` instead of `we are`.
 - Explain (as appropriate) the following:
   - why things are the way they are
   - how to use things
   - when to use things
+
+### Words to Avoid
+
+The following words have a weird or unnatural sound and are to be avoided:
+
+- outcome
 
 ## User Guide: Value Without Unnecessary Detail
 
@@ -42,9 +48,9 @@ For example, explain that selecting a file differs from opening it, that desktop
 
 ### Marketing Language
 
-Use confident, benefit-led marketing language on the definition and benefits pages. Make clear promises about what Sambee helps users do, and keep useful comparisons that give readers a familiar product category. Retain **Sambee can replace traditional tools like Windows File Explorer.** Do not remove this comparison or surround it with a list of caveats; it does not require a claim of complete feature parity.
+Use confident, benefit-led marketing language on the definition and benefits pages. Make clear promises about what Sambee helps users do, and keep useful comparisons that give readers a familiar product category.
 
-State task-critical requirements where they help the reader, without weakening every benefit with defensive wording. Keep promises grounded in supported capabilities. Do not invent features or guarantee external outcomes such as search ranking or AI inclusion.
+State task-critical requirements where they help the reader, without weakening every benefit with defensive wording. Keep promises grounded in supported capabilities.
 
 ### Author and AI Review
 

@@ -11,4 +11,3 @@ Press **F5** to copy or **F6** to move the selected items. Copying works between
 For a move across storage boundaries, Sambee creates the destination but retains the source when it cannot safely verify and delete it. Check both locations before deleting a retained source yourself.
 
 A failed or cancelled batch can leave completed files in the destination. Do not assume that the whole operation was undone. Inspect source and destination before retrying. See [transfer recovery](../../troubleshooting/common-user-problems/#cannot-complete-a-transfer).
-
