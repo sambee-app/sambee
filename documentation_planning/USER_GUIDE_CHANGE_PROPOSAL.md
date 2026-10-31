@@ -2,13 +2,21 @@
 
 ## Status and Purpose
 
-Status: Proposal for implementation review. This document does not change the published user guide.
+Status: Implemented across the applicable documentation versions. This document retains the implementation plan and acceptance criteria.
+
+General improvements start in 0.7. Rendered Markdown table editing and text editing start in 0.8, account management remains in 0.9, and ZIP workflows and recent-location guidance start in 1.0. The 2.0 overrides retain their newer behavior. The task-based structure applies across these versions; inherited content and authored overrides are preserved.
 
 The user guide must help new users understand what Sambee can do for them, then help them complete useful file tasks. It must also contain one clear definition page that search engines and AI systems can identify and quote.
 
 This plan combines the proposed guide reorganization, the benefit-led introduction, the canonical product definition, and the related page improvements.
 
-The version scope still needs a decision. The proposals are not permission to change every documentation version or to change application behavior.
+The implementation uses the recommended version scope and task-based section names. It does not change application behavior.
+
+### Implementation Verification
+
+The website build, 144 documentation tests, 40 file-operation tests, and 63 rendered Markdown table tests pass. Generated checks cover 398 user-guide links and heading fragments, 68 moved routes with and without trailing slashes, and version-aware definition metadata. The documentation structure report is refreshed.
+
+Live demo checks at a phone-sized viewport confirm a Photoshop preview, ZIP browsing, an image preview inside a ZIP, and disabled archive write actions. The supplied `image.psd` sample is rejected as invalid or corrupted; a different PSD renders successfully. Companion is not paired in this browser, so desktop upload was not verified end to end. A wider link scan also found seven existing Developer Guide link failures outside this change.
 
 ## Goals
 
@@ -48,12 +56,12 @@ Do not add screenshots to the docs. Use concrete examples and task links to demo
 |---|---|---|
 | Account management is the second Getting Started page. | [Current navigation](../website/data/docs-nav/2.0.toml) lists the overview, then account management. | Use the second position for What Can You Do With Sambee? Move account management later. |
 | Practical outcomes need more emphasis alongside the overview. | [What Is Sambee?](../website/content/docs/1.0/user-guide/getting-started/what-is-sambee/index.md) has a sound structure and describes viewers, editors, and desktop integration. | Improve the existing page without restructuring it. Add a separate benefits page with task links. |
-| Connection setup comes before using a connection. | [Connect to an SMB Share](../website/content/docs/0.7/user-guide/accessing-files/connect-to-an-smb-share/index.md) starts with settings and adding a connection. | Explain how to open an available connection first. Keep adding a connection as a separate procedure. |
-| Basic tasks are grouped under feature names. | Selection is in [Smart Navigation and the Quick Bar](../website/content/docs/2.0/user-guide/browsing-and-navigation/smart-navigation-and-the-quick-bar/index.md). Copy, move, and extraction are in [Dual-Pane Mode](../website/content/docs/2.0/user-guide/browsing-and-navigation/dual-pane-mode/index.md). | Give these tasks explicit navigation entries or clear task headings in suitable pages. |
-| File transfers are grouped with viewing and editing. | [Download and Upload Files](../website/content/docs/1.0/user-guide/viewing-and-editing-files/download-and-upload-files/index.md) is in Viewing & Editing Files. | Move it to Organize and Transfer Files. |
+| Connection setup comes before using a connection. | [Connect to an SMB Share](../website/content/docs/0.7/user-guide/find-and-browse-files/connect-to-an-smb-share/index.md) starts with settings and adding a connection. | Explain how to open an available connection first. Keep adding a connection as a separate procedure. |
+| Basic tasks are grouped under feature names. | Selection is in [Smart Navigation and the Quick Bar](../website/content/docs/2.0/user-guide/find-and-browse-files/smart-navigation-and-the-quick-bar/index.md). Copy, move, and extraction are in [Dual-Pane Mode](../website/content/docs/2.0/user-guide/find-and-browse-files/dual-pane-mode/index.md). | Give these tasks explicit navigation entries or clear task headings in suitable pages. |
+| File transfers are grouped with viewing and editing. | [Download and Upload Files](../website/content/docs/1.0/user-guide/organize-and-transfer-files/download-and-upload-files/index.md) is in Viewing & Editing Files. | Move it to Organize and Transfer Files. |
 | User instructions contain detailed operational explanations. | The Quick Bar page covers history ranking, retention policy, administrator settings, and many recovery cases. | Keep task limits and recovery actions. Remove unnecessary algorithm details and move administrator policy to the Admin Guide. |
 | Text editing is not easy to find as a task. | The overview describes text editing, but the navigation has a Markdown page and text-format reference rather than a named text-editing topic. | Add a short text-editing topic; create a page only if non-obvious behavior justifies it. |
-| Some preview details precede useful user information. | [View Images & Read Documents](../website/content/docs/0.7/user-guide/viewing-and-editing-files/view-images-and-read-documents/index.md) explains image processing before viewer controls. | Remove internal processing detail unless it explains a task-relevant difference. Do not replace it with a tutorial on standard controls. |
+| Some preview details precede useful user information. | [View Images & Read Documents](../website/content/docs/0.7/user-guide/view-and-edit-files/view-images-and-read-documents/index.md) explains image processing before viewer controls. | Remove internal processing detail unless it explains a task-relevant difference. Do not replace it with a tutorial on standard controls. |
 
 ## Proposed Guide Structure
 
@@ -254,7 +262,7 @@ Explain supported desktop, pairing, and installed-application requirements. Do n
 
 ### Account and Preferences
 
-Move [Manage Your Account](../website/content/docs/2.0/user-guide/getting-started/manage-your-account/index.md) out of Getting Started.
+Move [Manage Your Account](../website/content/docs/2.0/user-guide/account-and-preferences/manage-your-account/index.md) out of Getting Started.
 
 Keep identity review, sign-out, local password changes, and other-session revocation in this page. A brief sign-in section can remain here as reference, but account instructions must not interrupt the benefits page.
 
@@ -373,15 +381,15 @@ For application checks in the VS Code browser, use only `http://localhost:3000/b
 - Moved URLs have the required link and redirect updates.
 - Required docs checks pass, and the benefits examples and the linked starting-point task match the application.
 
-## Decisions Still Needed
+## Applied Decisions
 
-| Decision | Recommended Default |
+| Decision | Applied Choice |
 |---|---|
-| Version scope | Apply general improvements at the earliest applicable version and preserve later feature-specific overrides; confirm the scope before structural changes. |
+| Version scope | General improvements start in 0.7; later features and authored overrides remain at their applicable versions. The task-based structure applies across the documented versions. |
 | Getting Started page roles | Keep What Is Sambee? and its current structure; add What Can You Do With Sambee? as the benefits-focused second page. |
 | Section names | Use the task-based names in this plan. |
 | Page count | Prefer clear subsections; create pages only for distinct user value or substantial non-obvious behavior. |
 | Personal preferences | Keep them together under Account and Preferences; verify ownership before moving settings guidance. |
 | Search metadata changes | Inspect existing output first; change templates only for a demonstrated problem. |
 
-The proposed structure and copy require implementation review. This document records the full plan; it does not apply the reorganization.
+The published guide now uses this structure and copy approach. The sections above retain the original plan for review and traceability.

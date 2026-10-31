@@ -12,51 +12,62 @@ title = "Getting Started"
 [pages.user-guide.getting-started]
 items = [
   "what-is-sambee",
+  "what-can-you-do-with-sambee",
 ]
 
 [[sections.user-guide.items]]
-slug = "accessing-files"
-title = "Accessing Files"
+slug = "find-and-browse-files"
+title = "Find and Browse Files"
 
-[pages.user-guide.accessing-files]
+[pages.user-guide.find-and-browse-files]
 items = [
   "connect-to-an-smb-share",
-  "access-local-drives",
-]
-
-[[sections.user-guide.items]]
-slug = "browsing-and-navigation"
-title = "Browsing and Navigation"
-
-[pages.user-guide.browsing-and-navigation]
-items = [
+  "select-files-and-folders",
   "smart-navigation-and-the-quick-bar",
+  "mobile-navigation",
   "dual-pane-mode",
   "keyboard-navigation-and-shortcuts",
-  "mobile-navigation",
 ]
 
 [[sections.user-guide.items]]
-slug = "viewing-and-editing-files"
-title = "Viewing & Editing Files"
+slug = "organize-and-transfer-files"
+title = "Organize and Transfer Files"
 
-[pages.user-guide.viewing-and-editing-files]
+[pages.user-guide.organize-and-transfer-files]
+items = [
+  "copy-and-move-files",
+  "share-files-and-links",
+]
+
+[[sections.user-guide.items]]
+slug = "view-and-edit-files"
+title = "View and Edit Files"
+
+[pages.user-guide.view-and-edit-files]
 items = [
   "view-images-and-read-documents",
   "edit-markdown",
-  "edit-files-in-desktop-apps",
   "file-locking-and-conflict-resolution",
 ]
 
 [[sections.user-guide.items]]
-slug = "companion-app"
-title = "Companion App"
+slug = "use-local-drives-and-desktop-apps"
+title = "Use Local Drives and Desktop Apps"
 
-[pages.user-guide.companion-app]
+[pages.user-guide.use-local-drives-and-desktop-apps]
 items = [
   "install-and-pair-the-companion-app",
+  "access-local-drives",
+  "edit-files-in-desktop-apps",
   "desktop-app-picker",
 ]
+
+[[sections.user-guide.items]]
+slug = "account-and-preferences"
+title = "Account and Preferences"
+
+[pages.user-guide.account-and-preferences]
+items = []
 
 [[sections.user-guide.items]]
 slug = "troubleshooting"
