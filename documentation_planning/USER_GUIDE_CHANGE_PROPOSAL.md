@@ -40,6 +40,8 @@ The proposed changes cover the user guide landing page, its section order, page 
 
 They do not include a new marketing website, application changes, new product capabilities, or a general rewrite of the Admin Guide. Search metadata or template changes are follow-up work only if an inspection identifies a specific problem.
 
+Do not add screenshots to the docs. Use concrete examples and task links to demonstrate the benefits.
+
 ## Current Problems
 
 | Problem | Evidence | Proposed Response |
@@ -90,22 +92,26 @@ Keep What Is Sambee? as the first page in Getting Started, with its current titl
 
 This page is the editorial source for the product definition and capability overview. The second page, What Can You Do With Sambee?, explains practical outcomes and links to tasks. It is not a second definition or a duplicate feature catalog. The guide landing page links to both without repeating their content.
 
+Use confident, benefit-led marketing language on these two pages. Keep useful comparisons and make clear promises about what Sambee helps users do. Retain the current statement: **Sambee can replace traditional tools like Windows File Explorer.** This gives human readers a familiar product category; do not remove it or surround it with a list of caveats. It does not require a claim of complete feature parity. State task-critical requirements where they help the reader, without weakening every benefit with defensive wording.
+
 Editorial canonical status is not an instruction to change HTML canonical URLs. Published version URLs and their metadata must continue to follow the website's version-aware rules.
 
 ### Proposed Opening Copy
 
-> Sambee is a self-hosted, browser-based file manager for files on SMB network shares and local drives. It lets users browse files, view images and PDFs, and edit text and Markdown in their browser. Its optional desktop Companion app provides local-drive access and opens files in installed desktop applications, with an explicit upload step to save changes back to a network share.
+> Sambee is a self-hosted, browser-based file manager for files on SMB network shares and local drives. It lets users browse files, view images and PDFs, and edit text and Markdown in their browser. With optional Sambee Companion, you can access local drives and open network files in your installed desktop apps, then upload your changes back to the original share without managing downloaded copies or choosing an upload destination.
 
 This is draft copy for versions that support all listed capabilities. Check the capability history before applying it to an older version.
 
 The opening must stand on its own. It names the product, the product category, the storage it uses, the main browser tasks, and the role of Companion. Place the improved copy in the current opening section; no new section is required.
+
+Emphasize the complete desktop-editing workflow: open a network file in an installed app and return changes to the original share through Companion. Keep this distinctive benefit in the opening, not only in the task instructions. Keep the exact Done Editing procedure in the desktop-editing instructions; do not imply automatic synchronization.
 
 ### Improvements Within the Existing Structure
 
 | Existing Section | Keep | Improve |
 |---|---|---|
 | Sambee Turns Your Storage Into a Modern Workspace | The opening section and its position. | Make the opening a short, accurate definition suitable for quotation. |
-| Browser-Based File Manager | The device and storage subsections. | Clarify browser capabilities and Companion requirements. Qualify broad replacement claims and simplify server explanations without changing the structure. |
+| Browser-Based File Manager | The File Explorer replacement comparison and the device and storage subsections. | Use the familiar comparison confidently. Clarify browser capabilities and Companion requirements, and simplify server explanations without changing the structure. |
 | View and Edit Files | The image/PDF, Markdown/text, and desktop integration subsections. | Improve capability wording and accuracy. State the explicit desktop-edit upload requirement without adding a full procedure. |
 | Free & Open Source | The licensing and self-hosting section. | Keep it brief and accurate; link to deployment guidance rather than expand it. |
 
@@ -118,7 +124,7 @@ These section names describe the current 1.0 source inherited by later versions.
 - Use meaningful headings and short, self-contained paragraphs that can be understood outside the page.
 - Put the definition in ordinary page text, not only in an image, tooltip, or interactive element.
 - Link from the user guide landing page to this definition page.
-- Avoid keyword repetition, vague superlatives, and claims such as replaces File Explorer without clear limits.
+- Keep the File Explorer replacement comparison because it helps human readers understand Sambee. Use confident product promises grounded in its capabilities; avoid keyword repetition and empty superlatives.
 - Do not promise that search engines will rank the page or that AI systems will quote it.
 
 During implementation, verify the generated page title, description if supported, indexability, and version-aware canonical behavior. Use the existing website mechanisms. Do not introduce structured data or template changes without a verified need.
@@ -129,22 +135,44 @@ During implementation, verify the generated page title, description if supported
 
 Make this the second Getting Started page. It answers How is Sambee useful to me? while What Is Sambee? remains the definition and capability overview.
 
-Use short outcome-focused sections, each with a concrete example and a link to the relevant task. Do not repeat the product definition or describe the same viewer and editor features again.
+Use the [homepage content](../website/data/homepage.yaml) as the starting point, especially its existing-storage promise, rich previews, archive browsing, rendered Markdown table editing, fast directory navigation, and desktop-app integration. Translate these into concrete situations, not a second feature catalog.
 
-| Outcome | Benefit to Explain | Task Links |
-|---|---|---|
-| Read network documents and browse photos from a phone or tablet | Inspect existing files without downloading each one first or installing a desktop application. | Browsing, image/PDF viewing, and mobile guidance. |
-| Edit text and Markdown in the browser | Make a quick change without switching to a desktop editor. | Text and Markdown editing guidance. |
-| Organize files across storage locations | Copy or move files between supported locations from one workspace. | Copy and move tasks, with local-drive requirements where relevant. |
-| Edit network files in installed desktop applications | Use familiar applications without manually downloading and uploading file copies. | Companion setup and desktop editing, including the explicit upload step. |
+### Proposed Opening
 
-Returning to recent files or folders can be a brief additional example where useful. Do not turn the page into an exhaustive list of features. Do not imply that named desktop applications are bundled or available on every device.
+> Keep your files where they are and do more with them. Browse design files from your phone, look inside a ZIP without unpacking it, change a Markdown table without editing its markup, or open a network file in your favorite desktop app. Sambee brings these workflows to the storage you already use.
 
-Keep browser-only benefits first. Mention Companion only for outcomes that require it, and keep access and device limits beside the relevant benefit. Read-only users must still see useful outcomes.
+This is draft copy, not a second product definition. Keep the promise direct and select examples supported by the target documentation version.
+
+### Distinctive Outcomes
+
+Use short sections with an outcome-focused heading, a concrete example, and a task link. The homepage source column below is for authors; do not publish the source identifiers as user-facing text.
+
+| Proposed Heading | Concrete Situation and Benefit | Homepage Source | Task Links |
+|---|---|---|---|
+| Give your existing storage a modern workspace | Keep project files on the NAS or Windows file server you already use and access them through Sambee. No migration to a new cloud library or separate synchronized file collection is required. With Companion, bring local drives into the same workspace and copy files between drives and shares. | Hero; `problem_value.value1`; Access; File management. | SMB connections, local drives, and copy/move guidance. |
+| Preview design files from your phone | Check a Photoshop design or a HEIC photo stored on a network share without installing its desktop application or downloading it first. Swipe through a large image collection, including formats a browser cannot normally display on its own. | Rich previews; Fast swiping through images; Professional graphics and modern image formats. | Image viewing, supported formats, and mobile guidance. |
+| Look inside a ZIP without unpacking it | Open a ZIP as a virtual folder, browse its directories, and view a file inside it directly. Find the document or image you need without extracting the whole archive; extract or download selected contents when useful. | File management: Inspect, create, and extract ZIP archives. | Work with ZIP Archives and selected-member download/extraction guidance. |
+| Change Markdown tables without fighting the markup | Update a project checklist or comparison table directly in its rendered table view instead of aligning pipes and rows in source text. Keep the document as a Markdown file in its existing storage. | Markdown: WYSIWYG table editing. | Markdown editing guidance. |
+| Stop digging through folder trees | Type part of a directory name and jump to the matching folder instead of clicking through a deep hierarchy. Return to frequently used locations and use two panes when comparing folders or transferring files. | Instant navigation to any directory; Better file handling; Single-pane and dual-pane layouts. | Smart navigation, recent locations, dual-pane mode, and copy/move guidance. |
+| Edit in your desktop apps. Return changes to the original share. | Work on network files in Word, Photoshop, LibreOffice, or another installed app. Sambee Companion handles the file handoff and uploads your finished edits back to their source, so you do not have to manage a separate download-and-upload workflow. | Native editing; Edit in desktop apps; Save back to source location. | Companion setup and desktop editing, including Done Editing upload. |
+
+Lead with the existing-storage promise, then the browser-only examples, and finish with the optional desktop workflow. Read-only users must see useful outcomes in previews, archive inspection, and navigation. Mention Companion only where it is required.
+
+Do not dilute these examples with generic claims such as read PDFs, upload files, or edit text unless the example shows a distinctive advantage. Do not add Docker setup, reverse-proxy configuration, OIDC rollout, editor-library names, or SMB protocol internals to this page. Those homepage topics serve other audiences.
+
+### Benefits First, Workflow Details Later
+
+Use the homepage's confident positioning. Tell readers what becomes easier and why it matters. For desktop editing, the promise is:
+
+> Work on network files in Word, Photoshop, LibreOffice, or another installed app. Sambee Companion handles the file handoff and uploads your finished edits back to their source, so you do not have to manage a separate download-and-upload workflow.
+
+The benefits page sells the outcome; linked task pages explain how to complete it. Present uploading back to the original share as a distinctive benefit, not automatic synchronization. Keep Done Editing controls, conflict handling, recovery cases, format details, and other procedural information in those instructions rather than interrupting the benefit with warnings.
+
+Choose vivid examples from the [format reference](../website/content/docs/2.0/user-guide/reference/supported-file-formats/index.md) and task documentation: preview a Photoshop design from your phone, inspect an image inside a ZIP, or update a rendered Markdown table. Lead with what users gain, not a list of qualifications.
 
 ### Brief Starting Point
 
-End the benefits page with a short starting point if useful: choose an available SMB connection from the Connection List and open an image, PDF, text file, or Markdown file. Link to connection guidance for missing connections or access, and to useful next tasks.
+End the benefits page with one clear link to a useful browser-only task, such as previewing an image or inspecting a ZIP without extracting it. Choose a task supported by the target version that read-only users can complete without Companion. Add a short link to connection guidance for missing connections or access.
 
 Do not create a separate generic first-file tutorial. Do not add steps for opening the website, browsing familiar folders, using standard controls, or returning to the file list. Sign-in and account details remain in linked account or troubleshooting guidance.
 
@@ -256,7 +284,7 @@ Keep formats and syntax-highlighting details in Reference. Keep Keyboard Navigat
 | Sharing | Sharing a location does not grant access. Sharing behavior depends on the device, browser, and selected resource. |
 | Transfers | Cancellation and failure can leave partial results. Keep instructions for inspecting the source and destination. |
 | Storage | Do not imply that Sambee requires migrating all files into a new storage system. Do not claim that it never creates temporary copies. |
-| Product claims | Avoid universal application compatibility, unrestricted remote access, automatic synchronization, and guaranteed search or AI visibility. |
+| Product claims | Make confident promises about supported benefits and keep the File Explorer replacement comparison. Do not invent capabilities, claim complete feature parity, or guarantee external outcomes such as search ranking or AI inclusion. |
 
 ## Version and Inheritance Plan
 
@@ -282,7 +310,7 @@ Before implementation, choose whether the structural reorganization applies acro
 ### Phase 2: Establish the Introduction
 
 1. Improve What Is Sambee? within its current sections, preserving their order and heading hierarchy.
-2. Add What Can You Do With Sambee? as the second page, with concise outcomes, task links, and an optional brief starting point.
+2. Add What Can You Do With Sambee? as the second page, with concise outcomes, task links, and a brief starting point linking to one useful browser-only task.
 3. Update the guide landing page without duplicating the definition or benefits.
 4. Check that browser-only and read-only users can identify useful outcomes without Companion setup.
 
@@ -307,7 +335,7 @@ Before implementation, choose whether the structural reorganization applies acro
 2. Refresh required derived documentation artifacts through the repository workflow.
 3. Inspect generated navigation, moved-page links, redirects, and inherited content in each affected version.
 4. Review the rendered definition page and its metadata.
-5. Verify the benefits examples and any brief starting-point instructions against the application.
+5. Verify the benefits examples and the linked starting-point task against the application.
 6. Apply the style guide's content test and Author and AI Review check, then verify the accuracy requirements above.
 
 Use the [Docs Editor Tool](../website/content/docs/0.9/website-dev-guide/authoring-and-tooling/docs-editor-tool/index.md) for published page, section, and book structural changes. Preview each operation before applying it. The tool runs docs validation after a successful apply. Update Markdown links and managed redirects separately where needed.
@@ -321,13 +349,18 @@ For application checks in the VS Code browser, use only `http://localhost:3000/b
 - What Is Sambee? remains the first page and contains a short definition that can be understood without surrounding text.
 - Its current section order and heading hierarchy are preserved; improvements do not replace the page's structure.
 - The definition names the product category, existing storage, browser tasks, and the optional Companion role.
+- The opening and desktop benefit emphasize editing network files in installed apps and uploading changes back to the original share without managing downloaded copies or choosing an upload destination. They do not imply automatic synchronization.
+- The File Explorer replacement comparison is retained, and the definition and benefits pages use confident marketing language without unnecessary caveats or invented capabilities.
 - Benefits use concrete tasks and link to the relevant instructions.
+- No screenshots are added to the docs; concrete examples and task links demonstrate the benefits.
+- The benefits page uses distinctive homepage-backed scenarios, including unusual image previews, ZIP inspection without full extraction, rendered Markdown table editing, direct directory navigation, and desktop editing back to the source share.
+- The existing-storage benefit is clear, and generic file-manager actions or administrator deployment topics do not displace the distinctive examples.
 - Every passage passes the style guide's content test; obvious controls and unnecessary implementation detail are not explained.
 - Numbered steps are used only for non-obvious workflows where order matters.
 - Short related topics use subsections unless a distinct page is justified, and control lists or shortcut tables are not duplicated.
 - There is no competing full product introduction in the user guide.
 - What Can You Do With Sambee? is the second Getting Started page and explains practical outcomes without repeating the definition or feature catalog.
-- A brief starting point may appear at the end of the benefits page; no separate generic first-file tutorial is added.
+- The benefits page ends with one clear link to a useful browser-only task that read-only users can complete without Companion; no separate generic first-file tutorial is added.
 - Browser-only and read-only users can identify useful benefits without Companion setup.
 - Manage Your Account appears later under Account and Preferences.
 - Selection, search, copy, move, upload, download, and archive tasks can be found without knowing a control or layout name.
@@ -338,7 +371,7 @@ For application checks in the VS Code browser, use only `http://localhost:3000/b
 - Upload, conflict, cancellation, lock, and recovery warnings remain accurate and accessible.
 - Inheritance and authored overrides are preserved for every affected version.
 - Moved URLs have the required link and redirect updates.
-- Required docs checks pass, and the benefits examples and any starting-point instructions match the application.
+- Required docs checks pass, and the benefits examples and the linked starting-point task match the application.
 
 ## Decisions Still Needed
 

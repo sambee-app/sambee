@@ -40,13 +40,15 @@ Otherwise, remove it. Moving unnecessary detail to Reference does not make it us
 
 For example, explain that selecting a file differs from opening it, that desktop edits require an explicit upload, and that a cancelled transfer can leave partial results. Do not describe standard zoom, scrolling, or text entry.
 
-### Product Introduction
+### Marketing Language
 
-Keep **What Is Sambee?** as the user guide's definition page. Start with a short, standalone definition and concrete benefits. State device and Companion requirements briefly; do not turn the introduction into an architecture explanation. The guide landing page links to this definition rather than repeating it.
+Use confident, benefit-led marketing language on the definition and benefits pages. Make clear promises about what Sambee helps users do, and keep useful comparisons that give readers a familiar product category. Retain **Sambee can replace traditional tools like Windows File Explorer.** Do not remove this comparison or surround it with a list of caveats; it does not require a claim of complete feature parity.
+
+State task-critical requirements where they help the reader, without weakening every benefit with defensive wording. Keep promises grounded in supported capabilities. Do not invent features or guarantee external outcomes such as search ranking or AI inclusion.
 
 ### Author and AI Review
 
-Apply the content test before adding or expanding user guide content. Before completing a change, remove obvious instructions, duplicate explanations, unnecessary technical detail, and pages that should be short subsections. Verify that important limits and recovery actions remain clear. Brevity must not remove information needed to avoid data loss or complete a task safely.
+Apply the content test before adding or expanding user guide content. Before completing a change, remove obvious instructions, duplicate explanations, unnecessary technical detail, and pages that should be short subsections. Preserve confident benefit statements and useful comparisons on the definition and benefits pages. Verify that important limits and recovery actions remain clear. Brevity must not remove information needed to avoid data loss or complete a task safely.
 
 ## Lists
 
