@@ -60,6 +60,7 @@ import * as backendRouter from "../backendRouter";
 import { companionSession } from "../companionSession";
 import * as draftRecovery from "../draftRecovery";
 import { logger } from "../logger";
+import { ARCHIVE_PREVIEW_SIZE_LIMIT_MESSAGE, PreviewUnavailableError } from "../previewPolicy";
 
 const mockedAxios = vi.mocked(axios);
 const mockAxiosInstance = mockedAxios.create() as ReturnType<typeof mockedAxios.create> & {
@@ -1909,6 +1910,25 @@ describe("API Service", () => {
           responseType: "blob",
         })
       );
+    });
+
+    it.each(["conn1", "local-drive:c"])("reports an actionable archive preview size limit for %s", async (connectionId) => {
+      localStorage.setItem("companion_secret", "test-companion-secret");
+      mockAxiosInstance.get.mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 413, data: new Blob([JSON.stringify({ detail: "Archive member exceeds the inline preview size limit" })]) },
+      });
+
+      await expect(apiService.getArchiveMember(connectionId, "files.zip", "large.pdf", { request: { kind: "pdf" } })).rejects.toEqual(
+        new PreviewUnavailableError(ARCHIVE_PREVIEW_SIZE_LIMIT_MESSAGE)
+      );
+    });
+
+    it("does not classify an archive download limit as a preview limit", async () => {
+      const error = { isAxiosError: true, response: { status: 413, data: { detail: "Download exceeds its size limit" } } };
+      mockAxiosInstance.get.mockRejectedValueOnce(error);
+
+      await expect(apiService.getArchiveMember("conn1", "files.zip", "large.pdf", { download: true })).rejects.toBe(error);
     });
 
     it("getFileContent() fetches file content as text", async () => {

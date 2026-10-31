@@ -13,7 +13,7 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime};
 
 use bzip2::read::BzDecoder;
-use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, SecondsFormat, Timelike, Utc};
 use flate2::{write::DeflateEncoder, Compression, Decompress, FlushDecompress, Status};
 use log::info;
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,9 @@ const TEMPORARY_SOURCE_PREFIX: &str = "sambee-zip-source-";
 pub const ARCHIVE_INLINE_PREVIEW_MAX_BYTES: u64 = 5 * 1024 * 1024;
 const STORED_SAVINGS_BYTES: usize = 1024;
 const STORED_SAVINGS_RATIO: f64 = 0.05;
+const ZIP_MIN_YEAR: i32 = 1980;
+const ZIP_MAX_YEAR: i32 = 2107;
+const ZIP_DOS_EPOCH_SECONDS: u64 = 315_532_800;
 const EOCD_SIGNATURE: &[u8; 4] = b"PK\x05\x06";
 const CENTRAL_DIRECTORY_SIGNATURE: &[u8; 4] = b"PK\x01\x02";
 const ZIP64_LOCATOR_SIGNATURE: &[u8; 4] = b"PK\x06\x07";
@@ -1541,10 +1544,7 @@ fn local_directory_entry(entry: &LocalArchiveReadEntry) -> LocalArchiveDirectory
         crc32: (!entry.is_directory).then_some(entry.crc32),
         modified_at: entry.modified_at,
         encrypted: entry.encrypted,
-        is_available: !entry.is_directory
-            && !entry.encrypted
-            && matches!(entry.compression_method, 0 | 8 | 12)
-            && entry.uncompressed_size <= ARCHIVE_INLINE_PREVIEW_MAX_BYTES,
+        is_available: !entry.is_directory && !entry.encrypted && matches!(entry.compression_method, 0 | 8 | 12),
     }
 }
 
@@ -2450,6 +2450,11 @@ pub fn create_temporary_local_zip_selection(
                     LocalArchiveReadError::Io(io_error) => LocalArchiveError::Io(io_error),
                     error => LocalArchiveError::ArchiveRead(error),
                 })?;
+            let modified_at = entry
+                .modified_at
+                .map(SystemTime::from)
+                .unwrap_or(SystemTime::UNIX_EPOCH + Duration::from_secs(ZIP_DOS_EPOCH_SECONDS));
+            output.set_times(fs::FileTimes::new().set_modified(modified_at))?;
             path
         };
         let metadata = fs::metadata(&source_path)?;
@@ -2458,7 +2463,13 @@ pub fn create_temporary_local_zip_selection(
             archive_path,
             is_directory: entry.is_directory,
             source_size: if entry.is_directory { 0 } else { entry.uncompressed_size },
-            source_modified_at: normalized_source_modified_at(&metadata),
+            source_modified_at: if entry.is_directory {
+                entry
+                    .modified_at
+                    .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Secs, true))
+            } else {
+                normalized_source_modified_at(&metadata)
+            },
         });
     }
     for directory in projection.directories.iter().filter(|path| is_selected(path)) {
@@ -2474,7 +2485,12 @@ pub fn create_temporary_local_zip_selection(
             archive_path,
             is_directory: true,
             source_size: 0,
-            source_modified_at: normalized_source_modified_at(&fs::metadata(staging.path())?),
+            source_modified_at: projection
+                .entries
+                .iter()
+                .find(|entry| entry.path.starts_with(&format!("{directory}/")))
+                .and_then(|entry| entry.modified_at)
+                .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Secs, true)),
         });
     }
     entries.sort_by(|left, right| left.archive_path.cmp(&right.archive_path));
@@ -2528,7 +2544,10 @@ pub fn write_local_archive_stream_with_execution_plan<W: Write>(
                 return Err(LocalArchiveError::Cancelled);
             }
             if entry.is_directory {
-                writer.add_directory(normalized_archive_path(&manifest_entry.archive_path, true)?, directory_options())?;
+                writer.add_directory(
+                    normalized_archive_path(&manifest_entry.archive_path, true)?,
+                    source_timestamp_options(directory_options(), manifest_entry.source_modified_at.as_deref())?,
+                )?;
                 state.record_expected(&manifest_entry.archive_path)?;
                 on_progress(state.progress()?);
                 continue;
@@ -2541,7 +2560,10 @@ pub fn write_local_archive_stream_with_execution_plan<W: Write>(
             }
             writer.start_file(
                 normalized_archive_path(&manifest_entry.archive_path, false)?,
-                regular_file_options(&buffer[..probe_size])?,
+                source_timestamp_options(
+                    regular_file_options(&buffer[..probe_size])?,
+                    manifest_entry.source_modified_at.as_deref(),
+                )?,
             )?;
             writer.write_all(&buffer[..probe_size])?;
             let mut source_bytes = probe_size as u64;
@@ -2584,6 +2606,29 @@ pub fn write_local_archive_stream_with_execution_plan<W: Write>(
 
 fn directory_options() -> SimpleFileOptions {
     SimpleFileOptions::default().compression_method(CompressionMethod::Stored)
+}
+
+/// Encode UTC clock fields, not host-local time, in the timezone-free DOS timestamp.
+fn source_timestamp_options(options: SimpleFileOptions, modified_at: Option<&str>) -> Result<SimpleFileOptions, LocalArchiveError> {
+    let Some(modified_at) = modified_at else {
+        return Ok(options);
+    };
+    let timestamp = DateTime::parse_from_rfc3339(modified_at)
+        .map_err(|_| LocalArchiveError::InvalidCreationOutcome)?
+        .with_timezone(&Utc);
+    if timestamp.year() < ZIP_MIN_YEAR {
+        return Ok(options);
+    }
+    let timestamp = zip::DateTime::from_date_and_time(
+        timestamp.year().min(ZIP_MAX_YEAR) as u16,
+        timestamp.month() as u8,
+        timestamp.day() as u8,
+        timestamp.hour() as u8,
+        timestamp.minute() as u8,
+        timestamp.second() as u8,
+    )
+    .map_err(|_| LocalArchiveError::InvalidCreationOutcome)?;
+    Ok(options.last_modified_time(timestamp))
 }
 
 fn regular_file_options(probe: &[u8]) -> Result<SimpleFileOptions, LocalArchiveError> {
@@ -2670,7 +2715,7 @@ pub fn create_local_archive_relay_writer(
 }
 
 impl LocalArchiveRelayWriter {
-    fn next_manifest_entry(&self, archive_path: &str, is_directory: bool) -> Result<(String, u64), LocalArchiveError> {
+    fn next_manifest_entry(&self, archive_path: &str, is_directory: bool) -> Result<ArchiveCreationManifestMember, LocalArchiveError> {
         let normalized_path = normalized_archive_path(archive_path, is_directory)?
             .trim_end_matches('/')
             .to_string();
@@ -2680,18 +2725,20 @@ impl LocalArchiveRelayWriter {
             .get(self.next_manifest_index)
             .filter(|entry| entry.archive_path == normalized_path && entry.is_directory == is_directory)
             .ok_or(LocalArchiveError::InvalidCreationOutcome)?;
-        Ok((entry.archive_path.clone(), entry.source_size))
+        Ok(entry.clone())
     }
 
     /// Add one explicit directory entry to the local ZIP.
     pub fn add_directory(mut self, archive_path: &str) -> Result<Self, LocalArchiveError> {
-        let (manifest_path, source_size) = self.next_manifest_entry(archive_path, true)?;
-        if source_size != 0 {
+        let entry = self.next_manifest_entry(archive_path, true)?;
+        if entry.source_size != 0 {
             return Err(LocalArchiveError::InvalidCreationOutcome);
         }
         (|| {
-            self.writer
-                .add_directory(normalized_archive_path(&manifest_path, true)?, directory_options())?;
+            self.writer.add_directory(
+                normalized_archive_path(&entry.archive_path, true)?,
+                source_timestamp_options(directory_options(), entry.source_modified_at.as_deref())?,
+            )?;
             self.next_manifest_index += 1;
             Ok(self)
         })()
@@ -2700,14 +2747,17 @@ impl LocalArchiveRelayWriter {
 
     /// Write one regular member from a bounded asynchronous-relay channel.
     pub fn write_file(mut self, archive_path: &str, mut chunks: Receiver<LocalArchiveRelayChunk>) -> Result<Self, LocalArchiveError> {
-        let (manifest_path, expected_size) = self.next_manifest_entry(archive_path, false)?;
+        let entry = self.next_manifest_entry(archive_path, false)?;
+        let expected_size = entry.source_size;
         (|| {
             let (probe, pending_chunk, source_completed) = receive_compression_probe(&mut chunks)?;
             if probe.len() as u64 > expected_size {
                 return Err(LocalArchiveError::InvalidCreationOutcome);
             }
-            self.writer
-                .start_file(normalized_archive_path(&manifest_path, false)?, regular_file_options(&probe)?)?;
+            self.writer.start_file(
+                normalized_archive_path(&entry.archive_path, false)?,
+                source_timestamp_options(regular_file_options(&probe)?, entry.source_modified_at.as_deref())?,
+            )?;
             self.writer.write_all(&probe)?;
             let mut written = probe.len() as u64;
             if let Some(chunk) = pending_chunk {
@@ -2937,8 +2987,9 @@ mod tests {
         let source = tempdir().unwrap();
         let archive_path = source.path().join("source.zip");
         let mut writer = zip::ZipWriter::new(fs::File::create(&archive_path).unwrap());
-        writer.add_directory("parent/empty/", directory_options()).unwrap();
-        writer.start_file("parent/folder/report.txt", SimpleFileOptions::default()).unwrap();
+        let options = source_timestamp_options(SimpleFileOptions::default(), Some("2026-01-15T11:52:02Z")).unwrap();
+        writer.add_directory("parent/empty/", options).unwrap();
+        writer.start_file("parent/folder/report.txt", options).unwrap();
         writer.write_all(b"report").unwrap();
         writer.finish().unwrap();
 
@@ -2953,6 +3004,10 @@ mod tests {
         assert_eq!(output.len(), 3);
         assert!(output.by_name("empty/").is_ok());
         assert!(output.by_name("folder/").is_ok());
+        for name in ["empty/", "folder/", "folder/report.txt"] {
+            let timestamp = output.by_name(name).unwrap().last_modified().unwrap();
+            assert_eq!(timestamp, zip::DateTime::from_date_and_time(2026, 1, 15, 11, 52, 2).unwrap());
+        }
         let mut content = String::new();
         output.by_name("folder/report.txt").unwrap().read_to_string(&mut content).unwrap();
         assert_eq!(content, "report");
@@ -3667,14 +3722,25 @@ mod tests {
     fn writes_relayed_members_to_a_readable_zip_without_staging() {
         let directory = tempdir().unwrap();
         let target = directory.path().join("archive.zip");
-        let manifest = ArchiveCreationManifest::from_entries(vec![ArchiveCreationManifestMember {
-            archive_path: "notes.txt".to_string(),
-            is_directory: false,
-            source_size: 5,
-            source_modified_at: None,
-        }])
+        let manifest = ArchiveCreationManifest::from_entries(vec![
+            ArchiveCreationManifestMember {
+                archive_path: "empty".to_string(),
+                is_directory: true,
+                source_size: 0,
+                source_modified_at: Some("2024-07-15T13:52:02+02:00".to_string()),
+            },
+            ArchiveCreationManifestMember {
+                archive_path: "notes.txt".to_string(),
+                is_directory: false,
+                source_size: 5,
+                source_modified_at: Some("2026-01-15T13:52:02+02:00".to_string()),
+            },
+        ])
         .unwrap();
-        let writer = create_local_archive_relay_writer(directory.path(), &target, manifest).unwrap();
+        let writer = create_local_archive_relay_writer(directory.path(), &target, manifest)
+            .unwrap()
+            .add_directory("empty")
+            .unwrap();
         let (sender, receiver) = tokio::sync::mpsc::channel(2);
         sender.try_send(LocalArchiveRelayChunk::Data(b"notes".to_vec())).unwrap();
         sender.try_send(LocalArchiveRelayChunk::Complete).unwrap();
@@ -3683,6 +3749,14 @@ mod tests {
         let mut notes = String::new();
         archive.by_name("notes.txt").unwrap().read_to_string(&mut notes).unwrap();
         assert_eq!(notes, "notes");
+        let mut reader = LocalArchiveReader::open_pinned(&target).unwrap();
+        let directory_entry = reader.next_entry().unwrap().unwrap();
+        assert_eq!(directory_entry.modified_at.unwrap().to_rfc3339(), "2024-07-15T11:52:02+00:00");
+        let entry = reader.next_entry().unwrap().unwrap();
+        assert_eq!(entry.modified_at.unwrap().to_rfc3339(), "2026-01-15T11:52:02+00:00");
+        let mut contents = Vec::new();
+        reader.stream_entry(entry, &mut contents).unwrap();
+        assert_eq!(contents, b"notes");
         assert_eq!(
             LocalArchiveReader::open_pinned(&target)
                 .unwrap()
@@ -3712,6 +3786,12 @@ mod tests {
         sender.try_send(LocalArchiveRelayChunk::Complete).unwrap();
 
         writer.write_file("notes.txt", receiver).unwrap().finish().unwrap();
+
+        let mut reader = LocalArchiveReader::open_pinned(&target).unwrap();
+        let entry = reader.next_entry().unwrap().unwrap();
+        let mut contents = Vec::new();
+        reader.stream_entry(entry, &mut contents).unwrap();
+        assert_eq!(contents, content);
 
         assert_eq!(
             LocalArchiveReader::open_pinned(&target)
@@ -3927,6 +4007,16 @@ mod tests {
         fs::create_dir_all(source_root.join("nested/empty")).unwrap();
         fs::write(source_root.join("alpha.txt"), b"alpha").unwrap();
         fs::write(source_root.join("nested/beta.txt"), b"beta").unwrap();
+        let modified_at = DateTime::parse_from_rfc3339("2026-07-15T11:52:02Z").unwrap().with_timezone(&Utc);
+        for path in [
+            source_root.clone(),
+            source_root.join("alpha.txt"),
+            source_root.join("nested"),
+            source_root.join("nested/beta.txt"),
+            source_root.join("nested/empty"),
+        ] {
+            set_test_path_modified_time(&path, modified_at.into());
+        }
         let target = directory.path().join("archive.zip");
         let entries = build_local_archive_manifest(&[source_root], &target).unwrap();
         create_local_archive(directory.path(), &target, &entries, || false).unwrap();
@@ -3949,6 +4039,7 @@ mod tests {
         assert_eq!(first_page.items.len(), 1);
         assert_eq!(first_page.items[0].file_type, FileType::Directory);
         assert_eq!(first_page.items[0].state, ArchiveEntryState::Readable);
+        assert_eq!(first_page.items[0].modified_at, Some(modified_at));
         assert!(first_page.next_cursor.is_none());
 
         let nested_page = ArchiveInspectionCoordinator::from_plan(
@@ -3968,6 +4059,7 @@ mod tests {
         .directory_listing()
         .unwrap();
         assert_eq!(nested_page.path, first_page.items[0].path);
+        assert!(nested_page.items.iter().all(|entry| entry.modified_at == Some(modified_at)));
         assert_eq!(
             nested_page
                 .items
@@ -3980,6 +4072,79 @@ mod tests {
             nested_page.items.iter().find(|item| item.name == "nested").map(|item| &item.state),
             Some(&ArchiveEntryState::Readable)
         );
+    }
+
+    #[test]
+    fn large_archive_members_remain_readable_above_the_preview_limit() {
+        let directory = tempdir().unwrap();
+        let target = directory.path().join("archive.zip");
+        let content = vec![b'x'; ARCHIVE_INLINE_PREVIEW_MAX_BYTES as usize + 1];
+        let mut archive = ZipWriter::new(FsFile::create(&target).unwrap());
+        archive
+            .start_file("large.pdf", regular_file_options(&content[..ARCHIVE_COPY_BUFFER_SIZE]).unwrap())
+            .unwrap();
+        archive.write_all(&content).unwrap();
+        archive.finish().unwrap();
+
+        let mut reader = LocalArchiveReader::open_pinned(&target).unwrap();
+        let page = reader.directory_page("", None, 10).unwrap();
+        let listing = ArchiveDirectoryListingPresentation::new("archive.zip".to_string(), 0, None, String::new(), None, 10).present(page);
+        assert_eq!(listing.items[0].state, ArchiveEntryState::Readable);
+
+        let mut reader = LocalArchiveReader::open_pinned(&target).unwrap();
+        let member = find_local_archive_member(&mut reader, "large.pdf").unwrap();
+        for size in [
+            ARCHIVE_INLINE_PREVIEW_MAX_BYTES - 1,
+            ARCHIVE_INLINE_PREVIEW_MAX_BYTES,
+            ARCHIVE_INLINE_PREVIEW_MAX_BYTES + 1,
+        ] {
+            let mut entry = member.clone();
+            entry.uncompressed_size = size;
+            for method in [0, 8, 12, 99] {
+                entry.compression_method = method;
+                let page = LocalArchiveDirectoryPage {
+                    path: String::new(),
+                    entries: vec![local_directory_entry(&entry)],
+                    next_cursor: None,
+                };
+                let listing =
+                    ArchiveDirectoryListingPresentation::new("archive.zip".to_string(), 0, None, String::new(), None, 10).present(page);
+                assert_eq!(
+                    listing.items[0].state,
+                    if method == 99 {
+                        ArchiveEntryState::Unavailable
+                    } else {
+                        ArchiveEntryState::Readable
+                    }
+                );
+            }
+            entry.encrypted = true;
+            let page = LocalArchiveDirectoryPage {
+                path: String::new(),
+                entries: vec![local_directory_entry(&entry)],
+                next_cursor: None,
+            };
+            let listing =
+                ArchiveDirectoryListingPresentation::new("archive.zip".to_string(), 0, None, String::new(), None, 10).present(page);
+            assert_eq!(listing.items[0].state, ArchiveEntryState::Blocked);
+        }
+        assert_eq!(
+            ArchiveMemberReadPresentation::new("large.pdf".to_string(), false)
+                .present(&member)
+                .unwrap()
+                .delivery,
+            ArchiveMemberReadDelivery::PreviewUnavailable
+        );
+        assert_eq!(
+            ArchiveMemberReadPresentation::new("large.pdf".to_string(), true)
+                .present(&member)
+                .unwrap()
+                .delivery,
+            ArchiveMemberReadDelivery::Stream
+        );
+        let mut output = Vec::new();
+        reader.stream_entry(member, &mut output).unwrap();
+        assert_eq!(output, content);
     }
 
     #[test]

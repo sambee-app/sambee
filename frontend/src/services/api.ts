@@ -77,6 +77,7 @@ import { snapshotRegisteredDrafts } from "./draftRecovery";
 import { logger } from "./logger";
 import { sanitizeReturnPath } from "./oidcAuth";
 import { setPasswordChangeRequired } from "./passwordChange";
+import { ARCHIVE_PREVIEW_SIZE_LIMIT_MESSAGE, PreviewUnavailableError } from "./previewPolicy";
 import { type ContentTransferResult, ExpiredEditLockError, type TargetResolutionPolicy } from "./storageContracts";
 
 export { ExpiredEditLockError } from "./storageContracts";
@@ -1113,6 +1114,9 @@ class ApiService {
       });
       return response.data;
     } catch (error) {
+      if (!options.download && axios.isAxiosError(error) && error.response?.status === 413) {
+        throw new PreviewUnavailableError(ARCHIVE_PREVIEW_SIZE_LIMIT_MESSAGE);
+      }
       if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
         try {
           const data = JSON.parse(await error.response.data.text());
