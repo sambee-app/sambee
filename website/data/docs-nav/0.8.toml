@@ -74,13 +74,6 @@ items = [
 ]
 
 [[sections.user-guide.items]]
-slug = "account-and-preferences"
-title = "Account and Preferences"
-
-[pages.user-guide.account-and-preferences]
-items = []
-
-[[sections.user-guide.items]]
 slug = "troubleshooting"
 title = "Troubleshooting"
 
