@@ -323,7 +323,10 @@ fn find_local_archive_member(reader: &mut LocalArchiveReader, member_path: &str)
     }
     let projection = reader.effective_projection()?;
     if let Some(entry) = projection.member_by_path.get(&normalized_path) {
-        if entry.encrypted || !matches!(entry.compression_method, 0 | 8 | 12) {
+        if entry.encrypted {
+            return Err(LocalArchiveReadError::EncryptedMember);
+        }
+        if !matches!(entry.compression_method, 0 | 8 | 12) {
             return Err(LocalArchiveReadError::UnavailableMember);
         }
         return Ok(entry.clone());
@@ -817,6 +820,8 @@ pub struct LocalArchiveExtractionResult {
     pub members_processed: u64,
     pub members_completed: u64,
     pub members_skipped: u64,
+    pub encrypted_members_skipped: u64,
+    pub unsupported_compression_members_skipped: u64,
     pub members_failed: u64,
     pub files_extracted: u64,
     pub directories_created: u64,
@@ -1009,7 +1014,9 @@ pub enum LocalArchiveReadError {
     InvalidMemberPath,
     #[error("archive member was not found")]
     MemberNotFound,
-    #[error("archive member uses an unavailable codec or blocked feature")]
+    #[error("archive member is encrypted. Use an archive tool with the password to open it")]
+    EncryptedMember,
+    #[error("archive member uses unsupported compression. Use another archive tool to open it")]
     UnavailableMember,
     #[error("ZIP local header is invalid or does not match the central directory")]
     InvalidLocalHeader,
@@ -1394,7 +1401,10 @@ impl LocalArchiveReader {
     /// Validate a record through a duplicate of the original pinned descriptor.
     pub fn validate_entry(&self, entry: LocalArchiveReadEntry) -> Result<ValidatedLocalArchiveEntry, LocalArchiveReadError> {
         self.ensure_source_unchanged()?;
-        if entry.encrypted || !matches!(entry.compression_method, 0 | 8 | 12) {
+        if entry.encrypted {
+            return Err(LocalArchiveReadError::EncryptedMember);
+        }
+        if !matches!(entry.compression_method, 0 | 8 | 12) {
             return Err(LocalArchiveReadError::UnavailableMember);
         }
         let mut file = self.file.try_clone()?;

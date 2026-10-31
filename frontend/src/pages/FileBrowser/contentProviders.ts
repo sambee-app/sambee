@@ -124,6 +124,8 @@ export interface ArchiveExtractionSummary {
   totalMembers?: number;
   totalBytes?: number;
   filesSkipped: number;
+  encryptedMembersSkipped?: number;
+  unsupportedCompressionMembersSkipped?: number;
   filesReplaced: number;
   partialMembers: number;
 }

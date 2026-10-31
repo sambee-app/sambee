@@ -28,6 +28,10 @@ V2_EXTRACTION_COUNTER_FIELDS = (
     "extracted_bytes",
     "files_replaced",
 )
+V2_EXTRACTION_OPTIONAL_COUNTER_FIELDS = (
+    "encrypted_members_skipped",
+    "unsupported_compression_members_skipped",
+)
 V2_EXTRACTION_MAX_COUNTER = (1 << 63) - 1
 V2_CREATION_CHECKPOINT_FIELDS = frozenset({"version", "manifest", "member_outcomes", "decisions", "pending_decision", "delivery_ids"})
 V2_TIMESTAMP_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
@@ -126,14 +130,18 @@ def validate_v2_extraction_checkpoint(checkpoint: object) -> dict[str, object]:
     if checkpoint.get("version") != V2_CHECKPOINT_VERSION:
         raise _invalid_checkpoint("Archive V2 checkpoint version is invalid")
     counters = checkpoint.get("aggregate_counters")
-    if not isinstance(counters, dict) or frozenset(counters) != frozenset(V2_EXTRACTION_COUNTER_FIELDS):
+    required_counters = frozenset(V2_EXTRACTION_COUNTER_FIELDS)
+    allowed_counters = required_counters | frozenset(V2_EXTRACTION_OPTIONAL_COUNTER_FIELDS)
+    if not isinstance(counters, dict) or not required_counters <= frozenset(counters) <= allowed_counters:
         raise _invalid_checkpoint("Archive V2 checkpoint aggregate counters are invalid")
-    for name in V2_EXTRACTION_COUNTER_FIELDS:
+    for name in counters:
         value = counters[name]
         if type(value) is not int or value < 0 or value > V2_EXTRACTION_MAX_COUNTER:
             raise _invalid_checkpoint("Archive V2 checkpoint aggregate counters are invalid")
     if counters["members_processed"] != counters["members_completed"] + counters["members_skipped"] + counters["members_failed"]:
         raise _invalid_checkpoint("Archive V2 checkpoint aggregate counters are invalid")
+    if sum(counters.get(name, 0) for name in V2_EXTRACTION_OPTIONAL_COUNTER_FIELDS) > counters["members_skipped"]:
+        raise _invalid_checkpoint("Archive V2 checkpoint skipped member reason counters exceed the skipped total")
     return deepcopy(checkpoint)
 
 

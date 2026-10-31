@@ -1583,13 +1583,13 @@ class TestStreamArchiveMember:
             pytest.param(
                 "docs/readme.txt",
                 _archive_bytes(compression=zipfile.ZIP_LZMA),
-                "unavailable codec",
+                "unsupported compression",
                 id="unavailable-codec",
             ),
             pytest.param(
                 "docs/readme.txt",
                 _archive_bytes_with_encrypted_members(),
-                "blocked feature",
+                "encrypted",
                 id="encrypted-member",
             ),
         ],

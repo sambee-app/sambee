@@ -630,8 +630,10 @@ class ZipReader:
     async def validate_entry(self, entry: ZipEntry) -> ValidatedZipEntry:
         """Validate one selected readable entry without resolving its path again."""
 
-        if entry.encrypted or entry.compression_method not in _READABLE_METHODS:
-            raise ArchiveFormatError("Archive member uses an unavailable codec or blocked feature")
+        if entry.encrypted:
+            raise ArchiveFormatError("Archive member is encrypted. Use an archive tool with the password to open it")
+        if entry.compression_method not in _READABLE_METHODS:
+            raise ArchiveFormatError("Archive member uses unsupported compression. Use another archive tool to open it")
         return await self._validate_entry(entry)
 
     async def _validate_entry(self, entry: ZipEntry) -> ValidatedZipEntry:

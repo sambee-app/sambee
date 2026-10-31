@@ -3397,6 +3397,10 @@ struct LiveRemoteSourceAggregate {
     members_processed: u64,
     members_completed: u64,
     members_skipped: u64,
+    #[serde(default)]
+    encrypted_members_skipped: u64,
+    #[serde(default)]
+    unsupported_compression_members_skipped: u64,
     members_failed: u64,
     files_extracted: u64,
     directories_created: u64,
@@ -3446,6 +3450,8 @@ struct LiveLocalSourceExtractionSummary<'a> {
     members_processed: u64,
     members_completed: u64,
     members_skipped: u64,
+    encrypted_members_skipped: u64,
+    unsupported_compression_members_skipped: u64,
     members_failed: u64,
     files_extracted: u64,
     directories_created: u64,
@@ -3667,6 +3673,8 @@ impl ArchiveExtractionRelay {
             members_processed: aggregate.members_processed,
             members_completed: aggregate.members_completed,
             members_skipped: aggregate.members_skipped,
+            encrypted_members_skipped: aggregate.encrypted_members_skipped,
+            unsupported_compression_members_skipped: aggregate.unsupported_compression_members_skipped,
             members_failed: aggregate.members_failed,
             files_extracted: aggregate.files_extracted,
             directories_created: aggregate.directories_created,
@@ -4826,6 +4834,8 @@ pub async fn browse_get_v2_relay_extraction_status(
             "members_processed": aggregate.members_processed,
             "members_completed": aggregate.members_completed,
             "members_skipped": aggregate.members_skipped,
+            "encrypted_members_skipped": aggregate.encrypted_members_skipped,
+            "unsupported_compression_members_skipped": aggregate.unsupported_compression_members_skipped,
             "members_failed": aggregate.members_failed,
             "files_extracted": aggregate.files_extracted,
             "directories_created": aggregate.directories_created,
@@ -5185,6 +5195,8 @@ fn live_remote_source_response(status: LiveRemoteSourceStatus) -> ArchiveExtract
             members_processed: status.aggregate_counters.members_processed,
             members_completed: status.aggregate_counters.members_completed,
             members_skipped: status.aggregate_counters.members_skipped,
+            encrypted_members_skipped: status.aggregate_counters.encrypted_members_skipped,
+            unsupported_compression_members_skipped: status.aggregate_counters.unsupported_compression_members_skipped,
             members_failed: status.aggregate_counters.members_failed,
             files_extracted: status.aggregate_counters.files_extracted,
             directories_created: status.aggregate_counters.directories_created,
@@ -5203,6 +5215,8 @@ fn archive_extraction_response(
         members_processed: aggregate.members_processed,
         members_completed: aggregate.members_completed,
         members_skipped: aggregate.members_skipped,
+        encrypted_members_skipped: aggregate.encrypted_members_skipped,
+        unsupported_compression_members_skipped: aggregate.unsupported_compression_members_skipped,
         members_failed: aggregate.members_failed,
         files_extracted: aggregate.files_extracted,
         directories_created: aggregate.directories_created,
@@ -6418,6 +6432,8 @@ fn archive_execution_response(execution: ArchiveSessionStatus) -> ArchiveExecuti
                 members_processed: progress.members_processed,
                 members_completed: progress.members_completed,
                 members_skipped: progress.members_skipped,
+                encrypted_members_skipped: progress.encrypted_members_skipped,
+                unsupported_compression_members_skipped: progress.unsupported_compression_members_skipped,
                 members_failed: progress.members_failed,
                 files_extracted: progress.files_extracted,
                 directories_created: progress.directories_created,
@@ -8213,7 +8229,7 @@ mod tests {
         )
         .await
         .expect_err("unavailable archive member should be rejected");
-        assert!(matches!(unavailable_member, ApiError::BadRequest(message) if message.contains("unavailable codec")));
+        assert!(matches!(unavailable_member, ApiError::BadRequest(message) if message.contains("unsupported compression")));
         assert_eq!(inspection_resolver_call_count(), 6);
 
         let encrypted_target = directory.path().join("encrypted.zip");
@@ -8229,7 +8245,7 @@ mod tests {
         )
         .await
         .expect_err("encrypted archive member should be rejected");
-        assert!(matches!(encrypted_member, ApiError::BadRequest(message) if message.contains("blocked feature")));
+        assert!(matches!(encrypted_member, ApiError::BadRequest(message) if message.contains("encrypted")));
         assert_eq!(inspection_resolver_call_count(), 7);
 
         let large_source = directory.path().join("large.txt");
@@ -9657,6 +9673,8 @@ mod tests {
             members_processed: 5,
             members_completed: 2,
             members_skipped: 3,
+            encrypted_members_skipped: 1,
+            unsupported_compression_members_skipped: 2,
             members_failed: 0,
             files_extracted: 2,
             directories_created: 1,
@@ -9695,6 +9713,8 @@ mod tests {
                 "members_processed": 5,
                 "members_completed": 2,
                 "members_skipped": 3,
+                "encrypted_members_skipped": 1,
+                "unsupported_compression_members_skipped": 2,
                 "members_failed": 0,
                 "files_extracted": 2,
                 "directories_created": 1,
@@ -9717,6 +9737,8 @@ mod tests {
                 members_processed: 0,
                 members_completed: 0,
                 members_skipped: 0,
+                encrypted_members_skipped: 0,
+                unsupported_compression_members_skipped: 0,
                 members_failed: 0,
                 files_extracted: 0,
                 directories_created: 1,

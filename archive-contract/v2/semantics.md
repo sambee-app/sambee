@@ -49,6 +49,12 @@ An extraction terminal summary contains only the checked aggregate counters
 `members_processed = members_completed + members_skipped + members_failed`.
 It does not expose an archive-wide total-member count.
 
+The optional checked counters `encrypted_members_skipped` and
+`unsupported_compression_members_skipped` explain source-only skips. Missing
+counters mean zero. Their sum cannot exceed `members_skipped`. Encryption takes
+precedence when a member also has unsupported compression. Destination skips,
+such as collision decisions, do not increase these reason counters.
+
 ## Extraction Checkpoints And Decisions
 
 An extraction checkpoint has exactly `version` (integer `2`) and

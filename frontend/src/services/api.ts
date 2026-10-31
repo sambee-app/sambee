@@ -205,6 +205,8 @@ export interface LocalArchiveRelayExtractionStatus {
     members_processed: number;
     members_completed: number;
     members_skipped: number;
+    encrypted_members_skipped?: number;
+    unsupported_compression_members_skipped?: number;
     members_failed: number;
     files_extracted: number;
     directories_created: number;
@@ -245,6 +247,8 @@ export interface ArchiveRelayExtractionResponse {
   members_processed: number;
   members_completed: number;
   members_skipped: number;
+  encrypted_members_skipped?: number;
+  unsupported_compression_members_skipped?: number;
   members_failed: number;
   files_extracted: number;
   directories_created: number;
