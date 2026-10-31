@@ -7,13 +7,54 @@ Use this page as the canonical copy style reference for published docs.
 ## Language and Writing Style
 
 - Clarity and readability are paramount.
-- Use simple but correct language.
+- Use simple but correct language that sounds natural.
 - Don't be nitpicky or wordy.
 - Use contracted instead of expanded forms, e.g. `we're` instead of `we are`.
 - Explain (as appropriate) the following:
   - why things are the way they are
   - how to use things
   - when to use things
+
+### Words to Avoid
+
+The following words have a weird or unnatural sound and are to be avoided:
+
+- outcome
+
+## User Guide: Value Without Unnecessary Detail
+
+The user guide must show what Sambee helps users do, then explain only what they need to complete those tasks. It is not a tutorial on familiar browser, file manager, or editor controls.
+
+### Content Test
+
+Keep a passage only if it does at least one of the following:
+
+- Explains a concrete benefit or defines a relevant Sambee concept.
+- Explains a non-obvious Sambee action or behavior.
+- States a limit or requirement that affects the task.
+- Gives an actionable recovery step.
+
+Otherwise, remove it. Moving unnecessary detail to Reference does not make it useful. Administrator policy and implementation details belong in the appropriate guide, not in user task instructions.
+
+### Detail and Page Boundaries
+
+- Do not explain obvious actions such as opening a website, scrolling, typing, or using a clearly labeled standard button. Explain a control only when its behavior differs from what users expect.
+- Prefer a short explanation to a numbered procedure when the interface makes the sequence clear. Use steps for non-obvious workflows where order matters.
+- Keep small related topics together under clear headings. Create a separate page only when the topic has enough distinct user value or non-obvious behavior to need one.
+- Link to existing procedures and in-app help instead of repeating control lists or shortcut tables. Mention a shortcut when it helps with the specific task.
+- Keep important limits and data-safety warnings beside the relevant action. Explain each warning once and link to shared recovery guidance where needed.
+
+For example, explain that selecting a file differs from opening it, that desktop edits require an explicit upload, and that a cancelled transfer can leave partial results. Do not describe standard zoom, scrolling, or text entry.
+
+### Marketing Language
+
+Use confident, benefit-led marketing language on the definition and benefits pages. Make clear promises about what Sambee helps users do, and keep useful comparisons that give readers a familiar product category.
+
+State task-critical requirements where they help the reader, without weakening every benefit with defensive wording. Keep promises grounded in supported capabilities.
+
+### Author and AI Review
+
+Apply the content test before adding or expanding user guide content. Before completing a change, remove obvious instructions, duplicate explanations, unnecessary technical detail, and pages that should be short subsections. Preserve confident benefit statements and useful comparisons on the definition and benefits pages. Verify that important limits and recovery actions remain clear. Brevity must not remove information needed to avoid data loss or complete a task safely.
 
 ## Lists
 

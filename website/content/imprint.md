@@ -1,6 +1,5 @@
 +++
 title = "Imprint"
-description = "Legal notice information for this site."
 layout = "standalone"
 eyebrow = "Legal"
 +++

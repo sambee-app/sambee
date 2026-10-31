@@ -785,6 +785,7 @@ describe("Browser Component - Interactions", () => {
 
     it("does not show file-list feedback while mobile menus are open", async () => {
       const originalMatchMedia = window.matchMedia;
+      vi.useFakeTimers();
       window.matchMedia = vi.fn().mockImplementation((query: string) => ({
         matches: /max-width/.test(query),
         media: query,
@@ -797,25 +798,28 @@ describe("Browser Component - Interactions", () => {
       }));
 
       try {
-        const user = userEvent.setup();
         await renderBrowserAndFlush("/browse/smb/test-server-1");
 
-        await user.click(await screen.findByRole("button", { name: "Open menu" }));
-        await screen.findByRole("button", { name: "Open settings" });
+        fireEvent.click(screen.getByRole("button", { name: "Open menu" }));
+        await act(() => vi.runOnlyPendingTimersAsync());
+        expect(screen.getByRole("button", { name: "Open settings" })).toBeInTheDocument();
 
         const drawerEvent = createEvent.keyDown(document, { key: "F5" });
         fireEvent(document, drawerEvent);
         expect(drawerEvent.defaultPrevented).toBe(false);
         expect(screen.queryByText("Copy requires dual-pane mode.")).not.toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: "Open settings" }));
-        await screen.findByRole("button", { name: "Go back" });
+        fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
+        await act(() => vi.runOnlyPendingTimersAsync());
+        expect(screen.getByRole("button", { name: "Go back" })).toBeInTheDocument();
 
         const settingsEvent = createEvent.keyDown(document, { key: "F5" });
         fireEvent(document, settingsEvent);
         expect(settingsEvent.defaultPrevented).toBe(false);
         expect(screen.queryByText("Copy requires dual-pane mode.")).not.toBeInTheDocument();
       } finally {
+        cleanup();
+        vi.useRealTimers();
         window.matchMedia = originalMatchMedia;
       }
     });

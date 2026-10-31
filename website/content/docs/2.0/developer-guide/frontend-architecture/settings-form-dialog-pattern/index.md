@@ -139,7 +139,7 @@ Use `SettingsPasswordVisibilityToggle` as the end adornment for password fields.
 
 Use `DialogReadOnlyField` for a name, path, connection, or other value that a dialog shows without allowing the user to change it. Give the field a specific label such as `Destination directory` or `File to delete`; do not recreate a styled text pill. Keep the normal MUI field height when its label is inside the outlined field. Use a subdued read-only surface while keeping long values selectable.
 
-Write the dialog description as the outcome of the selected action. State what will be copied, moved, replaced, skipped, or deleted and name the source item for a single-item operation, then present the affected value in a labelled read-only field. Keep notices tied to their current condition: a no-op destination notice must disappear as soon as a renamed target makes the operation valid, without changing the dialog's layout.
+Describe what the selected action will do. State what will be copied, moved, replaced, skipped, or deleted and name the source item for a single-item operation, then present the affected value in a labelled read-only field. Keep notices tied to their current condition: a no-op destination notice must disappear as soon as a renamed target makes the operation valid, without changing the dialog's layout.
 
 ## Operation Context
 
@@ -153,7 +153,7 @@ Use `DialogIdentifierDisplay` inside this context rather than truncating an iden
 
 File-name shortening preserves the extension where possible. Path shortening preserves useful leading and trailing segments. Both use grapheme-aware boundaries, so combining characters and emoji sequences are never split. Breadcrumb segment labels must use `truncateTextByGrapheme` from `utils/pathDisplay` for the same reason.
 
-Use outcome-only translation strings for the dialog description. Do not interpolate filenames or paths into `Trans` text. For example, a single-item copy describes copying the item to the destination directory, then context rows identify `Source item` and `Destination directory`.
+Use translation strings that describe only what the action will do. Do not interpolate filenames or paths into `Trans` text. For example, a single-item copy describes copying the item to the destination directory, then context rows identify `Source item` and `Destination directory`.
 
 ## Feedback And Persistence
 

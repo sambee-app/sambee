@@ -137,6 +137,9 @@ class DocsReportTests(unittest.TestCase):
 
         editor = DOCS_EDITOR.DocsEditor(root)
         current_version = self.current_version(root)
+        book_dir = editor.book_root(current_version, "user-guide")
+        book_dir.joinpath("_index.md").unlink(missing_ok=True)
+        book_dir.joinpath("_inherit.md").write_text("", encoding="utf-8")
         source_version = DOCS_REPORT.resolve_branch_source_version(
             editor,
             current_version,

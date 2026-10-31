@@ -188,7 +188,7 @@ Do not treat preprocessable formats as ordinary file-type additions. They change
 
 Conversion failures are user-visible API behavior, not internal-only exceptions.
 
-Typical outcomes include:
+Common errors include:
 
 - not implemented when the current environment lacks support for a format family
 - unprocessable-content style failures when the file is corrupt or cannot be decoded
