@@ -42,4 +42,4 @@ If a file type is not supported by Sambee's viewers, or if you need the original
 - Download the file.
 - Open it in a desktop app through Companion.
 
-For the broader workflow explanation, see [View Images & Read Documents](../../viewing-and-editing-files/view-images-and-read-documents/).
+For the broader workflow explanation, see [View Images & Read Documents](../../view-and-edit-files/view-images-and-read-documents/).

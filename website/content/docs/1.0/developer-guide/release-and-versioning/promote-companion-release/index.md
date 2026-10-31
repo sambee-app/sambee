@@ -75,7 +75,7 @@ Companion updater feeds and Sambee download metadata are separate surfaces.
 
 - Promote a Companion channel when installed desktop apps should see the release through self-update.
 - Promote Sambee metadata when the product UI should offer the release as a direct download.
-- Select both when you want both outcomes from the same published release.
+- Select both to make the same release available through self-update and direct download.
 
 Use [Companion Channels, Feeds, And Downloads](../companion-channels-feeds-and-downloads/) when you need the underlying model.
 

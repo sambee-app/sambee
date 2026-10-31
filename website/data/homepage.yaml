@@ -196,9 +196,9 @@ features:
 preview_support:
   enabled: true
   eyebrow: Broad file type support
-  title: Viewers
+  title: Viewers & Editors
   body: >-
-    Sambee supports in-browser previewing for a broad range of file types,
+    Sambee supports in-browser previewing and/or editing for a broad range of file types,
     including images, PDFs, and Markdown.
   supporting_link:
     id: preview-support
@@ -303,7 +303,7 @@ companion:
     target:
       type: docs
       book: user-guide
-      section: companion-app
+      section: use-local-drives-and-desktop-apps
       page: install-and-pair-the-companion-app
 
 deployment:

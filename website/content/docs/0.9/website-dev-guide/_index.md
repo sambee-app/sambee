@@ -2,8 +2,6 @@
 title = "Website Dev Guide"
 +++
 
-Use this guide to edit and publish website and docs content, understand how the Hugo site and versioned docs system work, use the docs editor safely, and change shared website systems such as media and typography.
-
 ## Start Here if You Want To
 
 - Add or revise published website or docs content.

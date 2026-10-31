@@ -10,11 +10,11 @@ For each OIDC browser session, Sambee stores the provider refresh token encrypte
 
 Sambee renews the API token in the background until the configured interactive sign-in interval ends. Refreshing does not extend the original verified sign-in time.
 
-An interactive sign-in is required when the interval ends, the identity provider rejects or revokes the refresh token, a refresh result is uncertain, an access policy changes, or the browser session is revoked. Sambee returns the user to the same safe route after sign-in. See [Recover Unsaved In-Browser Edits](../../../user-guide/viewing-and-editing-files/recover-unsaved-edits/) for the editing behavior during required sign-in.
+An interactive sign-in is required when the interval ends, the identity provider rejects or revokes the refresh token, a refresh result is uncertain, an access policy changes, or the browser session is revoked. Sambee returns the user to the same safe route after sign-in. See [Recover Unsaved In-Browser Edits](../../../user-guide/view-and-edit-files/recover-unsaved-edits/) for the editing behavior during required sign-in.
 
 ## Manage OIDC Sessions
 
-Users can open **Settings** > **Account** to review their current session and other active OIDC browser sessions. The page separates **This browser** from **Other sessions**. For a local password sign-in, the current entry is not a persistent server-side browser session. For an OIDC sign-in, Sambee shows when each session was created and last active. Newly created OIDC sessions can also show a coarse browser and operating-system label without exposing a device fingerprint or token details. Existing sessions might not have a label. See [Manage Your Account](../../../user-guide/getting-started/manage-your-account/) for the user-facing controls.
+Users can open **Settings** > **Account** to review their current session and other active OIDC browser sessions. The page separates **This browser** from **Other sessions**. For a local password sign-in, the current entry is not a persistent server-side browser session. For an OIDC sign-in, Sambee shows when each session was created and last active. Newly created OIDC sessions can also show a coarse browser and operating-system label without exposing a device fingerprint or token details. Existing sessions might not have a label. See [Manage Your Account](../../../user-guide/account-and-preferences/manage-your-account/) for the user-facing controls.
 
 - Select **Sign out** next to the current browser to revoke its session and return to the sign-in page.
 - Select **Revoke** to end another browser session.

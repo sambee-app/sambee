@@ -18,16 +18,6 @@ Plain-text formats such as `.txt` and `.log` open in the text editor without hig
 
 For images, PDFs, archives, and other supported formats, see [Supported File Formats](../supported-file-formats/).
 
-## Editing and Read-Only Access
-
-Text files open directly in the editor. Sambee checks write access, reserves an edit lock, and reloads the saved file before enabling changes. Opening a file doesn't save anything; use the save icon or <kbd>Ctrl</kbd> + <kbd>S</kbd> to save.
-
-If another tab or user holds the lock, or the connection temporarily fails, the file stays readable. A toast explains why editing isn't available and stays visible for 15 seconds. For files locked by another editor, the message includes the same retry icon used in the toolbar. The **Read only** badge and **Retry editing** toolbar icon remain available after the toast disappears. Click that icon or press <kbd>Ctrl</kbd> + <kbd>R</kbd> to retry editing; the shortcut is available only when editing can be retried and no retry is already pending. Detailed retry errors stay visible until dismissed or resolved. Files on read-only connections, files without write permission, archive members, and files above the configured editing limit stay read-only. Find, selection, copying, wrapping, and download remain available; Save and Replace require write access.
-
-If the edit lock is lost, Sambee stops changes and retains your draft. On retry, if the saved file has changed, choose **Use saved file** to discard your draft or **Keep my draft** to retain it against the new saved version. Keeping the draft doesn't write it; review it before saving.
-
-Click Close or press <kbd>Esc</kbd> to return directly to the file list. Escape closes an open search panel first. If you have unsaved changes, Close, Back, and navigation offer **Save**, **Discard**, or **Cancel**. A failed Save keeps the editor open with your draft. Markdown's rendered viewer and separate edit mode are unchanged.
-
 ## Markdown Code Block Languages
 
 Put a language label immediately after the opening three backticks. For example, `py` selects Python:
@@ -195,5 +185,6 @@ Use the file column to look up a file and the Markdown column to choose a code b
 
 ## Related Guides
 
-- [Edit Markdown](../../viewing-and-editing-files/edit-markdown/)
+- [View and Edit Text Files](../../view-and-edit-files/view-and-edit-text-files/)
+- [Edit Markdown](../../view-and-edit-files/edit-markdown/)
 - [Supported File Formats](../supported-file-formats/)

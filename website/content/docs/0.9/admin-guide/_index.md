@@ -2,8 +2,6 @@
 title = "Admin Guide"
 +++
 
-Use this guide to plan and deploy a Sambee service, configure storage, networking, and persistence, maintain it, and recover the deployment.
-
 ## Start Here if You Want To
 
 - Understand what Sambee needs in order to run.

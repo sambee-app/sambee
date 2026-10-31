@@ -22,7 +22,9 @@ Tooling:
 
 Style:
 
-- Follow the docs style guide for writing and formatting guidelines: `website/content/docs/<version>/website-dev-guide/authoring-and-tooling/docs-style-guide/index.md`.
+- Before editing, read the resolved Docs Style Guide for the target version. Its base source is `website/content/docs/0.7/website-dev-guide/authoring-and-tooling/docs-style-guide/index.md`; later versions can inherit it or override it.
+- For user guide changes, apply its **User Guide: Value Without Unnecessary Detail** rules and content test. Do not turn obvious interface actions into tutorials or retain unnecessary technical detail in Reference.
+- Before completing user guide changes, perform the style guide's **Author and AI Review** check. Keep task-critical limits and recovery actions.
 
 Docs update process:
 

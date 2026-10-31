@@ -1,4 +1,4 @@
-description = "Browser-based file viewer and manager for SMB shares and local drives, with fast previews and Markdown editing on desktop and mobile."
+description = "Browser-based workspace for files on SMB shares and local drives. Access your data from PCs, phones, and tablets. View images, read PDFs, and edit Markdown right in your browser. On the desktop, open any file in the natively installed apps you already use."
 theme_default = "system"
 theme_switcher = true
 

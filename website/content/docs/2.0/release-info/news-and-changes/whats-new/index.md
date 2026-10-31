@@ -37,7 +37,7 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 
 - Uploads and copy or move operations no longer interfere with each other's conflict decisions.
 - Moving files between SMB connections no longer leaves the original in place when it should have been deleted.
-- SMB moves now protect the source from concurrent edits and renames, preventing deletion of changes that weren't copied.
+- SMB moves now protect the source from concurrent edits and renames, preventing deletion of changes that weren't copied yet.
 - Overwriting an existing SMB file now replaces it atomically instead of failing.
 - Cancelling a move after copying finishes, but before source deletion starts, now correctly reports that both copies were kept.
 - Transfer results now show when a file was copied or replaced, even if removing or checking the original fails.
@@ -78,9 +78,9 @@ Many identity providers require the `offline_access` scope to issue refresh toke
 
 Sambee uses a provider refresh token when one is returned, whether or not `offline_access` was requested. If no refresh token is returned, Sambee can continue issuing short-lived API tokens from the browser session for up to 8 hours by default (configurable from 1 to 24 hours). After Sambee's user session expires, the user must sign in through the identity provider again.
 
-### Other Changes
+### Re-Login Broadcast to Other Open Tabs
 
-- When an OIDC login is necessary, all Sambee browser tabs switch to the login page. After a successful login in one tab, that tab now broadcasts a login complete hint. When other tabs on the login page receive that hint, they return to their respectice previous URLs.
+When an OIDC login is necessary, all Sambee browser tabs switch to the login page. After a successful login in one tab, that tab now broadcasts a login complete hint. When other tabs on the login page receive that hint, they return to their respectice previous URLs.
 
 ### Bugfixes
 
@@ -92,19 +92,19 @@ Sambee uses a provider refresh token when one is returned, whether or not `offli
 
 Sambee's text viewer and text editor are now combined into a single component. Text files now open directly in the editor. If write mode cannot be enabled, text editor operates in read-only mode and a notification is shown.
 
-As part of this change, text editor, Markdown viewer and Markdown editor got a consistent toast-based notification system.
+As part of this change, Sambee got a consistent toast-based notification system for info, warning, and error messages.
 
 ### Syntax Highlighting and Rendering Performance Optimization
 
 Sambee now uses a consolidated syntax highlighting system throughout all text and Markdown rendering surfaces: text editor, Markdown editor, fenced code blocks in Markdown viewer and Markdown editor. The syntax highlighting system is integrated with the theming system; highlight colors are now part of each theme and can be edited in the new theme editor.
 
-Syntax highlighting is available for a wide range of languages and file types ((docs)[../../../user-guide/reference/text-file-support-and-syntax-highlighting/]).
+Syntax highlighting is available for a wide range of languages and file types ([docs](../../../user-guide/reference/text-file-support-and-syntax-highlighting/)).
 
 Text editor and Markdown editor performance was significantly boosted, especially for long documents. This was achieved through virtualization and viewport rendering.
 
 ## Markdown Viewer
 
-### Print / Save as PDF
+### Print and Save as PDF
 
 When you print or save as PDF from the browser, the Markdown viewer reformats the full rendered document to fit the page, spanning multiple pages as needed. A new print icon in the top bar makes the new functionality discoverable.
 
@@ -165,6 +165,8 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 ## Under the Hood
 
 ### Security Review
+
+A security review resulted in the following improvements:
 
 - OIDC login now binds the callback and login grant to the browser that started the login flow, preventing a grant from being redeemed in another browser.
 - Only admins can list and download uploaded mobile logs; signed-in users can still upload logs for troubleshooting.
