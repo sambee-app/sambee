@@ -3,6 +3,7 @@
 import json
 import sys
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
@@ -104,8 +105,9 @@ def test_active_runs_protect_their_refs(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("missing_cache", [False, True])
 def test_dry_run_and_apply_delete_only_eligible_ids(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], apply: bool
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path, apply: bool, missing_cache: bool
 ) -> None:
     entries = [
         cache(1, cleanup.MAIN_REF, RUST_OLD),
@@ -116,6 +118,8 @@ def test_dry_run_and_apply_delete_only_eligible_ids(
 
     def request(path: str, _token: str, method: str = "GET") -> object:
         calls.append((method, path))
+        if missing_cache and method == "DELETE" and path.endswith("/caches/1"):
+            raise HTTPError(path, 404, "Not Found", None, None)
         if path.endswith("/pulls/43"):
             return {"state": "closed"}
         return None
@@ -126,7 +130,8 @@ def test_dry_run_and_apply_delete_only_eligible_ids(
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
     monkeypatch.setenv("GITHUB_REPOSITORY", "example/project")
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
-    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    summary_path = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
     monkeypatch.setattr(sys, "argv", ["cleanup_actions_caches.py", *(["--apply"] if apply else [])])
 
     assert cleanup.main() == 0
@@ -135,7 +140,50 @@ def test_dry_run_and_apply_delete_only_eligible_ids(
     )
     output = capsys.readouterr().out.splitlines()
     assert json.loads(output[1])["reason"] == "protected: current cache"
-    assert ("200 bytes deleted" in output[-1]) == apply
+    expected_deleted_bytes = (100 if missing_cache else 200) if apply else 0
+    assert f"{expected_deleted_bytes} bytes deleted" in output[-1]
+    if apply and missing_cache:
+        assert json.loads(output[0])["reason"] == "absent: cache already removed"
+        assert "100 bytes already absent" in output[-1]
+        assert "200 bytes eligible" in output[-1]
+        summary = summary_path.read_text()
+        assert "absent: cache already removed" in summary
+        assert "delete: superseded cache" not in summary
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 500])
+def test_cache_deletion_errors_other_than_not_found_still_fail(monkeypatch: pytest.MonkeyPatch, status: int) -> None:
+    error = HTTPError("https://api.github.com/repos/example/project/actions/caches/1", status, "Failure", None, None)
+
+    def request(*_args: object, **_kwargs: object) -> object:
+        raise error
+
+    monkeypatch.setattr(cleanup, "api_request", request)
+    monkeypatch.setattr(cleanup, "list_pages", lambda *_args: [cache(1, cleanup.MAIN_REF, RUST_OLD), cache(2, cleanup.MAIN_REF, RUST_NEW)])
+    monkeypatch.setattr(cleanup, "active_build_refs", lambda *_args: (set(), False))
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "example/project")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    monkeypatch.setattr(sys, "argv", ["cleanup_actions_caches.py", "--apply"])
+
+    with pytest.raises(HTTPError) as raised:
+        cleanup.main()
+    assert raised.value is error
+
+
+def test_api_reads_do_not_ignore_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = HTTPError("https://api.github.com/repos/example/project/pulls/43", 404, "Not Found", None, None)
+
+    def open_url(_request: object) -> object:
+        raise error
+
+    monkeypatch.setattr(cleanup.urllib.request, "urlopen", open_url)
+    try:
+        with pytest.raises(HTTPError) as raised:
+            cleanup.api_request("/repos/example/project/pulls/43", "test-token")
+        assert raised.value is error
+    finally:
+        error.close()
 
 
 @pytest.mark.parametrize(
@@ -146,21 +194,31 @@ def test_dry_run_and_apply_delete_only_eligible_ids(
         (cleanup.CRITICAL_BYTES, "Critical: active caches still exceed 9 GiB"),
     ],
 )
+@pytest.mark.parametrize("missing_cache", [False, True])
 def test_storage_thresholds_emit_annotations(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     remaining_bytes: int,
     expected_message: str | None,
+    missing_cache: bool,
 ) -> None:
     entry = cache(1, cleanup.MAIN_REF, RUST_NEW)
     entry["size_in_bytes"] = remaining_bytes
-    monkeypatch.setattr(cleanup, "list_pages", lambda *_args: [entry])
+    entries = [entry]
+    if missing_cache:
+        entries.append(cache(0, cleanup.MAIN_REF, RUST_OLD))
+
+    def request(*_args: object, **_kwargs: object) -> object:
+        raise HTTPError("https://api.github.com/repos/example/project/actions/caches/0", 404, "Not Found", None, None)
+
+    monkeypatch.setattr(cleanup, "api_request", request)
+    monkeypatch.setattr(cleanup, "list_pages", lambda *_args: entries)
     monkeypatch.setattr(cleanup, "active_build_refs", lambda *_args: (set(), False))
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
     monkeypatch.setenv("GITHUB_REPOSITORY", "example/project")
     monkeypatch.setenv("GITHUB_RUN_ID", "123")
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-    monkeypatch.setattr(sys, "argv", ["cleanup_actions_caches.py"])
+    monkeypatch.setattr(sys, "argv", ["cleanup_actions_caches.py", *(["--apply"] if missing_cache else [])])
 
     assert cleanup.main() == 0
     annotations = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::warning")]
