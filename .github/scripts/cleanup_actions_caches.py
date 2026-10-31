@@ -6,8 +6,10 @@ import argparse
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 from collections.abc import Iterable
+from http import HTTPStatus
 from typing import Any
 
 PR_REF = re.compile(r"^refs/pull/(\d+)/merge$")
@@ -20,6 +22,7 @@ ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
 CLEANUP_WORKFLOW = "Maintenance: Clean Up Actions Caches"
 WARN_BYTES = 8 * 1024**3
 CRITICAL_BYTES = 9 * 1024**3
+ABSENT_CACHE_REASON = "absent: cache already removed"
 
 
 def cache_family(key: str) -> str | None:
@@ -158,11 +161,22 @@ def main() -> int:
     )
     decisions = classify_caches(caches, open_prs, active_refs, unknown_pr)
     deleted_bytes = 0
+    absent_bytes = 0
     for entry in decisions:
         reason = entry["reason"]
         if args.apply and reason.startswith("delete:"):
-            api_request(f"{base}/actions/caches/{entry['id']}", token, method="DELETE")
-            deleted_bytes += entry["size_in_bytes"]
+            try:
+                api_request(
+                    f"{base}/actions/caches/{entry['id']}", token, method="DELETE"
+                )
+            except urllib.error.HTTPError as error:
+                error.close()
+                if error.code != HTTPStatus.NOT_FOUND:
+                    raise
+                entry["reason"] = ABSENT_CACHE_REASON
+                absent_bytes += entry["size_in_bytes"]
+            else:
+                deleted_bytes += entry["size_in_bytes"]
         print(
             json.dumps(
                 {
@@ -176,13 +190,18 @@ def main() -> int:
         entry["size_in_bytes"]
         for entry in decisions
         if entry["reason"].startswith("delete:")
+        or entry["reason"] == ABSENT_CACHE_REASON
     )
-    remaining_bytes = total_bytes - (deleted_bytes if args.apply else eligible_bytes)
+    remaining_bytes = total_bytes - (
+        deleted_bytes + absent_bytes if args.apply else eligible_bytes
+    )
     message = (
         f"Actions cache cleanup: {len(caches)} entries, "
         f"{total_bytes} bytes before cleanup, {eligible_bytes} bytes eligible, "
         f"{deleted_bytes} bytes deleted, mode={'apply' if args.apply else 'dry-run'}."
     )
+    if absent_bytes:
+        message += f" {absent_bytes} bytes already absent when deletion was attempted."
     if remaining_bytes >= CRITICAL_BYTES:
         message += (
             " Critical: active caches still exceed 9 GiB; review the cache limit."
@@ -198,7 +217,10 @@ def main() -> int:
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
             summary.write(f"## Actions cache cleanup\n\n{message}\n\n")
             for entry in decisions:
-                if entry["reason"].startswith("delete:"):
+                if (
+                    entry["reason"].startswith("delete:")
+                    or entry["reason"] == ABSENT_CACHE_REASON
+                ):
                     summary.write(
                         f"- {entry['reason']}: `{entry['ref']}` / `{entry['key']}` ({entry['size_in_bytes']} bytes)\n"
                     )
