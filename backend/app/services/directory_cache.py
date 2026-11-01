@@ -47,6 +47,8 @@ from smbprotocol.change_notify import (
     FileSystemWatcher,
 )
 from smbprotocol.connection import Connection
+from smbprotocol.exceptions import SMBOSError
+from smbprotocol.header import NtStatus
 from smbprotocol.open import (
     CreateDisposition,
     CreateOptions,
@@ -358,12 +360,18 @@ class DirectoryScanCoordinator:
             self.index.write_scan_children(generation_id, children)
 
     def record_unsafe_traversal(self, token: ScanReadToken, generation_id: int) -> None:
+        self._record_scan_issue(token, generation_id, self.index.record_unsafe_traversal)
+
+    def record_access_denied(self, token: ScanReadToken, generation_id: int) -> None:
+        self._record_scan_issue(token, generation_id, self.index.record_access_denied)
+
+    def _record_scan_issue(self, token: ScanReadToken, generation_id: int, record: Callable[[int], None]) -> None:
         with self.lock:
             if not self.is_current(token):
                 self.verification_required = True
                 raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
             self.apply_pending()
-            self.index.record_unsafe_traversal(generation_id)
+            record(generation_id)
 
     def finish_parent(self, token: ScanReadToken, generation_id: int) -> None:
         with self.lock:
@@ -1839,6 +1847,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self.coordinator.invalidate()
         self._scan_error = "Directory observations were lost. Background verification is required."
 
+    class _DescendantAccessDenied(PermissionError):
+        """A source operation failed, not a local index write."""
+
     def _source_call(self, parent: str, operation: Callable[[], WorkerResult]) -> WorkerResult:
         if not parent:
             self._root_reading.set()
@@ -1846,6 +1857,12 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             return operation()
         except Exception as error:
             if parent:
+                if isinstance(error, PermissionError) or (
+                    isinstance(error, SMBOSError) and error.ntstatus == NtStatus.STATUS_ACCESS_DENIED
+                ):
+                    raise self._DescendantAccessDenied(
+                        "Directory descendant access was denied. Restore source permissions and retry verification."
+                    ) from error
                 raise
             self._source_available.clear()
             self._source_probe_completed.set()
@@ -1890,7 +1907,13 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
 
     def _scan_parent(self, generation: int, parent: str) -> None:
         with self.coordinator.read(parent) as token:
-            self._scan_parent_read(generation, parent, token)
+            try:
+                self._scan_parent_read(generation, parent, token)
+            except self._DescendantAccessDenied:
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.") from None
+                self.coordinator.record_access_denied(token, generation)
+                self.coordinator.finish_parent(token, generation)
 
     def _scan_parent_read(self, generation: int, parent: str, token: ScanReadToken) -> None:
         smb_path = self._smb_base_path + ("\\" + parent.replace("/", "\\") if parent else "")

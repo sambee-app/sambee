@@ -1109,6 +1109,128 @@ def test_sqlite_source_reparse_candidate_preserves_accepted_rows(sqlite_cache, m
     assert sqlite_cache.coordinator.verification_required
 
 
+@pytest.mark.parametrize("denied_at_open", [False, True])
+@pytest.mark.parametrize("smb_denial", [False, True])
+def test_sqlite_source_denied_descendant_preserves_readable_siblings(sqlite_cache, monkeypatch, denied_at_open, smb_denial):
+    from smbclient._os import FileAttributes
+    from smbprotocol.exceptions import SMBOSError
+    from smbprotocol.header import NtStatus
+
+    reads = []
+
+    def deny():
+        if smb_denial:
+            raise SMBOSError(NtStatus.STATUS_ACCESS_DENIED, "fixture")
+        raise PermissionError("Injected source denial.")
+
+    def entries(path):
+        if path == sqlite_cache._smb_base_path:
+            for name in ("denied", "readable"):
+                yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+        elif path.endswith("\\denied"):
+            deny()
+        elif path.endswith("\\readable"):
+            yield SimpleNamespace(name="child", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+
+    def scan(path, **kwargs):
+        reads.append(path)
+        if denied_at_open and path.endswith("\\denied"):
+            deny()
+        return entries(path)
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", scan)
+    sqlite_cache._scan_disk_queue()
+    response = sqlite_cache.search_index("denied readable")
+    assert response.directory_count == response.total_matches == 3
+    assert response.coverage == "partial"
+    assert response.issue_count == 1
+    assert response.last_verified_at_ms is None
+    assert sqlite_cache.coordinator.verification_required
+    assert sqlite_cache.index.pending_scan_paths(1) == []
+    assert sqlite_cache._smb_base_path + "\\readable\\child" in reads
+    assert sqlite_cache.index._connection().execute("SELECT code, count FROM coverage_issues").fetchall() == [("access_denied", 1)]
+
+
+def test_sqlite_source_denied_candidate_preserves_accepted_rows_and_recovers(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    sqlite_cache.index.write_paths(["accepted", "denied/retained"])
+    assert sqlite_cache.index.finish_generation(1)
+    before = sqlite_cache.index.search("accepted denied")
+    denied = True
+
+    def scan(path, **kwargs):
+        if path == sqlite_cache._smb_base_path:
+            for name in ("denied", "readable"):
+                yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+        elif path.endswith("\\denied") and denied:
+            raise PermissionError("Injected source denial.")
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", scan)
+    sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.index.search("accepted denied") == before
+    assert sqlite_cache.coordinator.verification_required
+    denied = False
+    sqlite_cache._scan_disk_queue()
+    response = sqlite_cache.search_index("accepted denied readable")
+    assert response.directory_count == response.total_matches == 2
+    assert response.coverage == "complete"
+    assert response.issue_count == 0
+    assert response.last_verified_at_ms is not None
+    assert not sqlite_cache.coordinator.verification_required
+
+
+def test_sqlite_source_root_permission_denial_blocks_results(sqlite_cache, monkeypatch):
+    from app.services.directory_cache import DirectorySourceUnavailableError
+
+    sqlite_cache.index.write_paths(["accepted"])
+
+    def denied(*args, **kwargs):
+        raise PermissionError("Injected root denial.")
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", denied)
+    with pytest.raises(DirectorySourceUnavailableError):
+        sqlite_cache._scan_disk_queue()
+    with pytest.raises(DirectorySourceUnavailableError):
+        sqlite_cache.search_index("accepted")
+    assert sqlite_cache.index.search("accepted").total_matches == 1
+
+
+def test_sqlite_source_storage_permission_denial_is_not_a_source_issue(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    def scan(path, **kwargs):
+        yield SimpleNamespace(name="child", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+
+    def denied(*args, **kwargs):
+        raise PermissionError("Injected local storage denial.")
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", scan)
+    monkeypatch.setattr(sqlite_cache.index, "write_scan_children", denied)
+    with pytest.raises(PermissionError, match="local storage denial"):
+        sqlite_cache._scan_parent(1, "parent")
+    assert sqlite_cache.index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
+    assert sqlite_cache._source_available.is_set()
+
+
+def test_sqlite_source_late_permission_denial_cannot_finish_stale_parent(sqlite_cache, monkeypatch):
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    sqlite_cache.index.seed_scan(1)
+    sqlite_cache.index.write_scan_children(1, [("parent", True)])
+    sqlite_cache.index.finish_scan_parent(1, "")
+
+    def denied(*args, **kwargs):
+        sqlite_cache.coordinator.invalidate()
+        raise PermissionError("Injected late denial.")
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", denied)
+    with pytest.raises(ScanObservationInvalidated):
+        sqlite_cache._scan_parent(1, "parent")
+    assert sqlite_cache.index.pending_scan_paths(1) == ["parent"]
+    assert sqlite_cache.index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
+
+
 def test_sqlite_source_rejects_late_parent_observations(sqlite_cache, monkeypatch):
     from smbclient._os import FileAttributes
 
@@ -1383,12 +1505,13 @@ def test_failed_missing_subtree_pruning_rolls_back_rows_queue_and_revision(index
     assert index.search("gone keep") == before
 
 
-def test_unsafe_traversal_issues_preserve_uncertainty_and_block_acceptance(index):
+@pytest.mark.parametrize("code", ["unsafe_traversal", "access_denied"])
+def test_scan_issues_preserve_uncertainty_and_block_acceptance(index, code):
     index.write_paths(["regular"])
     index.mark_uncertain()
     before = index.status()
     for count in (2, 3):
-        index.record_unsafe_traversal(1)
+        getattr(index, f"record_{code}")(1)
         after = index.status()
         assert after.issue_count == count
         assert after.coverage == "uncertain"
@@ -1398,25 +1521,29 @@ def test_unsafe_traversal_issues_preserve_uncertainty_and_block_acceptance(index
         before = after
     assert not index.finish_generation(1)
     assert index.status().issue_count == 3
-    assert index._connection().execute("SELECT code, count FROM coverage_issues ORDER BY code").fetchall() == [
-        ("event_loss", 1),
-        ("unsafe_traversal", 2),
-    ]
+    assert index._connection().execute("SELECT code, count FROM coverage_issues ORDER BY code").fetchall() == sorted(
+        [
+            ("event_loss", 1),
+            (code, 2),
+        ]
+    )
 
 
-def test_failed_unsafe_traversal_issue_rolls_back_issue_coverage_and_revision(index):
+@pytest.mark.parametrize("code", ["unsafe_traversal", "access_denied"])
+def test_failed_scan_issue_rolls_back_issue_coverage_and_revision(index, code):
     before = index.status()
     index._connection().execute(
         "CREATE TRIGGER reject_issue_metadata BEFORE UPDATE ON generations BEGIN SELECT RAISE(ABORT, 'injected'); END"
     )
     with pytest.raises(sqlite3.IntegrityError):
-        index.record_unsafe_traversal(1)
+        getattr(index, f"record_{code}")(1)
     assert index.status() == before
     assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("state", ["accepted", "retired", "missing"])
-def test_unsafe_traversal_issue_rejects_inactive_generation(index, state):
+@pytest.mark.parametrize("code", ["unsafe_traversal", "access_denied"])
+def test_scan_issue_rejects_inactive_generation(index, state, code):
     assert index.finish_generation(1)
     if state == "accepted":
         generation = 1
@@ -1428,13 +1555,14 @@ def test_unsafe_traversal_issue_rejects_inactive_generation(index, state):
                 pass
     before = index.status()
     with pytest.raises(ValueError, match="inactive scan"):
-        index.record_unsafe_traversal(generation)
+        getattr(index, f"record_{code}")(generation)
     assert index.status() == before
     assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("invalidate", [False, True])
-def test_unsafe_traversal_issue_rejects_completed_and_invalidated_reads(index, invalidate):
+@pytest.mark.parametrize("code", ["unsafe_traversal", "access_denied"])
+def test_scan_issue_rejects_completed_and_invalidated_reads(index, invalidate, code):
     from app.services.directory_cache import DirectoryScanCoordinator, ScanObservationInvalidated
 
     coordinator = DirectoryScanCoordinator(index)
@@ -1445,7 +1573,7 @@ def test_unsafe_traversal_issue_rejects_completed_and_invalidated_reads(index, i
         coordinator.end_read(token)
     before = index.status()
     with pytest.raises(ScanObservationInvalidated):
-        coordinator.record_unsafe_traversal(token, 1)
+        getattr(coordinator, f"record_{code}")(token, 1)
     assert index.status() == before
     assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
     assert coordinator.verification_required

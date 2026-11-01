@@ -656,6 +656,13 @@ class DirectoryIndex:
 
     def record_unsafe_traversal(self, generation_id: int) -> None:
         """Record an excluded directory without selecting an incomplete candidate."""
+        self._record_scan_issue(generation_id, "unsafe_traversal")
+
+    def record_access_denied(self, generation_id: int) -> None:
+        """Record an unreadable descendant without discarding readable siblings."""
+        self._record_scan_issue(generation_id, "access_denied")
+
+    def _record_scan_issue(self, generation_id: int, code: Literal["unsafe_traversal", "access_denied"]) -> None:
         with self._writer_lock, self.growth_guard():
             connection = self._connection()
             with transaction(connection):
@@ -663,9 +670,9 @@ class DirectoryIndex:
                 if state is None or state[0] not in {"building", "candidate"}:
                     raise ValueError("Traversal issue belongs to an inactive scan. Restart source verification.")
                 connection.execute(
-                    "INSERT INTO coverage_issues(generation_id, code, count) VALUES (?, 'unsafe_traversal', 1) "
+                    "INSERT INTO coverage_issues(generation_id, code, count) VALUES (?, ?, 1) "
                     "ON CONFLICT(generation_id, code) DO UPDATE SET count = count + 1",
-                    (generation_id,),
+                    (generation_id, code),
                 )
                 connection.execute(
                     "UPDATE generations SET issue_count = (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?), "
