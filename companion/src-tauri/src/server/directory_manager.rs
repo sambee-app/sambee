@@ -1388,6 +1388,7 @@ impl LocalDirectoryManager {
 
     fn start_scan(self: &Arc<Self>, source: &Arc<LocalSource>) -> Result<(), IndexError> {
         if source.stopped.load(Ordering::Acquire)
+            || Instant::now() < lock(&source.status)?.retry_at
             || source
                 .busy
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -1680,6 +1681,53 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn repeated_scan_requests_respect_resource_retry_deadline() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("cache")).unwrap();
+        for initialized in [false, true] {
+            let source = LocalSource::new(temporary.path().join(format!("root-{initialized}")), manager.storage_directory());
+            let mut reader = None;
+            if initialized {
+                let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+                index.write_paths(["accepted".to_owned()], None).unwrap();
+                index.finish_generation(1, 0).unwrap();
+                reader = Some(index.reader());
+                *lock(&source.reader).unwrap() = reader.clone();
+                *lock(&source.writer).unwrap() = Some(index);
+            }
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = reader
+                .as_ref()
+                .map(|reader| reader.search("accepted", 3, false, &cancelled, false).unwrap());
+            source.fail(&IndexError::StoragePaused("Injected resource refusal."), &manager.budget);
+            let (deadline, delay, message, progress) = {
+                let status = lock(&source.status).unwrap();
+                (status.retry_at, status.failure_delay, status.message.clone(), status.progress)
+            };
+            let permits = manager.scans.available_permits();
+            for _ in 0..3 {
+                manager.start_scan(&source).unwrap();
+                manager.start_scan_if_cold(&source).unwrap();
+                assert!(!source.busy.load(Ordering::Acquire));
+                assert_eq!(manager.scans.available_permits(), permits);
+                let status = lock(&source.status).unwrap();
+                assert_eq!(status.retry_at, deadline);
+                assert_eq!(status.failure_delay, delay);
+                assert_eq!(status.message, message);
+                assert_eq!(status.progress, progress);
+                assert_eq!(status.state, "ready");
+            }
+            assert!(lock(&source.observations).unwrap().producers.is_empty());
+            assert_eq!(
+                reader
+                    .as_ref()
+                    .map(|reader| reader.search("accepted", 3, false, &cancelled, false).unwrap()),
+                before
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn failed_policy_persistence_preserves_effective_resource_policy() {
         let temporary = tempfile::tempdir().unwrap();
         let manager = LocalDirectoryManager::new(temporary.path().join("cache")).unwrap();
@@ -1857,8 +1905,9 @@ mod tests {
         let candidate = index.begin_verification().unwrap();
         index.write_paths(["selected".to_owned()], Some(candidate)).unwrap();
         index.finish_generation(candidate, 0).unwrap();
+        let reader = index.reader();
         *source.writer.lock().unwrap() = Some(index);
-        let budget = Arc::new(DiskBudget {
+        let mut budget = Arc::new(DiskBudget {
             namespace,
             policy_gate: Mutex::new(()),
             state: Mutex::new(DiskState {
@@ -1868,6 +1917,23 @@ mod tests {
             }),
             space_probe: available_disk_bytes,
         });
+        for number in 0..ROW_BATCH_SIZE + 1 {
+            assert!(lock(&source.observations)
+                .unwrap()
+                .enqueue(
+                    DirectoryMutation::Add {
+                        path: format!("foreground/{number}")
+                    },
+                    limit("max_pending_observations").unwrap(),
+                    limit("max_observation_bytes").unwrap(),
+                )
+                .unwrap());
+        }
+        source.reclamation_pending.store(true, Ordering::Release);
+        source.flush(&budget).unwrap();
+        assert_eq!(lock(&source.observations).unwrap().pending.len(), 1);
+        assert!(source.cleanup_pending.load(Ordering::Acquire));
+        assert!(source.reclamation_pending.load(Ordering::Acquire));
         let semaphore = Arc::new(Semaphore::new(1));
         source.active_queries.fetch_add(1, Ordering::AcqRel);
         let ownership = QueryOwnership {
@@ -1881,11 +1947,28 @@ mod tests {
         assert!(source.cleanup_pending.load(Ordering::Acquire));
         assert!(source.reclamation_pending.load(Ordering::Acquire));
         assert_eq!(source.active_queries.load(Ordering::Acquire), 1);
+        assert!(lock(&source.observations).unwrap().pending.is_empty());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = reader.search("selected foreground", 3, false, &cancelled, false).unwrap();
+        assert_eq!(before.directory_count, ROW_BATCH_SIZE as i64 + 2);
+        source.busy.store(true, Ordering::Release);
         drop(ownership);
+        source.flush(&budget).unwrap();
+        assert!(source.cleanup_pending.load(Ordering::Acquire));
+        assert!(source.reclamation_pending.load(Ordering::Acquire));
+        source.busy.store(false, Ordering::Release);
+        Arc::get_mut(&mut budget).unwrap().space_probe = |_| Ok(0);
+        assert!(matches!(source.flush(&budget), Err(IndexError::StoragePaused(_))));
+        assert!(source.cleanup_pending.load(Ordering::Acquire));
+        assert!(source.reclamation_pending.load(Ordering::Acquire));
+        assert_eq!(lock(&budget.state).unwrap().reserved, 0);
+        assert_eq!(reader.search("selected foreground", 3, false, &cancelled, false).unwrap(), before);
+        Arc::get_mut(&mut budget).unwrap().space_probe = available_disk_bytes;
         source.flush(&budget).unwrap();
         assert!(!source.cleanup_pending.load(Ordering::Acquire));
         assert!(!source.reclamation_pending.load(Ordering::Acquire));
         assert_eq!(source.active_queries.load(Ordering::Acquire), 0);
+        assert_eq!(reader.search("selected foreground", 3, false, &cancelled, false).unwrap(), before);
     }
 
     #[test]

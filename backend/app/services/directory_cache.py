@@ -1682,7 +1682,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
 
     def _reclaim_disk_work(self) -> None:
         with self.coordinator.lock:
-            if not self._reclamation_pending or self.index.has_active_queries or self._scan_running.is_set():
+            if not self._reclamation_pending or self.coordinator.pending or self.index.has_active_queries or self._scan_running.is_set():
                 return
             self._reclamation_pending = not self.index.reclaim_pages()
 
@@ -1753,7 +1753,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             raise
 
     async def start_scan(self) -> None:
-        if self._stop_event.is_set():
+        if self._stop_event.is_set() or time.monotonic() < self._resource_retry_at:
             return
         if self._scan_task is not None and not self._scan_task.done():
             return
@@ -1953,16 +1953,12 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
                 self._scan_progress = time.monotonic()
                 entry = self._source_call(parent, lambda: next(entries, None))
-                if entry is None:
-                    if not parent and self.coordinator.is_current(token):
-                        self._source_available.set()
-                        self._source_probe_completed.set()
-                    break
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
                 if not self.coordinator.is_current(token):
                     raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
-                if not parent:
-                    self._source_available.set()
-                    self._source_probe_completed.set()
+                if entry is None:
+                    break
                 self._scan_progress = time.monotonic()
                 if entry.name in (".", ".."):
                     continue
@@ -1991,7 +1987,13 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     batch_bytes = 0
             if batch:
                 self.coordinator.commit_children(token, generation, batch)
-        self.coordinator.finish_parent(token, generation)
+        with self.coordinator.lock:
+            if self._stop_event.is_set():
+                raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+            self.coordinator.finish_parent(token, generation)
+            if not parent:
+                self._source_available.set()
+                self._source_probe_completed.set()
 
     def _scan_disk_queue(self) -> None:
         while not self._manager_scan_slots.acquire(timeout=WORKER_POLL_SECONDS):
@@ -2053,7 +2055,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         return current >= self._resource_retry_at and (bool(self._failure_retry_delay) or current >= verified_at + delay)
 
     async def _run_rescan(self) -> None:
-        if not self._opened.is_set() or self._scan_running.is_set():
+        if not self._opened.is_set() or self._scan_running.is_set() or time.monotonic() < self._resource_retry_at:
             return
         self._state = CacheState.UPDATING if self._directory_count else CacheState.BUILDING
         root_checked = False

@@ -380,6 +380,11 @@ def test_background_fts_repair_releases_actual_scan_ownership_after_failure(sqli
 
 
 def test_pressure_reclamation_coalesces_and_defers_for_actual_readers(sqlite_cache, monkeypatch):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import _DirectoryMutation
+    from app.services.directory_index_resources import DirectoryDiskBudgetError
+
     outcomes = iter([False, True])
     calls = []
 
@@ -391,17 +396,39 @@ def test_pressure_reclamation_coalesces_and_defers_for_actual_readers(sqlite_cac
     sqlite_cache._reclaim_disk_work()
     assert not calls
     sqlite_cache._reclamation_pending = True
+    assert sqlite_cache.coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "foreground"))
+    sqlite_cache._reclaim_disk_work()
+    assert not calls
+    assert sqlite_cache._reclamation_pending
+    sqlite_cache.coordinator.apply_pending()
+    before = sqlite_cache.index.search("foreground")
+    sqlite_cache._scan_running.set()
+    sqlite_cache._reclaim_disk_work()
+    assert not calls
+    assert sqlite_cache._reclamation_pending
+    sqlite_cache._scan_running.clear()
     with monkeypatch.context() as reader:
         reader.setattr(sqlite_cache.index, "_active_queries", 1)
         sqlite_cache._reclaim_disk_work()
         assert not calls
         assert sqlite_cache._reclamation_pending
+    with monkeypatch.context() as refusal:
+
+        def denied():
+            raise DirectoryDiskBudgetError("Injected maintenance headroom refusal.")
+
+        refusal.setattr(sqlite_cache.index, "reclaim_pages", denied)
+        with pytest.raises(DirectoryDiskBudgetError):
+            sqlite_cache._reclaim_disk_work()
+        assert sqlite_cache._reclamation_pending
+        assert sqlite_cache.index.search("foreground") == before
     sqlite_cache._reclaim_disk_work()
     assert sqlite_cache._reclamation_pending
     sqlite_cache._reclaim_disk_work()
     assert not sqlite_cache._reclamation_pending
     sqlite_cache._reclaim_disk_work()
     assert len(calls) == 2
+    assert sqlite_cache.index.search("foreground") == before
 
 
 def test_last_access_update_does_not_change_search_or_verification(index):
@@ -490,6 +517,30 @@ async def test_failed_initialization_keeps_bounded_retry_eligibility(sqlite_cach
     assert "Wait for active workers" in sqlite_cache.scan_error
     assert started == [True]
     assert not sqlite_cache._opened.is_set()
+
+
+@pytest.mark.asyncio
+async def test_repeated_cold_requests_respect_retry_deadline(sqlite_cache, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    sqlite_cache._opened.clear()
+    sqlite_cache._schedule_retry(now=1000.0)
+    deadline = sqlite_cache._resource_retry_at
+    now = [deadline - 0.001]
+    initialize = AsyncMock()
+    monkeypatch.setattr(sqlite_cache, "_initialize", initialize)
+    monkeypatch.setattr("app.services.directory_cache.time", SimpleNamespace(monotonic=lambda: now[0]))
+    for _ in range(3):
+        await sqlite_cache.start_scan()
+        if sqlite_cache._scan_task is not None:
+            await sqlite_cache._scan_task
+        initialize.assert_not_awaited()
+        assert sqlite_cache._resource_retry_at == deadline
+    now[0] = deadline
+    await sqlite_cache.start_scan()
+    assert sqlite_cache._scan_task is not None
+    await sqlite_cache._scan_task
+    initialize.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1000,11 +1051,16 @@ def test_unchanged_policy_preserves_backoff_and_changed_policy_retries(sqlite_ca
 @pytest.mark.asyncio
 async def test_failed_root_retries_back_off_and_success_resets_delay(sqlite_cache, monkeypatch):
     from contextlib import asynccontextmanager
+    from time import time
 
     unavailable = True
+    now = [1000.0]
+    attempts = []
+    monkeypatch.setattr("app.services.directory_cache.time", SimpleNamespace(monotonic=lambda: now[0], time=time))
 
     @asynccontextmanager
     async def connection(**kwargs):
+        attempts.append(now[0])
         if unavailable:
             raise OSError("Injected missing root")
         yield
@@ -1015,9 +1071,18 @@ async def test_failed_root_retries_back_off_and_success_resets_delay(sqlite_cach
     monkeypatch.setattr("app.services.directory_cache.get_connection_pool", pool)
     await sqlite_cache._run_rescan()
     assert sqlite_cache._failure_retry_delay == 30
+    deadline = sqlite_cache._resource_retry_at
+    for _ in range(3):
+        await sqlite_cache._run_rescan()
+        assert sqlite_cache._resource_retry_at == deadline
+        assert sqlite_cache._failure_retry_delay == 30
+        assert attempts == [1000.0]
+    now[0] = deadline
     await sqlite_cache._run_rescan()
     assert sqlite_cache._failure_retry_delay == 60
+    assert len(attempts) == 2
     unavailable = False
+    now[0] = sqlite_cache._resource_retry_at
     monkeypatch.setattr(sqlite_cache, "_probe_source_root", lambda: None)
     monkeypatch.setattr(sqlite_cache, "_scan_disk_queue", lambda: None)
     await sqlite_cache._run_rescan()
@@ -1103,6 +1168,61 @@ def test_directory_api_rejects_excess_terms_before_source_creation(monkeypatch, 
     )
     assert response.status_code == 400
     assert "distinct terms" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("boundary", ["next", "close"])
+@pytest.mark.parametrize("stop", [False, True])
+@pytest.mark.parametrize("has_child", [False, True])
+def test_root_scan_rejects_late_availability_and_parent_completion(sqlite_cache, monkeypatch, boundary, stop, has_child):
+    from smbclient._os import FileAttributes
+
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    sqlite_cache.index.write_paths(["accepted"])
+    assert sqlite_cache.index.finish_generation(1)
+    before = sqlite_cache.index.search("accepted")
+    sqlite_cache._source_available.clear()
+    sqlite_cache._source_probe_completed.clear()
+    completed = []
+    closed = []
+
+    def interrupt():
+        if stop:
+            sqlite_cache._stop_event.set()
+        else:
+            sqlite_cache.coordinator.invalidate()
+
+    class Entries:
+        def __init__(self):
+            self.returned_child = False
+
+        def __next__(self):
+            if boundary == "next":
+                interrupt()
+            if has_child and not self.returned_child:
+                self.returned_child = True
+                return SimpleNamespace(name="candidate", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+            raise StopIteration
+
+        def close(self):
+            closed.append(True)
+            if boundary == "close":
+                interrupt()
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", lambda *args, **kwargs: Entries())
+    monkeypatch.setattr(sqlite_cache.index, "finish_scan_parent", lambda *args: completed.append(args))
+    with pytest.raises((InterruptedError, ScanObservationInvalidated)):
+        sqlite_cache._scan_disk_queue()
+    assert closed == [True]
+    assert not completed
+    assert not sqlite_cache._source_available.is_set()
+    assert not sqlite_cache._source_probe_completed.is_set()
+    assert sqlite_cache.index.search("accepted") == before
+    assert sqlite_cache.coordinator.verification_required
+    assert not sqlite_cache.coordinator._producers
+    assert not sqlite_cache._scan_running.is_set()
+    assert sqlite_cache._manager_scan_slots.acquire(blocking=False)
+    sqlite_cache._manager_scan_slots.release()
 
 
 def test_sqlite_source_initial_batches_are_visible_before_parent_completion(sqlite_cache, monkeypatch):
