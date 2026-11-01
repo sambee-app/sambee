@@ -26,6 +26,7 @@ The approved requirements remain in the collapsed reference section. Its origina
 - [ ] Qualify retained-source identity for supported local source types. Keep session-bound SQLite data where restart identity cannot be proved; report that limit and bound cleanup.
 - [ ] Implement a safe Windows traversal adapter with handle-based containment, volume/root validation, exact native-name handling, and removal/replacement detection.
 - [ ] Classify Windows reparse tags. Exclude junctions, name-surrogate redirections, shortcuts, and unknown or unverified cloud placeholders with explicit coverage issues; do not treat all reparse points as equivalent.
+- [x] Exclude backend SMB reparse-point directories from scan rows and queued reads, with explicit unsafe-traversal coverage issues. Reject stale issue writes, preserve accepted data after a failed candidate, and recover through a later issue-free pass. See [SMB exclusion evidence](#acceptance-evidence-backend-smb-reparse-exclusions). This does not qualify root identity, containment races, or native Windows tag classification.
 - [ ] Complete race-safe traversal containment for backend SMB and supported companion sources. Test link and parent replacement, nested mounts, pseudo-filesystems, invalid native encodings, inaccessible descendants, and root failure.
 - [ ] Verify bounded traversal work for many-file trees, path/depth limits, cancellation checks, and batch backpressure. Directory counts must never stop coverage.
 
@@ -182,6 +183,17 @@ Verified on 2026-11-01 in the Debian development container. This evidence closes
 - Final backend contract/API selection: **162 passed, 1 skipped in 10.40 seconds**. Configured mypy for the changed storage module and Ruff for the changed backend files passed. Mypy noted unused existing third-party overrides in this focused invocation. The skipped fixture is the opt-in million-path experiment.
 - Final native directory selection: **76 passed, 2 ignored in 5.09 seconds**. Warning-free Clippy and Rust formatting passed. The ignored checks are the opt-in million-path experiment and explicitly invoked Python-to-Rust compatibility test; neither is claimed here.
 - Backend scanner integration, an owned accepted-generation dirty-parent worker, mutation-freshness timing, complete SQL temporary-work accounting, and Windows native traversal remain open. No schema, dependency, version, or capability change was made. Existing version 2.0 documentation remains accurate; final behavior documentation is still gated on qualification.
+
+## Acceptance Evidence: Backend SMB Reparse Exclusions
+
+Verified on 2026-11-01 in the Debian development container. This evidence closes conservative backend reparse-directory exclusion and issue reporting only. SMB root identity, race-safe containment, and native Windows tag classification remain open.
+
+- [Backend parent scans](../backend/app/services/directory_cache.py) exclude directory entries with the SMB reparse-point attribute. These entries are not inserted into searchable rows or queued for traversal. Ordinary directory batches remain progressive and complete.
+- The coordinator records each exclusion only under a current scan-read token. [Storage](../backend/app/services/directory_index.py) aggregates the shared `unsafe_traversal` issue in the same transaction as coverage, issue totals, and selected revision updates. It accepts only building/candidate generations, preserves uncertain coverage, and does not advance complete-verification time.
+- Injected SMB-entry tests verify that excluded directories are never read, an initial pass reports partial coverage, and a candidate with exclusions cannot replace usable accepted rows. A subsequent issue-free pass clears partial coverage through a fresh candidate and advances complete-verification time.
+- Focused failure tests reject completed/invalidated read tokens and accepted/retired/missing generations. An injected metadata-update failure rolls back the issue row, coverage, and revision. Issue rows contain only aggregate codes and counts, not source paths.
+- Final backend contract/API selection: **171 passed, 1 skipped in 10.59 seconds**. Configured mypy for both changed service modules and Ruff for the changed backend files passed. Mypy noted an unused existing `pyvips` override in this focused invocation. The skipped fixture is the opt-in million-path experiment.
+- The editor still reports the previously recorded SMB watcher `auth_protocol` type diagnostic on an unchanged line. No suppression or unrelated watcher change was made. No native SMB server or Windows traversal qualification, capacity measurement, schema/dependency/version change, or capability activation is claimed. Existing version 2.0 documentation remains accurate; final behavior documentation is still gated on qualification.
 
 <details>
 <summary>Approved Requirements and Original Acceptance Contract</summary>

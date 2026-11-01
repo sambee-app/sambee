@@ -654,6 +654,27 @@ class DirectoryIndex:
                 )
         raise RuntimeError("Directory reconciliation did not complete. Retry source verification.")
 
+    def record_unsafe_traversal(self, generation_id: int) -> None:
+        """Record an excluded directory without selecting an incomplete candidate."""
+        with self._writer_lock, self.growth_guard():
+            connection = self._connection()
+            with transaction(connection):
+                state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
+                if state is None or state[0] not in {"building", "candidate"}:
+                    raise ValueError("Traversal issue belongs to an inactive scan. Restart source verification.")
+                connection.execute(
+                    "INSERT INTO coverage_issues(generation_id, code, count) VALUES (?, 'unsafe_traversal', 1) "
+                    "ON CONFLICT(generation_id, code) DO UPDATE SET count = count + 1",
+                    (generation_id,),
+                )
+                connection.execute(
+                    "UPDATE generations SET issue_count = (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?), "
+                    "coverage = CASE WHEN coverage = 'uncertain' THEN 'uncertain' ELSE 'partial' END WHERE id = ?",
+                    (generation_id, generation_id),
+                )
+                if required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0] == generation_id:
+                    self._revision(connection)
+
     def finish_scan_parent(self, generation_id: int, path: str) -> None:
         with self._writer_lock:
             connection = self._connection()

@@ -1051,6 +1051,64 @@ def test_sqlite_source_initial_batches_are_visible_before_parent_completion(sqli
     assert not sqlite_cache._directories
 
 
+def test_sqlite_source_excludes_reparse_directories_and_reports_partial_coverage(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    def scan(path, **kwargs):
+        if path == sqlite_cache._smb_base_path:
+            for name in ("redirected", "unknown-placeholder"):
+                yield SimpleNamespace(
+                    name=name,
+                    smb_info=SimpleNamespace(
+                        file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY | FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT
+                    ),
+                )
+            yield SimpleNamespace(name="regular", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+        elif path != sqlite_cache._smb_base_path + "\\regular":
+            raise AssertionError("Excluded reparse directories must not be read.")
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", scan)
+    sqlite_cache._scan_disk_queue()
+    response = sqlite_cache.search_index("regular redirected placeholder")
+    assert response.total_matches == response.directory_count == 1
+    assert response.coverage == "partial"
+    assert response.issue_count == 2
+    assert response.last_verified_at_ms is None
+    assert sqlite_cache.coordinator.verification_required
+
+    def recovered_scan(path, **kwargs):
+        if path == sqlite_cache._smb_base_path:
+            yield SimpleNamespace(name="regular", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", recovered_scan)
+    sqlite_cache._scan_disk_queue()
+    recovered = sqlite_cache.search_index("regular redirected placeholder")
+    assert recovered.total_matches == recovered.directory_count == 1
+    assert recovered.issue_count == 0
+    assert recovered.coverage == "complete"
+    assert recovered.last_verified_at_ms is not None
+    assert not sqlite_cache.coordinator.verification_required
+
+
+def test_sqlite_source_reparse_candidate_preserves_accepted_rows(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    sqlite_cache.index.write_paths(["accepted"])
+    assert sqlite_cache.index.finish_generation(1)
+    before = sqlite_cache.index.search("accepted")
+
+    def scan(path, **kwargs):
+        yield SimpleNamespace(
+            name="redirected",
+            smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY | FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT),
+        )
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", scan)
+    sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.index.search("accepted") == before
+    assert sqlite_cache.coordinator.verification_required
+
+
 def test_sqlite_source_rejects_late_parent_observations(sqlite_cache, monkeypatch):
     from smbclient._os import FileAttributes
 
@@ -1323,6 +1381,75 @@ def test_failed_missing_subtree_pruning_rolls_back_rows_queue_and_revision(index
     index.write_paths(["gone", "gone/child"], generation_id=active)
     assert not index.prune_subtree_batch(active, "gone")
     assert index.search("gone keep") == before
+
+
+def test_unsafe_traversal_issues_preserve_uncertainty_and_block_acceptance(index):
+    index.write_paths(["regular"])
+    index.mark_uncertain()
+    before = index.status()
+    for count in (2, 3):
+        index.record_unsafe_traversal(1)
+        after = index.status()
+        assert after.issue_count == count
+        assert after.coverage == "uncertain"
+        assert after.directory_count == before.directory_count
+        assert after.last_verified_at_ms == before.last_verified_at_ms
+        assert after.accepted_revision > before.accepted_revision
+        before = after
+    assert not index.finish_generation(1)
+    assert index.status().issue_count == 3
+    assert index._connection().execute("SELECT code, count FROM coverage_issues ORDER BY code").fetchall() == [
+        ("event_loss", 1),
+        ("unsafe_traversal", 2),
+    ]
+
+
+def test_failed_unsafe_traversal_issue_rolls_back_issue_coverage_and_revision(index):
+    before = index.status()
+    index._connection().execute(
+        "CREATE TRIGGER reject_issue_metadata BEFORE UPDATE ON generations BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        index.record_unsafe_traversal(1)
+    assert index.status() == before
+    assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("state", ["accepted", "retired", "missing"])
+def test_unsafe_traversal_issue_rejects_inactive_generation(index, state):
+    assert index.finish_generation(1)
+    if state == "accepted":
+        generation = 1
+    else:
+        generation = index.begin_verification()
+        index.discard_generation(generation)
+        if state == "missing":
+            while index.cleanup_retired_batch():
+                pass
+    before = index.status()
+    with pytest.raises(ValueError, match="inactive scan"):
+        index.record_unsafe_traversal(generation)
+    assert index.status() == before
+    assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("invalidate", [False, True])
+def test_unsafe_traversal_issue_rejects_completed_and_invalidated_reads(index, invalidate):
+    from app.services.directory_cache import DirectoryScanCoordinator, ScanObservationInvalidated
+
+    coordinator = DirectoryScanCoordinator(index)
+    token = coordinator.begin_read("parent")
+    if invalidate:
+        coordinator.invalidate()
+    else:
+        coordinator.end_read(token)
+    before = index.status()
+    with pytest.raises(ScanObservationInvalidated):
+        coordinator.record_unsafe_traversal(token, 1)
+    assert index.status() == before
+    assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
+    assert coordinator.verification_required
+    coordinator.end_read(token)
 
 
 def test_scan_barriers_reject_late_rename_observations(index):

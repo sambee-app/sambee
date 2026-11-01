@@ -357,6 +357,14 @@ class DirectoryScanCoordinator:
             self.apply_pending()
             self.index.write_scan_children(generation_id, children)
 
+    def record_unsafe_traversal(self, token: ScanReadToken, generation_id: int) -> None:
+        with self.lock:
+            if not self.is_current(token):
+                self.verification_required = True
+                raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+            self.apply_pending()
+            self.index.record_unsafe_traversal(generation_id)
+
     def finish_parent(self, token: ScanReadToken, generation_id: int) -> None:
         with self.lock:
             if not self.is_current(token):
@@ -1925,6 +1933,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 attributes = entry.smb_info.file_attributes
                 if not attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
                     continue
+                if attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT:
+                    self.coordinator.record_unsafe_traversal(token, generation)
+                    continue
                 path = parent + PATH_SEPARATOR + entry.name if parent else entry.name
                 validate_directory_path(path)
                 path_bytes = len(path.encode("utf-8"))
@@ -1934,7 +1945,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     self.coordinator.commit_children(token, generation, batch)
                     batch.clear()
                     batch_bytes = 0
-                batch.append((path, not bool(attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT)))
+                batch.append((path, True))
                 batch_bytes += path_bytes
                 if len(batch) == ROW_BATCH_SIZE:
                     self.coordinator.commit_children(token, generation, batch)
