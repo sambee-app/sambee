@@ -32,10 +32,11 @@ import tempfile
 import threading
 import time
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Iterable, Optional, TypeVar
+from typing import Callable, Iterable, Iterator, Optional, TypeVar
 
 import smbclient
 from smbclient._os import FileAttributes
@@ -191,6 +192,7 @@ class ScanReadToken:
     epoch: int
     sequence: int
     path: str
+    producer_id: int
 
 
 class ScanObservationInvalidated(RuntimeError):
@@ -217,6 +219,8 @@ class DirectoryScanCoordinator:
         self.epoch = 0
         self.verification_required = True
         self._uncertain_pending = False
+        self._next_producer_id = 0
+        self._producers: dict[int, ScanReadToken] = {}
 
     def invalidate(self) -> None:
         with self.lock:
@@ -242,31 +246,81 @@ class DirectoryScanCoordinator:
                 return False
             self.pending.append((self.sequence, mutation, size))
             self.pending_bytes += size
-            if len(self.barriers) + len(paths) > self.maximum_pending or self.barrier_bytes + size > self.maximum_bytes:
-                self.invalidate()
-            else:
-                for path in paths:
-                    self.barriers.append((self.sequence, path, len(path.encode("utf-8"))))
-                self.barrier_bytes += size
+            for path in paths:
+                self._record_barrier(path)
             return True
+
+    def _record_barrier(self, path: str) -> None:
+        """Merge overlapping prefixes without allowing an older read to publish."""
+        retained: deque[tuple[int, str, int]] = deque()
+        prefix = path
+        for sequence, existing, size in self.barriers:
+            if path == existing or path.startswith(existing + PATH_SEPARATOR):
+                prefix = existing
+            elif not existing.startswith(path + PATH_SEPARATOR):
+                retained.append((sequence, existing, size))
+        size = len(prefix.encode("utf-8"))
+        total_bytes = sum(entry[2] for entry in retained) + size
+        if len(retained) >= self.maximum_pending or total_bytes > self.maximum_bytes:
+            self.invalidate()
+            return
+        retained.append((self.sequence, prefix, size))
+        self.barriers = retained
+        self.barrier_bytes = total_bytes
 
     def begin_read(self, path: str) -> ScanReadToken:
         if path:
             validate_directory_path(path)
         with self.lock:
-            return ScanReadToken(self.epoch, self.sequence, path)
+            if len(self._producers) >= MAX_PENDING_OBSERVATIONS or self._next_producer_id >= MAX_SIGNED_INTEGER:
+                self.invalidate()
+                raise ScanObservationInvalidated("Directory read capacity is exhausted. Wait for active source reads to finish.")
+            self._next_producer_id += 1
+            token = ScanReadToken(self.epoch, self.sequence, path, self._next_producer_id)
+            self._producers[token.producer_id] = token
+            return token
+
+    def end_read(self, token: ScanReadToken) -> None:
+        """Release a producer only after its reads and synchronous batches have exited."""
+        with self.lock:
+            if self._producers.get(token.producer_id) == token:
+                del self._producers[token.producer_id]
+                self._retire_barriers()
+
+    @contextmanager
+    def read(self, path: str) -> Iterator[ScanReadToken]:
+        token = self.begin_read(path)
+        try:
+            yield token
+        finally:
+            self.end_read(token)
+
+    def _retire_barriers(self) -> None:
+        """Pending mutations and older live reads retain their rejection fences."""
+        oldest = min(
+            (token.sequence for token in self._producers.values() if token.epoch == self.epoch),
+            default=self.sequence,
+        )
+        if self.pending:
+            oldest = min(oldest, self.pending[0][0] - 1)
+        self.barriers = deque(entry for entry in self.barriers if entry[0] > oldest)
+        self.barrier_bytes = sum(entry[2] for entry in self.barriers)
 
     def is_current(self, token: ScanReadToken) -> bool:
         with self.lock:
-            return token.epoch == self.epoch and not any(
-                sequence > token.sequence
-                and (
-                    not token.path
-                    or path == token.path
-                    or path.startswith(token.path + PATH_SEPARATOR)
-                    or token.path.startswith(path + PATH_SEPARATOR)
+            return (
+                self._producers.get(token.producer_id) == token
+                and token.epoch == self.epoch
+                and not any(
+                    sequence > token.sequence
+                    and (
+                        not token.path
+                        or path == token.path
+                        or path.startswith(token.path + PATH_SEPARATOR)
+                        or token.path.startswith(path + PATH_SEPARATOR)
+                    )
+                    for sequence, path, _size in self.barriers
                 )
-                for sequence, path, _size in self.barriers
             )
 
     def apply_pending(self) -> int:
@@ -289,6 +343,7 @@ class DirectoryScanCoordinator:
                 self.pending.popleft()
                 self.pending_bytes -= size
                 applied += 1
+            self._retire_barriers()
             return applied
 
     def commit_children(self, token: ScanReadToken, generation_id: int, children: Iterable[tuple[str, bool]]) -> None:
@@ -1791,32 +1846,38 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             raise DirectoryScanCapacityError("Directory scan capacity is in use. Wait for active work to finish, then retry.")
         try:
             self._scan_running.set()
-            token = self.coordinator.begin_read("")
-            entries = self._source_call(
-                "",
-                lambda: smbclient.scandir(
-                    self._smb_base_path,
-                    username=self.username,
-                    password=self.password,
-                    port=self.port,
-                    connection_cache=self._connection_cache,
-                    **get_smbclient_policy_kwargs(),
-                ),
-            )
-            try:
-                self._source_call("", lambda: next(entries, None))
-                if self._stop_event.is_set() or not self.coordinator.is_current(token):
-                    raise ScanObservationInvalidated("Directory root observation became stale. Retry source verification.")
-                self._source_available.set()
-                self._source_probe_completed.set()
-            finally:
-                self._source_call("", entries.close)
+            with self.coordinator.read("") as token:
+                self._probe_source_root_read(token)
         finally:
             self._scan_running.clear()
             self._manager_scan_slots.release()
 
+    def _probe_source_root_read(self, token: ScanReadToken) -> None:
+        entries = self._source_call(
+            "",
+            lambda: smbclient.scandir(
+                self._smb_base_path,
+                username=self.username,
+                password=self.password,
+                port=self.port,
+                connection_cache=self._connection_cache,
+                **get_smbclient_policy_kwargs(),
+            ),
+        )
+        try:
+            self._source_call("", lambda: next(entries, None))
+            if self._stop_event.is_set() or not self.coordinator.is_current(token):
+                raise ScanObservationInvalidated("Directory root observation became stale. Retry source verification.")
+            self._source_available.set()
+            self._source_probe_completed.set()
+        finally:
+            self._source_call("", entries.close)
+
     def _scan_parent(self, generation: int, parent: str) -> None:
-        token = self.coordinator.begin_read(parent)
+        with self.coordinator.read(parent) as token:
+            self._scan_parent_read(generation, parent, token)
+
+    def _scan_parent_read(self, generation: int, parent: str, token: ScanReadToken) -> None:
         smb_path = self._smb_base_path + ("\\" + parent.replace("/", "\\") if parent else "")
         entries = self._source_call(
             parent,
@@ -1886,8 +1947,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         try:
             self._scan_running.set()
             self._scan_progress = time.monotonic()
-            with self._generation_lock:
-                baseline = self.coordinator.begin_read("")
+            with self._generation_lock, self.coordinator.read("") as baseline:
                 generation, selected = self.index.prepare_scan()
                 self.index.seed_scan(generation)
                 try:

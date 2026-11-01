@@ -4,7 +4,7 @@
 
 Updated 2026-11-01. Repository version: 2.0.26. Implementation is partial. The new directory-index search capability remains disabled.
 
-This checklist lists unfinished implementation and verification. An unchecked verification task does not mean its implementation is absent. Close each task only when its acceptance checks pass and the evidence is recorded. Reuse existing code and tests; do not restart completed work.
+This checklist tracks completed and remaining implementation and verification. An unchecked verification task does not mean its implementation is absent. Close each task only when its acceptance checks pass and the evidence is recorded. Reuse existing code and tests; do not restart completed work.
 
 The [current implementation record](../website/content/docs/2.0/developer-guide/backend-architecture/smb-change-notification-and-directory-freshness/index.md#storage-qualification-and-remaining-work) confirms that shared SQLite storage, background managers, independent-term search, progressive results, recent-directory icons, administration controls, and policy-grant delivery are implemented. Standard Python `sqlite3`, serialized writer/checkpoint ownership, read-only queries, process leases, FTS repair, and bounded cleanup also have focused tests. Their final integration and failure checks remain part of the tasks below.
 
@@ -12,7 +12,7 @@ The approved requirements remain in the collapsed reference section. Its origina
 
 ## Scope Constraints
 
-- Keep the eight approved decisions. This checklist does not resume application implementation; the last approval resumed only the Python binding and concurrency change.
+- Keep the eight approved decisions. The request to fully implement the remaining work resumed implementation within these constraints. This checklist update does not authorize capability activation before its required gates pass.
 - Keep backend SQLite on Debian's system library and the companion on its approved Rust binding. Do not restore APSW, build custom SQLite, or mix Debian distributions. Follow the dependency workflow for further dependency changes.
 - Keep SQLite as the only directory-index storage format. Keep recent history in the application database and local indexes on the companion computer.
 - Keep directory searches within the targeted connection and file matching within loaded basenames and accessible recent-file history. Do not add drive-wide file or content search.
@@ -33,7 +33,9 @@ The approved requirements remain in the collapsed reference section. Its origina
 
 - [ ] Complete dirty-parent reconciliation: immediate children, new or moved-in subtrees, deleted subtrees, and both rename parents. Do not require paired rename events.
 - [ ] Complete the common mutation notification path for create/delete, empty-directory removal, rename, copy/move, transfers, parent-creating uploads, and archive extraction. Reconcile affected parents after partial failures.
-- [ ] Complete changed-prefix coalescing and outstanding-producer tracking. Retire barriers only after all older reads and queued batches can no longer apply; never retire them by elapsed time.
+- [x] Complete backend changed-prefix coalescing and outstanding-producer tracking for synchronous scan batches. Retire barriers only after older current-epoch reads and pending mutations can no longer apply; reject completed tokens and retain invalidated blocked producers until actual exit. See [backend acceptance evidence](#acceptance-evidence-backend-prefix-barriers).
+- [ ] Complete companion changed-prefix coalescing and outstanding-producer tracking. Retire barriers only after all older reads and queued batches can no longer apply; never retire them by elapsed time. The current whole-epoch invalidation path does not complete this task.
+- [x] Verify injected backend root-read ownership through barrier overflow and late completion. Preserve accepted rows and one verification request, retain the producer and scan permit until worker exit, and prevent late restoration of availability. See [backend acceptance evidence](#acceptance-evidence-backend-prefix-barriers). This does not qualify all overflow paths or native shutdown behavior.
 - [ ] Verify entry/byte and dirty-queue overflow handling in both runtimes. Invalidate affected scan epochs before clearing bookkeeping, preserve accepted rows and worker permits, reject late publication, and retain one verification request.
 - [ ] Verify reconciliation of accepted and candidate generations through a captured sequence before final selection. Failed verification must preserve usable accepted rows and accurate issues and freshness.
 - [ ] Complete and test watcher-loss, overflow, idle/sleep, and root-change recovery. Verify healthy/degraded full-pass deadlines, jitter, 30-second-to-five-minute failure backoff, and no retry storms under unchanged resource refusal.
@@ -114,6 +116,18 @@ cargo fmt --manifest-path companion/src-tauri/Cargo.toml --check
 npm --prefix companion run lint
 npm --prefix companion test
 ```
+
+## Acceptance Evidence: Backend Prefix Barriers
+
+Verified on 2026-11-01 in the Debian development container. This evidence closes the two backend tasks checked in Events and Verification: prefix-coalescing and producer-lifetime tracking, and injected blocked-root-read ownership. Companion handling, full overflow qualification, and complete dirty-parent reconciliation remain unchecked.
+
+- [Backend coordinator](../backend/app/services/directory_cache.py) coalesces repeated and overlapping changed prefixes using the newest mutation sequence. Barrier entry and byte limits remain enforced.
+- Each live read has a distinct producer token. Root probes, parent scans, and full-scan baselines release it only after their synchronous reads and batches exit, including exception cleanup. Completed tokens cannot publish again.
+- Barrier retirement waits for older current-epoch producers and pending mutations. It uses no elapsed-time rule. Overflow invalidates the epoch before barriers are cleared; blocked producers remain registered until actual exit.
+- [Focused regressions](../backend/tests/test_directory_index_contract.py) cover coalescing, independent same-sequence producers, queued-mutation retention, exception cleanup, rejected completed tokens, and a blocked root call. The blocked-call case preserves accepted rows, one verification request, and the scan permit until worker exit. Its late completion cannot restore source availability.
+- Final focused command: `cd backend && .venv/bin/python -m pytest tests/test_directory_index_contract.py tests/test_directory_search.py --show-capture=no -o addopts='' -q`. Result: **153 passed, 1 skipped in 9.60 seconds**. The opt-in million-path fixture remains skipped; these changes do not alter query or storage layout.
+- Configured mypy for `app/services/directory_cache.py` and Ruff for the changed implementation and test files passed. The root-directory mypy invocation did not load backend configuration and reported untyped third-party imports; the configured backend invocation resolved those reports without code suppression.
+- Docker is not installed on this host. Supported-image SQLite qualification remains unavailable. No full implementation-completion aggregate, native Windows qualification, or capacity experiment is claimed. The new capability remains disabled. The existing version 2.0 contract remains accurate; final product-documentation changes remain gated on behavior qualification.
 
 <details>
 <summary>Approved Requirements and Original Acceptance Contract</summary>

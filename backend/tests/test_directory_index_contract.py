@@ -742,6 +742,59 @@ def test_invalidated_root_probe_cannot_restore_availability(sqlite_cache, monkey
     assert not sqlite_cache._source_available.is_set()
 
 
+def test_blocked_root_read_retains_producer_and_permit_after_overflow(sqlite_cache, monkeypatch):
+    import threading
+
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, ScanObservationInvalidated, _DirectoryMutation
+
+    sqlite_cache.coordinator = DirectoryScanCoordinator(sqlite_cache.index, maximum_pending=1)
+    sqlite_cache._source_available.clear()
+    entered = threading.Event()
+    release = threading.Event()
+    failures = []
+
+    def entries(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=5)
+        return
+        yield
+
+    def probe():
+        try:
+            sqlite_cache._probe_source_root()
+        except BaseException as error:
+            failures.append(error)
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", entries)
+    worker = threading.Thread(target=probe)
+    worker.start()
+    try:
+        assert entered.wait(timeout=5)
+        coordinator = sqlite_cache.coordinator
+        assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "accepted"))
+        coordinator.apply_pending()
+        assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "deleted"))
+        coordinator.apply_pending()
+        assert coordinator.epoch == 1
+        assert not coordinator.barriers
+        assert len(coordinator._producers) == 1
+        assert coordinator.verification_required
+        assert not sqlite_cache._manager_scan_slots.acquire(blocking=False)
+        assert sqlite_cache.index.search("accepted").total_matches == 1
+    finally:
+        release.set()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert len(failures) == 1
+    assert isinstance(failures[0], ScanObservationInvalidated)
+    assert not sqlite_cache.coordinator._producers
+    assert not sqlite_cache._source_available.is_set()
+    assert sqlite_cache._manager_scan_slots.acquire(blocking=False)
+    sqlite_cache._manager_scan_slots.release()
+
+
 def test_root_loss_during_query_blocks_late_results(sqlite_cache, monkeypatch):
     from app.services.directory_cache import DirectorySourceUnavailableError
 
@@ -1108,6 +1161,42 @@ def test_scan_barriers_reject_late_rename_observations(index):
     assert index.search("beta").total_matches == 2
 
 
+def test_repeated_prefix_events_coalesce_without_accepting_old_reads(index):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, _DirectoryMutation
+
+    coordinator = DirectoryScanCoordinator(index, maximum_pending=2)
+    oldest = coordinator.begin_read("alpha")
+    assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "alpha"))
+    coordinator.apply_pending()
+    newer = coordinator.begin_read("alpha")
+    epoch = coordinator.epoch
+    for path in ("alpha/child", "alpha", "alpha/next"):
+        assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, path))
+        coordinator.apply_pending()
+    assert coordinator.epoch == epoch
+    assert list(coordinator.barriers) == [(coordinator.sequence, "alpha", len("alpha"))]
+    assert coordinator.barrier_bytes == len("alpha")
+    assert not coordinator.is_current(oldest)
+    assert not coordinator.is_current(newer)
+
+
+def test_parent_barrier_coalesces_children_and_preserves_unrelated_prefix(index):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, _DirectoryMutation
+
+    coordinator = DirectoryScanCoordinator(index, maximum_pending=3)
+    token = coordinator.begin_read("alpha/first")
+    for path in ("alpha/first", "unrelated", "alpha/second", "alpha"):
+        assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, path))
+        coordinator.apply_pending()
+    assert {entry[1] for entry in coordinator.barriers} == {"alpha", "unrelated"}
+    assert coordinator.barrier_bytes == len("alpha") + len("unrelated")
+    assert not coordinator.is_current(token)
+
+
 def test_unrelated_mutation_does_not_invalidate_directory_read(index):
     from smbprotocol.change_notify import FileAction
 
@@ -1149,6 +1238,62 @@ def test_failed_observation_commit_retains_pending_work(index):
     assert len(coordinator.pending) == 1
     assert coordinator.pending_bytes > 0
     assert index.search("alpha occupied").total_matches == 2
+
+
+def test_barrier_retirement_waits_for_all_old_producers_and_pending_mutations(index):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, ScanObservationInvalidated, _DirectoryMutation
+
+    coordinator = DirectoryScanCoordinator(index)
+    first = coordinator.begin_read("alpha")
+    second = coordinator.begin_read("alpha")
+    assert first != second
+    coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "alpha"))
+    coordinator.end_read(first)
+    coordinator.apply_pending()
+    assert coordinator.barriers
+    assert not coordinator.is_current(second)
+    coordinator.end_read(second)
+    assert not coordinator.barriers
+    assert coordinator.barrier_bytes == 0
+    with pytest.raises(ScanObservationInvalidated):
+        coordinator.commit_children(second, 1, [("alpha/stale", False)])
+    newer = coordinator.begin_read("beta")
+    coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "beta"))
+    coordinator.end_read(newer)
+    assert coordinator.barriers
+    coordinator.apply_pending()
+    assert not coordinator.barriers
+
+
+def test_invalidated_producer_cannot_publish_after_barrier_retirement(index):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, _DirectoryMutation
+
+    coordinator = DirectoryScanCoordinator(index, maximum_pending=1)
+    blocked = coordinator.begin_read("alpha")
+    coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "accepted"))
+    assert not coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "alpha"))
+    coordinator.apply_pending()
+    assert not coordinator.barriers
+    assert blocked.producer_id in coordinator._producers
+    assert not coordinator.is_current(blocked)
+    coordinator.end_read(blocked)
+    assert not coordinator._producers
+    assert coordinator.verification_required
+
+
+def test_read_context_releases_producer_after_exception(index):
+    from app.services.directory_cache import DirectoryScanCoordinator
+
+    coordinator = DirectoryScanCoordinator(index)
+    with pytest.raises(OSError):
+        with coordinator.read("alpha") as token:
+            raise OSError("Injected blocked read failure")
+    assert not coordinator._producers
+    assert not coordinator.is_current(token)
 
 
 def test_generation_acceptance_rejects_change_after_last_parent(index):
