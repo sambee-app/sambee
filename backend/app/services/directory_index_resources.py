@@ -5,6 +5,7 @@ from __future__ import annotations
 import heapq
 import os
 import shutil
+import sqlite3
 import stat
 import threading
 import time
@@ -13,11 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
-import apsw
-
 from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
 from app.models.system_settings import DirectoryIndexPolicy
-from app.services.directory_index import APPLICATION_ID, SCHEMA_VERSION, SQL_BUSY_TIMEOUT_MS, STORAGE_FILE_SUFFIXES, DirectoryIndex
+from app.services.directory_index import APPLICATION_ID, SCHEMA_VERSION, STORAGE_FILE_SUFFIXES, DirectoryIndex, connect_directory_database
 
 WRITE_HEADROOM_BYTES = DIRECTORY_INDEX_CONTRACT.limits["write_headroom_bytes"]
 LEASE_CLEANUP_BATCH = DIRECTORY_INDEX_CONTRACT.limits["lease_cleanup_batch"]
@@ -72,8 +71,7 @@ class DirectoryIndexResources:
             return None
         descriptor = DirectoryIndex.acquire_storage_lease(path)
         try:
-            with closing(apsw.Connection(str(path), flags=apsw.SQLITE_OPEN_READONLY | apsw.SQLITE_OPEN_NOFOLLOW)) as connection:
-                connection.set_busy_timeout(SQL_BUSY_TIMEOUT_MS)
+            with closing(connect_directory_database(path, readonly=True)) as connection:
                 if connection.execute("PRAGMA application_id").fetchone() != (APPLICATION_ID,):
                     return None
                 if connection.execute("PRAGMA user_version").fetchone() != (SCHEMA_VERSION,):
@@ -92,13 +90,14 @@ class DirectoryIndexResources:
         try:
             if not path.is_file():
                 return False
-            with closing(apsw.Connection(str(path), flags=apsw.SQLITE_OPEN_READWRITE | apsw.SQLITE_OPEN_NOFOLLOW)) as connection:
-                connection.set_busy_timeout(SQL_BUSY_TIMEOUT_MS)
+            with closing(connect_directory_database(path)) as connection:
                 if connection.execute("PRAGMA application_id").fetchone() != (APPLICATION_ID,):
                     return False
                 if connection.execute("SELECT last_access_at_ms FROM source_metadata WHERE id = 1").fetchone() != (expected_access,):
                     return False
-                connection.wal_checkpoint(mode=apsw.SQLITE_CHECKPOINT_TRUNCATE)
+                checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                if checkpoint is None or checkpoint[0] or checkpoint[1] != checkpoint[2]:
+                    return False
             for suffix in STORAGE_FILE_SUFFIXES:
                 if suffix != ".lease":
                     Path(str(path) + suffix).unlink(missing_ok=True)
@@ -163,7 +162,7 @@ class DirectoryIndexResources:
                         if len(retained) > self.policy.max_retained_inactive_sources:
                             _, old_path, old_access = heapq.heappop(retained)
                             removed += self._delete_inactive(old_path, old_access)
-                    except (OSError, apsw.Error):
+                    except (OSError, sqlite3.Error):
                         continue
             while pressure and retained:
                 usage = self.usage()
@@ -175,7 +174,7 @@ class DirectoryIndexResources:
                 _, path, accessed = heapq.heappop(retained)
                 try:
                     removed += self._delete_inactive(path, accessed)
-                except (OSError, apsw.Error):
+                except (OSError, sqlite3.Error):
                     continue
             self.cleanup_orphan_leases()
             self._next_cleanup_at = time.monotonic() + min(

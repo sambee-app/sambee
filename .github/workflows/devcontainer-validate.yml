@@ -68,8 +68,9 @@ jobs:
     - name: Report devcontainer runtime contract
       shell: bash
       run: |
-        docker run --rm --entrypoint sh sambee:devcontainer-validation -c '
+        docker run --rm --entrypoint sh -v "$PWD:/workspace:ro" -e PYTHONPATH=/workspace/backend sambee:devcontainer-validation -c '
           python --version
           python -c "import sqlite3; print(\"sqlite3 module: \" + sqlite3.sqlite_version)"
+          python -c "from app.services.directory_index import validate_sqlite_runtime; validate_sqlite_runtime(); print(\"Directory-index SQLite features verified\")"
           dpkg-query -W -f="\${Package} \${Version}\\n" libsqlite3-0
         '

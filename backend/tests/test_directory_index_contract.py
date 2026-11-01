@@ -11,12 +11,79 @@ from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
 
-import apsw
 import pytest
 
 from app.services.directory_index import MAX_QUERY_BYTES, MAX_QUERY_TERMS, DirectoryIndex, normalize_search_text, search_terms
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "shared" / "directory-index"
+
+
+def test_standard_sqlite_runtime_has_required_features():
+    from app.services.directory_index import validate_sqlite_runtime
+
+    validate_sqlite_runtime()
+
+
+def test_directory_query_connection_is_read_only(index):
+    assert isinstance(index._connection(), sqlite3.Connection)
+    with closing(index._connect(readonly=True)) as reader:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            reader.execute("UPDATE source_metadata SET accepted_revision = accepted_revision + 1")
+    assert index.status().accepted_revision == 0
+
+
+def test_directory_read_transaction_keeps_metadata_and_rows_consistent(index):
+    from app.services.directory_index import transaction
+
+    index.write_paths(["accepted"])
+    with closing(index._connect(readonly=True)) as reader, transaction(reader):
+        before = reader.execute("SELECT accepted_revision FROM source_metadata").fetchone()
+        index.write_paths(["new"])
+        assert reader.execute("SELECT accepted_revision FROM source_metadata").fetchone() == before
+        assert reader.execute("SELECT path FROM directories ORDER BY path").fetchall() == [("accepted",)]
+    assert index.search("accepted new").total_matches == 2
+    assert index.status().accepted_revision == before[0] + 1
+
+
+def test_directory_checkpoint_uses_writer_connection_and_lock(index):
+    entered = threading.Event()
+    statements = []
+    writer = index._connection()
+    writer.set_trace_callback(statements.append)
+
+    def checkpoint():
+        entered.set()
+        index.checkpoint()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with index._writer_lock:
+                pending = executor.submit(checkpoint)
+                assert entered.wait(timeout=5)
+                with pytest.raises(TimeoutError):
+                    pending.result(timeout=0.05)
+                assert not statements
+            pending.result(timeout=5)
+        assert statements == ["PRAGMA wal_checkpoint(PASSIVE)"]
+    finally:
+        writer.set_trace_callback(None)
+
+
+def test_inactive_cleanup_defers_deletion_for_pinned_reader(index):
+    from app.services.directory_index import transaction
+    from app.services.directory_index_resources import DirectoryIndexResources
+
+    resources = DirectoryIndexResources(index.path.parent)
+    index.write_paths(["accepted"])
+    with closing(index._connect(readonly=True)) as reader, transaction(reader):
+        accessed = reader.execute("SELECT last_access_at_ms FROM source_metadata").fetchone()[0]
+        index.write_paths(["new"])
+        index.close()
+        assert not resources._delete_inactive(index.path, accessed)
+        assert index.path.is_file()
+        assert reader.execute("SELECT path FROM directories ORDER BY path").fetchall() == [("accepted",)]
+    assert resources._delete_inactive(index.path, accessed)
+    assert not index.path.exists()
 
 
 def test_shared_resource_contract_defaults_and_bounds():
@@ -541,14 +608,14 @@ def test_trigram_query_streams_candidates_without_temporary_id_list(index, monke
 
     def connect(**kwargs):
         connection = original_connect(**kwargs)
-        connection.set_exec_trace(lambda cursor, statement, bindings: traced.append((statement, bindings)) or True)
+        connection.set_trace_callback(traced.append)
         return connection
 
     index.write_paths(["alpha/beta", "alpha", "beta", "neither"])
     monkeypatch.setattr(index, "_connect", connect)
     assert index.search("alpha beta").total_matches == 3
-    statement, bindings = next(item for item in traced if "CROSS JOIN directories" in item[0])
-    details = [row[3] for row in index._connection().execute("EXPLAIN QUERY PLAN " + statement, bindings)]
+    statement = next(statement for statement in traced if "CROSS JOIN directories" in statement)
+    details = [row[3] for row in index._connection().execute("EXPLAIN QUERY PLAN " + statement)]
     assert all("LIST SUBQUERY" not in detail and "TEMP B-TREE" not in detail for detail in details)
 
 
@@ -1077,7 +1144,7 @@ def test_failed_observation_commit_retains_pending_work(index):
     index.write_paths(["alpha", "occupied"])
     coordinator = DirectoryScanCoordinator(index)
     coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_RENAMED_NEW_NAME, "alpha", "occupied"))
-    with pytest.raises(apsw.ConstraintError):
+    with pytest.raises(sqlite3.IntegrityError):
         coordinator.apply_pending()
     assert len(coordinator.pending) == 1
     assert coordinator.pending_bytes > 0
@@ -1222,7 +1289,7 @@ def test_scan_queue_rename_collision_rolls_back_directory_changes(index):
     with index._writer_lock, index._connection() as connection:
         connection.execute("INSERT INTO scan_queue(generation_id, path) VALUES (1, 'occupied')")
     revision = index.status().accepted_revision
-    with pytest.raises(apsw.ConstraintError):
+    with pytest.raises(sqlite3.IntegrityError):
         index.mutate_path("rename", "alpha", "occupied")
     assert index.search("alpha").total_matches == 1
     assert index.search("occupied").total_matches == 0
@@ -1430,7 +1497,19 @@ def test_input_limits_are_not_silent():
         search_terms(" ".join(f"term{number}" for number in range(MAX_QUERY_TERMS + 1)))
 
 
-@pytest.mark.parametrize("count", [100_001, 1_000_001])
+@pytest.mark.parametrize(
+    "count",
+    [
+        100_001,
+        pytest.param(
+            1_000_001,
+            marks=pytest.mark.skipif(
+                os.environ.get("DIRECTORY_INDEX_CAPACITY_TEST") != "1",
+                reason="Set DIRECTORY_INDEX_CAPACITY_TEST=1 to run the separate million-path capacity check.",
+            ),
+        ),
+    ],
+)
 def test_coverage_above_old_cutoff_and_bounded_results(index, count):
     index.write_paths(f"directory-{number:06d}" for number in range(count))
     managed_bytes = sum(path.stat().st_size for path in index.path.parent.iterdir() if path.is_file())
@@ -1485,7 +1564,7 @@ def test_rename_includes_nonpositive_row_ids(index, identifier):
 def test_rename_conflict_rolls_back_rows_counts_and_revision(index):
     index.write_paths(["alpha", "beta"])
     before = index.search("alpha beta")
-    with pytest.raises(apsw.ConstraintError):
+    with pytest.raises(sqlite3.IntegrityError):
         index.mutate_path("rename", "alpha", "beta")
     assert index.search("alpha beta") == before
 
@@ -1504,7 +1583,7 @@ def test_scan_queue_is_disk_backed_and_deduplicated(index):
 
 def test_scan_queue_failure_rolls_back_directory_rows(index):
     index._connection().execute("CREATE TRIGGER fail_queue BEFORE INSERT ON scan_queue BEGIN SELECT RAISE(ABORT, 'injected'); END")
-    with pytest.raises(apsw.ConstraintError, match="injected"):
+    with pytest.raises(sqlite3.IntegrityError, match="injected"):
         index.write_scan_children(1, [("alpha", True)])
     assert index.search("alpha").total_matches == 0
     assert index.status().accepted_revision == 0

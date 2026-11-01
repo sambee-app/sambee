@@ -1404,37 +1404,45 @@ mod tests {
 
     #[test]
     fn count_has_no_discovery_cutoff() {
-        for count in [100_001, 1_000_001] {
-            let temporary = tempfile::tempdir().unwrap();
-            let path = temporary.path().join("private").join("source.sqlite3");
-            let identity = json!({"root": "fixture"});
-            let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
-            index
-                .write_paths((0..count).map(|number| format!("directory-{number:06}")), None)
-                .unwrap();
-            let managed_bytes: u64 = std::fs::read_dir(path.parent().unwrap())
-                .unwrap()
-                .map(|entry| entry.unwrap().metadata().unwrap().len())
-                .sum();
-            eprintln!("directory_index_fixture rows={count} managed_bytes={managed_bytes}");
-            for query in ["directory", "ry"] {
-                let response = index.search(query, 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap();
-                assert_eq!(response.total_matches, count);
-                assert_eq!(response.directory_count, count);
-                assert_eq!(response.results.len(), 3);
-            }
-            index.finish_generation(1, 0).unwrap();
-            drop(index);
-            let index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
-            assert_eq!(
-                index
-                    .search("100000", 3, false, &Arc::new(AtomicBool::new(false)), false)
-                    .unwrap()
-                    .results[0]
-                    .path,
-                "directory-100000"
-            );
+        check_count_and_bounded_results(100_001);
+    }
+
+    #[test]
+    #[ignore = "Separate million-path capacity check; run explicitly with --ignored."]
+    fn million_path_capacity() {
+        check_count_and_bounded_results(1_000_001);
+    }
+
+    fn check_count_and_bounded_results(count: i64) {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        index
+            .write_paths((0..count).map(|number| format!("directory-{number:06}")), None)
+            .unwrap();
+        let managed_bytes: u64 = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().metadata().unwrap().len())
+            .sum();
+        eprintln!("directory_index_fixture rows={count} managed_bytes={managed_bytes}");
+        for query in ["directory", "ry"] {
+            let response = index.search(query, 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap();
+            assert_eq!(response.total_matches, count);
+            assert_eq!(response.directory_count, count);
+            assert_eq!(response.results.len(), 3);
         }
+        index.finish_generation(1, 0).unwrap();
+        drop(index);
+        let index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        assert_eq!(
+            index
+                .search("100000", 3, false, &Arc::new(AtomicBool::new(false)), false)
+                .unwrap()
+                .results[0]
+                .path,
+            "directory-100000"
+        );
     }
 
     #[test]

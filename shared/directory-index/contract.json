@@ -18,7 +18,7 @@
     "idle_release_seconds": 600,
     "max_pending_observations": 1024,
     "max_observation_bytes": 1048576,
-    "minimum_sqlite_version_number": 3051003,
+    "minimum_sqlite_version_number": 3037000,
     "write_headroom_bytes": 33554432,
     "maintenance_page_batch": 256,
     "checkpoint_wal_bytes": 1048576,
