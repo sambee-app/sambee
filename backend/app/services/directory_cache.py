@@ -1686,6 +1686,12 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 return
             self._reclamation_pending = not self.index.reclaim_pages()
 
+    def _checkpoint_work(self) -> None:
+        with self.coordinator.lock:
+            if self._stop_event.is_set() or self.coordinator.pending or self.index.has_active_queries or self._scan_running.is_set():
+                return
+            self.index.checkpoint_if_due()
+
     def _repair_fts_work(self) -> None:
         while not self._manager_scan_slots.acquire(timeout=WORKER_POLL_SECONDS):
             if self._stop_event.is_set():
@@ -2124,7 +2130,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     if self._reclamation_pending:
                         await self._blocking(self._reclaim_disk_work)
                     if not self._scan_running.is_set():
-                        await self._blocking(self.index.checkpoint_if_due)
+                        await self._blocking(self._checkpoint_work)
                 if self._verification_due(verified_at):
                     await self._run_rescan()
                     verified_at = time.monotonic()

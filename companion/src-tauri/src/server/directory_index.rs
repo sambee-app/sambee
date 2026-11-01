@@ -527,6 +527,20 @@ impl DirectoryIndex {
         Ok(())
     }
 
+    fn require_reconciliation_parent(transaction: &rusqlite::Transaction<'_>, generation_id: i64, parent: &str) -> Result<(), IndexError> {
+        let pending: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM generations g JOIN source_metadata m ON m.selected_generation = g.id JOIN scan_queue q ON q.generation_id = g.id WHERE g.id = ? AND g.state = 'accepted' AND q.path = ? AND q.processed = 0)",
+            params![generation_id, parent],
+            |row| row.get(0),
+        )?;
+        if !pending {
+            return Err(IndexError::Invalid(
+                "Reconciliation parent is not pending on the selected generation. Request source verification.",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn seed_scan(&mut self, generation_id: i64) -> Result<(), IndexError> {
         let transaction = self.writer.transaction()?;
         Self::require_scan_generation(&transaction, generation_id)?;
@@ -554,19 +568,107 @@ impl DirectoryIndex {
         generation_id: i64,
         children: impl IntoIterator<Item = (String, bool)>,
     ) -> Result<(), IndexError> {
+        self.write_children(generation_id, children, None)
+    }
+
+    pub fn queue_reconciliation_parent(&mut self, generation_id: i64, parent: &str) -> Result<(), IndexError> {
+        if !parent.is_empty() {
+            validate_directory_path(parent)?;
+        }
+        let transaction = self.writer.transaction()?;
+        let accepted: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.id = ? AND g.state = 'accepted')",
+            [generation_id],
+            |row| row.get(0),
+        )?;
+        if !accepted {
+            return Err(IndexError::Invalid(
+                "Reconciliation generation is no longer selected. Request source verification.",
+            ));
+        }
+        transaction.execute(
+            "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
+            params![generation_id, parent],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn finish_reconciliation_parent(&mut self, generation_id: i64, parent: &str) -> Result<(), IndexError> {
+        let transaction = self.writer.transaction()?;
+        Self::require_reconciliation_parent(&transaction, generation_id, parent)?;
+        transaction.execute(
+            "UPDATE scan_queue SET processed = 1 WHERE generation_id = ? AND path = ?",
+            params![generation_id, parent],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn write_reconciliation_children(
+        &mut self,
+        generation_id: i64,
+        parent: &str,
+        children: impl IntoIterator<Item = (String, bool)>,
+    ) -> Result<(), IndexError> {
+        if !parent.is_empty() {
+            validate_directory_path(parent)?;
+        }
+        self.write_children(generation_id, children, Some(parent))
+    }
+
+    fn write_children(
+        &mut self,
+        generation_id: i64,
+        children: impl IntoIterator<Item = (String, bool)>,
+        reconciliation_parent: Option<&str>,
+    ) -> Result<(), IndexError> {
         self.require_fts()?;
-        let batch: Vec<_> = children.into_iter().take(ROW_BATCH_SIZE + 1).collect();
+        let mut batch = Vec::new();
+        let mut batch_bytes = 0;
+        for child in children.into_iter().take(ROW_BATCH_SIZE + 1) {
+            if reconciliation_parent.is_some() {
+                if child.0.len() > SCAN_BATCH_BYTES - batch_bytes {
+                    return Err(IndexError::Invalid(
+                        "Reconciliation children exceed the scan-batch byte limit. Split them into bounded batches.",
+                    ));
+                }
+                batch_bytes += child.0.len();
+            }
+            batch.push(child);
+        }
         if batch.len() > ROW_BATCH_SIZE {
             return Err(IndexError::Invalid(
                 "Scan children exceed the batch limit. Split them into bounded batches.",
             ));
         }
         let transaction = self.writer.transaction()?;
-        Self::require_scan_generation(&transaction, generation_id)?;
+        let prefix = if let Some(parent) = reconciliation_parent {
+            Self::require_reconciliation_parent(&transaction, generation_id, parent)?;
+            if parent.is_empty() {
+                String::new()
+            } else {
+                format!("{parent}/")
+            }
+        } else {
+            Self::require_scan_generation(&transaction, generation_id)?;
+            String::new()
+        };
+        let mut changed = false;
         for (path, descend) in batch {
             validate_directory_path(&path)?;
-            transaction.execute("INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING", params![generation_id, path, normalize_search_text(&path), normalize_search_text(path.rsplit('/').next().unwrap_or(&path)), checked_sql_size(path.bytes().filter(|byte| *byte == b'/').count())?, path.split('/').any(|part| part.starts_with('.'))])?;
-            if descend {
+            if reconciliation_parent.is_some()
+                && !path
+                    .strip_prefix(&prefix)
+                    .is_some_and(|child| !child.is_empty() && !child.contains('/'))
+            {
+                return Err(IndexError::Invalid(
+                    "Reconciliation child is outside its immediate parent. Request source verification.",
+                ));
+            }
+            let inserted = transaction.execute("INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING", params![generation_id, path, normalize_search_text(&path), normalize_search_text(path.rsplit('/').next().unwrap_or(&path)), checked_sql_size(path.bytes().filter(|byte| *byte == b'/').count())?, path.split('/').any(|part| part.starts_with('.'))])?;
+            changed |= inserted != 0;
+            if descend && (reconciliation_parent.is_none() || inserted != 0) {
                 transaction.execute(
                     "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT DO NOTHING",
                     params![generation_id, path],
@@ -574,7 +676,7 @@ impl DirectoryIndex {
             }
         }
         let selected: i64 = transaction.query_row("SELECT selected_generation FROM source_metadata WHERE id = 1", [], |row| row.get(0))?;
-        if generation_id == selected {
+        if generation_id == selected && (reconciliation_parent.is_none() || changed) {
             Self::advance_revision(&transaction)?;
         }
         transaction.commit()?;
@@ -1859,6 +1961,167 @@ mod tests {
             1
         );
         index.discard_generation(candidate).unwrap();
+    }
+
+    #[test]
+    fn accepted_parent_reconciliation_queues_only_new_subtrees() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let source = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &source).unwrap();
+        index.write_paths(["parent".into(), "parent/existing".into()], None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("parent", 3, false, &cancelled, false).unwrap();
+        assert!(index.write_scan_children(1, [("parent/unowned".into(), false)]).is_err());
+        assert!(index
+            .write_reconciliation_children(1, "parent", [("parent/unowned".into(), false)])
+            .is_err());
+        index.queue_reconciliation_parent(1, "parent").unwrap();
+        assert_eq!(index.search("parent", 3, false, &cancelled, false).unwrap(), before);
+        drop(index);
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &source).unwrap();
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["parent"]);
+        index
+            .write_reconciliation_children(1, "parent", [("parent/existing".into(), true), ("parent/new".into(), true)])
+            .unwrap();
+        let after = index.search("parent", 3, false, &cancelled, false).unwrap();
+        assert_eq!(after.directory_count, 3);
+        assert_eq!(after.accepted_revision, before.accepted_revision + 1);
+        assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["parent", "parent/new"]);
+        index
+            .write_reconciliation_children(1, "parent", [("parent/existing".into(), true), ("parent/new".into(), true)])
+            .unwrap();
+        assert_eq!(index.search("parent", 3, false, &cancelled, false).unwrap(), after);
+        index
+            .write_reconciliation_children(1, "parent/new", [("parent/new/child".into(), false)])
+            .unwrap();
+        index.finish_reconciliation_parent(1, "parent/new").unwrap();
+        index.finish_reconciliation_parent(1, "parent").unwrap();
+        index.queue_reconciliation_parent(1, "parent").unwrap();
+        let before_repeat = index.search("parent", 3, false, &cancelled, false).unwrap();
+        index
+            .write_reconciliation_children(1, "parent", [("parent/new".into(), true)])
+            .unwrap();
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["parent"]);
+        assert_eq!(index.search("parent", 3, false, &cancelled, false).unwrap(), before_repeat);
+        assert_eq!(before_repeat.directory_count, 4);
+        assert_eq!(before_repeat.last_verified_at_ms, before.last_verified_at_ms);
+    }
+
+    #[test]
+    fn accepted_parent_reconciliation_rejects_stale_and_unrelated_work() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        assert!(index.queue_reconciliation_parent(1, "").is_err());
+        index.write_paths(["parent".into()], None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        index.queue_reconciliation_parent(1, "parent").unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("parent other", 3, false, &cancelled, false).unwrap();
+        for invalid in ["other/child", "parent", "parent/deep/child"] {
+            assert!(index
+                .write_reconciliation_children(1, "parent", [("parent/safe".into(), false), (invalid.into(), false)])
+                .is_err());
+            assert_eq!(index.search("parent other", 3, false, &cancelled, false).unwrap(), before);
+        }
+        assert!(index
+            .write_reconciliation_children(1, "parent", (0..=ROW_BATCH_SIZE).map(|number| (format!("parent/{number}"), false)))
+            .is_err());
+        assert_eq!(index.search("parent other", 3, false, &cancelled, false).unwrap(), before);
+        index.finish_reconciliation_parent(1, "parent").unwrap();
+        assert!(index.finish_reconciliation_parent(1, "parent").is_err());
+        assert!(index
+            .write_reconciliation_children(1, "parent", [("parent/late".into(), false)])
+            .is_err());
+        index.queue_reconciliation_parent(1, "parent").unwrap();
+        let candidate = index.begin_verification().unwrap();
+        assert!(index.queue_reconciliation_parent(candidate, "parent").is_err());
+        assert!(index
+            .write_reconciliation_children(candidate, "parent", [("parent/late".into(), false)])
+            .is_err());
+        assert!(index.finish_reconciliation_parent(candidate, "parent").is_err());
+        index.write_paths(["replacement".into()], Some(candidate)).unwrap();
+        assert!(index.finish_generation(candidate, 0).unwrap());
+        let selected = index.search("replacement parent", 3, false, &cancelled, false).unwrap();
+        for generation in [1, i64::MAX] {
+            assert!(index.queue_reconciliation_parent(generation, "parent").is_err());
+            assert!(index
+                .write_reconciliation_children(generation, "parent", [("parent/late".into(), false)])
+                .is_err());
+            assert!(index.finish_reconciliation_parent(generation, "parent").is_err());
+            assert_eq!(index.search("replacement parent", 3, false, &cancelled, false).unwrap(), selected);
+        }
+    }
+
+    #[test]
+    fn accepted_parent_reconciliation_bounds_bytes_and_root_children() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index.write_paths(["existing".into()], None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        index.queue_reconciliation_parent(1, "").unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("existing root", 3, false, &cancelled, false).unwrap();
+        let mut consumed = 0;
+        let children = [
+            "a".repeat(SCAN_BATCH_BYTES / 2),
+            "b".repeat(SCAN_BATCH_BYTES / 2 + 1),
+            "not-consumed".into(),
+        ];
+        assert!(index
+            .write_reconciliation_children(
+                1,
+                "",
+                children.into_iter().map(|path| {
+                    consumed += 1;
+                    (path, true)
+                })
+            )
+            .is_err());
+        assert_eq!(consumed, 2);
+        assert_eq!(index.search("existing root", 3, false, &cancelled, false).unwrap(), before);
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec![""]);
+        assert!(index
+            .write_reconciliation_children(1, "", [("root-child".into(), true), ("nested/child".into(), false)])
+            .is_err());
+        assert_eq!(index.search("existing root", 3, false, &cancelled, false).unwrap(), before);
+        index.write_reconciliation_children(1, "", [("root-child".into(), true)]).unwrap();
+        index.finish_reconciliation_parent(1, "").unwrap();
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["root-child"]);
+        let after = index.search("existing root", 3, false, &cancelled, false).unwrap();
+        assert_eq!(after.directory_count, 2);
+        assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+    }
+
+    #[test]
+    fn failed_accepted_parent_reconciliation_rolls_back_rows_and_work() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index.write_paths(["parent".into()], None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        index.queue_reconciliation_parent(1, "parent").unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("parent", 3, false, &cancelled, false).unwrap();
+        for trigger in [
+            "CREATE TRIGGER reject_reconciliation BEFORE INSERT ON scan_queue WHEN NEW.path = 'parent/abort' BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+            "CREATE TRIGGER reject_reconciliation BEFORE UPDATE ON source_metadata BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+        ] {
+            index.writer.execute_batch(trigger).unwrap();
+            assert!(index.write_reconciliation_children(1, "parent", [("parent/abort".into(), true)]).is_err());
+            assert_eq!(index.search("parent", 3, false, &cancelled, false).unwrap(), before);
+            assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["parent"]);
+            index.writer.execute_batch("DROP TRIGGER reject_reconciliation").unwrap();
+        }
+        index
+            .write_reconciliation_children(1, "parent", [("parent/abort".into(), true)])
+            .unwrap();
+        assert_eq!(index.search("parent", 3, false, &cancelled, false).unwrap().directory_count, 2);
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["parent", "parent/abort"]);
     }
 
     #[test]

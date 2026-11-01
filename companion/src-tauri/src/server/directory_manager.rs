@@ -2449,42 +2449,121 @@ mod tests {
 
     #[test]
     fn blocked_observation_read_keeps_ownership_through_overflow() {
-        let temporary = tempfile::tempdir().unwrap();
-        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
-        source.busy.store(true, Ordering::Release);
-        let semaphore = Arc::new(Semaphore::new(1));
-        let ownership = ScanOwnership {
-            source: Arc::clone(&source),
-            _permit: Arc::clone(&semaphore).try_acquire_owned().unwrap(),
-        };
-        let read = source.begin_read().unwrap();
-        let token = read.token;
-        let (release, blocked) = std::sync::mpsc::channel::<()>();
-        let worker = std::thread::spawn(move || {
-            let _ownership = ownership;
-            let _read = read;
-            blocked.recv().unwrap();
-        });
-        {
-            let mut observations = lock(&source.observations).unwrap();
-            observations
-                .enqueue(DirectoryMutation::Add { path: "accepted".into() }, 1, 64)
-                .unwrap();
-            assert!(!observations
-                .enqueue(DirectoryMutation::Remove { path: "deleted".into() }, 1, 64)
+        for (maximum_pending, maximum_bytes, drain_first) in [(1, 64, false), (4, 14, false), (1, 64, true), (4, 14, true)] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root_path = temporary.path().join("root");
+            std::fs::create_dir(&root_path).unwrap();
+            let namespace = temporary.path().join("private");
+            let source = LocalSource::new(root_path, &namespace);
+            let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+            index.write_paths(["accepted".into()], None).unwrap();
+            assert!(index.finish_generation(1, 0).unwrap());
+            let candidate = index.begin_verification().unwrap();
+            index.write_paths(["candidate".into()], Some(candidate)).unwrap();
+            let reader = index.reader();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = reader.search("accepted candidate stale", 3, false, &cancelled, false).unwrap();
+            *lock(&source.writer).unwrap() = Some(index);
+            let budget = Arc::new(DiskBudget {
+                namespace,
+                policy_gate: Mutex::new(()),
+                state: Mutex::new(DiskState {
+                    policy: DirectoryPolicy::defaults().unwrap(),
+                    reserved: 0,
+                    next_cleanup_at: Instant::now(),
+                }),
+                space_probe: available_disk_bytes,
+            });
+            source.busy.store(true, Ordering::Release);
+            let semaphore = Arc::new(Semaphore::new(1));
+            let ownership = ScanOwnership {
+                source: Arc::clone(&source),
+                _permit: Arc::clone(&semaphore).try_acquire_owned().unwrap(),
+            };
+            let read = source.begin_read().unwrap();
+            let token = read.token;
+            let (release, blocked) = std::sync::mpsc::channel::<()>();
+            let worker = std::thread::spawn(move || {
+                let _ownership = ownership;
+                let _read = read;
+                blocked.recv().unwrap();
+            });
+            assert!(lock(&source.observations)
+                .unwrap()
+                .enqueue(DirectoryMutation::Add { path: "accepted".into() }, maximum_pending, maximum_bytes)
                 .unwrap());
-            assert!(!observations.is_current(token, ""));
-            assert_eq!(observations.producers.len(), 1);
-            assert_eq!(observations.pending.len(), 1);
-            assert!(observations.verification_required);
+            if drain_first {
+                source.flush(&budget).unwrap();
+            }
+            {
+                let mut observations = lock(&source.observations).unwrap();
+                assert_eq!(
+                    observations
+                        .enqueue(
+                            DirectoryMutation::ReadParent { path: "deleted".into() },
+                            maximum_pending,
+                            maximum_bytes
+                        )
+                        .unwrap(),
+                    drain_first
+                );
+                assert_eq!(observations.epoch, 1);
+                assert!(observations.barriers.is_empty());
+                assert_eq!(observations.barrier_bytes, 0);
+                assert!(!observations.is_current(token, ""));
+                assert_eq!(observations.producers.len(), 1);
+                assert_eq!(observations.pending.len(), 1);
+                assert_eq!(observations.bytes, if drain_first { "deleted".len() } else { "accepted".len() });
+                assert!(!observations
+                    .enqueue(DirectoryMutation::Add { path: "overflow".into() }, maximum_pending, maximum_bytes)
+                    .unwrap());
+                assert_eq!(observations.epoch, 2);
+                assert_eq!(observations.pending.len(), 1);
+                assert_eq!(observations.bytes, if drain_first { "deleted".len() } else { "accepted".len() });
+                assert!(observations.verification_required);
+            }
+            source.flush(&budget).unwrap();
+            #[cfg(target_os = "linux")]
+            {
+                let root = NativeRoot::open(&source.root_path).unwrap();
+                let identity = root.parent_identity("").unwrap();
+                assert!(matches!(
+                    source.commit_children(
+                        &root,
+                        "",
+                        identity,
+                        ScanGeneration {
+                            id: candidate,
+                            read: token
+                        },
+                        &[("stale".into(), false)],
+                        &budget,
+                    ),
+                    Err(IndexError::Interrupted)
+                ));
+                assert!(matches!(
+                    source.accept_generation(&root, token, candidate, &budget),
+                    Err(IndexError::Interrupted)
+                ));
+            }
+            let response = reader.search("accepted candidate stale", 3, false, &cancelled, false).unwrap();
+            assert_eq!(response.total_matches, 1);
+            assert_eq!(response.directory_count, 1);
+            assert_eq!(response.results, before.results);
+            assert_eq!(response.coverage, "uncertain");
+            assert_eq!(response.issue_count, 1);
+            assert_eq!(response.last_verified_at_ms, before.last_verified_at_ms);
+            assert!(lock(&source.observations).unwrap().pending.is_empty());
+            assert_eq!(lock(&source.observations).unwrap().bytes, 0);
+            assert_eq!(semaphore.available_permits(), 0);
+            assert!(source.busy.load(Ordering::Acquire));
+            release.send(()).unwrap();
+            worker.join().unwrap();
+            assert!(lock(&source.observations).unwrap().producers.is_empty());
+            assert_eq!(semaphore.available_permits(), 1);
+            assert!(!source.busy.load(Ordering::Acquire));
+            assert!(lock(&source.observations).unwrap().verification_required);
         }
-        assert_eq!(semaphore.available_permits(), 0);
-        assert!(source.busy.load(Ordering::Acquire));
-        release.send(()).unwrap();
-        worker.join().unwrap();
-        assert!(lock(&source.observations).unwrap().producers.is_empty());
-        assert_eq!(semaphore.available_permits(), 1);
-        assert!(!source.busy.load(Ordering::Acquire));
     }
 
     #[cfg(target_os = "linux")]

@@ -286,6 +286,106 @@ def test_incremental_reclamation_preserves_results_and_verification(index):
     assert index.search("selected") == before
 
 
+@pytest.mark.asyncio
+async def test_update_loop_defers_checkpoint_until_foreground_mutations_drain(sqlite_cache, monkeypatch):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services import directory_cache
+    from app.services.directory_cache import _DirectoryMutation
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    for number in range(ROW_BATCH_SIZE + 1):
+        assert sqlite_cache.coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, f"foreground/{number}"))
+    ticks = 0
+    checkpoints = []
+
+    async def tick(_delay):
+        nonlocal ticks
+        ticks += 1
+        if ticks > 1:
+            raise asyncio.CancelledError
+
+    async def run(operation):
+        return operation()
+
+    monkeypatch.setattr(directory_cache, "asyncio", SimpleNamespace(sleep=tick, CancelledError=asyncio.CancelledError))
+    monkeypatch.setattr(sqlite_cache, "_blocking", run)
+    monkeypatch.setattr(sqlite_cache, "_verification_due", lambda _verified_at: False)
+    monkeypatch.setattr(sqlite_cache.index, "checkpoint_if_due", lambda: checkpoints.append(len(sqlite_cache.coordinator.pending)))
+    await sqlite_cache._periodic_rescan_loop()
+    assert len(sqlite_cache.coordinator.pending) == 1
+    assert not checkpoints
+    ticks = 0
+    await sqlite_cache._periodic_rescan_loop()
+    assert not sqlite_cache.coordinator.pending
+    assert checkpoints == [0]
+    assert sqlite_cache.index.search("foreground").total_matches == ROW_BATCH_SIZE + 1
+
+
+@pytest.mark.parametrize("blocker", ["mutation", "query", "scan", "stop"])
+def test_checkpoint_worker_defers_for_foreground_ownership(sqlite_cache, monkeypatch, blocker):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import _DirectoryMutation
+
+    calls = []
+    monkeypatch.setattr(sqlite_cache.index, "checkpoint_if_due", lambda: calls.append(True))
+    if blocker == "mutation":
+        assert sqlite_cache.coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "foreground"))
+    elif blocker == "query":
+        monkeypatch.setattr(sqlite_cache.index, "_active_queries", 1)
+    elif blocker == "scan":
+        sqlite_cache._scan_running.set()
+    else:
+        sqlite_cache._stop_event.set()
+    sqlite_cache._checkpoint_work()
+    assert not calls
+    if blocker == "mutation":
+        sqlite_cache.coordinator.apply_pending()
+    elif blocker == "query":
+        monkeypatch.setattr(sqlite_cache.index, "_active_queries", 0)
+    elif blocker == "scan":
+        sqlite_cache._scan_running.clear()
+    else:
+        sqlite_cache._stop_event.clear()
+    sqlite_cache._checkpoint_work()
+    assert calls == [True]
+
+
+def test_checkpoint_worker_retries_pinned_reader_and_refused_headroom(sqlite_cache, monkeypatch):
+    from app.services.directory_index import CHECKPOINT_WAL_BYTES, ROW_BATCH_SIZE
+    from app.services.directory_index_resources import DirectoryDiskBudgetError
+
+    index = sqlite_cache.index
+    index._connection().execute("PRAGMA wal_autocheckpoint = 0")
+    index.write_paths(["accepted"])
+    assert index.finish_generation(1)
+    with closing(index._connect(readonly=True)) as reader:
+        reader.execute("BEGIN")
+        reader.execute("SELECT count(*) FROM directories").fetchone()
+        index.write_paths(f"match/{number}/{'long-name-' * 100}" for number in range(ROW_BATCH_SIZE * 4))
+        before = index.search("match accepted")
+        wal = Path(str(index.path) + "-wal")
+        assert wal.stat().st_size >= CHECKPOINT_WAL_BYTES
+        sqlite_cache._checkpoint_work()
+        assert wal.stat().st_size >= CHECKPOINT_WAL_BYTES
+        assert index.search("match accepted") == before
+        reader.execute("ROLLBACK")
+
+    def denied():
+        raise DirectoryDiskBudgetError("Injected checkpoint headroom refusal.")
+
+    with monkeypatch.context() as refusal:
+        refusal.setattr(index, "growth_guard", denied)
+        with pytest.raises(DirectoryDiskBudgetError, match="checkpoint headroom"):
+            sqlite_cache._checkpoint_work()
+        assert wal.stat().st_size >= CHECKPOINT_WAL_BYTES
+        assert index.search("match accepted") == before
+    sqlite_cache._checkpoint_work()
+    assert wal.stat().st_size == 0
+    assert index.search("match accepted") == before
+
+
 def test_small_wal_does_not_request_checkpoint_admission(index, monkeypatch):
     def unexpected_admission():
         raise AssertionError("A small WAL must not request maintenance admission.")
@@ -793,14 +893,27 @@ def test_invalidated_root_probe_cannot_restore_availability(sqlite_cache, monkey
     assert not sqlite_cache._source_available.is_set()
 
 
-def test_blocked_root_read_retains_producer_and_permit_after_overflow(sqlite_cache, monkeypatch):
+@pytest.mark.parametrize(
+    ("maximum_pending", "maximum_bytes", "drain_first"),
+    [(1, 64, False), (4, 14, False), (1, 64, True), (4, 14, True)],
+    ids=["queue-entries", "queue-bytes", "barrier-entries", "barrier-bytes"],
+)
+def test_blocked_root_read_retains_producer_and_permit_after_overflow(
+    sqlite_cache, monkeypatch, maximum_pending, maximum_bytes, drain_first
+):
     import threading
 
     from smbprotocol.change_notify import FileAction
 
     from app.services.directory_cache import DirectoryScanCoordinator, ScanObservationInvalidated, _DirectoryMutation
 
-    sqlite_cache.coordinator = DirectoryScanCoordinator(sqlite_cache.index, maximum_pending=1)
+    sqlite_cache.index.write_paths(["accepted"])
+    assert sqlite_cache.index.finish_generation(1)
+    verified = sqlite_cache.index.status().last_verified_at_ms
+    candidate = sqlite_cache.index.begin_verification()
+    sqlite_cache.index.write_paths(["candidate"], generation_id=candidate)
+    before = sqlite_cache.index.search("accepted candidate stale")
+    sqlite_cache.coordinator = DirectoryScanCoordinator(sqlite_cache.index, maximum_pending=maximum_pending, maximum_bytes=maximum_bytes)
     sqlite_cache._source_available.clear()
     entered = threading.Event()
     release = threading.Event()
@@ -824,16 +937,38 @@ def test_blocked_root_read_retains_producer_and_permit_after_overflow(sqlite_cac
     try:
         assert entered.wait(timeout=5)
         coordinator = sqlite_cache.coordinator
+        token = next(iter(coordinator._producers.values()))
         assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "accepted"))
-        coordinator.apply_pending()
-        assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "deleted"))
-        coordinator.apply_pending()
+        if drain_first:
+            coordinator.apply_pending()
+        assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "deleted")) == drain_first
         assert coordinator.epoch == 1
         assert not coordinator.barriers
+        assert coordinator.barrier_bytes == 0
+        assert len(coordinator.pending) == 1
+        assert coordinator.pending_bytes == len("deleted" if drain_first else "accepted")
+        assert not coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "overflow"))
+        assert coordinator.epoch == 2
+        assert len(coordinator.pending) == 1
+        assert coordinator.pending_bytes == len("deleted" if drain_first else "accepted")
         assert len(coordinator._producers) == 1
         assert coordinator.verification_required
         assert not sqlite_cache._manager_scan_slots.acquire(blocking=False)
-        assert sqlite_cache.index.search("accepted").total_matches == 1
+        with pytest.raises(ScanObservationInvalidated):
+            coordinator.commit_children(token, candidate, [("stale", False)])
+        with pytest.raises(ScanObservationInvalidated):
+            coordinator.finish_parent(token, candidate)
+        with pytest.raises(ScanObservationInvalidated):
+            coordinator.accept_generation(token, candidate)
+        assert coordinator.apply_pending() == 1
+        assert not coordinator.pending
+        assert coordinator.pending_bytes == 0
+        response = sqlite_cache.index.search("accepted candidate stale")
+        assert response.total_matches == response.directory_count == 1
+        assert response.results == before.results
+        assert response.coverage == "uncertain"
+        assert response.issue_count == 1
+        assert response.last_verified_at_ms == verified
     finally:
         release.set()
         worker.join(timeout=5)
