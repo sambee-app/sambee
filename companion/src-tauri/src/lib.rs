@@ -14,6 +14,8 @@ mod sync;
 mod token;
 mod uri;
 
+pub use server::directory_index;
+
 use log::{debug, error, info, warn};
 use std::sync::{Arc, RwLock};
 use tauri::{

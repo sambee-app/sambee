@@ -84,6 +84,7 @@ describe("getDirectoryResultPresentation", () => {
       { kind: "result", value: "recent-directory:recent-other-connection" },
     ]);
     expect(emptyResults[1]).toMatchObject({
+      icon: "recent-directory",
       primaryText: "…/Reports",
       secondaryText: "Documents server:/Documents/",
     });
@@ -98,6 +99,9 @@ describe("getDirectoryResultPresentation", () => {
       { kind: "result", value: "recent-directory:recent-other-connection" },
       { kind: "result", value: "directory:Documents/Reference" },
     ]);
+    expect(results[0]).toMatchObject({ icon: "recent-directory" });
+    expect(results[1]).toMatchObject({ icon: "recent-directory" });
+    expect(results[2]).toMatchObject({ icon: "directory" });
 
     result.current.onSelect("recent-directory:recent-other-connection");
     expect(onNavigateDirectory).toHaveBeenCalledWith("connection-2", "Projects/2026", "recent-other-connection");
@@ -167,10 +171,91 @@ describe("getDirectoryResultPresentation", () => {
     await expect(result.current.fetchResults("re", controller.signal)).resolves.toEqual([]);
   });
 
-  it("propagates a recent-directory search failure to the shared Quick Bar error UI", async () => {
+  it("propagates complete source failure to the shared Quick Bar error UI", async () => {
     vi.mocked(api.searchRecentDirectories).mockRejectedValue(new Error("Network error"));
+    vi.mocked(api.searchDirectories).mockRejectedValue(new Error("Index error"));
     const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
 
-    await expect(result.current.fetchResults("reports", new AbortController().signal)).rejects.toThrow("Network error");
+    await act(async () => {
+      await expect(result.current.fetchResults("reports", new AbortController().signal)).rejects.toThrow("Network error");
+    });
+  });
+
+  it("publishes selectable history before a deferred index response", async () => {
+    const onNavigateDirectory = vi.fn();
+    const onUpdate = vi.fn();
+    let finishIndex: ((response: Awaited<ReturnType<typeof api.searchDirectories>>) => void) | undefined;
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({
+      result_limit: 10,
+      results: [{ id: "recent", connection_id: "connection-1", path: "Reports", last_visited_at: "2026-01-01T00:00:00Z" }],
+    });
+    vi.mocked(api.searchDirectories).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishIndex = resolve;
+        })
+    );
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn(), { onNavigateDirectory }), { wrapper });
+    let request: ReturnType<typeof result.current.fetchResults> | undefined;
+    await act(async () => {
+      request = result.current.fetchResults("reports", new AbortController().signal, onUpdate);
+      await Promise.resolve();
+    });
+    expect(onUpdate).toHaveBeenCalledWith([expect.objectContaining({ value: "recent-directory:recent", icon: "recent-directory" })]);
+    result.current.onSelect("recent-directory:recent");
+    expect(onNavigateDirectory).toHaveBeenCalledWith("connection-1", "Reports", "recent");
+    await act(async () => {
+      finishIndex?.({ results: ["Reports", "Other Reports"], cache_state: "ready", total_matches: 2, directory_count: 100_001 });
+      await request;
+    });
+    expect(onUpdate.mock.lastCall?.[0]).toHaveLength(2);
+    expect(onUpdate.mock.lastCall?.[0][0]).toMatchObject({ icon: "recent-directory" });
+  });
+
+  it("keeps history when index search fails and stops the status spinner", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({
+      result_limit: 10,
+      results: [{ id: "recent", connection_id: "connection-1", path: "Reports", last_visited_at: "2026-01-01T00:00:00Z" }],
+    });
+    vi.mocked(api.searchDirectories).mockRejectedValue(new Error("Index unavailable"));
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    await act(async () => {
+      const rows = await result.current.fetchResults("reports", new AbortController().signal);
+      expect(rows).toEqual([expect.objectContaining({ value: "recent-directory:recent" })]);
+    });
+    expect(result.current.getStatusInfo()).toMatchObject({ showSpinner: false });
+    expect(result.current.getStatusInfo()?.label).toContain("Directory search is unavailable");
+  });
+
+  it("keeps index results when history search fails", async () => {
+    vi.mocked(api.searchRecentDirectories).mockRejectedValue(new Error("History unavailable"));
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: ["Reports"],
+      cache_state: "ready",
+      total_matches: 1,
+      directory_count: 1,
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    await act(async () => {
+      const rows = await result.current.fetchResults("reports", new AbortController().signal);
+      expect(rows).toEqual([expect.objectContaining({ value: "directory:Reports" })]);
+    });
+    expect(result.current.getStatusInfo()?.label).toContain("Recent directories are unavailable");
+  });
+
+  it("aborts activation on deactivation and unmount", async () => {
+    let signal: AbortSignal | undefined;
+    vi.mocked(api.searchDirectories).mockImplementation((_connection, _query, options) => {
+      signal = options?.signal;
+      return new Promise<never>(() => undefined);
+    });
+    const { result, unmount } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    result.current.onActivate?.();
+    expect(signal?.aborted).toBe(false);
+    result.current.onDeactivate?.();
+    expect(signal?.aborted).toBe(true);
+    result.current.onActivate?.();
+    unmount();
+    expect(signal?.aborted).toBe(true);
   });
 });

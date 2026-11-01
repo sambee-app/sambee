@@ -1,10 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import { getQuickBarResultRowHeight, QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT, QUICK_BAR_RESULT_ITEM_HEIGHT } from "../QuickBarResultRow";
-import type { SearchProvider } from "../search/types";
+import type { SearchProvider, SearchResultsUpdate } from "../search/types";
 import { UnifiedSearchBar } from "../UnifiedSearchBar";
 
 const virtualizerSizeCache = new Map<string | number, number>();
@@ -326,9 +326,64 @@ describe("UnifiedSearchBar", () => {
     await user.click(searchInput);
 
     await waitFor(() => {
-      expect(fetchResults).toHaveBeenCalledWith("", expect.any(AbortSignal));
+      expect(fetchResults).toHaveBeenCalledWith("", expect.any(AbortSignal), expect.any(Function));
     });
     expect(screen.queryByText("Loading history")).not.toBeInTheDocument();
+  });
+
+  it("publishes selectable rows before the final response and rejects old-query updates", async () => {
+    const user = userEvent.setup();
+    const updates = new Map<string, SearchResultsUpdate>();
+    const provider: SearchProvider = {
+      ...testProvider,
+      fetchResults: async (query, _signal, onUpdate) => {
+        if (onUpdate) updates.set(query, onUpdate);
+        return new Promise<never>(() => undefined);
+      },
+    };
+    renderWithProvider(<UnifiedSearchBar provider={provider} />);
+    const input = screen.getByRole("textbox");
+    await user.click(input);
+    await user.type(input, "a");
+    await waitFor(() => expect(updates.has("a")).toBe(true));
+    act(() =>
+      updates.get("a")?.([{ kind: "result", id: "history", value: "history", icon: "recent-directory", primaryText: "Available history" }])
+    );
+    expect(await screen.findByRole("option", { name: "Available history" })).toBeInTheDocument();
+    await user.type(input, "b");
+    act(() => updates.get("a")?.([{ kind: "result", id: "stale", value: "stale", icon: "directory", primaryText: "Stale result" }]));
+    expect(screen.queryByRole("option", { name: "Stale result" })).not.toBeInTheDocument();
+  });
+
+  it("preserves the selected value when a complete-array update inserts a row", async () => {
+    const user = userEvent.setup();
+    let update: SearchResultsUpdate | undefined;
+    const onSelect = vi.fn();
+    const provider: SearchProvider = {
+      ...testProvider,
+      onSelect,
+      fetchResults: async (_query, _signal, onUpdate) => {
+        update = onUpdate;
+        return new Promise<never>(() => undefined);
+      },
+    };
+    const selected = {
+      kind: "result" as const,
+      id: "history",
+      value: "history",
+      icon: "recent-directory" as const,
+      primaryText: "History",
+    };
+    renderWithProvider(<UnifiedSearchBar provider={provider} />);
+    const input = screen.getByRole("textbox");
+    await user.click(input);
+    await user.type(input, "a");
+    await waitFor(() => expect(update).toBeTypeOf("function"));
+    act(() => update?.([selected]));
+    await screen.findByRole("option", { name: "History" });
+    act(() => update?.([{ kind: "result", id: "new", value: "new", icon: "directory", primaryText: "New directory" }, selected]));
+    await user.keyboard("{Enter}");
+    expect(onSelect).toHaveBeenCalledWith("history", "associated-viewer");
   });
 
   it("hides shortcut hints without hiding footer information", async () => {

@@ -16,16 +16,16 @@
  * - Warm-up on activation to trigger cache building
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BROWSER_SHORTCUTS } from "../../../config/keyboardShortcuts";
 import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
 import { logger } from "../../../services/logger";
 import { publishRecentDirectoriesChanged } from "../../../services/recentDirectoriesSync";
-import type { DirectorySearchResult, RecentDirectory } from "../../../types";
+import type { DirectorySearchResult, RecentDirectory, RecentDirectorySearchResponse } from "../../../types";
 import { normalizeQuerySeparators } from "./normalizeQuerySeparators";
 import { historyMatchRank, rankHistorySearchResults, removeRecentHistoryResult } from "./recentHistory";
-import type { SearchProvider, SearchResult, SearchResultItem, SearchStatusInfo, SearchTextHighlight } from "./types";
+import type { SearchProvider, SearchResult, SearchResultItem, SearchResultsUpdate, SearchStatusInfo, SearchTextHighlight } from "./types";
 
 // ============================================================================
 // Constants
@@ -209,10 +209,22 @@ export function useDirectorySearchProvider(
   const [cacheState, setCacheState] = useState<string>("empty");
   const [directoryCount, setDirectoryCount] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
+  const [sourceFailure, setSourceFailure] = useState<"history" | "index" | null>(null);
   const includeDotDirectories = options.includeDotDirectories ?? false;
   const recentDirectoryResultLimit = options.resultLimit ?? MAX_RECENT_DIRECTORY_RESULT_LIMIT;
   const history = options.history ?? browserHistoryService;
   const recentDirectoriesRef = useRef(new Map<string, RecentDirectory>());
+  const requestGenerationRef = useRef(0);
+  const activationControllerRef = useRef<AbortController | null>(null);
+  const sourceBindingRef = useRef({ connectionId, history, includeDotDirectories });
+
+  useEffect(() => {
+    sourceBindingRef.current = { connectionId, history, includeDotDirectories };
+    return () => {
+      requestGenerationRef.current += 1;
+      activationControllerRef.current?.abort();
+    };
+  }, [connectionId, history, includeDotDirectories]);
 
   const getRecentDirectoryPresentation = useCallback(
     (directory: RecentDirectory, query: string): Pick<SearchResultItem, "primaryText" | "secondaryText" | "primaryHighlight"> => {
@@ -230,33 +242,22 @@ export function useDirectorySearchProvider(
   // fetchResults
   //
   const fetchResults = useCallback(
-    async (query: string, signal: AbortSignal): Promise<SearchResult[]> => {
+    async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate): Promise<SearchResult[]> => {
       // Normalise backslashes to forward slashes for cross-directory search
       const normalizedQuery = normalizeQuerySeparators(query).trim();
+      const generation = ++requestGenerationRef.current;
+      const isCurrent = () =>
+        !signal.aborted &&
+        generation === requestGenerationRef.current &&
+        sourceBindingRef.current.connectionId === connectionId &&
+        sourceBindingRef.current.history === history &&
+        sourceBindingRef.current.includeDotDirectories === includeDotDirectories;
+      if (!isCurrent()) return [];
+      setSourceFailure(null);
+      let recentResponse: RecentDirectorySearchResponse = { results: [], result_limit: recentDirectoryResultLimit };
+      let directorySearchResult: DirectorySearchResult | null = null;
 
-      try {
-        const recentDirectoriesRequest = history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal);
-        const directorySearchRequest =
-          normalizedQuery.length >= DIRECTORY_MIN_QUERY_LENGTH
-            ? history.searchDirectories(connectionId, normalizedQuery, {
-                includeDotDirectories,
-                signal,
-              })
-            : Promise.resolve<DirectorySearchResult | null>(null);
-        const [recentResponse, directorySearchResult] = await Promise.all([recentDirectoriesRequest, directorySearchRequest]);
-
-        if (signal.aborted) {
-          return [];
-        }
-
-        recentDirectoriesRef.current = new Map(recentResponse.results.map((directory) => [directory.id, directory]));
-
-        if (directorySearchResult) {
-          setCacheState(directorySearchResult.cache_state);
-          setDirectoryCount(directorySearchResult.directory_count);
-          setTotalMatches(directorySearchResult.total_matches);
-        }
-
+      const mergeResults = (): SearchResult[] => {
         const recentPaths = new Set(recentResponse.results.map((directory) => `${directory.connection_id}\u0000${directory.path}`));
         const directoryResults = (directorySearchResult?.results ?? [])
           .filter((path) => !recentPaths.has(`${connectionId}\u0000${path}`))
@@ -287,7 +288,7 @@ export function useDirectorySearchProvider(
               kind: "result" as const,
               id: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
               value: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
-              icon: "directory" as const,
+              icon: "recent-directory" as const,
               matchRank:
                 directory.match_rank ?? historyMatchRank(directory.path.split(PATH_SEPARATOR).at(-1) ?? directory.path, normalizedQuery),
               usageScore: directory.usage_score,
@@ -307,15 +308,33 @@ export function useDirectorySearchProvider(
           ],
           normalizedQuery
         );
-      } catch (error: unknown) {
-        if (
-          signal.aborted ||
-          (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ERR_CANCELED")
-        ) {
-          return [];
-        }
-        throw error;
+      };
+
+      const recentRequest = history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal).then((response) => {
+        if (!isCurrent()) return;
+        recentResponse = response;
+        recentDirectoriesRef.current = new Map(response.results.map((directory) => [directory.id, directory]));
+        onUpdate?.(mergeResults());
+      });
+      const queryIndex = normalizedQuery.length >= DIRECTORY_MIN_QUERY_LENGTH;
+      const indexRequest = queryIndex
+        ? history.searchDirectories(connectionId, normalizedQuery, { includeDotDirectories, signal }).then((response) => {
+            if (!isCurrent()) return;
+            directorySearchResult = response;
+            setCacheState(response.cache_state);
+            setDirectoryCount(response.directory_count);
+            setTotalMatches(response.total_matches);
+            onUpdate?.(mergeResults());
+          })
+        : Promise.resolve();
+      const [recentOutcome, indexOutcome] = await Promise.allSettled([recentRequest, indexRequest]);
+      if (!isCurrent()) return [];
+      if (recentOutcome.status === "rejected" && (indexOutcome.status === "rejected" || !queryIndex)) {
+        throw recentOutcome.reason;
       }
+      if (recentOutcome.status === "rejected") setSourceFailure("history");
+      else if (indexOutcome.status === "rejected") setSourceFailure("index");
+      return mergeResults();
     },
     [connectionId, getRecentDirectoryPresentation, history, includeDotDirectories, recentDirectoryResultLimit, t]
   );
@@ -357,6 +376,12 @@ export function useDirectorySearchProvider(
   // getStatusInfo
   //
   const getStatusInfo = useCallback((): SearchStatusInfo | null => {
+    if (sourceFailure) {
+      return {
+        label: t(`fileBrowser.search.status.${sourceFailure}Unavailable`),
+        showSpinner: false,
+      };
+    }
     switch (cacheState) {
       case "building":
         return {
@@ -375,14 +400,16 @@ export function useDirectorySearchProvider(
       default:
         return null;
     }
-  }, [cacheState, directoryCount, t]);
+  }, [cacheState, directoryCount, sourceFailure, t]);
 
   //
   // onActivate
   //
   const onActivate = useCallback(() => {
     // Trigger an empty search to warm up the directory cache
+    activationControllerRef.current?.abort();
     const controller = new AbortController();
+    activationControllerRef.current = controller;
     history
       .searchDirectories(connectionId, "", {
         includeDotDirectories,
@@ -400,6 +427,12 @@ export function useDirectorySearchProvider(
         }
       });
   }, [connectionId, history, includeDotDirectories]);
+
+  const onDeactivate = useCallback(() => {
+    requestGenerationRef.current += 1;
+    activationControllerRef.current?.abort();
+    activationControllerRef.current = null;
+  }, []);
 
   //
   // footerInfo
@@ -433,6 +466,7 @@ export function useDirectorySearchProvider(
     onRemoveSelected,
     getStatusInfo,
     onActivate,
+    onDeactivate,
     getFooterHint: (selectedResult) => (
       <>
         ↑↓ {t("fileBrowser.search.footer.navigate")}&ensp;↵ {t("fileBrowser.search.footer.open")}&ensp;<kbd>esc</kbd>{" "}

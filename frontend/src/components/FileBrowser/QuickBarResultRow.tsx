@@ -21,6 +21,7 @@ function getResultIcon(icon: SearchResultIcon): React.ReactElement {
       return <KeyboardCommandKeyIcon fontSize="small" />;
     case "directory":
       return <FolderIcon fontSize="small" />;
+    case "recent-directory":
     case "recent-file":
       return <HistoryOutlinedIcon fontSize="small" />;
     case "file":
@@ -50,7 +51,7 @@ export function getQuickBarResultRowHeight(result: SearchResult): number {
 }
 
 export function QuickBarResultRow({ result, useCompactLayout = false }: { result: SearchResultItem; useCompactLayout?: boolean }) {
-  const isDirectory = result.icon === "directory";
+  const isDirectory = result.icon === "directory" || result.icon === "recent-directory";
 
   return (
     <Box sx={{ alignItems: "center", display: "flex", gap: 1.25, minWidth: 0, width: "100%" }}>

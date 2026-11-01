@@ -7,6 +7,7 @@
 pub mod archive;
 pub mod archive_sessions;
 pub mod auth;
+pub mod directory_index;
 pub mod drives;
 pub mod edit_locks;
 pub mod errors;

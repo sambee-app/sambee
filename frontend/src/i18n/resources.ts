@@ -744,6 +744,8 @@ export const EN_TRANSLATIONS = {
         indexing: "Indexing... ({{count}} directories found)",
         updating: "Updating index... ({{count}} directories)",
         startingIndex: "Starting index...",
+        historyUnavailable: "Recent directories are unavailable. Check the backend connection and retry.",
+        indexUnavailable: "Directory search is unavailable. Check the source connection and retry.",
       },
       groups: {
         recentFiles: "Recent files",

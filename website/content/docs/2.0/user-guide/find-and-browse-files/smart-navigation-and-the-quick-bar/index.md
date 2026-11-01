@@ -21,6 +21,10 @@ The quick bar has multiple modes:
 
 When the search box is empty, the Recent directories group shows your saved locations. Choose a recent directory to switch to its connection and open the saved location. A directory that is both recent and present in the active connection's cache is shown once.
 
+Recent directories use a history icon. Directory-index matches use a folder icon. A duplicate keeps its history icon and history actions.
+
+Recent results become available without waiting for directory search to finish. You can select them while the index request is pending. If one source fails, results from the other source remain available. Check the connection identified by the status message, then retry the search.
+
 To remove only the selected item from Recent directories, press <kbd>Shift</kbd> + <kbd>Delete</kbd>. This removes history metadata; it never deletes the underlying directory or its contents.
 
 History is private to your account. See [File Browser Preferences](../../account-and-preferences/file-browser-preferences/#clear-personal-history) to clear it.

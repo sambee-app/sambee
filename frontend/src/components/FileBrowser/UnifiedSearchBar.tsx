@@ -218,6 +218,9 @@ export function UnifiedSearchBar({
   const lastActivationTokenRef = useRef(activationToken);
   const lastRefreshTokenRef = useRef(refreshToken);
   const wasDropdownSuppressedRef = useRef(suppressDropdown);
+  const queryGenerationRef = useRef(0);
+  const selectedValueRef = useRef<string | undefined>(undefined);
+  selectedValueRef.current = results[selectedIndex]?.value;
 
   // Always keep providerRef current so stable callbacks use the latest provider
   providerRef.current = provider;
@@ -227,6 +230,9 @@ export function UnifiedSearchBar({
 
   const setQuery = useCallback(
     (value: string) => {
+      queryGenerationRef.current += 1;
+      abortControllerRef.current?.abort();
+      setIsLoading(false);
       providerRef.current.onQueryChange?.(value);
       onQueryValueChange?.(value);
 
@@ -458,29 +464,30 @@ export function UnifiedSearchBar({
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      const generation = queryGenerationRef.current;
+      const activeProvider = providerRef.current;
+      const isCurrent = () =>
+        !controller.signal.aborted && generation === queryGenerationRef.current && activeProvider.id === providerRef.current.id;
+      const publishResults = (updatedResults: SearchResult[]) => {
+        if (!isCurrent()) return;
+        const previousValue = selectedValueRef.current;
+        const previousIndex = updatedResults.findIndex((result) => result.kind === "result" && result.value === previousValue);
+        const firstIndex = updatedResults.findIndex((result) => result.kind === "result");
+        setResults(updatedResults);
+        setSelectedIndex(Math.max(previousIndex >= 0 ? previousIndex : firstIndex, 0));
+        setHasSearched(true);
+        if (openDropdown) setIsDropdownOpen(true);
+      };
 
       try {
         setIsSearchPending(false);
         setIsLoading(true);
         setSearchError(false);
         setRemoveError(false);
-        const fetchedResults = await providerRef.current.fetchResults(searchQuery, controller.signal);
-
-        if (!controller.signal.aborted) {
-          setResults(fetchedResults);
-          setSelectedIndex(
-            Math.max(
-              fetchedResults.findIndex((result) => result.kind !== "group-header"),
-              0
-            )
-          );
-          setHasSearched(true);
-          if (openDropdown) {
-            setIsDropdownOpen(true);
-          }
-        }
+        const fetchedResults = await activeProvider.fetchResults(searchQuery, controller.signal, publishResults);
+        publishResults(fetchedResults);
       } catch {
-        if (!controller.signal.aborted) {
+        if (isCurrent()) {
           setResults([]);
           setHasSearched(true);
           setSearchError(true);
@@ -489,7 +496,7 @@ export function UnifiedSearchBar({
           }
         }
       } finally {
-        if (!controller.signal.aborted) {
+        if (isCurrent()) {
           setIsLoading(false);
         }
       }
@@ -623,6 +630,20 @@ export function UnifiedSearchBar({
     return "associated-viewer";
   }, []);
 
+  const dismissSearch = useCallback(() => {
+    queryGenerationRef.current += 1;
+    abortControllerRef.current?.abort();
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    setIsLoading(false);
+    setIsSearchPending(false);
+    setIsDropdownOpen(false);
+    activatedRef.current = false;
+    providerRef.current.onDeactivate?.();
+  }, []);
+
   // ── Keyboard navigation ────────────────────────────────────────────────
 
   //
@@ -708,7 +729,7 @@ export function UnifiedSearchBar({
           }
           if (isDropdownOpen) {
             // First Escape: close the dropdown
-            setIsDropdownOpen(false);
+            dismissSearch();
           } else if (query) {
             // Second Escape: clear the query
             setQuery("");
@@ -723,13 +744,14 @@ export function UnifiedSearchBar({
 
         case "Tab":
           if (isDropdownOpen) {
-            setIsDropdownOpen(false);
+            dismissSearch();
           }
           break;
       }
     },
     [
       disableDropdown,
+      dismissSearch,
       findSelectableResultIndex,
       getSelectionAction,
       handleSelect,
@@ -804,8 +826,8 @@ export function UnifiedSearchBar({
   // handleClickAway
   //
   const handleClickAway = useCallback(() => {
-    setIsDropdownOpen(false);
-  }, []);
+    dismissSearch();
+  }, [dismissSearch]);
 
   // ── Re-open on typing after click-away ─────────────────────────────────
   //

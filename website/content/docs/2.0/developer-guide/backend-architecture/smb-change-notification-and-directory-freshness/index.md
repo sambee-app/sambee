@@ -160,6 +160,22 @@ A snapshot with a different source identity is ignored, including when trying th
 
 Startup verification and the periodic rescan loop have separate tracked tasks. Removing a cache or shutting down the application cancels both tasks, along with initial scanning and snapshot flushing.
 
+### SQLite Storage Under Development
+
+The shared SQLite schema and search fixtures are in `shared/directory-index/`. The Python storage module is `backend/app/services/directory_index.py`. The Rust storage module is `companion/src-tauri/src/server/directory_index.rs`.
+
+These modules are not yet connected to the live directory-search managers. The backend still uses the snapshot lifecycle described above. Companion still uses its existing per-request directory walk. Do not report that persistent local indexing or independent-term search is available through the application APIs.
+
+The storage tests cover source-kind and identity checks, strict integer storage, row and FTS transactions, separate verification generations, literal any-term matching, exact unique counts, and bounded returned results. Both runtimes test a generated 100,001-path catalogue. One explicit compatibility test opens a Python-created database through Rust source validation. These tests do not establish native traversal safety, resource-policy enforcement, or production performance.
+
+Runtime integration still requires private-storage checks, process leases, bounded source and query workers, event reconciliation and scan barriers, disk accounting and maintenance, source replacement handling, and authorized administration policy delivery. Do not enable the new index capability before those controls and their tests are complete.
+
+### Progressive Quick-Bar Results
+
+`SearchProvider.fetchResults` accepts an optional complete-array update callback. The directory provider uses the same merge path for updates and the final result. It installs recent-history selection records before publishing history rows. A source failure preserves results from the other successful source and displays a specific connection error.
+
+The shared bar rejects obsolete request and query updates and preserves selection by value. Input changes and dismissal cancel the request. Recent directories use the history icon; indexed folders retain the folder icon and directory text style. Automatic status refresh and new search-capability handling are not yet implemented.
+
 ## Recovery and Failure Handling
 
 The directory monitor treats connection failures as part of normal long-lived operation, not as impossible edge cases.
