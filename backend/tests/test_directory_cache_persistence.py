@@ -913,7 +913,7 @@ class TestManagerLoadOnCreate:
 
     async def test_loaded_snapshot_keeps_both_scan_tasks_cancellable(self):
         """Snapshot verification must not replace the periodic task's tracked handle."""
-        manager = DirectoryCacheManager()
+        manager = DirectoryCacheManager(cache_factory=ConnectionDirectoryCache)
         verification_started = asyncio.Event()
         periodic_started = asyncio.Event()
         blocked = asyncio.Event()
@@ -978,7 +978,7 @@ class TestManagerLoadOnCreate:
             f.write(json.dumps({"p": "dir_b"}) + "\n")
             f.write(json.dumps({"p": "dir_c"}) + "\n")
 
-        manager = DirectoryCacheManager()
+        manager = DirectoryCacheManager(cache_factory=ConnectionDirectoryCache)
 
         with patch("app.services.directory_cache.static") as mock_static:
             mock_static.data_dir = tmp_path
@@ -1012,7 +1012,7 @@ class TestManagerLoadOnCreate:
     async def test_falls_back_to_scan_without_snapshot(self, tmp_path: Path):
         """Without a snapshot, manager should start a full scan."""
 
-        manager = DirectoryCacheManager()
+        manager = DirectoryCacheManager(cache_factory=ConnectionDirectoryCache)
 
         with patch("app.services.directory_cache.static") as mock_static:
             mock_static.data_dir = tmp_path

@@ -25,6 +25,7 @@ import { publishRecentDirectoriesChanged } from "../../../services/recentDirecto
 import type { DirectorySearchResult, RecentDirectory, RecentDirectorySearchResponse } from "../../../types";
 import { normalizeQuerySeparators } from "./normalizeQuerySeparators";
 import {
+  bestSearchRelevance,
   findSearchHighlights,
   findTextHighlight,
   getSearchRelevance,
@@ -214,6 +215,10 @@ export function useDirectorySearchProvider(
   const [cacheState, setCacheState] = useState<string>("empty");
   const [directoryCount, setDirectoryCount] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
+  const [coverageStatus, setCoverageStatus] = useState<Pick<
+    DirectorySearchResult,
+    "coverage" | "coverage_issue_count" | "last_verified_at_ms" | "status_message"
+  > | null>(null);
   const [sourceFailure, setSourceFailure] = useState<"history" | "index" | null>(null);
   const [legacyIndex, setLegacyIndex] = useState(false);
   const sourceFailureRef = useRef<"history" | "index" | null>(null);
@@ -228,10 +233,22 @@ export function useDirectorySearchProvider(
   const activationControllerRef = useRef<AbortController | null>(null);
   const sourceBindingRef = useRef({ connectionId, history, includeDotDirectories });
 
+  const updateIndexStatus = useCallback((response: DirectorySearchResult) => {
+    setCacheState(response.cache_state);
+    setDirectoryCount(response.directory_count);
+    setCoverageStatus({
+      coverage: response.coverage,
+      coverage_issue_count: response.coverage_issue_count,
+      last_verified_at_ms: response.last_verified_at_ms,
+      status_message: response.status_message,
+    });
+  }, []);
+
   useEffect(() => {
     sourceBindingRef.current = { connectionId, history, includeDotDirectories };
     recentResponseRef.current = null;
     indexResponseRef.current = null;
+    setCoverageStatus(null);
     return () => {
       requestGenerationRef.current += 1;
       recentResponseRef.current = null;
@@ -283,7 +300,10 @@ export function useDirectorySearchProvider(
             id: `${DIRECTORY_PREFIX}${path}`,
             value: `${DIRECTORY_PREFIX}${path}`,
             icon: "directory" as const,
-            ...getSearchRelevance(path, terms, path.split(PATH_SEPARATOR).at(-1) ?? path),
+            ...bestSearchRelevance(terms.length, getSearchRelevance(path, terms, path.split(PATH_SEPARATOR).at(-1) ?? path), {
+              matchedTermCount: directorySearchResult?.matched_term_counts?.[path],
+              matchRank: directorySearchResult?.match_ranks?.[path],
+            }),
             sortPath: path,
             depth: path.split(PATH_SEPARATOR).length - 1,
             ...getDirectoryResultPresentation(path, normalizedQuery),
@@ -306,7 +326,17 @@ export function useDirectorySearchProvider(
               id: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
               value: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
               icon: "recent-directory" as const,
-              ...getSearchRelevance(directory.path, terms, directory.path.split(PATH_SEPARATOR).at(-1) ?? directory.path),
+              ...bestSearchRelevance(
+                terms.length,
+                getSearchRelevance(directory.path, terms, directory.path.split(PATH_SEPARATOR).at(-1) ?? directory.path),
+                { matchedTermCount: directory.matched_term_count, matchRank: directory.match_rank },
+                directory.connection_id === connectionId
+                  ? {
+                      matchedTermCount: directorySearchResult?.matched_term_counts?.[directory.path],
+                      matchRank: directorySearchResult?.match_ranks?.[directory.path],
+                    }
+                  : {}
+              ),
               sortPath: directory.path,
               lastUsedAt: directory.last_visited_at,
               usageScore: directory.usage_score,
@@ -349,8 +379,7 @@ export function useDirectorySearchProvider(
             directorySearchResult = response;
             indexResponseRef.current = response;
             setLegacyIndex(terms.length > 1 && response.search_contract_version !== SEARCH_CONTRACT_VERSION);
-            setCacheState(response.cache_state);
-            setDirectoryCount(response.directory_count);
+            updateIndexStatus(response);
             setTotalMatches(response.total_matches);
             onUpdate?.(mergeResults());
           })
@@ -365,7 +394,7 @@ export function useDirectorySearchProvider(
       setSourceFailure(sourceFailureRef.current);
       return mergeResults();
     },
-    [connectionId, getRecentDirectoryPresentation, history, includeDotDirectories, recentDirectoryResultLimit, t]
+    [connectionId, getRecentDirectoryPresentation, history, includeDotDirectories, recentDirectoryResultLimit, t, updateIndexStatus]
   );
 
   //
@@ -412,6 +441,15 @@ export function useDirectorySearchProvider(
         showSpinner: false,
       };
     }
+    if (coverageStatus?.status_message)
+      return { label: coverageStatus.status_message, showSpinner: cacheState === "building" || cacheState === "updating" };
+    if (coverageStatus?.coverage === "uncertain")
+      return {
+        label: t("fileBrowser.search.status.indexCoverageUncertain"),
+        showSpinner: cacheState === "building" || cacheState === "updating",
+      };
+    if (coverageStatus?.coverage === "partial" && cacheState === "ready")
+      return { label: t("fileBrowser.search.status.indexCoveragePartial"), showSpinner: false };
     if (legacyIndex) return { label: t("fileBrowser.search.status.legacyDirectorySearch"), showSpinner: false };
     switch (cacheState) {
       case "building":
@@ -431,7 +469,7 @@ export function useDirectorySearchProvider(
       default:
         return null;
     }
-  }, [cacheState, directoryCount, legacyIndex, sourceFailure, t]);
+  }, [cacheState, coverageStatus, directoryCount, legacyIndex, sourceFailure, t]);
 
   const getRefreshIntervalMs = useCallback((): number | null => {
     const response = indexResponseRef.current;
@@ -450,6 +488,7 @@ export function useDirectorySearchProvider(
     // Trigger an empty search to warm up the directory cache
     activationControllerRef.current?.abort();
     const controller = new AbortController();
+    const generation = requestGenerationRef.current;
     activationControllerRef.current = controller;
     history
       .searchDirectories(connectionId, "", {
@@ -457,9 +496,8 @@ export function useDirectorySearchProvider(
         signal: controller.signal,
       })
       .then((result: DirectorySearchResult) => {
-        if (!controller.signal.aborted) {
-          setCacheState(result.cache_state);
-          setDirectoryCount(result.directory_count);
+        if (!controller.signal.aborted && generation === requestGenerationRef.current) {
+          updateIndexStatus(result);
         }
       })
       .catch((error: unknown) => {
@@ -467,7 +505,7 @@ export function useDirectorySearchProvider(
           logger.error("Failed to warm up directory cache", { error }, "directory-search-provider");
         }
       });
-  }, [connectionId, history, includeDotDirectories]);
+  }, [connectionId, history, includeDotDirectories, updateIndexStatus]);
 
   const onDeactivate = useCallback(() => {
     requestGenerationRef.current += 1;

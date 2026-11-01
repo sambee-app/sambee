@@ -75,6 +75,32 @@ export function getSearchRelevance(
   };
 }
 
+export function bestSearchRelevance(
+  termCount: number,
+  ...candidates: Pick<SearchResultItem, "matchedTermCount" | "matchRank">[]
+): { matchedTermCount: number; matchRank: number } {
+  let best = { matchedTermCount: 0, matchRank: 3 };
+  for (const candidate of candidates) {
+    const count = candidate.matchedTermCount;
+    const rank = candidate.matchRank;
+    if (
+      count === undefined ||
+      rank === undefined ||
+      !Number.isSafeInteger(count) ||
+      count < 0 ||
+      count > termCount ||
+      !Number.isInteger(rank) ||
+      rank < 0 ||
+      rank > 3
+    )
+      continue;
+    if (count > best.matchedTermCount || (count === best.matchedTermCount && rank < best.matchRank)) {
+      best = { matchedTermCount: count, matchRank: rank };
+    }
+  }
+  return best;
+}
+
 export function findSearchHighlights(text: string, query: string): SearchTextHighlight[] {
   const terms = searchTerms(query);
   let normalized = "";
@@ -137,7 +163,7 @@ export function rankHistorySearchResults(results: SearchResult[], query: string)
     );
 }
 
-function compareText(left: string, right: string): number {
+export function compareText(left: string, right: string): number {
   const leftCharacters = left[Symbol.iterator]();
   const rightCharacters = right[Symbol.iterator]();
   while (true) {

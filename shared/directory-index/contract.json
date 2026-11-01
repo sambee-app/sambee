@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "limits": {
+    "schema_version": 1,
+    "normalization_version": 1,
+    "traversal_version": 1,
+    "max_query_bytes": 4096,
+    "max_query_terms": 32,
+    "max_result_limit": 200,
+    "row_batch_size": 256,
+    "query_workers": 2,
+    "scan_workers": 1,
+    "busy_timeout_ms": 250,
+    "progress_steps": 1000,
+    "query_timeout_seconds": 10,
+    "status_publication_ms": 250,
+    "event_coalescing_ms": 300,
+    "idle_release_seconds": 600,
+    "max_pending_observations": 1024,
+    "max_observation_bytes": 1048576,
+    "minimum_sqlite_version_number": 3051003,
+    "write_headroom_bytes": 33554432,
+    "maintenance_page_batch": 256,
+    "checkpoint_wal_bytes": 1048576,
+    "lease_cleanup_batch": 64
+  },
+  "policy": {
+    "disk_budget_bytes": {
+      "label": "Directory-index disk budget",
+      "description": "Total managed directory-index storage, including retained data, WAL and operation headroom.",
+      "default": 2147483648,
+      "minimum": 67108864,
+      "maximum": 68719476736,
+      "step": 1048576
+    },
+    "inactive_retention_seconds": {
+      "label": "Inactive-source retention",
+      "description": "Maximum retention after the last index access. Inactive sources can be removed earlier for disk pressure.",
+      "default": 604800,
+      "minimum": 60,
+      "maximum": 7776000,
+      "step": 60
+    },
+    "max_retained_inactive_sources": {
+      "label": "Retained inactive sources",
+      "description": "Maximum retained inactive source databases. This does not limit active sources or directory coverage.",
+      "default": 4,
+      "minimum": 1,
+      "maximum": 64,
+      "step": 1
+    },
+    "page_cache_kib": {
+      "label": "SQLite page-cache target",
+      "description": "Page-cache target per SQLite connection in KiB. This is not a process memory limit.",
+      "default": 2048,
+      "minimum": 64,
+      "maximum": 16384,
+      "step": 64
+    },
+    "healthy_verification_seconds": {
+      "label": "Healthy verification interval",
+      "description": "Full verification interval for active sources with healthy observation.",
+      "default": 900,
+      "minimum": 60,
+      "maximum": 86400,
+      "step": 30
+    },
+    "degraded_verification_seconds": {
+      "label": "Degraded verification interval",
+      "description": "Full verification interval when observation is unavailable or uncertain. It must not exceed the healthy interval.",
+      "default": 300,
+      "minimum": 30,
+      "maximum": 3600,
+      "step": 30
+    }
+  }
+}

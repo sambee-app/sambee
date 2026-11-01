@@ -3,8 +3,24 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, POLICY_FIELDS
+
 
 class SystemSettingKey(StrEnum):
+    DIRECTORY_INDEX_BACKEND_POLICY_REVISION = "directory_index.backend.policy_revision"
+    DIRECTORY_INDEX_COMPANION_POLICY_REVISION = "directory_index.companion.policy_revision"
+    DIRECTORY_INDEX_BACKEND_DISK_BUDGET_BYTES = "directory_index.backend.disk_budget_bytes"
+    DIRECTORY_INDEX_BACKEND_INACTIVE_RETENTION_SECONDS = "directory_index.backend.inactive_retention_seconds"
+    DIRECTORY_INDEX_BACKEND_MAX_RETAINED_INACTIVE_SOURCES = "directory_index.backend.max_retained_inactive_sources"
+    DIRECTORY_INDEX_BACKEND_PAGE_CACHE_KIB = "directory_index.backend.page_cache_kib"
+    DIRECTORY_INDEX_BACKEND_HEALTHY_VERIFICATION_SECONDS = "directory_index.backend.healthy_verification_seconds"
+    DIRECTORY_INDEX_BACKEND_DEGRADED_VERIFICATION_SECONDS = "directory_index.backend.degraded_verification_seconds"
+    DIRECTORY_INDEX_COMPANION_DISK_BUDGET_BYTES = "directory_index.companion.disk_budget_bytes"
+    DIRECTORY_INDEX_COMPANION_INACTIVE_RETENTION_SECONDS = "directory_index.companion.inactive_retention_seconds"
+    DIRECTORY_INDEX_COMPANION_MAX_RETAINED_INACTIVE_SOURCES = "directory_index.companion.max_retained_inactive_sources"
+    DIRECTORY_INDEX_COMPANION_PAGE_CACHE_KIB = "directory_index.companion.page_cache_kib"
+    DIRECTORY_INDEX_COMPANION_HEALTHY_VERIFICATION_SECONDS = "directory_index.companion.healthy_verification_seconds"
+    DIRECTORY_INDEX_COMPANION_DEGRADED_VERIFICATION_SECONDS = "directory_index.companion.degraded_verification_seconds"
     TEMPORARY_ARCHIVE_DOWNLOAD_SIZE_BYTES = "archive.temporary_download_size_bytes"
     SMB_READ_CHUNK_SIZE_BYTES = "smb.read_chunk_size_bytes"
     SMB_AUTHENTICATION_MODE = "smb.authentication_mode"
@@ -34,6 +50,22 @@ class SystemSettingSource(StrEnum):
     DATABASE = "database"
     CONFIG_FILE = "config_file"
     DEFAULT = "default"
+
+
+class DirectoryIndexPolicyScope(StrEnum):
+    BACKEND = "backend"
+    COMPANION = "companion"
+
+
+DIRECTORY_INDEX_SETTING_KEYS = {
+    scope: {field: SystemSettingKey(f"directory_index.{scope.value}.{field}") for field in POLICY_FIELDS}
+    for scope in DirectoryIndexPolicyScope
+}
+DIRECTORY_INDEX_ALL_SETTING_KEYS = frozenset(key for fields in DIRECTORY_INDEX_SETTING_KEYS.values() for key in fields.values())
+DIRECTORY_INDEX_REVISION_KEYS = {
+    DirectoryIndexPolicyScope.BACKEND: SystemSettingKey.DIRECTORY_INDEX_BACKEND_POLICY_REVISION,
+    DirectoryIndexPolicyScope.COMPANION: SystemSettingKey.DIRECTORY_INDEX_COMPANION_POLICY_REVISION,
+}
 
 
 @dataclass(frozen=True)
@@ -210,3 +242,17 @@ SYSTEM_SETTING_DEFINITIONS: dict[SystemSettingKey, IntegerSystemSettingDefinitio
         step=1024 * 1024,
     ),
 }
+
+for policy_scope, policy_keys in DIRECTORY_INDEX_SETTING_KEYS.items():
+    for policy_field_name, policy_key in policy_keys.items():
+        policy_field = DIRECTORY_INDEX_CONTRACT.policy[policy_field_name]
+        SYSTEM_SETTING_DEFINITIONS[policy_key] = IntegerSystemSettingDefinition(
+            key=policy_key,
+            config_attr=None,
+            label=policy_field.label,
+            description=policy_field.description,
+            default_value=policy_field.default,
+            min_value=policy_field.minimum,
+            max_value=policy_field.maximum,
+            step=policy_field.step,
+        )

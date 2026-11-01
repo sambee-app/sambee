@@ -744,8 +744,12 @@ export const EN_TRANSLATIONS = {
         indexing: "Indexing... ({{count}} directories found)",
         updating: "Updating index... ({{count}} directories)",
         startingIndex: "Starting index...",
-        legacyDirectorySearch: "This directory source does not support independent search terms. Upgrade the backend or companion.",
+        indexCoveragePartial: "Directory index has incomplete coverage.",
+        indexCoverageUncertain: "Directory index is not verified. A new check is pending.",
+        legacyDirectorySearch:
+          "Multi-term directory search is not confirmed for this source. Search one directory term or check backend and companion support.",
         historyUnavailable: "Recent directories are unavailable. Check the backend connection and retry.",
+        fileHistoryUnavailable: "Recent files are unavailable. Check the backend connection and retry.",
         indexUnavailable: "Directory search is unavailable. Check the source connection and retry.",
       },
       groups: {

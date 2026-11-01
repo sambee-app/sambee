@@ -57,10 +57,6 @@ CREATE TABLE coverage_issues (
     PRIMARY KEY (generation_id, code)
 ) STRICT;
 
-CREATE VIRTUAL TABLE directory_fts USING fts5(
-    path_key, content='directories', content_rowid='id',
-    tokenize='trigram case_sensitive 1', detail=full
-);
 CREATE TRIGGER directories_insert AFTER INSERT ON directories BEGIN
     INSERT INTO directory_fts(rowid, path_key) VALUES (new.id, new.path_key);
     UPDATE generations SET indexed_count = indexed_count + 1 WHERE id = new.generation_id;

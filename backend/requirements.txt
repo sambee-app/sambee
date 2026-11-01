@@ -4,6 +4,7 @@ uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 sqlmodel==0.0.48
 SQLAlchemy==2.0.55
+apsw==3.54.1.0
 Authlib==1.9.1
 joserfc==1.7.7
 cryptography==50.0.2

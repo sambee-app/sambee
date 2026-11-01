@@ -83,7 +83,7 @@ def populated_cache_fixture(cache: ConnectionDirectoryCache) -> ConnectionDirect
 def manager_fixture() -> DirectoryCacheManager:
     """Create a DirectoryCacheManager instance for testing."""
 
-    return DirectoryCacheManager()
+    return DirectoryCacheManager(cache_factory=ConnectionDirectoryCache)
 
 
 # ============================================================================

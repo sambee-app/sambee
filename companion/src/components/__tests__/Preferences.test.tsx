@@ -51,6 +51,40 @@ vi.mock("../../lib/updateCheck", () => ({
 }));
 
 describe("Preferences", () => {
+  it("resets a policy owner only after a native confirmation with Cancel focused", async () => {
+    getUserPreferencesMock.mockResolvedValue({
+      allowedServers: [],
+      uploadConflictAction: "ask",
+      autoStartOnLogin: false,
+      showNotifications: true,
+      companionUpdateChannel: "stable",
+      tempFileRetentionDays: 7,
+    });
+    isAutostartEnabledMock.mockResolvedValue(false);
+    let owned = true;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_paired_origins") return [];
+      if (command === "get_synced_localization") return null;
+      if (command === "get_native_directory_policy_status")
+        return {
+          status: owned ? "applied" : "unowned",
+          owner_origin: owned ? "https://owner.example" : null,
+          effective_revision: owned ? 3 : null,
+          message: null,
+        };
+      if (command === "reset_native_directory_policy_owner") owned = false;
+    });
+    render(<Preferences onClose={vi.fn()} />);
+    expect(await screen.findByText("https://owner.example")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reset Policy Owner" }));
+    expect(await screen.findByRole("alertdialog")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: translate("common.actions.cancel") })).toHaveFocus());
+    expect(invokeMock).not.toHaveBeenCalledWith("reset_native_directory_policy_owner");
+    fireEvent.click(screen.getByRole("button", { name: "Reset Owner" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("reset_native_directory_policy_owner"));
+    expect(await screen.findByText("Local default policy is active. No backend owner is approved.")).toBeInTheDocument();
+  });
+
   beforeEach(() => {
     invokeMock.mockReset();
     listenMock.mockReset();

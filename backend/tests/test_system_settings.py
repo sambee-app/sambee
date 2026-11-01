@@ -16,7 +16,7 @@ from app.db.migrations import _apply_per_field_system_settings_migration
 from app.models.connection import Connection
 from app.models.oidc import OidcFlow, OidcFlowPurpose, OidcFlowStatus, OidcProviderConfiguration
 from app.models.system_settings import SmbAuthenticationModeUpdate, SmbPolicySettings, SystemSetting
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.system_settings import (
     SmbPolicyConfigurationError,
     get_integer_setting_value,
@@ -40,6 +40,201 @@ def _create_system_settings_table(connection) -> None:
             )
             """
         )
+    )
+
+
+@pytest.mark.parametrize("scope", ["backend", "companion"])
+def test_directory_index_policy_settings_require_administrator(client, auth_headers_user, scope):
+    assert client.get(f"/api/admin/settings/directory-index/{scope}", headers=auth_headers_user).status_code == 403
+    response = client.put(
+        f"/api/admin/settings/directory-index/{scope}", headers=auth_headers_user, json={"field": "page_cache_kib", "value": 1024}
+    )
+    assert response.status_code == 403
+
+
+def test_directory_index_policy_updates_are_scoped_and_revisioned(client, auth_headers_admin):
+    response = client.put(
+        "/api/admin/settings/directory-index/backend", headers=auth_headers_admin, json={"field": "page_cache_kib", "value": 1024}
+    )
+    assert response.status_code == 200
+    assert response.json() == {"field": "page_cache_kib", "value": 1024}
+    backend = client.get("/api/admin/settings/directory-index/backend", headers=auth_headers_admin).json()
+    companion = client.get("/api/admin/settings/directory-index/companion", headers=auth_headers_admin).json()
+    assert backend["policy"]["page_cache_kib"] == 1024
+    assert backend["revision"] == 1
+    assert companion["policy"]["page_cache_kib"] == 2048
+    assert companion["revision"] == 0
+    assert client.put("/api/admin/settings/directory-index/backend", headers=auth_headers_admin, json=response.json()).status_code == 200
+    assert client.get("/api/admin/settings/directory-index/backend", headers=auth_headers_admin).json()["revision"] == 1
+
+
+def test_directory_index_policy_correlated_update_rolls_back(client, auth_headers_admin):
+    response = client.put(
+        "/api/admin/settings/directory-index/backend",
+        headers=auth_headers_admin,
+        json={"field": "healthy_verification_seconds", "value": 60},
+    )
+    assert response.status_code == 400
+    policy = client.get("/api/admin/settings/directory-index/backend", headers=auth_headers_admin).json()
+    assert policy["revision"] == 0
+    assert policy["policy"]["healthy_verification_seconds"] == 900
+
+
+def test_directory_index_policy_rejects_extra_browser_values(client, auth_headers_admin):
+    response = client.put(
+        "/api/admin/settings/directory-index/companion",
+        headers=auth_headers_admin,
+        json={"field": "page_cache_kib", "value": 1024, "policy": {"disk_budget_bytes": 1}},
+    )
+    assert response.status_code == 422
+
+
+def _policy_grant_binding():
+    import uuid
+
+    return {"companion_id": str(uuid.uuid4()), "challenge": "challenge_" + "a" * 32, "origin": "https://sambee.example"}
+
+
+@pytest.mark.parametrize("origin", ["https://" + ".".join(["\u00e9" * 20] * 50), "https://" + ".".join(["\u00e9"] * 256)])
+def test_directory_policy_origin_limits_input_and_canonical_utf8_bytes(origin):
+    from pydantic import ValidationError
+
+    from app.models.system_settings import DirectoryPolicyGrantBinding
+
+    with pytest.raises(ValidationError, match="2048 UTF-8 bytes"):
+        DirectoryPolicyGrantBinding(**{**_policy_grant_binding(), "origin": origin})
+
+
+def test_directory_policy_origin_accepts_exact_utf8_byte_limit():
+    from app.core.directory_index_contract import MAX_DIRECTORY_POLICY_ORIGIN_BYTES
+    from app.models.system_settings import DirectoryPolicyGrantBinding
+
+    prefix = "https://"
+    origin = prefix + "a" * (MAX_DIRECTORY_POLICY_ORIGIN_BYTES - len(prefix))
+    binding = DirectoryPolicyGrantBinding(**{**_policy_grant_binding(), "origin": origin})
+    assert len(binding.origin.encode("utf-8")) == MAX_DIRECTORY_POLICY_ORIGIN_BYTES
+
+
+def test_directory_policy_grant_is_single_use_and_returns_backend_policy(client, auth_headers_admin):
+    binding = _policy_grant_binding()
+    issued = client.post(
+        "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
+    )
+    assert issued.status_code == 200
+    redeem = {**binding, "grant": issued.json()["grant"]}
+    desired = client.get("/api/admin/settings/directory-index/companion", headers=auth_headers_admin)
+    assert desired.status_code == 200
+    assert desired.json()["backend_identity"] == issued.json()["backend_identity"]
+    accepted = client.post("/api/admin/settings/directory-index/companion/grants/redeem", json=redeem)
+    assert accepted.status_code == 200
+    assert accepted.json()["policy"]["disk_budget_bytes"] == 2147483648
+    assert accepted.json()["backend_identity"] == issued.json()["backend_identity"]
+    assert client.post("/api/admin/settings/directory-index/companion/grants/redeem", json=redeem).status_code == 409
+
+
+def test_directory_policy_revisions_are_safe_wire_integers():
+    from app.core.directory_index_contract import MAX_WIRE_INTEGER
+    from app.models.system_settings import DirectoryIndexPolicy, DirectoryIndexSettingsRead
+
+    values = {"scope": "companion", "policy": DirectoryIndexPolicy(), "backend_identity": "a" * 64, "fields": {}}
+    assert DirectoryIndexSettingsRead(**values, revision=MAX_WIRE_INTEGER).revision == MAX_WIRE_INTEGER
+    with pytest.raises(ValueError):
+        DirectoryIndexSettingsRead(**values, revision=MAX_WIRE_INTEGER + 1)
+
+
+@pytest.mark.parametrize("permission_change", ["role", "disabled", "expired", "token_version"])
+def test_directory_policy_grant_rechecks_current_administrator(client, auth_headers_admin, admin_user, session, permission_change):
+    from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
+
+    binding = _policy_grant_binding()
+    issued = client.post("/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
+    assert issued.status_code == 200
+    if permission_change == "role":
+        admin_user.role = UserRole.EDITOR
+    elif permission_change == "disabled":
+        admin_user.is_active = False
+    elif permission_change == "expired":
+        admin_user.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    else:
+        admin_user.token_version += 1
+    session.add(admin_user)
+    session.commit()
+    response = client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": issued.json()["grant"]})
+    assert response.status_code == 403
+    assert session.exec(select(CompanionDirectoryPolicyGrant)).one().consumed_at is None
+
+
+def test_directory_policy_grant_ledger_expiry_and_browser_tokens_are_refused(client, auth_headers_admin, admin_token, session):
+    from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
+
+    binding = _policy_grant_binding()
+    issued = client.post("/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
+    assert issued.status_code == 200
+    ordinary = client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": admin_token})
+    assert ordinary.status_code in {401, 403}
+    record = session.exec(select(CompanionDirectoryPolicyGrant)).one()
+    record.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    session.add(record)
+    session.commit()
+    expired = client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": issued.json()["grant"]})
+    assert expired.status_code == 409
+    session.refresh(record)
+    assert record.consumed_at is None
+
+
+@pytest.mark.parametrize(
+    "field,value", [("challenge", "b" * 32), ("companion_id", "00000000-0000-0000-0000-000000000000"), ("origin", "https://other.example")]
+)
+def test_directory_policy_grant_rejects_changed_bindings(client, auth_headers_admin, field, value):
+    binding = _policy_grant_binding()
+    issued = client.post(
+        "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
+    ).json()
+    binding[field] = value
+    assert (
+        client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": issued["grant"]}).status_code
+        == 403
+    )
+
+
+def test_directory_policy_grant_cannot_authenticate_browser_or_deliver_extra_policy(client, auth_headers_admin):
+    binding = _policy_grant_binding()
+    issued = client.post(
+        "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
+    ).json()
+    assert client.get("/api/auth/me", headers={"Authorization": "Bearer " + issued["grant"]}).status_code == 401
+    assert (
+        client.post(
+            "/api/admin/settings/directory-index/companion/grants/redeem",
+            json={**binding, "grant": issued["grant"], "policy": {"disk_budget_bytes": 1}},
+        ).status_code
+        == 422
+    )
+
+
+def test_directory_policy_grant_rejects_nonadministrator_and_nonloopback_http(client, auth_headers_user):
+    binding = _policy_grant_binding()
+    assert (
+        client.post(
+            "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_user, "Origin": binding["origin"]}, json=binding
+        ).status_code
+        == 403
+    )
+    binding["origin"] = "http://untrusted.example"
+    assert (
+        client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": "invalid"}).status_code == 422
+    )
+
+
+def test_directory_policy_grant_rejects_changed_desired_revision(client, auth_headers_admin):
+    binding = _policy_grant_binding()
+    issued = client.post(
+        "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
+    ).json()
+    client.put("/api/admin/settings/directory-index/companion", headers=auth_headers_admin, json={"field": "page_cache_kib", "value": 1024})
+    assert (
+        client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": issued["grant"]}).status_code
+        == 409
     )
 
 

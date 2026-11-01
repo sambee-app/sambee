@@ -1045,6 +1045,8 @@ pub fn run() {
         .manage(Arc::new(PairingState::new()))
         .manage(Arc::new(LocalizationState::new()))
         .invoke_handler(tauri::generate_handler![
+            server::directory_policy::get_native_directory_policy_status,
+            server::directory_policy::reset_native_directory_policy_owner,
             commands::app_picker::get_apps_for_file,
             commands::app_picker::consume_pending_app_picker,
             commands::localization::get_synced_localization,

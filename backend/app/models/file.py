@@ -147,6 +147,12 @@ class DirectorySearchResult(BaseModel):
 
     results: List[str]
     match_ranks: dict[str, int] = Field(default_factory=dict)
+    matched_term_counts: dict[str, int] = Field(default_factory=dict)
     total_matches: int
     cache_state: str
     directory_count: int
+    accepted_revision: int | None = Field(default=None, ge=0)
+    coverage: str | None = None
+    coverage_issue_count: int = Field(default=0, ge=0)
+    last_verified_at_ms: int | None = Field(default=None, ge=0)
+    status_message: str | None = None

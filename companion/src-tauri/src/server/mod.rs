@@ -8,6 +8,9 @@ pub mod archive;
 pub mod archive_sessions;
 pub mod auth;
 pub mod directory_index;
+mod directory_manager;
+pub mod directory_policy;
+mod directory_traversal;
 pub mod drives;
 pub mod edit_locks;
 pub mod errors;
@@ -26,11 +29,12 @@ use std::time::Instant;
 use axum::http::{header, Method};
 use axum::Router;
 use log::{error, info};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use self::archive_sessions::ArchiveSessionManager;
 use self::auth::AuthState;
+use self::directory_manager::LocalDirectoryManager;
 use self::edit_locks::EditLockManager;
 use self::localization::LocalizationState;
 use self::pairing::PairingState;
@@ -57,6 +61,8 @@ pub struct AppState {
     pub archive_sessions: Arc<ArchiveSessionManager>,
     pub edit_locks: Arc<EditLockManager>,
     pub watcher: DirectoryWatcher,
+    pub directory_indexes: Arc<LocalDirectoryManager>,
+    pub directory_policy: Arc<directory_policy::DirectoryPolicyState>,
 }
 
 /// Start the local HTTP API server.
@@ -79,6 +85,20 @@ async fn run_server(
     localization: Arc<LocalizationState>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     archive::cleanup_stale_temporary_archive_downloads()?;
+    let directory_indexes = LocalDirectoryManager::new(app.path().app_cache_dir()?.join("directory-index").join("sqlite"))?;
+    let directory_policy =
+        directory_policy::DirectoryPolicyState::open(app.path().app_config_dir()?.join("directory-index-policy"), &directory_indexes)
+            .map_err(|_| {
+                std::io::Error::other("Approved directory policy storage is unavailable. Correct private configuration storage.")
+            })?;
+    app.manage(Arc::clone(&directory_policy));
+    directory_policy
+        .protect_storage(directory_indexes.storage_directory())
+        .map_err(|_| {
+            std::io::Error::other(
+                "Approved policy storage cannot be protected. Correct private configuration storage and restart the companion.",
+            )
+        })?;
     let state = Arc::new(AppState {
         app,
         pairing,
@@ -87,6 +107,8 @@ async fn run_server(
         archive_sessions: Arc::new(ArchiveSessionManager::new()),
         edit_locks: Arc::new(EditLockManager::new()),
         watcher: DirectoryWatcher::new(),
+        directory_indexes,
+        directory_policy,
     });
 
     let app = build_router(state);
@@ -126,6 +148,15 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/pair/cancel", axum::routing::post(handlers::pair_cancel));
 
     let authenticated_routes = Router::new()
+        .route("/api/directory-index/policy", axum::routing::get(handlers::directory_policy_status))
+        .route(
+            "/api/directory-index/policy/challenge",
+            axum::routing::post(handlers::directory_policy_challenge),
+        )
+        .route(
+            "/api/directory-index/policy/redeem",
+            axum::routing::post(handlers::directory_policy_redeem),
+        )
         .route("/api/download-intents", axum::routing::post(handlers::create_download_intent))
         .route("/api/pair/test", axum::routing::post(handlers::test_pairing))
         .route("/api/pair/current", axum::routing::delete(handlers::delete_current_pairing))

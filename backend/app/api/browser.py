@@ -1,6 +1,7 @@
 import asyncio
 import json
 import secrets
+import threading
 import unicodedata
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -1064,14 +1065,14 @@ async def get_file_info(
 @router.get("/{connection_id}/directories", response_model=DirectorySearchResult)
 async def search_directories(
     connection_id: uuid.UUID,
-    q: str = Query("", description="Search query for directory names"),
+    q: str = Query("", max_length=1024, description="Search query for directory names"),
     include_dot_directories: bool = Query(False, description="Whether to include directories whose path contains dot-prefixed segments"),
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
 ) -> DirectorySearchResult:
     """Search for directories across the entire connection.
 
-    Returns matching directory paths from the in-memory cache.
+    Returns matching directory paths from the source index.
     If the cache is not yet built, triggers an initial scan and returns
     partial results. The cache_state field indicates indexing status.
     """
@@ -1081,8 +1082,15 @@ async def search_directories(
 
     connection = _get_connection_or_404(session, current_user, connection_id)
 
+    from app.services.directory_index import search_terms
+
     try:
-        from app.services.directory_cache import get_directory_cache_manager
+        search_terms(q.replace("\\", "/"))
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+
+    try:
+        from app.services.directory_cache import SQLiteConnectionDirectoryCache, get_directory_cache_manager
 
         cache_manager = get_directory_cache_manager()
         cache = await cache_manager.get_or_create_cache(
@@ -1096,7 +1104,28 @@ async def search_directories(
             source_revision=connection.updated_at.isoformat(),
         )
 
-        results, total_matches = cache.search(q, include_dot_directories=include_dot_directories) if q else ([], 0)
+        if isinstance(cache, SQLiteConnectionDirectoryCache):
+            cancelled = threading.Event()
+            try:
+                response = await asyncio.to_thread(cache.search_index, q, include_dot_directories=include_dot_directories, cancelled=cancelled)
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            return DirectorySearchResult(
+                results=[row.path for row in response.results],
+                match_ranks={row.path: row.match_rank for row in response.results},
+                matched_term_counts={row.path: row.matched_term_count for row in response.results},
+                total_matches=response.total_matches,
+                cache_state=cache.state.value,
+                directory_count=response.directory_count,
+                accepted_revision=response.accepted_revision,
+                coverage=response.coverage,
+                coverage_issue_count=response.issue_count,
+                last_verified_at_ms=response.last_verified_at_ms,
+                status_message=cache.scan_error,
+            )
+
+        results, total_matches = await asyncio.to_thread(cache.search, q, include_dot_directories=include_dot_directories) if q else ([], 0)
         normalized_query = normalize_history_search_text(q.replace("\\", "/").strip())
 
         return DirectorySearchResult(
@@ -1107,15 +1136,16 @@ async def search_directories(
             directory_count=cache.directory_count,
         )
 
-    except Exception as e:
-        logger.error(
-            f"Failed to search directories: connection_id={connection_id}, query='{q}', include_dot_directories={include_dot_directories}, error={type(e).__name__}: {e}",
-            exc_info=True,
-        )
+    except HTTPException:
+        raise
+    except (TimeoutError, InterruptedError) as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except Exception as error:
+        logger.error("Directory search failed (%s).", type(error).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to search directories: {str(e)}",
-        )
+            detail="Directory search failed. Check connection access and local index storage, then retry.",
+        ) from error
 
 
 # ============================================================================

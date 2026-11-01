@@ -29,7 +29,12 @@ import type {
   CurrentAccount,
   CurrentUserSettings,
   CurrentUserSettingsUpdate,
+  DirectoryIndexPolicyScope,
+  DirectoryIndexSettings,
+  DirectoryIndexSettingUpdate,
   DirectoryListing,
+  DirectoryPolicyGrant,
+  DirectoryPolicyGrantBinding,
   DirectorySearchResult,
   EditLockInfo,
   EditLockStatus,
@@ -905,6 +910,25 @@ class ApiService {
 
   async getAdvancedSettings(): Promise<AdvancedSystemSettings> {
     const response = await this.api.get<AdvancedSystemSettings>("/admin/settings/advanced");
+    return response.data;
+  }
+
+  async getDirectoryIndexSettings(scope: DirectoryIndexPolicyScope): Promise<DirectoryIndexSettings> {
+    const response = await this.api.get<DirectoryIndexSettings>(`/admin/settings/directory-index/${scope}`);
+    return response.data;
+  }
+
+  async issueDirectoryPolicyGrant(binding: DirectoryPolicyGrantBinding, options?: { signal?: AbortSignal }): Promise<DirectoryPolicyGrant> {
+    const response = await this.api.post<DirectoryPolicyGrant>("/admin/settings/directory-index/companion/grants", binding, options);
+    return response.data;
+  }
+
+  async updateDirectoryIndexSettings(
+    scope: DirectoryIndexPolicyScope,
+    payload: DirectoryIndexSettingUpdate,
+    options?: { signal?: AbortSignal }
+  ): Promise<DirectoryIndexSettingUpdate> {
+    const response = await this.api.put<DirectoryIndexSettingUpdate>(`/admin/settings/directory-index/${scope}`, payload, options);
     return response.data;
   }
 

@@ -1,11 +1,20 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BrowserOpenMode } from "../../../pages/FileBrowser/types";
 import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
 import { publishRecentFilesChanged } from "../../../services/recentFilesSync";
-import type { FileEntry, RecentFile } from "../../../types";
-import { findTextHighlight, getSearchRelevance, rankHistorySearchResults, removeRecentHistoryResult, searchTerms } from "./recentHistory";
-import type { SearchProvider, SearchResult, SearchSelectionAction, SearchStatusInfo } from "./types";
+import type { FileEntry, RecentFile, RecentFileSearchResponse } from "../../../types";
+import {
+  bestSearchRelevance,
+  compareText,
+  findTextHighlight,
+  getSearchRelevance,
+  normalizeSearchText,
+  rankHistorySearchResults,
+  removeRecentHistoryResult,
+  searchTerms,
+} from "./recentHistory";
+import type { SearchProvider, SearchResult, SearchResultsUpdate, SearchSelectionAction, SearchStatusInfo } from "./types";
 
 const CURRENT_DIRECTORY_PREFIX = "current:";
 const RECENT_FILE_PREFIX = "recent:";
@@ -50,9 +59,32 @@ export function useFileSearchProvider({
   const { t } = useTranslation();
   const recentFilesRef = useRef(new Map<string, RecentFile>());
   const currentFilesRef = useRef(new Map<string, FileEntry>());
+  const requestGenerationRef = useRef(0);
+  const sourceBindingRef = useRef({ connectionId, currentPath, files, history, resultLimit });
+  const [historyUnavailable, setHistoryUnavailable] = useState(false);
+
+  useEffect(() => {
+    sourceBindingRef.current = { connectionId, currentPath, files, history, resultLimit };
+    return () => {
+      requestGenerationRef.current += 1;
+      recentFilesRef.current.clear();
+      currentFilesRef.current.clear();
+    };
+  }, [connectionId, currentPath, files, history, resultLimit]);
 
   const fetchResults = useCallback(
-    async (query: string, signal: AbortSignal): Promise<SearchResult[]> => {
+    async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate): Promise<SearchResult[]> => {
+      const generation = ++requestGenerationRef.current;
+      const isCurrent = () =>
+        !signal.aborted &&
+        generation === requestGenerationRef.current &&
+        sourceBindingRef.current.connectionId === connectionId &&
+        sourceBindingRef.current.currentPath === currentPath &&
+        sourceBindingRef.current.files === files &&
+        sourceBindingRef.current.history === history &&
+        sourceBindingRef.current.resultLimit === resultLimit;
+      if (!isCurrent()) return [];
+      setHistoryUnavailable(false);
       const terms = searchTerms(query);
       const currentCandidates = files
         .filter((file) => file.type === "file" && (!terms.length || getSearchRelevance(file.name, terms).matchedTermCount > 0))
@@ -62,68 +94,93 @@ export function useFileSearchProvider({
           return (
             rightRank.matchedTermCount - leftRank.matchedTermCount ||
             leftRank.matchRank - rightRank.matchRank ||
-            (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+            compareText(normalizeSearchText(left.name), normalizeSearchText(right.name)) ||
+            compareText(left.name, right.name)
           );
         });
-      const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
-      const effectiveResultLimit = recentResponse.result_limit ?? resultLimit;
-      const recentPaths = new Set(recentResponse.results.map((file) => `${file.connection_id}\u0000${file.path}`));
-      const uniqueCurrentMatches = currentCandidates
-        .filter((file) => !recentPaths.has(`${connectionId}\u0000${currentPath ? `${currentPath}/` : ""}${file.name}`))
-        .slice(0, effectiveResultLimit);
+      const mergeResults = (recentResponse: RecentFileSearchResponse): SearchResult[] => {
+        const effectiveResultLimit = recentResponse.result_limit ?? resultLimit;
+        const currentRelevance = new Map(
+          currentCandidates.map((file) => [
+            `${connectionId}\u0000${currentPath ? `${currentPath}/` : ""}${file.name}`,
+            getSearchRelevance(file.name, terms),
+          ])
+        );
+        const recentPaths = new Set(recentResponse.results.map((file) => `${file.connection_id}\u0000${file.path}`));
+        const uniqueCurrentMatches = currentCandidates
+          .filter((file) => !recentPaths.has(`${connectionId}\u0000${currentPath ? `${currentPath}/` : ""}${file.name}`))
+          .slice(0, effectiveResultLimit);
 
-      recentFilesRef.current = new Map(recentResponse.results.map((file) => [file.id, file]));
-      currentFilesRef.current = new Map(uniqueCurrentMatches.map((file) => [file.name, file]));
+        recentFilesRef.current = new Map(recentResponse.results.map((file) => [file.id, file]));
+        currentFilesRef.current = new Map(uniqueCurrentMatches.map((file) => [file.name, file]));
 
-      return rankHistorySearchResults(
-        [
-          ...(recentResponse.results.length > 0
-            ? [
-                {
-                  id: "recent-group-header",
-                  kind: "group-header" as const,
-                  value: "" as const,
-                  label: t("fileBrowser.search.groups.recentFiles"),
-                },
-              ]
-            : []),
-          ...recentResponse.results.map((file) => ({
-            kind: "result" as const,
-            id: `${RECENT_FILE_PREFIX}${file.id}`,
-            value: `${RECENT_FILE_PREFIX}${file.id}`,
-            icon: "recent-file" as const,
-            ...getSearchRelevance(file.file_name, terms),
-            usageScore: file.usage_score,
-            sortPath: file.file_name,
-            lastUsedAt: file.last_opened_at,
-            primaryText: file.file_name,
-            primaryHighlight: findTextHighlight(file.file_name, query.trim()),
-            secondaryText: formatConnectionPath(getConnectionName(file.connection_id), parentPath(file.path)),
-          })),
-          ...(uniqueCurrentMatches.length > 0
-            ? [
-                {
-                  id: "current-directory-group-header",
-                  kind: "group-header" as const,
-                  value: "" as const,
-                  label: t("fileBrowser.search.groups.currentDirectory"),
-                },
-              ]
-            : []),
-          ...uniqueCurrentMatches.map((file) => ({
-            kind: "result" as const,
-            id: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
-            value: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
-            icon: "file" as const,
-            ...getSearchRelevance(file.name, terms),
-            sortPath: file.name,
-            primaryText: file.name,
-            primaryHighlight: findTextHighlight(file.name, query.trim()),
-            secondaryText: formatConnectionPath(connectionName, currentPath || "/"),
-          })),
-        ],
-        query
-      );
+        return rankHistorySearchResults(
+          [
+            ...(recentResponse.results.length > 0
+              ? [
+                  {
+                    id: "recent-group-header",
+                    kind: "group-header" as const,
+                    value: "" as const,
+                    label: t("fileBrowser.search.groups.recentFiles"),
+                  },
+                ]
+              : []),
+            ...recentResponse.results.map((file) => ({
+              kind: "result" as const,
+              id: `${RECENT_FILE_PREFIX}${file.id}`,
+              value: `${RECENT_FILE_PREFIX}${file.id}`,
+              icon: "recent-file" as const,
+              ...bestSearchRelevance(
+                terms.length,
+                getSearchRelevance(file.file_name, terms),
+                { matchedTermCount: file.matched_term_count, matchRank: file.match_rank },
+                currentRelevance.get(`${file.connection_id}\u0000${file.path}`) ?? {}
+              ),
+              usageScore: file.usage_score,
+              sortPath: file.file_name,
+              lastUsedAt: file.last_opened_at,
+              primaryText: file.file_name,
+              primaryHighlight: findTextHighlight(file.file_name, query.trim()),
+              secondaryText: formatConnectionPath(getConnectionName(file.connection_id), parentPath(file.path)),
+            })),
+            ...(uniqueCurrentMatches.length > 0
+              ? [
+                  {
+                    id: "current-directory-group-header",
+                    kind: "group-header" as const,
+                    value: "" as const,
+                    label: t("fileBrowser.search.groups.currentDirectory"),
+                  },
+                ]
+              : []),
+            ...uniqueCurrentMatches.map((file) => ({
+              kind: "result" as const,
+              id: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
+              value: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
+              icon: "file" as const,
+              ...getSearchRelevance(file.name, terms),
+              sortPath: file.name,
+              primaryText: file.name,
+              primaryHighlight: findTextHighlight(file.name, query.trim()),
+              secondaryText: formatConnectionPath(connectionName, currentPath || "/"),
+            })),
+          ],
+          query
+        );
+      };
+      const availableResponse: RecentFileSearchResponse = { results: [], result_limit: resultLimit };
+      const availableResults = mergeResults(availableResponse);
+      onUpdate?.(availableResults);
+      try {
+        const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
+        if (!isCurrent()) return [];
+        return mergeResults(recentResponse);
+      } catch {
+        if (!isCurrent()) return [];
+        setHistoryUnavailable(true);
+        return availableResults;
+      }
     },
     [connectionId, connectionName, currentPath, files, getConnectionName, history, resultLimit, t]
   );
@@ -142,7 +199,11 @@ export function useFileSearchProvider({
     [onOpenCurrentFile, onOpenRecentFile]
   );
 
-  const getStatusInfo = useCallback((): SearchStatusInfo | null => null, []);
+  const getStatusInfo = useCallback(
+    (): SearchStatusInfo | null =>
+      historyUnavailable ? { label: t("fileBrowser.search.status.fileHistoryUnavailable"), showSpinner: false } : null,
+    [historyUnavailable, t]
+  );
 
   const onRemoveSelected = useCallback(
     async (value: string) => {

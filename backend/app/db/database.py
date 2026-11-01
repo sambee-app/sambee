@@ -91,7 +91,7 @@ def init_db() -> None:
     from app.models.app_secret import AppSecret  # noqa: F401 - Required for table creation
     from app.models.archive_operation import ArchiveOperation  # noqa: F401 - Required for table creation
     from app.models.audit import AuditEvent  # noqa: F401 - Required for table creation
-    from app.models.companion_uri_token_jti import CompanionUriTokenJti  # noqa: F401 - Required for table creation
+    from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant, CompanionUriTokenJti  # noqa: F401 - Required for table creation
     from app.models.download_intent import DownloadIntent  # noqa: F401 - Required for table creation
     from app.models.edit_lock import EditLock  # noqa: F401 - Required for table creation
     from app.models.oidc import (  # noqa: F401 - Required for table creation

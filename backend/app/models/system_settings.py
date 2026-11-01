@@ -1,15 +1,31 @@
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Annotated, Literal, Optional
 
-from pydantic import field_validator, model_validator
+from pydantic import StringConstraints, field_validator, model_validator
 from sqlmodel import Field, SQLModel
 from sqlmodel._compat import SQLModelConfig
 
-from app.core.system_setting_definitions import SystemSettingKey, SystemSettingSource
+from app.core.directory_index_contract import (
+    CONTRACT_VERSION,
+    DIRECTORY_INDEX_CONTRACT,
+    MAX_DIRECTORY_POLICY_CHALLENGE_BYTES,
+    MAX_DIRECTORY_POLICY_ORIGIN_BYTES,
+    MAX_DIRECTORY_POLICY_TOKEN_BYTES,
+    MAX_WIRE_INTEGER,
+    MIN_DIRECTORY_POLICY_CHALLENGE_BYTES,
+    POLICY_FIELDS,
+)
+from app.core.system_setting_definitions import (
+    DIRECTORY_INDEX_ALL_SETTING_KEYS,
+    DirectoryIndexPolicyScope,
+    SystemSettingKey,
+    SystemSettingSource,
+)
 
 
 class SystemSetting(SQLModel, table=True):
@@ -86,6 +102,83 @@ class StrictSettingUpdate(SQLModel):
     model_config = SQLModelConfig(extra="forbid")
 
 
+class DirectoryIndexPolicy(StrictSettingUpdate):
+    version: Literal[1] = CONTRACT_VERSION
+    disk_budget_bytes: int = Field(
+        default=DIRECTORY_INDEX_CONTRACT.policy["disk_budget_bytes"].default,
+        ge=DIRECTORY_INDEX_CONTRACT.policy["disk_budget_bytes"].minimum,
+        le=DIRECTORY_INDEX_CONTRACT.policy["disk_budget_bytes"].maximum,
+    )
+    inactive_retention_seconds: int = Field(
+        default=DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].default,
+        ge=DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].minimum,
+        le=DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].maximum,
+    )
+    max_retained_inactive_sources: int = Field(
+        default=DIRECTORY_INDEX_CONTRACT.policy["max_retained_inactive_sources"].default,
+        ge=DIRECTORY_INDEX_CONTRACT.policy["max_retained_inactive_sources"].minimum,
+        le=DIRECTORY_INDEX_CONTRACT.policy["max_retained_inactive_sources"].maximum,
+    )
+    page_cache_kib: int = Field(
+        default=DIRECTORY_INDEX_CONTRACT.policy["page_cache_kib"].default,
+        ge=DIRECTORY_INDEX_CONTRACT.policy["page_cache_kib"].minimum,
+        le=DIRECTORY_INDEX_CONTRACT.policy["page_cache_kib"].maximum,
+    )
+    healthy_verification_seconds: int = Field(
+        default=DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].default,
+        ge=DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].minimum,
+        le=DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].maximum,
+    )
+    degraded_verification_seconds: int = Field(
+        default=DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].default,
+        ge=DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].minimum,
+        le=DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].maximum,
+    )
+
+    @field_validator("version", *POLICY_FIELDS, mode="before")
+    @classmethod
+    def validate_integer_value(cls, value: object) -> int:
+        if type(value) is not int:
+            raise ValueError("Directory-index policy values must be integers, not booleans, text, or fractions.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_verification_intervals(self) -> "DirectoryIndexPolicy":
+        if self.degraded_verification_seconds > self.healthy_verification_seconds:
+            raise ValueError("Degraded verification must not exceed the healthy verification interval.")
+        return self
+
+
+class DirectoryIndexSettingsRead(SQLModel):
+    scope: DirectoryIndexPolicyScope
+    policy: DirectoryIndexPolicy
+    backend_identity: str = Field(min_length=64, max_length=64)
+    revision: int = Field(ge=0, le=MAX_WIRE_INTEGER)
+    fields: dict[str, IntegerSystemSettingRead]
+
+
+class DirectoryIndexSettingUpdate(StrictSettingUpdate):
+    field: Literal[
+        "disk_budget_bytes",
+        "inactive_retention_seconds",
+        "max_retained_inactive_sources",
+        "page_cache_kib",
+        "healthy_verification_seconds",
+        "degraded_verification_seconds",
+    ]
+    value: int
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def validate_integer_value(cls, value: object) -> int:
+        return DirectoryIndexPolicy.validate_integer_value(value)
+
+    @model_validator(mode="after")
+    def validate_supported_value(self) -> "DirectoryIndexSettingUpdate":
+        DIRECTORY_INDEX_CONTRACT.policy[self.field].validate(self.value)
+        return self
+
+
 class AdvancedSystemSettingUpdate(StrictSettingUpdate):
     field: SystemSettingKey
     value: int
@@ -94,7 +187,11 @@ class AdvancedSystemSettingUpdate(StrictSettingUpdate):
     def validate_supported_field(self) -> "AdvancedSystemSettingUpdate":
         from app.core.system_setting_definitions import SYSTEM_SETTING_DEFINITIONS
 
-        if self.field not in SYSTEM_SETTING_DEFINITIONS or self.field is SystemSettingKey.SMB_READ_CHUNK_SIZE_BYTES:
+        if (
+            self.field not in SYSTEM_SETTING_DEFINITIONS
+            or self.field is SystemSettingKey.SMB_READ_CHUNK_SIZE_BYTES
+            or self.field in DIRECTORY_INDEX_ALL_SETTING_KEYS
+        ):
             raise ValueError("Field is not an editable advanced system setting")
         return self
 
@@ -195,6 +292,62 @@ class FileSearchSettings(SQLModel):
         if len(self.model_dump_json().encode("utf-8")) > FILE_SEARCH_POLICY_MAX_BYTES:
             raise ValueError("File-search policy is too large")
         return self
+
+
+class DirectoryPolicyGrantBinding(StrictSettingUpdate):
+    """The native challenge and consent origin, never a browser policy payload."""
+
+    companion_id: uuid.UUID
+    challenge: Annotated[
+        str,
+        StringConstraints(
+            min_length=MIN_DIRECTORY_POLICY_CHALLENGE_BYTES, max_length=MAX_DIRECTORY_POLICY_CHALLENGE_BYTES, pattern=r"^[A-Za-z0-9_-]+$"
+        ),
+    ]
+    origin: str = Field(max_length=MAX_DIRECTORY_POLICY_ORIGIN_BYTES)
+
+    @field_validator("origin")
+    @classmethod
+    def validate_origin(cls, value: str) -> str:
+        from pydantic import HttpUrl
+
+        parsed = HttpUrl(value)
+        host = (parsed.host or "").strip("[]")
+        try:
+            loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            loopback = host.lower() == "localhost"
+        if parsed.scheme != "https" and not (parsed.scheme == "http" and loopback):
+            raise ValueError("Policy origin must use HTTPS, or HTTP on a loopback host.")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in (None, "/"):
+            raise ValueError("Policy origin must contain only the scheme, host and optional port.")
+        canonical = str(parsed).rstrip("/")
+        for origin in (value, canonical):
+            try:
+                encoded = origin.encode("utf-8")
+            except UnicodeEncodeError:
+                raise ValueError("Policy origin must contain valid Unicode text.") from None
+            if len(encoded) > MAX_DIRECTORY_POLICY_ORIGIN_BYTES:
+                raise ValueError(f"Policy origin must contain at most {MAX_DIRECTORY_POLICY_ORIGIN_BYTES} UTF-8 bytes.")
+        return canonical
+
+
+class DirectoryPolicyGrantRedeem(DirectoryPolicyGrantBinding):
+    grant: str = Field(min_length=1, max_length=MAX_DIRECTORY_POLICY_TOKEN_BYTES)
+
+
+class DirectoryPolicyGrantRead(StrictSettingUpdate):
+    grant: str
+    expires_in_seconds: int
+    revision: int
+    backend_identity: str
+
+
+class DirectoryPolicyGrantReceipt(DirectoryPolicyGrantBinding):
+    version: Literal[1] = 1
+    backend_identity: str
+    revision: int = Field(ge=0)
+    policy: DirectoryIndexPolicy
 
 
 class FileSearchSettingsRead(SQLModel):

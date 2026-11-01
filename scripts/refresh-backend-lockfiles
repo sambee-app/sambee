@@ -57,12 +57,10 @@ create_temp_env() {
     trap 'rm -rf "${TEMP_DIR}"' EXIT
 
     "$python_bin" -m venv "${TEMP_DIR}/venv"
-    # shellcheck disable=SC1091
-    source "${TEMP_DIR}/venv/bin/activate"
 
     # Use the interpreter's bundled pip so lockfile refresh matches the
     # repo's normal Python setup more closely than an independently pinned pip.
-    python -m pip install --quiet "pip-tools==${PIP_TOOLS_VERSION}"
+    "${TEMP_DIR}/venv/bin/python" -m pip install --quiet "pip-tools==${PIP_TOOLS_VERSION}"
 }
 
 compile_lockfiles() {
@@ -72,13 +70,13 @@ compile_lockfiles() {
 
     (
         cd "${BACKEND_DIR}"
-        pip-compile \
+        "${TEMP_DIR}/venv/bin/python" -m piptools compile \
             --allow-unsafe \
             --generate-hashes \
             --output-file="${output_dir}/${REQUIREMENTS_LOCKFILE_NAME}" \
             requirements.txt
 
-        pip-compile \
+        "${TEMP_DIR}/venv/bin/python" -m piptools compile \
             --allow-unsafe \
             --generate-hashes \
             --output-file="${output_dir}/${REQUIREMENTS_DEV_LOCKFILE_NAME}" \

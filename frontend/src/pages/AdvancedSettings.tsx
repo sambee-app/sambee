@@ -1,16 +1,30 @@
+import { Refresh as RefreshIcon, Sync as SyncIcon } from "@mui/icons-material";
 import { Alert, Box, Button, FormControl, FormHelperText, InputAdornment, MenuItem, Stack, TextField } from "@mui/material";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "../components/Settings/SettingsGroup";
 import { SettingsPage } from "../components/Settings/SettingsPage";
 import { SettingsSectionList } from "../components/Settings/SettingsSectionList";
 import { SettingsLoadingState } from "../components/Settings/SettingsState";
+import { settingsUtilityButtonSx } from "../components/Settings/settingsButtonStyles";
 import { loadAdvancedSettingsData, SETTINGS_DATA_CACHE_KEYS } from "../components/Settings/settingsDataSources";
 import { useCachedAsyncData } from "../hooks/useCachedAsyncData";
 import { SettingPersistenceIndicator, useSystemSettingPersistence } from "../hooks/useSystemSettingPersistence";
 import { translate } from "../i18n";
 import api from "../services/api";
-import type { AdvancedSystemSettings, AdvancedSystemSettingsUpdate, IntegerSystemSetting } from "../types";
+import companionService from "../services/companion";
+import type { CompanionDirectoryPolicyStatus } from "../types";
+import {
+  type AdvancedSystemSettings,
+  type AdvancedSystemSettingsUpdate,
+  DIRECTORY_INDEX_POLICY_FIELDS,
+  type DirectoryIndexPolicyField,
+  type DirectoryIndexPolicyScope,
+  type DirectoryIndexSettings,
+  type DirectoryIndexSettingUpdate,
+  type IntegerSystemSetting,
+  isApiError,
+} from "../types";
 import { getApiErrorMessage } from "../utils/apiErrors";
 import { formatLocalizedNumber } from "../utils/localeFormatting";
 
@@ -196,6 +210,13 @@ function SettingField({
         onBlur={() => {
           setTouched(true);
           if (!validationError && value !== null) onCommit(value);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            setTouched(true);
+            if (!validationError && value !== null) onCommit(value);
+          }
         }}
         variant="outlined"
         sx={{ width: "100%", maxWidth: { xs: "100%", sm: DESKTOP_NUMERIC_FIELD_MAX_WIDTH } }}
@@ -411,6 +432,248 @@ function applyAdvancedSettingUpdate(settings: AdvancedSystemSettings, update: Ad
   };
 }
 
+const DIRECTORY_INDEX_LOADERS = {
+  backend: () => api.getDirectoryIndexSettings("backend"),
+  companion: () => api.getDirectoryIndexSettings("companion"),
+} as const;
+
+const POLICY_APPROVAL_POLL_MS = 500;
+const POLICY_APPROVAL_TIMEOUT_MS = 110_000;
+
+function CompanionPolicyDelivery({ desiredRevision, backendIdentity }: { desiredRevision: number; backendIdentity: string }) {
+  const [status, setStatus] = useState<CompanionDirectoryPolicyStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState<"offline" | "legacy" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const controller = useRef<AbortController | null>(null);
+  const setFailure = useCallback((failure: unknown) => {
+    if (failure instanceof Error && failure.name === "Error") {
+      setUnavailable(null);
+      setError(failure.message);
+      return;
+    }
+    setUnavailable(isApiError(failure) && failure.response?.status === 404 ? "legacy" : "offline");
+    setError(getApiErrorMessage(failure, "Companion policy is unavailable. Check pairing and the companion connection, then retry."));
+  }, []);
+  useEffect(() => {
+    const request = new AbortController();
+    companionService.getDirectoryPolicyStatus({ signal: request.signal }).then(
+      (result) => {
+        if (!request.signal.aborted) setStatus(result);
+      },
+      (failure) => {
+        if (!request.signal.aborted) setFailure(failure);
+      }
+    );
+    return () => {
+      request.abort();
+      controller.current?.abort();
+    };
+  }, [setFailure]);
+  const refresh = async () => {
+    if (controller.current) return;
+    const request = new AbortController();
+    controller.current = request;
+    setBusy(true);
+    setRefreshing(true);
+    setError(null);
+    try {
+      const result = await companionService.getDirectoryPolicyStatus({ signal: request.signal });
+      if (!request.signal.aborted) {
+        setStatus(result);
+        setUnavailable(null);
+      }
+    } catch (failure) {
+      if (!request.signal.aborted) setFailure(failure);
+    } finally {
+      if (controller.current === request) {
+        controller.current = null;
+        if (!request.signal.aborted) {
+          setBusy(false);
+          setRefreshing(false);
+        }
+      }
+    }
+  };
+  const apply = async () => {
+    if (controller.current) return;
+    const request = new AbortController();
+    controller.current = request;
+    setBusy(true);
+    setError(null);
+    try {
+      let challenge = await companionService.requestDirectoryPolicyChallenge({ signal: request.signal });
+      if (request.signal.aborted) return;
+      setStatus(challenge);
+      const deadline = Date.now() + POLICY_APPROVAL_TIMEOUT_MS;
+      const expected = challenge.challenge;
+      while (!challenge.approved) {
+        if (request.signal.aborted) return;
+        if (Date.now() >= deadline || challenge.status === "denied" || !expected || challenge.challenge !== expected)
+          throw new Error("Local policy approval was denied or expired. Request a new approval.");
+        await new Promise<void>((resolve) => setTimeout(resolve, POLICY_APPROVAL_POLL_MS));
+        if (request.signal.aborted) return;
+        challenge = await companionService.getDirectoryPolicyStatus({ signal: request.signal });
+        if (request.signal.aborted) return;
+        setStatus(challenge);
+      }
+      if (!challenge.challenge || challenge.status === "owner_conflict")
+        throw new Error("Another backend owns companion policy. Reset that owner in native Preferences.");
+      const grant = await api.issueDirectoryPolicyGrant(
+        { companion_id: challenge.companion_id, challenge: challenge.challenge, origin: window.location.origin },
+        { signal: request.signal }
+      );
+      if (request.signal.aborted) return;
+      const applied = await companionService.redeemDirectoryPolicyGrant(grant.grant, { signal: request.signal });
+      if (request.signal.aborted) return;
+      if (
+        applied.status !== "applied" ||
+        applied.effective_revision !== grant.revision ||
+        applied.backend_identity !== grant.backend_identity ||
+        applied.owner_origin !== window.location.origin
+      )
+        throw new Error("Companion policy confirmation does not match the issued grant. Refresh its status before retrying.");
+      setStatus(applied);
+      setUnavailable(null);
+    } catch (failure) {
+      if (!request.signal.aborted) setFailure(failure);
+    } finally {
+      if (controller.current === request) {
+        controller.current = null;
+        if (!request.signal.aborted) setBusy(false);
+      }
+    }
+  };
+  const conflict =
+    status?.status === "owner_conflict" ||
+    Boolean(status?.backend_identity && status.backend_identity !== backendIdentity) ||
+    Boolean(status?.owner_origin && status.owner_origin !== window.location.origin);
+  const applied = status?.status === "applied" && status.effective_revision === desiredRevision;
+  const message =
+    unavailable === "legacy"
+      ? "Companion update required. Desired policy is saved, but this companion has no policy approval support."
+      : conflict
+        ? "Another backend owns companion policy. Reset that owner in native Preferences."
+        : busy
+          ? refreshing
+            ? "Refreshing companion policy status."
+            : status?.status === "pending_local_approval"
+              ? "Waiting for local companion approval."
+              : "Delivering approved companion policy."
+          : applied
+            ? "Companion policy is active."
+            : unavailable === "offline"
+              ? "Companion is offline or unavailable. Its last approved policy remains active."
+              : "Desired policy is saved. Companion approval or delivery is pending.";
+  return (
+    <Stack spacing={1.5}>
+      <Alert severity={error || conflict ? "warning" : "info"} role="status">
+        {error ?? status?.message ?? message}
+      </Alert>
+      <Box sx={{ typography: "caption", color: "text.secondary" }}>
+        Desired revision: {desiredRevision}. Active revision: {status?.effective_revision ?? "not applied"}.
+      </Box>
+      <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap", gap: 1 }}>
+        <Button
+          variant="outlined"
+          startIcon={<SyncIcon />}
+          sx={settingsUtilityButtonSx}
+          onClick={() => void apply()}
+          disabled={busy || conflict || unavailable === "legacy" || applied}
+        >
+          Apply To This Companion
+        </Button>
+        <Button variant="outlined" startIcon={<RefreshIcon />} sx={settingsUtilityButtonSx} onClick={() => void refresh()} disabled={busy}>
+          Refresh Status
+        </Button>
+      </Stack>
+    </Stack>
+  );
+}
+
+function DirectoryIndexPolicyGroup({ scope }: { scope: DirectoryIndexPolicyScope }) {
+  const { t } = useTranslation();
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Partial<Record<DirectoryIndexPolicyField, number | null>>>({});
+  const { data, loading, refresh, setData } = useCachedAsyncData<DirectoryIndexSettings>({
+    cacheKey: scope === "backend" ? SETTINGS_DATA_CACHE_KEYS.directoryIndexBackend : SETTINGS_DATA_CACHE_KEYS.directoryIndexCompanion,
+    load: DIRECTORY_INDEX_LOADERS[scope],
+    onError: (error) => setLoadError(getApiErrorMessage(error, t("settings.advanced.loadFailed"))),
+  });
+  const persistence = useSystemSettingPersistence<DirectoryIndexSettingUpdate>(
+    (update, options) => api.updateDirectoryIndexSettings(scope, update, options),
+    (error) => getApiErrorMessage(error, t("settings.advanced.saveFailed"))
+  );
+  const persistField = async (field: DirectoryIndexPolicyField, value: number) => {
+    const result = await persistence.persist({ field, value }, data?.policy[field]);
+    if (result.status !== "completed") return;
+    setData((current) =>
+      current
+        ? {
+            ...current,
+            policy: { ...current.policy, [field]: result.update.value },
+            fields: { ...current.fields, [field]: { ...current.fields[field], value: result.update.value, source: "db" } },
+          }
+        : current
+    );
+    setDrafts((current) => ({ ...current, [field]: result.update.value }));
+    void refresh();
+  };
+  return (
+    <SettingsGroup title={scope === "backend" ? "Backend Directory Indexes" : "Companion Directory Indexes"}>
+      {loadError && (
+        <Alert
+          severity="error"
+          action={
+            <Button
+              onClick={() => {
+                setLoadError(null);
+                void refresh(true);
+              }}
+              disabled={loading}
+            >
+              {t("common.actions.retry")}
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      )}
+      {loading && !data && <SettingsLoadingState />}
+      {scope === "companion" && data && <CompanionPolicyDelivery desiredRevision={data.revision} backendIdentity={data.backend_identity} />}
+      {data &&
+        DIRECTORY_INDEX_POLICY_FIELDS.map((field) => {
+          const setting = data.fields[field];
+          const value = Object.hasOwn(drafts, field) ? (drafts[field] ?? null) : data.policy[field];
+          const props = {
+            setting,
+            value,
+            onChange: (next: number | null) => {
+              setDrafts((current) => ({ ...current, [field]: next }));
+              persistence.clearFieldFeedback(field);
+            },
+            onCommit: (next: number) => void persistField(field, next),
+            persistenceError: persistence.fieldErrors[field],
+            pending: persistence.isPending(field),
+            saved: persistence.isSaved(field),
+          };
+          return field === "disk_budget_bytes" ? (
+            <ByteSizeSettingField key={field} {...props} fixedUnit="MiB" />
+          ) : (
+            <SettingField
+              key={field}
+              {...props}
+              unitAdornment={
+                field === "page_cache_kib" ? "KiB" : field.endsWith("seconds") ? t("settings.advanced.fields.seconds") : undefined
+              }
+            />
+          );
+        })}
+    </SettingsGroup>
+  );
+}
+
 export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsProps) {
   const { t } = useTranslation();
   const [pageError, setPageError] = useState<string | null>(null);
@@ -613,6 +876,8 @@ export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsP
               )}
             </Stack>
           </SettingsGroup>
+          <DirectoryIndexPolicyGroup scope="backend" />
+          <DirectoryIndexPolicyGroup scope="companion" />
         </SettingsSectionList>
       )}
     </SettingsPage>

@@ -13,7 +13,7 @@
  */
 
 import axios, { type AxiosInstance } from "axios";
-import { isApiError } from "../types";
+import { type CompanionDirectoryPolicyStatus, isApiError } from "../types";
 import { companionSession } from "./companionSession";
 import { logger } from "./logger";
 
@@ -342,6 +342,31 @@ class CompanionService {
   async testPairing(): Promise<PairTestResponse> {
     const headers = await this.buildAuthHeaders("POST", "/pair/test");
     const response = await this.client.post<PairTestResponse>("/pair/test", undefined, { headers });
+    return response.data;
+  }
+
+  async getDirectoryPolicyStatus(options?: { signal?: AbortSignal }): Promise<CompanionDirectoryPolicyStatus> {
+    const headers = await this.buildAuthHeaders("GET", "/directory-index/policy");
+    const response = await this.client.get<CompanionDirectoryPolicyStatus>("/directory-index/policy", { headers, ...options });
+    return response.data;
+  }
+
+  async requestDirectoryPolicyChallenge(options?: { signal?: AbortSignal }): Promise<CompanionDirectoryPolicyStatus> {
+    const headers = await this.buildAuthHeaders("POST", "/directory-index/policy/challenge");
+    const response = await this.client.post<CompanionDirectoryPolicyStatus>("/directory-index/policy/challenge", undefined, {
+      headers,
+      ...options,
+    });
+    return response.data;
+  }
+
+  async redeemDirectoryPolicyGrant(grant: string, options?: { signal?: AbortSignal }): Promise<CompanionDirectoryPolicyStatus> {
+    const headers = await this.buildAuthHeaders("POST", "/directory-index/policy/redeem");
+    const response = await this.client.post<CompanionDirectoryPolicyStatus>(
+      "/directory-index/policy/redeem",
+      { grant },
+      { headers, ...options }
+    );
     return response.data;
   }
 

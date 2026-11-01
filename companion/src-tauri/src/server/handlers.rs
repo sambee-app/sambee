@@ -1347,6 +1347,7 @@ pub async fn browse_delete(Path(drive): Path<String>, Query(query): Query<Browse
 
     let full_path = resolve_safe_path(&base_path, &drive, &relative)?;
 
+    super::directory_policy::ensure_mutation_allowed(&full_path)?;
     let metadata = tokio::fs::metadata(&full_path).await.map_err(|e| map_io_error(e, &full_path))?;
 
     if metadata.is_dir() {
@@ -1369,6 +1370,7 @@ pub async fn browse_delete_empty_directory(Path(drive): Path<String>, Query(quer
         return Err(ApiError::BadRequest("Cannot delete the drive root".to_string()));
     }
     let directory = resolve_safe_path(&base_path, &drive, &relative)?;
+    super::directory_policy::ensure_mutation_allowed(&directory)?;
     let metadata = tokio::fs::symlink_metadata(&directory)
         .await
         .map_err(|error| map_io_error(error, &directory))?;
@@ -1414,6 +1416,8 @@ pub async fn browse_rename(Path(drive): Path<String>, Json(body): Json<RenameReq
         .parent()
         .ok_or_else(|| ApiError::BadRequest("Cannot determine parent directory".to_string()))?;
     let new_full_path = parent.join(&body.new_name);
+    super::directory_policy::ensure_mutation_allowed(&full_path)?;
+    super::directory_policy::ensure_mutation_allowed(&new_full_path)?;
 
     if new_full_path.exists() {
         let candidate_is_source = new_full_path != full_path
@@ -1505,6 +1509,7 @@ pub async fn browse_create(Path(drive): Path<String>, Json(body): Json<CreateIte
     }
 
     let new_path = parent_path.join(&body.name);
+    super::directory_policy::ensure_mutation_allowed(&new_path)?;
     if new_path.exists() {
         return Err(ApiError::conflict_message(format!("An item named '{}' already exists", body.name)));
     }
@@ -2067,6 +2072,7 @@ async fn execute_browse_move(
     let (dest_drive, dest_base) = resolve_dest_drive(drive, &body.dest_connection_id)?;
     validate_copy_move_paths(&body.source_path, &body.dest_path)?;
     let source = resolve_safe_path(&base_path, drive, &body.source_path)?;
+    super::directory_policy::ensure_mutation_allowed(&source)?;
     let source_meta = tokio::fs::metadata(&source).await.map_err(|error| map_io_error(error, &source))?;
     if !source_meta.is_file() {
         return Err(ApiError::BadRequest(
@@ -5444,18 +5450,35 @@ fn map_local_archive_read_error(error: super::archive::LocalArchiveReadError) ->
 
 // ─── Directory Search ────────────────────────────────────────────────────────
 
-/// Maximum number of directory results to return per query.
-const MAX_SEARCH_RESULTS: usize = 50;
+pub async fn directory_policy_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<super::directory_policy::DirectoryPolicyStatus>, ApiError> {
+    let origin = extract_origin(&headers)?;
+    state.directory_policy.status(Some(&origin)).map(Json)
+}
 
-/// Maximum number of directories to index per drive.
-///
-/// Prevents runaway recursion on very large or deep filesystems.
-const MAX_DIRECTORY_SCAN: usize = 100_000;
+pub async fn directory_policy_challenge(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<super::directory_policy::DirectoryPolicyStatus>, ApiError> {
+    let origin = extract_origin(&headers)?;
+    state.directory_policy.challenge(&origin, &state.app).map(Json)
+}
+
+pub async fn directory_policy_redeem(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(delivery): Json<super::directory_policy::PolicyGrantDelivery>,
+) -> Result<Json<super::directory_policy::DirectoryPolicyStatus>, ApiError> {
+    let origin = extract_origin(&headers)?;
+    state.directory_policy.redeem(&origin, delivery).await.map(Json)
+}
 
 /// Query parameters for directory search.
 #[derive(Deserialize)]
 pub struct DirectorySearchQuery {
-    /// Search query string (case-insensitive substring match on path).
+    /// Independent literal terms matched against directory paths.
     pub q: Option<String>,
     /// Whether to include directories with dot-prefixed path segments.
     pub include_dot_directories: Option<bool>,
@@ -5463,103 +5486,29 @@ pub struct DirectorySearchQuery {
 
 /// `GET /api/browse/{drive}/directories` — search for directories on a local drive.
 ///
-/// Recursively walks the drive, collects directory paths, and returns those
-/// matching the query string `q`. Produces the same JSON shape as the
-/// backend's `DirectorySearchResult`.
-///
-/// Unlike the backend, this does not maintain a persistent cache — it walks
-/// the filesystem on each request. For typical local drives this is fast
-/// enough (< 1s for tens of thousands of directories).
+/// Starts or joins a background catalogue and queries its committed rows.
 pub async fn browse_search_directories(
+    State(state): State<Arc<AppState>>,
     Path(drive): Path<String>,
     Query(query): Query<DirectorySearchQuery>,
 ) -> Result<Json<DirectorySearchResult>, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
 
-    let canonical_base = std::fs::canonicalize(&base_path).map_err(|e| ApiError::NotFound(format!("Drive root inaccessible: {e}")))?;
-
     let q = query.q.unwrap_or_default();
     let include_dot_directories = query.include_dot_directories.unwrap_or(false);
-
-    // Walk the directory tree and collect directory paths
-    let directories = tokio::task::spawn_blocking({
-        let base = canonical_base.clone();
-        move || walk_directories(&base, MAX_DIRECTORY_SCAN, include_dot_directories)
-    })
-    .await
-    .map_err(|e| ApiError::Internal(format!("Directory scan task failed: {e}")))?;
-
-    let directory_count = directories.len();
-
-    // Filter by query (case-insensitive substring match)
-    let (results, total_matches) = if q.is_empty() {
-        (Vec::new(), 0)
-    } else {
-        let q_lower = q.to_lowercase();
-        let matching: Vec<String> = directories
-            .into_iter()
-            .filter(|path| path.to_lowercase().contains(&q_lower))
-            .collect();
-        let total = matching.len();
-        let truncated = matching.into_iter().take(MAX_SEARCH_RESULTS).collect();
-        (truncated, total)
-    };
-
-    Ok(Json(DirectorySearchResult {
-        results,
-        total_matches,
-        cache_state: "ready".to_string(),
-        directory_count,
-    }))
-}
-
-/// Recursively walk a directory tree and collect relative directory paths.
-///
-/// Optionally skips hidden directories (starting with `.`) and stops after
-/// `max_dirs` directories to prevent runaway scans on very large filesystems.
-fn walk_directories(base: &std::path::Path, max_dirs: usize, include_dot_directories: bool) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut stack: Vec<PathBuf> = vec![base.to_path_buf()];
-
-    while let Some(dir) = stack.pop() {
-        if result.len() >= max_dirs {
-            break;
-        }
-
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => continue, // skip unreadable directories
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
+    super::directory_index::search_terms(&q).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    state
+        .directory_indexes
+        .search(drive, base_path, q, include_dot_directories)
+        .await
+        .map(Json)
+        .map_err(|error| match error {
+            super::directory_index::IndexError::Invalid(message) => ApiError::BadRequest(message.to_owned()),
+            super::directory_index::IndexError::Interrupted => {
+                ApiError::TooManyRequests("Directory query was cancelled or timed out. Retry the search.".to_owned())
             }
-
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-
-            // Skip hidden directories
-            if !include_dot_directories && name_str.starts_with('.') {
-                continue;
-            }
-
-            // Build relative path
-            if let Ok(rel) = path.strip_prefix(base) {
-                let rel_str = rel.to_string_lossy().replace('\\', "/");
-                result.push(rel_str);
-                stack.push(path);
-            }
-
-            if result.len() >= max_dirs {
-                break;
-            }
-        }
-    }
-
-    result.sort();
-    result
+            _ => ApiError::Internal("Directory search failed. Check drive access and private local storage, then retry.".to_owned()),
+        })
 }
 
 // ─── Upload ──────────────────────────────────────────────────────────────────
@@ -6310,6 +6259,7 @@ fn resolve_safe_path_for_new(base: &std::path::Path, drive: &str, relative: &str
         }
     }
 
+    super::directory_policy::ensure_mutation_allowed(&full)?;
     Ok(full)
 }
 

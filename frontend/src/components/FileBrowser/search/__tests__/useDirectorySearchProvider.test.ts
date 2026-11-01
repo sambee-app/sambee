@@ -16,6 +16,87 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("getDirectoryResultPresentation", () => {
+  it("keeps the history representation with the best valid duplicate relevance", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({
+      result_limit: 10,
+      results: [
+        {
+          id: "recent-reports",
+          connection_id: "connection-1",
+          path: "Documents/Reports",
+          last_visited_at: "2026-01-01T00:00:00Z",
+          matched_term_count: 99,
+          match_rank: -1,
+        },
+      ],
+    });
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: ["Documents/Reports"],
+      total_matches: 1,
+      cache_state: "ready",
+      directory_count: 1,
+      matched_term_counts: { "Documents/Reports": 2 },
+      match_ranks: { "Documents/Reports": 0 },
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    let rows: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+    await act(async () => {
+      rows = await result.current.fetchResults("doc report", new AbortController().signal);
+    });
+    expect(rows).toEqual([
+      expect.objectContaining({
+        value: "recent-directory:recent-reports",
+        icon: "recent-directory",
+        matchedTermCount: 2,
+        matchRank: 0,
+      }),
+    ]);
+  });
+
+  it("retains results and shows an incomplete source message even when cache state is ready", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: ["Reports"],
+      total_matches: 1,
+      cache_state: "ready",
+      directory_count: 1,
+      coverage: "partial",
+      coverage_issue_count: 1,
+      status_message: "Directory indexing is paused. Increase its disk budget and retry.",
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    let rows: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+    await act(async () => {
+      rows = await result.current.fetchResults("Reports", new AbortController().signal);
+    });
+    expect(rows.some((row) => row.kind === "result" && row.value === "directory:Reports")).toBe(true);
+    expect(result.current.getStatusInfo?.()).toEqual({
+      label: "Directory indexing is paused. Increase its disk budget and retry.",
+      showSpinner: false,
+    });
+  });
+
+  it("does not let a late warm-up overwrite a newer query status", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    let finishWarmup!: (response: Awaited<ReturnType<typeof api.searchDirectories>>) => void;
+    vi.mocked(api.searchDirectories).mockImplementation((_connection, query) =>
+      query === ""
+        ? new Promise((resolve) => {
+            finishWarmup = resolve;
+          })
+        : Promise.resolve({ results: ["Reports"], total_matches: 1, cache_state: "ready", directory_count: 1, coverage: "complete" })
+    );
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    act(() => result.current.onActivate?.());
+    await act(async () => {
+      await result.current.fetchResults("Reports", new AbortController().signal);
+    });
+    await act(async () => {
+      finishWarmup({ results: [], total_matches: 0, cache_state: "building", directory_count: 0, coverage: "partial" });
+    });
+    expect(result.current.getStatusInfo?.()).toBeNull();
+  });
+
   it("returns proportional-renderer data with a highlighted smart path", () => {
     expect(getDirectoryResultPresentation("Documents/Quarterly Reports/2026", "Reports")).toEqual({
       primaryText: "…/Quarterly Reports/2026",
