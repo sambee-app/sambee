@@ -1,8 +1,126 @@
-# Quick Bar: SQLite Directory Indexes, Independent Search Terms, and Result Icons
+# Quick Bar: Remaining Tasks
 
-## Status and Scope
+## Status and Checklist Rules
 
-Approved implementation plan, dated 2026-11-01. Repository version: 2.0.26. The eight implementation decisions are approved. Documentation changes are limited to version 2.0. No application changes are part of this document.
+Updated 2026-11-01. Repository version: 2.0.26. Implementation is partial. The new directory-index search capability remains disabled.
+
+This checklist lists unfinished implementation and verification. An unchecked verification task does not mean its implementation is absent. Close each task only when its acceptance checks pass and the evidence is recorded. Reuse existing code and tests; do not restart completed work.
+
+The [current implementation record](../website/content/docs/2.0/developer-guide/backend-architecture/smb-change-notification-and-directory-freshness/index.md#storage-qualification-and-remaining-work) confirms that shared SQLite storage, background managers, independent-term search, progressive results, recent-directory icons, administration controls, and policy-grant delivery are implemented. Standard Python `sqlite3`, serialized writer/checkpoint ownership, read-only queries, process leases, FTS repair, and bounded cleanup also have focused tests. Their final integration and failure checks remain part of the tasks below.
+
+The approved requirements remain in the collapsed reference section. Its original findings and future-tense instructions are historical context, not the current task status.
+
+## Scope Constraints
+
+- Keep the eight approved decisions. This checklist does not resume application implementation; the last approval resumed only the Python binding and concurrency change.
+- Keep backend SQLite on Debian's system library and the companion on its approved Rust binding. Do not restore APSW, build custom SQLite, or mix Debian distributions. Follow the dependency workflow for further dependency changes.
+- Keep SQLite as the only directory-index storage format. Keep recent history in the application database and local indexes on the companion computer.
+- Keep directory searches within the targeted connection and file matching within loaded basenames and accessible recent-file history. Do not add drive-wide file or content search.
+- Keep Windows indexing in scope. macOS indexing is excluded; report it as unavailable and preserve successful history results.
+- Keep routine tests focused, with one 100,001-path cutoff regression per runtime. Keep million-path experiments opt-in and outside the aggregate.
+- Change product documentation in version 2.0 only through the docs editor. Do not change product versions, commit, publish, deploy, or require manual hardware certification.
+
+## Source Identity and Traversal
+
+- [ ] Complete backend SMB root identity and availability checks beyond the existing root-listing probe. Cover root replacement, mount/DFS identity, idle/sleep revalidation, and rejection of late results from an old binding.
+- [ ] Qualify retained-source identity for supported local source types. Keep session-bound SQLite data where restart identity cannot be proved; report that limit and bound cleanup.
+- [ ] Implement a safe Windows traversal adapter with handle-based containment, volume/root validation, exact native-name handling, and removal/replacement detection.
+- [ ] Classify Windows reparse tags. Exclude junctions, name-surrogate redirections, shortcuts, and unknown or unverified cloud placeholders with explicit coverage issues; do not treat all reparse points as equivalent.
+- [ ] Complete race-safe traversal containment for backend SMB and supported companion sources. Test link and parent replacement, nested mounts, pseudo-filesystems, invalid native encodings, inaccessible descendants, and root failure.
+- [ ] Verify bounded traversal work for many-file trees, path/depth limits, cancellation checks, and batch backpressure. Directory counts must never stop coverage.
+
+## Events and Verification
+
+- [ ] Complete dirty-parent reconciliation: immediate children, new or moved-in subtrees, deleted subtrees, and both rename parents. Do not require paired rename events.
+- [ ] Complete the common mutation notification path for create/delete, empty-directory removal, rename, copy/move, transfers, parent-creating uploads, and archive extraction. Reconcile affected parents after partial failures.
+- [ ] Complete changed-prefix coalescing and outstanding-producer tracking. Retire barriers only after all older reads and queued batches can no longer apply; never retire them by elapsed time.
+- [ ] Verify entry/byte and dirty-queue overflow handling in both runtimes. Invalidate affected scan epochs before clearing bookkeeping, preserve accepted rows and worker permits, reject late publication, and retain one verification request.
+- [ ] Verify reconciliation of accepted and candidate generations through a captured sequence before final selection. Failed verification must preserve usable accepted rows and accurate issues and freshness.
+- [ ] Complete and test watcher-loss, overflow, idle/sleep, and root-change recovery. Verify healthy/degraded full-pass deadlines, jitter, 30-second-to-five-minute failure backoff, and no retry storms under unchanged resource refusal.
+- [ ] Qualify idle release, source replacement, and explicit exit versus tray hiding. Blocked calls must retain worker, SMB-pool, and process ownership until actual exit; do not promise forced cancellation.
+
+## Storage and Recovery
+
+- [ ] Complete race-safe private-storage creation, open, replacement, and deletion. Preserve custom backend cache roots; reject unsafe permissions, ownership, links, and aliases without exposing private paths.
+- [ ] Qualify Windows hard-link and filesystem-alias protection for main databases, sidecars, leases, and protected configuration paths. Run native Unicode alias tests where available; record unavailable native checks.
+- [ ] Complete background replacement of corrupt, incompatible, or invalid directory databases. Preserve usable accepted data where possible, exclude corrupted rows, bound quarantine, and prevent discard/rebuild loops on storage failure.
+- [ ] Measure FTS reset/rebuild headroom and qualify interrupted repair, denied storage, FULL/IOERR, and retry behavior. Valid row-table scans must remain complete while FTS is repaired.
+- [ ] Remove obsolete backend RAM/JSONL implementation and snapshot-only tests after replacing required lifecycle coverage. Verify bounded legacy retirement, no import or full-drive fallback, and isolation from older writers and rollback binaries.
+- [ ] Qualify row/FTS/count/issue/revision transactions, failed queued mutations, candidate acceptance, orphan retirement, and restart recovery. Count and results must use one selected-generation read view.
+- [ ] Qualify writer/checkpoint/maintenance/close serialization and process leases under long readers, cancellation, cleanup contention, and interrupted shutdown. Read-only query connections must never checkpoint or write.
+- [ ] Run required SQLite feature checks in the actual supported Docker image and record runtime versions and tokenizer settings. The local Python runtime is qualified; a fresh Docker build was not available on the recorded host. Do not claim a Debian WAL-reset backport or unavailable filesystem durability.
+
+## Resources and Administration
+
+- [ ] Complete manager-wide disk accounting for main files, WAL/SHM, journals, SQL temporary work, candidates, maintenance, quarantine, and legacy retention. Measure sufficient operation headroom; do not describe admission as a hard physical allocation ceiling.
+- [ ] Qualify growth refusal, budget shrink, inactive-only eviction, age/count retention, and capacity restoration. Preserve active accepted catalogues and retry eligibility; report usage, cleanup, headroom, and over-budget state.
+- [ ] Qualify bounded logical cleanup, incremental vacuum, and normal WAL checkpoints under pressure, pinned readers, interruption, and insufficient headroom. Verify foreground priority and unchanged results, revisions, and verification time.
+- [ ] Measure aggregate page-cache targets, batches, top-K buffers, dirty queues, barriers, file descriptors, temporary SQL work, and application RSS. Smaller caches must preserve coverage; allocation failure must produce a specific error.
+- [ ] Complete administration integration checks for units, ranges, defaults, backend configuration precedence, policy version, separate host scopes, and desired versus effective usage and policy. Read the settings-form-dialog pattern before further form changes.
+- [ ] Qualify administrator grant issuance and atomic redemption against wrong purpose, backend, origin, companion, challenge, policy substitution, expiry, replay, revoked authority, and out-of-order revisions.
+- [ ] Qualify direct verified HTTPS redemption, redirect rejection, loopback-only development HTTP, timeout/offline failures, cancellation, and single-prompt admission. Browser-supplied policy or endpoint values must never become authority.
+- [ ] Qualify native policy persistence and recovery under concurrent delivery, source initialization, save failure, and owner reset. Preserve the effective policy, require local consent for a new owner, invalidate pending challenges, and block delivery if recovery fails.
+- [ ] Qualify pending/failed/unsupported delivery presentation for unavailable, unpaired, old, offline, and competing-origin companions. Ordinary pairing must not grant policy ownership.
+
+## Search, API, and Quick Bar
+
+- [ ] Complete cross-source acceptance checks for normalization, limits, any-term inclusion, exact unique counts, short-term full scans, literal punctuation, and term-count-first ranking before result limits. Reuse shared fixtures and existing source tests.
+- [ ] Verify the fixed mixed-source total order, Unicode ties, history usage below relevance, and duplicate relevance merging while preserving the history icon, selection value, and action. Preserve filename-only file matching and per-user history access.
+- [ ] Complete highlight and row tests for case-fold expansion, decomposed accents, overlapping terms, primary/secondary text, stable dimensions, accessibility, keyboard selection, and Shift+Delete.
+- [ ] Complete source-failure and stale-response tests: history before index completion, loaded files before history completion, valid selection maps, obsolete query/source/activation responses, and no focus change from background updates.
+- [ ] Qualify the gated quiet-refresh path with one 500 ms timeout, 200 ms input priority, no overlap or spinner flashes, same-query history reuse, invalidation, terminal-stop/backoff, hidden-tab pause/resume, and activation cleanup. Never poll legacy full-scan endpoints.
+- [ ] Complete API/status tests for counts above 100,000, output truncation, partial coverage, stale accepted data, query cancellation/failure, source loss, corruption, and storage refusal. Keep these states distinct and preserve successful sources.
+- [ ] Complete mixed-version capability tests and source-specific upgrade behavior. Do not recover legacy semantics with capped per-term requests or enable the new capability before the required safety and policy checks pass.
+
+## Logs and Measurements
+
+- [ ] Verify structured lifecycle and query logs for initialization, recovery, scans, accepted generations, watcher loss, storage pauses, eviction, transactions, busy waits, checkpoints, maintenance, and retries. Aggregate descendant failures.
+- [ ] Verify companion frontend API timing for method, route template, status, duration, cancellation, and optional revision. Exclude raw paths, source/account identities, terms, credentials, pairing data, and signed URLs from all logs.
+- [ ] Run one generated 100,000-path baseline per runtime after material query/storage changes. Measure selective, common, mixed-short, and query-during-verification cases, exact counts, CPU/RSS, cache targets, and endpoint timing.
+- [ ] Measure pasted/incremental-query visible-result timing with mocked companion responses. Report selective endpoint p95 against 100 ms and visible merged results against 300 ms including debounce; separate broad exact-count timing and do not claim native companion performance from mocks.
+- [ ] Run one generated million-path capacity experiment per runtime with injected scanning. Record build/reopen time, query availability, bounded application resources, and database/FTS/WAL/temp/candidate peaks during verification. Repeat a query/count check with a smaller cache and assess the 2 GiB default separately.
+- [ ] Record first-partial-result and mutation-freshness timing, including blocked-call admission and a small native many-file tree. Compare ordinary event freshness with the two-second target and verification start with its configured deadline.
+- [ ] Record host, runtime versions, fixture methods, target misses, and unavailable native checks. Existing opt-in storage fixtures and pre-`sqlite3` RSS figures are not complete application capacity or peak-storage evidence.
+
+## Final Checks and Documentation
+
+- [ ] Complete focused owning-boundary tests for the tasks above. Retain the routine 100,001-path build/update/verification/reopen regression and one small source-validated Python-to-Rust database compatibility check; do not add a platform/performance matrix.
+- [ ] Run available native identity, traversal, permissions, locks, recovery, and exit tests. Use injected unavailable-platform cases and state their limits; cross-compilation is not native certification and macOS indexing is not an open gate.
+- [ ] Update version 2.0 user documentation after behavior is qualified: independent terms, path/basename scope, history icons, useful status, recovery actions, and upgrade limits.
+- [ ] Complete version 2.0 developer and administration documentation for storage/search contracts, source identity, generations/races, WAL ownership, recovery, disk/cache/retention semantics, policy precedence/ownership/delivery, local locations, and privacy. Use the docs editor and 2.0 overrides for inherited pages.
+- [ ] Complete capability, first-start legacy rebuild, and rollback notes. Do not add database downgrade, history migration, JSONL mirrors, or export/restore procedures. Validate documentation and refresh derived artifacts through the docs workflow.
+- [ ] At implementation completion, run `./scripts/test` once on the final revision, then Rust formatting and companion lint. Run companion frontend Vitest separately, which the aggregate does not cover. Run the Windows cross-check only if its toolchain is available and the aggregate skipped it; otherwise record it as unavailable. Resolve related warnings and errors.
+- [ ] Record final acceptance evidence and remaining platform limits. Enable the new source capability only after its implementation, safety, policy, and compatibility gates pass; this checklist edit does not authorize that code change.
+
+## Commands for Remaining Verification
+
+Choose focused commands for each changed area. Do not run all suites after each edit. The detailed test requirements and optional capacity commands remain in the reference below.
+
+```bash
+cd /workspace/backend
+.venv/bin/python -m pytest tests/test_directory_index_contract.py tests/test_directory_search.py --show-capture=no
+cd /workspace
+cargo test --manifest-path companion/src-tauri/Cargo.toml --lib server::directory_index
+cargo test --manifest-path companion/src-tauri/Cargo.toml --lib opens_python_created_database_through_source_validation -- --ignored
+npm --prefix frontend test -- src/components/FileBrowser/search/__tests__/useDirectorySearchProvider.test.ts src/components/FileBrowser/__tests__/UnifiedSearchBar.test.tsx
+```
+
+At implementation completion only:
+
+```bash
+cd /workspace
+./scripts/test
+cargo fmt --manifest-path companion/src-tauri/Cargo.toml --check
+npm --prefix companion run lint
+npm --prefix companion test
+```
+
+<details>
+<summary>Approved Requirements and Original Acceptance Contract</summary>
+
+## Original Status and Scope
+
+Approved implementation plan, dated 2026-11-01. Repository version: 2.0.26. The eight implementation decisions are approved. Documentation changes are limited to version 2.0. This reference does not describe current completion status.
 
 ### Scope Updates From Implementation Review
 
@@ -481,4 +599,6 @@ The user approved these eight decisions on 2026-11-01, with documentation edits 
 7. **Blocked work and races:** Keep bounded workers and cooperative cancellation; retain permits until blocked work actually exits. Use the bounded barrier and scan-epoch rules in Events and Race Handling. Retire barriers only when older producers and queued batches cannot apply; invalidate affected epochs before overflow cleanup, preserve accepted data, and keep one pending verification through existing admission/backoff. Use injected blocked calls, scan barriers, and SQL failures to test mutation ordering and crash recovery. Do not add a persisted barrier journal, another scheduler, a helper process, or a promise of forced cancellation or bounded native shutdown. A timeout ends the request, not the OS call. If measured requirements later demand process isolation, treat it as a separate scope change.
 8. **Documentation and compatibility:** Modify documentation version 2.0 only, using the docs editor and creating 2.0 overrides for inherited pages where needed. Do not edit documentation sources in other versions, choose a future product version, or create a new version. Prepare capability, legacy-rebuild, and rollback notes without publishing or deploying. Ignore legacy JSONL caches, use the separate SQLite namespace, and leave history storage unchanged. Require source capabilities for new semantics; report upgrade needs instead of capped per-term legacy queries or full-drive scan fallback.
 
-The confirmed local delay remains filesystem traversal in every search request. These recommendations do not establish a production link cycle, blocked mount, permission failure, or support for untested source types. The selected TODO adds required multi-term behavior; it does not change which sources the user can search.
+The original investigation identified filesystem traversal in every local search request. These historical findings do not establish a production link cycle, blocked mount, permission failure, or support for untested source types. The selected TODO adds required multi-term behavior; it does not change which sources the user can search.
+
+</details>
