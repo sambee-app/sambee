@@ -871,6 +871,83 @@ def test_sqlite_source_policy_applies_at_connection_boundaries(sqlite_cache):
     assert sqlite_cache.search_index("accepted") == before
 
 
+def test_failed_verification_backoff_is_due_before_the_full_pass_interval(sqlite_cache):
+    from app.services.directory_cache import FAILURE_RETRY_JITTER_PERCENT
+
+    sqlite_cache._retry_jitter = FAILURE_RETRY_JITTER_PERCENT
+    now = 1000.0
+    verified_at = now
+    for seconds in (30, 60, 120, 240, 300, 300):
+        sqlite_cache._schedule_retry(now=now)
+        assert sqlite_cache._resource_retry_at == now + seconds
+        assert not sqlite_cache._verification_due(verified_at, now=now + seconds - 0.001)
+        assert sqlite_cache._verification_due(verified_at, now=now + seconds)
+        now += seconds
+        verified_at = now
+    sqlite_cache._reset_retry()
+    assert not sqlite_cache._verification_due(verified_at, now=now)
+    sqlite_cache._schedule_retry(now=now)
+    assert sqlite_cache._failure_retry_delay == 30
+
+
+def test_retry_jitter_stays_bounded_and_spreads_backend_sources(sqlite_cache):
+    from app.services.directory_cache import FAILURE_RETRY_MAX_SECONDS, FAILURE_RETRY_MIN_SECONDS
+
+    delays = set()
+    for jitter in range(256):
+        sqlite_cache._retry_jitter = jitter
+        sqlite_cache._reset_retry()
+        sqlite_cache._schedule_retry(now=1000.0)
+        delay = sqlite_cache._resource_retry_at - 1000.0
+        assert FAILURE_RETRY_MIN_SECONDS <= delay <= FAILURE_RETRY_MAX_SECONDS
+        delays.add(delay)
+        sqlite_cache._failure_retry_delay = FAILURE_RETRY_MAX_SECONDS
+        sqlite_cache._schedule_retry(now=1000.0)
+        assert FAILURE_RETRY_MIN_SECONDS <= sqlite_cache._resource_retry_at - 1000.0 <= FAILURE_RETRY_MAX_SECONDS
+    assert len(delays) > 1
+
+
+def test_unchanged_policy_preserves_backoff_and_changed_policy_retries(sqlite_cache):
+    from app.models.system_settings import DirectoryIndexPolicy
+
+    sqlite_cache._schedule_retry(now=1000.0)
+    deadline = sqlite_cache._resource_retry_at
+    sqlite_cache.apply_policy(sqlite_cache.policy)
+    assert sqlite_cache._resource_retry_at == deadline
+    assert sqlite_cache._failure_retry_delay > 0
+    sqlite_cache.apply_policy(DirectoryIndexPolicy(page_cache_kib=1024))
+    assert sqlite_cache._failure_retry_delay == 0
+    assert sqlite_cache._resource_retry_at == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_root_retries_back_off_and_success_resets_delay(sqlite_cache, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    unavailable = True
+
+    @asynccontextmanager
+    async def connection(**kwargs):
+        if unavailable:
+            raise OSError("Injected missing root")
+        yield
+
+    async def pool():
+        return SimpleNamespace(get_connection=connection)
+
+    monkeypatch.setattr("app.services.directory_cache.get_connection_pool", pool)
+    await sqlite_cache._run_rescan()
+    assert sqlite_cache._failure_retry_delay == 30
+    await sqlite_cache._run_rescan()
+    assert sqlite_cache._failure_retry_delay == 60
+    unavailable = False
+    monkeypatch.setattr(sqlite_cache, "_probe_source_root", lambda: None)
+    monkeypatch.setattr(sqlite_cache, "_scan_disk_queue", lambda: None)
+    await sqlite_cache._run_rescan()
+    assert sqlite_cache._failure_retry_delay == 0
+    assert sqlite_cache._resource_retry_at == 0
+
+
 def test_root_unavailable_api_returns_specific_service_error(sqlite_cache, monkeypatch, client, auth_headers_user, test_connection):
     sqlite_cache.index.write_paths(["accepted"])
     sqlite_cache._source_available.clear()

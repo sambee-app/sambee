@@ -129,6 +129,9 @@ DEGRADED_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["degraded_verifi
 HEALTHY_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].default
 OBSERVATION_POLL_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["event_coalescing_ms"] / 1000
 WORKER_POLL_SECONDS = SQL_BUSY_TIMEOUT_MS / 1000
+FAILURE_RETRY_MIN_SECONDS = 30.0
+FAILURE_RETRY_MAX_SECONDS = 300.0
+FAILURE_RETRY_JITTER_PERCENT = 10
 WorkerResult = TypeVar("WorkerResult")
 
 
@@ -1621,6 +1624,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._scan_progress = time.monotonic()
         self._scan_running = threading.Event()
         self._resource_retry_at = 0.0
+        self._failure_retry_delay = 0.0
+        self._retry_jitter = hashlib.sha256(identity.encode("utf-8")).digest()[0]
         self._owning_loop: asyncio.AbstractEventLoop | None = None
         self._last_access = time.monotonic()
         self._last_access_at_ms = int(time.time() * 1000)
@@ -1758,7 +1763,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 else "Directory index initialization failed. Check private local storage and reopen the connection."
             )
             self._state = CacheState.READY if self._opened.is_set() else CacheState.EMPTY
-            self._resource_retry_at = time.monotonic() + self.policy.degraded_verification_seconds
+            self._schedule_retry()
             self._start_periodic_rescan()
             logger.warning("Directory index initialization failed (%s).", type(error).__name__)
 
@@ -1768,10 +1773,12 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             self.index.open()
 
     def apply_policy(self, policy: DirectoryIndexPolicy) -> None:
+        changed = policy != self.policy
         self.resources.apply_policy(policy)
         self.index.configure_page_cache(policy.page_cache_kib)
         self.policy = DirectoryIndexPolicy.model_validate(policy.model_dump())
-        self._resource_retry_at = 0.0
+        if changed:
+            self._reset_retry()
         if not self._opened.is_set() and self._owning_loop is not None and not self._stop_event.is_set():
             if self._scan_task is None or self._scan_task.done():
                 self._owning_loop.call_soon_threadsafe(lambda: asyncio.create_task(self.start_scan()))
@@ -1975,6 +1982,28 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             self._scan_running.clear()
             self._manager_scan_slots.release()
 
+    def _schedule_retry(self, *, now: float | None = None) -> None:
+        """Spread bounded retries without changing the configured full-pass interval."""
+        self._failure_retry_delay = (
+            FAILURE_RETRY_MIN_SECONDS if not self._failure_retry_delay else min(self._failure_retry_delay * 2, FAILURE_RETRY_MAX_SECONDS)
+        )
+        percent = 100 - FAILURE_RETRY_JITTER_PERCENT + self._retry_jitter % (FAILURE_RETRY_JITTER_PERCENT * 2 + 1)
+        delay = min(FAILURE_RETRY_MAX_SECONDS, max(FAILURE_RETRY_MIN_SECONDS, self._failure_retry_delay * percent / 100))
+        self._resource_retry_at = (time.monotonic() if now is None else now) + delay
+
+    def _reset_retry(self) -> None:
+        self._failure_retry_delay = 0.0
+        self._resource_retry_at = 0.0
+
+    def _verification_due(self, verified_at: float, *, now: float | None = None) -> bool:
+        current = time.monotonic() if now is None else now
+        interval = (
+            self.policy.degraded_verification_seconds
+            if self.coordinator.verification_required
+            else self.policy.healthy_verification_seconds
+        )
+        return current >= self._resource_retry_at and (bool(self._failure_retry_delay) or current - verified_at >= interval)
+
     async def _run_rescan(self) -> None:
         if not self._opened.is_set() or self._scan_running.is_set():
             return
@@ -1996,6 +2025,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     self._scan_error = "Directory search index is being rebuilt. Existing directory rows remain searchable."
                     await self._blocking(self._repair_fts_work)
                 await self._blocking(self._scan_disk_queue, pool=pool)
+            self._reset_retry()
         except asyncio.CancelledError:
             self.coordinator.invalidate()
             raise
@@ -2018,7 +2048,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 else "Directory verification failed. Check source access; existing results remain available."
             )
             self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
-            self._resource_retry_at = time.monotonic() + self.policy.degraded_verification_seconds
+            self._schedule_retry()
             logger.warning("Directory verification failed (%s).", type(error).__name__)
 
     async def _periodic_rescan_loop(self) -> None:
@@ -2045,12 +2075,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                         await self._blocking(self._reclaim_disk_work)
                     if not self._scan_running.is_set():
                         await self._blocking(self.index.checkpoint_if_due)
-                interval = (
-                    self.policy.degraded_verification_seconds
-                    if self.coordinator.verification_required
-                    else self.policy.healthy_verification_seconds
-                )
-                if time.monotonic() - verified_at >= interval:
+                if self._verification_due(verified_at):
                     await self._run_rescan()
                     verified_at = time.monotonic()
             except asyncio.CancelledError:
@@ -2064,7 +2089,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     if isinstance(error, DirectoryDiskBudgetError)
                     else "Directory updates failed. Check source access and private local storage, then retry."
                 )
-                self._resource_retry_at = time.monotonic() + self.policy.degraded_verification_seconds
+                self._schedule_retry()
                 logger.warning("Directory updates paused (%s).", type(error).__name__)
 
     def _request_stop(self) -> None:

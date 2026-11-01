@@ -26,6 +26,9 @@ use super::models::DirectorySearchResult;
 
 const CONTRACT_JSON: &str = include_str!("../../../../shared/directory-index/contract.json");
 const STALLED_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const FAILURE_RETRY_MIN: Duration = Duration::from_secs(30);
+const FAILURE_RETRY_MAX: Duration = Duration::from_secs(300);
+const FAILURE_RETRY_JITTER_PERCENT: u8 = 10;
 const DEFAULT_RESULT_LIMIT: usize = 50;
 pub(super) const MAX_WIRE_INTEGER: i64 = 9_007_199_254_740_991;
 const POLICY_VERSION: u32 = 1;
@@ -444,12 +447,148 @@ impl Drop for DiskReservation {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ObservationToken {
+    epoch: u64,
+    sequence: u64,
+    producer: u64,
+}
+
+#[derive(Default)]
 struct Observations {
     epoch: u64,
+    sequence: u64,
+    next_producer: u64,
+    producers: HashMap<u64, ObservationToken>,
+    barriers: Vec<(u64, String)>,
+    barrier_bytes: usize,
     uncertain: bool,
-    pending: VecDeque<(DirectoryMutation, usize)>,
+    pending: VecDeque<(u64, DirectoryMutation, usize)>,
     bytes: usize,
     verification_required: bool,
+}
+
+impl Observations {
+    fn invalidate(&mut self) -> Result<(), IndexError> {
+        self.epoch = self.epoch.checked_add(1).ok_or(IndexError::Invalid(
+            "Directory observation epoch is exhausted. Restart the companion.",
+        ))?;
+        self.barriers.clear();
+        self.barrier_bytes = 0;
+        self.uncertain = true;
+        self.verification_required = true;
+        Ok(())
+    }
+
+    fn begin_read(&mut self) -> Result<ObservationToken, IndexError> {
+        if self.producers.len() >= limit("max_pending_observations")? || self.next_producer == u64::MAX {
+            self.invalidate()?;
+            return Err(IndexError::Invalid(
+                "Directory read capacity is exhausted. Wait for active reads to finish.",
+            ));
+        }
+        self.next_producer += 1;
+        let token = ObservationToken {
+            epoch: self.epoch,
+            sequence: self.sequence,
+            producer: self.next_producer,
+        };
+        self.producers.insert(token.producer, token);
+        Ok(token)
+    }
+
+    fn is_current(&self, token: ObservationToken, parent: &str) -> bool {
+        self.producers.get(&token.producer) == Some(&token)
+            && token.epoch == self.epoch
+            && !self
+                .barriers
+                .iter()
+                .any(|(sequence, path)| *sequence > token.sequence && (parent.is_empty() || overlaps(path, parent)))
+    }
+
+    fn end_read(&mut self, token: ObservationToken) {
+        if self.producers.get(&token.producer) == Some(&token) {
+            self.producers.remove(&token.producer);
+            self.retire_barriers();
+        }
+    }
+
+    fn retire_barriers(&mut self) {
+        let mut oldest = self
+            .producers
+            .values()
+            .filter(|token| token.epoch == self.epoch)
+            .map(|token| token.sequence)
+            .min()
+            .unwrap_or(self.sequence);
+        if let Some((sequence, _, _)) = self.pending.front() {
+            oldest = oldest.min(sequence.saturating_sub(1));
+        }
+        self.barriers.retain(|(sequence, _)| *sequence > oldest);
+        self.barrier_bytes = self.barriers.iter().map(|(_, path)| path.len()).sum();
+    }
+
+    fn enqueue(&mut self, mutation: DirectoryMutation, maximum_pending: usize, maximum_bytes: usize) -> Result<bool, IndexError> {
+        let paths = match &mutation {
+            DirectoryMutation::Add { path } | DirectoryMutation::Remove { path } => vec![path.as_str()],
+            DirectoryMutation::Rename { path, new_path } => vec![path.as_str(), new_path.as_str()],
+        };
+        let bytes = paths.iter().map(|path| path.len()).sum::<usize>();
+        if self.sequence == u64::MAX {
+            self.invalidate()?;
+            return Err(IndexError::Invalid(
+                "Directory observation sequence is exhausted. Restart the companion.",
+            ));
+        }
+        self.sequence += 1;
+        self.uncertain = true;
+        self.verification_required = true;
+        if self.pending.len() >= maximum_pending || bytes > maximum_bytes.saturating_sub(self.bytes) {
+            self.invalidate()?;
+            return Ok(false);
+        }
+        for path in paths {
+            let mut prefix = path.to_owned();
+            self.barriers.retain(|(_, existing)| {
+                if is_prefix(existing, path) {
+                    prefix.clone_from(existing);
+                    false
+                } else {
+                    !is_prefix(path, existing)
+                }
+            });
+            self.barriers.push((self.sequence, prefix));
+        }
+        self.barrier_bytes = self.barriers.iter().map(|(_, path)| path.len()).sum();
+        self.pending.push_back((self.sequence, mutation, bytes));
+        self.bytes += bytes;
+        if self.barriers.len() > maximum_pending || self.barrier_bytes > maximum_bytes {
+            self.invalidate()?;
+        }
+        Ok(true)
+    }
+}
+
+fn is_prefix(parent: &str, path: &str) -> bool {
+    path == parent || path.strip_prefix(parent).is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn overlaps(first: &str, second: &str) -> bool {
+    is_prefix(first, second) || is_prefix(second, first)
+}
+
+struct ObservationRead {
+    source: Arc<LocalSource>,
+    token: ObservationToken,
+}
+
+impl Drop for ObservationRead {
+    fn drop(&mut self) {
+        match self.source.observations.lock() {
+            Ok(mut observations) => observations.end_read(self.token),
+            Err(_) => log::warn!("Directory read ownership could not be released. Restart the companion."),
+        }
+    }
 }
 struct SourceStatus {
     state: &'static str,
@@ -459,7 +598,34 @@ struct SourceStatus {
     accessed: Instant,
     accessed_at_ms: Option<i64>,
     retry_at: Instant,
+    failure_delay: Duration,
     stalled: bool,
+}
+
+impl SourceStatus {
+    fn schedule_retry(&mut self, now: Instant, jitter: u8) {
+        self.failure_delay = if self.failure_delay.is_zero() {
+            FAILURE_RETRY_MIN
+        } else {
+            self.failure_delay.saturating_mul(2).min(FAILURE_RETRY_MAX)
+        };
+        let percent = 100 - FAILURE_RETRY_JITTER_PERCENT + jitter % (FAILURE_RETRY_JITTER_PERCENT * 2 + 1);
+        let delay = self
+            .failure_delay
+            .mul_f64(f64::from(percent) / 100.0)
+            .clamp(FAILURE_RETRY_MIN, FAILURE_RETRY_MAX);
+        self.retry_at = now + delay;
+    }
+
+    fn verification_due(&self, now: Instant, interval: Duration, initialized: bool) -> bool {
+        now >= self.retry_at && (!initialized || !self.failure_delay.is_zero() || now.saturating_duration_since(self.verified) >= interval)
+    }
+
+    fn complete_pass(&mut self, now: Instant) {
+        self.verified = now;
+        self.retry_at = now;
+        self.failure_delay = Duration::ZERO;
+    }
 }
 
 struct LocalSource {
@@ -485,7 +651,7 @@ struct LocalSource {
 #[derive(Clone, Copy)]
 struct ScanGeneration {
     id: i64,
-    epoch: u64,
+    read: ObservationToken,
 }
 
 impl LocalSource {
@@ -528,13 +694,7 @@ impl LocalSource {
             writer: Mutex::new(None),
             reader: Mutex::new(None),
             watcher: Mutex::new(None),
-            observations: Mutex::new(Observations {
-                epoch: 0,
-                uncertain: false,
-                pending: VecDeque::new(),
-                bytes: 0,
-                verification_required: false,
-            }),
+            observations: Mutex::new(Observations::default()),
             status: Mutex::new(SourceStatus {
                 state: "building",
                 message: None,
@@ -543,6 +703,7 @@ impl LocalSource {
                 accessed: now,
                 accessed_at_ms: None,
                 retry_at: now,
+                failure_delay: Duration::ZERO,
                 stalled: false,
             }),
             busy: AtomicBool::new(false),
@@ -561,7 +722,7 @@ impl LocalSource {
         Ok(())
     }
 
-    fn fail(&self, error: &IndexError, budget: &DiskBudget) {
+    fn fail(&self, error: &IndexError, _budget: &DiskBudget) {
         if matches!(error, IndexError::StoragePaused(_)) {
             self.reclamation_pending.store(true, Ordering::Release);
         }
@@ -572,24 +733,20 @@ impl LocalSource {
         if let Ok(mut status) = self.status.lock() {
             status.state = "ready";
             status.message = Some(message);
-            status.retry_at = Instant::now()
-                + Duration::from_secs(
-                    budget
-                        .policy()
-                        .map(|policy| policy.degraded_verification_seconds as u64)
-                        .unwrap_or(STALLED_READ_TIMEOUT.as_secs()),
-                );
+            status.schedule_retry(Instant::now(), Sha256::digest(self.session.as_bytes())[0]);
         }
     }
 
     fn invalidate(&self) -> Result<(), IndexError> {
-        let mut observations = lock(&self.observations)?;
-        observations.epoch = observations.epoch.checked_add(1).ok_or(IndexError::Invalid(
-            "Directory observation sequence is exhausted. Restart the companion.",
-        ))?;
-        observations.uncertain = true;
-        observations.verification_required = true;
-        Ok(())
+        lock(&self.observations)?.invalidate()
+    }
+
+    fn begin_read(self: &Arc<Self>) -> Result<ObservationRead, IndexError> {
+        let token = lock(&self.observations)?.begin_read()?;
+        Ok(ObservationRead {
+            source: Arc::clone(self),
+            token,
+        })
     }
 
     fn observe(&self, event: Result<Event, notify::Error>) -> Result<(), IndexError> {
@@ -627,43 +784,33 @@ impl LocalSource {
             validate_directory_path(&text)?;
             Ok(text)
         };
-        let mut mutations = Vec::new();
+        let maximum_pending = limit("max_pending_observations")?;
+        let maximum_bytes = limit("max_observation_bytes")?;
+        let mut observations = lock(&self.observations)?;
+        let mut enqueue = |mutation| observations.enqueue(mutation, maximum_pending, maximum_bytes);
         match event.kind {
             EventKind::Create(CreateKind::Folder) => {
                 for path in &event.paths {
-                    mutations.push(DirectoryMutation::Add { path: relative(path)? });
+                    if !enqueue(DirectoryMutation::Add { path: relative(path)? })? {
+                        break;
+                    }
                 }
             }
             EventKind::Remove(RemoveKind::Folder) => {
                 for path in &event.paths {
-                    mutations.push(DirectoryMutation::Remove { path: relative(path)? });
+                    if !enqueue(DirectoryMutation::Remove { path: relative(path)? })? {
+                        break;
+                    }
                 }
             }
-            EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() == 2 => mutations.push(DirectoryMutation::Rename {
-                path: relative(&event.paths[0])?,
-                new_path: relative(&event.paths[1])?,
-            }),
-            EventKind::Modify(ModifyKind::Metadata(_)) => return Ok(()),
-            _ => return self.invalidate(),
-        }
-        let mut observations = lock(&self.observations)?;
-        observations.epoch = observations.epoch.checked_add(1).ok_or(IndexError::Invalid(
-            "Directory observation sequence is exhausted. Restart the companion.",
-        ))?;
-        observations.uncertain = true;
-        observations.verification_required = true;
-        for mutation in mutations {
-            let bytes = match &mutation {
-                DirectoryMutation::Add { path } | DirectoryMutation::Remove { path } => path.len(),
-                DirectoryMutation::Rename { path, new_path } => path.len() + new_path.len(),
-            };
-            if observations.pending.len() >= limit("max_pending_observations")?
-                || bytes > limit("max_observation_bytes")?.saturating_sub(observations.bytes)
-            {
-                return Ok(());
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() == 2 => {
+                enqueue(DirectoryMutation::Rename {
+                    path: relative(&event.paths[0])?,
+                    new_path: relative(&event.paths[1])?,
+                })?;
             }
-            observations.bytes += bytes;
-            observations.pending.push_back((mutation, bytes));
+            EventKind::Modify(ModifyKind::Metadata(_)) => return Ok(()),
+            _ => return observations.invalidate(),
         }
         Ok(())
     }
@@ -743,13 +890,14 @@ impl LocalSource {
             observations.uncertain = false;
         }
         for _ in 0..ROW_BATCH_SIZE {
-            let Some((mutation, bytes)) = observations.pending.front() else {
+            let Some((_, mutation, bytes)) = observations.pending.front() else {
                 break;
             };
             writer.mutate_path(mutation)?;
             observations.bytes -= *bytes;
             observations.pending.pop_front();
         }
+        observations.retire_barriers();
         if observations.pending.is_empty()
             && !self.busy.load(Ordering::Acquire)
             && self.active_queries.load(Ordering::Acquire) == 0
@@ -785,7 +933,7 @@ impl LocalSource {
     ) -> Result<(), IndexError> {
         root.verify_parent(parent, parent_identity)?;
         let observations = lock(&self.observations)?;
-        if observations.epoch != scan.epoch || self.stopped.load(Ordering::Acquire) {
+        if !observations.is_current(scan.read, parent) || self.stopped.load(Ordering::Acquire) {
             return Err(IndexError::Interrupted);
         }
         let _reservation = budget.reserve()?;
@@ -794,6 +942,37 @@ impl LocalSource {
             .as_mut()
             .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
             .write_scan_children(scan.id, children.iter().cloned())?;
+        Ok(())
+    }
+
+    fn accept_generation(
+        &self,
+        root: &NativeRoot,
+        baseline: ObservationToken,
+        generation: i64,
+        budget: &Arc<DiskBudget>,
+    ) -> Result<(), IndexError> {
+        root.verify()?;
+        let mut observations = lock(&self.observations)?;
+        if !observations.is_current(baseline, "") || !observations.pending.is_empty() || self.stopped.load(Ordering::Acquire) {
+            return Err(IndexError::Interrupted);
+        }
+        let _reservation = budget.reserve()?;
+        let complete = lock(&self.writer)?
+            .as_mut()
+            .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+            .finish_generation(generation, 0)?;
+        let mut status = lock(&self.status)?;
+        status.state = "ready";
+        status.complete_pass(Instant::now());
+        if complete {
+            self.cleanup_pending.store(true, Ordering::Release);
+            observations.verification_required = false;
+            status.message = None;
+        } else {
+            status.message = Some("Directory coverage is incomplete. Some paths cannot be indexed safely.".to_owned());
+            observations.verification_required = true;
+        }
         Ok(())
     }
 
@@ -837,8 +1016,12 @@ impl LocalSource {
             index.repair_fts_batch()?;
         }
         self.flush(budget)?;
+        let baseline = self.begin_read()?;
         let (epoch, generation, selected) = {
             let observations = lock(&self.observations)?;
+            if !observations.is_current(baseline.token, "") {
+                return Err(IndexError::Interrupted);
+            }
             let _reservation = budget.reserve()?;
             let mut writer = lock(&self.writer)?;
             let index = writer.as_mut().ok_or(IndexError::Invalid("Directory writer is unavailable."))?;
@@ -858,13 +1041,14 @@ impl LocalSource {
                 let Some(parent) = parents.first() else {
                     break;
                 };
+                let read = self.begin_read()?;
                 let parent_identity = root.parent_identity(parent)?;
                 let mut batch = Vec::with_capacity(ROW_BATCH_SIZE);
                 let mut bytes = 0;
                 self.progress()?;
                 root.children(parent, |entry| {
                     self.progress()?;
-                    if self.stopped.load(Ordering::Acquire) || lock(&self.observations)?.epoch != epoch {
+                    if self.stopped.load(Ordering::Acquire) || !lock(&self.observations)?.is_current(read.token, parent) {
                         return Err(IndexError::Interrupted);
                     }
                     match entry {
@@ -882,7 +1066,10 @@ impl LocalSource {
                                     &root,
                                     parent,
                                     parent_identity,
-                                    ScanGeneration { id: generation, epoch },
+                                    ScanGeneration {
+                                        id: generation,
+                                        read: read.token,
+                                    },
                                     &batch,
                                     budget,
                                 )?;
@@ -895,7 +1082,7 @@ impl LocalSource {
                         Ok(None) => {}
                         Err(issue) => {
                             let observations = lock(&self.observations)?;
-                            if observations.epoch != epoch {
+                            if !observations.is_current(read.token, parent) {
                                 return Err(IndexError::Interrupted);
                             }
                             let _reservation = budget.reserve()?;
@@ -912,14 +1099,17 @@ impl LocalSource {
                         &root,
                         parent,
                         parent_identity,
-                        ScanGeneration { id: generation, epoch },
+                        ScanGeneration {
+                            id: generation,
+                            read: read.token,
+                        },
                         &batch,
                         budget,
                     )?;
                 }
                 root.verify_parent(parent, parent_identity)?;
                 let observations = lock(&self.observations)?;
-                if observations.epoch != epoch {
+                if !observations.is_current(read.token, parent) {
                     return Err(IndexError::Interrupted);
                 }
                 let _reservation = budget.reserve()?;
@@ -928,28 +1118,7 @@ impl LocalSource {
                     .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
                     .finish_scan_parent(generation, parent)?;
             }
-            root.verify()?;
-            let mut observations = lock(&self.observations)?;
-            if observations.epoch != epoch || !observations.pending.is_empty() || self.stopped.load(Ordering::Acquire) {
-                return Err(IndexError::Interrupted);
-            }
-            let _reservation = budget.reserve()?;
-            let complete = lock(&self.writer)?
-                .as_mut()
-                .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
-                .finish_generation(generation, 0)?;
-            let mut status = lock(&self.status)?;
-            status.state = "ready";
-            if complete {
-                self.cleanup_pending.store(true, Ordering::Release);
-                observations.verification_required = false;
-                status.verified = Instant::now();
-                status.message = None;
-            } else {
-                status.message = Some("Directory coverage is incomplete. Some paths cannot be indexed safely.".to_owned());
-                observations.verification_required = true;
-            }
-            Ok(())
+            self.accept_generation(&root, baseline.token, generation, budget)
         })();
         if outcome.is_err() {
             self.invalidate()?;
@@ -1073,6 +1242,7 @@ impl LocalDirectoryManager {
         for source in &sources {
             if let Ok(mut status) = source.status.lock() {
                 status.retry_at = Instant::now();
+                status.failure_delay = Duration::ZERO;
             }
         }
         Ok(())
@@ -1253,8 +1423,11 @@ impl LocalDirectoryManager {
             } else {
                 policy.healthy_verification_seconds
             };
-            let due = Instant::now() >= status.retry_at
-                && (lock(&source.reader)?.is_none() || status.verified.elapsed() >= Duration::from_secs(interval as u64));
+            let due = status.verification_due(
+                Instant::now(),
+                Duration::from_secs(interval as u64),
+                lock(&source.reader)?.is_some(),
+            );
             drop(status);
             if due {
                 self.start_scan(&source)?;
@@ -1659,6 +1832,61 @@ mod tests {
     }
 
     #[test]
+    fn failed_verification_uses_bounded_backoff_instead_of_the_full_pass_interval() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
+        let mut status = lock(&source.status).unwrap();
+        let mut now = status.verified;
+        let interval = Duration::from_secs(900);
+        for seconds in [30, 60, 120, 240, 300, 300] {
+            status.schedule_retry(now, FAILURE_RETRY_JITTER_PERCENT);
+            let delay = Duration::from_secs(seconds);
+            assert_eq!(status.retry_at.saturating_duration_since(now), delay);
+            assert!(!status.verification_due(now + delay - Duration::from_millis(1), interval, true));
+            assert!(status.verification_due(now + delay, interval, true));
+            now += delay;
+        }
+        status.complete_pass(now);
+        assert!(!status.verification_due(now, interval, true));
+        status.schedule_retry(now, FAILURE_RETRY_JITTER_PERCENT);
+        assert_eq!(status.failure_delay, FAILURE_RETRY_MIN);
+    }
+
+    #[test]
+    fn retry_jitter_stays_within_limits_and_spreads_sources() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
+        let mut status = lock(&source.status).unwrap();
+        let now = status.verified;
+        let mut delays = std::collections::HashSet::new();
+        for jitter in 0..=u8::MAX {
+            status.failure_delay = Duration::ZERO;
+            status.schedule_retry(now, jitter);
+            let delay = status.retry_at.saturating_duration_since(now);
+            assert!((FAILURE_RETRY_MIN..=FAILURE_RETRY_MAX).contains(&delay));
+            delays.insert(delay);
+            status.failure_delay = FAILURE_RETRY_MAX;
+            status.schedule_retry(now, jitter);
+            assert!((FAILURE_RETRY_MIN..=FAILURE_RETRY_MAX).contains(&status.retry_at.saturating_duration_since(now)));
+        }
+        assert!(delays.len() > 1);
+    }
+
+    #[test]
+    fn completed_partial_pass_waits_for_its_degraded_deadline() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
+        let mut status = lock(&source.status).unwrap();
+        let now = status.verified;
+        let interval = Duration::from_secs(300);
+        status.complete_pass(now);
+        assert!(!status.verification_due(now, interval, true));
+        assert!(!status.verification_due(now + interval - Duration::from_millis(1), interval, true));
+        assert!(status.verification_due(now + interval, interval, true));
+        assert!(status.verification_due(now, interval, false));
+    }
+
+    #[test]
     fn observation_overflow_invalidates_before_dropping_the_new_hint() {
         let temporary = tempfile::tempdir().unwrap();
         let source = LocalSource::new(temporary.path().join("root"), temporary.path());
@@ -1673,7 +1901,223 @@ mod tests {
         assert_eq!(observations.pending.len(), limit("max_pending_observations").unwrap());
         assert!(observations.verification_required);
         assert!(observations.uncertain);
-        assert_eq!(observations.epoch, (limit("max_pending_observations").unwrap() + 1) as u64);
+        assert_eq!(observations.epoch, 1);
+    }
+
+    #[test]
+    fn single_event_byte_overflow_stops_before_copying_remaining_hints() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
+        let read = source.begin_read().unwrap();
+        let bytes = limit("max_observation_bytes").unwrap() / 2 + 1;
+        let event = Event::new(EventKind::Create(CreateKind::Folder))
+            .add_path(source.root_path.join("a".repeat(bytes)))
+            .add_path(source.root_path.join("b".repeat(bytes)))
+            .add_path(source.root_path.join("../not-parsed-after-overflow"));
+        source.observe(Ok(event)).unwrap();
+        let observations = lock(&source.observations).unwrap();
+        assert_eq!(observations.pending.len(), 1);
+        assert_eq!(observations.bytes, bytes);
+        assert_eq!(observations.epoch, 1);
+        assert!(observations.verification_required);
+        assert!(!observations.is_current(read.token, ""));
+    }
+
+    #[test]
+    fn prefix_barriers_coalesce_and_keep_the_newest_sequence() {
+        let mut observations = Observations::default();
+        let old = observations.begin_read().unwrap();
+        for path in ["alpha/first", "unrelated", "alpha/second", "alpha", "alpha/next"] {
+            assert!(observations.enqueue(DirectoryMutation::Add { path: path.into() }, 3, 64).unwrap());
+            observations.pending.clear();
+            observations.bytes = 0;
+            observations.retire_barriers();
+        }
+        assert_eq!(observations.epoch, 0);
+        assert_eq!(observations.barriers.len(), 2);
+        assert_eq!(observations.barrier_bytes, "alpha".len() + "unrelated".len());
+        assert!(observations.barriers.contains(&(observations.sequence, "alpha".into())));
+        assert!(!observations.is_current(old, "alpha/first"));
+        assert!(!observations.is_current(old, ""));
+        assert!(observations.is_current(old, "other"));
+        assert!(observations.is_current(old, "alphabet"));
+    }
+
+    #[test]
+    fn barrier_retirement_waits_for_distinct_producers_and_queued_work() {
+        let mut observations = Observations::default();
+        let first = observations.begin_read().unwrap();
+        let second = observations.begin_read().unwrap();
+        assert_ne!(first, second);
+        observations
+            .enqueue(DirectoryMutation::Remove { path: "alpha".into() }, 2, 64)
+            .unwrap();
+        observations.end_read(first);
+        assert_eq!(observations.barriers.len(), 1);
+        observations.end_read(second);
+        assert_eq!(observations.barriers.len(), 1);
+        observations.pending.clear();
+        observations.bytes = 0;
+        observations.retire_barriers();
+        assert!(observations.barriers.is_empty());
+        assert_eq!(observations.barrier_bytes, 0);
+        assert!(!observations.is_current(second, "alpha"));
+    }
+
+    #[test]
+    fn barrier_overflow_invalidates_blocked_producers_before_retirement() {
+        for (maximum_pending, maximum_bytes) in [(1, 64), (4, 5)] {
+            let mut observations = Observations::default();
+            let old = observations.begin_read().unwrap();
+            observations
+                .enqueue(DirectoryMutation::Add { path: "alpha".into() }, maximum_pending, maximum_bytes)
+                .unwrap();
+            observations.pending.clear();
+            observations.bytes = 0;
+            assert!(observations
+                .enqueue(DirectoryMutation::Remove { path: "beta".into() }, maximum_pending, maximum_bytes)
+                .unwrap());
+            assert_eq!(observations.epoch, 1);
+            assert!(observations.barriers.is_empty());
+            assert_eq!(observations.barrier_bytes, 0);
+            assert_eq!(observations.pending.len(), 1);
+            assert_eq!(observations.producers.len(), 1);
+            assert!(observations.verification_required);
+            assert!(!observations.is_current(old, "alpha"));
+            assert!(!observations.is_current(old, ""));
+            observations.end_read(old);
+            assert!(observations.producers.is_empty());
+        }
+    }
+
+    #[test]
+    fn observation_read_releases_on_error_without_early_permit_release() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
+        source.busy.store(true, Ordering::Release);
+        let semaphore = Arc::new(Semaphore::new(1));
+        let ownership = ScanOwnership {
+            source: Arc::clone(&source),
+            _permit: Arc::clone(&semaphore).try_acquire_owned().unwrap(),
+        };
+        let read = source.begin_read().unwrap();
+        source.invalidate().unwrap();
+        assert_eq!(lock(&source.observations).unwrap().producers.len(), 1);
+        assert_eq!(semaphore.available_permits(), 0);
+        drop(read);
+        assert!(lock(&source.observations).unwrap().producers.is_empty());
+        assert_eq!(semaphore.available_permits(), 0);
+        drop(ownership);
+        assert_eq!(semaphore.available_permits(), 1);
+    }
+
+    #[test]
+    fn blocked_observation_read_keeps_ownership_through_overflow() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
+        source.busy.store(true, Ordering::Release);
+        let semaphore = Arc::new(Semaphore::new(1));
+        let ownership = ScanOwnership {
+            source: Arc::clone(&source),
+            _permit: Arc::clone(&semaphore).try_acquire_owned().unwrap(),
+        };
+        let read = source.begin_read().unwrap();
+        let token = read.token;
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let worker = std::thread::spawn(move || {
+            let _ownership = ownership;
+            let _read = read;
+            blocked.recv().unwrap();
+        });
+        {
+            let mut observations = lock(&source.observations).unwrap();
+            observations
+                .enqueue(DirectoryMutation::Add { path: "accepted".into() }, 1, 64)
+                .unwrap();
+            assert!(!observations
+                .enqueue(DirectoryMutation::Remove { path: "deleted".into() }, 1, 64)
+                .unwrap());
+            assert!(!observations.is_current(token, ""));
+            assert_eq!(observations.producers.len(), 1);
+            assert_eq!(observations.pending.len(), 1);
+            assert!(observations.verification_required);
+        }
+        assert_eq!(semaphore.available_permits(), 0);
+        assert!(source.busy.load(Ordering::Acquire));
+        release.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(lock(&source.observations).unwrap().producers.is_empty());
+        assert_eq!(semaphore.available_permits(), 1);
+        assert!(!source.busy.load(Ordering::Acquire));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn late_scan_batches_and_candidate_selection_cannot_restore_deleted_rows() {
+        let temporary = tempfile::tempdir().unwrap();
+        let namespace = temporary.path().join("private");
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir(&root_path).unwrap();
+        std::fs::create_dir(root_path.join("alpha")).unwrap();
+        let root = NativeRoot::open(&root_path).unwrap();
+        let parent_identity = root.parent_identity("alpha").unwrap();
+        let source = LocalSource::new(root_path, &namespace);
+        let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index
+            .write_paths(["alpha".into(), "alpha/child".into(), "unrelated".into()], None)
+            .unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let generation = index.begin_verification().unwrap();
+        index.write_paths(["alpha".into(), "candidate".into()], Some(generation)).unwrap();
+        let reader = index.reader();
+        *lock(&source.writer).unwrap() = Some(index);
+        source.busy.store(true, Ordering::Release);
+        let baseline = source.begin_read().unwrap();
+        let read = source.begin_read().unwrap();
+        let budget = Arc::new(DiskBudget {
+            namespace,
+            policy_gate: Mutex::new(()),
+            state: Mutex::new(DiskState {
+                policy: DirectoryPolicy::defaults().unwrap(),
+                reserved: 0,
+                next_cleanup_at: Instant::now(),
+            }),
+            space_probe: available_disk_bytes,
+        });
+        source
+            .observe(Ok(
+                Event::new(EventKind::Remove(RemoveKind::Folder)).add_path(source.root_path.join("alpha"))
+            ))
+            .unwrap();
+        source.flush(&budget).unwrap();
+        assert!(matches!(
+            source.commit_children(
+                &root,
+                "alpha",
+                parent_identity,
+                ScanGeneration {
+                    id: generation,
+                    read: read.token
+                },
+                &[("alpha/stale".into(), false)],
+                &budget,
+            ),
+            Err(IndexError::Interrupted)
+        ));
+        assert!(matches!(
+            source.accept_generation(&root, baseline.token, generation, &budget),
+            Err(IndexError::Interrupted)
+        ));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        assert_eq!(reader.search("alpha", 3, false, &cancelled, false).unwrap().total_matches, 0);
+        assert_eq!(
+            reader
+                .search("unrelated candidate", 3, false, &cancelled, false)
+                .unwrap()
+                .total_matches,
+            1
+        );
+        assert!(lock(&source.observations).unwrap().verification_required);
     }
 
     #[test]
