@@ -41,6 +41,14 @@ CREATE TABLE directories (
 ) STRICT;
 CREATE INDEX directories_generation ON directories(generation_id);
 
+CREATE TABLE scan_queue (
+    generation_id INTEGER NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    processed INTEGER NOT NULL DEFAULT 0 CHECK (processed IN (0, 1)),
+    PRIMARY KEY (generation_id, path)
+) STRICT;
+CREATE INDEX scan_queue_pending ON scan_queue(generation_id, processed);
+
 CREATE TABLE coverage_issues (
     generation_id INTEGER NOT NULL REFERENCES generations(id) ON DELETE CASCADE,
     code TEXT NOT NULL CHECK (code IN ('access_denied', 'unsupported_encoding',

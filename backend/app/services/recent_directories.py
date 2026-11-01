@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import heapq
 import uuid
 from datetime import datetime, timezone
+from typing import Iterator
 
 from fastapi import HTTPException, status
 from sqlmodel import Session, col, select
 
 from app.models.recent_directory import RecentDirectory, RecentDirectoryRead
 from app.models.user import User
+from app.services.directory_index import search_terms
 from app.services.history_common import (
+    HISTORY_QUERY_BATCH_SIZE,
     LOCAL_DRIVE_PREFIX,
-    directory_match_rank,
+    history_search_relevance,
     history_usage_score,
     normalize_history_search_text,
     normalize_recent_history_path,
@@ -87,32 +91,47 @@ def _is_accessible_history_record(*, record: RecentDirectory, current_user: User
 
 def search_recent_directories(*, query: str, limit: int, current_user: User, session: Session) -> list[RecentDirectoryRead]:
     bounded_limit = max(1, min(limit, MAX_RECENT_DIRECTORY_RESULTS, get_file_search_settings(session).result_limit))
-    normalized_query = normalize_history_search_text(query.strip())
+    terms = search_terms(query)
     records = session.exec(
-        select(RecentDirectory).where(RecentDirectory.user_id == current_user.id).order_by(col(RecentDirectory.last_visited_at).desc())
-    ).all()
+        select(RecentDirectory).where(RecentDirectory.user_id == current_user.id).execution_options(yield_per=HISTORY_QUERY_BATCH_SIZE)
+    )
 
     now = datetime.now(timezone.utc)
-    matched: list[tuple[int, RecentDirectory]] = []
-    for record in records:
-        if normalized_query not in normalize_history_search_text(record.path) or not _is_accessible_history_record(
-            record=record, current_user=current_user, session=session
-        ):
-            continue
-        matched.append((directory_match_rank(record.path, normalized_query), record))
-    matched.sort(
+
+    def matches() -> Iterator[tuple[int, int, RecentDirectory]]:
+        try:
+            for record in records:
+                relevance = history_search_relevance(
+                    normalize_history_search_text(record.path), normalize_history_search_text(record.path.rsplit("/", 1)[-1]), terms
+                )
+                if relevance is not None and _is_accessible_history_record(record=record, current_user=current_user, session=session):
+                    yield *relevance, record
+        finally:
+            records.close()
+
+    matched = heapq.nsmallest(
+        bounded_limit,
+        matches(),
         key=lambda result: (
-            result[0],
-            -history_usage_score(result[1].usage_score, result[1].last_visited_at, now),
-            -result[1].last_visited_at.timestamp(),
-            str(result[1].id),
-        )
+            -result[0],
+            result[1],
+            -history_usage_score(result[2].usage_score, result[2].last_visited_at, now),
+            -result[2].last_visited_at.replace(tzinfo=timezone.utc).timestamp(),
+            normalize_history_search_text(result[2].path),
+            result[2].path,
+            result[2].connection_id,
+            str(result[2].id),
+        ),
     )
     return [
         RecentDirectoryRead.model_validate(record).model_copy(
-            update={"match_rank": rank, "usage_score": history_usage_score(record.usage_score, record.last_visited_at, now)}
+            update={
+                "matched_term_count": count,
+                "match_rank": rank,
+                "usage_score": history_usage_score(record.usage_score, record.last_visited_at, now),
+            }
         )
-        for rank, record in matched[:bounded_limit]
+        for count, rank, record in matched
     ]
 
 

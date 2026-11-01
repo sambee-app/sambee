@@ -4,8 +4,8 @@ import type { BrowserOpenMode } from "../../../pages/FileBrowser/types";
 import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
 import { publishRecentFilesChanged } from "../../../services/recentFilesSync";
 import type { FileEntry, RecentFile } from "../../../types";
-import { historyMatchRank, normalizeSearchText, rankHistorySearchResults, removeRecentHistoryResult } from "./recentHistory";
-import type { SearchProvider, SearchResult, SearchSelectionAction, SearchStatusInfo, SearchTextHighlight } from "./types";
+import { findTextHighlight, getSearchRelevance, rankHistorySearchResults, removeRecentHistoryResult, searchTerms } from "./recentHistory";
+import type { SearchProvider, SearchResult, SearchSelectionAction, SearchStatusInfo } from "./types";
 
 const CURRENT_DIRECTORY_PREFIX = "current:";
 const RECENT_FILE_PREFIX = "recent:";
@@ -22,12 +22,6 @@ function parentPath(path: string): string {
 function formatConnectionPath(connection: string, path: string): string {
   const rootedPath = path.startsWith("/") ? path : `/${path}`;
   return `${connection}:${rootedPath}`;
-}
-
-function findTextHighlight(text: string, query: string): SearchTextHighlight | undefined {
-  if (!query) return undefined;
-  const start = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
-  return start < 0 ? undefined : { start, end: start + query.length };
 }
 
 interface FileSearchProviderOptions {
@@ -59,11 +53,17 @@ export function useFileSearchProvider({
 
   const fetchResults = useCallback(
     async (query: string, signal: AbortSignal): Promise<SearchResult[]> => {
-      const normalizedQuery = normalizeSearchText(query.trim());
+      const terms = searchTerms(query);
       const currentCandidates = files
-        .filter((file) => file.type === "file" && (!normalizedQuery || normalizeSearchText(file.name).includes(normalizedQuery)))
+        .filter((file) => file.type === "file" && (!terms.length || getSearchRelevance(file.name, terms).matchedTermCount > 0))
         .sort((left, right) => {
-          return historyMatchRank(left.name, normalizedQuery) - historyMatchRank(right.name, normalizedQuery);
+          const leftRank = getSearchRelevance(left.name, terms);
+          const rightRank = getSearchRelevance(right.name, terms);
+          return (
+            rightRank.matchedTermCount - leftRank.matchedTermCount ||
+            leftRank.matchRank - rightRank.matchRank ||
+            (left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+          );
         });
       const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
       const effectiveResultLimit = recentResponse.result_limit ?? resultLimit;
@@ -92,8 +92,10 @@ export function useFileSearchProvider({
             id: `${RECENT_FILE_PREFIX}${file.id}`,
             value: `${RECENT_FILE_PREFIX}${file.id}`,
             icon: "recent-file" as const,
-            matchRank: file.match_rank ?? historyMatchRank(file.file_name, query),
+            ...getSearchRelevance(file.file_name, terms),
             usageScore: file.usage_score,
+            sortPath: file.file_name,
+            lastUsedAt: file.last_opened_at,
             primaryText: file.file_name,
             primaryHighlight: findTextHighlight(file.file_name, query.trim()),
             secondaryText: formatConnectionPath(getConnectionName(file.connection_id), parentPath(file.path)),
@@ -113,7 +115,8 @@ export function useFileSearchProvider({
             id: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
             value: `${CURRENT_DIRECTORY_PREFIX}${file.name}`,
             icon: "file" as const,
-            matchRank: historyMatchRank(file.name, query),
+            ...getSearchRelevance(file.name, terms),
+            sortPath: file.name,
             primaryText: file.name,
             primaryHighlight: findTextHighlight(file.name, query.trim()),
             secondaryText: formatConnectionPath(connectionName, currentPath || "/"),
@@ -156,6 +159,7 @@ export function useFileSearchProvider({
 
   return {
     id: "file-search",
+    sourceKey: `${connectionId}:${currentPath}:${resultLimit}`,
     modeId: "file-search",
     modeLabel: t("fileBrowser.search.modes.fileSearch"),
     placeholder: t("fileBrowser.search.placeholders.fileSearch"),

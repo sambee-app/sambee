@@ -283,11 +283,13 @@ export interface RecentFile {
   last_opened_at: string;
   usage_score?: number;
   match_rank?: number;
+  matched_term_count?: number;
 }
 
 export interface RecentFileSearchResponse {
   results: RecentFile[];
   result_limit?: number;
+  search_contract_version?: number;
 }
 
 export interface RecentDirectory {
@@ -297,11 +299,13 @@ export interface RecentDirectory {
   last_visited_at: string;
   usage_score?: number;
   match_rank?: number;
+  matched_term_count?: number;
 }
 
 export interface RecentDirectorySearchResponse {
   results: RecentDirectory[];
   result_limit: number;
+  search_contract_version?: number;
 }
 
 export interface RecentFileValidationError {
@@ -555,6 +559,7 @@ export interface LocalLinkTargetListing {
 }
 
 export interface DirectorySearchResult {
+  search_contract_version?: number;
   results: string[];
   match_ranks?: Record<string, number>;
   total_matches: number;

@@ -456,8 +456,12 @@ async def get_recent_directories(
     session: Session = Depends(get_session),
 ) -> RecentDirectorySearchRead:
     set_user(current_user.username)
+    try:
+        results = search_recent_directories(query=q, limit=limit, current_user=current_user, session=session)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return RecentDirectorySearchRead(
-        results=search_recent_directories(query=q, limit=limit, current_user=current_user, session=session),
+        results=results,
         result_limit=get_recent_file_result_limit(limit=limit, session=session),
     )
 
@@ -547,8 +551,12 @@ async def get_recent_files(
 ) -> RecentFileSearchRead:
     set_user(current_user.username)
     result_limit = get_recent_file_result_limit(limit=limit, session=session)
+    try:
+        results = search_recent_files(query=q, limit=result_limit, current_user=current_user, session=session)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return RecentFileSearchRead(
-        results=search_recent_files(query=q, limit=result_limit, current_user=current_user, session=session),
+        results=results,
         result_limit=result_limit,
     )
 

@@ -1378,6 +1378,35 @@ class TestThreadSafety:
 class TestDirectoryCacheManager:
     """Tests for the DirectoryCacheManager class."""
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("host", "other-host"),
+            ("share_name", "other-share"),
+            ("username", "other-user"),
+            ("password", "other-password"),
+            ("port", 1445),
+            ("path_prefix", "/other"),
+            ("source_revision", "new-revision"),
+        ],
+    )
+    async def test_rebinds_changed_sources_without_serving_previous_paths(self, manager: DirectoryCacheManager, field, value):
+        parameters = {"connection_id": "rebound", "host": "host", "share_name": "share", "username": "user", "password": "password"}
+        with (
+            patch.object(ConnectionDirectoryCache, "start_scan", new_callable=AsyncMock),
+            patch.object(ConnectionDirectoryCache, "load_from_disk", return_value=False),
+            patch.object(ConnectionDirectoryCache, "save_to_disk"),
+        ):
+            previous = await manager.get_or_create_cache(**parameters)
+            previous.add_directory("old-source-data")
+            replacement = await manager.get_or_create_cache(**{**parameters, field: value})
+            assert replacement is not previous
+            assert previous._stop_event.is_set()
+            assert replacement.directory_count == 0
+            assert manager.get_cache("rebound") is replacement
+            await manager.stop_all_async()
+
     def test_get_cache_returns_none_for_unknown(self, manager: DirectoryCacheManager):
         """get_cache should return None for unknown connection IDs."""
 

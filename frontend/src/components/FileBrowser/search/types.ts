@@ -46,12 +46,16 @@ export interface SearchResultItem {
   /** Optional muted result context. */
   secondaryText?: string;
   /** Optional highlighted range in the primary label. */
-  primaryHighlight?: SearchTextHighlight;
+  primaryHighlight?: SearchTextHighlight | SearchTextHighlight[];
   /** Optional highlighted range in the secondary label. */
-  secondaryHighlight?: SearchTextHighlight;
+  secondaryHighlight?: SearchTextHighlight | SearchTextHighlight[];
   /** Optional keyboard shortcut badge, used by commands. */
   shortcutLabel?: string;
   matchRank?: number;
+  matchedTermCount?: number;
+  sortPath?: string;
+  depth?: number;
+  lastUsedAt?: string;
   usageScore?: number;
 }
 
@@ -93,6 +97,8 @@ export type SearchSelectionAction = "associated-viewer" | "force-viewer-picker" 
 export interface SearchProvider {
   /** Unique identifier for this provider */
   id: string;
+  sourceKey?: string;
+  invalidateResults?: () => void;
 
   /** Stable mode identifier used for UI logic without coupling to translated labels. */
   modeId?: string;

@@ -1,16 +1,17 @@
 //! Disk-backed directory storage. Managers own source binding, private storage, and worker admission.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::{BTreeSet, BinaryHeap, HashMap};
+use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
-use unicode_casefold::UnicodeCaseFold;
-use unicode_normalization::{char::canonical_combining_class, UnicodeNormalization};
 
 pub const APPLICATION_ID: i64 = 1396853073;
 pub const SCHEMA_VERSION: i64 = 1;
@@ -25,6 +26,118 @@ pub const SQL_BUSY_TIMEOUT: Duration = Duration::from_millis(250);
 pub const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 pub const SQL_PROGRESS_STEPS: i32 = 1000;
 pub const SCHEMA: &str = include_str!("../../../../shared/directory-index/schema.sql");
+pub const UNICODE_CONTRACT: &str = include_str!("../../../../shared/directory-index/unicode.json");
+#[cfg(unix)]
+const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
+#[cfg(unix)]
+const PRIVATE_FILE_MODE: u32 = 0o600;
+const LEASE_EXTENSION: &str = ".lease";
+
+fn acquire_storage(path: &Path) -> Result<File, IndexError> {
+    let directory = path.parent().ok_or(IndexError::Invalid(
+        "Directory-index path has no parent. Select private local storage.",
+    ))?;
+    for ancestor in directory.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(IndexError::Invalid(
+                    "Directory-index storage must not use symbolic links. Select private local storage.",
+                ))
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    builder.mode(PRIVATE_DIRECTORY_MODE);
+    builder.create(directory)?;
+    let metadata = fs::symlink_metadata(directory)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(IndexError::Invalid(
+            "Directory-index storage is not a private directory. Select private local storage.",
+        ));
+    }
+    #[cfg(unix)]
+    if metadata.uid() != unsafe { libc::geteuid() } || metadata.permissions().mode() & 0o077 != 0 {
+        return Err(IndexError::Invalid(
+            "Directory-index storage must belong to the current user with mode 0700. Correct its owner and permissions.",
+        ));
+    }
+    for extension in ["", "-wal", "-shm", "-journal", LEASE_EXTENSION] {
+        let mut filename = path.as_os_str().to_os_string();
+        filename.push(extension);
+        match fs::symlink_metadata(Path::new(&filename)) {
+            Ok(metadata) if !metadata.is_file() || metadata.file_type().is_symlink() => {
+                return Err(IndexError::Invalid(
+                    "Directory-index files must be regular files without symbolic links. Correct the storage path.",
+                ))
+            }
+            Ok(metadata) => {
+                #[cfg(unix)]
+                if metadata.uid() != unsafe { libc::geteuid() } || metadata.permissions().mode() & 0o022 != 0 {
+                    return Err(IndexError::Invalid("Directory-index files must belong to the current user without public write access. Correct their owner and permissions."));
+                }
+                #[cfg(not(unix))]
+                let _ = metadata;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let mut lease_path = path.as_os_str().to_os_string();
+    lease_path.push(LEASE_EXTENSION);
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    options.mode(PRIVATE_FILE_MODE).custom_flags(libc::O_NOFOLLOW);
+    let lease = options.open(Path::new(&lease_path))?;
+    lease.try_lock().map_err(|error| match error {
+        fs::TryLockError::WouldBlock => std::io::Error::new(
+            std::io::ErrorKind::WouldBlock,
+            "Another process owns this directory index. Close the other instance and retry.",
+        ),
+        fs::TryLockError::Error(error) => error,
+    })?;
+    Ok(lease)
+}
+
+#[derive(Deserialize)]
+struct UnicodeContract {
+    #[serde(deserialize_with = "deserialize_normalization")]
+    normalization: HashMap<char, String>,
+    whitespace: BTreeSet<char>,
+    word_ranges: Vec<(u32, u32)>,
+}
+
+fn deserialize_normalization<'de, Deserializer: serde::Deserializer<'de>>(
+    deserializer: Deserializer,
+) -> Result<HashMap<char, String>, Deserializer::Error> {
+    Ok(Vec::<(char, String)>::deserialize(deserializer)?.into_iter().collect())
+}
+
+fn unicode_contract() -> &'static UnicodeContract {
+    static CONTRACT: OnceLock<UnicodeContract> = OnceLock::new();
+    CONTRACT.get_or_init(|| serde_json::from_str(UNICODE_CONTRACT).expect("Embedded search Unicode contract must pass contract tests"))
+}
+
+fn is_word_character(character: char) -> bool {
+    let codepoint = u32::from(character);
+    unicode_contract()
+        .word_ranges
+        .binary_search_by(|(start, end)| {
+            if codepoint < *start {
+                std::cmp::Ordering::Greater
+            } else if codepoint > *end {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum IndexError {
@@ -55,11 +168,15 @@ impl SourceKind {
 }
 
 pub fn normalize_search_text(value: &str) -> String {
-    value
-        .nfkd()
-        .filter(|character| canonical_combining_class(*character) == 0)
-        .case_fold()
-        .collect()
+    let mut normalized = String::with_capacity(value.len());
+    for character in value.chars() {
+        if let Some(key) = unicode_contract().normalization.get(&character) {
+            normalized.push_str(key);
+        } else {
+            normalized.push(character);
+        }
+    }
+    normalized
 }
 
 pub fn search_terms(query: &str) -> Result<Vec<String>, IndexError> {
@@ -69,7 +186,7 @@ pub fn search_terms(query: &str) -> Result<Vec<String>, IndexError> {
         ));
     }
     let terms: BTreeSet<_> = query
-        .split_whitespace()
+        .split(|character| unicode_contract().whitespace.contains(&character))
         .map(normalize_search_text)
         .filter(|term| !term.is_empty())
         .collect();
@@ -88,7 +205,7 @@ pub fn single_term_rank(basename_key: &str, term: &str) -> i64 {
     }
     if basename_key
         .char_indices()
-        .any(|(offset, character)| !character.is_alphanumeric() && basename_key[offset + character.len_utf8()..].starts_with(term))
+        .any(|(offset, character)| !is_word_character(character) && basename_key[offset + character.len_utf8()..].starts_with(term))
     {
         return 2;
     }
@@ -159,11 +276,32 @@ pub struct DirectoryIndexSearch {
 pub struct DirectoryIndex {
     path: PathBuf,
     writer: Connection,
+    _lease: File,
+}
+
+pub enum DirectoryMutation {
+    Add { path: String },
+    Remove { path: String },
+    Rename { path: String, new_path: String },
+}
+
+fn checked_sql_size(value: usize) -> Result<i64, IndexError> {
+    i64::try_from(value).map_err(|_| IndexError::Invalid("Directory-index size exceeds the supported signed integer range."))
 }
 
 impl DirectoryIndex {
     pub fn open(path: &Path, source_kind: SourceKind, source_identity: &serde_json::Value) -> Result<Self, IndexError> {
+        let absolute_path = std::path::absolute(path)?;
+        let path = absolute_path.as_path();
+        let lease = acquire_storage(path)?;
         let created = !path.try_exists()?;
+        if created {
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(PRIVATE_FILE_MODE).custom_flags(libc::O_NOFOLLOW);
+            drop(options.open(path)?);
+        }
         let mut writer = Connection::open(path)?;
         writer.busy_timeout(SQL_BUSY_TIMEOUT)?;
         if created {
@@ -220,6 +358,7 @@ impl DirectoryIndex {
         Ok(Self {
             path: path.to_path_buf(),
             writer,
+            _lease: lease,
         })
     }
 
@@ -278,6 +417,99 @@ impl DirectoryIndex {
         }
     }
 
+    fn require_scan_generation(transaction: &rusqlite::Transaction<'_>, generation_id: i64) -> Result<(), IndexError> {
+        let state: String = transaction.query_row("SELECT state FROM generations WHERE id = ?", [generation_id], |row| row.get(0))?;
+        if !matches!(state.as_str(), "building" | "candidate") {
+            return Err(IndexError::Invalid("Scan generation is no longer active. Discard this batch and request verification."));
+        }
+        Ok(())
+    }
+
+    pub fn seed_scan(&mut self, generation_id: i64) -> Result<(), IndexError> {
+        let transaction = self.writer.transaction()?;
+        Self::require_scan_generation(&transaction, generation_id)?;
+        transaction.execute("INSERT INTO scan_queue(generation_id, path) VALUES (?, '') ON CONFLICT DO NOTHING", [generation_id])?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn pending_scan_paths(&self, generation_id: i64, limit: usize) -> Result<Vec<String>, IndexError> {
+        if limit == 0 || limit > ROW_BATCH_SIZE { return Err(IndexError::Invalid("Scan queue batch limit is unsupported. Use a bounded batch.")); }
+        let mut statement = self.writer.prepare("SELECT path FROM scan_queue WHERE generation_id = ? AND processed = 0 ORDER BY path LIMIT ?")?;
+        let rows = statement.query_map(params![generation_id, checked_sql_size(limit)?], |row| row.get(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn write_scan_children(&mut self, generation_id: i64, children: impl IntoIterator<Item = (String, bool)>) -> Result<(), IndexError> {
+        let batch: Vec<_> = children.into_iter().take(ROW_BATCH_SIZE + 1).collect();
+        if batch.len() > ROW_BATCH_SIZE { return Err(IndexError::Invalid("Scan children exceed the batch limit. Split them into bounded batches.")); }
+        let transaction = self.writer.transaction()?;
+        Self::require_scan_generation(&transaction, generation_id)?;
+        for (path, descend) in batch {
+            validate_directory_path(&path)?;
+            transaction.execute("INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING", params![generation_id, path, normalize_search_text(&path), normalize_search_text(path.rsplit('/').next().unwrap_or(&path)), checked_sql_size(path.bytes().filter(|byte| *byte == b'/').count())?, path.split('/').any(|part| part.starts_with('.'))])?;
+            if descend { transaction.execute("INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT DO NOTHING", params![generation_id, path])?; }
+        }
+        let selected: i64 = transaction.query_row("SELECT selected_generation FROM source_metadata WHERE id = 1", [], |row| row.get(0))?;
+        if generation_id == selected { Self::advance_revision(&transaction)?; }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn finish_scan_parent(&mut self, generation_id: i64, path: &str) -> Result<(), IndexError> {
+        if !path.is_empty() { validate_directory_path(path)?; }
+        let transaction = self.writer.transaction()?;
+        Self::require_scan_generation(&transaction, generation_id)?;
+        transaction.execute("UPDATE scan_queue SET processed = 1 WHERE generation_id = ? AND path = ?", params![generation_id, path])?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn discard_generation(&mut self, generation_id: i64) -> Result<(), IndexError> {
+        self.writer.execute("DELETE FROM generations WHERE id = ? AND id <> (SELECT selected_generation FROM source_metadata WHERE id = 1)", [generation_id])?;
+        Ok(())
+    }
+
+    pub fn mutate_path(&mut self, mutation: &DirectoryMutation) -> Result<(), IndexError> {
+        let path = match mutation { DirectoryMutation::Add { path } | DirectoryMutation::Remove { path } | DirectoryMutation::Rename { path, .. } => path };
+        validate_directory_path(path)?;
+        if let DirectoryMutation::Rename { new_path, .. } = mutation {
+            validate_directory_path(new_path)?;
+            if new_path == path { return Ok(()); }
+            if new_path.starts_with(&format!("{path}/")) { return Err(IndexError::Invalid("A directory cannot be renamed into its own subtree.")); }
+        }
+        let transaction = self.writer.transaction()?;
+        match mutation {
+            DirectoryMutation::Add { path } => {
+                transaction.execute("INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) SELECT id, ?, ?, ?, ?, ? FROM generations WHERE state IN ('building', 'accepted', 'candidate') ON CONFLICT(generation_id, path) DO NOTHING", params![path, normalize_search_text(path), normalize_search_text(path.rsplit('/').next().unwrap_or(path)), checked_sql_size(path.bytes().filter(|byte| *byte == b'/').count())?, path.split('/').any(|part| part.starts_with('.'))])?;
+            },
+            DirectoryMutation::Remove { path } => {
+                let prefix = format!("{path}/");
+                transaction.execute("DELETE FROM directories WHERE generation_id IN (SELECT id FROM generations WHERE state IN ('building', 'accepted', 'candidate')) AND (path = ? OR substr(path, 1, length(?)) = ?)", params![path, prefix, prefix])?;
+            },
+            DirectoryMutation::Rename { path, new_path } => {
+                let prefix = format!("{path}/");
+                let mut last_id = 0;
+                loop {
+                    let batch: Vec<(i64, String)> = {
+                        let mut statement = transaction.prepare("SELECT id, path FROM directories WHERE id > ? AND generation_id IN (SELECT id FROM generations WHERE state IN ('building', 'accepted', 'candidate')) AND (path = ? OR substr(path, 1, length(?)) = ?) ORDER BY id LIMIT ?")?;
+                        let rows = statement.query_map(params![last_id, path, prefix, prefix, checked_sql_size(ROW_BATCH_SIZE)?], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                        rows.collect::<Result<Vec<_>, _>>()?
+                    };
+                    if batch.is_empty() { break; }
+                    for (identifier, original) in batch {
+                        last_id = identifier;
+                        let renamed = format!("{new_path}{}", &original[path.len()..]);
+                        transaction.execute("UPDATE directories SET path = ?, path_key = ?, basename_key = ?, depth = ?, has_dot_directory = ? WHERE id = ?", params![renamed, normalize_search_text(&renamed), normalize_search_text(renamed.rsplit('/').next().unwrap_or(&renamed)), checked_sql_size(renamed.bytes().filter(|byte| *byte == b'/').count())?, renamed.split('/').any(|part| part.starts_with('.')), identifier])?;
+                    }
+                }
+            },
+        }
+        Self::advance_revision(&transaction)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn begin_verification(&mut self) -> Result<i64, IndexError> {
         self.writer
             .execute("INSERT INTO generations(state, coverage) VALUES ('candidate', 'partial')", [])?;
@@ -300,6 +532,9 @@ impl DirectoryIndex {
             )?;
             transaction.commit()?;
             return Ok(false);
+        }
+        if transaction.query_row("SELECT EXISTS(SELECT 1 FROM scan_queue WHERE generation_id = ? AND processed = 0)", [generation_id], |row| row.get::<_, bool>(0))? {
+            return Err(IndexError::Invalid("Scan work remains queued. Complete the scan before selecting this generation."));
         }
         transaction.execute("UPDATE generations SET state = 'retired' WHERE id = (SELECT selected_generation FROM source_metadata WHERE id = 1) AND id <> ?", [generation_id])?;
         transaction.execute(
@@ -445,7 +680,7 @@ mod tests {
         }
         let temporary = tempfile::tempdir().unwrap();
         let mut index = DirectoryIndex::open(
-            &temporary.path().join("source.sqlite3"),
+            &temporary.path().join("private").join("source.sqlite3"),
             SourceKind::Local,
             &json!({"root": "fixture"}),
         )
@@ -486,7 +721,7 @@ mod tests {
     #[test]
     fn candidate_failure_selection_reopen_and_source_binding() {
         let temporary = tempfile::tempdir().unwrap();
-        let path = temporary.path().join("source.sqlite3");
+        let path = temporary.path().join("private").join("source.sqlite3");
         let identity = json!({"root": "fixture"});
         let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
         index.write_paths(["old/alpha".into()], None).unwrap();
@@ -516,7 +751,7 @@ mod tests {
     #[test]
     fn count_has_no_discovery_cutoff() {
         let temporary = tempfile::tempdir().unwrap();
-        let path = temporary.path().join("source.sqlite3");
+        let path = temporary.path().join("private").join("source.sqlite3");
         let identity = json!({"root": "fixture"});
         let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
         index
@@ -573,7 +808,7 @@ mod tests {
     fn literal_queries_colliding_keys_cancellation_and_limits() {
         let temporary = tempfile::tempdir().unwrap();
         let mut index = DirectoryIndex::open(
-            &temporary.path().join("source.sqlite3"),
+            &temporary.path().join("private").join("source.sqlite3"),
             SourceKind::Local,
             &json!({"root": "fixture"}),
         )
@@ -613,6 +848,77 @@ mod tests {
     }
 
     #[test]
+    fn process_lease_is_retained_until_owner_drops() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let owner = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        assert!(
+            matches!(DirectoryIndex::open(&path, SourceKind::Local, &identity), Err(IndexError::Io(error)) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+        drop(owner);
+        assert!(DirectoryIndex::open(&path, SourceKind::Local, &identity).is_ok());
+    }
+
+    #[test]
+    fn scan_queue_is_atomic_bounded_and_blocks_premature_completion() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index.seed_scan(1).unwrap();
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec![""]);
+        assert!(index.finish_generation(1, 0).is_err());
+        index.writer.execute_batch("CREATE TRIGGER reject_scan_work BEFORE INSERT ON scan_queue WHEN NEW.path = 'abort' BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+        assert!(index.write_scan_children(1, [("alpha".to_owned(), true), ("abort".to_owned(), true)]).is_err());
+        let unchanged = index.search("", MAX_RESULT_LIMIT, true, &Arc::new(AtomicBool::new(false)), false).unwrap();
+        assert_eq!(unchanged.directory_count, 0);
+        assert_eq!(unchanged.accepted_revision, 0);
+        assert!(index.write_scan_children(1, (0..).map(|number| (format!("directory{number}"), true))).is_err());
+        index.write_scan_children(1, [("alpha".to_owned(), true), ("alpha/beta".to_owned(), false)]).unwrap();
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["", "alpha"]);
+        index.finish_scan_parent(1, "").unwrap();
+        index.finish_scan_parent(1, "alpha").unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+    }
+
+    #[test]
+    fn subtree_mutations_reach_candidates_and_rollback_on_collision() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index.write_paths(["alpha".to_owned(), "alpha/beta".to_owned(), "occupied".to_owned()], None).unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let candidate = index.begin_verification().unwrap();
+        index.write_paths(["alpha".to_owned(), "alpha/beta".to_owned()], Some(candidate)).unwrap();
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let verified = index.search("", MAX_RESULT_LIMIT, true, &cancellation, false).unwrap().last_verified_at_ms;
+        index.mutate_path(&DirectoryMutation::Rename { path: "alpha".to_owned(), new_path: "archive".to_owned() }).unwrap();
+        let renamed = index.search("archive", MAX_RESULT_LIMIT, true, &cancellation, false).unwrap();
+        assert_eq!(renamed.total_matches, 2);
+        assert_eq!(renamed.last_verified_at_ms, verified);
+        assert!(index.mutate_path(&DirectoryMutation::Rename { path: "archive".to_owned(), new_path: "occupied".to_owned() }).is_err());
+        assert_eq!(index.search("archive", MAX_RESULT_LIMIT, true, &cancellation, false).unwrap(), renamed);
+        let candidate_matches: i64 = index.writer.query_row("SELECT count(*) FROM directories WHERE generation_id = ? AND path LIKE 'archive%'", [candidate], |row| row.get(0)).unwrap();
+        assert_eq!(candidate_matches, 2);
+        index.mutate_path(&DirectoryMutation::Remove { path: "archive".to_owned() }).unwrap();
+        assert_eq!(index.search("archive", MAX_RESULT_LIMIT, true, &cancellation, false).unwrap().total_matches, 0);
+        index.mutate_path(&DirectoryMutation::Add { path: "new".to_owned() }).unwrap();
+        assert_eq!(index.search("new", MAX_RESULT_LIMIT, true, &cancellation, false).unwrap().total_matches, 1);
+        index.discard_generation(candidate).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_public_storage_and_symbolic_links() {
+        let temporary = tempfile::tempdir().unwrap();
+        fs::set_permissions(temporary.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(DirectoryIndex::open(&temporary.path().join("source.sqlite3"), SourceKind::Local, &json!({})).is_err());
+        let link = temporary.path().join("link");
+        std::os::unix::fs::symlink(temporary.path(), &link).unwrap();
+        assert!(DirectoryIndex::open(&link.join("source.sqlite3"), SourceKind::Local, &json!({})).is_err());
+    }
+
+    #[test]
     #[ignore = "Requires the backend test interpreter; run this compatibility test explicitly."]
     fn opens_python_created_database_through_source_validation() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
@@ -620,14 +926,19 @@ mod tests {
             .map(PathBuf::from)
             .unwrap_or_else(|| root.join("backend/.venv/bin/python"));
         let temporary = tempfile::tempdir().unwrap();
-        let path = temporary.path().join("python.sqlite3");
-        let status = std::process::Command::new(executable)
+        let path = temporary.path().join("private").join("python.sqlite3");
+        let status = std::process::Command::new(&executable)
             .env("PYTHONPATH", root.join("backend"))
             .args(["-c", "import sys; from pathlib import Path; from app.services.directory_index import DirectoryIndex; store = DirectoryIndex(Path(sys.argv[1]), source_kind='local', source_identity={'root': 'fixture'}); store.open(); store.write_paths(['alpha/beta', 'beta', 'neither']); store.finish_generation(1); store.close()"])
             .arg(&path).status().expect("Backend test interpreter could not run. Set SAMBEE_INDEX_TEST_PYTHON to its executable path.");
         assert!(status.success());
         assert!(DirectoryIndex::open(&path, SourceKind::Smb, &json!({"root": "fixture"})).is_err());
         let index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let locked_status = std::process::Command::new(&executable)
+            .env("PYTHONPATH", root.join("backend"))
+            .args(["-c", "import sys; from pathlib import Path; from app.services.directory_index import DirectoryIndex; store = DirectoryIndex(Path(sys.argv[1]), source_kind='local', source_identity={'root': 'fixture'})\ntry:\n store.open()\nexcept BlockingIOError:\n pass\nelse:\n store.close(); raise SystemExit('Rust process lease did not exclude Python')"])
+            .arg(&path).status().expect("Backend test interpreter could not run the lease compatibility check.");
+        assert!(locked_status.success());
         let response = index
             .search("alpha beta", 10, false, &Arc::new(AtomicBool::new(false)), false)
             .unwrap();

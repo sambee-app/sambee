@@ -3,6 +3,8 @@
 import json
 import sqlite3
 import threading
+import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
 
@@ -13,6 +15,84 @@ from app.services.directory_index import MAX_QUERY_BYTES, MAX_QUERY_TERMS, Direc
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "shared" / "directory-index"
 APPLICATION_ID = 1396853073
 SCHEMA_VERSION = 1
+
+
+def test_generated_unicode_contract_matches_backend() -> None:
+    contract = json.loads((CONTRACT_ROOT / "unicode.json").read_text(encoding="utf-8"))
+    assert contract["unicode_version"] == unicodedata.unidata_version
+    for character, normalized in contract["normalization"]:
+        assert normalize_search_text(character) == normalized
+    assert contract["whitespace"] == [chr(codepoint) for codepoint in range(0x110000) if chr(codepoint).isspace()]
+
+
+def test_query_admission_is_bounded(index):
+    from app.services.directory_index import QUERY_WORKERS
+
+    for _ in range(QUERY_WORKERS):
+        assert index._query_slots.acquire(blocking=False)
+    try:
+        with pytest.raises(TimeoutError, match="workers are busy"):
+            index.search("alpha")
+    finally:
+        for _ in range(QUERY_WORKERS):
+            index._query_slots.release()
+    assert index.search("alpha").total_matches == 0
+
+
+def test_pending_work_blocks_complete_generation_and_unbounded_batches(index):
+    from itertools import count
+
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    index.seed_scan(1)
+    with pytest.raises(ValueError, match="work remains queued"):
+        index.finish_generation(1)
+    observed = []
+
+    def children():
+        for number in count():
+            observed.append(number)
+            yield f"directory{number}", True
+
+    with pytest.raises(ValueError):
+        index.write_scan_children(1, children())
+    assert len(observed) == ROW_BATCH_SIZE + 1
+    assert index.search("").directory_count == 0
+    index.finish_scan_parent(1, "")
+    assert index.finish_generation(1)
+
+
+def test_close_retains_process_lease_until_readers_exit(index, monkeypatch):
+    entered = threading.Event()
+    release = threading.Event()
+    closed = threading.Event()
+    original_connect = index._connect
+
+    def connect(*, readonly=False):
+        if readonly:
+            entered.set()
+            assert release.wait(timeout=5)
+        return original_connect(readonly=readonly)
+
+    def close():
+        index.close()
+        closed.set()
+
+    monkeypatch.setattr(index, "_connect", connect)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        query = executor.submit(index.search, "alpha")
+        try:
+            assert entered.wait(timeout=5)
+            shutdown = executor.submit(close)
+            assert not closed.wait(timeout=0.1)
+            competing = DirectoryIndex(index.path, source_kind=index.source_kind, source_identity=json.loads(index.source_identity))
+            with pytest.raises(BlockingIOError):
+                competing.open()
+        finally:
+            release.set()
+        assert query.result(timeout=5).total_matches == 0
+        shutdown.result(timeout=5)
+    assert closed.is_set()
 
 
 @pytest.fixture
@@ -168,3 +248,82 @@ def test_coverage_above_old_cutoff_and_bounded_results(index):
     index.close()
     index.open()
     assert index.search("100000").directory_count == 100_001
+
+
+def test_mutations_update_accepted_candidate_fts_and_preserve_verification(index):
+    index.write_paths(["parent/alpha", "parent/alpha/child", "parent/alpha-other"])
+    index.finish_generation(1)
+    before = index.search("alpha")
+    candidate = index.begin_verification()
+    index.write_paths(["parent/alpha", "parent/alpha/child", "parent/alpha-other"], generation_id=candidate)
+    index.mutate_path("rename", "parent/alpha", "new/.beta")
+    assert index.search("alpha").total_matches == 1
+    assert index.search("beta").total_matches == 0
+    assert index.search("beta", include_dot_directories=True).total_matches == 2
+    assert index.search("beta", include_dot_directories=True).last_verified_at_ms == before.last_verified_at_ms
+    index.mutate_path("remove", "new/.beta")
+    index.mutate_path("add", "fresh/beta")
+    assert index.search("beta").total_matches == 1
+    index.finish_generation(candidate)
+    assert index.search("beta").results[0].path == "fresh/beta"
+    assert index.search("alpha").total_matches == 1
+
+
+def test_rename_conflict_rolls_back_rows_counts_and_revision(index):
+    index.write_paths(["alpha", "beta"])
+    before = index.search("alpha beta")
+    with pytest.raises(sqlite3.IntegrityError):
+        index.mutate_path("rename", "alpha", "beta")
+    assert index.search("alpha beta") == before
+
+
+def test_scan_queue_is_disk_backed_and_deduplicated(index):
+    index.seed_scan(1)
+    assert index.pending_scan_paths(1) == [""]
+    index.write_scan_children(1, [("alpha", True), ("link", False)])
+    index.write_scan_children(1, [("alpha", True)])
+    index.finish_scan_parent(1, "")
+    assert index.pending_scan_paths(1) == ["alpha"]
+    index.finish_scan_parent(1, "alpha")
+    assert index.pending_scan_paths(1) == []
+    assert index.status().directory_count == 2
+
+
+def test_scan_queue_failure_rolls_back_directory_rows(index):
+    index._connection().execute("CREATE TRIGGER fail_queue BEFORE INSERT ON scan_queue BEGIN SELECT RAISE(ABORT, 'injected'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="injected"):
+        index.write_scan_children(1, [("alpha", True)])
+    assert index.search("alpha").total_matches == 0
+    assert index.status().accepted_revision == 0
+
+
+def test_process_lease_prevents_two_writers(index):
+    second = DirectoryIndex(index.path, source_kind="smb", source_identity={"connection_id": "test", "host": "test"})
+    with pytest.raises(BlockingIOError):
+        second.open()
+    index.close()
+    second.open()
+    second.close()
+
+
+def test_private_storage_rejects_links_and_public_permissions(tmp_path):
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    store = DirectoryIndex(public / "source.sqlite3", source_kind="local", source_identity={"root": "test"})
+    with pytest.raises(PermissionError, match="0700"):
+        store.open()
+    link = tmp_path / "link"
+    link.symlink_to(public, target_is_directory=True)
+    store = DirectoryIndex(link / "source.sqlite3", source_kind="local", source_identity={"root": "test"})
+    with pytest.raises(PermissionError, match="symbolic"):
+        store.open()
+
+
+def test_open_failure_releases_process_lease(index, monkeypatch):
+    index.close()
+    with monkeypatch.context() as context:
+        context.setattr(index, "_connect", lambda **_kwargs: (_ for _ in ()).throw(sqlite3.OperationalError("injected")))
+        with pytest.raises(sqlite3.OperationalError, match="injected"):
+            index.open()
+    assert index._lease_fd is None
+    index.open()

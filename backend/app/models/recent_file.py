@@ -41,11 +41,13 @@ class RecentFileRead(SQLModel):
     last_opened_at: datetime
     usage_score: float = 0
     match_rank: int = 3
+    matched_term_count: int = 0
 
 
 class RecentFileSearchRead(SQLModel):
     results: list[RecentFileRead]
     result_limit: int
+    search_contract_version: int = 1
 
 
 class RecentFileClearRead(SQLModel):

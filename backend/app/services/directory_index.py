@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import heapq
 import json
+import os
 import sqlite3
+import stat
+import sys
 import threading
 import time
 import unicodedata
 from contextlib import closing
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import Iterable, Literal
 
@@ -23,10 +27,14 @@ MAX_RESULT_LIMIT = 200
 ROW_BATCH_SIZE = 256
 PAGE_CACHE_KIB = 2048
 SQL_BUSY_TIMEOUT_MS = 250
+QUERY_WORKERS = 2
 SQL_PROGRESS_STEPS = 1000
 QUERY_TIMEOUT_SECONDS = 10.0
 MAX_SIGNED_INTEGER = (1 << 63) - 1
-SCHEMA_PATH = Path(__file__).resolve().parents[3] / "shared" / "directory-index" / "schema.sql"
+SCHEMA_PATH_CANDIDATES = tuple(Path(__file__).resolve().parents[level] / "shared" / "directory-index" / "schema.sql" for level in (3, 2))
+SCHEMA_PATH = next((path for path in SCHEMA_PATH_CANDIDATES if path.is_file()), SCHEMA_PATH_CANDIDATES[0])
+PRIVATE_DIRECTORY_MODE = 0o700
+LEASE_FILE_MODE = 0o600
 
 
 def normalize_search_text(value: str) -> str:
@@ -99,7 +107,49 @@ class DirectoryIndex:
         self.source_kind = source_kind
         self.source_identity = json.dumps(source_identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         self._writer_lock = threading.RLock()
+        self._reader_condition = threading.Condition(self._writer_lock)
+        self._query_slots = threading.BoundedSemaphore(QUERY_WORKERS)
+        self._active_queries = 0
+        self._closing = False
         self._writer: sqlite3.Connection | None = None
+        self._lease_fd: int | None = None
+
+    def _acquire_storage(self) -> None:
+        directory = self.path.parent.absolute()
+        for ancestor in (directory, *directory.parents):
+            if ancestor.is_symlink():
+                raise PermissionError("Directory-index storage must not use symbolic links. Select a private local directory.")
+        directory.mkdir(mode=PRIVATE_DIRECTORY_MODE, parents=True, exist_ok=True)
+        info = directory.stat()
+        if os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077):
+            raise PermissionError(
+                "Directory-index storage must belong to the service account with mode 0700. Correct its owner and permissions."
+            )
+        if self.path.is_symlink():
+            raise PermissionError("Directory-index database must not be a symbolic link. Remove the link and retry.")
+        descriptor = os.open(str(self.path) + ".lease", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), LEASE_FILE_MODE)
+        try:
+            if os.name == "posix":
+                import fcntl
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            elif sys.platform == "win32":
+                import msvcrt
+
+                os.write(descriptor, b"\0")
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                raise OSError("Directory-index process leases are unsupported on this platform. Use a supported backend host.")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        self._lease_fd = descriptor
+
+    def _release_storage(self) -> None:
+        if self._lease_fd is not None:
+            os.close(self._lease_fd)
+            self._lease_fd = None
 
     def _connect(self, *, readonly: bool = False) -> sqlite3.Connection:
         uri = self.path.resolve().as_uri() + ("?mode=ro" if readonly else "?mode=rw")
@@ -120,20 +170,25 @@ class DirectoryIndex:
         with self._writer_lock:
             if self._writer is not None:
                 return
+            self._acquire_storage()
             created = not self.path.exists()
-            if created:
-                with closing(sqlite3.connect(self.path)) as connection:
-                    connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
-                    now = epoch_milliseconds()
-                    with connection:
-                        connection.execute("INSERT INTO generations(id, state, coverage) VALUES (1, 'building', 'partial')")
-                        connection.execute(
-                            "INSERT INTO source_metadata(id, source_kind, source_identity, normalization_version, "
-                            "traversal_version, selected_generation, committed_at_ms, last_access_at_ms) "
-                            "VALUES (1, ?, ?, ?, ?, 1, ?, ?)",
-                            (self.source_kind, self.source_identity, NORMALIZATION_VERSION, TRAVERSAL_VERSION, now, now),
-                        )
-            connection = self._connect()
+            try:
+                if created:
+                    with closing(sqlite3.connect(self.path)) as connection:
+                        connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+                        now = epoch_milliseconds()
+                        with connection:
+                            connection.execute("INSERT INTO generations(id, state, coverage) VALUES (1, 'building', 'partial')")
+                            connection.execute(
+                                "INSERT INTO source_metadata(id, source_kind, source_identity, normalization_version, "
+                                "traversal_version, selected_generation, committed_at_ms, last_access_at_ms) "
+                                "VALUES (1, ?, ?, ?, ?, 1, ?, ?)",
+                                (self.source_kind, self.source_identity, NORMALIZATION_VERSION, TRAVERSAL_VERSION, now, now),
+                            )
+                connection = self._connect()
+            except BaseException:
+                self._release_storage()
+                raise
             try:
                 if connection.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
                     raise ValueError("Directory database application identifier is invalid. Rebuild this source index.")
@@ -157,20 +212,25 @@ class DirectoryIndex:
                         "(SELECT selected_generation FROM source_metadata WHERE id = 1)"
                     )
                 self._writer = connection
+                self._closing = False
             except BaseException:
                 connection.close()
+                self._release_storage()
                 raise
 
     def _connection(self) -> sqlite3.Connection:
-        if self._writer is None:
+        if self._writer is None or self._closing:
             raise RuntimeError("Directory index is not initialized. Wait for source initialization and retry.")
         return self._writer
 
     def close(self) -> None:
-        with self._writer_lock:
+        with self._reader_condition:
+            self._closing = True
+            self._reader_condition.wait_for(lambda: self._active_queries == 0)
             if self._writer is not None:
                 self._writer.close()
                 self._writer = None
+            self._release_storage()
 
     def _revision(self, connection: sqlite3.Connection) -> None:
         revision = connection.execute("SELECT accepted_revision FROM source_metadata WHERE id = 1").fetchone()[0]
@@ -228,6 +288,148 @@ class DirectoryIndex:
                     raise RuntimeError("SQLite did not allocate a verification generation. Retry verification.")
                 return cursor.lastrowid
 
+    def status(self) -> DirectoryIndexSearch:
+        return self.search("")
+
+    def seed_scan(self, generation_id: int) -> None:
+        with self._writer_lock:
+            connection = self._connection()
+            with connection:
+                connection.execute("INSERT INTO scan_queue(generation_id, path) VALUES (?, '') ON CONFLICT DO NOTHING", (generation_id,))
+
+    def pending_scan_paths(self, generation_id: int, limit: int = ROW_BATCH_SIZE) -> list[str]:
+        if not 1 <= limit <= ROW_BATCH_SIZE:
+            raise ValueError("Scan work batch limit is outside the supported range.")
+        with self._writer_lock:
+            return [
+                row[0]
+                for row in self._connection().execute(
+                    "SELECT path FROM scan_queue WHERE generation_id = ? AND processed = 0 ORDER BY path LIMIT ?", (generation_id, limit)
+                )
+            ]
+
+    def write_scan_children(self, generation_id: int, children: Iterable[tuple[str, bool]]) -> None:
+        batch = list(islice(children, ROW_BATCH_SIZE + 1))
+        if len(batch) > ROW_BATCH_SIZE:
+            raise ValueError("Scan row batch exceeds the supported limit. Split the batch.")
+        for path, _ in batch:
+            validate_directory_path(path)
+        with self._writer_lock:
+            connection = self._connection()
+            with connection:
+                state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
+                if state is None or state[0] not in {"building", "candidate"}:
+                    raise ValueError("Scan generation is no longer active. Discard this batch and request verification.")
+                connection.executemany(
+                    "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) "
+                    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
+                    (
+                        (
+                            generation_id,
+                            path,
+                            normalize_search_text(path),
+                            normalize_search_text(path.rsplit("/", 1)[-1]),
+                            path.count("/"),
+                            any(part.startswith(".") for part in path.split("/")),
+                        )
+                        for path, _ in batch
+                    ),
+                )
+                connection.executemany(
+                    "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                    ((generation_id, path) for path, descend in batch if descend),
+                )
+                if connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1").fetchone()[0] == generation_id:
+                    self._revision(connection)
+
+    def finish_scan_parent(self, generation_id: int, path: str) -> None:
+        with self._writer_lock:
+            connection = self._connection()
+            with connection:
+                connection.execute("UPDATE scan_queue SET processed = 1 WHERE generation_id = ? AND path = ?", (generation_id, path))
+
+    def discard_generation(self, generation_id: int) -> None:
+        with self._writer_lock:
+            connection = self._connection()
+            with connection:
+                connection.execute(
+                    "DELETE FROM generations WHERE id = ? AND id <> (SELECT selected_generation FROM source_metadata WHERE id = 1)",
+                    (generation_id,),
+                )
+
+    def checkpoint(self) -> None:
+        with self._writer_lock:
+            self._connection().execute("PRAGMA wal_checkpoint(PASSIVE)")
+
+    def mutate_path(self, action: Literal["add", "remove", "rename"], path: str, new_path: str | None = None) -> None:
+        """Apply one observation to both accepted rows and active verification rows."""
+        validate_directory_path(path)
+        if action == "rename":
+            if new_path is None:
+                raise ValueError("A directory rename requires a new relative path.")
+            validate_directory_path(new_path)
+            if new_path == path:
+                return
+            if new_path.startswith(path + "/"):
+                raise ValueError("A directory cannot be renamed into its own subtree.")
+        with self._writer_lock:
+            connection = self._connection()
+            connection.create_function("normalize_directory_key", 1, normalize_search_text, deterministic=True)
+            connection.create_function(
+                "directory_basename_key", 1, lambda value: normalize_search_text(value.rsplit("/", 1)[-1]), deterministic=True
+            )
+            connection.create_function(
+                "directory_dot_path", 1, lambda value: int(any(part.startswith(".") for part in value.split("/"))), deterministic=True
+            )
+            with connection:
+                generations = connection.execute(
+                    "SELECT id FROM generations WHERE state IN ('building', 'accepted', 'candidate')"
+                ).fetchall()
+                for (generation_id,) in generations:
+                    if action == "add":
+                        connection.execute(
+                            "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) "
+                            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
+                            (
+                                generation_id,
+                                path,
+                                normalize_search_text(path),
+                                normalize_search_text(path.rsplit("/", 1)[-1]),
+                                path.count("/"),
+                                any(part.startswith(".") for part in path.split("/")),
+                            ),
+                        )
+                    elif action == "remove":
+                        connection.execute(
+                            "DELETE FROM directories WHERE generation_id = ? AND (path = ? OR substr(path, 1, ?) = ?)",
+                            (generation_id, path, len(path) + 1, path + "/"),
+                        )
+                    elif action == "rename" and new_path is not None:
+                        expression = "? || substr(path, ?)"
+                        connection.execute(
+                            f"UPDATE directories SET path = {expression}, path_key = normalize_directory_key({expression}), "
+                            f"basename_key = directory_basename_key({expression}), has_dot_directory = directory_dot_path({expression}), "
+                            "depth = depth + ? WHERE generation_id = ? AND (path = ? OR substr(path, 1, ?) = ?)",
+                            (
+                                new_path,
+                                len(path) + 1,
+                                new_path,
+                                len(path) + 1,
+                                new_path,
+                                len(path) + 1,
+                                new_path,
+                                len(path) + 1,
+                                new_path.count("/") - path.count("/"),
+                                generation_id,
+                                path,
+                                len(path) + 1,
+                                path + "/",
+                            ),
+                        )
+                    else:
+                        raise ValueError("Unsupported directory mutation. Use add, remove, or rename.")
+                self._revision(connection)
+
     def finish_generation(self, generation_id: int, *, issue_count: int = 0) -> bool:
         """Only issue-free full passes select candidates and advance verification time."""
         if not 0 <= issue_count <= MAX_SIGNED_INTEGER:
@@ -243,6 +445,10 @@ class DirectoryIndex:
                         "UPDATE generations SET issue_count = ?, coverage = 'partial' WHERE id = ?", (issue_count, generation_id)
                     )
                     return False
+                if connection.execute(
+                    "SELECT 1 FROM scan_queue WHERE generation_id = ? AND processed = 0 LIMIT 1", (generation_id,)
+                ).fetchone():
+                    raise ValueError("Scan work remains queued. Complete the scan before selecting this generation.")
                 previous = connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1").fetchone()[0]
                 connection.execute("UPDATE generations SET state = 'retired' WHERE id = ? AND id <> ?", (previous, generation_id))
                 connection.execute(
@@ -264,9 +470,34 @@ class DirectoryIndex:
         cancelled: threading.Event | None = None,
         force_scan: bool = False,
     ) -> DirectoryIndexSearch:
+        if not self._query_slots.acquire(timeout=SQL_BUSY_TIMEOUT_MS / 1000):
+            raise TimeoutError("Directory query workers are busy. Wait briefly and retry the search.")
+        admitted = False
+        try:
+            with self._reader_condition:
+                self._connection()
+                self._active_queries += 1
+                admitted = True
+            return self._search(
+                query, limit=limit, include_dot_directories=include_dot_directories, cancelled=cancelled, force_scan=force_scan
+            )
+        finally:
+            with self._reader_condition:
+                if admitted:
+                    self._active_queries -= 1
+                    self._reader_condition.notify_all()
+            self._query_slots.release()
+
+    def _search(
+        self,
+        query: str,
+        *,
+        limit: int = MAX_RESULT_LIMIT,
+        include_dot_directories: bool = False,
+        cancelled: threading.Event | None = None,
+        force_scan: bool = False,
+    ) -> DirectoryIndexSearch:
         terms = search_terms(query)
-        with self._writer_lock:
-            self._connection()
         if not 1 <= limit <= MAX_RESULT_LIMIT:
             raise ValueError(f"Result limit must be between 1 and {MAX_RESULT_LIMIT}.")
         deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS

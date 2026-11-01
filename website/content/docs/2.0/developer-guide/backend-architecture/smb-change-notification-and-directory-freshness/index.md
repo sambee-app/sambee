@@ -156,6 +156,8 @@ Directory junctions, symbolic links, and unrecognized directory reparse points a
 
 Version 2 snapshots are bound to the connection's host, port, share, normalized path prefix, username, and connection revision. The revision changes when the connection is edited, including credential changes. Passwords aren't stored in snapshot metadata.
 
+The live cache manager also checks the source and credential binding before reusing a connection ID. A changed host, port, share, prefix, username, password, or connection revision stops the previous cache and creates a replacement. Its previous paths are not reused.
+
 A snapshot with a different source identity is ignored, including when trying the backup file. Older version 1 snapshots are also ignored, so existing installations rebuild the directory index once after upgrading. Matching snapshots still provide immediate search results while background verification checks freshness.
 
 Startup verification and the periodic rescan loop have separate tracked tasks. Removing a cache or shutting down the application cancels both tasks, along with initial scanning and snapshot flushing.
@@ -164,15 +166,23 @@ Startup verification and the periodic rescan loop have separate tracked tasks. R
 
 The shared SQLite schema and search fixtures are in `shared/directory-index/`. The Python storage module is `backend/app/services/directory_index.py`. The Rust storage module is `companion/src-tauri/src/server/directory_index.rs`.
 
-These modules are not yet connected to the live directory-search managers. The backend still uses the snapshot lifecycle described above. Companion still uses its existing per-request directory walk. Do not report that persistent local indexing or independent-term search is available through the application APIs.
+These modules are not yet connected to the live directory-search managers. The backend still uses the snapshot lifecycle described above. Companion still uses its existing per-request directory walk. Do not report that persistent local indexing or independent-term directory-index search is available through those endpoints. Recent-directory history, recent-file history, and loaded-file matching now support independent terms.
 
-The storage tests cover source-kind and identity checks, strict integer storage, row and FTS transactions, separate verification generations, literal any-term matching, exact unique counts, and bounded returned results. Both runtimes test a generated 100,001-path catalogue. One explicit compatibility test opens a Python-created database through Rust source validation. These tests do not establish native traversal safety, resource-policy enforcement, or production performance.
+The storage tests cover source-kind and identity checks, strict integer storage, row and FTS transactions, separate verification generations, literal any-term matching, exact unique counts, and bounded returned results. Python also has private POSIX directory checks, process leases, transactional subtree mutations, a disk-backed scan queue, and two-query admission. Close retains the writer and process lease until admitted readers finish. Both runtimes test a generated 100,001-path catalogue. One explicit compatibility test opens a Python-created database through Rust source validation. These tests do not establish native traversal safety, resource-policy enforcement, or production performance.
 
-Runtime integration still requires private-storage checks, process leases, bounded source and query workers, event reconciliation and scan barriers, disk accounting and maintenance, source replacement handling, and authorized administration policy delivery. Do not enable the new index capability before those controls and their tests are complete.
+`shared/directory-index/unicode.json` defines normalization keys, whitespace, and word-character ranges for search contract version 1. Generate it with `backend/.venv/bin/python scripts/generate-search-unicode-contract.py`; use `--check` to detect stale data. Rust and TypeScript use the generated Unicode 16.0 table. Python tests compare it with the backend interpreter's Unicode data. This avoids runtime-dependent case folding and word boundaries. TypeScript maps normalized matches back to original UTF-16 display ranges and merges overlapping highlights.
+
+The current backend SQLite runtime is 3.46.1. SQLite's [WAL documentation](https://www.sqlite.org/wal.html#walresetbug) identifies a WAL-reset corruption fix in 3.51.3, with backports for 3.44.6 and 3.50.7. Version 3.46.1 is not a deployment-approved runtime for the new index. Passing storage tests does not replace this runtime qualification.
+
+Runtime integration still requires race-safe private-storage handling, companion process leases, bounded source workers, event reconciliation and scan barriers, disk accounting and maintenance, source replacement handling, a qualified SQLite runtime, and authorized administration policy delivery. Do not enable the new index capability before those controls and their tests are complete.
 
 ### Progressive Quick-Bar Results
 
 `SearchProvider.fetchResults` accepts an optional complete-array update callback. The directory provider uses the same merge path for updates and the final result. It installs recent-history selection records before publishing history rows. A source failure preserves results from the other successful source and displays a specific connection error.
+
+The shared bar supports one quiet-refresh timeout after each accepted response. Refresh uses the same fetch and publication path without a foreground spinner or focus change. Typing, dismissal, source changes, hidden tabs, and terminal failures stop obsolete work. Providers must opt in through `getRefreshIntervalMs`; the directory provider requires search contract version 1 and an active build or update. Legacy endpoints never trigger automatic index polling.
+
+Quiet index refresh reuses history for the active query. Explicit history-change, window-focus, and tab-visibility refresh tokens invalidate that reuse. Shared ranking uses distinct matched-term count first, then best single-term quality and deterministic Unicode code-point ties. Files match basenames only. History services stream accessible per-user records before their bounded top-result selection. Invalid query limits return HTTP 400 rather than a server error.
 
 The shared bar rejects obsolete request and query updates and preserves selection by value. Input changes and dismissal cancel the request. Recent directories use the history icon; indexed folders retain the folder icon and directory text style. Automatic status refresh and new search-capability handling are not yet implemented.
 

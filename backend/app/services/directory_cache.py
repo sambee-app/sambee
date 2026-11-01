@@ -1425,8 +1425,17 @@ class DirectoryCacheManager:
         """
 
         with self._lock:
-            if connection_id in self._caches:
-                return self._caches[connection_id]
+            previous = self._caches.get(connection_id)
+            if previous is not None and (
+                previous.host == host
+                and previous.share_name == share_name
+                and previous.username == username
+                and previous.password == password
+                and previous.port == port
+                and previous._path_prefix == (path_prefix or "/").replace("\\", "/").strip("/")
+                and previous._source_identity["revision"] == source_revision
+            ):
+                return previous
 
             cache = ConnectionDirectoryCache(
                 connection_id=connection_id,
@@ -1439,6 +1448,10 @@ class DirectoryCacheManager:
                 source_revision=source_revision,
             )
             self._caches[connection_id] = cache
+
+        if previous is not None:
+            previous._request_stop()
+            await asyncio.to_thread(previous._finish_stop)
 
         # Try to load cached snapshot from disk for instant availability
         loaded = cache.load_from_disk()

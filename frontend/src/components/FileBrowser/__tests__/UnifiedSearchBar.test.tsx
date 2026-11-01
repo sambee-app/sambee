@@ -268,6 +268,47 @@ function renderWithProvider(component: React.ReactElement) {
 }
 
 describe("UnifiedSearchBar", () => {
+  it("refreshes without a foreground spinner and stops after dismissal", async () => {
+    const fetchResults = vi.fn(async () => [
+      { kind: "result" as const, id: "stable", value: "stable", icon: "directory" as const, primaryText: "Stable" },
+    ]);
+    render(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={{ ...testProvider, fetchResults, getRefreshIntervalMs: () => 500 }} />
+      </SambeeThemeProvider>
+    );
+    const input = screen.getByPlaceholderText("Search");
+    fireEvent.change(input, { target: { value: "stable" } });
+    await waitFor(() => expect(fetchResults).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fetchResults).toHaveBeenCalledTimes(2), { timeout: 1200 });
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(screen.getByText("Stable")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Escape" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+    expect(fetchResults).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps accepted rows and stops refresh after a quiet request fails", async () => {
+    const fetchResults = vi
+      .fn()
+      .mockResolvedValueOnce([{ kind: "result", id: "stable", value: "stable", icon: "directory", primaryText: "Stable" }])
+      .mockRejectedValue(new Error("offline"));
+    render(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={{ ...testProvider, fetchResults, getRefreshIntervalMs: () => 500 }} />
+      </SambeeThemeProvider>
+    );
+    fireEvent.change(screen.getByPlaceholderText("Search"), { target: { value: "stable" } });
+    await waitFor(() => expect(fetchResults).toHaveBeenCalledTimes(2), { timeout: 1200 });
+    expect(screen.getByText("Stable")).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+    expect(fetchResults).toHaveBeenCalledTimes(2);
+  });
+
   afterEach(async () => {
     cleanup();
     virtualizerSizeCache.clear();

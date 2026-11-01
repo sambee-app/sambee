@@ -24,8 +24,16 @@ import { logger } from "../../../services/logger";
 import { publishRecentDirectoriesChanged } from "../../../services/recentDirectoriesSync";
 import type { DirectorySearchResult, RecentDirectory, RecentDirectorySearchResponse } from "../../../types";
 import { normalizeQuerySeparators } from "./normalizeQuerySeparators";
-import { historyMatchRank, rankHistorySearchResults, removeRecentHistoryResult } from "./recentHistory";
-import type { SearchProvider, SearchResult, SearchResultItem, SearchResultsUpdate, SearchStatusInfo, SearchTextHighlight } from "./types";
+import {
+  findSearchHighlights,
+  findTextHighlight,
+  getSearchRelevance,
+  rankHistorySearchResults,
+  removeRecentHistoryResult,
+  SEARCH_CONTRACT_VERSION,
+  searchTerms,
+} from "./recentHistory";
+import type { SearchProvider, SearchResult, SearchResultItem, SearchResultsUpdate, SearchStatusInfo } from "./types";
 
 // ============================================================================
 // Constants
@@ -33,6 +41,7 @@ import type { SearchProvider, SearchResult, SearchResultItem, SearchResultsUpdat
 
 /** Debounce delay in milliseconds for directory search */
 const DIRECTORY_SEARCH_DEBOUNCE_MS = 200;
+const DIRECTORY_REFRESH_INTERVAL_MS = 500;
 
 /** Minimum query length to trigger a directory search */
 const DIRECTORY_MIN_QUERY_LENGTH = 2;
@@ -114,10 +123,12 @@ function findMatchSegmentRange(segments: string[], query: string): SegmentRange 
     }
   }
 
-  const matchIndex = reconstructed.toLowerCase().indexOf(query.toLowerCase());
-  if (matchIndex === -1) return null;
-
-  const matchEnd = matchIndex + query.length - 1;
+  const highlights = findSearchHighlights(reconstructed, query);
+  const first = highlights[0];
+  const last = highlights.at(-1);
+  if (!first || !last) return null;
+  const matchIndex = first.start;
+  const matchEnd = last.end - 1;
   const startSeg = charToSegment[matchIndex];
   const endSeg = charToSegment[Math.min(matchEnd, charToSegment.length - 1)];
   if (startSeg === undefined || endSeg === undefined) return null;
@@ -131,12 +142,6 @@ function findMatchSegmentRange(segments: string[], query: string): SegmentRange 
 // ============================================================================
 // SmartPathDisplay — shows path with match context and highlighted match
 // ============================================================================
-
-function findTextHighlight(text: string, query: string): SearchTextHighlight | undefined {
-  if (!query) return undefined;
-  const start = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
-  return start < 0 ? undefined : { start, end: start + query.length };
-}
 
 export function getDirectoryResultPresentation(
   path: string,
@@ -210,6 +215,11 @@ export function useDirectorySearchProvider(
   const [directoryCount, setDirectoryCount] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
   const [sourceFailure, setSourceFailure] = useState<"history" | "index" | null>(null);
+  const [legacyIndex, setLegacyIndex] = useState(false);
+  const sourceFailureRef = useRef<"history" | "index" | null>(null);
+  const indexResponseRef = useRef<DirectorySearchResult | null>(null);
+  const activeTermsRef = useRef<string[]>([]);
+  const recentResponseRef = useRef<{ query: string; limit: number; response: RecentDirectorySearchResponse } | null>(null);
   const includeDotDirectories = options.includeDotDirectories ?? false;
   const recentDirectoryResultLimit = options.resultLimit ?? MAX_RECENT_DIRECTORY_RESULT_LIMIT;
   const history = options.history ?? browserHistoryService;
@@ -220,8 +230,12 @@ export function useDirectorySearchProvider(
 
   useEffect(() => {
     sourceBindingRef.current = { connectionId, history, includeDotDirectories };
+    recentResponseRef.current = null;
+    indexResponseRef.current = null;
     return () => {
       requestGenerationRef.current += 1;
+      recentResponseRef.current = null;
+      indexResponseRef.current = null;
       activationControllerRef.current?.abort();
     };
   }, [connectionId, history, includeDotDirectories]);
@@ -245,6 +259,8 @@ export function useDirectorySearchProvider(
     async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate): Promise<SearchResult[]> => {
       // Normalise backslashes to forward slashes for cross-directory search
       const normalizedQuery = normalizeQuerySeparators(query).trim();
+      const terms = searchTerms(normalizedQuery);
+      activeTermsRef.current = terms;
       const generation = ++requestGenerationRef.current;
       const isCurrent = () =>
         !signal.aborted &&
@@ -254,6 +270,7 @@ export function useDirectorySearchProvider(
         sourceBindingRef.current.includeDotDirectories === includeDotDirectories;
       if (!isCurrent()) return [];
       setSourceFailure(null);
+      sourceFailureRef.current = null;
       let recentResponse: RecentDirectorySearchResponse = { results: [], result_limit: recentDirectoryResultLimit };
       let directorySearchResult: DirectorySearchResult | null = null;
 
@@ -261,18 +278,18 @@ export function useDirectorySearchProvider(
         const recentPaths = new Set(recentResponse.results.map((directory) => `${directory.connection_id}\u0000${directory.path}`));
         const directoryResults = (directorySearchResult?.results ?? [])
           .filter((path) => !recentPaths.has(`${connectionId}\u0000${path}`))
-          .slice(0, recentResponse.result_limit)
           .map((path) => ({
             kind: "result" as const,
             id: `${DIRECTORY_PREFIX}${path}`,
             value: `${DIRECTORY_PREFIX}${path}`,
             icon: "directory" as const,
-            matchRank:
-              directorySearchResult?.match_ranks?.[path] ?? historyMatchRank(path.split(PATH_SEPARATOR).at(-1) ?? path, normalizedQuery),
+            ...getSearchRelevance(path, terms, path.split(PATH_SEPARATOR).at(-1) ?? path),
+            sortPath: path,
+            depth: path.split(PATH_SEPARATOR).length - 1,
             ...getDirectoryResultPresentation(path, normalizedQuery),
           }));
 
-        return rankHistorySearchResults(
+        const ranked = rankHistorySearchResults(
           [
             ...(recentResponse.results.length > 0
               ? [
@@ -289,8 +306,9 @@ export function useDirectorySearchProvider(
               id: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
               value: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
               icon: "recent-directory" as const,
-              matchRank:
-                directory.match_rank ?? historyMatchRank(directory.path.split(PATH_SEPARATOR).at(-1) ?? directory.path, normalizedQuery),
+              ...getSearchRelevance(directory.path, terms, directory.path.split(PATH_SEPARATOR).at(-1) ?? directory.path),
+              sortPath: directory.path,
+              lastUsedAt: directory.last_visited_at,
               usageScore: directory.usage_score,
               ...getRecentDirectoryPresentation(directory, normalizedQuery),
             })),
@@ -308,11 +326,19 @@ export function useDirectorySearchProvider(
           ],
           normalizedQuery
         );
+        let selectedCount = 0;
+        return ranked.filter((row) => row.kind === "group-header" || selectedCount++ < recentResponse.result_limit);
       };
 
-      const recentRequest = history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal).then((response) => {
+      const cachedHistory = recentResponseRef.current;
+      const recentPromise =
+        cachedHistory?.query === normalizedQuery && cachedHistory.limit === recentDirectoryResultLimit
+          ? Promise.resolve(cachedHistory.response)
+          : history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal);
+      const recentRequest = recentPromise.then((response) => {
         if (!isCurrent()) return;
         recentResponse = response;
+        recentResponseRef.current = { query: normalizedQuery, limit: recentDirectoryResultLimit, response };
         recentDirectoriesRef.current = new Map(response.results.map((directory) => [directory.id, directory]));
         onUpdate?.(mergeResults());
       });
@@ -321,6 +347,8 @@ export function useDirectorySearchProvider(
         ? history.searchDirectories(connectionId, normalizedQuery, { includeDotDirectories, signal }).then((response) => {
             if (!isCurrent()) return;
             directorySearchResult = response;
+            indexResponseRef.current = response;
+            setLegacyIndex(terms.length > 1 && response.search_contract_version !== SEARCH_CONTRACT_VERSION);
             setCacheState(response.cache_state);
             setDirectoryCount(response.directory_count);
             setTotalMatches(response.total_matches);
@@ -332,8 +360,9 @@ export function useDirectorySearchProvider(
       if (recentOutcome.status === "rejected" && (indexOutcome.status === "rejected" || !queryIndex)) {
         throw recentOutcome.reason;
       }
-      if (recentOutcome.status === "rejected") setSourceFailure("history");
-      else if (indexOutcome.status === "rejected") setSourceFailure("index");
+      if (recentOutcome.status === "rejected") sourceFailureRef.current = "history";
+      else if (indexOutcome.status === "rejected") sourceFailureRef.current = "index";
+      setSourceFailure(sourceFailureRef.current);
       return mergeResults();
     },
     [connectionId, getRecentDirectoryPresentation, history, includeDotDirectories, recentDirectoryResultLimit, t]
@@ -361,6 +390,7 @@ export function useDirectorySearchProvider(
 
   const onRemoveSelected = useCallback(
     async (value: string) => {
+      recentResponseRef.current = null;
       return removeRecentHistoryResult({
         value,
         prefix: RECENT_DIRECTORY_PREFIX,
@@ -382,6 +412,7 @@ export function useDirectorySearchProvider(
         showSpinner: false,
       };
     }
+    if (legacyIndex) return { label: t("fileBrowser.search.status.legacyDirectorySearch"), showSpinner: false };
     switch (cacheState) {
       case "building":
         return {
@@ -400,7 +431,17 @@ export function useDirectorySearchProvider(
       default:
         return null;
     }
-  }, [cacheState, directoryCount, sourceFailure, t]);
+  }, [cacheState, directoryCount, legacyIndex, sourceFailure, t]);
+
+  const getRefreshIntervalMs = useCallback((): number | null => {
+    const response = indexResponseRef.current;
+    return activeTermsRef.current.length > 0 &&
+      !sourceFailureRef.current &&
+      response?.search_contract_version === SEARCH_CONTRACT_VERSION &&
+      (response.cache_state === "building" || response.cache_state === "updating")
+      ? DIRECTORY_REFRESH_INTERVAL_MS
+      : null;
+  }, []);
 
   //
   // onActivate
@@ -430,6 +471,7 @@ export function useDirectorySearchProvider(
 
   const onDeactivate = useCallback(() => {
     requestGenerationRef.current += 1;
+    recentResponseRef.current = null;
     activationControllerRef.current?.abort();
     activationControllerRef.current = null;
   }, []);
@@ -456,6 +498,7 @@ export function useDirectorySearchProvider(
 
   return {
     id: "directory-search",
+    sourceKey: `${connectionId}:${includeDotDirectories}:${recentDirectoryResultLimit}`,
     modeId: "navigate",
     modeLabel: t("fileBrowser.search.modes.navigate"),
     placeholder: t("fileBrowser.search.placeholders.directory"),
@@ -465,6 +508,10 @@ export function useDirectorySearchProvider(
     onSelect,
     onRemoveSelected,
     getStatusInfo,
+    getRefreshIntervalMs,
+    invalidateResults: () => {
+      recentResponseRef.current = null;
+    },
     onActivate,
     onDeactivate,
     getFooterHint: (selectedResult) => (

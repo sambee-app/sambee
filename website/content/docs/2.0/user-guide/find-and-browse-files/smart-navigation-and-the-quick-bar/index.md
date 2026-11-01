@@ -25,6 +25,10 @@ Recent directories use a history icon. Directory-index matches use a folder icon
 
 Recent results become available without waiting for directory search to finish. You can select them while the index request is pending. If one source fails, results from the other source remain available. Check the connection identified by the status message, then retry the search.
 
+Recent-directory history matches separate search terms. For example, `annual reports` finds saved paths that contain either term. Paths that contain both terms rank first. Repeated terms and their order do not change the ranking.
+
+Directory sources that use the older search contract do not support this behavior. The status message identifies this limit for a multi-term search. Use one term for directory-source matches; recent history still supports separate terms.
+
 To remove only the selected item from Recent directories, press <kbd>Shift</kbd> + <kbd>Delete</kbd>. This removes history metadata; it never deletes the underlying directory or its contents.
 
 History is private to your account. See [File Browser Preferences](../../account-and-preferences/file-browser-preferences/#clear-personal-history) to clear it.
@@ -45,6 +49,8 @@ If a folder from a direct link no longer exists, or the open folder is deleted, 
 1. Select a file and press <kbd>Enter</kbd> to open it.
 
 File Search searches names in the active directory's loaded files and your recent-file history. It is not a global file index and does not search contents. A file in both sources appears once. With an empty query, results use separate Recent files and Current directory groups.
+
+Separate terms match any part of a filename. Files that match more terms rank first, before match quality and recent use. Term order and repeated terms do not change the ranking. Folder names do not create file matches. Highlights follow the original filename, including case-folded and accented matches.
 
 Use modifiers with <kbd>Enter</kbd> or a result click to choose how to open the selected file:
 

@@ -744,6 +744,7 @@ export const EN_TRANSLATIONS = {
         indexing: "Indexing... ({{count}} directories found)",
         updating: "Updating index... ({{count}} directories)",
         startingIndex: "Starting index...",
+        legacyDirectorySearch: "This directory source does not support independent search terms. Upgrade the backend or companion.",
         historyUnavailable: "Recent directories are unavailable. Check the backend connection and retry.",
         indexUnavailable: "Directory search is unavailable. Check the source connection and retry.",
       },

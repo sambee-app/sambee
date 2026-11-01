@@ -29,20 +29,30 @@ function getResultIcon(icon: SearchResultIcon): React.ReactElement {
   }
 }
 
-function renderHighlightedText(text: string, highlight?: SearchTextHighlight): React.ReactNode {
-  if (!highlight || highlight.start < 0 || highlight.end <= highlight.start || highlight.end > text.length) {
-    return text;
-  }
-
-  return (
-    <>
-      {text.slice(0, highlight.start)}
-      <Box component="span" sx={{ color: "primary.main", fontWeight: 700 }}>
-        {text.slice(highlight.start, highlight.end)}
+function renderHighlightedText(text: string, highlight?: SearchTextHighlight | SearchTextHighlight[]): React.ReactNode {
+  if (!highlight) return text;
+  const ranges = Array.isArray(highlight) ? highlight : [highlight];
+  const pieces: React.ReactNode[] = [];
+  let offset = 0;
+  for (const range of ranges) {
+    if (
+      !Number.isInteger(range.start) ||
+      !Number.isInteger(range.end) ||
+      range.start < offset ||
+      range.end <= range.start ||
+      range.end > text.length
+    )
+      continue;
+    pieces.push(text.slice(offset, range.start));
+    pieces.push(
+      <Box key={`${range.start}:${range.end}`} component="span" sx={{ color: "primary.main", fontWeight: 700 }}>
+        {text.slice(range.start, range.end)}
       </Box>
-      {text.slice(highlight.end)}
-    </>
-  );
+    );
+    offset = range.end;
+  }
+  pieces.push(text.slice(offset));
+  return <>{pieces}</>;
 }
 
 /** Returns the virtualized height for a structured quick-bar result. */
