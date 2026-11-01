@@ -27,6 +27,7 @@ MAX_QUERY_BYTES = DIRECTORY_INDEX_CONTRACT.limits["max_query_bytes"]
 MAX_QUERY_TERMS = DIRECTORY_INDEX_CONTRACT.limits["max_query_terms"]
 MAX_RESULT_LIMIT = DIRECTORY_INDEX_CONTRACT.limits["max_result_limit"]
 ROW_BATCH_SIZE = DIRECTORY_INDEX_CONTRACT.limits["row_batch_size"]
+SCAN_BATCH_BYTES = DIRECTORY_INDEX_CONTRACT.limits["max_observation_bytes"]
 MAINTENANCE_PAGE_BATCH = DIRECTORY_INDEX_CONTRACT.limits["maintenance_page_batch"]
 CHECKPOINT_WAL_BYTES = DIRECTORY_INDEX_CONTRACT.limits["checkpoint_wal_bytes"]
 NAMESPACE_LEASE_NAME = ".namespace.lease"
@@ -579,6 +580,79 @@ class DirectoryIndex:
                 )
                 if required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0] == generation_id:
                     self._revision(connection)
+
+    def direct_child_paths(
+        self, generation_id: int, parent: str, *, after_path: str | None = None, maximum_bytes: int = SCAN_BATCH_BYTES
+    ) -> list[str]:
+        """Page original immediate-child paths, including branches without an ancestor row."""
+        if parent:
+            validate_directory_path(parent)
+        if after_path is not None:
+            validate_directory_path(after_path)
+            if after_path.rpartition("/")[0] != parent:
+                raise ValueError("Child-page cursor must belong to the requested parent.")
+        if type(maximum_bytes) is not int or not 1 <= maximum_bytes <= SCAN_BATCH_BYTES:
+            raise ValueError("Child-page byte budget is outside the supported scan-batch range.")
+        prefix = parent + "/" if parent else ""
+        with self._writer_lock:
+            cursor = self._connection().execute(
+                "WITH suffixes AS (SELECT substr(path, length(?) + 1) AS suffix FROM directories "
+                "WHERE generation_id = ? AND (? = '' OR substr(path, 1, length(?)) = ?)), "
+                "children AS (SELECT ? || substr(suffix, 1, instr(suffix || '/', '/') - 1) AS path FROM suffixes) "
+                "SELECT DISTINCT path FROM children WHERE (? IS NULL OR path > ?) ORDER BY path LIMIT ?",
+                (prefix, generation_id, prefix, prefix, prefix, prefix, after_path, after_path, ROW_BATCH_SIZE),
+            )
+            result: list[str] = []
+            size = 0
+            try:
+                for (path,) in cursor:
+                    path_bytes = len(path.encode("utf-8"))
+                    if path_bytes > maximum_bytes:
+                        raise ValueError("Directory child exceeds the scan-page byte budget. Source coverage is incomplete.")
+                    if size + path_bytes > maximum_bytes:
+                        break
+                    result.append(path)
+                    size += path_bytes
+            finally:
+                cursor.close()
+            return result
+
+    def prune_subtree_batch(self, generation_id: int, path: str) -> bool:
+        """Remove bounded missing-subtree work; return whether more work remains."""
+        validate_directory_path(path)
+        prefix = path + "/"
+        with self._writer_lock, self.growth_guard():
+            connection = self._connection()
+            self._require_fts()
+            with transaction(connection):
+                state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
+                if state is None or state[0] not in {"building", "candidate", "accepted"}:
+                    raise ValueError("Reconciliation generation is no longer active. Discard this observation and request verification.")
+                removed = connection.execute(
+                    "DELETE FROM directories WHERE id IN (SELECT id FROM directories WHERE generation_id = ? "
+                    "AND (path = ? OR substr(path, 1, length(?)) = ?) ORDER BY id LIMIT ?)",
+                    (generation_id, path, prefix, prefix, ROW_BATCH_SIZE),
+                ).rowcount
+                queued = connection.execute(
+                    "DELETE FROM scan_queue WHERE generation_id = ? AND path IN (SELECT path FROM scan_queue "
+                    "WHERE generation_id = ? AND (path = ? OR substr(path, 1, length(?)) = ?) ORDER BY path LIMIT ?)",
+                    (generation_id, generation_id, path, prefix, prefix, ROW_BATCH_SIZE),
+                ).rowcount
+                if (removed or queued) and required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[
+                    0
+                ] == generation_id:
+                    self._revision(connection)
+                return bool(
+                    required_row(
+                        connection.execute(
+                            "SELECT EXISTS(SELECT 1 FROM directories WHERE generation_id = ? "
+                            "AND (path = ? OR substr(path, 1, length(?)) = ?)) OR EXISTS(SELECT 1 FROM scan_queue "
+                            "WHERE generation_id = ? AND (path = ? OR substr(path, 1, length(?)) = ?))",
+                            (generation_id, path, prefix, prefix, generation_id, path, prefix, prefix),
+                        )
+                    )[0]
+                )
+        raise RuntimeError("Directory reconciliation did not complete. Retry source verification.")
 
     def finish_scan_parent(self, generation_id: int, path: str) -> None:
         with self._writer_lock:

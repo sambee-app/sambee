@@ -973,6 +973,66 @@ impl LocalSource {
         Ok(())
     }
 
+    fn prune_missing_children(
+        &self,
+        root: &NativeRoot,
+        parent: &str,
+        parent_identity: NativeIdentity,
+        scan: ScanGeneration,
+        budget: &Arc<DiskBudget>,
+    ) -> Result<(), IndexError> {
+        let prefix = if parent.is_empty() { String::new() } else { format!("{parent}/") };
+        let mut cursor: Option<String> = None;
+        loop {
+            self.progress()?;
+            root.verify_parent(parent, parent_identity)?;
+            let paths = {
+                let observations = lock(&self.observations)?;
+                if self.stopped.load(Ordering::Acquire) || !observations.is_current(scan.read, parent) {
+                    return Err(IndexError::Interrupted);
+                }
+                lock(&self.writer)?
+                    .as_ref()
+                    .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+                    .direct_child_paths(scan.id, parent, cursor.as_deref(), limit("max_observation_bytes")?)?
+            };
+            if paths.is_empty() {
+                return Ok(());
+            }
+            for path in paths {
+                self.progress()?;
+                {
+                    let observations = lock(&self.observations)?;
+                    if self.stopped.load(Ordering::Acquire) || !observations.is_current(scan.read, parent) {
+                        return Err(IndexError::Interrupted);
+                    }
+                }
+                let name = path.strip_prefix(&prefix).ok_or(IndexError::Invalid(
+                    "Indexed child is outside its observed parent. Rebuild this source.",
+                ))?;
+                if !root.has_directory_child(parent, parent_identity, name)? {
+                    loop {
+                        self.progress()?;
+                        root.verify_parent(parent, parent_identity)?;
+                        let observations = lock(&self.observations)?;
+                        if self.stopped.load(Ordering::Acquire) || !observations.is_current(scan.read, parent) {
+                            return Err(IndexError::Interrupted);
+                        }
+                        let _reservation = budget.reserve()?;
+                        if !lock(&self.writer)?
+                            .as_mut()
+                            .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+                            .prune_subtree_batch(scan.id, &path)?
+                        {
+                            break;
+                        }
+                    }
+                }
+                cursor = Some(path);
+            }
+        }
+    }
+
     fn accept_generation(
         &self,
         root: &NativeRoot,
@@ -1135,6 +1195,16 @@ impl LocalSource {
                         budget,
                     )?;
                 }
+                self.prune_missing_children(
+                    &root,
+                    parent,
+                    parent_identity,
+                    ScanGeneration {
+                        id: generation,
+                        read: read.token,
+                    },
+                    budget,
+                )?;
                 root.verify_parent(parent, parent_identity)?;
                 let observations = lock(&self.observations)?;
                 if !observations.is_current(read.token, parent) {
@@ -1840,6 +1910,10 @@ mod tests {
         assert_eq!(policy.page_cache_kib, super::super::directory_index::PAGE_CACHE_KIB);
         assert_eq!(limit("row_batch_size").unwrap(), ROW_BATCH_SIZE);
         assert_eq!(
+            limit("max_observation_bytes").unwrap(),
+            super::super::directory_index::SCAN_BATCH_BYTES
+        );
+        assert_eq!(
             limit("maintenance_page_batch").unwrap(),
             super::super::directory_index::MAINTENANCE_PAGE_BATCH as usize
         );
@@ -1912,6 +1986,81 @@ mod tests {
         assert!(!status.verification_due(now + interval - Duration::from_millis(1), interval, true));
         assert!(status.verification_due(now + interval, interval, true));
         assert!(status.verification_due(now, interval, false));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn parent_pruning_removes_only_confirmed_missing_children_and_rejects_stale_reads() {
+        let temporary = tempfile::tempdir().unwrap();
+        let namespace = temporary.path().join("private");
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir_all(root_path.join("parent/keep/child")).unwrap();
+        std::fs::create_dir(root_path.join("parent/gone-other")).unwrap();
+        std::fs::write(root_path.join("parent/file"), b"fixture").unwrap();
+        let root = NativeRoot::open(&root_path).unwrap();
+        let identity = root.parent_identity("parent").unwrap();
+        let source = LocalSource::new(root_path, &namespace);
+        let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index
+            .write_paths(
+                [
+                    "parent/gone",
+                    "parent/gone/child",
+                    "parent/file",
+                    "parent/file/child",
+                    "parent/keep",
+                    "parent/keep/child",
+                    "parent/gone-other",
+                ]
+                .map(str::to_owned),
+                None,
+            )
+            .unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let reader = index.reader();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = reader.search("keep", 3, false, &cancelled, false).unwrap();
+        *lock(&source.writer).unwrap() = Some(index);
+        let budget = Arc::new(DiskBudget {
+            namespace,
+            policy_gate: Mutex::new(()),
+            state: Mutex::new(DiskState {
+                policy: DirectoryPolicy::defaults().unwrap(),
+                reserved: 0,
+                next_cleanup_at: Instant::now(),
+            }),
+            space_probe: available_disk_bytes,
+        });
+        let read = source.begin_read().unwrap();
+        let scan = ScanGeneration { id: 1, read: read.token };
+        source.prune_missing_children(&root, "parent", identity, scan, &budget).unwrap();
+        let after = reader.search("gone file keep", 3, false, &cancelled, false).unwrap();
+        assert_eq!(after.directory_count, 3);
+        assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+        assert_eq!(reader.search("file", 3, false, &cancelled, false).unwrap().total_matches, 0);
+        assert_eq!(reader.search("gone-other", 3, false, &cancelled, false).unwrap().total_matches, 1);
+        source.invalidate().unwrap();
+        assert!(matches!(
+            source.prune_missing_children(&root, "parent", identity, scan, &budget),
+            Err(IndexError::Interrupted)
+        ));
+        assert_eq!(reader.search("gone file keep", 3, false, &cancelled, false).unwrap(), after);
+        let current = source.begin_read().unwrap();
+        std::fs::rename(source.root_path.join("parent"), source.root_path.join("replaced-parent")).unwrap();
+        std::fs::create_dir(source.root_path.join("parent")).unwrap();
+        assert!(source
+            .prune_missing_children(
+                &root,
+                "parent",
+                identity,
+                ScanGeneration {
+                    id: 1,
+                    read: current.token
+                },
+                &budget
+            )
+            .is_err());
+        assert_eq!(reader.search("gone file keep", 3, false, &cancelled, false).unwrap(), after);
     }
 
     #[test]

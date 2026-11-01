@@ -21,6 +21,7 @@ pub const MAX_QUERY_BYTES: usize = 4096;
 pub const MAX_QUERY_TERMS: usize = 32;
 pub const MAX_RESULT_LIMIT: usize = 200;
 pub const ROW_BATCH_SIZE: usize = 256;
+pub const SCAN_BATCH_BYTES: usize = 1_048_576;
 pub const MAINTENANCE_PAGE_BATCH: i64 = 256;
 pub const CHECKPOINT_WAL_BYTES: u64 = 1_048_576;
 const INCREMENTAL_VACUUM_MODE: i64 = 2;
@@ -578,6 +579,96 @@ impl DirectoryIndex {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    pub fn direct_child_paths(
+        &self,
+        generation_id: i64,
+        parent: &str,
+        after_path: Option<&str>,
+        maximum_bytes: usize,
+    ) -> Result<Vec<String>, IndexError> {
+        if !parent.is_empty() {
+            validate_directory_path(parent)?;
+        }
+        if let Some(cursor) = after_path {
+            validate_directory_path(cursor)?;
+            if cursor.rsplit_once('/').map_or("", |(parent, _)| parent) != parent {
+                return Err(IndexError::Invalid("Child-page cursor must belong to the requested parent."));
+            }
+        }
+        if maximum_bytes == 0 || maximum_bytes > SCAN_BATCH_BYTES {
+            return Err(IndexError::Invalid(
+                "Child-page byte budget is outside the supported scan-batch range.",
+            ));
+        }
+        let prefix = if parent.is_empty() { String::new() } else { format!("{parent}/") };
+        let mut statement = self.writer.prepare(
+            "WITH suffixes AS (SELECT substr(path, length(?) + 1) AS suffix FROM directories WHERE generation_id = ? AND (? = '' OR substr(path, 1, length(?)) = ?)), children AS (SELECT ? || substr(suffix, 1, instr(suffix || '/', '/') - 1) AS path FROM suffixes) SELECT DISTINCT path FROM children WHERE (? IS NULL OR path > ?) ORDER BY path LIMIT ?"
+        )?;
+        let rows = statement.query_map(
+            params![
+                prefix,
+                generation_id,
+                prefix,
+                prefix,
+                prefix,
+                prefix,
+                after_path,
+                after_path,
+                checked_sql_size(ROW_BATCH_SIZE)?
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        let mut result = Vec::new();
+        let mut bytes = 0;
+        for path in rows {
+            let path = path?;
+            if path.len() > maximum_bytes {
+                return Err(IndexError::Invalid(
+                    "Directory child exceeds the scan-page byte budget. Source coverage is incomplete.",
+                ));
+            }
+            if path.len() > maximum_bytes - bytes {
+                break;
+            }
+            bytes += path.len();
+            result.push(path);
+        }
+        Ok(result)
+    }
+
+    pub fn prune_subtree_batch(&mut self, generation_id: i64, path: &str) -> Result<bool, IndexError> {
+        validate_directory_path(path)?;
+        self.require_fts()?;
+        let prefix = format!("{path}/");
+        let transaction = self.writer.transaction()?;
+        let state: Option<String> = transaction
+            .query_row("SELECT state FROM generations WHERE id = ?", [generation_id], |row| row.get(0))
+            .optional()?;
+        if !matches!(state.as_deref(), Some("building" | "candidate" | "accepted")) {
+            return Err(IndexError::Invalid(
+                "Reconciliation generation is no longer active. Discard this observation and request verification.",
+            ));
+        }
+        let removed = transaction.execute(
+            "DELETE FROM directories WHERE id IN (SELECT id FROM directories WHERE generation_id = ? AND (path = ? OR substr(path, 1, length(?)) = ?) ORDER BY id LIMIT ?)",
+            params![generation_id, path, prefix, prefix, checked_sql_size(ROW_BATCH_SIZE)?],
+        )?;
+        let queued = transaction.execute(
+            "DELETE FROM scan_queue WHERE generation_id = ? AND path IN (SELECT path FROM scan_queue WHERE generation_id = ? AND (path = ? OR substr(path, 1, length(?)) = ?) ORDER BY path LIMIT ?)",
+            params![generation_id, generation_id, path, prefix, prefix, checked_sql_size(ROW_BATCH_SIZE)?],
+        )?;
+        let selected: i64 = transaction.query_row("SELECT selected_generation FROM source_metadata WHERE id = 1", [], |row| row.get(0))?;
+        if (removed != 0 || queued != 0) && generation_id == selected {
+            Self::advance_revision(&transaction)?;
+        }
+        let remains = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM directories WHERE generation_id = ? AND (path = ? OR substr(path, 1, length(?)) = ?)) OR EXISTS(SELECT 1 FROM scan_queue WHERE generation_id = ? AND (path = ? OR substr(path, 1, length(?)) = ?))",
+            params![generation_id, path, prefix, prefix, generation_id, path, prefix, prefix], |row| row.get(0),
+        )?;
+        transaction.commit()?;
+        Ok(remains)
     }
 
     pub fn finish_scan_parent(&mut self, generation_id: i64, path: &str) -> Result<(), IndexError> {
@@ -1786,6 +1877,140 @@ mod tests {
                 .last_verified_at_ms,
             verified
         );
+    }
+
+    #[test]
+    fn direct_child_pages_preserve_original_names_and_byte_bounds() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index
+            .write_paths(
+                [
+                    "root%_/a/one",
+                    "root%_/a/two",
+                    "root%_/a-b",
+                    "root%_/b/child",
+                    "root%_-other/leak",
+                    "é/x",
+                    "e\u{0301}/y",
+                ]
+                .map(str::to_owned),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            index.direct_child_paths(1, "root%_", None, 18).unwrap(),
+            vec!["root%_/a", "root%_/a-b"]
+        );
+        assert_eq!(
+            index.direct_child_paths(1, "root%_", Some("root%_/a-b"), 18).unwrap(),
+            vec!["root%_/b"]
+        );
+        assert!(index
+            .direct_child_paths(1, "root%_", Some("root%_/b"), SCAN_BATCH_BYTES)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            index.direct_child_paths(1, "", None, SCAN_BATCH_BYTES).unwrap(),
+            vec!["e\u{0301}", "root%_", "root%_-other", "é"]
+        );
+        assert!(index
+            .direct_child_paths(1, "root%_", Some("other/child"), SCAN_BATCH_BYTES)
+            .is_err());
+        assert!(index.direct_child_paths(1, "root%_", None, 1).is_err());
+        index
+            .write_paths((0..ROW_BATCH_SIZE * 2 + 1).map(|number| format!("many/{number:06}")), None)
+            .unwrap();
+        let mut cursor: Option<String> = None;
+        let mut count = 0;
+        loop {
+            let page = index.direct_child_paths(1, "many", cursor.as_deref(), SCAN_BATCH_BYTES).unwrap();
+            assert!(page.len() <= ROW_BATCH_SIZE);
+            if page.is_empty() {
+                break;
+            }
+            count += page.len();
+            cursor = page.last().cloned();
+        }
+        assert_eq!(count, ROW_BATCH_SIZE * 2 + 1);
+    }
+
+    #[test]
+    fn missing_subtree_pruning_is_bounded_and_preserves_verification() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let paths: Vec<_> = std::iter::once("gone".to_owned())
+            .chain((0..ROW_BATCH_SIZE * 2).map(|number| format!("gone/{number:06}")))
+            .collect();
+        index
+            .write_paths(paths.iter().cloned().chain(["gone-other".into(), "keep".into()]), None)
+            .unwrap();
+        index.finish_generation(1, 0).unwrap();
+        index
+            .writer
+            .execute("UPDATE directories SET id = -1 WHERE path = 'gone'", [])
+            .unwrap();
+        for path in &paths {
+            index
+                .writer
+                .execute("INSERT INTO scan_queue(generation_id, path) VALUES (1, ?)", [path])
+                .unwrap();
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("keep", 3, false, &cancelled, false).unwrap();
+        let mut remaining = true;
+        let mut passes = 0;
+        while remaining {
+            let previous = index.search("keep", 3, false, &cancelled, false).unwrap().directory_count;
+            remaining = index.prune_subtree_batch(1, "gone").unwrap();
+            let after = index.search("keep", 3, false, &cancelled, false).unwrap();
+            assert!(previous - after.directory_count > 0);
+            assert!(previous - after.directory_count <= ROW_BATCH_SIZE as i64);
+            assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+            assert_eq!(
+                index.search("gone-other keep", 3, false, &cancelled, false).unwrap().total_matches,
+                2
+            );
+            passes += 1;
+        }
+        assert_eq!(passes, 3);
+        assert!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap().is_empty());
+        let completed = index.search("keep", 3, false, &cancelled, false).unwrap();
+        assert!(!index.prune_subtree_batch(1, "gone").unwrap());
+        assert_eq!(index.search("keep", 3, false, &cancelled, false).unwrap(), completed);
+    }
+
+    #[test]
+    fn failed_missing_subtree_pruning_rolls_back_rows_queue_and_revision() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index
+            .write_paths(["gone".into(), "gone/child".into(), "keep".into()], None)
+            .unwrap();
+        index
+            .writer
+            .execute("INSERT INTO scan_queue(generation_id, path) VALUES (1, 'gone')", [])
+            .unwrap();
+        index
+            .writer
+            .execute_batch("CREATE TRIGGER reject_prune_queue BEFORE DELETE ON scan_queue BEGIN SELECT RAISE(ABORT, 'injected'); END;")
+            .unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("gone keep", 3, false, &cancelled, false).unwrap();
+        assert!(index.prune_subtree_batch(1, "gone").is_err());
+        assert_eq!(index.search("gone keep", 3, false, &cancelled, false).unwrap(), before);
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["gone"]);
+        let candidate = index.begin_verification().unwrap();
+        index.discard_generation(candidate).unwrap();
+        assert!(index.prune_subtree_batch(candidate, "gone").is_err());
+        assert!(index.prune_subtree_batch(1, "").is_err());
+        let active = index.begin_verification().unwrap();
+        index.write_paths(["gone".into(), "gone/child".into()], Some(active)).unwrap();
+        assert!(!index.prune_subtree_batch(active, "gone").unwrap());
+        assert_eq!(index.search("gone keep", 3, false, &cancelled, false).unwrap(), before);
     }
 
     #[test]

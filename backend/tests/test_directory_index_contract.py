@@ -1254,6 +1254,77 @@ def test_added_subtrees_do_not_queue_accepted_generation_or_advance_verification
     assert index.search("accepted").last_verified_at_ms == before.last_verified_at_ms
 
 
+def test_direct_child_pages_preserve_original_names_and_byte_bounds(index):
+    index.write_paths(["root%_/a/one", "root%_/a/two", "root%_/a-b", "root%_/b/child", "root%_-other/leak", "é/x", "e\u0301/y"])
+    assert index.direct_child_paths(1, "root%_", maximum_bytes=18) == ["root%_/a", "root%_/a-b"]
+    assert index.direct_child_paths(1, "root%_", after_path="root%_/a-b", maximum_bytes=18) == ["root%_/b"]
+    assert index.direct_child_paths(1, "root%_", after_path="root%_/b") == []
+    assert index.direct_child_paths(1, "") == ["e\u0301", "root%_", "root%_-other", "é"]
+    with pytest.raises(ValueError, match="cursor"):
+        index.direct_child_paths(1, "root%_", after_path="other/child")
+    with pytest.raises(ValueError, match="byte budget"):
+        index.direct_child_paths(1, "root%_", maximum_bytes=1)
+    with pytest.raises(ValueError, match="byte budget"):
+        index.direct_child_paths(1, "root%_", maximum_bytes=True)
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    index.write_paths(f"many/{number:06d}" for number in range(ROW_BATCH_SIZE * 2 + 1))
+    cursor = None
+    count = 0
+    while page := index.direct_child_paths(1, "many", after_path=cursor):
+        assert len(page) <= ROW_BATCH_SIZE
+        count += len(page)
+        cursor = page[-1]
+    assert count == ROW_BATCH_SIZE * 2 + 1
+
+
+def test_missing_subtree_pruning_is_bounded_and_preserves_verification(index):
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    paths = ["gone"] + [f"gone/{number:06d}" for number in range(ROW_BATCH_SIZE * 2)]
+    index.write_paths(paths + ["gone-other", "keep"])
+    assert index.finish_generation(1)
+    before = index.search("keep")
+    index._connection().executemany("INSERT INTO scan_queue(generation_id, path) VALUES (1, ?)", ((path,) for path in paths))
+    remaining = True
+    passes = 0
+    while remaining:
+        previous = index.status().directory_count
+        remaining = index.prune_subtree_batch(1, "gone")
+        after = index.status()
+        assert 0 < previous - after.directory_count <= ROW_BATCH_SIZE
+        assert after.last_verified_at_ms == before.last_verified_at_ms
+        assert index.search("gone-other keep").total_matches == 2
+        passes += 1
+    assert passes == 3
+    assert index.status().directory_count == 2
+    assert index.pending_scan_paths(1) == []
+    completed = index.search("keep")
+    assert not index.prune_subtree_batch(1, "gone")
+    assert index.search("keep") == completed
+
+
+def test_failed_missing_subtree_pruning_rolls_back_rows_queue_and_revision(index):
+    index.write_paths(["gone", "gone/child", "keep"])
+    index._connection().execute("INSERT INTO scan_queue(generation_id, path) VALUES (1, 'gone')")
+    index._connection().execute("CREATE TRIGGER reject_prune_queue BEFORE DELETE ON scan_queue BEGIN SELECT RAISE(ABORT, 'injected'); END")
+    before = index.search("gone keep")
+    with pytest.raises(sqlite3.IntegrityError):
+        index.prune_subtree_batch(1, "gone")
+    assert index.search("gone keep") == before
+    assert index.pending_scan_paths(1) == ["gone"]
+    candidate = index.begin_verification()
+    index.discard_generation(candidate)
+    with pytest.raises(ValueError, match="no longer active"):
+        index.prune_subtree_batch(candidate, "gone")
+    with pytest.raises(ValueError):
+        index.prune_subtree_batch(1, "")
+    active = index.begin_verification()
+    index.write_paths(["gone", "gone/child"], generation_id=active)
+    assert not index.prune_subtree_batch(active, "gone")
+    assert index.search("gone keep") == before
+
+
 def test_scan_barriers_reject_late_rename_observations(index):
     from smbprotocol.change_notify import FileAction
 

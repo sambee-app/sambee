@@ -222,6 +222,55 @@ mod platform {
             identity(&self.parent(parent)?)
         }
 
+        /// Check one exact child through the held parent; errors are not evidence of absence.
+        pub fn has_directory_child(&self, parent: &str, expected: NativeIdentity, name: &str) -> Result<bool, IndexError> {
+            super::super::directory_index::validate_directory_path(name)?;
+            if name.contains('/') {
+                return Err(IndexError::Invalid("Directory child check requires one native name."));
+            }
+            let file = self.parent(parent)?;
+            if identity(&file)? != expected {
+                return Err(IndexError::Invalid(
+                    "Directory parent changed during reconciliation. Retry source verification.",
+                ));
+            }
+            let name = CString::new(name).map_err(|_| IndexError::Invalid("Directory child name contains NUL."))?;
+            let outcome = (|| {
+                let mut metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
+                if unsafe { libc::fstatat(file.as_raw_fd(), name.as_ptr(), metadata.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+                    let error = io::Error::last_os_error();
+                    return if error.kind() == io::ErrorKind::NotFound {
+                        Ok(false)
+                    } else {
+                        Err(error.into())
+                    };
+                }
+                let kind = unsafe { metadata.assume_init() }.st_mode & libc::S_IFMT;
+                if kind == libc::S_IFLNK {
+                    return Err(IndexError::Invalid(
+                        "Directory child is a redirection. Retry source verification under the traversal policy.",
+                    ));
+                }
+                if kind != libc::S_IFDIR {
+                    return Ok(false);
+                }
+                let child = match open_at(file.as_raw_fd(), &name) {
+                    Ok(child) => child,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+                    Err(error) => return Err(error.into()),
+                };
+                let current = identity(&child)?;
+                if current.device != self.identity.device || current.mount != self.identity.mount {
+                    return Err(IndexError::Invalid(
+                        "Directory child is on a different mount. Retry verification without crossing filesystems.",
+                    ));
+                }
+                Ok(true)
+            })();
+            self.verify_parent(parent, expected)?;
+            outcome
+        }
+
         /// fdopendir owns its descriptor; copied names remain valid after the next readdir call.
         pub fn children(
             &self,
@@ -323,6 +372,11 @@ impl NativeRoot {
     pub fn verify_parent(&self, _: &str, _: NativeIdentity) -> Result<(), IndexError> {
         self.verify()
     }
+    pub fn has_directory_child(&self, _: &str, _: NativeIdentity, _: &str) -> Result<bool, IndexError> {
+        Err(IndexError::Invalid(
+            "Safe directory reconciliation is unavailable on this platform. Use recent directories.",
+        ))
+    }
     pub fn children(
         &self,
         _: &str,
@@ -392,6 +446,25 @@ mod tests {
         assert_eq!(rows, vec![(".hidden".to_owned(), true), ("visible".to_owned(), true)]);
         assert!(issues.contains(&TraversalIssue::UnsafeTraversal));
         assert!(issues.contains(&TraversalIssue::UnsupportedEncoding));
+    }
+
+    #[test]
+    fn child_checks_use_exact_names_and_do_not_treat_redirections_or_replacement_as_absence() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("parent/é")).unwrap();
+        std::fs::write(root.join("parent/file"), b"fixture").unwrap();
+        symlink(temporary.path(), root.join("parent/link")).unwrap();
+        let source = NativeRoot::open(&root).unwrap();
+        let parent = source.parent_identity("parent").unwrap();
+        assert!(source.has_directory_child("parent", parent, "é").unwrap());
+        assert!(!source.has_directory_child("parent", parent, "missing").unwrap());
+        assert!(!source.has_directory_child("parent", parent, "file").unwrap());
+        assert!(source.has_directory_child("parent", parent, "link").is_err());
+        assert!(source.has_directory_child("parent", parent, "nested/name").is_err());
+        std::fs::rename(root.join("parent"), root.join("old-parent")).unwrap();
+        std::fs::create_dir(root.join("parent")).unwrap();
+        assert!(source.has_directory_child("parent", parent, "missing").is_err());
     }
 
     #[test]
