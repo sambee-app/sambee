@@ -1107,7 +1107,9 @@ async def search_directories(
         if isinstance(cache, SQLiteConnectionDirectoryCache):
             cancelled = threading.Event()
             try:
-                response = await asyncio.to_thread(cache.search_index, q, include_dot_directories=include_dot_directories, cancelled=cancelled)
+                response = await asyncio.to_thread(
+                    cache.search_index, q, include_dot_directories=include_dot_directories, cancelled=cancelled
+                )
             except asyncio.CancelledError:
                 cancelled.set()
                 raise

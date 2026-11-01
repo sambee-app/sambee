@@ -288,6 +288,7 @@ def _build_integer_read(definition: IntegerSystemSettingDefinition) -> IntegerSy
 def get_integer_setting_value(key: SystemSettingKey) -> int:
     return _resolve_integer_setting(SYSTEM_SETTING_DEFINITIONS[key]).value
 
+
 def build_directory_index_settings_read(scope: DirectoryIndexPolicyScope, session: Session) -> DirectoryIndexSettingsRead:
     from app.services.directory_policy_grants import backend_policy_identity
 
@@ -300,15 +301,27 @@ def build_directory_index_settings_read(scope: DirectoryIndexPolicyScope, sessio
             value = definition.default_value if override is None else _parse_override_value(definition, override.value)
             values[field] = value
             fields[field] = IntegerSystemSettingRead(
-                key=key, label=definition.label, description=definition.description, value=value,
+                key=key,
+                label=definition.label,
+                description=definition.description,
+                value=value,
                 source=SystemSettingSource.DEFAULT if override is None else SystemSettingSource.DATABASE,
-                default_value=definition.default_value, min_value=definition.min_value, max_value=definition.max_value, step=definition.step,
+                default_value=definition.default_value,
+                min_value=definition.min_value,
+                max_value=definition.max_value,
+                step=definition.step,
             )
         revision_row = session.get(SystemSetting, DIRECTORY_INDEX_REVISION_KEYS[scope].value)
         revision = 0 if revision_row is None else int(revision_row.value)
         if not 0 <= revision <= MAX_WIRE_INTEGER:
             raise ValueError("Directory-index policy revision is outside the supported range.")
-        return DirectoryIndexSettingsRead(scope=scope, policy=DirectoryIndexPolicy.model_validate(values), backend_identity=backend_policy_identity(), revision=revision, fields=fields)
+        return DirectoryIndexSettingsRead(
+            scope=scope,
+            policy=DirectoryIndexPolicy.model_validate(values),
+            backend_identity=backend_policy_identity(),
+            revision=revision,
+            fields=fields,
+        )
     except ValueError as error:
         raise ValueError("Stored directory-index policy is invalid. Restore valid administration values before indexing.") from error
 
@@ -318,7 +331,9 @@ def get_directory_index_policy(scope: DirectoryIndexPolicyScope = DirectoryIndex
         return build_directory_index_settings_read(scope, session).policy
 
 
-def update_directory_index_settings(scope: DirectoryIndexPolicyScope, payload: DirectoryIndexSettingUpdate, *, updated_by_user_id: uuid.UUID, session: Session) -> DirectoryIndexSettingUpdate:
+def update_directory_index_settings(
+    scope: DirectoryIndexPolicyScope, payload: DirectoryIndexSettingUpdate, *, updated_by_user_id: uuid.UUID, session: Session
+) -> DirectoryIndexSettingUpdate:
     _begin_immediate_transaction(session)
     current = build_directory_index_settings_read(scope, session)
     values = current.policy.model_dump()
@@ -329,7 +344,9 @@ def update_directory_index_settings(scope: DirectoryIndexPolicyScope, payload: D
         return payload
     if current.revision >= MAX_WIRE_INTEGER:
         raise ValueError("Directory-index policy revision is exhausted. Restore policy revision storage before changing it.")
-    _write_system_setting(session, DIRECTORY_INDEX_SETTING_KEYS[scope][payload.field], str(getattr(policy, payload.field)), updated_by_user_id)
+    _write_system_setting(
+        session, DIRECTORY_INDEX_SETTING_KEYS[scope][payload.field], str(getattr(policy, payload.field)), updated_by_user_id
+    )
     _write_system_setting(session, DIRECTORY_INDEX_REVISION_KEYS[scope], str(current.revision + 1), updated_by_user_id)
     session.commit()
     store.refresh_from_session(session)

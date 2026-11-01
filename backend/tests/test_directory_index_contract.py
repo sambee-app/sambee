@@ -412,6 +412,7 @@ async def test_failed_initialization_keeps_bounded_retry_eligibility(sqlite_cach
     sqlite_cache.index.close()
     sqlite_cache._opened.clear()
     started = []
+
     def unavailable():
         raise BlockingIOError("leased")
 
@@ -444,10 +445,17 @@ async def test_source_replacement_does_not_wait_for_old_close(sqlite_cache, monk
     monkeypatch.setattr(sqlite_cache, "_finish_stop", finish)
     monkeypatch.setattr(SQLiteConnectionDirectoryCache, "start_scan", initialize_later)
     try:
-        replacement = await asyncio.wait_for(manager.get_or_create_cache(
-            sqlite_cache.connection_id, sqlite_cache.host, sqlite_cache.share_name,
-            sqlite_cache.username, "replacement-password", sqlite_cache.port,
-        ), timeout=1)
+        replacement = await asyncio.wait_for(
+            manager.get_or_create_cache(
+                sqlite_cache.connection_id,
+                sqlite_cache.host,
+                sqlite_cache.share_name,
+                sqlite_cache.username,
+                "replacement-password",
+                sqlite_cache.port,
+            ),
+            timeout=1,
+        )
         await asyncio.wait_for(entered.wait(), timeout=5)
         assert replacement is not sqlite_cache
         assert sqlite_cache in manager._retiring_caches
@@ -498,14 +506,18 @@ def test_directory_disk_admission_checks_filesystem_headroom_and_retains_rows(in
     before = index.search("accepted")
     resources = DirectoryIndexResources(index.path.parent)
     index.growth_guard = resources.reserve_growth
-    monkeypatch.setattr("app.services.directory_index_resources.shutil.disk_usage", lambda _path: SimpleNamespace(free=WRITE_HEADROOM_BYTES - 1))
+    monkeypatch.setattr(
+        "app.services.directory_index_resources.shutil.disk_usage", lambda _path: SimpleNamespace(free=WRITE_HEADROOM_BYTES - 1)
+    )
     with pytest.raises(DirectoryDiskBudgetError, match="insufficient free space"):
         index.write_paths(["refused"])
     assert resources.usage().growth_paused
     assert resources.usage().reserved_bytes == 0
     assert index.search("accepted") == before
     assert index.search("refused").total_matches == 0
-    monkeypatch.setattr("app.services.directory_index_resources.shutil.disk_usage", lambda _path: SimpleNamespace(free=WRITE_HEADROOM_BYTES))
+    monkeypatch.setattr(
+        "app.services.directory_index_resources.shutil.disk_usage", lambda _path: SimpleNamespace(free=WRITE_HEADROOM_BYTES)
+    )
     index.write_paths(["restored"])
     assert index.search("restored").total_matches == 1
 
@@ -817,6 +829,7 @@ def test_directory_api_rejects_excess_terms_before_source_creation(monkeypatch, 
     )
     assert response.status_code == 400
     assert "distinct terms" in response.json()["detail"]
+
 
 def test_sqlite_source_initial_batches_are_visible_before_parent_completion(sqlite_cache, monkeypatch):
     from smbclient._os import FileAttributes

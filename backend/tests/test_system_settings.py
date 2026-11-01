@@ -147,7 +147,9 @@ def test_directory_policy_grant_rechecks_current_administrator(client, auth_head
     from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
 
     binding = _policy_grant_binding()
-    issued = client.post("/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
+    issued = client.post(
+        "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
+    )
     assert issued.status_code == 200
     if permission_change == "role":
         admin_user.role = UserRole.EDITOR
@@ -168,7 +170,9 @@ def test_directory_policy_grant_ledger_expiry_and_browser_tokens_are_refused(cli
     from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
 
     binding = _policy_grant_binding()
-    issued = client.post("/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
+    issued = client.post(
+        "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
+    )
     assert issued.status_code == 200
     ordinary = client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": admin_token})
     assert ordinary.status_code in {401, 403}

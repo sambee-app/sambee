@@ -178,7 +178,9 @@ class DirectoryIndexResources:
                 except (OSError, apsw.Error):
                     continue
             self.cleanup_orphan_leases()
-            self._next_cleanup_at = time.monotonic() + min(self.policy.inactive_retention_seconds, DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].minimum)
+            self._next_cleanup_at = time.monotonic() + min(
+                self.policy.inactive_retention_seconds, DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].minimum
+            )
             return removed
 
     def _directory_bytes(self, directory: Path, *, legacy_only: bool = False) -> int:
@@ -249,7 +251,9 @@ class DirectoryIndexResources:
                 )
             if self.reserved_bytes + WRITE_HEADROOM_BYTES > self._available_disk_bytes():
                 self.growth_paused = True
-                raise DirectoryDiskBudgetError("Directory-index filesystem has insufficient free space. Free disk space or select another cache location, then retry.")
+                raise DirectoryDiskBudgetError(
+                    "Directory-index filesystem has insufficient free space. Free disk space or select another cache location, then retry."
+                )
             self.reserved_bytes += WRITE_HEADROOM_BYTES
             self.growth_paused = False
         try:

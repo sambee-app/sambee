@@ -1741,7 +1741,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         if not self._source_available.is_set():
             if not self._source_probe_completed.is_set():
                 return DirectoryIndexSearch((), 0, 0, 0, "partial", None, "empty")
-            raise DirectorySourceUnavailableError("Directory source root is unavailable. Restore source access and retry the search after verification.")
+            raise DirectorySourceUnavailableError(
+                "Directory source root is unavailable. Restore source access and retry the search after verification."
+            )
         if not self._manager_query_slots.acquire(timeout=WORKER_POLL_SECONDS):
             raise TimeoutError("Directory query workers are busy. Wait briefly and retry the search.")
         try:
@@ -1751,7 +1753,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             if self._stop_event.is_set():
                 raise InterruptedError("Directory source was replaced or stopped. Retry the search on the current connection.")
             if not self._source_available.is_set():
-                raise DirectorySourceUnavailableError("Directory source root is unavailable. Restore source access and retry the search after verification.")
+                raise DirectorySourceUnavailableError(
+                    "Directory source root is unavailable. Restore source access and retry the search after verification."
+                )
             return response
         finally:
             self._manager_query_slots.release()
@@ -1775,7 +1779,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 raise
             self._source_available.clear()
             self._source_probe_completed.set()
-            raise DirectorySourceUnavailableError("Directory source root is unavailable. Restore source access and retry verification.") from error
+            raise DirectorySourceUnavailableError(
+                "Directory source root is unavailable. Restore source access and retry verification."
+            ) from error
         finally:
             if not parent:
                 self._root_reading.clear()
@@ -2057,8 +2063,7 @@ class DirectoryCacheManager:
     async def release_idle_caches(self) -> None:
         with self._lock:
             expired = [
-                cache for cache in self._caches.values()
-                if isinstance(cache, SQLiteConnectionDirectoryCache) and cache.can_release_idle()
+                cache for cache in self._caches.values() if isinstance(cache, SQLiteConnectionDirectoryCache) and cache.can_release_idle()
             ]
             for cache in expired:
                 self._caches.pop(cache.connection_id)

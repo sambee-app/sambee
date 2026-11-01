@@ -177,7 +177,9 @@ class DirectoryIndex:
                 if not stat.S_ISREG(info.st_mode):
                     raise PermissionError("Directory-index files must be regular files without symbolic links. Correct the storage path.")
                 if os.name == "posix" and info.st_nlink != 1:
-                    raise PermissionError("Directory-index files must not use hard links. Remove the alias or select new private cache storage, then retry.")
+                    raise PermissionError(
+                        "Directory-index files must not use hard links. Remove the alias or select new private cache storage, then retry."
+                    )
                 if os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022):
                     raise PermissionError(
                         "Directory-index files must belong to the service account without public write access. Correct their permissions."
@@ -207,7 +209,9 @@ class DirectoryIndex:
         try:
             info = os.fstat(descriptor)
             if os.name == "posix" and info.st_nlink != 1:
-                raise PermissionError("Directory-index leases must not use hard links. Remove the alias or select new private cache storage, then retry.")
+                raise PermissionError(
+                    "Directory-index leases must not use hard links. Remove the alias or select new private cache storage, then retry."
+                )
             if not stat.S_ISREG(info.st_mode) or (
                 os.name == "posix" and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o022)
             ):
@@ -608,8 +612,7 @@ class DirectoryIndex:
                     return False
                 generation = retired[0]
                 connection.execute(
-                    "DELETE FROM directories WHERE id IN "
-                    "(SELECT id FROM directories WHERE generation_id = ? ORDER BY id LIMIT ?)",
+                    "DELETE FROM directories WHERE id IN (SELECT id FROM directories WHERE generation_id = ? ORDER BY id LIMIT ?)",
                     (generation, ROW_BATCH_SIZE),
                 )
                 connection.execute(
