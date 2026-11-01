@@ -530,7 +530,9 @@ impl Observations {
 
     fn enqueue(&mut self, mutation: DirectoryMutation, maximum_pending: usize, maximum_bytes: usize) -> Result<bool, IndexError> {
         let paths = match &mutation {
-            DirectoryMutation::Add { path } | DirectoryMutation::Remove { path } => vec![path.as_str()],
+            DirectoryMutation::Add { path } | DirectoryMutation::Remove { path } | DirectoryMutation::ReadParent { path } => {
+                vec![path.as_str()]
+            }
             DirectoryMutation::Rename { path, new_path } => vec![path.as_str(), new_path.as_str()],
         };
         let bytes = paths.iter().map(|path| path.len()).sum::<usize>();
@@ -570,7 +572,13 @@ impl Observations {
 }
 
 fn is_prefix(parent: &str, path: &str) -> bool {
-    path == parent || path.strip_prefix(parent).is_some_and(|suffix| suffix.starts_with('/'))
+    parent.is_empty() || path == parent || path.strip_prefix(parent).is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn parent_observation(path: &str) -> DirectoryMutation {
+    DirectoryMutation::ReadParent {
+        path: path.rsplit_once('/').map_or("", |(parent, _)| parent).to_owned(),
+    }
 }
 
 fn overlaps(first: &str, second: &str) -> bool {
@@ -803,11 +811,31 @@ impl LocalSource {
                     }
                 }
             }
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)) => {
+                for path in &event.paths {
+                    let path = relative(path)?;
+                    if !enqueue(DirectoryMutation::Remove { path: path.clone() })? || !enqueue(parent_observation(&path))? {
+                        break;
+                    }
+                }
+            }
             EventKind::Modify(ModifyKind::Name(RenameMode::Both)) if event.paths.len() == 2 => {
-                enqueue(DirectoryMutation::Rename {
-                    path: relative(&event.paths[0])?,
-                    new_path: relative(&event.paths[1])?,
-                })?;
+                let old = relative(&event.paths[0])?;
+                let new = relative(&event.paths[1])?;
+                if enqueue(DirectoryMutation::Rename {
+                    path: old.clone(),
+                    new_path: new.clone(),
+                })? && enqueue(parent_observation(&old))?
+                {
+                    enqueue(parent_observation(&new))?;
+                }
+            }
+            EventKind::Modify(ModifyKind::Name(_)) => {
+                for path in &event.paths {
+                    if !enqueue(parent_observation(&relative(path)?))? {
+                        break;
+                    }
+                }
             }
             EventKind::Modify(ModifyKind::Metadata(_)) => return Ok(()),
             _ => return observations.invalidate(),
@@ -1884,6 +1912,81 @@ mod tests {
         assert!(!status.verification_due(now + interval - Duration::from_millis(1), interval, true));
         assert!(status.verification_due(now + interval, interval, true));
         assert!(status.verification_due(now, interval, false));
+    }
+
+    #[test]
+    fn root_parent_barriers_reject_all_older_directory_reads() {
+        let mut observations = Observations::default();
+        let old = observations.begin_read().unwrap();
+        observations.enqueue(parent_observation("renamed"), 4, 64).unwrap();
+        assert!(!observations.is_current(old, "unrelated/child"));
+        assert!(!observations.is_current(old, ""));
+        let current = observations.begin_read().unwrap();
+        assert!(observations.is_current(current, "unrelated"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unpaired_rename_hints_verify_directories_without_indexing_files() {
+        for modes in [
+            vec![RenameMode::From],
+            vec![RenameMode::To],
+            vec![RenameMode::To, RenameMode::From],
+            vec![RenameMode::Any],
+        ] {
+            let temporary = tempfile::tempdir().unwrap();
+            let namespace = temporary.path().join("private");
+            let root_path = temporary.path().join("root");
+            std::fs::create_dir_all(root_path.join("old/child")).unwrap();
+            let source = LocalSource::new(root_path.clone(), &namespace);
+            let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+            index.write_paths(["old".into(), "old/child".into()], None).unwrap();
+            index.finish_generation(1, 0).unwrap();
+            let reader = index.reader();
+            *lock(&source.writer).unwrap() = Some(index);
+            *lock(&source.root).unwrap() = Some(Arc::new(NativeRoot::open(&root_path).unwrap()));
+            std::fs::rename(root_path.join("old"), root_path.join("new")).unwrap();
+            std::fs::write(root_path.join("renamed-file.txt"), b"fixture").unwrap();
+            for mode in modes {
+                let path = if mode == RenameMode::From { "old" } else { "new" };
+                source
+                    .observe(Ok(
+                        Event::new(EventKind::Modify(ModifyKind::Name(mode))).add_path(root_path.join(path))
+                    ))
+                    .unwrap();
+            }
+            source
+                .observe(Ok(
+                    Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To))).add_path(root_path.join("renamed-file.txt"))
+                ))
+                .unwrap();
+            let budget = Arc::new(DiskBudget {
+                namespace,
+                policy_gate: Mutex::new(()),
+                state: Mutex::new(DiskState {
+                    policy: DirectoryPolicy::defaults().unwrap(),
+                    reserved: 0,
+                    next_cleanup_at: Instant::now(),
+                }),
+                space_probe: available_disk_bytes,
+            });
+            source.flush(&budget).unwrap();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            assert_eq!(reader.search("renamed-file", 3, false, &cancelled, false).unwrap().total_matches, 0);
+            assert!(lock(&source.observations).unwrap().verification_required);
+            source.scan(&budget).unwrap();
+            assert_eq!(
+                reader
+                    .search("old renamed-file", 3, false, &cancelled, false)
+                    .unwrap()
+                    .total_matches,
+                0
+            );
+            let response = reader.search("new", 3, false, &cancelled, false).unwrap();
+            assert_eq!(response.total_matches, 2);
+            assert_eq!(response.directory_count, 2);
+            assert!(!lock(&source.observations).unwrap().verification_required);
+        }
     }
 
     #[test]

@@ -729,6 +729,12 @@ class DirectoryIndex:
                                 any(part.startswith(".") for part in path.split("/")),
                             ),
                         )
+                        connection.execute(
+                            "INSERT INTO scan_queue(generation_id, path) SELECT id, ? FROM generations "
+                            "WHERE id = ? AND state IN ('building', 'candidate') "
+                            "ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
+                            (path, generation_id),
+                        )
                     elif action == "remove":
                         connection.execute(
                             "DELETE FROM directories WHERE generation_id = ? AND (path = ? OR substr(path, 1, ?) = ?)",

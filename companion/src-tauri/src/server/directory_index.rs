@@ -348,6 +348,7 @@ pub struct DirectoryIndex {
 }
 
 pub enum DirectoryMutation {
+    ReadParent { path: String },
     Add { path: String },
     Remove { path: String },
     Rename { path: String, new_path: String },
@@ -710,9 +711,14 @@ impl DirectoryIndex {
     pub fn mutate_path(&mut self, mutation: &DirectoryMutation) -> Result<(), IndexError> {
         self.require_fts()?;
         let path = match mutation {
-            DirectoryMutation::Add { path } | DirectoryMutation::Remove { path } | DirectoryMutation::Rename { path, .. } => path,
+            DirectoryMutation::Add { path }
+            | DirectoryMutation::Remove { path }
+            | DirectoryMutation::Rename { path, .. }
+            | DirectoryMutation::ReadParent { path } => path,
         };
-        validate_directory_path(path)?;
+        if !matches!(mutation, DirectoryMutation::ReadParent { .. }) || !path.is_empty() {
+            validate_directory_path(path)?;
+        }
         if let DirectoryMutation::Rename { new_path, .. } = mutation {
             validate_directory_path(new_path)?;
             if new_path == path {
@@ -724,8 +730,18 @@ impl DirectoryIndex {
         }
         let transaction = self.writer.transaction()?;
         match mutation {
+            DirectoryMutation::ReadParent { path } => {
+                transaction.execute(
+                    "INSERT INTO scan_queue(generation_id, path) SELECT id, ? FROM generations WHERE state IN ('building', 'candidate') ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
+                    [path],
+                )?;
+            }
             DirectoryMutation::Add { path } => {
                 transaction.execute("INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) SELECT id, ?, ?, ?, ?, ? FROM generations WHERE state IN ('building', 'accepted', 'candidate') ON CONFLICT(generation_id, path) DO NOTHING", params![path, normalize_search_text(path), normalize_search_text(path.rsplit('/').next().unwrap_or(path)), checked_sql_size(path.bytes().filter(|byte| *byte == b'/').count())?, path.split('/').any(|part| part.starts_with('.'))])?;
+                transaction.execute(
+                    "INSERT INTO scan_queue(generation_id, path) SELECT id, ? FROM generations WHERE state IN ('building', 'candidate') ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
+                    [path],
+                )?;
             }
             DirectoryMutation::Remove { path } => {
                 let prefix = format!("{path}/");
@@ -1716,6 +1732,84 @@ mod tests {
                 .total_matches,
             0
         );
+    }
+
+    #[test]
+    fn added_subtrees_are_queued_for_builds_and_candidates_atomically() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let candidate = index.begin_verification().unwrap();
+        index.mutate_path(&DirectoryMutation::Add { path: "moved-in".into() }).unwrap();
+        for generation in [1, candidate] {
+            assert_eq!(index.pending_scan_paths(generation, ROW_BATCH_SIZE).unwrap(), vec!["moved-in"]);
+            index.finish_scan_parent(generation, "moved-in").unwrap();
+        }
+        index.mutate_path(&DirectoryMutation::Add { path: "moved-in".into() }).unwrap();
+        for generation in [1, candidate] {
+            assert_eq!(index.pending_scan_paths(generation, ROW_BATCH_SIZE).unwrap(), vec!["moved-in"]);
+        }
+        index.writer.execute_batch("CREATE TRIGGER reject_added_scan_work BEFORE INSERT ON scan_queue WHEN NEW.path = 'abort' BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+        let before = index
+            .search("moved-in", 3, false, &Arc::new(AtomicBool::new(false)), false)
+            .unwrap();
+        assert!(index.mutate_path(&DirectoryMutation::Add { path: "abort".into() }).is_err());
+        assert_eq!(
+            index
+                .search("moved-in", 3, false, &Arc::new(AtomicBool::new(false)), false)
+                .unwrap(),
+            before
+        );
+        assert_eq!(
+            index
+                .search("abort", 3, false, &Arc::new(AtomicBool::new(false)), false)
+                .unwrap()
+                .total_matches,
+            0
+        );
+        index.finish_scan_parent(1, "moved-in").unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let verified = index
+            .search("moved-in", 3, false, &Arc::new(AtomicBool::new(false)), false)
+            .unwrap()
+            .last_verified_at_ms;
+        index.mutate_path(&DirectoryMutation::Add { path: "later".into() }).unwrap();
+        assert!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap().is_empty());
+        assert_eq!(
+            index.pending_scan_paths(candidate, ROW_BATCH_SIZE).unwrap(),
+            vec!["later", "moved-in"]
+        );
+        assert_eq!(
+            index
+                .search("later", 3, false, &Arc::new(AtomicBool::new(false)), false)
+                .unwrap()
+                .last_verified_at_ms,
+            verified
+        );
+    }
+
+    #[test]
+    fn parent_read_hints_queue_work_without_inserting_directory_names() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let candidate = index.begin_verification().unwrap();
+        for parent in ["", "parent"] {
+            index.mutate_path(&DirectoryMutation::ReadParent { path: parent.into() }).unwrap();
+        }
+        for generation in [1, candidate] {
+            assert_eq!(index.pending_scan_paths(generation, ROW_BATCH_SIZE).unwrap(), vec!["", "parent"]);
+        }
+        assert_eq!(
+            index
+                .search("parent", 3, false, &Arc::new(AtomicBool::new(false)), false)
+                .unwrap()
+                .directory_count,
+            0
+        );
+        assert!(index
+            .mutate_path(&DirectoryMutation::ReadParent { path: "../outside".into() })
+            .is_err());
     }
 
     #[test]

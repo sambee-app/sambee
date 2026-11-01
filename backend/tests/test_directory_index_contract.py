@@ -1222,6 +1222,38 @@ def test_new_database_and_lease_are_private(index):
         assert stat.S_IMODE(Path(str(index.path) + ".lease").stat().st_mode) == 0o600
 
 
+def test_added_subtrees_queue_build_and_candidate_work_atomically(index):
+    candidate = index.begin_verification()
+    index.mutate_path("add", "moved-in")
+    for generation in (1, candidate):
+        assert index.pending_scan_paths(generation) == ["moved-in"]
+        index.finish_scan_parent(generation, "moved-in")
+    index.mutate_path("add", "moved-in")
+    for generation in (1, candidate):
+        assert index.pending_scan_paths(generation) == ["moved-in"]
+    index._connection().execute(
+        "CREATE TRIGGER reject_added_scan_work BEFORE INSERT ON scan_queue WHEN NEW.path = 'abort' "
+        "BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    before = index.search("moved-in")
+    with pytest.raises(sqlite3.IntegrityError):
+        index.mutate_path("add", "abort")
+    assert index.search("moved-in") == before
+    assert index.search("abort").total_matches == 0
+
+
+def test_added_subtrees_do_not_queue_accepted_generation_or_advance_verification(index):
+    index.write_paths(["accepted"])
+    assert index.finish_generation(1)
+    before = index.search("accepted")
+    candidate = index.begin_verification()
+    index.mutate_path("add", "new")
+    assert index.pending_scan_paths(1) == []
+    assert index.pending_scan_paths(candidate) == ["new"]
+    assert index.search("accepted new").directory_count == 2
+    assert index.search("accepted").last_verified_at_ms == before.last_verified_at_ms
+
+
 def test_scan_barriers_reject_late_rename_observations(index):
     from smbprotocol.change_notify import FileAction
 
@@ -1761,6 +1793,10 @@ def test_mutations_update_accepted_candidate_fts_and_preserve_verification(index
     index.mutate_path("remove", "new/.beta")
     index.mutate_path("add", "fresh/beta")
     assert index.search("beta").total_matches == 1
+    with pytest.raises(ValueError, match="Scan work remains queued"):
+        index.finish_generation(candidate)
+    assert index.pending_scan_paths(candidate) == ["fresh/beta"]
+    index.finish_scan_parent(candidate, "fresh/beta")
     index.finish_generation(candidate)
     assert index.search("beta").results[0].path == "fresh/beta"
     assert index.search("alpha").total_matches == 1

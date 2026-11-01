@@ -31,6 +31,8 @@ The approved requirements remain in the collapsed reference section. Its origina
 
 ## Events and Verification
 
+- [x] Queue added-directory subtree reads for active builds and verification candidates in both runtimes. Commit rows, FTS changes, and queued work together; reset previously processed work on a repeated hint. Preserve accepted verification time and block candidate acceptance while new work remains. See [subtree and rename evidence](#acceptance-evidence-subtree-and-rename-hints).
+- [x] Handle companion unpaired and unknown-direction rename hints without requiring event pairing. Moved-out hints remove the indexed prefix; moved-in and unknown hints queue parent reads without inserting unverified directory names. Paired events queue both rename parents. See [subtree and rename evidence](#acceptance-evidence-subtree-and-rename-hints). Full verification tests preserve directory-only scope and discover moved descendants.
 - [ ] Complete dirty-parent reconciliation: immediate children, new or moved-in subtrees, deleted subtrees, and both rename parents. Do not require paired rename events.
 - [ ] Complete the common mutation notification path for create/delete, empty-directory removal, rename, copy/move, transfers, parent-creating uploads, and archive extraction. Reconcile affected parents after partial failures.
 - [x] Complete backend changed-prefix coalescing and outstanding-producer tracking for synchronous scan batches. Retire barriers only after older current-epoch reads and pending mutations can no longer apply; reject completed tokens and retain invalidated blocked producers until actual exit. See [backend acceptance evidence](#acceptance-evidence-backend-prefix-barriers).
@@ -154,6 +156,18 @@ Verified on 2026-11-01 in the Debian development container. This evidence closes
 - The native directory selection passed **66 tests with 2 ignored** before the final event-staging edit. The final native manager selection passed **24 tests**. Rust formatting and warning-free Clippy passed after the final native edit. The ignored checks were the opt-in million-path experiment and explicitly invoked Python-to-Rust compatibility test; neither is claimed by this selection.
 - The editor reports an SMB watcher `auth_protocol` type diagnostic on an unchanged line already present in `HEAD`. This work does not suppress or change that unrelated code. Configured mypy reported no errors in the changed module.
 - No capacity measurement, Docker qualification, Windows native qualification, or implementation-completion aggregate is claimed. The new capability remains disabled.
+
+## Acceptance Evidence: Subtree And Rename Hints
+
+Verified on 2026-11-01 in the Debian development container. This evidence closes active-scan subtree queueing and companion rename-hint routing only. Complete immediate-child reconciliation against accepted rows and candidates, mutation-freshness timing, and captured-sequence final selection remain open.
+
+- [Backend storage](../backend/app/services/directory_index.py) and [companion storage](../companion/src-tauri/src/server/directory_index.rs) add subtree work to building/candidate scan queues in the same transaction as directory rows and FTS entries. Repeated hints reset processed work. Tests inject a failed queue insertion and verify row/revision rollback.
+- Accepted generations still receive observed row mutations, but do not receive scan work without an owner. Tests in both runtimes verify that an add does not advance accepted complete-verification time. Backend acceptance tests now reject candidate selection until the added subtree's queued read is complete.
+- [Native event handling](../companion/src-tauri/src/server/directory_manager.rs) handles moved-out hints independently. Moved-in and unknown-direction hints queue a parent read instead of assuming the renamed object is a directory. Paired renames also queue both parents. Root-parent hints fence every older directory read; completed or stale tokens cannot bypass the barrier.
+- A parent-read hint can queue the root, but cannot insert a root or inferred filename into directory rows. Native tests use a small real Linux directory tree with injected From-only, To-only, reversed To/From, and unknown-direction events. Full verification discovers the moved directory and child, removes old paths, and excludes a renamed regular file.
+- Final backend contract/API command: **159 passed, 1 skipped in 9.99 seconds**. Configured mypy for the changed storage module and Ruff for the changed backend files passed. The opt-in million-path fixture remains skipped.
+- Native directory selection: **71 passed, 2 ignored**. The added-subtree test also passed after the accepted-generation assertions were added. Rust formatting and warning-free Clippy passed on the final native edits. The ignored checks were the opt-in million-path experiment and explicitly invoked Python-to-Rust compatibility test.
+- These changes do not complete immediate accepted-row parent reconciliation: parent-read hints currently feed active build/candidate queues, and full verification supplies recovery when no such scan is active. Ordinary event-driven freshness and candidate reconciliation through a captured sequence are not claimed. No schema, dependency, product-version, or capability change was made.
 
 <details>
 <summary>Approved Requirements and Original Acceptance Contract</summary>
