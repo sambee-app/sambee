@@ -29,6 +29,7 @@ const STALLED_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const FAILURE_RETRY_MIN: Duration = Duration::from_secs(30);
 const FAILURE_RETRY_MAX: Duration = Duration::from_secs(300);
 const FAILURE_RETRY_JITTER_PERCENT: u8 = 10;
+const PERIODIC_VERIFICATION_JITTER_PERCENT: u8 = 10;
 const DEFAULT_RESULT_LIMIT: usize = 50;
 pub(super) const MAX_WIRE_INTEGER: i64 = 9_007_199_254_740_991;
 const POLICY_VERSION: u32 = 1;
@@ -607,6 +608,7 @@ struct SourceStatus {
     accessed_at_ms: Option<i64>,
     retry_at: Instant,
     failure_delay: Duration,
+    verification_jitter: u8,
     stalled: bool,
 }
 
@@ -626,6 +628,8 @@ impl SourceStatus {
     }
 
     fn verification_due(&self, now: Instant, interval: Duration, initialized: bool) -> bool {
+        let percent = 100 - self.verification_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1);
+        let interval = interval.mul_f64(f64::from(percent) / 100.0);
         now >= self.retry_at && (!initialized || !self.failure_delay.is_zero() || now.saturating_duration_since(self.verified) >= interval)
     }
 
@@ -692,6 +696,7 @@ impl LocalSource {
 
     fn new(root_path: PathBuf, namespace: &Path) -> Arc<Self> {
         let session = uuid::Uuid::new_v4().to_string();
+        let verification_jitter = Sha256::digest(session.as_bytes())[0];
         let filename = format!("{:x}.sqlite3", Sha256::digest(session.as_bytes()));
         let now = Instant::now();
         Arc::new(Self {
@@ -712,6 +717,7 @@ impl LocalSource {
                 accessed_at_ms: None,
                 retry_at: now,
                 failure_delay: Duration::ZERO,
+                verification_jitter,
                 stalled: false,
             }),
             busy: AtomicBool::new(false),
@@ -1975,10 +1981,47 @@ mod tests {
     }
 
     #[test]
+    fn periodic_verification_jitter_preserves_deadlines_and_retry_priority() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), temporary.path());
+        let policy = DirectoryPolicy::defaults().unwrap();
+        let mut status = lock(&source.status).unwrap();
+        assert_eq!(status.verification_jitter, Sha256::digest(source.session.as_bytes())[0]);
+        let now = status.verified;
+        for seconds in [policy.healthy_verification_seconds, policy.degraded_verification_seconds] {
+            let interval = Duration::from_secs(seconds as u64);
+            let mut delays = std::collections::HashSet::new();
+            for jitter in 0..=u8::MAX {
+                status.verification_jitter = jitter;
+                let percent = 100 - jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1);
+                let delay = interval.mul_f64(f64::from(percent) / 100.0);
+                delays.insert(delay);
+                assert!(delay >= interval.mul_f64(0.9) && delay <= interval);
+                assert!(!status.verification_due(now + delay - Duration::from_millis(1), interval, true));
+                assert!(status.verification_due(now + delay, interval, true));
+                status.retry_at = now + delay + FAILURE_RETRY_MIN;
+                assert!(!status.verification_due(now + delay, interval, true));
+                assert!(status.verification_due(status.retry_at, interval, true));
+                status.retry_at = now;
+            }
+            assert!(delays.len() > 1);
+        }
+        status.verification_jitter = 0;
+        let interval = Duration::from_secs(policy.healthy_verification_seconds as u64);
+        status.schedule_retry(now, FAILURE_RETRY_JITTER_PERCENT);
+        assert!(status.verification_due(status.retry_at, interval, true));
+        status.complete_pass(now + FAILURE_RETRY_MIN);
+        assert!(!status.verification_due(status.verified, interval, true));
+        assert!(status.verification_due(status.verified, interval, false));
+        assert!(status.verification_due(status.verified + interval, interval, true));
+    }
+
+    #[test]
     fn completed_partial_pass_waits_for_its_degraded_deadline() {
         let temporary = tempfile::tempdir().unwrap();
         let source = LocalSource::new(temporary.path().join("root"), temporary.path());
         let mut status = lock(&source.status).unwrap();
+        status.verification_jitter = 0;
         let now = status.verified;
         let interval = Duration::from_secs(300);
         status.complete_pass(now);
@@ -2072,6 +2115,64 @@ mod tests {
         assert!(!observations.is_current(old, ""));
         let current = observations.begin_read().unwrap();
         assert!(observations.is_current(current, "unrelated"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn repeated_watcher_loss_preserves_rows_and_recovers_through_verification() {
+        let temporary = tempfile::tempdir().unwrap();
+        let namespace = temporary.path().join("private");
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir_all(root_path.join("accepted/child")).unwrap();
+        let source = LocalSource::new(root_path.clone(), &namespace);
+        let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index.write_paths(["accepted".into(), "accepted/child".into()], None).unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let reader = index.reader();
+        *lock(&source.writer).unwrap() = Some(index);
+        *lock(&source.root).unwrap() = Some(Arc::new(NativeRoot::open(&root_path).unwrap()));
+        let budget = Arc::new(DiskBudget {
+            namespace,
+            policy_gate: Mutex::new(()),
+            state: Mutex::new(DiskState {
+                policy: DirectoryPolicy::defaults().unwrap(),
+                reserved: 0,
+                next_cleanup_at: Instant::now(),
+            }),
+            space_probe: available_disk_bytes,
+        });
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = reader.search("accepted", 3, false, &cancelled, false).unwrap();
+        let mut uncertain = None;
+        for _ in 0..3 {
+            let read = source.begin_read().unwrap();
+            source.observe(Err(notify::Error::generic("Injected watcher loss."))).unwrap();
+            assert!(!lock(&source.observations).unwrap().is_current(read.token, "accepted"));
+            source.flush(&budget).unwrap();
+            let response = reader.search("accepted", 3, false, &cancelled, false).unwrap();
+            assert_eq!(response.directory_count, before.directory_count);
+            assert_eq!(response.total_matches, before.total_matches);
+            assert_eq!(response.last_verified_at_ms, before.last_verified_at_ms);
+            assert_eq!(response.coverage, "uncertain");
+            assert_eq!(response.issue_count, 1);
+            if let Some(previous) = &uncertain {
+                assert_eq!(&response, previous);
+            }
+            uncertain = Some(response);
+            assert!(lock(&source.observations).unwrap().verification_required);
+        }
+        source.scan(&budget).unwrap();
+        let recovered = reader.search("accepted", 3, false, &cancelled, false).unwrap();
+        assert_eq!(recovered.coverage, "complete");
+        assert_eq!(recovered.issue_count, 0);
+        assert!(!lock(&source.observations).unwrap().verification_required);
+        source.observe(Err(notify::Error::generic("Injected new watcher loss."))).unwrap();
+        source.flush(&budget).unwrap();
+        let lost_again = reader.search("accepted", 3, false, &cancelled, false).unwrap();
+        assert_eq!(lost_again.coverage, "uncertain");
+        assert_eq!(lost_again.issue_count, 1);
+        assert!(lost_again.accepted_revision > recovered.accepted_revision);
+        assert_eq!(lost_again.last_verified_at_ms, recovered.last_verified_at_ms);
     }
 
     #[cfg(target_os = "linux")]

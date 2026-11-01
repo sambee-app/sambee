@@ -941,6 +941,32 @@ def test_failed_verification_backoff_is_due_before_the_full_pass_interval(sqlite
     assert sqlite_cache._failure_retry_delay == 30
 
 
+@pytest.mark.parametrize("degraded", [False, True])
+def test_periodic_verification_jitter_preserves_deadlines_and_retry_priority(sqlite_cache, degraded):
+    from app.services.directory_cache import PERIODIC_VERIFICATION_JITTER_PERCENT
+
+    sqlite_cache.coordinator.verification_required = degraded
+    interval = sqlite_cache.policy.degraded_verification_seconds if degraded else sqlite_cache.policy.healthy_verification_seconds
+    verified_at = 1000.0
+    deadlines = set()
+    for jitter in range(256):
+        sqlite_cache._retry_jitter = jitter
+        delay = interval * (100 - jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1)) / 100
+        deadline = verified_at + delay
+        deadlines.add(deadline)
+        assert not sqlite_cache._verification_due(verified_at, now=deadline - 0.001)
+        assert sqlite_cache._verification_due(verified_at, now=deadline)
+        assert verified_at + interval * 0.9 <= deadline <= verified_at + interval
+        sqlite_cache._resource_retry_at = deadline + 30
+        assert not sqlite_cache._verification_due(verified_at, now=deadline)
+        assert sqlite_cache._verification_due(verified_at, now=deadline + 30)
+        sqlite_cache._resource_retry_at = 0
+    assert len(deadlines) > 1
+    sqlite_cache._retry_jitter = 0
+    sqlite_cache._schedule_retry(now=verified_at)
+    assert sqlite_cache._verification_due(verified_at, now=sqlite_cache._resource_retry_at)
+
+
 def test_retry_jitter_stays_bounded_and_spreads_backend_sources(sqlite_cache):
     from app.services.directory_cache import FAILURE_RETRY_MAX_SECONDS, FAILURE_RETRY_MIN_SECONDS
 
@@ -1908,7 +1934,46 @@ def test_event_loss_persists_uncertain_coverage_without_losing_accepted_rows(ind
     revision = response.accepted_revision
     coordinator.apply_pending()
     assert index.status().accepted_revision == revision
+    with coordinator.read("accepted") as read:
+        coordinator.invalidate()
+        assert not coordinator.is_current(read)
+        coordinator.apply_pending()
+    repeated = index.search("accepted")
+    assert repeated == response
     assert coordinator.verification_required
+    index._connection().execute(
+        "CREATE TRIGGER reject_unchanged_loss BEFORE UPDATE ON generations BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    coordinator.invalidate()
+    coordinator.apply_pending()
+    assert index.search("accepted") == response
+    index._connection().execute("DROP TRIGGER reject_unchanged_loss")
+
+
+def test_failed_event_loss_persistence_retains_verification_and_retries(index):
+    from app.services.directory_cache import DirectoryScanCoordinator
+
+    index.write_paths(["accepted"])
+    assert index.finish_generation(1)
+    before = index.search("accepted")
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.invalidate()
+    index._connection().execute(
+        "CREATE TRIGGER reject_loss_revision BEFORE UPDATE ON source_metadata BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        coordinator.apply_pending()
+    assert index.search("accepted") == before
+    assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
+    assert coordinator.verification_required
+    assert coordinator._uncertain_pending
+    index._connection().execute("DROP TRIGGER reject_loss_revision")
+    coordinator.apply_pending()
+    response = index.search("accepted")
+    assert response.coverage == "uncertain"
+    assert response.issue_count == 1
+    assert response.last_verified_at_ms == before.last_verified_at_ms
+    assert not coordinator._uncertain_pending
 
 
 def test_unresolved_issue_rows_cannot_be_selected_as_complete(index):
@@ -1930,7 +1995,9 @@ def test_failed_generation_issue_count_agrees_with_issue_rows(index):
     assert index.status().issue_count == aggregate == 3
 
 
-def test_sqlite_source_watcher_gap_invalidates_scan_and_coverage(sqlite_cache):
+def test_sqlite_source_watcher_gap_invalidates_scan_and_coverage(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
     sqlite_cache.index.write_paths(["accepted"])
     assert sqlite_cache.index.finish_generation(1)
     token = sqlite_cache.coordinator.begin_read("accepted")
@@ -1941,6 +2008,30 @@ def test_sqlite_source_watcher_gap_invalidates_scan_and_coverage(sqlite_cache):
     assert response.coverage == "uncertain"
     assert response.total_matches == 1
     assert sqlite_cache.scan_error is not None
+    sqlite_cache.coordinator.end_read(token)
+    for _ in range(3):
+        sqlite_cache._observation_lost()
+        sqlite_cache.coordinator.apply_pending()
+        assert sqlite_cache.search_index("accepted") == response
+
+    def scan(path, **kwargs):
+        if path == sqlite_cache._smb_base_path:
+            yield SimpleNamespace(name="accepted", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", scan)
+    sqlite_cache._scan_disk_queue()
+    recovered = sqlite_cache.search_index("accepted")
+    assert recovered.coverage == "complete"
+    assert recovered.issue_count == 0
+    assert not sqlite_cache.coordinator.verification_required
+    assert sqlite_cache.scan_error is None
+    sqlite_cache._observation_lost()
+    sqlite_cache.coordinator.apply_pending()
+    lost_again = sqlite_cache.search_index("accepted")
+    assert lost_again.coverage == "uncertain"
+    assert lost_again.issue_count == 1
+    assert lost_again.accepted_revision > recovered.accepted_revision
+    assert lost_again.last_verified_at_ms == recovered.last_verified_at_ms
 
 
 def test_sqlite_source_bounds_batch_bytes_without_limiting_coverage(sqlite_cache, monkeypatch):

@@ -895,8 +895,14 @@ impl DirectoryIndex {
         let generation: i64 =
             transaction.query_row("SELECT selected_generation FROM source_metadata WHERE id = 1", [], |row| row.get(0))?;
         transaction.execute("INSERT INTO coverage_issues(generation_id, code, count) VALUES (?, 'event_loss', 1) ON CONFLICT(generation_id, code) DO NOTHING", [generation])?;
-        transaction.execute("UPDATE generations SET coverage = 'uncertain', issue_count = (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?) WHERE id = ?", params![generation, generation])?;
-        Self::advance_revision(&transaction)?;
+        let changed = transaction.execute(
+            "UPDATE generations SET coverage = 'uncertain', issue_count = (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?) \
+             WHERE id = ? AND (coverage <> 'uncertain' OR issue_count <> (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?))",
+            params![generation, generation, generation],
+        )?;
+        if changed != 0 {
+            Self::advance_revision(&transaction)?;
+        }
         transaction.commit()?;
         Ok(())
     }
@@ -1683,6 +1689,74 @@ mod tests {
         let (candidate, selected) = index.prepare_scan().unwrap();
         assert!(!selected);
         assert_ne!(candidate, 1);
+    }
+
+    #[test]
+    fn repeated_event_loss_is_idempotent_and_recovers() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let source = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &source).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        index.write_paths(["accepted".to_owned()], None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let accepted = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        index.mark_uncertain().unwrap();
+        let uncertain = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        assert_eq!(uncertain.coverage, "uncertain");
+        assert_eq!(uncertain.issue_count, 1);
+        assert_eq!(uncertain.last_verified_at_ms, accepted.last_verified_at_ms);
+        assert!(uncertain.accepted_revision > accepted.accepted_revision);
+        index
+            .writer
+            .execute_batch("CREATE TRIGGER reject_unchanged_loss BEFORE UPDATE ON generations BEGIN SELECT RAISE(ABORT, 'injected'); END")
+            .unwrap();
+        for _ in 0..3 {
+            index.mark_uncertain().unwrap();
+            assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), uncertain);
+        }
+        index.writer.execute_batch("DROP TRIGGER reject_unchanged_loss").unwrap();
+        let candidate = index.begin_verification().unwrap();
+        index.write_paths(["accepted".to_owned()], Some(candidate)).unwrap();
+        assert!(index.finish_generation(candidate, 0).unwrap());
+        let recovered = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        assert_eq!(recovered.coverage, "complete");
+        assert_eq!(recovered.issue_count, 0);
+        index.mark_uncertain().unwrap();
+        let lost_again = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        assert_eq!(lost_again.coverage, "uncertain");
+        assert_eq!(lost_again.issue_count, 1);
+        assert!(lost_again.accepted_revision > recovered.accepted_revision);
+        drop(index);
+        let reopened = DirectoryIndex::open(&path, SourceKind::Local, &source).unwrap();
+        assert_eq!(reopened.search("accepted", 3, false, &cancelled, false).unwrap(), lost_again);
+    }
+
+    #[test]
+    fn failed_event_loss_rolls_back_issue_metadata_and_revision() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        index.write_paths(["accepted".to_owned()], None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let before = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        index
+            .writer
+            .execute_batch(
+                "CREATE TRIGGER reject_loss_revision BEFORE UPDATE ON source_metadata BEGIN SELECT RAISE(ABORT, 'injected'); END",
+            )
+            .unwrap();
+        assert!(index.mark_uncertain().is_err());
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+        let issues: i64 = index
+            .writer
+            .query_row("SELECT count(*) FROM coverage_issues", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(issues, 0);
+        index.writer.execute_batch("DROP TRIGGER reject_loss_revision").unwrap();
+        index.mark_uncertain().unwrap();
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap().issue_count, 1);
     }
 
     #[test]

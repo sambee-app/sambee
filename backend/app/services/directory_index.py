@@ -789,12 +789,14 @@ class DirectoryIndex:
                     "ON CONFLICT(generation_id, code) DO NOTHING",
                     (generation,),
                 )
-                connection.execute(
+                changed = connection.execute(
                     "UPDATE generations SET coverage = 'uncertain', issue_count = "
-                    "(SELECT sum(count) FROM coverage_issues WHERE generation_id = ?) WHERE id = ?",
-                    (generation, generation),
-                )
-                self._revision(connection)
+                    "(SELECT sum(count) FROM coverage_issues WHERE generation_id = ?) WHERE id = ? "
+                    "AND (coverage <> 'uncertain' OR issue_count <> (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?))",
+                    (generation, generation, generation),
+                ).rowcount
+                if changed:
+                    self._revision(connection)
 
     def mutate_path(self, action: Literal["add", "remove", "rename"], path: str, new_path: str | None = None) -> None:
         """Apply one observation to both accepted rows and active verification rows."""

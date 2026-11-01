@@ -134,6 +134,7 @@ WORKER_POLL_SECONDS = SQL_BUSY_TIMEOUT_MS / 1000
 FAILURE_RETRY_MIN_SECONDS = 30.0
 FAILURE_RETRY_MAX_SECONDS = 300.0
 FAILURE_RETRY_JITTER_PERCENT = 10
+PERIODIC_VERIFICATION_JITTER_PERCENT = 10
 WorkerResult = TypeVar("WorkerResult")
 
 
@@ -2048,7 +2049,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             if self.coordinator.verification_required
             else self.policy.healthy_verification_seconds
         )
-        return current >= self._resource_retry_at and (bool(self._failure_retry_delay) or current - verified_at >= interval)
+        delay = interval * (100 - self._retry_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1)) / 100
+        return current >= self._resource_retry_at and (bool(self._failure_retry_delay) or current >= verified_at + delay)
 
     async def _run_rescan(self) -> None:
         if not self._opened.is_set() or self._scan_running.is_set():
