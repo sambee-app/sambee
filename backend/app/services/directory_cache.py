@@ -1873,6 +1873,20 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             if not parent:
                 self._root_reading.clear()
 
+    @contextmanager
+    def _source_read(self, parent: str, close: Callable[[], None]) -> Iterator[None]:
+        """Keep the primary read failure when cleanup also fails."""
+        try:
+            yield
+        except BaseException:
+            try:
+                self._source_call(parent, close)
+            except Exception as error:
+                logger.warning("Directory source read cleanup failed (%s).", type(error).__name__)
+            raise
+        else:
+            self._source_call(parent, close)
+
     def _probe_source_root(self) -> None:
         if not self._manager_scan_slots.acquire(blocking=False):
             raise DirectoryScanCapacityError("Directory scan capacity is in use. Wait for active work to finish, then retry.")
@@ -1896,14 +1910,14 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 **get_smbclient_policy_kwargs(),
             ),
         )
-        try:
+        with self._source_read("", entries.close):
             self._source_call("", lambda: next(entries, None))
             if self._stop_event.is_set() or not self.coordinator.is_current(token):
                 raise ScanObservationInvalidated("Directory root observation became stale. Retry source verification.")
-            self._source_available.set()
-            self._source_probe_completed.set()
-        finally:
-            self._source_call("", entries.close)
+        if self._stop_event.is_set() or not self.coordinator.is_current(token):
+            raise ScanObservationInvalidated("Directory root observation became stale. Retry source verification.")
+        self._source_available.set()
+        self._source_probe_completed.set()
 
     def _scan_parent(self, generation: int, parent: str) -> None:
         with self.coordinator.read(parent) as token:
@@ -1930,7 +1944,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         )
         batch: list[tuple[str, bool]] = []
         batch_bytes = 0
-        try:
+        with self._source_read(parent, entries.close):
             while True:
                 if self._stop_event.is_set():
                     raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
@@ -1976,9 +1990,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     batch_bytes = 0
             if batch:
                 self.coordinator.commit_children(token, generation, batch)
-            self.coordinator.finish_parent(token, generation)
-        finally:
-            self._source_call(parent, entries.close)
+        self.coordinator.finish_parent(token, generation)
 
     def _scan_disk_queue(self) -> None:
         while not self._manager_scan_slots.acquire(timeout=WORKER_POLL_SECONDS):

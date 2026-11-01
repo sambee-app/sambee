@@ -795,6 +795,57 @@ def test_blocked_root_read_retains_producer_and_permit_after_overflow(sqlite_cac
     sqlite_cache._manager_scan_slots.release()
 
 
+@pytest.mark.parametrize("stop", [False, True])
+def test_blocked_root_close_retains_producer_and_permit_without_late_availability(sqlite_cache, monkeypatch, stop):
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    sqlite_cache._source_available.clear()
+    sqlite_cache.index.write_paths(["accepted"])
+    entered = threading.Event()
+    release = threading.Event()
+    failures = []
+
+    class Entries:
+        def __next__(self):
+            raise StopIteration
+
+        def close(self):
+            entered.set()
+            assert release.wait(timeout=5)
+
+    def probe():
+        try:
+            sqlite_cache._probe_source_root()
+        except BaseException as error:
+            failures.append(error)
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", lambda *args, **kwargs: Entries())
+    worker = threading.Thread(target=probe)
+    worker.start()
+    try:
+        assert entered.wait(timeout=5)
+        if stop:
+            sqlite_cache._stop_event.set()
+        else:
+            sqlite_cache.coordinator.invalidate()
+        assert len(sqlite_cache.coordinator._producers) == 1
+        assert sqlite_cache._scan_running.is_set()
+        assert not sqlite_cache._source_available.is_set()
+        assert not sqlite_cache._manager_scan_slots.acquire(blocking=False)
+        assert sqlite_cache.index.search("accepted").total_matches == 1
+    finally:
+        release.set()
+        worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert len(failures) == 1
+    assert isinstance(failures[0], ScanObservationInvalidated)
+    assert not sqlite_cache.coordinator._producers
+    assert not sqlite_cache._scan_running.is_set()
+    assert not sqlite_cache._source_available.is_set()
+    assert sqlite_cache._manager_scan_slots.acquire(blocking=False)
+    sqlite_cache._manager_scan_slots.release()
+
+
 def test_root_loss_during_query_blocks_late_results(sqlite_cache, monkeypatch):
     from app.services.directory_cache import DirectorySourceUnavailableError
 
@@ -1211,6 +1262,82 @@ def test_sqlite_source_storage_permission_denial_is_not_a_source_issue(sqlite_ca
         sqlite_cache._scan_parent(1, "parent")
     assert sqlite_cache.index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
     assert sqlite_cache._source_available.is_set()
+
+
+@pytest.mark.parametrize("failure", ["storage", "stale", "cancelled", "task_cancelled"])
+@pytest.mark.parametrize("parent", ["", "parent"])
+def test_sqlite_source_close_denial_preserves_primary_failure(sqlite_cache, monkeypatch, failure, parent):
+    from smbclient._os import FileAttributes
+
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    errors = {
+        "storage": PermissionError("Injected local storage denial."),
+        "stale": ScanObservationInvalidated("Injected stale read."),
+        "cancelled": InterruptedError("Injected cancelled read."),
+        "task_cancelled": asyncio.CancelledError("Injected task cancellation."),
+    }
+    original = errors[failure]
+    closed = []
+    warnings = []
+
+    def warning(message, *args):
+        warnings.append(message % args)
+
+    monkeypatch.setattr("app.services.directory_cache.logger.warning", warning)
+
+    class Entries:
+        def __init__(self):
+            self.items = iter(
+                [SimpleNamespace(name="child", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))]
+            )
+
+        def __next__(self):
+            return next(self.items)
+
+        def close(self):
+            closed.append(True)
+            raise PermissionError("Injected close denial with private source path.")
+
+    def reject_batch(*args, **kwargs):
+        raise original
+
+    sqlite_cache.index.seed_scan(1)
+    if parent:
+        sqlite_cache.index.write_scan_children(1, [(parent, True)])
+        sqlite_cache.index.finish_scan_parent(1, "")
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", lambda *args, **kwargs: Entries())
+    monkeypatch.setattr(sqlite_cache.coordinator, "commit_children", reject_batch)
+    with pytest.raises(type(original)) as caught:
+        sqlite_cache._scan_parent(1, parent)
+    assert caught.value is original
+    assert closed == [True]
+    assert sqlite_cache.index.pending_scan_paths(1) == [parent]
+    assert sqlite_cache.index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
+    assert len(warnings) == 1
+    assert "Directory source read cleanup failed" in warnings[0]
+    assert "private source path" not in warnings[0]
+
+
+def test_sqlite_source_close_failure_keeps_parent_pending(sqlite_cache, monkeypatch):
+    sqlite_cache.index.seed_scan(1)
+    sqlite_cache.index.write_scan_children(1, [("parent", True)])
+    sqlite_cache.index.finish_scan_parent(1, "")
+    closed = []
+
+    class Entries:
+        def __next__(self):
+            raise StopIteration
+
+        def close(self):
+            closed.append(True)
+            raise OSError("Injected close failure.")
+
+    monkeypatch.setattr("app.services.directory_cache.smbclient.scandir", lambda *args, **kwargs: Entries())
+    with pytest.raises(OSError, match="close failure"):
+        sqlite_cache._scan_parent(1, "parent")
+    assert closed == [True]
+    assert sqlite_cache.index.pending_scan_paths(1) == ["parent"]
 
 
 def test_sqlite_source_late_permission_denial_cannot_finish_stale_parent(sqlite_cache, monkeypatch):
