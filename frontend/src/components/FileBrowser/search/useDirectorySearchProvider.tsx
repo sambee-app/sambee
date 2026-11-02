@@ -223,7 +223,7 @@ export function useDirectorySearchProvider(
   const [legacyIndex, setLegacyIndex] = useState(false);
   const sourceFailureRef = useRef<"history" | "index" | null>(null);
   const indexResponseRef = useRef<DirectorySearchResult | null>(null);
-  const activeTermsRef = useRef<string[]>([]);
+  const activeIndexQueryRef = useRef(false);
   const recentResponseRef = useRef<{ query: string; limit: number; response: RecentDirectorySearchResponse } | null>(null);
   const includeDotDirectories = options.includeDotDirectories ?? false;
   const recentDirectoryResultLimit = options.resultLimit ?? MAX_RECENT_DIRECTORY_RESULT_LIMIT;
@@ -284,7 +284,8 @@ export function useDirectorySearchProvider(
       // Normalise backslashes to forward slashes for cross-directory search
       const normalizedQuery = normalizeQuerySeparators(query).trim();
       const terms = searchTerms(normalizedQuery);
-      activeTermsRef.current = terms;
+      const queryIndex = normalizedQuery.length >= DIRECTORY_MIN_QUERY_LENGTH;
+      activeIndexQueryRef.current = queryIndex && terms.length > 0;
       const generation = ++requestGenerationRef.current;
       const isCurrent = () =>
         !signal.aborted &&
@@ -379,7 +380,6 @@ export function useDirectorySearchProvider(
         recentDirectoriesRef.current = new Map(response.results.map((directory) => [directory.id, directory]));
         onUpdate?.(mergeResults());
       });
-      const queryIndex = normalizedQuery.length >= DIRECTORY_MIN_QUERY_LENGTH;
       const indexRequest = queryIndex
         ? history.searchDirectories(connectionId, normalizedQuery, { includeDotDirectories, signal }).then((response) => {
             if (!isCurrent()) return;
@@ -480,7 +480,7 @@ export function useDirectorySearchProvider(
 
   const getRefreshIntervalMs = useCallback((): number | null => {
     const response = indexResponseRef.current;
-    return activeTermsRef.current.length > 0 &&
+    return activeIndexQueryRef.current &&
       !sourceFailureRef.current &&
       response?.search_contract_version === SEARCH_CONTRACT_VERSION &&
       (response.cache_state === "building" || response.cache_state === "updating")

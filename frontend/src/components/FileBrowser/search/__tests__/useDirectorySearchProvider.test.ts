@@ -93,6 +93,35 @@ describe("getDirectoryResultPresentation", () => {
     expect(result.current.getRefreshIntervalMs?.()).toBe(expected);
   });
 
+  it.each(["building", "updating"] as const)("stops quiet refresh when a %s query becomes too short", async (cacheState) => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    vi.mocked(api.searchDirectories).mockClear();
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: [],
+      total_matches: 0,
+      directory_count: 0,
+      cache_state: cacheState,
+      search_contract_version: SEARCH_CONTRACT_VERSION,
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+
+    await act(async () => {
+      await result.current.fetchResults("r", new AbortController().signal);
+    });
+    expect(api.searchDirectories).toHaveBeenCalledTimes(1);
+    expect(result.current.getRefreshIntervalMs?.()).toBeNull();
+
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(api.searchDirectories).toHaveBeenCalledTimes(2);
+    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+  });
+
   it.each(["connection-1", "local-C"])("keeps one full-query request and source-specific legacy status for %s", async (connectionId) => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
     const response = {

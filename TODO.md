@@ -1,13 +1,8 @@
 # TODO
 
-## Quick bar
+## Directory search v2
 
-### Directory navigation and file search
-
-- Make search more user-friendly by allowing multiple independent search terms
-   - Currently, searching for "term1 term2" apparently looks for files/folders with that exact string.
-   - With this change, Sambee would search for files/folders that contain both "term1" and "term2" but doesn't require them to follow another in the name or path.
-      - Sambee would look for both terms independently and rank results highest that contain both, followed by results that contain only one term.
+-
 
 ## Viewers
 
