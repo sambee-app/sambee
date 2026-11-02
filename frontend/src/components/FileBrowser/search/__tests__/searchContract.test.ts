@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import contract from "../../../../../../shared/directory-index/contract.json";
 import fixtures from "../../../../../../shared/directory-index/search-fixtures.json";
 import {
   findSearchHighlights,
@@ -28,6 +29,36 @@ describe("shared search contract", () => {
   it("uses language-neutral normalization and term fixtures", () => {
     for (const fixture of fixtures.normalization) expect(normalizeSearchText(fixture.input)).toBe(fixture.expected);
     for (const fixture of fixtures.queries) expect(searchTerms(fixture.query)).toEqual([...fixture.terms].sort());
+  });
+
+  it("preserves shared any-term inclusion, unique counts, and full-path ordering", () => {
+    for (const fixture of fixtures.searches) {
+      const terms = searchTerms(fixture.query);
+      const rows = fixtures.paths
+        .filter((path) => fixture.include_dot || !path.split("/").some((part) => part.startsWith(".")))
+        .map((path) => ({
+          kind: "result" as const,
+          id: path,
+          value: path,
+          icon: "directory" as const,
+          primaryText: path,
+          sortPath: path,
+          depth: path.split("/").length,
+          ...getSearchRelevance(path, terms, path.split("/").at(-1)),
+        }))
+        .filter((row) => row.matchedTermCount > 0);
+      expect(rows).toHaveLength(fixture.count);
+      expect(rankHistorySearchResults(rows, fixture.query).map((row) => row.value)).toEqual(fixture.results);
+    }
+  });
+
+  it("uses the shared byte and term limits for ASCII and complete Unicode characters", () => {
+    expect(MAX_SEARCH_QUERY_BYTES).toBe(contract.limits.max_query_bytes);
+    expect(MAX_SEARCH_TERMS).toBe(contract.limits.max_query_terms);
+    expect(searchTerms("a".repeat(MAX_SEARCH_QUERY_BYTES))).toHaveLength(1);
+    expect(searchTerms("😀".repeat(MAX_SEARCH_QUERY_BYTES / 4))).toHaveLength(1);
+    expect(() => searchTerms("😀".repeat(MAX_SEARCH_QUERY_BYTES / 4 + 1))).toThrow("UTF-8 bytes");
+    expect(searchTerms(Array.from({ length: MAX_SEARCH_TERMS }, (_, index) => `term${index}`).join(" "))).toHaveLength(MAX_SEARCH_TERMS);
   });
 
   it("maps case-fold expansion, combining marks, overlaps, and separate terms to original text", () => {

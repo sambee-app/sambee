@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import heapq
+import logging
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -13,14 +15,25 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
+from uuid import UUID
 
 from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
 from app.models.system_settings import DirectoryIndexPolicy
-from app.services.directory_index import APPLICATION_ID, SCHEMA_VERSION, STORAGE_FILE_SUFFIXES, DirectoryIndex, connect_directory_database
+from app.services.directory_index import (
+    APPLICATION_ID,
+    SCHEMA_VERSION,
+    STORAGE_FILE_SUFFIXES,
+    DirectoryIndex,
+    connect_directory_database,
+    validate_storage_ancestors,
+)
 
 WRITE_HEADROOM_BYTES = DIRECTORY_INDEX_CONTRACT.limits["write_headroom_bytes"]
 LEASE_CLEANUP_BATCH = DIRECTORY_INDEX_CONTRACT.limits["lease_cleanup_batch"]
-LEGACY_STORAGE_SUFFIXES = frozenset({".idx", ".bak", ".tmp"})
+LEGACY_SNAPSHOT_SUFFIXES = frozenset({".idx", ".bak"})
+LEGACY_STORAGE_SUFFIXES = LEGACY_SNAPSHOT_SUFFIXES | {".tmp"}
+LEGACY_TEMP_NAME = re.compile(r"\.[0-9a-f]{8}_[a-z0-9_]{8}\.tmp")
+logger = logging.getLogger(__name__)
 
 
 class DirectoryDiskBudgetError(RuntimeError):
@@ -131,17 +144,74 @@ class DirectoryIndexResources:
                         continue
             return removed
 
+    def cleanup_legacy(self, *, now_ms: int | None = None) -> int:
+        """Retire bounded obsolete snapshots without reading them or touching recent writer work."""
+        if os.name != "posix":
+            return 0
+        with self.lock:
+            validate_storage_ancestors(self.namespace)
+            try:
+                descriptor = os.open(self.namespace.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                return 0
+            try:
+                parent = os.fstat(descriptor)
+                if parent.st_uid != os.getuid() or parent.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                    logger.warning(
+                        "Legacy directory-cache cleanup was skipped. Use a cache root owned by the service account "
+                        "without group/public write access to permit legacy cleanup."
+                    )
+                    return 0
+                now = int(time.time() * 1000) if now_ms is None else now_ms
+                removed = 0
+                with os.scandir(descriptor) as entries:
+                    for entry in entries:
+                        if removed >= LEASE_CLEANUP_BATCH:
+                            break
+                        path = Path(entry.name)
+                        temporary = LEGACY_TEMP_NAME.fullmatch(entry.name) is not None
+                        if not temporary:
+                            if path.suffix not in LEGACY_SNAPSHOT_SUFFIXES:
+                                continue
+                            try:
+                                if str(UUID(path.stem)) != path.stem:
+                                    continue
+                            except ValueError:
+                                continue
+                        try:
+                            metadata = entry.stat(follow_symlinks=False)
+                            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or metadata.st_nlink != 1:
+                                continue
+                            if temporary and now - int(metadata.st_mtime * 1000) < self.policy.inactive_retention_seconds * 1000:
+                                continue
+                            current = os.stat(entry.name, dir_fd=descriptor, follow_symlinks=False)
+                            if current != metadata:
+                                continue
+                            os.unlink(entry.name, dir_fd=descriptor)
+                            removed += 1
+                        except OSError:
+                            continue
+                return removed
+            finally:
+                os.close(descriptor)
+
     def cleanup_inactive(self, *, now_ms: int | None = None, pressure: bool = False) -> int:
         """Keep bounded recent inactive databases; never delete an owned source."""
         with self.lock:
             self.usage()
+            if pressure:
+                try:
+                    DirectoryIndex.discard_quarantine(self.namespace)
+                except OSError:
+                    pass
             now = int(time.time() * 1000) if now_ms is None else now_ms
             retained: list[tuple[int, Path, int]] = []
-            removed = 0
+            legacy_removed = self.cleanup_legacy(now_ms=now)
+            removed = legacy_removed
             try:
                 entries = os.scandir(self.namespace)
             except FileNotFoundError:
-                return 0
+                return removed
             with entries:
                 for entry in entries:
                     if not entry.name.endswith(".sqlite3"):
@@ -177,8 +247,11 @@ class DirectoryIndexResources:
                 except (OSError, sqlite3.Error):
                     continue
             self.cleanup_orphan_leases()
-            self._next_cleanup_at = time.monotonic() + min(
-                self.policy.inactive_retention_seconds, DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].minimum
+            self._next_cleanup_at = (
+                0.0
+                if legacy_removed == LEASE_CLEANUP_BATCH
+                else time.monotonic()
+                + min(self.policy.inactive_retention_seconds, DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].minimum)
             )
             return removed
 

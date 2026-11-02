@@ -4,7 +4,7 @@ import stat
 import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from time import monotonic
 from typing import Any, Awaitable, BinaryIO, TypeVar, cast
 
@@ -114,13 +114,16 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
         self._source_path = source_path
         self._inflight: asyncio.Future[Any] | None = None
         self._cleanup: asyncio.Task[None] | None = None
+        self._delete_dispatched = False
 
-    async def _operate(self, operation: Callable[[], BlockingResultT], timeout: float) -> BlockingResultT:
+    async def _operate(
+        self, operation: Callable[[], BlockingResultT], timeout: float, *, mutation_paths: tuple[str, ...] = ()
+    ) -> BlockingResultT:
         if self._closed:
             raise ValueError("SMB move source reader is closed")
         if self._inflight is not None and not self._inflight.done():
             raise RuntimeError("Previous SMB move source operation is still running")
-        future = asyncio.get_running_loop().run_in_executor(None, operation)
+        future = asyncio.get_running_loop().run_in_executor(None, lambda: self._backend._run_observed_operation(operation, mutation_paths))
         self._inflight = future
         return await asyncio.wait_for(asyncio.shield(future), timeout)
 
@@ -171,7 +174,12 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
                                 await asyncio.shield(self._inflight)
                             except BaseException:
                                 pass
-                        await asyncio.get_running_loop().run_in_executor(None, self._handle.close)
+                        await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            lambda: self._backend._run_observed_operation(
+                                self._handle.close, (self._smb_path,) if self._delete_dispatched else ()
+                            ),
+                        )
                     finally:
                         await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
 
@@ -217,13 +225,14 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
                             destination_mutated=True,
                         )
                 dispatched = True
+                self._delete_dispatched = True
                 pending = connection.send(request, session_id, tree_connect_id)
                 response = connection.receive(pending)
                 parsed = SMB2SetInfoResponse()
                 parsed.unpack(response["data"].get_value())
 
             try:
-                await self._operate(_delete_opened_file, SMB_DELETE_TIMEOUT_SECONDS)
+                await self._operate(_delete_opened_file, SMB_DELETE_TIMEOUT_SECONDS, mutation_paths=(self._smb_path,))
             except SourceDeleteError:
                 raise
             except SMBResponseException as error:
@@ -279,6 +288,7 @@ class _SMBExclusiveWriter:
                     self._handle.close,
                     SMB_FILE_CLOSE_TIMEOUT_SECONDS,
                     smb_path=self._smb_path,
+                    mutation_paths=(self._smb_path,),
                 )
             finally:
                 await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
@@ -293,6 +303,7 @@ class _SMBExclusiveWriter:
                     lambda: smbclient.remove(self._smb_path, **self._backend._smb_auth_kwargs()),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=self._smb_path,
+                    mutation_paths=(self._smb_path,),
                 )
             except OSError:
                 return False
@@ -301,6 +312,7 @@ class _SMBExclusiveWriter:
                 self._handle.close,
                 SMB_FILE_CLOSE_TIMEOUT_SECONDS,
                 smb_path=self._smb_path,
+                mutation_paths=(self._smb_path,),
             )
             self._closed = True
             await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
@@ -353,6 +365,7 @@ class SMBBackend(StorageBackend):
         # Persisted connections share one isolated cache across request-scoped
         # backend instances. Detail-only test backends remain self-contained.
         self._connection_cache = get_smb_connection_cache(connection_context_key) if connection_context_key is not None else {}
+        self._connection_context_key = connection_context_key
         self._close_connection_cache_on_disconnect = close_connection_cache_on_disconnect
 
         # Normalize path_prefix: strip slashes, collapse to empty string for root
@@ -490,6 +503,7 @@ class SMBBackend(StorageBackend):
         timeout_seconds: float,
         *,
         smb_path: str,
+        mutation_paths: tuple[str, ...] = (),
     ) -> BlockingResultT:
         try:
             return await self._run_blocking_smb_operation(
@@ -497,6 +511,7 @@ class SMBBackend(StorageBackend):
                 operation,
                 timeout_seconds,
                 smb_path=smb_path,
+                mutation_paths=mutation_paths,
             )
         except asyncio.TimeoutError as exc:
             raise TimeoutError(f"SMB operation timed out during {operation_name}") from exc
@@ -506,6 +521,45 @@ class SMBBackend(StorageBackend):
                 raise translated from error
             raise
 
+    def _observe_mutation_paths(self, paths: tuple[str, ...]) -> None:
+        """Keep disposable index hints separate from the source operation result."""
+        if not paths or self._connection_context_key is None:
+            return
+        from app.services.directory_cache import SQLiteConnectionDirectoryCache, get_directory_cache_manager
+
+        cache = None
+        try:
+            cache = get_directory_cache_manager().get_cache(self._connection_context_key)
+            if not isinstance(cache, SQLiteConnectionDirectoryCache):
+                return
+            if (
+                cache._connection_cache is not self._connection_cache
+                or (cache.host, cache.share_name, cache.port, cache.username, cache.password, cache._path_prefix)
+                != (self.host, self.share_name, self.port, self.username, self.password, self._path_prefix)
+                or cache._stop_event.is_set()
+            ):
+                return
+            root = PureWindowsPath(self._build_smb_path(""))
+            parents = set()
+            for path in paths:
+                relative = PureWindowsPath(path).relative_to(root)
+                normalized = self._normalize_relative_path(relative.as_posix()) if relative.parts else ""
+                parents.add(normalized.rpartition("/")[0])
+            for parent in sorted(parents):
+                cache.observe_parent(parent)
+        except Exception as error:
+            if isinstance(cache, SQLiteConnectionDirectoryCache):
+                cache._observation_lost()
+            logger.warning("Directory mutation hints could not be queued (%s).", type(error).__name__)
+
+    def _run_observed_operation(self, operation: Callable[[], BlockingResultT], mutation_paths: tuple[str, ...]) -> BlockingResultT:
+        """Fence source reads before dispatch and reconcile only after actual exit."""
+        self._observe_mutation_paths(mutation_paths)
+        try:
+            return operation()
+        finally:
+            self._observe_mutation_paths(mutation_paths)
+
     async def _run_blocking_smb_operation(
         self,
         operation_name: str,
@@ -513,11 +567,12 @@ class SMBBackend(StorageBackend):
         timeout_seconds: float,
         *,
         smb_path: str,
+        mutation_paths: tuple[str, ...] = (),
     ) -> BlockingResultT:
         """Run executor work without releasing its SMB cache before it completes."""
 
         loop = asyncio.get_running_loop()
-        operation_future = loop.run_in_executor(None, operation)
+        operation_future = loop.run_in_executor(None, lambda: self._run_observed_operation(operation, mutation_paths))
 
         try:
             return await self._wait_for_blocking_smb_operation(
@@ -993,6 +1048,7 @@ class SMBBackend(StorageBackend):
                 ),
                 SMB_FILE_OPEN_TIMEOUT_SECONDS,
                 smb_path=smb_path,
+                mutation_paths=(smb_path,),
             )
         except BaseException:
             await connection_lease.__aexit__(None, None, None)
@@ -1063,6 +1119,7 @@ class SMBBackend(StorageBackend):
                     _write,
                     SMB_WRITE_FILE_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
                 logger.debug(f"Successfully wrote {bytes_written} bytes: path='{path}'")
@@ -1150,6 +1207,7 @@ class SMBBackend(StorageBackend):
             lambda: _remove(smb_path),
             SMB_DELETE_TIMEOUT_SECONDS,
             smb_path=smb_path,
+            mutation_paths=(smb_path,),
         )
 
     async def _remove_regular_file_if_exists(self, smb_path: str) -> bool:
@@ -1169,6 +1227,7 @@ class SMBBackend(StorageBackend):
             lambda: _remove(smb_path),
             SMB_DELETE_TIMEOUT_SECONDS,
             smb_path=smb_path,
+            mutation_paths=(smb_path,),
         )
 
     #
@@ -1265,7 +1324,7 @@ class SMBBackend(StorageBackend):
                         # before we call rmdir.
                         children = [entry.path for entry in smbclient.scandir(target, **self._smb_auth_kwargs())]
                         for child_path in children:
-                            _delete_recursive(child_path)
+                            self._run_observed_operation(lambda: _delete_recursive(child_path), (child_path,))
                         smbclient.rmdir(target, **self._smb_auth_kwargs())
                     else:
                         smbclient.remove(target, **self._smb_auth_kwargs())
@@ -1275,6 +1334,7 @@ class SMBBackend(StorageBackend):
                     lambda: _delete_recursive(smb_path),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
                 logger.debug(f"Successfully deleted: path='{path}'")
@@ -1327,6 +1387,7 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.rmdir(smb_path, **self._smb_auth_kwargs()),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
         except OSError as error:
             error_text = str(error)
@@ -1393,6 +1454,7 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.rename(smb_src, smb_dst, **self._smb_auth_kwargs()),
                     30.0,
                     smb_path=smb_src,
+                    mutation_paths=(smb_src, smb_dst),
                 )
 
                 logger.debug(f"Successfully renamed: '{path}' -> '{new_name}'")
@@ -1454,6 +1516,7 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.mkdir(smb_path, **self._smb_auth_kwargs()),
                     30.0,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
                 logger.debug(f"Successfully created directory: '{path}'")
@@ -1522,6 +1585,7 @@ class SMBBackend(StorageBackend):
                     _create_empty_file,
                     30.0,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
                 logger.debug(f"Successfully created file: '{path}'")
@@ -1653,7 +1717,8 @@ class SMBBackend(StorageBackend):
                         # generator is fully consumed before deeper calls.
                         children = [(entry.name, entry.path) for entry in smbclient.scandir(src, **self._smb_auth_kwargs())]
                         for child_name, child_path in children:
-                            _copy_recursive(child_path, f"{dst}\\{child_name}")
+                            child_destination = f"{dst}\\{child_name}"
+                            self._run_observed_operation(lambda: _copy_recursive(child_path, child_destination), (child_destination,))
                         # Restore directory timestamps after all children are
                         # copied (adding children updates the directory mtime).
                         smbclient.utime(dst, ns=(atime_ns, mtime_ns), **self._smb_auth_kwargs())
@@ -1666,6 +1731,7 @@ class SMBBackend(StorageBackend):
                     lambda: _copy_recursive(smb_src, smb_dst),
                     300.0,  # Large copies may take time
                     smb_path=smb_src,
+                    mutation_paths=(smb_dst,),
                 )
 
                 logger.debug(f"Successfully copied: '{source_path}' -> '{dest_path}'")
@@ -1751,6 +1817,7 @@ class SMBBackend(StorageBackend):
                     ),
                     30.0,
                     smb_path=smb_src,
+                    mutation_paths=(smb_src, smb_dst),
                 )
 
                 logger.debug(f"Successfully moved: '{source_path}' -> '{dest_path}'")
@@ -1854,6 +1921,7 @@ class SMBBackend(StorageBackend):
                     ),
                     15.0,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
                 target_may_have_changed = True
 
@@ -1880,6 +1948,7 @@ class SMBBackend(StorageBackend):
                         file_handle.close,
                         5.0,
                         smb_path=smb_path,
+                        mutation_paths=(smb_path,),
                     )
 
                 # Preserve the original modification timestamp inside
@@ -1961,6 +2030,7 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.remove(smb_stage_path, **self._smb_auth_kwargs()),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=smb_stage_path,
+                    mutation_paths=(smb_stage_path,),
                 )
             except Exception as cleanup_error:
                 logger.warning(
@@ -1989,6 +2059,7 @@ class SMBBackend(StorageBackend):
                     ),
                     SMB_FILE_OPEN_TIMEOUT_SECONDS,
                     smb_path=smb_stage_path,
+                    mutation_paths=(smb_stage_path,),
                 )
                 try:
                     async for chunk in stream:
@@ -2041,6 +2112,7 @@ class SMBBackend(StorageBackend):
                     lambda: commit_stage(smb_stage_path, smb_path, **self._smb_auth_kwargs()),
                     SMB_FILE_OPEN_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_stage_path, smb_path),
                 )
                 committed = True
                 logger.debug("Committed staged SMB transfer: '%s'", path)

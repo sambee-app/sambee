@@ -9,6 +9,7 @@ import {
 } from "../companion";
 import { companionSession } from "../companionSession";
 import { getLocalDrivePairingErrorKind } from "../localDrivePairing";
+import { logger } from "../logger";
 
 describe("companion authentication protocol", () => {
   it("distinguishes older, matching, and newer Companion versions", () => {
@@ -97,6 +98,23 @@ vi.mock("axios", () => ({
     create: vi.fn(() => mockAxiosInstance),
   },
 }));
+
+describe("companionService.initiatePairing", () => {
+  it("does not log the pairing identity, code, or nonces", async () => {
+    const pairingId = "private-pairing-identity";
+    const nonceCompanion = "private-companion-nonce";
+    mockAxiosInstance.post.mockResolvedValueOnce({ data: { pairing_id: pairingId, nonce_companion: nonceCompanion } });
+    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const result = await companionService.initiatePairing();
+    expect(result.pairingId).toBe(pairingId);
+    expect(result.pairingCode).toHaveLength(6);
+    expect(info).toHaveBeenCalledWith("Pairing initiated", {}, "companion");
+    const logged = JSON.stringify(info.mock.calls);
+    for (const privateValue of [pairingId, result.pairingCode, result.nonceBrowser, nonceCompanion]) {
+      expect(logged).not.toContain(privateValue);
+    }
+  });
+});
 
 describe("companionService.confirmPairing", () => {
   beforeEach(() => {

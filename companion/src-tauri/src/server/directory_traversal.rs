@@ -1,5 +1,6 @@
 //! Descriptor-based traversal; unsupported platforms fail closed without a lossy walker.
 
+#[cfg(not(windows))]
 use std::path::Path;
 
 use super::directory_index::IndexError;
@@ -28,6 +29,153 @@ pub struct NativeIdentity {
     device: u64,
     inode: u64,
     mount: u64,
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WindowsReparseKind {
+    Ordinary,
+    Redirection,
+    CloudPlaceholder,
+    Unsupported,
+}
+
+#[cfg(any(windows, test))]
+fn windows_reparse_kind(tag: u32) -> WindowsReparseKind {
+    const NAME_SURROGATE: u32 = 0x2000_0000;
+    const CLOUD_TAG: u32 = 0x9000_001a;
+    const CLOUD_VARIANT_MASK: u32 = 0xffff_0fff;
+    const ONEDRIVE_TAG: u32 = 0x8000_0021;
+
+    if tag == 0 {
+        WindowsReparseKind::Ordinary
+    } else if tag & NAME_SURROGATE != 0 {
+        WindowsReparseKind::Redirection
+    } else if tag & CLOUD_VARIANT_MASK == CLOUD_TAG || tag == ONEDRIVE_TAG {
+        WindowsReparseKind::CloudPlaceholder
+    } else {
+        WindowsReparseKind::Unsupported
+    }
+}
+
+#[cfg(any(windows, test))]
+fn validate_windows_component(name: &str) -> Result<(), IndexError> {
+    super::directory_index::validate_directory_path(name)?;
+    if name.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) || name.ends_with(['.', ' ']) || name.chars().any(char::is_control) {
+        return Err(IndexError::Invalid(
+            "Directory name cannot round-trip through the Windows path API. Source coverage is incomplete.",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn windows_entry_name(native: &[u16]) -> Result<String, TraversalIssue> {
+    let name = String::from_utf16(native).map_err(|_| TraversalIssue::UnsupportedEncoding)?;
+    validate_windows_component(&name).map_err(|_| TraversalIssue::UnsupportedEncoding)?;
+    Ok(name)
+}
+
+#[cfg(any(windows, test))]
+fn windows_record_name_range(
+    remaining: usize,
+    next_offset: usize,
+    name_offset: usize,
+    name_bytes: usize,
+) -> Result<std::ops::Range<usize>, IndexError> {
+    let record_bytes = if next_offset == 0 { remaining } else { next_offset };
+    if name_bytes == 0
+        || !name_bytes.is_multiple_of(size_of::<u16>())
+        || record_bytes > remaining
+        || record_bytes < name_offset
+        || name_bytes > record_bytes - name_offset
+        || (next_offset != 0 && !record_bytes.is_multiple_of(size_of::<u64>()))
+    {
+        return Err(IndexError::Invalid(
+            "Directory enumeration returned an invalid native name record. Retry verification.",
+        ));
+    }
+    Ok(name_offset..name_offset + name_bytes)
+}
+
+#[cfg(test)]
+mod windows_policy_tests {
+    use super::*;
+
+    #[test]
+    fn windows_native_names_preserve_exact_spelling_and_reject_lossy_or_ambiguous_names() {
+        for name in [
+            ".hidden",
+            "\u{e9}",
+            "e\u{301}",
+            "MixedCASE",
+            "emoji-\u{1f4c1}",
+            "percent%underscore_",
+        ] {
+            let native: Vec<_> = name.encode_utf16().collect();
+            assert_eq!(windows_entry_name(&native).unwrap(), name);
+        }
+        for native in [vec![0xd800], vec![0xdc00], vec![0xd800, b'a' as u16]] {
+            assert_eq!(windows_entry_name(&native), Err(TraversalIssue::UnsupportedEncoding));
+        }
+        for name in [
+            "",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "stream:alternate",
+            "wild*card",
+            "name?",
+            "tail.",
+            "tail ",
+            "nul\0name",
+            "control\u{1}name",
+        ] {
+            let native: Vec<_> = name.encode_utf16().collect();
+            assert_eq!(
+                windows_entry_name(&native),
+                Err(TraversalIssue::UnsupportedEncoding),
+                "Unexpected valid name: {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_reparse_tags_keep_redirections_cloud_and_unknown_types_distinct() {
+        assert_eq!(windows_reparse_kind(0), WindowsReparseKind::Ordinary);
+        for tag in [0xa000_0003, 0xa000_000c, 0xa000_001d] {
+            assert_eq!(windows_reparse_kind(tag), WindowsReparseKind::Redirection);
+        }
+        for variant in 0..=15 {
+            assert_eq!(
+                windows_reparse_kind(0x9000_001a | (variant << 12)),
+                WindowsReparseKind::CloudPlaceholder
+            );
+        }
+        assert_eq!(windows_reparse_kind(0x8000_0021), WindowsReparseKind::CloudPlaceholder);
+        for tag in [0x8000_001b, 0x8000_0023, 0x8000_ffff, 1] {
+            assert_eq!(windows_reparse_kind(tag), WindowsReparseKind::Unsupported);
+        }
+    }
+
+    #[test]
+    fn windows_directory_record_bounds_reject_truncation_overflow_and_misalignment() {
+        assert_eq!(windows_record_name_range(128, 112, 88, 8).unwrap(), 88..96);
+        assert_eq!(windows_record_name_range(128, 0, 88, 40).unwrap(), 88..128);
+        for (remaining, next, name_offset, name_bytes) in [
+            (128, 0, 88, 0),
+            (128, 0, 88, 3),
+            (128, 136, 88, 2),
+            (128, 80, 88, 2),
+            (128, 112, 88, 26),
+            (128, 110, 88, 2),
+            (128, 0, usize::MAX, 2),
+            (128, 0, 88, usize::MAX - 1),
+        ] {
+            assert!(windows_record_name_range(remaining, next, name_offset, name_bytes).is_err());
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -223,7 +371,19 @@ mod platform {
         }
 
         /// Check one exact child through the held parent; errors are not evidence of absence.
+        #[cfg(test)]
         pub fn has_directory_child(&self, parent: &str, expected: NativeIdentity, name: &str) -> Result<bool, IndexError> {
+            self.has_directory_child_with_check(parent, expected, name, || Ok(()))
+        }
+
+        pub fn has_directory_child_with_check(
+            &self,
+            parent: &str,
+            expected: NativeIdentity,
+            name: &str,
+            mut check: impl FnMut() -> Result<(), IndexError>,
+        ) -> Result<bool, IndexError> {
+            check()?;
             super::super::directory_index::validate_directory_path(name)?;
             if name.contains('/') {
                 return Err(IndexError::Invalid("Directory child check requires one native name."));
@@ -236,6 +396,7 @@ mod platform {
             }
             let name = CString::new(name).map_err(|_| IndexError::Invalid("Directory child name contains NUL."))?;
             let outcome = (|| {
+                check()?;
                 let mut metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
                 if unsafe { libc::fstatat(file.as_raw_fd(), name.as_ptr(), metadata.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) } != 0 {
                     let error = io::Error::last_os_error();
@@ -254,6 +415,7 @@ mod platform {
                 if kind != libc::S_IFDIR {
                     return Ok(false);
                 }
+                check()?;
                 let child = match open_at(file.as_raw_fd(), &name) {
                     Ok(child) => child,
                     Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
@@ -267,8 +429,10 @@ mod platform {
                 }
                 Ok(true)
             })();
+            let found = outcome?;
+            check()?;
             self.verify_parent(parent, expected)?;
-            outcome
+            Ok(found)
         }
 
         /// fdopendir owns its descriptor; copied names remain valid after the next readdir call.
@@ -353,12 +517,19 @@ mod platform {
 #[cfg(target_os = "linux")]
 pub use platform::NativeRoot;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+#[path = "directory_traversal_windows.rs"]
+mod windows_platform;
+
+#[cfg(windows)]
+pub use windows_platform::NativeRoot;
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub struct NativeRoot {
     pub identity: NativeIdentity,
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 impl NativeRoot {
     pub fn open(_: &Path) -> Result<Self, IndexError> {
         Err(IndexError::Invalid("Safe directory indexing is not available on this platform. Use recent directories until a verified traversal adapter is available."))
@@ -376,6 +547,16 @@ impl NativeRoot {
         Err(IndexError::Invalid(
             "Safe directory reconciliation is unavailable on this platform. Use recent directories.",
         ))
+    }
+    pub fn has_directory_child_with_check(
+        &self,
+        parent: &str,
+        expected: NativeIdentity,
+        name: &str,
+        mut check: impl FnMut() -> Result<(), IndexError>,
+    ) -> Result<bool, IndexError> {
+        check()?;
+        self.has_directory_child(parent, expected, name)
     }
     pub fn children(
         &self,
@@ -465,6 +646,28 @@ mod tests {
         std::fs::rename(root.join("parent"), root.join("old-parent")).unwrap();
         std::fs::create_dir(root.join("parent")).unwrap();
         assert!(source.has_directory_child("parent", parent, "missing").is_err());
+    }
+
+    #[test]
+    fn child_lookup_obeys_control_checks_before_and_after_native_work() {
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temporary.path().join("child")).unwrap();
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        for stop_at in 1..=4 {
+            let mut checks = 0;
+            let result = root.has_directory_child_with_check("", root.identity, "child", || {
+                checks += 1;
+                if checks == stop_at {
+                    Err(IndexError::Interrupted)
+                } else {
+                    Ok(())
+                }
+            });
+            assert!(matches!(result, Err(IndexError::Interrupted)));
+            assert_eq!(checks, stop_at);
+            root.verify().unwrap();
+        }
+        assert!(root.has_directory_child("", root.identity, "child").unwrap());
     }
 
     #[test]

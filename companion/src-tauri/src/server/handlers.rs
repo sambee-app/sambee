@@ -75,6 +75,38 @@ use super::target_resolution::{
 };
 use super::{AppState, DownloadIntent};
 
+/// Shared directory-index coordinator for directory reads and namespace mutations.
+#[derive(Clone)]
+pub struct DirectoryMutationState(pub(super) Arc<super::directory_manager::LocalDirectoryManager>);
+
+impl axum::extract::FromRef<Arc<AppState>> for DirectoryMutationState {
+    fn from_ref(state: &Arc<AppState>) -> Self {
+        Self(Arc::clone(&state.directory_indexes))
+    }
+}
+
+impl DirectoryMutationState {
+    async fn create_parent(&self, drive: &str, root: &FsPath, destination: &FsPath) -> Result<(), std::io::Error> {
+        let parent = destination
+            .parent()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Destination has no parent directory."))?
+            .to_path_buf();
+        let indexes = Arc::clone(&self.0);
+        let drive = drive.to_owned();
+        let root = root.to_path_buf();
+        let destination = destination.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            indexes.run_observed_parent_creation(&drive, &root, &destination, || std::fs::create_dir_all(parent))
+        })
+        .await
+        .map_err(|error| {
+            std::io::Error::other(format!(
+                "Destination directory creation failed: {error}. Check the destination and retry."
+            ))
+        })?
+    }
+}
+
 /// Characters forbidden in file/directory names (matches backend validation).
 const FORBIDDEN_NAME_CHARS: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
 /// Prefix used by the frontend for synthetic local-drive connection IDs.
@@ -1337,7 +1369,11 @@ fn resolve_viewer_path(drive: &str, query: &ViewerQuery) -> Result<(PathBuf, Str
 /// `DELETE /api/browse/{drive}/item` — delete a file or directory.
 ///
 /// Directories are removed recursively. Refuses to delete the drive root.
-pub async fn browse_delete(Path(drive): Path<String>, Query(query): Query<BrowseQuery>) -> Result<StatusCode, ApiError> {
+pub async fn browse_delete(
+    State(DirectoryMutationState(indexes)): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Query(query): Query<BrowseQuery>,
+) -> Result<StatusCode, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
 
     let relative = normalize_drive_relative_path(&drive, query.path.as_deref().unwrap_or(""))?;
@@ -1348,22 +1384,31 @@ pub async fn browse_delete(Path(drive): Path<String>, Query(query): Query<Browse
     let full_path = resolve_safe_path(&base_path, &drive, &relative)?;
 
     super::directory_policy::ensure_mutation_allowed(&full_path)?;
-    let metadata = tokio::fs::metadata(&full_path).await.map_err(|e| map_io_error(e, &full_path))?;
+    let target = full_path.clone();
+    tokio::task::spawn_blocking(move || {
+        indexes.run_observed_subtree_operation(&drive, &base_path, &target, || {
+            let metadata = std::fs::symlink_metadata(&target)?;
+            if metadata.is_dir() {
+                std::fs::remove_dir_all(&target)
+            } else {
+                std::fs::remove_file(&target)
+            }
+        })
+    })
+    .await
+    .map_err(|error| ApiError::Internal(format!("Deletion task failed: {error}. Check the target and retry.")))?
+    .map_err(|error| map_io_error(error, &full_path))?;
 
-    if metadata.is_dir() {
-        tokio::fs::remove_dir_all(&full_path)
-            .await
-            .map_err(|e| map_io_error(e, &full_path))?;
-    } else {
-        tokio::fs::remove_file(&full_path).await.map_err(|e| map_io_error(e, &full_path))?;
-    }
-
-    log::info!("Deleted: {}", full_path.display());
+    log::info!("Local item deletion completed");
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// `DELETE /api/browse/{drive}/empty-directory` — remove one empty directory.
-pub async fn browse_delete_empty_directory(Path(drive): Path<String>, Query(query): Query<BrowseQuery>) -> Result<StatusCode, ApiError> {
+pub async fn browse_delete_empty_directory(
+    State(DirectoryMutationState(indexes)): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Query(query): Query<BrowseQuery>,
+) -> Result<StatusCode, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
     let relative = normalize_drive_relative_path(&drive, query.path.as_deref().unwrap_or(""))?;
     if relative.is_empty() {
@@ -1380,7 +1425,16 @@ pub async fn browse_delete_empty_directory(Path(drive): Path<String>, Query(quer
             directory.display()
         )));
     }
-    match tokio::fs::remove_dir(&directory).await {
+    let target = directory.clone();
+    let outcome =
+        tokio::task::spawn_blocking(move || indexes.run_observed_operation(&drive, &base_path, &target, || std::fs::remove_dir(&target)))
+            .await
+            .map_err(|error| {
+                ApiError::Internal(format!(
+                    "Empty-directory deletion task failed: {error}. Check the target and retry."
+                ))
+            })?;
+    match outcome {
         Ok(()) => Ok(StatusCode::NO_CONTENT),
         Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => Err(ApiError::conflict_message(format!(
             "Directory is not empty: {}",
@@ -1399,7 +1453,11 @@ pub struct RenameRequest {
 /// `POST /api/browse/{drive}/rename` — rename a file or directory.
 ///
 /// Returns the updated `FileInfo` for the renamed item.
-pub async fn browse_rename(Path(drive): Path<String>, Json(body): Json<RenameRequest>) -> Result<Json<FileInfo>, ApiError> {
+pub async fn browse_rename(
+    State(DirectoryMutationState(indexes)): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Json(body): Json<RenameRequest>,
+) -> Result<Json<FileInfo>, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
 
     validate_name(&body.new_name)?;
@@ -1467,9 +1525,18 @@ pub async fn browse_rename(Path(drive): Path<String>, Json(body): Json<RenameReq
         }
     }
 
-    tokio::fs::rename(&full_path, &new_full_path)
-        .await
-        .map_err(|e| map_io_error(e, &full_path))?;
+    let target = full_path.clone();
+    let destination = new_full_path.clone();
+    tokio::task::spawn_blocking(move || {
+        indexes.run_observed_operation(&drive, &base_path, &target, || std::fs::rename(&target, &destination))
+    })
+    .await
+    .map_err(|error| {
+        ApiError::Internal(format!(
+            "Rename task failed: {error}. Check the source and destination, then retry."
+        ))
+    })?
+    .map_err(|error| map_io_error(error, &full_path))?;
 
     // Build the new relative path for the response
     let parent_relative = relative_path.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
@@ -1496,7 +1563,11 @@ pub struct CreateItemRequest {
 /// `POST /api/browse/{drive}/create` — create a new file or directory.
 ///
 /// Returns the `FileInfo` for the newly created item.
-pub async fn browse_create(Path(drive): Path<String>, Json(body): Json<CreateItemRequest>) -> Result<Json<FileInfo>, ApiError> {
+pub async fn browse_create(
+    State(DirectoryMutationState(indexes)): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Json(body): Json<CreateItemRequest>,
+) -> Result<Json<FileInfo>, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
 
     validate_name(&body.name)?;
@@ -1516,7 +1587,13 @@ pub async fn browse_create(Path(drive): Path<String>, Json(body): Json<CreateIte
 
     match body.item_type {
         FileType::Directory => {
-            tokio::fs::create_dir(&new_path).await.map_err(|e| map_io_error(e, &new_path))?;
+            let target = new_path.clone();
+            tokio::task::spawn_blocking(move || {
+                indexes.run_observed_operation(&drive, &base_path, &target, || std::fs::create_dir(&target))
+            })
+            .await
+            .map_err(|error| ApiError::Internal(format!("Directory creation task failed: {error}. Check the target and retry.")))?
+            .map_err(|error| map_io_error(error, &new_path))?;
         }
         FileType::File => {
             File::create(&new_path).await.map_err(|e| map_io_error(e, &new_path))?;
@@ -1947,7 +2024,11 @@ pub async fn browse_cancel_transfer_attempt(Path((_drive, attempt_id)): Path<(St
 ///
 /// Supports cross-drive copy when `dest_connection_id` specifies a
 /// different local drive (e.g. copying from drive C to drive D).
-pub async fn browse_copy(Path(drive): Path<String>, Json(body): Json<CopyMoveRequest>) -> Result<Json<ContentTransferResult>, ApiError> {
+pub async fn browse_copy(
+    State(indexes): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Json(body): Json<CopyMoveRequest>,
+) -> Result<Json<ContentTransferResult>, ApiError> {
     match reserve_transfer_receipt("copy", &drive, &body)? {
         TransferReceiptLookup::Owner => {}
         TransferReceiptLookup::Cached(outcome) => return replay_transfer_outcome(outcome),
@@ -1963,7 +2044,7 @@ pub async fn browse_copy(Path(drive): Path<String>, Json(body): Json<CopyMoveReq
     if cancellation.is_cancelled() {
         return Ok(finalize_transfer_result("copy", &drive, &body, cancelled_transfer_result()));
     }
-    match execute_browse_copy(&drive, &body, cancellation.cancellation.as_deref()).await {
+    match execute_browse_copy(&indexes, &drive, &body, cancellation.cancellation.as_deref()).await {
         Ok(result) => Ok(finalize_transfer_result("copy", &drive, &body, result)),
         Err(error) => {
             complete_transfer_receipt("copy", &drive, &body, TransferReceiptOutcome::Error(transfer_receipt_error(&error)));
@@ -1973,6 +2054,7 @@ pub async fn browse_copy(Path(drive): Path<String>, Json(body): Json<CopyMoveReq
 }
 
 async fn execute_browse_copy(
+    indexes: &DirectoryMutationState,
     drive: &str,
     body: &CopyMoveRequest,
     cancellation: Option<&AtomicBool>,
@@ -1996,17 +2078,21 @@ async fn execute_browse_copy(
         ));
     }
 
-    let resolution =
-        match resolve_local_regular_file_transfer(&source, &dest, &source_meta, copy_move_target_policy(body)?, cancellation).await {
-            Ok(resolution) => resolution,
-            Err(LocalTransferWriteError::Io(error)) => return Err(map_io_error(error, &source)),
-            Err(LocalTransferWriteError::SourceChanged) => return Ok(source_changed_transfer_result(false)),
-            Err(LocalTransferWriteError::Cancelled) => return Ok(cancelled_transfer_result()),
-            Err(LocalTransferWriteError::TargetChanged) => {
-                return Err(build_conflict_error(&source, &dest, &body.source_path, &body.dest_path).await);
-            }
-            Err(LocalTransferWriteError::OutcomeUnknown) => return Ok(outcome_unknown_transfer_result()),
-        };
+    let policy = copy_move_target_policy(body)?;
+    indexes
+        .create_parent(&dest_drive, &dest_base, &dest)
+        .await
+        .map_err(|error| map_io_error(error, &dest))?;
+    let resolution = match resolve_local_regular_file_transfer(&source, &dest, &source_meta, policy, cancellation).await {
+        Ok(resolution) => resolution,
+        Err(LocalTransferWriteError::Io(error)) => return Err(map_io_error(error, &source)),
+        Err(LocalTransferWriteError::SourceChanged) => return Ok(source_changed_transfer_result(false)),
+        Err(LocalTransferWriteError::Cancelled) => return Ok(cancelled_transfer_result()),
+        Err(LocalTransferWriteError::TargetChanged) => {
+            return Err(build_conflict_error(&source, &dest, &body.source_path, &body.dest_path).await);
+        }
+        Err(LocalTransferWriteError::OutcomeUnknown) => return Ok(outcome_unknown_transfer_result()),
+    };
     if matches!(
         resolution.disposition,
         TargetResolutionDisposition::CreateNew | TargetResolutionDisposition::ReplaceExisting
@@ -2035,7 +2121,11 @@ async fn execute_browse_copy(
 }
 
 /// `POST /api/browse/{drive}/move` — move an item within its local drive.
-pub async fn browse_move(Path(drive): Path<String>, Json(body): Json<CopyMoveRequest>) -> Result<Json<ContentTransferResult>, ApiError> {
+pub async fn browse_move(
+    State(indexes): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Json(body): Json<CopyMoveRequest>,
+) -> Result<Json<ContentTransferResult>, ApiError> {
     match reserve_transfer_receipt("move", &drive, &body)? {
         TransferReceiptLookup::Owner => {}
         TransferReceiptLookup::Cached(outcome) => return replay_transfer_outcome(outcome),
@@ -2051,7 +2141,7 @@ pub async fn browse_move(Path(drive): Path<String>, Json(body): Json<CopyMoveReq
     if cancellation.is_cancelled() {
         return Ok(finalize_transfer_result("move", &drive, &body, cancelled_transfer_result()));
     }
-    match execute_browse_move(&drive, &body, cancellation.cancellation.as_deref()).await {
+    match execute_browse_move(&indexes, &drive, &body, cancellation.cancellation.as_deref()).await {
         Ok(result) => Ok(finalize_transfer_result("move", &drive, &body, result)),
         Err(error) => {
             complete_transfer_receipt("move", &drive, &body, TransferReceiptOutcome::Error(transfer_receipt_error(&error)));
@@ -2061,6 +2151,7 @@ pub async fn browse_move(Path(drive): Path<String>, Json(body): Json<CopyMoveReq
 }
 
 async fn execute_browse_move(
+    indexes: &DirectoryMutationState,
     drive: &str,
     body: &CopyMoveRequest,
     cancellation: Option<&AtomicBool>,
@@ -2080,7 +2171,7 @@ async fn execute_browse_move(
         ));
     }
     if base_path != dest_base {
-        let copy_result = execute_browse_copy(drive, body, cancellation).await?;
+        let copy_result = execute_browse_copy(indexes, drive, body, cancellation).await?;
         if copy_result.status != "completed" {
             return Ok(copy_result);
         }
@@ -2107,17 +2198,21 @@ async fn execute_browse_move(
     }
 
     let dest = resolve_safe_path_for_new(&dest_base, &dest_drive, &body.dest_path)?;
-    let resolution =
-        match resolve_local_regular_file_transfer(&source, &dest, &source_meta, copy_move_target_policy(body)?, cancellation).await {
-            Ok(resolution) => resolution,
-            Err(LocalTransferWriteError::Io(error)) => return Err(map_io_error(error, &source)),
-            Err(LocalTransferWriteError::SourceChanged) => return Ok(source_changed_transfer_result(false)),
-            Err(LocalTransferWriteError::Cancelled) => return Ok(cancelled_transfer_result()),
-            Err(LocalTransferWriteError::TargetChanged) => {
-                return Err(build_conflict_error(&source, &dest, &body.source_path, &body.dest_path).await);
-            }
-            Err(LocalTransferWriteError::OutcomeUnknown) => return Ok(outcome_unknown_transfer_result()),
-        };
+    let policy = copy_move_target_policy(body)?;
+    indexes
+        .create_parent(&dest_drive, &dest_base, &dest)
+        .await
+        .map_err(|error| map_io_error(error, &dest))?;
+    let resolution = match resolve_local_regular_file_transfer(&source, &dest, &source_meta, policy, cancellation).await {
+        Ok(resolution) => resolution,
+        Err(LocalTransferWriteError::Io(error)) => return Err(map_io_error(error, &source)),
+        Err(LocalTransferWriteError::SourceChanged) => return Ok(source_changed_transfer_result(false)),
+        Err(LocalTransferWriteError::Cancelled) => return Ok(cancelled_transfer_result()),
+        Err(LocalTransferWriteError::TargetChanged) => {
+            return Err(build_conflict_error(&source, &dest, &body.source_path, &body.dest_path).await);
+        }
+        Err(LocalTransferWriteError::OutcomeUnknown) => return Ok(outcome_unknown_transfer_result()),
+    };
     match resolution.disposition {
         TargetResolutionDisposition::Skip => return Ok(skipped_transfer_result()),
         TargetResolutionDisposition::AwaitCollision => {
@@ -2157,6 +2252,7 @@ pub struct StreamTransferQuery {
 /// private sibling stage and publishes through the requested target policy,
 /// leaving an interrupted relay without partial output.
 pub async fn browse_stream_transfer(
+    State(indexes): State<DirectoryMutationState>,
     Path(drive): Path<String>,
     Query(query): Query<StreamTransferQuery>,
     body: Body,
@@ -2184,6 +2280,10 @@ pub async fn browse_stream_transfer(
         TargetResolutionDisposition::CreateNew | TargetResolutionDisposition::ReplaceExisting => {}
     }
 
+    indexes
+        .create_parent(&drive, &base_path, &destination)
+        .await
+        .map_err(|error| map_io_error(error, &destination))?;
     match stage_local_request_body_with_target_policy(
         &destination,
         body,
@@ -2251,7 +2351,6 @@ async fn stage_local_request_body_with_target_policy(
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Transfer target name is not valid UTF-8"))?;
-    tokio::fs::create_dir_all(parent).await?;
     let stage = parent.join(format!(".{target_name}.sambee-stage-{}", uuid::Uuid::new_v4()));
 
     let result: Result<(u64, bool), LocalTransferWriteError> = async {
@@ -3237,6 +3336,9 @@ pub(crate) async fn start_direct_local_archive_session(
             .await?;
         }
         super::archive_sessions::ArchiveSessionKind::Extract => {
+            let temporary = tempfile::tempdir().unwrap();
+            let indexes =
+                DirectoryMutationState(super::directory_manager::LocalDirectoryManager::new(temporary.path().join("private")).unwrap());
             resolve_companion_extraction_coordinator(
                 resolve_companion_archive_topology_plan(CompanionArchiveOperationKind::Extract, true, true)
                     .map_err(map_local_archive_error)?,
@@ -3244,7 +3346,7 @@ pub(crate) async fn start_direct_local_archive_session(
                     .await?
                     .into_plan(),
             )?
-            .execute()
+            .execute(indexes)
             .await?;
         }
     }
@@ -3299,13 +3401,15 @@ pub(crate) async fn decide_direct_local_archive_session(
     expected_revision: u64,
     decision: super::archive_sessions::ArchiveSessionDecision,
 ) -> Result<ArchiveSessionStatus, ApiError> {
+    let temporary = tempfile::tempdir().unwrap();
+    let indexes = DirectoryMutationState(super::directory_manager::LocalDirectoryManager::new(temporary.path().join("private")).unwrap());
     resolve_companion_extraction_coordinator(
         resolve_companion_archive_topology_plan(CompanionArchiveOperationKind::Extract, true, true).map_err(map_local_archive_error)?,
         CompanionArchiveExtractionCoordinator::direct_local_from_session(state_store, execution_id.to_string())
             .await?
             .into_plan(),
     )?
-    .decide(drive, owner_origin, execution_id, expected_revision, decision)
+    .decide(indexes, drive, owner_origin, execution_id, expected_revision, decision)
     .await
 }
 
@@ -3795,10 +3899,10 @@ impl CompanionArchiveExtractionCoordinator {
         Ok(Self::direct_local(state_store, execution_id))
     }
 
-    async fn execute(self) -> Result<CompanionArchiveExtractionResult, ApiError> {
+    async fn execute(self, indexes: DirectoryMutationState) -> Result<CompanionArchiveExtractionResult, ApiError> {
         match self.plan {
             CompanionArchiveExtractionPlan::DirectLocal { state_store, execution_id } => {
-                Self::execute_direct_local(state_store, execution_id).await?;
+                Self::execute_direct_local(indexes, state_store, execution_id).await?;
                 Ok(CompanionArchiveExtractionResult::DirectLocalStarted)
             }
         }
@@ -3806,6 +3910,7 @@ impl CompanionArchiveExtractionCoordinator {
 
     async fn decide(
         self,
+        indexes: DirectoryMutationState,
         drive: &str,
         owner_origin: &str,
         execution_id: &str,
@@ -3861,6 +3966,7 @@ impl CompanionArchiveExtractionCoordinator {
                     .resume_live_extraction(drive, owner_origin, execution_id, expected_revision, decision)
                     .await?;
                 Self::spawn_direct_local_extraction(
+                    indexes,
                     state_store,
                     execution_id.to_string(),
                     drive_root,
@@ -3908,7 +4014,11 @@ fn resolve_companion_extraction_coordinator(
 }
 
 impl CompanionArchiveExtractionCoordinator {
-    async fn execute_direct_local(state_store: Arc<ArchiveSessionManager>, execution_id: String) -> Result<(), ApiError> {
+    async fn execute_direct_local(
+        indexes: DirectoryMutationState,
+        state_store: Arc<ArchiveSessionManager>,
+        execution_id: String,
+    ) -> Result<(), ApiError> {
         let (drive_root, _archive_path, destination_path, cancellation_requested, source) =
             match state_store.start_live_extraction(&execution_id).await {
                 Ok(state) => state,
@@ -3920,6 +4030,7 @@ impl CompanionArchiveExtractionCoordinator {
                 }
             };
         Self::spawn_direct_local_extraction(
+            indexes,
             state_store,
             execution_id,
             drive_root,
@@ -3931,6 +4042,7 @@ impl CompanionArchiveExtractionCoordinator {
     }
 
     fn spawn_direct_local_extraction(
+        indexes: DirectoryMutationState,
         state_store: Arc<ArchiveSessionManager>,
         execution_id: String,
         drive_root: PathBuf,
@@ -3941,12 +4053,12 @@ impl CompanionArchiveExtractionCoordinator {
         tokio::spawn(async move {
             let worker_source = source.clone();
             let result = tokio::task::spawn_blocking(move || {
-                extract_live_local_archive(&drive_root, &destination_path, &cancellation_requested, &worker_source).map(|result| {
-                    match result {
+                extract_live_local_archive(&indexes, &drive_root, &destination_path, &cancellation_requested, &worker_source).map(
+                    |result| match result {
                         DirectLiveExtractionRun::Completed(result) => ArchiveSessionCompletion::ExtractionCompletedLive { result },
                         DirectLiveExtractionRun::AwaitingCollision { result } => ArchiveSessionCompletion::AwaitingLiveCollision { result },
-                    }
-                })
+                    },
+                )
             })
             .await
             .map_err(|error| LocalArchiveError::Io(std::io::Error::other(format!("Archive execution task failed: {error}"))))
@@ -3970,12 +4082,15 @@ impl CompanionArchiveExtractionCoordinator {
 }
 
 fn extract_live_local_archive(
+    indexes: &DirectoryMutationState,
     drive_root: &FsPath,
     destination_path: &FsPath,
     cancellation_requested: &AtomicBool,
     source: &AsyncMutex<super::archive_sessions::LiveLocalArchiveSourceSession>,
 ) -> Result<DirectLiveExtractionRun, LocalArchiveError> {
-    create_local_extraction_root(drive_root, destination_path)?;
+    indexes.0.run_observed_root_creation(drive_root, destination_path, || {
+        create_local_extraction_root(drive_root, destination_path)
+    })?;
     loop {
         if cancellation_requested.load(Ordering::Acquire) {
             return Err(LocalArchiveError::Cancelled);
@@ -3994,7 +4109,9 @@ fn extract_live_local_archive(
         let target_path = destination_path.join(&relative_target_path);
         let target_path_text = target_path.to_string_lossy().to_string();
         let result = if member.entry.is_directory {
-            let directories_created = match ensure_local_extraction_directory(drive_root, destination_path, &target_path)? {
+            let directories_created = match indexes.0.run_observed_root_creation(drive_root, &target_path, || {
+                ensure_local_extraction_directory(drive_root, destination_path, &target_path)
+            })? {
                 LocalArchiveDirectoryOutput::Ready { directories_created } => directories_created,
                 LocalArchiveDirectoryOutput::AwaitCollision { target } => {
                     return pause_live_local_collision(source, &member, relative_target_path, target);
@@ -4012,8 +4129,9 @@ fn extract_live_local_archive(
                 renamed: false,
             }
         } else {
-            match prepare_local_archive_target_output(drive_root, destination_path, &target_path, target_policy, member.entry.modified_at)?
-            {
+            match indexes.0.run_observed_root_creation(drive_root, &target_path, || {
+                prepare_local_archive_target_output(drive_root, destination_path, &target_path, target_policy, member.entry.modified_at)
+            })? {
                 LocalArchiveTargetOutput::Ready {
                     mut file,
                     replaced,
@@ -4451,7 +4569,7 @@ async fn start_v2_local_archive_execution(
                 .await?
                 .into_plan(),
             )?
-            .execute()
+            .execute(DirectoryMutationState(Arc::clone(&state.directory_indexes)))
             .await?;
             if !matches!(result, CompanionArchiveExtractionResult::DirectLocalStarted) {
                 return Err(ApiError::Internal(
@@ -4557,6 +4675,7 @@ async fn decide_v2_local_archive_execution(
             .into_plan(),
     )?
     .decide(
+        DirectoryMutationState(Arc::clone(&state.directory_indexes)),
         &drive,
         &extract_origin(&headers)?,
         &execution_id,
@@ -5022,7 +5141,12 @@ async fn execute_relay_extraction_to_local_destination(
     let relay = ArchiveExtractionRelay::from_transport(transport);
     Ok(Json(
         execute_archive_relay(
-            extract_smb_archive_to_local_live(&relay, drive_root, destination_path),
+            extract_smb_archive_to_local_live(
+                DirectoryMutationState(Arc::clone(&state.directory_indexes)),
+                &relay,
+                drive_root,
+                destination_path,
+            ),
             relay.fail(),
         )
         .await?,
@@ -5051,6 +5175,7 @@ pub async fn browse_relay_v2_archive_extraction(
 }
 
 async fn extract_smb_archive_to_local_live(
+    indexes: DirectoryMutationState,
     relay: &ArchiveExtractionRelay,
     drive_root: PathBuf,
     destination_path: PathBuf,
@@ -5058,10 +5183,15 @@ async fn extract_smb_archive_to_local_live(
     relay.begin_live_remote_source().await?;
     let root = destination_path.clone();
     let root_drive = drive_root.clone();
-    let _root_created = tokio::task::spawn_blocking(move || create_local_extraction_root(&root_drive, &root))
-        .await
-        .map_err(|error| ApiError::Internal(format!("Local archive root task failed: {error}")))?
-        .map_err(map_local_archive_error)?;
+    let root_indexes = indexes.clone();
+    let _root_created = tokio::task::spawn_blocking(move || {
+        root_indexes
+            .0
+            .run_observed_root_creation(&root_drive, &root, || create_local_extraction_root(&root_drive, &root))
+    })
+    .await
+    .map_err(|error| ApiError::Internal(format!("Local archive root task failed: {error}")))?
+    .map_err(map_local_archive_error)?;
     loop {
         let Some(member) = relay.next_live_remote_source_member().await? else {
             return Ok(live_remote_source_response(relay.complete_live_remote_source().await?));
@@ -5075,10 +5205,15 @@ async fn extract_smb_archive_to_local_live(
         let target_path_text = target_path.to_string_lossy().to_string();
         if member.is_directory {
             let output = tokio::task::spawn_blocking({
+                let indexes = indexes.clone();
                 let drive_root = drive_root.clone();
                 let destination_path = destination_path.clone();
                 let target_path = target_path.clone();
-                move || ensure_local_extraction_directory(&drive_root, &destination_path, &target_path)
+                move || {
+                    indexes.0.run_observed_root_creation(&drive_root, &target_path, || {
+                        ensure_local_extraction_directory(&drive_root, &destination_path, &target_path)
+                    })
+                }
             })
             .await
             .map_err(|error| ApiError::Internal(format!("Local archive directory task failed: {error}")))?
@@ -5112,11 +5247,16 @@ async fn extract_smb_archive_to_local_live(
             continue;
         }
         let output = tokio::task::spawn_blocking({
+            let indexes = indexes.clone();
             let drive_root = drive_root.clone();
             let destination_path = destination_path.clone();
             let target_path = target_path.clone();
             let modified_at = member.modified_at;
-            move || prepare_local_archive_target_output(&drive_root, &destination_path, &target_path, target_policy, modified_at)
+            move || {
+                indexes.0.run_observed_root_creation(&drive_root, &target_path, || {
+                    prepare_local_archive_target_output(&drive_root, &destination_path, &target_path, target_policy, modified_at)
+                })
+            }
         })
         .await
         .map_err(|error| ApiError::Internal(format!("Local archive file task failed: {error}")))?
@@ -5488,7 +5628,7 @@ pub struct DirectorySearchQuery {
 ///
 /// Starts or joins a background catalogue and queries its committed rows.
 pub async fn browse_search_directories(
-    State(state): State<Arc<AppState>>,
+    State(state): State<DirectoryMutationState>,
     Path(drive): Path<String>,
     Query(query): Query<DirectorySearchQuery>,
 ) -> Result<Json<DirectorySearchResult>, ApiError> {
@@ -5498,7 +5638,7 @@ pub async fn browse_search_directories(
     let include_dot_directories = query.include_dot_directories.unwrap_or(false);
     super::directory_index::search_terms(&q).map_err(|error| ApiError::BadRequest(error.to_string()))?;
     state
-        .directory_indexes
+        .0
         .search(drive, base_path, q, include_dot_directories)
         .await
         .map(Json)
@@ -5721,7 +5861,10 @@ pub async fn browse_upload(
 
     // Ensure parent directory exists
     if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| map_io_error(e, parent))?;
+        DirectoryMutationState(Arc::clone(&state.directory_indexes))
+            .create_parent(&drive, &base_path, &dest)
+            .await
+            .map_err(|error| map_io_error(error, parent))?;
     }
 
     let size = data.len() as u64;
@@ -5739,7 +5882,7 @@ pub async fn browse_upload(
         dt.to_rfc3339()
     });
 
-    log::info!("Uploaded {} bytes to {}", size, dest.display());
+    log::info!("Local upload completed: bytes={size}");
 
     Ok(Json(UploadResponse {
         status: "ok".to_string(),
@@ -6564,9 +6707,6 @@ async fn resolve_local_regular_file_transfer(
     policy: TargetResolutionPolicy,
     cancellation: Option<&AtomicBool>,
 ) -> Result<super::target_resolution::TargetMutationResolution<()>, LocalTransferWriteError> {
-    if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(LocalTransferWriteError::Io)?;
-    }
     resolve_target_mutation_attempt(
         ContentTransferPlan {
             source_modified_at: expected_source.modified().ok().map(DateTime::<Utc>::from),
@@ -6855,6 +6995,232 @@ async fn rename_noreplace(_source: &FsPath, _destination: &FsPath) -> Result<(),
 
 #[cfg(test)]
 mod tests {
+    fn directory_mutation_state(directory: &std::path::Path) -> axum::extract::State<super::DirectoryMutationState> {
+        axum::extract::State(super::DirectoryMutationState(
+            super::super::directory_manager::LocalDirectoryManager::new(directory.join("index-cache")).unwrap(),
+        ))
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn local_directory_mutation_handlers_reconcile_the_background_index() {
+        const SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+        const RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+        const FRESHNESS_TARGET: std::time::Duration = std::time::Duration::from_secs(2);
+
+        async fn wait_for_paths(
+            state: &super::DirectoryMutationState,
+            drive: &str,
+            root: &std::path::Path,
+            expected: &[&str],
+        ) -> super::DirectorySearchResult {
+            let mut last_status = String::new();
+            let settled = tokio::time::timeout(SETTLE_TIMEOUT, async {
+                loop {
+                    let result = state
+                        .0
+                        .search(drive.to_owned(), root.to_path_buf(), "created renamed".to_owned(), false)
+                        .await
+                        .unwrap();
+                    if result.cache_state == "ready"
+                        && result.last_verified_at_ms.is_some()
+                        && result.results.iter().map(String::as_str).collect::<Vec<_>>() == expected
+                        && result.directory_count == expected.len()
+                    {
+                        return result;
+                    }
+                    last_status = serde_json::to_string(&result).unwrap();
+                    tokio::time::sleep(RETRY_INTERVAL).await;
+                }
+            })
+            .await;
+            settled.unwrap_or_else(|_| {
+                panic!("background directory reconciliation should finish; expected {expected:?}; last status: {last_status}")
+            })
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let drive = format!("mutation-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), directory.path().to_path_buf());
+        let state = directory_mutation_state(cache.path());
+        let before = wait_for_paths(&state.0, &drive, directory.path(), &[]).await;
+        let started = std::time::Instant::now();
+        let created_info = super::browse_create(
+            state.clone(),
+            axum::extract::Path(drive.clone()),
+            axum::Json(super::CreateItemRequest {
+                parent_path: String::new(),
+                name: "created".to_owned(),
+                item_type: super::FileType::Directory,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created_info.0.path, "created");
+        let created = wait_for_paths(&state.0, &drive, directory.path(), &["created"]).await;
+        eprintln!(
+            "directory_mutation_fixture operation=create elapsed_ms={} target_ms={}",
+            started.elapsed().as_millis(),
+            FRESHNESS_TARGET.as_millis()
+        );
+        assert_eq!(created.last_verified_at_ms, before.last_verified_at_ms);
+        let started = std::time::Instant::now();
+        let renamed_info = super::browse_rename(
+            state.clone(),
+            axum::extract::Path(drive.clone()),
+            axum::Json(super::RenameRequest {
+                path: "created".to_owned(),
+                new_name: "renamed".to_owned(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(renamed_info.0.path, "renamed");
+        let renamed = wait_for_paths(&state.0, &drive, directory.path(), &["renamed"]).await;
+        eprintln!(
+            "directory_mutation_fixture operation=rename elapsed_ms={} target_ms={}",
+            started.elapsed().as_millis(),
+            FRESHNESS_TARGET.as_millis()
+        );
+        assert_eq!(renamed.last_verified_at_ms, before.last_verified_at_ms);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            super::browse_delete_empty_directory(
+                state.clone(),
+                axum::extract::Path(drive.clone()),
+                axum::extract::Query(super::BrowseQuery {
+                    path: Some("renamed".to_owned())
+                }),
+            )
+            .await
+            .unwrap(),
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let removed = wait_for_paths(&state.0, &drive, directory.path(), &[]).await;
+        eprintln!(
+            "directory_mutation_fixture operation=delete elapsed_ms={} target_ms={}",
+            started.elapsed().as_millis(),
+            FRESHNESS_TARGET.as_millis()
+        );
+        assert_eq!(removed.last_verified_at_ms, before.last_verified_at_ms);
+        assert!(!directory.path().join("created").exists());
+        assert!(!directory.path().join("renamed").exists());
+
+        std::fs::create_dir_all(directory.path().join("created/nested/child")).unwrap();
+        let nested = wait_for_paths(
+            &state.0,
+            &drive,
+            directory.path(),
+            &["created", "created/nested", "created/nested/child"],
+        )
+        .await;
+        assert_eq!(
+            super::browse_delete(
+                state.clone(),
+                axum::extract::Path(drive.clone()),
+                axum::extract::Query(super::BrowseQuery {
+                    path: Some("created".to_owned())
+                }),
+            )
+            .await
+            .unwrap(),
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let recursively_removed = wait_for_paths(&state.0, &drive, directory.path(), &[]).await;
+        assert_eq!(recursively_removed.last_verified_at_ms, nested.last_verified_at_ms);
+        assert!(!directory.path().join("created").exists());
+
+        for complete in [true, false] {
+            let result = super::browse_stream_transfer(
+                state.clone(),
+                axum::extract::Path(drive.clone()),
+                axum::extract::Query(super::StreamTransferQuery {
+                    path: "created/nested/file.txt".to_owned(),
+                    target_resolution_policy: Some("ask".to_owned()),
+                    expected_size: if complete { 4 } else { 5 },
+                    source_modified_at: None,
+                }),
+                super::Body::from("data"),
+            )
+            .await;
+            if complete {
+                assert_eq!(result.unwrap().0.status, "completed");
+            } else {
+                assert!(matches!(result, Err(super::ApiError::UnprocessableContent(_))));
+            }
+            let transferred = wait_for_paths(&state.0, &drive, directory.path(), &["created", "created/nested"]).await;
+            assert_eq!(transferred.last_verified_at_ms, recursively_removed.last_verified_at_ms);
+            assert_eq!(directory.path().join("created/nested/file.txt").exists(), complete);
+            assert_eq!(
+                super::browse_delete(
+                    state.clone(),
+                    axum::extract::Path(drive.clone()),
+                    axum::extract::Query(super::BrowseQuery {
+                        path: Some("created".to_owned())
+                    }),
+                )
+                .await
+                .unwrap(),
+                axum::http::StatusCode::NO_CONTENT
+            );
+            wait_for_paths(&state.0, &drive, directory.path(), &[]).await;
+        }
+
+        let archive_path = directory.path().join("fixture.zip");
+        let mut archive = zip::ZipWriter::new(std::fs::File::create(&archive_path).unwrap());
+        archive
+            .start_file("nested/child/data.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        std::io::Write::write_all(&mut archive, b"data").unwrap();
+        archive.finish().unwrap();
+        let sessions = std::sync::Arc::new(super::ArchiveSessionManager::new());
+        let origin = "https://sambee.example";
+        let execution = sessions
+            .create_extraction(
+                drive.clone(),
+                origin.to_owned(),
+                directory.path().to_path_buf(),
+                archive_path,
+                directory.path().join("created"),
+            )
+            .await;
+        let coordinator = super::CompanionArchiveExtractionCoordinator::direct_local_from_session(
+            std::sync::Arc::clone(&sessions),
+            execution.execution_id.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            coordinator.execute(state.0.clone()).await.unwrap(),
+            super::CompanionArchiveExtractionResult::DirectLocalStarted
+        ));
+        tokio::time::timeout(SETTLE_TIMEOUT, async {
+            loop {
+                let status = sessions.get(&drive, origin, &execution.execution_id).await.unwrap();
+                match status.phase {
+                    super::super::archive_sessions::ArchiveSessionPhase::Completed => break,
+                    super::super::archive_sessions::ArchiveSessionPhase::Failed => panic!("archive extraction failed: {status:?}"),
+                    _ => tokio::time::sleep(RETRY_INTERVAL).await,
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let extracted = wait_for_paths(
+            &state.0,
+            &drive,
+            directory.path(),
+            &["created", "created/nested", "created/nested/child"],
+        )
+        .await;
+        assert_eq!(extracted.last_verified_at_ms, recursively_removed.last_verified_at_ms);
+        assert_eq!(
+            std::fs::read(directory.path().join("created/nested/child/data.txt")).unwrap(),
+            b"data"
+        );
+    }
+
     #[tokio::test]
     async fn directory_listing_preserves_drive_boundaries() {
         let directory = tempfile::tempdir().expect("temporary drive should be created");
@@ -7063,6 +7429,7 @@ mod tests {
             }
 
             let response = super::browse_rename(
+                directory_mutation_state(directory.path()),
                 axum::extract::Path(drive.clone()),
                 axum::Json(super::RenameRequest {
                     path: old_name.to_string(),
@@ -7091,6 +7458,7 @@ mod tests {
             .expect("target should be created");
 
         let response = super::browse_rename(
+            directory_mutation_state(directory.path()),
             axum::extract::Path(drive),
             axum::Json(super::RenameRequest {
                 path: "source.txt".to_string(),
@@ -7117,6 +7485,7 @@ mod tests {
 
         for alias in ["hard-link.txt", "symbolic-link.txt"] {
             let response = super::browse_rename(
+                directory_mutation_state(directory.path()),
                 axum::extract::Path(drive.clone()),
                 axum::Json(super::RenameRequest {
                     path: "source.txt".to_string(),
@@ -7143,6 +7512,7 @@ mod tests {
         std::fs::hard_link(&source, &target).expect("case-variant hard link should be created");
 
         let response = super::browse_rename(
+            directory_mutation_state(directory.path()),
             axum::extract::Path(drive),
             axum::Json(super::RenameRequest {
                 path: "A.PDF".to_string(),
@@ -7447,7 +7817,9 @@ mod tests {
 
     #[tokio::test]
     async fn move_route_validates_the_source_drive() {
+        let cache = tempfile::tempdir().unwrap();
         let response = super::browse_move(
+            directory_mutation_state(cache.path()),
             Path("missing-drive".to_string()),
             axum::Json(CopyMoveRequest {
                 source_path: "source.txt".to_string(),
@@ -7476,6 +7848,7 @@ mod tests {
         tokio::fs::write(&source, b"report").await.expect("source should be written");
 
         let result = super::execute_browse_move(
+            &directory_mutation_state(destination_directory.path()).0,
             &source_drive,
             &CopyMoveRequest {
                 source_path: "report.txt".to_string(),
@@ -7516,6 +7889,7 @@ mod tests {
             .expect("source directory should be written");
 
         let result = super::execute_browse_copy(
+            &directory_mutation_state(destination_directory.path()).0,
             &source_drive,
             &CopyMoveRequest {
                 source_path: "documents".to_string(),
@@ -7554,6 +7928,7 @@ mod tests {
 
         for policy in ["ask", "skip", "replace", "replace_older"] {
             let result = super::execute_browse_copy(
+                &directory_mutation_state(destination_directory.path()).0,
                 &source_drive,
                 &CopyMoveRequest {
                     source_path: "documents".to_string(),
@@ -7592,6 +7967,7 @@ mod tests {
         tokio::fs::create_dir(&source).await.expect("source directory should be written");
 
         let result = super::execute_browse_move(
+            &directory_mutation_state(destination_directory.path()).0,
             &source_drive,
             &CopyMoveRequest {
                 source_path: "documents".to_string(),
@@ -7676,6 +8052,7 @@ mod tests {
         tokio::fs::write(&target, b"existing").await.expect("target should be written");
 
         let response = browse_stream_transfer(
+            directory_mutation_state(directory.path()),
             Path(drive),
             Query(StreamTransferQuery {
                 path: "target.txt".to_string(),
@@ -7701,6 +8078,7 @@ mod tests {
         tokio::fs::write(&target, b"existing").await.expect("target should be written");
 
         let response = browse_stream_transfer(
+            directory_mutation_state(directory.path()),
             Path(drive),
             Query(StreamTransferQuery {
                 path: "target.txt".to_string(),
@@ -7734,6 +8112,7 @@ mod tests {
 
         for source_modified_at in [target_mtime - chrono::Duration::seconds(1), target_mtime] {
             let response = browse_stream_transfer(
+                directory_mutation_state(directory.path()),
                 Path(drive.clone()),
                 Query(StreamTransferQuery {
                     path: "target.txt".to_string(),
@@ -7751,6 +8130,7 @@ mod tests {
         }
 
         let response = browse_stream_transfer(
+            directory_mutation_state(directory.path()),
             Path(drive),
             Query(StreamTransferQuery {
                 path: "target.txt".to_string(),
@@ -7777,6 +8157,7 @@ mod tests {
         tokio::fs::write(&target, b"existing").await.expect("target should be written");
 
         let response = browse_stream_transfer(
+            directory_mutation_state(directory.path()),
             Path(drive),
             Query(StreamTransferQuery {
                 path: "target.txt".to_string(),
@@ -9373,9 +9754,14 @@ mod tests {
             playback.url.clone(),
             "test-token".to_string(),
         ));
-        let result = extract_smb_archive_to_local_live(&relay, directory.path().to_path_buf(), destination_path.clone())
-            .await
-            .expect("SMB-to-local live relay should complete");
+        let result = extract_smb_archive_to_local_live(
+            directory_mutation_state(directory.path()).0,
+            &relay,
+            directory.path().to_path_buf(),
+            destination_path.clone(),
+        )
+        .await
+        .expect("SMB-to-local live relay should complete");
 
         assert_eq!(
             (
@@ -9513,9 +9899,14 @@ mod tests {
             playback.url.clone(),
             "test-token".to_string(),
         ));
-        let result = extract_smb_archive_to_local_live(&relay, directory.path().to_path_buf(), destination_path)
-            .await
-            .expect("source integrity failure should surface the live retry decision");
+        let result = extract_smb_archive_to_local_live(
+            directory_mutation_state(directory.path()).0,
+            &relay,
+            directory.path().to_path_buf(),
+            destination_path,
+        )
+        .await
+        .expect("source integrity failure should surface the live retry decision");
 
         assert_eq!(result.phase, Some("awaiting_user_decision"));
         assert_eq!(result.members_processed, 0);

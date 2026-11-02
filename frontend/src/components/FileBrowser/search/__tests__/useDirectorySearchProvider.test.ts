@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import "../../../../i18n";
 import api from "../../../../services/api";
 import { SambeeThemeProvider } from "../../../../theme/ThemeContext";
+import { SEARCH_CONTRACT_VERSION } from "../recentHistory";
 import { getDirectoryResultPresentation, useDirectorySearchProvider } from "../useDirectorySearchProvider";
 
 vi.mock("../../../../services/api");
@@ -16,6 +17,69 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("getDirectoryResultPresentation", () => {
+  it.each([
+    { cache_state: "building", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
+    { cache_state: "updating", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
+    { cache_state: "ready", search_contract_version: SEARCH_CONTRACT_VERSION, expected: null },
+    { cache_state: "empty", search_contract_version: SEARCH_CONTRACT_VERSION, expected: null },
+    {
+      cache_state: "ready",
+      coverage: "partial",
+      status_message: "Directory indexing is paused. Increase its disk budget and retry.",
+      search_contract_version: SEARCH_CONTRACT_VERSION,
+      expected: null,
+    },
+    { cache_state: "building", search_contract_version: undefined, expected: null },
+  ] as const)("gates quiet refresh for $cache_state contract $search_contract_version", async ({ expected, ...status }) => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    vi.mocked(api.searchDirectories).mockResolvedValue({ results: [], total_matches: 0, directory_count: 0, ...status });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getRefreshIntervalMs?.()).toBe(expected);
+  });
+
+  it("reuses same-query history, stops refresh on failure, and reloads invalidated history", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    vi.mocked(api.searchDirectories)
+      .mockResolvedValueOnce({
+        results: [],
+        total_matches: 0,
+        directory_count: 0,
+        cache_state: "building",
+        search_contract_version: SEARCH_CONTRACT_VERSION,
+      })
+      .mockRejectedValueOnce(new Error("Index unavailable"))
+      .mockResolvedValue({
+        results: [],
+        total_matches: 0,
+        directory_count: 0,
+        cache_state: "ready",
+        search_contract_version: SEARCH_CONTRACT_VERSION,
+      });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getRefreshIntervalMs?.()).toBeNull();
+    expect(api.searchRecentDirectories).toHaveBeenCalledTimes(1);
+    result.current.invalidateResults?.();
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(api.searchRecentDirectories).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await result.current.fetchResults("other", new AbortController().signal);
+    });
+    expect(api.searchRecentDirectories).toHaveBeenCalledTimes(3);
+    expect(api.searchDirectories).toHaveBeenCalledTimes(4);
+  });
+
   it("keeps the history representation with the best valid duplicate relevance", async () => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({
       result_limit: 10,

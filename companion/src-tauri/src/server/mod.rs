@@ -183,7 +183,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/browse/{drive}/rename", axum::routing::post(handlers::browse_rename))
         .route("/api/browse/{drive}/create", axum::routing::post(handlers::browse_create))
-        .merge(transfer_routes().with_state::<Arc<AppState>>(()))
+        .merge(transfer_routes())
         .route("/api/browse/{drive}/open", axum::routing::post(handlers::browse_open))
         .route(
             "/api/browse/{drive}/directories",
@@ -268,7 +268,11 @@ fn build_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-fn transfer_routes() -> Router {
+fn transfer_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+    handlers::DirectoryMutationState: axum::extract::FromRef<S>,
+{
     Router::new()
         .route(
             "/api/browse/{drive}/transfer-attempts/{attempt_id}/cancel",
@@ -291,7 +295,10 @@ mod tests {
 
     #[tokio::test]
     async fn transfer_stream_route_is_registered() {
+        let temporary = tempfile::tempdir().unwrap();
+        let indexes = super::directory_manager::LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let response = transfer_routes()
+            .with_state(super::handlers::DirectoryMutationState(indexes))
             .oneshot(
                 Request::builder()
                     .method("GET")

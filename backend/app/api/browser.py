@@ -98,6 +98,7 @@ from app.services.cross_connection import (
     cross_connection_move,
     final_target_policy_check,
 )
+from app.services.directory_index import MAX_QUERY_BYTES
 from app.services.history_common import (
     LOCAL_DRIVE_PREFIX,
     directory_match_rank,
@@ -1065,7 +1066,7 @@ async def get_file_info(
 @router.get("/{connection_id}/directories", response_model=DirectorySearchResult)
 async def search_directories(
     connection_id: uuid.UUID,
-    q: str = Query("", max_length=1024, description="Search query for directory names"),
+    q: str = Query("", max_length=MAX_QUERY_BYTES, description="Directory search text; shared UTF-8 byte and term limits apply"),
     include_dot_directories: bool = Query(False, description="Whether to include directories whose path contains dot-prefixed segments"),
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
@@ -3351,12 +3352,12 @@ def _rename_in_directory_cache(connection_id: str, old_path: str, new_path: str)
 # _add_to_directory_cache
 #
 def _add_to_directory_cache(connection_id: str, path: str) -> None:
-    """Add a newly created directory to the directory cache, if it exists.
+    """Reconcile a mutation destination, which can be a file or directory.
 
     Silently ignores errors — cache updates must never break the main flow.
     """
 
-    from app.services.directory_cache import get_directory_cache_manager
+    from app.services.directory_cache import SQLiteConnectionDirectoryCache, get_directory_cache_manager
 
     try:
         cache_manager = get_directory_cache_manager()
@@ -3364,6 +3365,9 @@ def _add_to_directory_cache(connection_id: str, path: str) -> None:
         if cache is None:
             return
 
-        cache.add_directories([path])
+        if isinstance(cache, SQLiteConnectionDirectoryCache):
+            cache.observe_parent(path.strip("/").rpartition("/")[0])
+        else:
+            cache.add_directories([path])
     except Exception:
         pass

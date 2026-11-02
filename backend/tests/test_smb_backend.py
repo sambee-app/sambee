@@ -27,6 +27,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 import smbclient
+import smbclient.path
 from smbclient._os import FileAttributes
 from smbprotocol.exceptions import AccessDenied, SMBOSError
 from smbprotocol.file_info import FileDispositionInformation, InfoType
@@ -117,6 +118,75 @@ async def test_write_recreates_missing_target_and_truncates_existing_content(tmp
         target.write_bytes(b"old content longer than draft")
         assert await backend.write_file("draft.txt", io.BytesIO(b"draft")) == 5
     assert target.read_bytes() == b"draft"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "arguments", "affected"),
+    [
+        ("create_directory", ("parent/new",), ("parent/new",)),
+        ("create_file", ("parent/new.txt",), ("parent/new.txt",)),
+        ("delete_item", ("parent/old",), ("parent/old",)),
+        ("remove_empty_directory", ("parent/empty",), ("parent/empty",)),
+        ("rename_item", ("parent/old", "new"), ("parent/old", "parent/new")),
+        ("copy_item", ("source/tree", "destination/tree"), ("destination/tree",)),
+        ("move_item", ("source/tree", "destination/tree"), ("source/tree", "destination/tree")),
+        ("write_file", ("parent/file.txt", io.BytesIO(b"data")), ("parent/file.txt",)),
+    ],
+)
+async def test_namespace_mutations_pass_explicit_affected_paths(method, arguments, affected, monkeypatch) -> None:
+    backend = SMBBackend(host="server", share_name="share", username="user", password="pass", path_prefix="/scoped")
+    observations = []
+
+    async def execute(name, operation, timeout, *, smb_path, mutation_paths=()):
+        if mutation_paths:
+            observations.append(mutation_paths)
+        return False
+
+    monkeypatch.setattr(backend, "_run_blocking_smb_operation", execute)
+    await getattr(backend, method)(*arguments)
+    assert observations == [tuple(backend._build_smb_path(path) for path in affected)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed", [False, True])
+async def test_recursive_copy_observes_child_destinations_through_actual_exit(monkeypatch, failed):
+    from types import SimpleNamespace
+
+    backend = SMBBackend(host="server", share_name="share", username="user", password="pass")
+    source = backend._build_smb_path("source")
+    destination = backend._build_smb_path("destination")
+    child_destination = destination + "\\child"
+    observations = []
+    created = []
+
+    def observe(paths):
+        if paths:
+            observations.append(paths)
+
+    def scan(path, **kwargs):
+        if path == source:
+            yield SimpleNamespace(name="child", path=source + "\\child")
+
+    def create(path, **kwargs):
+        assert observations[-1] == (path,)
+        created.append(path)
+        if failed and path == child_destination:
+            raise PermissionError("Injected partial copy failure.")
+
+    monkeypatch.setattr(backend, "_observe_mutation_paths", observe)
+    monkeypatch.setattr(smbclient.path, "exists", lambda *args, **kwargs: False)
+    monkeypatch.setattr(smbclient, "stat", lambda *args, **kwargs: SimpleNamespace(st_mode=stat_module.S_IFDIR, st_atime=0, st_mtime=0))
+    monkeypatch.setattr(smbclient, "scandir", scan)
+    monkeypatch.setattr(smbclient, "mkdir", create)
+    monkeypatch.setattr(smbclient, "utime", lambda *args, **kwargs: None)
+    if failed:
+        with pytest.raises(PermissionError, match="partial copy failure"):
+            await backend.copy_item("source", "destination")
+    else:
+        await backend.copy_item("source", "destination")
+    assert created == [destination, child_destination]
+    assert observations == [(destination,), (child_destination,), (child_destination,), (destination,)]
 
 
 class _MemoryArchiveReader:

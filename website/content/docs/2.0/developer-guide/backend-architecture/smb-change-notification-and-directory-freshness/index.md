@@ -2,301 +2,175 @@
 title = "SMB Change Notification and Directory Freshness"
 +++
 
-Sambee uses SMB2/SMB3 `CHANGE_NOTIFY` support to keep directory state fresh without falling back to naive polling.
+Sambee uses two separate SMB2/SMB3 `CHANGE_NOTIFY` paths: one tells an open browser to refresh its directory listing; the other maintains the directory-search index. They have different subscription, event, and consistency rules.
 
-That capability is used in two different backend paths:
+## Components
 
-- `backend/app/services/directory_monitor.py` for browser-visible WebSocket refresh notifications
-- `backend/app/services/directory_cache.py` for per-connection directory-cache freshness
-
-Use this page when a backend change affects WebSocket directory updates, SMB watcher lifecycle, or how the product maintains fresh directory state over time.
-
-## Why This Matters
-
-Directory freshness is a cross-boundary product contract.
-
-Users expect Sambee to react when:
-
-- another SMB client creates, deletes, renames, or edits content in the current directory
-- the current browser view should refresh because the underlying SMB directory changed
-- cached directory-search data should stay reasonably current without rescanning the entire tree on every request
-
-That is why the backend owns change-notification behavior instead of leaving refresh decisions entirely to the browser.
-
-## The Two Change-Notification Paths
-
-Sambee does not have a single watcher for all purposes.
-
-### Browser Notification Path
-
-`directory_monitor.py` is responsible for directory-specific monitoring tied to active WebSocket subscriptions.
-
-Its job is to:
-
-- start watching a directory when the first browser subscriber appears
-- share one SMB monitor across multiple subscribers for the same watched path
-- stop monitoring when the last subscriber leaves
-- send `directory_changed` messages back through the WebSocket layer
-
-This is the path that keeps an open file browser view fresh.
-
-### Directory-Cache Freshness Path
-
-`directory_cache.py` uses its own `CHANGE_NOTIFY` watcher for a different reason.
-
-Its job is to:
-
-- watch the share root or effective path prefix for directory-name changes
-- update SQLite directory rows for adds, removes, and renames
-- combine event-driven updates with periodic full rescans as a safety net
-- preserve fast directory-search behavior without rebuilding the entire cache on every navigation event
-
-This is not the same as the browser WebSocket monitor, even though both rely on SMB `CHANGE_NOTIFY`.
-
-## Browser Notification Flow
-
-At a high level, the browser-facing flow is:
-
-1. the browser opens the backend WebSocket endpoint
-2. it sends a subscription message for a connection and directory path
-3. `ConnectionManager` resolves access, applies any `path_prefix`, and starts monitoring if this is the first subscriber
-4. `DirectoryMonitor` opens SMB resources for that resolved directory and starts a background watcher thread
-5. when the SMB server reports a change, the backend emits `directory_changed` to all subscribers for the user-facing path
-6. when the last subscriber leaves, the monitor stops and releases its SMB resources
-
-Representative client messages include:
-
-- subscribe: `{ "action": "subscribe", "connection_id": "uuid", "path": "/dir" }`
-- unsubscribe: `{ "action": "unsubscribe", "connection_id": "uuid", "path": "/dir" }`
-- server notification: `{ "type": "directory_changed", "connection_id": "uuid", "path": "/dir" }`
-
-## Path Resolution and Subscription Keys
-
-One subtle but important part of the design is that browser subscriptions and SMB watches do not always use the same path string.
-
-The WebSocket layer keys subscriptions by the user-facing path.
-
-If the SMB connection has a `path_prefix`, the backend resolves the actual watched SMB path by combining:
-
-- the normalized connection prefix
-- the user-facing relative path
-
-That resolved SMB path is what `DirectoryMonitor` actually watches.
-
-The callback then maps notifications back to the user-facing path before sending `directory_changed` over the WebSocket.
-
-If you remove that mapping, subscriptions stop lining up with the paths the browser thinks it subscribed to.
-
-## Main Components
-
-| Path | Responsibility |
+| Component | Responsibility |
 |---|---|
-| `backend/app/api/websocket.py` | WebSocket endpoint, subscription bookkeeping, access checks, path-prefix resolution, and delivery of `directory_changed` events |
-| `backend/app/services/directory_monitor.py` | per-directory SMB watchers for active browser subscriptions |
-| `backend/app/services/directory_cache.py` | per-connection directory cache plus root-level `CHANGE_NOTIFY` watcher for cache freshness |
-| `backend/app/main.py` | application shutdown hooks for directory caches and directory monitors |
+| `backend/app/api/websocket.py` | Browser subscriptions, access checks, path-prefix mapping, and `directory_changed` delivery |
+| `backend/app/services/directory_monitor.py` | Shared per-directory SMB watchers for active browser subscriptions |
+| `backend/app/services/directory_cache.py` | Per-connection index lifecycle, recursive directory-name notifications, and background verification |
+| `backend/app/services/directory_index.py` | SQLite storage, generations, search, and maintenance |
+| `backend/app/services/directory_traversal.py` | Handle-bound SMB enumeration, identity validation, and exact missing-child checks |
+| `companion/src-tauri/src/server/directory_manager.rs` | Local-drive index lifecycle, native observations, and background workers |
+| `backend/app/main.py` | Backend monitor and cache shutdown |
 
-## Directory Monitor Lifecycle
+## Browser Notifications
 
-The browser-facing monitor is reference-counted by subscription demand.
+### Subscriptions and Paths
 
-`DirectoryMonitor` keeps one `MonitoredDirectory` per `connection_id:path` key and tracks subscriber counts.
+`DirectoryMonitor` shares one `MonitoredDirectory` per `connection_id:path`. The first subscriber starts it; the last unsubscribe stops it. A WebSocket disconnect must release that client's subscriptions.
 
-That means:
+The WebSocket layer uses user-facing paths. `ConnectionManager` applies the connection's `path_prefix` to obtain the native SMB path. Notification callbacks map that path back to the user-facing path before delivery. Subscription keys and native watch paths must not be used interchangeably.
 
-- the first subscriber starts the monitor
-- later subscribers reuse the same watched directory instance
-- unsubscribing decrements the count
-- the monitor only stops when the count reaches zero
+| Message | Example |
+|---|---|
+| Subscribe | `{ "action": "subscribe", "connection_id": "uuid", "path": "/dir" }` |
+| Unsubscribe | `{ "action": "unsubscribe", "connection_id": "uuid", "path": "/dir" }` |
+| Change notification | `{ "type": "directory_changed", "connection_id": "uuid", "path": "/dir" }` |
 
-This avoids opening duplicate SMB watcher handles for the same directory just because multiple browser clients are watching it.
+### Events and Refreshes
 
-## SMB Resource Management
+Browser watchers observe file names, directory names, sizes, and last-write changes in the subscribed directory's immediate children. They do not watch the whole subtree. A deep write does not invalidate every ancestor listing, although metadata changes reported for an immediate child directory can trigger a refresh.
 
-`MonitoredDirectory` owns low-level SMB resources directly.
+The browser retains loaded rows during automatic refresh, including an empty listing. It waits for an active listing request, combines notifications into one pending refresh, and starts at most one automatic refresh per second. Navigation and pane disposal cancel queued refreshes.
 
-Creation follows this order:
+`directory_changed` requests a new listing; it is not a file-difference protocol. See [File Browser and Navigation Model](../../frontend-architecture/file-browser-and-navigation-model/) for browser state and request handling.
 
-1. connection
-2. session
-3. tree connect
-4. directory open handle
-5. `FileSystemWatcher`
+### Resource Ownership
 
-Cleanup happens in reverse order so partial failure does not leak handles.
+A monitor acquires its connection, session, tree, directory handle, and `FileSystemWatcher` in that order. Cleanup runs in reverse order, including after partial initialization.
 
-That ordering is important because change-notification bugs are often really handle-lifecycle bugs.
-
-## Watched Events
-
-The browser-facing monitor currently watches for:
-
-- file-name changes
-- directory-name changes
-- size changes
-- last-write changes
-
-The browser-facing monitor watches only immediate children of the subscribed directory. Writes deeper in the tree, such as installing packages in a project's `node_modules` folder, don't invalidate an ancestor's file list. If the SMB server reports a metadata change for an immediate child directory, that change can still trigger a refresh.
-
-The directory-cache watcher is narrower by design.
-
-It watches directory-name changes across the tree because the cache only needs enough signal to update its directory index efficiently.
+Connection, socket, and timeout failures use capped exponential reconnect backoff with jitter. Deletion of the watched directory stops its monitor. Shutdown calls `shutdown_monitor()` to release watchers and SMB handles explicitly.
 
 ## Directory-Index Consistency
 
-The default backend cache manager now creates a SQLite-backed SMB source. Database validation and scanning run in a shared background task. Cold and empty queries return available status without waiting for the full scan. Initial batches are query-visible with partial coverage. An interrupted build is checked through a fresh candidate rather than accepted from its old scan queue.
+The backend and companion maintain SQLite directory indexes through shared background managers, not per-request tree walks. Cold queries return status while initialization proceeds. Committed initial batches are searchable with partial coverage; result limits do not limit indexed coverage or exact match counts.
 
-Verification builds a separate generation while existing rows remain selected. The coordinator checks a read's sequence, changed-prefix barriers, and scan epoch before committing children or completing a parent. Final selection also checks the root baseline. An overlapping change or lost observation invalidates the producer and retains a verification request. Queue overflow preserves already queued mutations. A failed SQL mutation stays queued for retry.
+The index watcher observes directory-name changes recursively from the share root or configured prefix. Events drive parent reconciliation. Periodic full verification covers missed notifications; it must not become a full rescan on every navigation or query.
 
-Directory rows, FTS entries, counts, and queued subtree paths change in one transaction. Remove and rename operations cannot leave obsolete scan paths behind. Unresolved issue rows prevent complete coverage. Event loss marks accepted coverage uncertain without deleting rows or advancing verification time.
+### Generations and Observation Order
 
-The manager shares one scan permit and two query permits across its sources. SMB scan batches are bounded by both rows and path bytes. Queries run off the API event loop and obtain results, relevance, exact counts, revision, and coverage from one read transaction. Cancelling a scan retains its SMB pool lease and process ownership until the blocking worker exits. Storage initialization failures keep a bounded background retry. Replacing a source does not wait for a stalled old close worker; that worker retains its ownership until it exits. Both managers reject late query results from stopped bindings.
+Full verification builds a candidate while the accepted generation remains selected. An interrupted initial build is verified through a fresh candidate. Only an issue-free full pass advances `last_verified_at_ms`; incremental changes, writes, and query access do not.
 
-The SQLite scanner does not descend into directory reparse points, including DFS referrals. DFS behavior, link-replacement containment, and excluded-root coverage still need traversal qualification before the new capability is enabled.
+Each source read has a producer token, scan epoch, and observation sequence. Changed-prefix barriers reject overlapping stale reads before child writes or parent completion. Lost events and queue overflow invalidate the epoch, retain admitted work, and request verification. Event loss marks accepted coverage uncertain without deleting its rows. Failed SQL mutations remain queued.
 
-### SQLite Persistence
+Candidate selection occurs under the coordinator lock after root revalidation. It requires a live baseline, the same epoch, no pending observations or uncertainty write, no other current-epoch producer, and no unfinished accepted or candidate parents. A later event remains queued for the selected generation.
 
-Backend databases use opaque source filenames under `data/directory_cache/sqlite/`, or the `sqlite/` namespace below `directory_cache_location`. Identity includes connection ID, host, port, share, normalized path prefix, username, and connection revision. Passwords are excluded from stored metadata. A changed runtime source or credential binding stops the previous source before replacement.
+Directory rows, FTS entries, counts, issues, queued subtree work, and revision updates must remain transactionally consistent. Queries read results and metadata from one selected-generation transaction.
 
-Live SQLite sources do not read or import JSONL snapshots. Legacy snapshot code remains only for migration test coverage while its replacement is completed. There are no periodic full-index exports in the live SQLite path.
+### Parent Reconciliation
 
-### Storage Qualification And Remaining Work
+Background workers reconcile affected parents between full passes. Additions and moved-in directories queue descendant reads; removals retire missing subtrees. Both rename parents are reconciled without requiring paired events. New-name hints do not insert an assumed directory, so a regular file cannot enter the index through a transfer notification.
 
-The shared SQLite schema and search fixtures are in `shared/directory-index/`. The Python storage module is `backend/app/services/directory_index.py`. The Rust storage module is `companion/src-tauri/src/server/directory_index.rs`.
+Reconciliation uses the same source identity, read-token, scan-admission, and bounded-write checks as full scans. Exact missing-child checks use a held, revalidated parent and the original native name. A listing omission, access error, redirected child, or failed cleanup is not proof of absence. Failed work remains pending. Reconciliation does not advance full-verification time or clear uncertainty and the verification request.
 
-Both modules are connected to their live directory APIs. The companion uses a shared background manager instead of a per-request walk or a discovery cutoff. Its independent readers can query committed initial batches while a scan continues. Exact counts are not limited by the returned-result cap. Recent-directory history, recent-file history, loaded files, and the indexes use independent search terms. The new index capability flag remains disabled until all required safety and policy controls are complete.
+Application mutation guards queue parent hints before dispatch and after the synchronous operation actually exits, including failure. They validate the active source binding and preserve the original operation result if hint delivery fails. Recursive SMB copy and deletion guard each child operation. Companion guards cover directory creation, rename, empty and recursive deletion, upload and file-transfer parent creation, and direct or relayed archive extraction.
 
-The companion stores SQLite catalogues under its OS-user cache directory in `directory-index/sqlite/`. Catalogue names are session-bound because durable root-identity reuse is not yet qualified. Linux traversal uses held directory descriptors, no-follow opens, exact native names, and device and mount checks. It classifies the held root filesystem to reject known kernel pseudo-filesystems. Device-tree roots and aliases on the same device as `/dev` are rejected; ordinary tmpfs data remains eligible. Native tests cover `/proc`, `/sys`, and `/dev`, links, unsupported names, and parent/root replacement. These checks do not certify every filesystem type. Root replacement retires the old binding. Other platforms refuse indexing until a safe native adapter is available. Idle companion sources release their readers, writers, and watcher after ten minutes when no worker or request still owns them. Stalled workers retain their actual permits until they exit.
+Parent creation queues checks for each source-relative ancestor. Retained archive workers bind these checks to the destination root, including resumed cross-drive extraction. Recursive deletion pages indexed subtree paths from active generations to queue affected parents without changing native deletion behavior. Queue refusal preserves accepted rows and requires verification. A missing hinted descendant queues an ancestor check; it is not proof of absence and does not start failure backoff.
 
-The Linux companion reconciles affected parents in the selected accepted generation between full verification passes. Observed mutations and their parent/subtree work commit together. The background update worker must obtain shared scan ownership before native reads, then uses the same descriptor, read-token, bounded child-write, and missing-child pruning checks as full scans. Added directories and moved-in subtrees are read; both rename parents are reconciled without requiring paired events. Reconciliation preserves complete-verification time and does not clear uncertainty or the full-pass request. Capacity refusal, storage refusal, and retry backoff retain queued work. Cleanup and checkpoints wait for that work to finish. Backend accepted-parent reconciliation and Windows traversal remain required.
+Cancellation or timeout cannot send a completion hint or release a producer early. Cooperative stale-read interruption leaves existing failure backoff unchanged so queued reconciliation can resume on the next maintenance tick.
 
-Both managers reserve shared write headroom and check filesystem free space before growing batches. Backend accounting includes SQLite sidecars, namespace temporary files, and legacy snapshots. Lowering a disk policy can pause growth without deleting accepted rows. These controls do not establish a hard physical disk ceiling or complete temporary-storage accounting.
+### Source Identity and Traversal
 
-Backend sources release idle handles after ten minutes when no scan, query, or blocking worker still uses them. A cancelled cleanup request retains the source until its close worker exits. The backend records query access separately from writes and verification. Its inactive cleanup applies retention, a bounded retained-source count, and disk-pressure eviction. Active-source registration and process leases prevent deletion of admitted or externally owned sources. Future access timestamps do not imply recent use.
+Catalogue names are session-bound. A changed source or credential binding stops the old source; retained rows must never be exposed as data from a replacement root. Cross-session catalogue reuse is disabled because durable root identity is not established.
 
-Both runtimes serialize source-lease creation and orphan-lease removal through a short-lived namespace process lease. Cleanup removes at most 64 orphan lease files per pass, only when no owner, main database, or sidecar remains. It closes the source lease before removal while retaining namespace ownership, which prevents a cooperating process from replacing the lease inode during the operation. The namespace lease remains in place. Tests cover namespace contention, retained source owners, sidecars, and bounded batches. These controls do not replace race-safe filesystem containment or qualify older processes that do not use the namespace protocol.
+| Source | Traversal rules |
+|---|---|
+| SMB | Direct no-follow handles without delete sharing or automatic DFS retries; retained ancestors; server, session, tree, volume, file ID, and native-name validation |
+| Linux local drive | Retained directory descriptors, no-follow opens, exact native names, device and mount checks; kernel pseudo-filesystems and device-tree aliases excluded |
+| Windows local drive | Retained no-delete ancestor handles, 128-bit file IDs, volume and native-device paths; bounded enumeration and strict UTF-16 decoding |
 
-Unix storage checks reject hard-linked main databases, WAL, SHM, and lease files. A second pathname must not open the same database inode with different sidecars. Tests verify rejection before a second source opens, while the original source remains readable. Windows hard-link qualification and concurrent filesystem replacement remain required.
+SMB DFS shares, unverified identities, changed ancestry, and volume crossings are refused. Reparse descendants and unsupported directory names produce coverage issues. Windows junctions, name-surrogate redirections, cloud placeholders, and unknown reparse tags are excluded rather than followed. Unsupported identity APIs must not trigger a path-only fallback.
 
-Backend initialization hides retained rows until a background root-listing probe succeeds. The probe uses nonblocking scan admission and retains the SMB pool lease through actual worker exit. Root-listing or pool-entry failure makes the binding unavailable without deleting its rows. The directory API returns a specific HTTP 503; late SQL results cannot bypass the availability check. Descendant failures remain separate from root loss. Invalid scan epochs cannot restore availability through a late root probe. Capacity refusal preserves known availability and retries through the existing loop without starting an unadmitted SMB read. These controls establish basic read availability, not stable SMB root identity, mount containment, or safe retained-data reuse after root replacement.
+Backend initialization withholds rows until a handle-bound root probe succeeds. Root identity, metadata, transport, or pool-entry failure makes the source unavailable without deleting accepted data; the directory API returns HTTP 503. Descendant access denial remains a separate partial-coverage condition. Late results cannot restore a stopped or invalidated binding.
 
-Both stores remove retired directory and scan-queue rows in bounded transactions. Successful verification and failed-candidate retirement queue this logical cleanup without changing selected results, revisions, or verification time. Cleanup defers for active query work. The native manager can schedule additional batches within a 250 ms slice, with a separate growth reservation for each transaction. It releases writer and observation locks between batches and gives priority to queries, scans, and pending observations. The slice limits scheduling, not operating-system call duration. Native subtree rename batches include all signed SQLite row IDs, including zero and negative values.
+### SQLite Storage
 
-The shared `schema.sql` defines directory rows and synchronization triggers; `fts.sql` defines the derived virtual table. Startup validates directory storage before checking FTS consistency. The shared `validate-generations.sql` checks exact directory and issue counts and a selected generation in a publishable state. SQLite integrity checks alone do not establish those application invariants. Invalid generation metadata is rejected before query publication. Missing or inconsistent FTS data uses complete literal scans of validated directory rows while a background scan worker rebuilds tokens in batches of at most 256 rows. Directory mutations wait for repair; pending observations remain queued. Repair does not change directory counts, revisions, or verification time. Interrupted repair restarts from validated rows, and storage failures retain scan-based search and bounded retry. Physical database corruption still fails closed. Full database replacement, FTS-reset headroom measurements, and recovery-failure qualification remain required.
+| Runtime | Location and driver |
+|---|---|
+| Backend | `data/directory_cache/sqlite/`, or `sqlite/` below `directory_cache_location`; standard Python `sqlite3` with Debian system SQLite |
+| Companion | `directory-index/sqlite/` in the OS-user cache directory; bundled Rust SQLite binding |
 
-Disk-admission failures request one coalesced reclamation job per source. The writer runs at most 256 incremental-vacuum pages per step, under the shared growth reservation, after pending updates and logical cleanup. Active scans, active queries, or pinned WAL readers defer the step. A passive checkpoint checks reader progress before reclamation; WAL truncation follows only when SQLite permits it. Tests verify reduced main-file page counts and unchanged search results, revision, and verification time. There is no periodic idle reclamation.
+Stored source metadata excludes passwords. Indexes are disposable directory data, separate from recent history. SQLite sources do not import legacy JSONL snapshots or export full-index mirrors.
 
-Normal WAL handling is independent of disk pressure. The existing update loop checks the shared 1 MiB WAL threshold outside the async executor. Below that threshold, it runs no checkpoint SQL and requests no maintenance reservation. Due checkpoints use shared headroom, defer for active work or pinned readers, and retry after readers release their snapshots. Tests verify truncation and unchanged results and freshness metadata. Complete disk accounting, operation-headroom measurements, and directory-database recovery remain required.
+The backend has no RAM catalogue or JSONL reader/writer fallback. Each cleanup pass can remove at most 64 recognized legacy snapshots, backups, or expired temporary files from the configured cache root. Recent temporary files remain until the inactive-retention interval expires. Cleanup skips unknown names, links, foreign-owned entries, and shared writable roots; these skipped files can still consume disk space.
 
-The companion applies inactive retention, retained-source count, and disk-pressure eviction under process leases. It checks the database application, schema, source kind, and unchanged access time before deletion. Active and externally owned databases remain protected. Its idle close runs outside the async executor and records last query access before releasing the lease. Failed access-time writes can cause disposable closed cache data to expire earlier; they do not affect history.
+Older binaries use separate snapshot names and cannot update SQLite catalogues. Stop the backend before switching binaries. A rollback rebuilds its disposable index when its snapshot is absent; it does not downgrade or import the SQLite database. Recent-file and recent-directory history remain separate and unchanged.
 
-Administration has separate backend and companion desired policies. Backend changes apply to live sources. Companion delivery requires a current administrator, a native challenge, and local approval of one backend owner. The backend issues a purpose-separated, single-use grant and checks administrator access again at redemption. The browser sends only that opaque grant. The companion redeems it directly with verified HTTPS, or HTTP on a literal loopback host; redirects are refused. It checks the companion, challenge, origin, backend identity, revision, and policy before storing the approved receipt. Failed delivery preserves the last approved policy. An admitted redemption continues if its browser request is cancelled. Native Preferences shows the owner and provides a confirmed local reset to defaults. The policy process lease remains held through actual worker exit. Only one native approval prompt can remain active, including after challenge expiry. Busy policy storage returns an actionable response instead of blocking status requests. Complete platform persistence and transport qualification remain required.
+`shared/directory-index/` owns the schema, FTS definition, generation validation, and search fixtures. `unicode.json` supplies shared normalization and word-character data for Rust and TypeScript; Python checks it against its interpreter's Unicode data. Runtime validation requires serialized threading, STRICT tables, RETURNING, and FTS5 with the specified trigram settings. The backend requires SQLite 3.37 or later; the companion requires 3.51.3 or later.
 
-Companion file-mutation APIs reject paths inside the configured native configuration and SQLite storage directories, and mutations of their ancestors. This includes create, delete, rename, move, and common destination resolution. Canonical path checks cover existing aliases and missing descendants. On Windows, component comparisons use the operating-system Unicode uppercase table through `CompareStringOrdinal`, not ASCII lowercasing. Comparison failures block mutations. Windows Unicode case-alias tests compile on the Debian cross-check host but still need native execution. These checks do not establish containment under concurrent path replacement or all Windows filesystem aliases.
+Both stores use WAL and `synchronous=FULL`. Active writes, checkpoints, maintenance, and close are serialized through the writer. Queries use strictly read-only connections and explicit transactions; they must never checkpoint or write. Close retains process ownership until admitted readers and workers finish. External writes to active managed indexes are unsupported. Preserve this ownership model when changing checkpoint behavior; see SQLite's [WAL reset-race documentation](https://www.sqlite.org/wal.html#walresetbug).
 
-Policy-origin bindings must contain at most 2,048 UTF-8 bytes, both before and after URL canonicalization. Backend tests cover oversized Unicode input, oversized canonical host names, and the exact byte boundary.
+Storage must be private and local. Backend ancestors must be real directories owned by the service account or root; group/public write access requires a trusted sticky parent. The namespace must be service-owned with mode 0700. Unix checks reject hard-linked database, sidecar, and lease files. Namespace leases serialize source-lease creation and orphan cleanup; active or externally owned database families cannot be evicted.
 
-Native policy selection checks source locks before changing runtime settings. It serializes source initialization against policy changes and restores each writer's actual cache target when persistence fails. The reported resource policy changes only after persistence succeeds. Failed policy-file selection attempts to restore the previous file. If storage cannot be restored, further delivery is blocked with a specific native recovery message. Reset checks manager availability before clearing the stored owner. Platform durability and concurrent failure qualification remain required.
+### Resource Controls
 
-The storage tests cover source-kind and identity checks, strict integer storage, row and FTS transactions, separate verification generations, literal any-term matching, exact unique counts, and bounded returned results. Both runtimes have private-storage checks, process leases, transactional subtree mutations, and disk scan queues. Python tests also cover worker admission, stale scan rejection, queue overflow, uncertain coverage, API metadata, and off-loop queries. Close retains the writer and process lease until admitted work finishes. Both runtimes test generated 100,001-path and opt-in 1,000,001-path catalogues, including trigram searches, short-term full scans, a three-result limit, and reopen validation. The explicit compatibility test opens a Python `sqlite3`-created database through Rust source validation and checks process-lease exclusion. These storage tests do not establish full native traversal safety, resource-policy enforcement, or production performance.
+| Control | Rule |
+|---|---|
+| Worker admission | One shared scan permit and two query permits per manager |
+| Scan and bulk-write batches | Bounded by both row count and input path bytes before row-key construction |
+| Child paging | Ordered index scan with a row- and byte-bounded sorted buffer, including branches without ancestor rows |
+| Observations | Entry- and byte-bounded pending queues and changed-prefix barriers |
+| Disk growth | Shared write-headroom reservation and filesystem free-space check before growth |
+| Maintenance | Bounded retired-row cleanup and incremental vacuum; pending updates, scans, queries, and pinned readers take priority |
 
-On the Debian test host, both drivers reported the same sampled database and sidecar sizes:
+Policy ranges and defaults belong to `shared/directory-index/contract.json`, not duplicated runtime settings. Lowering a disk budget may pause growth but must not trim active accepted rows. Retention and disk-pressure eviction apply only to inactive, unowned catalogues. Query access is recorded separately from writes and verification.
 
-| Generated rows | Managed bytes after insertion |
-|---|---:|
-| 100,001 | 20,315,120 |
-| 1,000,001 | 167,534,064 |
+Normal WAL handling checks a 1 MiB threshold outside the async executor. Below it, no checkpoint SQL or maintenance reservation is requested. Due checkpoints use shared headroom, defer for active work or pinned readers, and retry when readers release their snapshots. Disk-pressure reclamation is coalesced per source; it is not periodic idle work.
 
-These measurements precede the backend conversion from APSW to standard `sqlite3`. The combined two-fixture Python run took 29.99 seconds and reached 193,144 KiB peak process RSS. The Rust debug test binary took 60.88 seconds and reached 24,164 KiB peak process RSS, excluding compilation. Each run includes initialization, insertion, searches, reopen checks, and cleanup; these are not query-latency measurements. Python includes pytest and application fixtures, while Rust uses a library test binary rather than the running Tauri application. Do not compare these figures as equivalent application memory measurements. Disk sampling is not a peak-storage guarantee. Concurrent manager jobs, descriptor use, worst-case Unicode paths, temporary storage, and native application resource measurements remain required.
+Disk admission is not a hard physical allocation ceiling. Complete SQL temporary-storage accounting, operation headroom, and application peak-resource limits are not established by these controls.
 
-`shared/directory-index/unicode.json` defines normalization keys, whitespace, and word-character ranges for search contract version 1. Generate it with `backend/.venv/bin/python scripts/generate-search-unicode-contract.py`; use `--check` to detect stale data. Rust and TypeScript use the generated Unicode 16.0 table. Python tests compare it with the backend interpreter's Unicode data. This avoids runtime-dependent case folding and word boundaries. TypeScript maps normalized matches back to original UTF-16 display ranges and merges overlapping highlights.
+### Recovery and Shutdown
 
-Backend directory indexes use Python's standard `sqlite3`, with the same Debian system SQLite library as the application database. The test host uses SQLite 3.46.1. No separate Python SQLite binding or custom SQLite build is required. Runtime validation checks serialized threading, SQLite 3.37 or later, STRICT tables, RETURNING, and the required FTS5 trigram settings. The production and devcontainer validation workflows run this check against their actual images. The Rust companion retains its maintained bundled SQLite build and its 3.51.3 minimum.
+Startup validates application and source identities, schema, directory rows, generation counts, and issues before publishing a reader. SQLite integrity checks alone do not establish application consistency.
 
-Both stores retain WAL and `synchronous=FULL`. SQLite's [WAL documentation](https://www.sqlite.org/wal.html#walresetbug) describes a reset race between writes and checkpoints on different connections. Each active backend index uses one connection for all writes, checkpoints, and maintenance under the same writer lock. Queries open strictly read-only connections and use explicit read transactions. Closure retains the writer lock and process lease until readers finish. Inactive cleanup can open a writer only while it holds the process lease after the active writer has closed; a busy checkpoint prevents deletion. External writes to active managed indexes are unsupported. This prevents the affected concurrent-write/checkpoint configuration; it does not claim that Debian has backported the fix. Continue Debian security updates through normal Docker builds. These checks do not certify filesystem durability on unavailable platforms.
+Missing or inconsistent FTS data uses complete literal scans of validated rows while tokens rebuild in bounded background batches. Mutations wait; observations remain queued. Repair preserves counts, revisions, and verification time. Token-reset failure must not authorize replacement of valid directory rows.
 
-Remaining work includes race-safe storage and traversal containment, a Windows traversal adapter, complete event reconciliation, backend root availability, complete disk accounting and operation-headroom measurements, directory-database recovery, and application-level million-path resource measurements. macOS directory indexing is outside the approved scope. Policy delivery also needs full native-platform and failure qualification. Do not enable the new index capability before those controls and their tests are complete.
+Background replacement is limited to recognized application-schema or policy incompatibility, invalid core metadata, failed integrity or generation checks, and SQLite corruption or invalid-database errors. Wrong application/source identity, busy storage, FULL, general I/O errors, and permission failures do not authorize discard. Replacement retains the source lease and requires operation headroom. Fresh data starts empty with partial coverage and no complete-verification time.
+
+Each namespace has one rejected family, `.rejected-directory-index`, including sidecars and a separate lease. Pressure cleanup may remove it only when unowned. Ordinary move failures attempt to restore moved members and preserve the primary error. A failed replacement cannot cause a repeated discard loop on the same source. Restore capacity and permissions before reconnecting after a storage failure; family moves are not guaranteed crash-atomic.
+
+Initialization and verification failures use bounded retries with source-specific jitter. Existing accepted rows remain usable only while the source is available. Healthy and degraded verification intervals are separate from failure backoff; repeated requests must not bypass a retry deadline.
+
+Idle sources release readers, writers, root handles, and watchers after ten minutes without active ownership. Cancellation does not release a still-running worker's SMB pool lease, producer, or process lease. Source replacement need not wait for that old worker, but its results must be rejected. Backend shutdown calls `shutdown_directory_cache()` and waits for admitted work before closing storage and root ownership.
+
+### Resource Policy Ownership
+
+Backend and companion policies have separate host scopes. Backend settings apply to live sources. Companion delivery requires administrator authority, a native challenge, and local approval of one backend owner. The browser carries only an opaque single-use grant; the companion redeems it directly over verified HTTPS, or HTTP to a literal loopback host, without redirects. Failed delivery preserves the last approved policy.
+
+Native policy changes serialize against source initialization. Persistence failure restores prior runtime targets; failed recovery blocks further delivery with a specific error. Native Preferences provides a confirmed owner reset. Companion mutation APIs must protect the configuration and SQLite directories, including their ancestors and filesystem aliases.
+
+### Support Limits
+
+The new directory-index search capability remains disabled. Storage and traversal replacement races, full mutation coverage, live SMB root/mount and idle/sleep recovery, complete resource accounting, interrupted recovery, and policy transport/persistence require further qualification before activation.
+
+Linux native behavior and Windows cross-compilation are different kinds of evidence. Cross-compilation does not establish Windows handle, filesystem-alias, mapped-volume, provider, or recovery behavior. macOS directory indexing is unavailable. Generated storage fixtures do not establish native traversal speed, application memory use, or production latency.
 
 ### Progressive Quick-Bar Results
 
-`SearchProvider.fetchResults` accepts an optional complete-array update callback. The directory provider uses the same merge path for updates and the final result. It installs recent-history selection records before publishing history rows. The file provider publishes selectable loaded-file matches before history completes. A history failure retains loaded matches and displays a specific connection error. Request generations and source bindings prevent old completions from replacing newer selection records.
+Quick-bar consumers must distinguish partial or uncertain coverage, source unavailability, and query failure. Usable history and loaded-file results remain available while slower index work completes. Index results carry exact counts and coverage metadata; the returned-result cap does not imply incomplete indexing.
 
-The shared bar supports one quiet-refresh timeout after each accepted response. Refresh uses the same fetch and publication path without a foreground spinner or focus change. Typing, dismissal, source changes, hidden tabs, and terminal failures stop obsolete work. Providers must opt in through `getRefreshIntervalMs`; the directory provider requires search contract version 1 and an active build or update. Legacy endpoints never trigger automatic index polling.
+Providers publish selectable records before result rows and reject obsolete query/source responses. Quiet index refresh requires an explicit compatible search capability; it must not poll legacy full-scan endpoints. Typing, dismissal, source changes, hidden tabs, and terminal failures stop obsolete refresh work. See [File Browser and Navigation Model](../../frontend-architecture/file-browser-and-navigation-model/) for presentation and selection behavior.
 
-Quiet index refresh reuses history for the active query. Explicit history-change, window-focus, and tab-visibility refresh tokens invalidate that reuse. Shared ranking uses distinct matched-term count first, then best single-term quality and deterministic Unicode code-point ties, including before loaded-file limits. Duplicate matches retain the history representation and action while taking the best valid relevance from either source. Files match basenames only. History services stream accessible per-user records before their bounded top-result selection. Invalid query limits return HTTP 400 rather than a server error.
-
-The shared bar rejects obsolete request and query updates and preserves selection by value. Input changes and dismissal cancel the request. Recent directories use the history icon; indexed folders retain the folder icon and directory text style. The directory provider displays incomplete or uncertain coverage and source status messages while retaining usable rows. A late warm-up response cannot replace newer query status. Automatic index refresh remains gated by the disabled new search capability.
-
-## Recovery and Failure Handling
-
-The directory monitor treats connection failures as part of normal long-lived operation, not as impossible edge cases.
-
-Current behavior includes:
-
-- exponential backoff for reconnect attempts
-- retry jitter to avoid synchronized reconnect storms
-- capped retry attempts before giving up
-- explicit detection of connection, socket, and timeout failures
-- stop-on-delete behavior when the watched directory itself is deleted
-
-The cache watcher has its own retry loop and also tolerates `CHANGE_NOTIFY` buffer-overflow conditions by relying on later rescans to restore correctness.
-
-That distinction matters: browser notification is path-specific and subscriber-driven, while the cache watcher is connection-scoped and consistency-oriented.
-
-## Shutdown Behavior
-
-Sambee shuts these systems down explicitly.
-
-During application shutdown:
-
-- directory caches are stopped through `shutdown_directory_cache()`
-- directory monitors are stopped through `shutdown_monitor()`
-
-That explicit shutdown path exists to release watcher threads and SMB handles cleanly instead of depending on interpreter teardown.
-
-## Performance Characteristics
-
-The design tries to keep freshness inexpensive without resorting to constant polling.
-
-- SMB `CHANGE_NOTIFY` is event-driven rather than poll-based
-- multiple browser subscribers share one monitor for the same watched path
-- browser-facing monitors don't request recursive subtree notifications
-- each browser pane keeps loaded physical-directory rows visible during automatic refreshes, including a previously loaded empty listing
-- automatic refreshes wait for an active listing request and combine newer notifications into one pending refresh, starting at most once per second
-- navigation and pane disposal cancel queued refreshes
-- directory-cache updates avoid full rescans for every single directory rename or add event
-- periodic rescans remain in place as a correctness safety net, not the primary freshness mechanism
-
-## Limits and Tradeoffs
-
-Contributors need to preserve a few constraints here.
-
-- this requires SMB2 or later
-- some notifications can still be missed during network instability, which is why manual refresh and periodic cache rescans still matter
-- the browser-facing path is optimized for telling clients to refresh, not for transmitting rich per-file diffs
-- cache freshness and browser freshness are related concerns, but they are not the same subsystem and should not be collapsed casually
-
-## Common Failure Modes
-
-- path-prefix resolution is ignored, so the monitor watches the wrong SMB directory
-- subscriber bookkeeping drifts, so monitors are leaked or stopped too early
-- WebSocket disconnect cleanup forgets to release the last subscriber's monitor
-- a recovery change handles one timeout path but leaks SMB resources on reconnect
-- buffer-overflow or rename-edge handling is simplified in ways that quietly degrade cache correctness
+Companion browse-request completion logs contain the method, an allow-listed route template, HTTP status, monotonic duration, cancellation flag, and an optional validated revision. Unknown routes use a fixed placeholder. These debug records exclude request URLs, drive identities, terms, paths, headers, bodies, error text, grants, and signed values. Pairing-start logs contain no pairing identities, nonces, or displayed codes.
 
 ## Where to Continue
 
-- Use [Request Flow and Service Boundaries](../request-flow-and-service-boundaries/) for the broader backend layering model.
-- Use [File Operations and Edit Locking](../file-operations-and-edit-locking/) when the changed behavior interacts with uploads, moves, renames, or companion-assisted editing.
-- Use [Test Strategy Overview](../../testing-and-quality-gates/test-strategy-overview/) when the change requires wider backend or browser validation.
+- [Request Flow and Service Boundaries](../request-flow-and-service-boundaries/): backend service ownership
+- [File Operations and Edit Locking](../file-operations-and-edit-locking/): uploads, moves, renames, and edit sessions
+- [Local-Drive and Save-Back Pipeline](../../companion-architecture/local-drive-and-save-back-pipeline/): companion file operations
+- [Test Strategy Overview](../../testing-and-quality-gates/test-strategy-overview/): test scope and repository gates
 
 ## Validation Expectations
 
-When you change SMB change-notification behavior, usually run:
+Select focused watcher, cache, storage, directory API, and SMB operation tests for the changed boundary. Verify source binding, partial failures, lost events, stale-read rejection, exact counts, and retained ownership through cancellation. For example:
 
 ```bash
-cd backend && pytest -v
-cd backend && mypy app
+cd backend
+.venv/bin/python -m pytest tests/test_directory_cache.py tests/test_directory_index_contract.py tests/test_directory_search.py tests/test_smb_backend.py
+.venv/bin/python -m mypy app
 ```
 
-If the change affects browser-visible refresh behavior, add the relevant frontend checks as well.
+For companion index changes, run the relevant Rust manager, storage, traversal, and handler tests. Add frontend checks when refresh, status, selection, or progressive result behavior changes.

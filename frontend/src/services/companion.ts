@@ -261,7 +261,7 @@ class CompanionService {
    * the companion's nonce, and computes the 6-character pairing code.
    *
    * @returns Object with `pairingId`, `pairingCode`, and the internal
-   *          `nonceBrowser` (needed for logging/debugging only).
+   *          `nonceBrowser` used to derive the pairing code.
    */
   async initiatePairing(): Promise<{
     pairingId: string;
@@ -283,7 +283,7 @@ class CompanionService {
     const hash = await sha256Hex(combined);
     const pairingCode = hash.slice(0, 6).toUpperCase();
 
-    logger.info("Pairing initiated", { pairingId: pairing_id, pairingCode }, "companion");
+    logger.info("Pairing initiated", {}, "companion");
 
     return { pairingId: pairing_id, pairingCode, nonceBrowser };
   }

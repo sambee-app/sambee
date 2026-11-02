@@ -256,6 +256,9 @@ impl DiskBudget {
     }
 
     fn cleanup_inactive(&self, policy: &DirectoryPolicy, reserved: u64, pressure: bool, now_ms: i64) -> Result<usize, IndexError> {
+        if pressure {
+            let _ = super::directory_index::discard_quarantine(&self.namespace);
+        }
         let entries = match std::fs::read_dir(&self.namespace) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
@@ -507,6 +510,17 @@ impl Observations {
                 .any(|(sequence, path)| *sequence > token.sequence && (parent.is_empty() || overlaps(path, parent)))
     }
 
+    fn can_capture(&self, token: ObservationToken) -> bool {
+        self.producers.get(&token.producer) == Some(&token)
+            && token.epoch == self.epoch
+            && !self.uncertain
+            && self.pending.is_empty()
+            && !self
+                .producers
+                .values()
+                .any(|other| other.epoch == self.epoch && other.producer != token.producer)
+    }
+
     fn end_read(&mut self, token: ObservationToken) {
         if self.producers.get(&token.producer) == Some(&token) {
             self.producers.remove(&token.producer);
@@ -599,6 +613,96 @@ impl Drop for ObservationRead {
         }
     }
 }
+
+/// Retain producer ownership until the synchronous mutation worker actually exits.
+struct MutationObservation {
+    read: ObservationRead,
+    parent: String,
+    subtree: Option<String>,
+    ancestors: bool,
+}
+
+impl MutationObservation {
+    fn observe(&self) {
+        let source = &self.read.source;
+        if source.stopped.load(Ordering::Acquire) {
+            return;
+        }
+        let outcome = (|| {
+            lock(&source.root)?
+                .as_ref()
+                .ok_or(IndexError::Invalid("Directory source identity is unavailable."))?
+                .verify()?;
+            let admitted = lock(&source.observations)?.enqueue(
+                DirectoryMutation::ReadParent { path: self.parent.clone() },
+                limit("max_pending_observations")?,
+                limit("max_observation_bytes")?,
+            )?;
+            if !admitted {
+                return Ok(());
+            }
+            if self.ancestors {
+                let mut parent = self.parent.as_str();
+                while !parent.is_empty() {
+                    parent = parent.rsplit_once('/').map_or("", |(ancestor, _)| ancestor);
+                    if !lock(&source.observations)?.enqueue(
+                        DirectoryMutation::ReadParent { path: parent.to_owned() },
+                        limit("max_pending_observations")?,
+                        limit("max_observation_bytes")?,
+                    )? {
+                        return Ok(());
+                    }
+                }
+            }
+            if let Some(subtree) = &self.subtree {
+                let generations = lock(&source.writer)?
+                    .as_ref()
+                    .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+                    .mutation_generations()?;
+                for generation in generations {
+                    let mut cursor = None;
+                    loop {
+                        if source.stopped.load(Ordering::Acquire) {
+                            return Ok(());
+                        }
+                        let paths = lock(&source.writer)?
+                            .as_ref()
+                            .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+                            .mutation_subtree_paths(generation, subtree, cursor.as_deref())?;
+                        if paths.is_empty() {
+                            break;
+                        }
+                        for path in paths {
+                            let parent = path.rsplit_once('/').map_or("", |(parent, _)| parent).to_owned();
+                            if !lock(&source.observations)?.enqueue(
+                                DirectoryMutation::ReadParent { path: parent },
+                                limit("max_pending_observations")?,
+                                limit("max_observation_bytes")?,
+                            )? {
+                                return Ok(());
+                            }
+                            cursor = Some(path);
+                        }
+                    }
+                }
+            }
+            Ok::<(), IndexError>(())
+        })();
+        if outcome.is_err() {
+            if source.invalidate().is_err() {
+                log::warn!("Directory mutation observations could not be invalidated. Restart the companion.");
+            }
+            log::warn!("Directory mutation reconciliation was not queued. Check drive access and retry verification.");
+        }
+    }
+}
+
+impl Drop for MutationObservation {
+    fn drop(&mut self) {
+        self.observe();
+    }
+}
+
 struct SourceStatus {
     state: &'static str,
     message: Option<String>,
@@ -657,6 +761,7 @@ struct LocalSource {
     active_queries: AtomicUsize,
     stopped: AtomicBool,
     root_invalid: AtomicBool,
+    recovery_attempted: AtomicBool,
     finished: Notify,
 }
 
@@ -724,6 +829,7 @@ impl LocalSource {
             flush_busy: AtomicBool::new(false),
             cleanup_pending: AtomicBool::new(true),
             reclamation_pending: AtomicBool::new(false),
+            recovery_attempted: AtomicBool::new(false),
             active_queries: AtomicUsize::new(0),
             stopped: AtomicBool::new(false),
             root_invalid: AtomicBool::new(false),
@@ -737,11 +843,19 @@ impl LocalSource {
     }
 
     fn fail(&self, error: &IndexError, _budget: &DiskBudget) {
+        if matches!(error, IndexError::Interrupted) {
+            if let Ok(mut status) = self.status.lock() {
+                status.state = "ready";
+            }
+            return;
+        }
         if matches!(error, IndexError::StoragePaused(_)) {
             self.reclamation_pending.store(true, Ordering::Release);
         }
         let message = match error {
-            IndexError::Invalid(message) | IndexError::StoragePaused(message) => (*message).to_owned(),
+            IndexError::Invalid(message) | IndexError::RebuildRequired(message) | IndexError::StoragePaused(message) => {
+                (*message).to_owned()
+            }
             _ => "Directory verification failed. Check drive access and private local storage, then retry.".to_owned(),
         };
         if let Ok(mut status) = self.status.lock() {
@@ -1028,7 +1142,14 @@ impl LocalSource {
                 let name = path.strip_prefix(&prefix).ok_or(IndexError::Invalid(
                     "Indexed child is outside its observed parent. Rebuild this source.",
                 ))?;
-                if !root.has_directory_child(parent, parent_identity, name)? {
+                if !root.has_directory_child_with_check(parent, parent_identity, name, || {
+                    self.progress()?;
+                    let observations = lock(&self.observations)?;
+                    if self.stopped.load(Ordering::Acquire) || !observations.is_current(scan.read, parent) {
+                        return Err(IndexError::Interrupted);
+                    }
+                    Ok(())
+                })? {
                     loop {
                         self.progress()?;
                         root.verify_parent(parent, parent_identity)?;
@@ -1060,14 +1181,16 @@ impl LocalSource {
     ) -> Result<(), IndexError> {
         root.verify()?;
         let mut observations = lock(&self.observations)?;
-        if !observations.is_current(baseline, "") || !observations.pending.is_empty() || self.stopped.load(Ordering::Acquire) {
+        if !observations.can_capture(baseline) || self.stopped.load(Ordering::Acquire) {
             return Err(IndexError::Interrupted);
         }
         let _reservation = budget.reserve()?;
-        let complete = lock(&self.writer)?
-            .as_mut()
-            .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
-            .finish_generation(generation, 0)?;
+        let mut writer = lock(&self.writer)?;
+        let writer = writer.as_mut().ok_or(IndexError::Invalid("Directory writer is unavailable."))?;
+        if writer.reconciliation_generation()?.is_some() || !writer.pending_scan_paths(generation, 1)?.is_empty() {
+            return Err(IndexError::Interrupted);
+        }
+        let complete = writer.finish_generation(generation, 0)?;
         let mut status = lock(&self.status)?;
         status.state = "ready";
         status.complete_pass(Instant::now());
@@ -1083,7 +1206,50 @@ impl LocalSource {
     }
 
     fn scan_parent(self: &Arc<Self>, root: &NativeRoot, generation: i64, parent: &str, budget: &Arc<DiskBudget>) -> Result<(), IndexError> {
+        self.with_parent_read(root, parent, |read| self.scan_parent_read(root, generation, parent, read, budget))
+    }
+
+    fn with_parent_read(
+        self: &Arc<Self>,
+        root: &NativeRoot,
+        parent: &str,
+        operation: impl FnOnce(&ObservationRead) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
         let read = self.begin_read()?;
+        match operation(&read) {
+            Err(IndexError::Io(error))
+                if !parent.is_empty() && matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) =>
+            {
+                root.verify()?;
+                match root.parent_identity(parent) {
+                    Err(IndexError::Io(current))
+                        if matches!(current.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => {}
+                    Ok(_) => return Err(IndexError::Io(error)),
+                    Err(error) => return Err(error),
+                }
+                let mut observations = lock(&self.observations)?;
+                if self.stopped.load(Ordering::Acquire) || !observations.is_current(read.token, parent) {
+                    return Err(IndexError::Interrupted);
+                }
+                observations.enqueue(
+                    parent_observation(parent),
+                    limit("max_pending_observations")?,
+                    limit("max_observation_bytes")?,
+                )?;
+                Err(IndexError::Interrupted)
+            }
+            result => result,
+        }
+    }
+
+    fn scan_parent_read(
+        self: &Arc<Self>,
+        root: &NativeRoot,
+        generation: i64,
+        parent: &str,
+        read: &ObservationRead,
+        budget: &Arc<DiskBudget>,
+    ) -> Result<(), IndexError> {
         let parent_identity = root.parent_identity(parent)?;
         let mut batch = Vec::with_capacity(ROW_BATCH_SIZE);
         let mut bytes = 0;
@@ -1247,6 +1413,57 @@ impl LocalSource {
         outcome
     }
 
+    fn scan_to_acceptance(
+        self: &Arc<Self>,
+        root: &NativeRoot,
+        baseline: ObservationToken,
+        generation: i64,
+        budget: &Arc<DiskBudget>,
+    ) -> Result<(), IndexError> {
+        self.scan_to_acceptance_with(root, baseline, generation, budget, |generation, parent| {
+            self.scan_parent(root, generation, parent, budget)
+        })
+    }
+
+    fn scan_to_acceptance_with(
+        self: &Arc<Self>,
+        root: &NativeRoot,
+        baseline: ObservationToken,
+        generation: i64,
+        budget: &Arc<DiskBudget>,
+        mut scan_parent: impl FnMut(i64, &str) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        loop {
+            if self.stopped.load(Ordering::Acquire) {
+                return Err(IndexError::Interrupted);
+            }
+            let needs_flush = {
+                let observations = lock(&self.observations)?;
+                if observations.epoch != baseline.epoch {
+                    return Err(IndexError::Interrupted);
+                }
+                observations.uncertain || !observations.pending.is_empty()
+            };
+            if needs_flush {
+                self.flush(budget)?;
+            }
+            if !lock(&self.observations)?.pending.is_empty() {
+                continue;
+            }
+            let (work_generation, parents) = {
+                let writer = lock(&self.writer)?;
+                let writer = writer.as_ref().ok_or(IndexError::Invalid("Directory writer is unavailable."))?;
+                let work_generation = writer.reconciliation_generation()?.unwrap_or(generation);
+                (work_generation, writer.pending_scan_paths(work_generation, 1)?)
+            };
+            let Some(parent) = parents.first() else {
+                break;
+            };
+            scan_parent(work_generation, parent)?;
+        }
+        self.accept_generation(root, baseline, generation, budget)
+    }
+
     fn scan(self: &Arc<Self>, budget: &Arc<DiskBudget>) -> Result<(), IndexError> {
         self.progress()?;
         let root = match lock(&self.root)?.clone() {
@@ -1258,10 +1475,11 @@ impl LocalSource {
         };
         if lock(&self.writer)?.is_none() {
             let _reservation = budget.reserve()?;
-            let mut index = DirectoryIndex::open(
+            let mut index = DirectoryIndex::open_with_recovery(
                 &self.index_path,
                 SourceKind::Local,
                 &json!({"platform": std::env::consts::OS, "root_identity": root.identity, "session": self.session}),
+                Some(&self.recovery_attempted),
             )?;
             let _policy_gate = lock(&budget.policy_gate)?;
             index.configure_page_cache(budget.policy()?.page_cache_kib)?;
@@ -1288,7 +1506,7 @@ impl LocalSource {
         }
         self.flush(budget)?;
         let baseline = self.begin_read()?;
-        let (epoch, generation, selected) = {
+        let (generation, selected) = {
             let observations = lock(&self.observations)?;
             if !observations.is_current(baseline.token, "") {
                 return Err(IndexError::Interrupted);
@@ -1298,24 +1516,9 @@ impl LocalSource {
             let index = writer.as_mut().ok_or(IndexError::Invalid("Directory writer is unavailable."))?;
             let (generation, selected) = index.prepare_scan()?;
             index.seed_scan(generation)?;
-            (observations.epoch, generation, selected)
+            (generation, selected)
         };
-        let outcome = (|| {
-            loop {
-                if self.stopped.load(Ordering::Acquire) || lock(&self.observations)?.epoch != epoch {
-                    return Err(IndexError::Interrupted);
-                }
-                let parents = lock(&self.writer)?
-                    .as_ref()
-                    .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
-                    .pending_scan_paths(generation, 1)?;
-                let Some(parent) = parents.first() else {
-                    break;
-                };
-                self.scan_parent(&root, generation, parent, budget)?;
-            }
-            self.accept_generation(&root, baseline.token, generation, budget)
-        })();
+        let outcome = self.scan_to_acceptance(&root, baseline.token, generation, budget);
         if outcome.is_err() {
             self.invalidate()?;
             if !selected {
@@ -1377,9 +1580,105 @@ pub struct LocalDirectoryManager {
     updates: Arc<Semaphore>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MutationScope {
+    Parent,
+    Subtree,
+    Ancestors,
+}
+
 impl LocalDirectoryManager {
     pub(super) fn storage_directory(&self) -> &Path {
         &self.budget.namespace
+    }
+
+    /// Call inside the blocking worker, not in the async future that waits for it.
+    pub(super) fn run_observed_operation<T>(&self, drive: &str, root: &Path, path: &Path, operation: impl FnOnce() -> T) -> T {
+        self.run_observed_mutation(drive, root, path, MutationScope::Parent, operation)
+    }
+
+    pub(super) fn run_observed_subtree_operation<T>(&self, drive: &str, root: &Path, path: &Path, operation: impl FnOnce() -> T) -> T {
+        self.run_observed_mutation(drive, root, path, MutationScope::Subtree, operation)
+    }
+
+    pub(super) fn run_observed_parent_creation<T>(&self, drive: &str, root: &Path, path: &Path, operation: impl FnOnce() -> T) -> T {
+        self.run_observed_mutation(drive, root, path, MutationScope::Ancestors, operation)
+    }
+
+    pub(super) fn run_observed_root_creation<T>(&self, root: &Path, path: &Path, operation: impl FnOnce() -> T) -> T {
+        let bindings = lock(&self.sources).map(|sources| {
+            sources
+                .iter()
+                .filter(|(_, source)| source.root_path == root && !source.stopped.load(Ordering::Acquire))
+                .map(|(drive, _)| drive.clone())
+                .collect::<Vec<_>>()
+        });
+        let _observations = match bindings {
+            Ok(bindings) => bindings
+                .iter()
+                .filter_map(|drive| self.mutation_observation(drive, root, path, MutationScope::Ancestors))
+                .collect::<Vec<_>>(),
+            Err(_) => {
+                log::warn!("Archive directory observation is unavailable. Restart the companion and retry verification.");
+                Vec::new()
+            }
+        };
+        operation()
+    }
+
+    fn run_observed_mutation<T>(&self, drive: &str, root: &Path, path: &Path, scope: MutationScope, operation: impl FnOnce() -> T) -> T {
+        let _observation = self.mutation_observation(drive, root, path, scope);
+        operation()
+    }
+
+    fn mutation_observation(&self, drive: &str, root: &Path, path: &Path, scope: MutationScope) -> Option<MutationObservation> {
+        let observation = (|| {
+            let source = lock(&self.sources)?.get(drive).cloned();
+            let Some(source) = source.filter(|source| source.root_path == root && !source.stopped.load(Ordering::Acquire)) else {
+                return Ok(None);
+            };
+            let prepare = (|| {
+                let relative = path
+                    .strip_prefix(root)
+                    .ok()
+                    .and_then(|path| path.to_str())
+                    .ok_or(IndexError::Invalid(
+                        "Directory mutation is outside its bound source or uses unsupported encoding.",
+                    ))?;
+                #[cfg(windows)]
+                let relative = relative.replace('\\', "/");
+                let relative = relative.to_owned();
+                if !relative.is_empty() || scope != MutationScope::Ancestors {
+                    validate_directory_path(&relative)?;
+                }
+                if relative.len() > limit("max_observation_bytes")? {
+                    return Err(IndexError::Invalid("Directory mutation path exceeds the observation byte limit."));
+                }
+                Ok(MutationObservation {
+                    read: source.begin_read()?,
+                    parent: relative.rsplit_once('/').map_or("", |(parent, _)| parent).to_owned(),
+                    subtree: (scope == MutationScope::Subtree).then_some(relative),
+                    ancestors: scope == MutationScope::Ancestors,
+                })
+            })();
+            match prepare {
+                Ok(observation) => {
+                    observation.observe();
+                    Ok(Some(observation))
+                }
+                Err(error) => {
+                    source.invalidate()?;
+                    Err(error)
+                }
+            }
+        })();
+        match observation {
+            Ok(observation) => observation,
+            Err(_) => {
+                log::warn!("Directory mutation observation is unavailable. Check drive access and retry verification.");
+                None
+            }
+        }
     }
 
     pub fn apply_policy(&self, policy: DirectoryPolicy) -> Result<(), IndexError> {
@@ -1774,6 +2073,366 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn cooperative_mutation_interruption_preserves_retry_deadline_and_failure_state() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(temporary.path().join("root"), manager.storage_directory());
+        for resource_failure in [false, true] {
+            if resource_failure {
+                source.fail(&IndexError::StoragePaused("Injected storage refusal."), &manager.budget);
+            }
+            let (deadline, delay, message, verified) = {
+                let status = lock(&source.status).unwrap();
+                (status.retry_at, status.failure_delay, status.message.clone(), status.verified)
+            };
+            for _ in 0..3 {
+                source.fail(&IndexError::Interrupted, &manager.budget);
+                let status = lock(&source.status).unwrap();
+                assert_eq!(status.state, "ready");
+                assert_eq!(status.retry_at, deadline);
+                assert_eq!(status.failure_delay, delay);
+                assert_eq!(status.message, message);
+                assert_eq!(status.verified, verified);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn application_mutation_rejects_unbound_hints_without_replacing_operation_errors() {
+        for binding in ["drive", "root", "stopped", "outside", "unavailable"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("root");
+            let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+            let source = LocalSource::new(root.clone(), manager.storage_directory());
+            lock(&source.status).unwrap().retry_at = Instant::now() + FAILURE_RETRY_MAX;
+            source.stopped.store(binding == "stopped", Ordering::Release);
+            lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+            let drive = if binding == "drive" { "other-drive" } else { "drive" };
+            let operation_root = if binding == "root" {
+                temporary.path().join("other-root")
+            } else {
+                root.clone()
+            };
+            let target = if binding == "outside" {
+                temporary.path().join("outside")
+            } else {
+                root.join("target")
+            };
+            let mut executed = false;
+            let result = manager.run_observed_operation(drive, &operation_root, &target, || {
+                executed = true;
+                Err::<(), _>(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "Original operation failure.",
+                ))
+            });
+            assert!(executed);
+            assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+            let observations = lock(&source.observations).unwrap();
+            assert!(observations.pending.is_empty());
+            assert!(observations.producers.is_empty());
+            assert_eq!(observations.verification_required, matches!(binding, "outside" | "unavailable"));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn application_mutation_reconciles_after_success_or_failure_without_watcher_events() {
+        for (failed, operation) in [
+            (false, "delete"),
+            (true, "delete"),
+            (false, "create"),
+            (true, "create"),
+            (false, "create-parents"),
+            (true, "create-parents"),
+            (false, "archive-parents"),
+            (true, "archive-parents"),
+            (false, "rename"),
+            (true, "rename"),
+            (false, "recursive-delete"),
+            (true, "recursive-delete"),
+        ] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("root");
+            let target = root.join("parent/target");
+            let create_parents = matches!(operation, "create-parents" | "archive-parents");
+            let create = operation == "create" || create_parents;
+            std::fs::create_dir_all(if create { target.parent().unwrap() } else { &target }).unwrap();
+            if operation == "rename" {
+                std::fs::create_dir(target.join("child")).unwrap();
+            }
+            if operation == "recursive-delete" {
+                std::fs::create_dir_all(target.join("survivor/removed")).unwrap();
+            }
+            std::fs::create_dir(root.join("outside")).unwrap();
+            let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+            let source = LocalSource::new(root.clone(), manager.storage_directory());
+            source.scan(&manager.budget).unwrap();
+            lock(&source.watcher).unwrap().take();
+            lock(&source.status).unwrap().retry_at = Instant::now() + FAILURE_RETRY_MAX;
+            lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+            let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = reader.search("parent target outside", 3, false, &cancelled, false).unwrap();
+            let mutation = || {
+                let observations = lock(&source.observations).unwrap();
+                assert_eq!(observations.producers.len(), 1);
+                let expected_hints = match operation {
+                    "recursive-delete" => 3,
+                    _ if create_parents => 4,
+                    _ => 1,
+                };
+                assert_eq!(observations.pending.len(), expected_hints);
+                let expected_parent = if create_parents { "parent/target/nested" } else { "parent" };
+                assert!(matches!(&observations.pending[0].1, DirectoryMutation::ReadParent { path } if path == expected_parent));
+                drop(observations);
+                if create_parents {
+                    source.flush(&manager.budget).unwrap();
+                    lock(&source.status).unwrap().retry_at = Instant::now();
+                    let retry = lock(&source.status).unwrap().retry_at;
+                    let early_read = source.reconcile(&manager.budget, &manager.scans).unwrap_err();
+                    assert!(matches!(early_read, IndexError::Interrupted));
+                    source.fail(&early_read, &manager.budget);
+                    assert_eq!(lock(&source.status).unwrap().retry_at, retry);
+                    assert_eq!(lock(&source.status).unwrap().failure_delay, Duration::ZERO);
+                    assert_eq!(
+                        reader.search("parent target outside", 3, false, &cancelled, false).unwrap().results,
+                        before.results
+                    );
+                    lock(&source.status).unwrap().retry_at = Instant::now() + FAILURE_RETRY_MAX;
+                }
+                match operation {
+                    "create" => std::fs::create_dir(&target),
+                    "create-parents" | "archive-parents" => std::fs::create_dir_all(target.join("nested")),
+                    "rename" => std::fs::rename(&target, root.join("parent/renamed")),
+                    "recursive-delete" if failed => std::fs::remove_dir(target.join("survivor/removed")),
+                    "recursive-delete" => std::fs::remove_dir_all(&target),
+                    _ => std::fs::remove_dir(&target),
+                }?;
+                if failed {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "Injected failure after mutation.",
+                    ))
+                } else {
+                    Ok(())
+                }
+            };
+            let result = if operation == "recursive-delete" {
+                manager.run_observed_subtree_operation("drive", &root, &target, mutation)
+            } else if operation == "create-parents" {
+                manager.run_observed_parent_creation("drive", &root, &target.join("nested/file"), mutation)
+            } else if operation == "archive-parents" {
+                manager.run_observed_root_creation(&root, &target.join("nested/file"), mutation)
+            } else {
+                manager.run_observed_operation("drive", &root, &target, mutation)
+            };
+            assert_eq!(
+                result.as_ref().err().map(std::io::Error::kind),
+                failed.then_some(std::io::ErrorKind::PermissionDenied)
+            );
+            assert_eq!(
+                reader.search("parent target outside", 3, false, &cancelled, false).unwrap().results,
+                before.results
+            );
+            {
+                let observations = lock(&source.observations).unwrap();
+                assert!(observations.producers.is_empty());
+                let expected_hints = match operation {
+                    "recursive-delete" => 6,
+                    _ if create_parents => 5,
+                    _ => 2,
+                };
+                assert_eq!(observations.pending.len(), expected_hints);
+            }
+            lock(&manager.sources).unwrap().remove("drive");
+            lock(&source.status).unwrap().retry_at = Instant::now();
+            source.flush(&manager.budget).unwrap();
+            source.reconcile(&manager.budget, &manager.scans).unwrap();
+            let after = reader.search("parent target outside", 3, false, &cancelled, false).unwrap();
+            let expected_count = match operation {
+                "create" => 3,
+                _ if create_parents => 4,
+                "rename" => 4,
+                "recursive-delete" if failed => 4,
+                _ => 2,
+            };
+            assert_eq!(after.directory_count, expected_count);
+            assert_eq!(
+                after.results.iter().any(|row| row.path == "parent/target"),
+                create || (operation == "recursive-delete" && failed)
+            );
+            if operation == "rename" {
+                assert_eq!(reader.search("renamed", 3, false, &cancelled, false).unwrap().total_matches, 2);
+                assert_eq!(reader.search("target", 3, false, &cancelled, false).unwrap().total_matches, 0);
+            }
+            assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+            assert!(lock(&source.observations).unwrap().verification_required);
+            assert!(lock(&source.observations).unwrap().pending.is_empty());
+            assert_eq!(lock(&manager.budget.state).unwrap().reserved, 0);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn parent_loss_after_identity_read_retains_rows_and_does_not_hide_storage_or_root_failure() {
+        for scenario in ["renamed-parent", "replaced-by-file", "missing-storage", "replaced-root"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let path = temporary.path().join("root");
+            std::fs::create_dir_all(path.join("target/child")).unwrap();
+            let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+            let source = LocalSource::new(path.clone(), manager.storage_directory());
+            source.scan(&manager.budget).unwrap();
+            lock(&source.watcher).unwrap().take();
+            let root = lock(&source.root).unwrap().as_ref().unwrap().clone();
+            let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = reader.search("target", 3, false, &cancelled, false).unwrap();
+            let retry_at = lock(&source.status).unwrap().retry_at;
+            let failure_delay = lock(&source.status).unwrap().failure_delay;
+            let result = source.with_parent_read(&root, "target", |_read| {
+                root.parent_identity("target")?;
+                match scenario {
+                    "renamed-parent" | "replaced-by-file" => {
+                        std::fs::rename(path.join("target"), path.join("moved"))?;
+                        if scenario == "replaced-by-file" {
+                            std::fs::write(path.join("target"), b"not a directory")?;
+                        }
+                    }
+                    "replaced-root" => std::fs::rename(&path, temporary.path().join("old-root"))?,
+                    _ => return Err(IndexError::Io(std::io::Error::from(std::io::ErrorKind::NotFound))),
+                }
+                root.children("target", |_entry| Ok(()))
+            });
+            let error = result.unwrap_err();
+            assert_eq!(reader.search("target", 3, false, &cancelled, false).unwrap(), before);
+            let observations = lock(&source.observations).unwrap();
+            assert!(observations.producers.is_empty());
+            if matches!(scenario, "renamed-parent" | "replaced-by-file") {
+                assert!(matches!(error, IndexError::Interrupted));
+                assert!(observations.verification_required);
+                assert_eq!(observations.pending.len(), 1);
+                assert!(matches!(&observations.pending.front().unwrap().1, DirectoryMutation::ReadParent { path } if path.is_empty()));
+                drop(observations);
+                source.fail(&error, &manager.budget);
+                let status = lock(&source.status).unwrap();
+                assert_eq!(status.retry_at, retry_at);
+                assert_eq!(status.failure_delay, failure_delay);
+            } else {
+                assert!(!matches!(error, IndexError::Interrupted));
+                assert!(observations.pending.is_empty());
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn application_subtree_queue_overflow_preserves_rows_and_actual_worker_ownership() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("target/child")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root.clone(), manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        lock(&source.watcher).unwrap().take();
+        lock(&source.status).unwrap().retry_at = Instant::now() + FAILURE_RETRY_MAX;
+        lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+        let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = reader.search("target", 3, false, &cancelled, false).unwrap();
+        let maximum = limit("max_pending_observations").unwrap();
+        {
+            let mut observations = lock(&source.observations).unwrap();
+            for _ in 0..maximum - 1 {
+                assert!(observations
+                    .enqueue(
+                        DirectoryMutation::ReadParent { path: "target".into() },
+                        maximum,
+                        limit("max_observation_bytes").unwrap()
+                    )
+                    .unwrap());
+            }
+        }
+        let old_read = source.begin_read().unwrap();
+        let epoch = lock(&source.observations).unwrap().epoch;
+        let result = manager.run_observed_subtree_operation("drive", &root, &root.join("target"), || {
+            let observations = lock(&source.observations).unwrap();
+            assert!(observations.epoch > epoch);
+            assert_eq!(observations.pending.len(), maximum);
+            assert_eq!(observations.producers.len(), 2);
+            assert!(!observations.is_current(old_read.token, "target"));
+            assert!(observations.verification_required);
+            Err::<(), _>(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Original deletion failure.",
+            ))
+        });
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(reader.search("target", 3, false, &cancelled, false).unwrap(), before);
+        let observations = lock(&source.observations).unwrap();
+        assert_eq!(observations.producers.len(), 1);
+        assert_eq!(observations.pending.len(), maximum);
+        assert!(observations.epoch > epoch);
+        assert!(observations.verification_required);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn application_mutation_ownership_survives_cancelled_async_waiter() {
+        for (scope, root_bound) in [
+            (MutationScope::Parent, false),
+            (MutationScope::Subtree, false),
+            (MutationScope::Ancestors, false),
+            (MutationScope::Ancestors, true),
+        ] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("root");
+            std::fs::create_dir_all(root.join("target")).unwrap();
+            let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+            let source = LocalSource::new(root.clone(), manager.storage_directory());
+            source.scan(&manager.budget).unwrap();
+            lock(&source.watcher).unwrap().take();
+            lock(&source.status).unwrap().retry_at = Instant::now() + FAILURE_RETRY_MAX;
+            lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+            let task_manager = Arc::clone(&manager);
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let (release, blocked) = std::sync::mpsc::channel::<()>();
+            let (finished, complete) = tokio::sync::oneshot::channel();
+            let request = tokio::spawn(async move {
+                tokio::task::spawn_blocking(move || {
+                    let operation = || {
+                        started.send(()).unwrap();
+                        blocked.recv().unwrap();
+                        std::fs::remove_dir(root.join("target"))
+                    };
+                    let result = if root_bound {
+                        task_manager.run_observed_root_creation(&root, &root.join("target"), operation)
+                    } else {
+                        task_manager.run_observed_mutation("drive", &root, &root.join("target"), scope, operation)
+                    };
+                    finished.send(result).unwrap();
+                })
+                .await
+            });
+            ready.await.unwrap();
+            request.abort();
+            assert!(request.await.unwrap_err().is_cancelled());
+            {
+                let observations = lock(&source.observations).unwrap();
+                assert_eq!(observations.producers.len(), 1);
+                assert_eq!(observations.pending.len(), 1);
+                assert!(!observations.barriers.is_empty());
+            }
+            release.send(()).unwrap();
+            complete.await.unwrap().unwrap();
+            let observations = lock(&source.observations).unwrap();
+            assert!(observations.producers.is_empty());
+            assert_eq!(observations.pending.len(), 2);
+            assert!(observations.verification_required);
+        }
+    }
+
+    #[tokio::test]
     async fn repeated_scan_requests_respect_resource_retry_deadline() {
         let temporary = tempfile::tempdir().unwrap();
         let manager = LocalDirectoryManager::new(temporary.path().join("cache")).unwrap();
@@ -1917,6 +2576,67 @@ mod tests {
         assert_eq!(budget.cleanup_inactive(&policy, 0, false, 1_000_000_000).unwrap(), 1);
         assert!(paths[2].exists());
         drop(active);
+    }
+
+    #[test]
+    fn pressure_cleanup_accounts_quarantine_and_preserves_owned_catalogue() {
+        use super::super::directory_index::QUARANTINE_FILE_NAME;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let path = manager.budget.namespace.join(format!("{}.sqlite3", "a".repeat(64)));
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index.write_paths(["accepted".to_owned()], None).unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        for suffix in ["", "-journal"] {
+            let rejected = manager.budget.namespace.join(format!("{QUARANTINE_FILE_NAME}{suffix}"));
+            let bytes = manager.budget.managed_bytes().unwrap();
+            std::fs::write(&rejected, b"rejected").unwrap();
+            assert_eq!(manager.budget.managed_bytes().unwrap(), bytes + 8);
+            let policy = manager.budget.policy().unwrap();
+            manager
+                .budget
+                .cleanup_inactive(&policy, 0, false, epoch_milliseconds().unwrap())
+                .unwrap();
+            assert!(rejected.exists());
+            let lease = acquire_storage(&manager.budget.namespace.join(QUARANTINE_FILE_NAME)).unwrap();
+            manager
+                .budget
+                .cleanup_inactive(&policy, 0, true, epoch_milliseconds().unwrap())
+                .unwrap();
+            assert!(rejected.exists());
+            drop(lease);
+            manager
+                .budget
+                .cleanup_inactive(&policy, 0, true, epoch_milliseconds().unwrap())
+                .unwrap();
+            assert!(!rejected.exists());
+            assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn background_scan_recovers_corruption_then_builds_current_directories() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(root.join("fresh")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root, &manager.budget.namespace);
+        let lease = acquire_storage(&source.index_path).unwrap();
+        std::fs::write(&source.index_path, b"corrupt disposable catalogue").unwrap();
+        drop(lease);
+        source.scan(&manager.budget).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let writer = lock(&source.writer).unwrap();
+        let response = writer.as_ref().unwrap().search("fresh", 3, false, &cancelled, false).unwrap();
+        assert_eq!(response.total_matches, 1);
+        assert_eq!(response.coverage, "complete");
+        assert!(source.recovery_attempted.load(Ordering::Acquire));
+        assert_eq!(lock(&manager.budget.state).unwrap().reserved, 0);
     }
 
     #[test]
@@ -2818,6 +3538,467 @@ mod tests {
             let writer = writer.as_ref().unwrap();
             assert_eq!(writer.accepted_generation().unwrap(), Some(1));
             assert!(writer.reconciliation_generation().unwrap().is_none());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "Explicit injected application resource measurement; not part of routine tests."]
+    fn injected_application_capacity_measurement() {
+        const DEFAULT_COUNT: usize = 100_000;
+        const QUERY_SAMPLES: usize = 30;
+        const SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
+        const NANOSECONDS_PER_SECOND: f64 = 1_000_000_000.0;
+
+        fn process_cpu_seconds() -> f64 {
+            let mut clock = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+            assert_eq!(
+                unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut clock) },
+                0,
+                "Cannot read the process CPU clock: {}",
+                std::io::Error::last_os_error()
+            );
+            clock.tv_sec as f64 + clock.tv_nsec as f64 / NANOSECONDS_PER_SECOND
+        }
+
+        fn process_memory() -> (u64, u64) {
+            let status = std::fs::read_to_string("/proc/self/status").unwrap();
+            let value = |key| {
+                status
+                    .lines()
+                    .find(|line| line.starts_with(key))
+                    .unwrap()
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap()
+            };
+            (value("VmRSS:"), value("VmHWM:"))
+        }
+
+        let count = std::env::var("DIRECTORY_INDEX_MEASURE_COUNT")
+            .map(|value| value.parse::<usize>().unwrap())
+            .unwrap_or(DEFAULT_COUNT);
+        assert!(count >= DEFAULT_COUNT);
+        let temporary = tempfile::tempdir().unwrap();
+        let namespace = temporary.path().join("private");
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir(&root_path).unwrap();
+        let root = NativeRoot::open(&root_path).unwrap();
+        let source = LocalSource::new(root_path, &namespace);
+        let identity = json!({"root": "injected-capacity-fixture"});
+        let index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &identity).unwrap();
+        let reader = index.reader();
+        *lock(&source.writer).unwrap() = Some(index);
+        source.busy.store(true, Ordering::Release);
+        let budget = Arc::new(DiskBudget {
+            namespace: namespace.clone(),
+            policy_gate: Mutex::new(()),
+            state: Mutex::new(DiskState {
+                policy: DirectoryPolicy::defaults().unwrap(),
+                reserved: 0,
+                next_cleanup_at: Instant::now(),
+            }),
+            space_probe: available_disk_bytes,
+        });
+        let started = Instant::now();
+        let started_cpu = process_cpu_seconds();
+        let initial_memory = process_memory();
+        let finished = Arc::new(AtomicBool::new(false));
+        let sampled = Arc::new(Mutex::new(
+            json!({"rss_kib": 0, "fds": 0, "managed_bytes": 0, "main_bytes": 0, "wal_bytes": 0, "shm_bytes": 0}),
+        ));
+        let first_partial = Arc::new(Mutex::new(None));
+        let sampler = {
+            let finished = Arc::clone(&finished);
+            let sampled = Arc::clone(&sampled);
+            let first_partial = Arc::clone(&first_partial);
+            let path = source.index_path.clone();
+            let reader = reader.clone();
+            let budget = Arc::clone(&budget);
+            std::thread::spawn(move || {
+                while !finished.load(Ordering::Acquire) {
+                    let mut sample = lock(&sampled).unwrap();
+                    for (key, value) in [
+                        ("rss_kib", process_memory().0),
+                        ("fds", std::fs::read_dir("/proc/self/fd").unwrap().count() as u64),
+                        ("managed_bytes", budget.managed_bytes().unwrap()),
+                    ] {
+                        sample[key] = json!(sample[key].as_u64().unwrap().max(value));
+                    }
+                    for (key, suffix) in [("main_bytes", ""), ("wal_bytes", "-wal"), ("shm_bytes", "-shm")] {
+                        let value = std::fs::metadata(format!("{}{suffix}", path.display()))
+                            .map(|metadata| metadata.len())
+                            .unwrap_or(0);
+                        sample[key] = json!(sample[key].as_u64().unwrap().max(value));
+                    }
+                    drop(sample);
+                    if lock(&first_partial).unwrap().is_none() {
+                        let result = reader.search("000099", 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap();
+                        if !result.results.is_empty() {
+                            *lock(&first_partial).unwrap() = Some(json!({
+                                "seconds": started.elapsed().as_secs_f64(),
+                                "coverage": result.coverage,
+                                "directory_count": result.directory_count
+                            }));
+                        }
+                    }
+                    std::thread::park_timeout(SAMPLE_INTERVAL);
+                }
+            })
+        };
+        let run_generation = || {
+            let baseline = source.begin_read().unwrap();
+            let generation = {
+                let _reservation = budget.reserve().unwrap();
+                let mut writer = lock(&source.writer).unwrap();
+                let writer = writer.as_mut().unwrap();
+                let (generation, _) = writer.prepare_scan().unwrap();
+                writer.seed_scan(generation).unwrap();
+                generation
+            };
+            source
+                .scan_to_acceptance_with(&root, baseline.token, generation, &budget, |generation, parent| {
+                    let read = source.begin_read()?;
+                    if parent.is_empty() {
+                        let mut batch = Vec::with_capacity(ROW_BATCH_SIZE);
+                        for number in 0..count {
+                            batch.push((format!("directory-{number:06}"), true));
+                            if batch.len() == ROW_BATCH_SIZE || number + 1 == count {
+                                let observations = lock(&source.observations)?;
+                                assert!(observations.is_current(read.token, parent));
+                                let _reservation = budget.reserve()?;
+                                lock(&source.writer)?
+                                    .as_mut()
+                                    .unwrap()
+                                    .write_scan_children(generation, batch.drain(..))?;
+                            }
+                        }
+                    }
+                    let observations = lock(&source.observations)?;
+                    assert!(observations.is_current(read.token, parent));
+                    let _reservation = budget.reserve()?;
+                    lock(&source.writer)?.as_mut().unwrap().finish_scan_parent(generation, parent)
+                })
+                .unwrap();
+        };
+        let begin = Instant::now();
+        let begin_cpu = process_cpu_seconds();
+        run_generation();
+        let build_seconds = begin.elapsed().as_secs_f64();
+        let build_cpu_seconds = process_cpu_seconds() - begin_cpu;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut selective_ms = Vec::with_capacity(QUERY_SAMPLES);
+        for _ in 0..QUERY_SAMPLES {
+            let begin = Instant::now();
+            let result = reader.search("090000", 3, false, &cancelled, false).unwrap();
+            selective_ms.push(begin.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(result.directory_count, count as i64);
+            assert_eq!(result.total_matches, 1);
+        }
+        selective_ms.sort_by(f64::total_cmp);
+        let mut query_ms = serde_json::Map::new();
+        for (label, query) in [("common", "directory"), ("mixed_short", "ry 090000")] {
+            let begin = Instant::now();
+            let result = reader.search(query, 3, false, &cancelled, false).unwrap();
+            query_ms.insert(label.into(), json!(begin.elapsed().as_secs_f64() * 1000.0));
+            assert_eq!(result.total_matches, count as i64);
+            assert_eq!(result.results.len(), 3);
+        }
+        let verification_started = Instant::now();
+        let verification_started_cpu = process_cpu_seconds();
+        let verification_query_ms = std::thread::scope(|scope| {
+            let verification = scope.spawn(run_generation);
+            let begin = Instant::now();
+            let result = reader.search("090000", 3, false, &cancelled, false).unwrap();
+            assert_eq!(result.directory_count, count as i64);
+            assert_eq!(result.total_matches, 1);
+            let elapsed = begin.elapsed().as_secs_f64() * 1000.0;
+            verification.join().unwrap();
+            elapsed
+        });
+        let verification_seconds = verification_started.elapsed().as_secs_f64();
+        let verification_cpu_seconds = process_cpu_seconds() - verification_started_cpu;
+        let small_reader = {
+            let mut writer = lock(&source.writer).unwrap();
+            let writer = writer.as_mut().unwrap();
+            writer.configure_page_cache(64).unwrap();
+            writer.reader()
+        };
+        assert_eq!(
+            small_reader.search("ry 090000", 3, false, &cancelled, false).unwrap().total_matches,
+            count as i64
+        );
+        finished.store(true, Ordering::Release);
+        sampler.thread().unpark();
+        sampler.join().unwrap();
+        lock(&source.writer).unwrap().take();
+        let reopen_started = Instant::now();
+        let reopened = DirectoryIndex::open(&source.index_path, SourceKind::Local, &identity).unwrap();
+        assert_eq!(
+            reopened.search("090000", 3, false, &cancelled, false).unwrap().directory_count,
+            count as i64
+        );
+        eprintln!(
+            "DIRECTORY_INDEX_APPLICATION_MEASUREMENT {}",
+            json!({
+                "rows": count, "build_seconds": build_seconds, "verification_seconds": verification_seconds,
+                "build_cpu_seconds": build_cpu_seconds, "verification_cpu_seconds": verification_cpu_seconds,
+                "query_during_verification_ms": verification_query_ms, "storage_reopen_seconds": reopen_started.elapsed().as_secs_f64(),
+                "selective_query_ms": {"samples": QUERY_SAMPLES, "p50": selective_ms[QUERY_SAMPLES / 2], "p95": selective_ms[(QUERY_SAMPLES * 95).div_ceil(100) - 1], "max": selective_ms[QUERY_SAMPLES - 1]},
+                "broad_query_ms": query_ms, "first_partial": *lock(&first_partial).unwrap(), "sampled_peaks": *lock(&sampled).unwrap(),
+                "initial_rss_kib": initial_memory.0, "process_peak_rss_kib": process_memory().1,
+                "cache_target_kib_per_connection": DirectoryPolicy::defaults().unwrap().page_cache_kib, "small_cache_kib": 64,
+                "sqlite": rusqlite::version(), "total_seconds": started.elapsed().as_secs_f64(),
+                "total_cpu_seconds": process_cpu_seconds() - started_cpu
+            })
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "Explicit seeded HTTP latency measurement; not part of routine tests."]
+    async fn seeded_directory_search_http_latency_measurement() {
+        use axum::{body::Body, http::Request, routing::get, Router};
+        use tower::ServiceExt;
+
+        const DEFAULT_COUNT: usize = 100_000;
+        const QUERY_SAMPLES: usize = 30;
+        const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+
+        let count = std::env::var("DIRECTORY_INDEX_HTTP_MEASURE_COUNT")
+            .map(|value| value.parse::<usize>().unwrap())
+            .unwrap_or(DEFAULT_COUNT);
+        assert!(count > 0);
+        let temporary = tempfile::tempdir().unwrap();
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir(&root_path).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root_path.clone(), &manager.budget.namespace);
+        let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "http-timing-fixture"})).unwrap();
+        index
+            .write_paths((0..count).map(|number| format!("directory-{number:06}")), None)
+            .unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        *lock(&source.root).unwrap() = Some(Arc::new(NativeRoot::open(&root_path).unwrap()));
+        *lock(&source.reader).unwrap() = Some(index.reader());
+        *lock(&source.writer).unwrap() = Some(index);
+        lock(&source.status).unwrap().state = "ready";
+        source.busy.store(true, Ordering::Release);
+        let drive = format!("http-measurement-{}", uuid::Uuid::new_v4());
+        super::super::drives::register_test_drive_path(drive.clone(), root_path);
+        lock(&manager.sources).unwrap().insert(drive.clone(), Arc::clone(&source));
+        let router = Router::new()
+            .route(
+                "/api/browse/{drive}/directories",
+                get(super::super::handlers::browse_search_directories),
+            )
+            .with_state(super::super::handlers::DirectoryMutationState(Arc::clone(&manager)));
+        let query = format!("{:06}", count - 1);
+        let mut samples = Vec::with_capacity(QUERY_SAMPLES);
+        for _ in 0..QUERY_SAMPLES {
+            let started = Instant::now();
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/browse/{drive}/directories?q={query}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), MAX_RESPONSE_BYTES).await.unwrap();
+            samples.push(started.elapsed().as_secs_f64() * 1000.0);
+            assert_eq!(status, axum::http::StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+            let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(result["directory_count"].as_u64(), Some(count as u64));
+            assert_eq!(result["total_matches"].as_u64(), Some(1));
+            assert_eq!(result["results"], json!([format!("directory-{:06}", count - 1)]));
+        }
+        assert_eq!(source.active_queries.load(Ordering::Acquire), 0);
+        samples.sort_by(f64::total_cmp);
+        eprintln!(
+            "DIRECTORY_INDEX_HTTP_MEASUREMENT {}",
+            json!({
+                "rows": count, "samples": QUERY_SAMPLES,
+                "p50_ms": (samples[QUERY_SAMPLES / 2 - 1] + samples[QUERY_SAMPLES / 2]) / 2.0,
+                "p95_ms": samples[(QUERY_SAMPLES * 95).div_ceil(100) - 1], "max_ms": samples[QUERY_SAMPLES - 1],
+                "method": "Axum routing, real native query worker and seeded SQLite; excludes pairing authentication, TCP and source build time",
+                "cache_target_kib_per_connection": DirectoryPolicy::defaults().unwrap().page_cache_kib,
+                "sqlite": rusqlite::version(), "debug_build": cfg!(debug_assertions)
+            })
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn candidate_accepts_only_after_captured_parent_work_is_drained() {
+        let temporary = tempfile::tempdir().unwrap();
+        let namespace = temporary.path().join("private");
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir_all(root_path.join("old/child")).unwrap();
+        std::fs::create_dir(root_path.join("stable")).unwrap();
+        let root = NativeRoot::open(&root_path).unwrap();
+        let source = LocalSource::new(root_path, &namespace);
+        let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index
+            .write_paths(["old".into(), "old/child".into(), "stable".into()], None)
+            .unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let reader = index.reader();
+        let generation = index.begin_verification().unwrap();
+        index.seed_scan(generation).unwrap();
+        *lock(&source.writer).unwrap() = Some(index);
+        source.busy.store(true, Ordering::Release);
+        let budget = Arc::new(DiskBudget {
+            namespace,
+            policy_gate: Mutex::new(()),
+            state: Mutex::new(DiskState {
+                policy: DirectoryPolicy::defaults().unwrap(),
+                reserved: 0,
+                next_cleanup_at: Instant::now(),
+            }),
+            space_probe: available_disk_bytes,
+        });
+        let drain = |generation| loop {
+            let parents = lock(&source.writer)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .pending_scan_paths(generation, 1)
+                .unwrap();
+            let Some(parent) = parents.first() else {
+                break;
+            };
+            source.scan_parent(&root, generation, parent, &budget).unwrap();
+        };
+        let baseline = source.begin_read().unwrap();
+        drain(generation);
+        std::fs::rename(source.root_path.join("old"), source.root_path.join("new")).unwrap();
+        source
+            .observe(Ok(
+                Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To))).add_path(source.root_path.join("new"))
+            ))
+            .unwrap();
+        source.flush(&budget).unwrap();
+        assert!(!lock(&source.observations).unwrap().is_current(baseline.token, ""));
+        assert!(matches!(
+            source.accept_generation(&root, baseline.token, generation, &budget),
+            Err(IndexError::Interrupted)
+        ));
+        drain(generation);
+        assert!(matches!(
+            source.accept_generation(&root, baseline.token, generation, &budget),
+            Err(IndexError::Interrupted)
+        ));
+        drain(1);
+        let outstanding = source.begin_read().unwrap();
+        assert!(matches!(
+            source.accept_generation(&root, baseline.token, generation, &budget),
+            Err(IndexError::Interrupted)
+        ));
+        drop(outstanding);
+        source
+            .observe(Ok(
+                Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To))).add_path(source.root_path.join("new"))
+            ))
+            .unwrap();
+        source.scan_to_acceptance(&root, baseline.token, generation, &budget).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let result = reader.search("old new stable", 3, false, &cancelled, false).unwrap();
+        assert_eq!(result.total_matches, 3);
+        assert_eq!(result.coverage, "complete");
+        assert_eq!(result.issue_count, 0);
+        assert_eq!(reader.search("old", 3, false, &cancelled, false).unwrap().total_matches, 0);
+        assert_eq!(
+            lock(&source.writer).unwrap().as_ref().unwrap().accepted_generation().unwrap(),
+            Some(generation)
+        );
+        assert!(!lock(&source.observations).unwrap().verification_required);
+        let captured = lock(&source.observations).unwrap().sequence;
+        source
+            .observe(Ok(
+                Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To))).add_path(source.root_path.join("stable/later"))
+            ))
+            .unwrap();
+        let observations = lock(&source.observations).unwrap();
+        assert!(observations.sequence > captured);
+        assert!(!observations.pending.is_empty());
+        assert!(observations.verification_required);
+        drop(observations);
+        assert_eq!(reader.search("old new stable", 3, false, &cancelled, false).unwrap(), result);
+        drop(baseline);
+        assert!(lock(&source.observations).unwrap().producers.is_empty());
+        assert_eq!(lock(&budget.state).unwrap().reserved, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn candidate_capture_refusal_preserves_selected_rows_and_freshness() {
+        for refusal in ["epoch", "stopped", "completed", "uncertain", "pending", "producer"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let namespace = temporary.path().join("private");
+            let root_path = temporary.path().join("root");
+            std::fs::create_dir_all(root_path.join("stable")).unwrap();
+            let root = NativeRoot::open(&root_path).unwrap();
+            let source = LocalSource::new(root_path, &namespace);
+            let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+            index.write_paths(["stable".into()], None).unwrap();
+            assert!(index.finish_generation(1, 0).unwrap());
+            let generation = index.begin_verification().unwrap();
+            index.write_paths(["stable".into()], Some(generation)).unwrap();
+            let reader = index.reader();
+            *lock(&source.writer).unwrap() = Some(index);
+            let budget = Arc::new(DiskBudget {
+                namespace,
+                policy_gate: Mutex::new(()),
+                state: Mutex::new(DiskState {
+                    policy: DirectoryPolicy::defaults().unwrap(),
+                    reserved: 0,
+                    next_cleanup_at: Instant::now(),
+                }),
+                space_probe: available_disk_bytes,
+            });
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = reader.search("stable", 3, false, &cancelled, false).unwrap();
+            let baseline = source.begin_read().unwrap();
+            let token = baseline.token;
+            let mut held_baseline = Some(baseline);
+            let mut other = None;
+            match refusal {
+                "epoch" => source.invalidate().unwrap(),
+                "stopped" => source.stopped.store(true, Ordering::Release),
+                "completed" => drop(held_baseline.take()),
+                "uncertain" => lock(&source.observations).unwrap().uncertain = true,
+                "pending" => {
+                    source
+                        .observe(Ok(
+                            Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To))).add_path(source.root_path.join("later"))
+                        ))
+                        .unwrap();
+                }
+                "producer" => other = Some(source.begin_read().unwrap()),
+                _ => unreachable!(),
+            }
+            assert!(
+                matches!(
+                    source.accept_generation(&root, token, generation, &budget),
+                    Err(IndexError::Interrupted)
+                ),
+                "Unexpected acceptance: {refusal}"
+            );
+            assert_eq!(reader.search("stable", 3, false, &cancelled, false).unwrap(), before);
+            assert_eq!(
+                lock(&source.writer).unwrap().as_ref().unwrap().accepted_generation().unwrap(),
+                Some(1)
+            );
+            assert_eq!(lock(&budget.state).unwrap().reserved, 0);
+            drop(other);
+            drop(held_baseline);
+            assert!(lock(&source.observations).unwrap().producers.is_empty());
         }
     }
 

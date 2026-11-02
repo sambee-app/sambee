@@ -2,12 +2,21 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
+import { browserHistoryService } from "../../../services/browserHistoryService";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import { getQuickBarResultRowHeight, QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT, QUICK_BAR_RESULT_ITEM_HEIGHT } from "../QuickBarResultRow";
+import { SEARCH_CONTRACT_VERSION } from "../search/recentHistory";
 import type { SearchProvider, SearchResultsUpdate } from "../search/types";
+import { useDirectorySearchProvider } from "../search/useDirectorySearchProvider";
 import { UnifiedSearchBar } from "../UnifiedSearchBar";
 
 const virtualizerSizeCache = new Map<string | number, number>();
+const INPUT_DEBOUNCE_MS = 200;
+const QUIET_REFRESH_INTERVAL_MS = 500;
+const MOCK_HISTORY_RESPONSE_MS = 40;
+const MOCK_INDEX_RESPONSE_MS = 80;
+const VISIBLE_RESULTS_TARGET_MS = 300;
+const INCREMENTAL_KEY_INTERVAL_MS = 50;
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({
@@ -268,6 +277,123 @@ function renderWithProvider(component: React.ReactElement) {
 }
 
 describe("UnifiedSearchBar", () => {
+  it.each(["pasted", "incremental"])("publishes selectable merged rows within the mocked %s-query timing budget", async (inputMode) => {
+    vi.useFakeTimers();
+    try {
+      const onNavigateDirectory = vi.fn();
+      const history = {
+        ...browserHistoryService,
+        searchRecentDirectories: vi.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, MOCK_HISTORY_RESPONSE_MS));
+          return {
+            result_limit: 10,
+            results: [{ id: "recent", connection_id: "connection-1", path: "Reports", last_visited_at: "2026-01-01T00:00:00Z" }],
+          };
+        }),
+        searchDirectories: vi.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, MOCK_INDEX_RESPONSE_MS));
+          return {
+            results: ["Reports", "Quarterly Reports"],
+            total_matches: 2,
+            directory_count: 100_000,
+            cache_state: "ready" as const,
+            search_contract_version: SEARCH_CONTRACT_VERSION,
+          };
+        }),
+      };
+      function DirectoryTimingHarness() {
+        const provider = useDirectorySearchProvider("connection-1", vi.fn(), { history, onNavigateDirectory });
+        return <UnifiedSearchBar provider={provider} />;
+      }
+      renderWithProvider(<DirectoryTimingHarness />);
+      const input = screen.getByRole("textbox");
+      if (inputMode === "incremental") {
+        for (const prefix of ["r", "re", "rep"]) {
+          fireEvent.change(input, { target: { value: prefix } });
+          await act(() => vi.advanceTimersByTimeAsync(INCREMENTAL_KEY_INTERVAL_MS));
+        }
+      }
+      const started = Date.now();
+      fireEvent.change(input, { target: { value: "reports" } });
+      await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS - 1));
+      expect(history.searchDirectories).not.toHaveBeenCalled();
+      expect(history.searchRecentDirectories).not.toHaveBeenCalled();
+      await act(() => vi.advanceTimersByTimeAsync(1 + MOCK_HISTORY_RESPONSE_MS));
+      expect(screen.getAllByRole("option")).toHaveLength(1);
+      expect(Date.now() - started).toBe(INPUT_DEBOUNCE_MS + MOCK_HISTORY_RESPONSE_MS);
+      await act(() => vi.advanceTimersByTimeAsync(MOCK_INDEX_RESPONSE_MS - MOCK_HISTORY_RESPONSE_MS));
+      expect(screen.getAllByRole("option")).toHaveLength(2);
+      expect(screen.getByRole("option", { name: /Quarterly Reports/ })).toBeInTheDocument();
+      expect(Date.now() - started).toBeLessThanOrEqual(VISIBLE_RESULTS_TARGET_MS);
+      expect(history.searchDirectories).toHaveBeenCalledTimes(1);
+      expect(history.searchRecentDirectories).toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(onNavigateDirectory).toHaveBeenCalledWith("connection-1", "Reports", "recent");
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not overlap quiet refreshes and gives new input priority over a blocked refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const stableRows = [{ kind: "result" as const, id: "stable", value: "stable", icon: "directory" as const, primaryText: "Stable" }];
+      const freshRows = stableRows.map((row) => ({ ...row, id: "fresh", value: "fresh", primaryText: "Fresh" }));
+      let finishRefresh: ((rows: typeof stableRows) => void) | undefined;
+      const fetchResults = vi
+        .fn<SearchProvider["fetchResults"]>()
+        .mockResolvedValueOnce(stableRows)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishRefresh = resolve;
+            })
+        )
+        .mockResolvedValue(freshRows);
+      renderWithProvider(
+        <UnifiedSearchBar
+          provider={{
+            ...testProvider,
+            minQueryLength: 1,
+            debounceMs: INPUT_DEBOUNCE_MS,
+            fetchResults,
+            getRefreshIntervalMs: () => QUIET_REFRESH_INTERVAL_MS,
+          }}
+        />
+      );
+      const input = screen.getByPlaceholderText("Search");
+      act(() => input.focus());
+      fireEvent.change(input, { target: { value: "stable" } });
+      await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS));
+      expect(fetchResults).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS - 1));
+      expect(fetchResults).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(fetchResults).toHaveBeenCalledTimes(2);
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS * 3));
+      expect(fetchResults).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.getByText("Stable")).toBeInTheDocument();
+      const refreshSignal = fetchResults.mock.calls[1]?.[1];
+      fireEvent.change(input, { target: { value: "fresh" } });
+      expect(refreshSignal?.aborted).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS - 1));
+      expect(fetchResults).toHaveBeenCalledTimes(2);
+      await act(() => vi.advanceTimersByTimeAsync(1));
+      expect(fetchResults).toHaveBeenCalledTimes(3);
+      expect(fetchResults.mock.lastCall?.[0]).toBe("fresh");
+      expect(screen.getByText("Fresh")).toBeInTheDocument();
+      await act(async () => finishRefresh?.(stableRows));
+      expect(screen.queryByText("Stable")).not.toBeInTheDocument();
+      expect(screen.getByText("Fresh")).toBeInTheDocument();
+      expect(document.activeElement).toBe(input);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   it("refreshes without a foreground spinner and stops after dismissal", async () => {
     const fetchResults = vi.fn(async () => [
       { kind: "result" as const, id: "stable", value: "stable", icon: "directory" as const, primaryText: "Stable" },
@@ -288,6 +414,103 @@ describe("UnifiedSearchBar", () => {
       await new Promise((resolve) => setTimeout(resolve, 550));
     });
     expect(fetchResults).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauses hidden-tab work, resumes once, and cancels refresh on unmount", async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    try {
+      const rows = [{ kind: "result" as const, id: "stable", value: "stable", icon: "directory" as const, primaryText: "Stable" }];
+      let finishHiddenRequest: ((results: typeof rows) => void) | undefined;
+      const fetchResults = vi
+        .fn<SearchProvider["fetchResults"]>()
+        .mockResolvedValueOnce(rows)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishHiddenRequest = resolve;
+            })
+        )
+        .mockResolvedValue(rows);
+      const { unmount } = renderWithProvider(
+        <UnifiedSearchBar provider={{ ...testProvider, fetchResults, getRefreshIntervalMs: () => QUIET_REFRESH_INTERVAL_MS }} />
+      );
+      const input = screen.getByPlaceholderText("Search");
+      fireEvent.change(input, { target: { value: "stable" } });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS));
+      expect(fetchResults).toHaveBeenCalledTimes(2);
+      visibility.mockReturnValue("hidden");
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      expect(fetchResults.mock.calls[1]?.[1].aborted).toBe(true);
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS * 3));
+      expect(fetchResults).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      visibility.mockReturnValue("visible");
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+      expect(fetchResults).toHaveBeenCalledTimes(3);
+      await act(async () => finishHiddenRequest?.(rows.map((row) => ({ ...row, primaryText: "Obsolete" }))));
+      expect(screen.queryByText("Obsolete")).not.toBeInTheDocument();
+      expect(screen.getByText("Stable")).toBeInTheDocument();
+      unmount();
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS * 3));
+      expect(fetchResults).toHaveBeenCalledTimes(3);
+    } finally {
+      cleanup();
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects old-source publications and cancels in-flight work on source replacement", async () => {
+    vi.useFakeTimers();
+    try {
+      const oldRows = [{ kind: "result" as const, id: "old", value: "old", icon: "directory" as const, primaryText: "Old source" }];
+      const newRows = oldRows.map((row) => ({ ...row, id: "new", value: "new", primaryText: "New source" }));
+      let finishOld: ((rows: typeof oldRows) => void) | undefined;
+      let publishOld: SearchResultsUpdate | undefined;
+      const onDeactivate = vi.fn();
+      const oldFetch = vi.fn<SearchProvider["fetchResults"]>().mockImplementation(
+        (_query, _signal, onUpdate) =>
+          new Promise((resolve) => {
+            publishOld = onUpdate;
+            finishOld = resolve;
+          })
+      );
+      const oldProvider = { ...testProvider, sourceKey: "old-source", minQueryLength: 1, fetchResults: oldFetch, onDeactivate };
+      const newFetch = vi.fn<SearchProvider["fetchResults"]>().mockResolvedValue(newRows);
+      const newProvider = { ...oldProvider, sourceKey: "new-source", fetchResults: newFetch };
+      const { rerender } = renderWithProvider(<UnifiedSearchBar provider={oldProvider} />);
+      const input = screen.getByPlaceholderText("Search");
+      act(() => input.focus());
+      fireEvent.change(input, { target: { value: "old" } });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(oldFetch).toHaveBeenCalledTimes(1);
+      rerender(
+        <SambeeThemeProvider>
+          <UnifiedSearchBar provider={newProvider} />
+        </SambeeThemeProvider>
+      );
+      expect(oldFetch.mock.calls[0]?.[1].aborted).toBe(true);
+      expect(onDeactivate).toHaveBeenCalledTimes(1);
+      expect(input).toHaveValue("");
+      fireEvent.change(input, { target: { value: "new" } });
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText("New source")).toBeInTheDocument();
+      await act(async () => {
+        publishOld?.(oldRows);
+        finishOld?.(oldRows);
+      });
+      expect(screen.queryByText("Old source")).not.toBeInTheDocument();
+      expect(screen.getByText("New source")).toBeInTheDocument();
+      expect(document.activeElement).toBe(input);
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS * 3));
+      expect(oldFetch).toHaveBeenCalledTimes(1);
+      expect(newFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
   });
 
   it("keeps accepted rows and stops refresh after a quiet request fails", async () => {

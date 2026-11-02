@@ -40,13 +40,27 @@ const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
 const PRIVATE_FILE_MODE: u32 = 0o600;
 const LEASE_EXTENSION: &str = ".lease";
 const NAMESPACE_LEASE_NAME: &str = ".namespace.lease";
+pub(super) const QUARANTINE_FILE_NAME: &str = ".rejected-directory-index";
+const STORAGE_FILE_SUFFIXES: [&str; 5] = ["", "-wal", "-shm", "-journal", LEASE_EXTENSION];
+const REQUIRED_DIRECTORY_TABLES: [&str; 5] = ["source_metadata", "generations", "directories", "scan_queue", "coverage_issues"];
 
 pub(super) fn acquire_storage(path: &Path) -> Result<File, IndexError> {
     let directory = path.parent().ok_or(IndexError::Invalid(
         "Directory-index path has no parent. Select private local storage.",
     ))?;
     let _namespace_lease = acquire_namespace_lease(directory)?;
-    for extension in ["", "-wal", "-shm", "-journal", LEASE_EXTENSION] {
+    validate_storage_files(path)?;
+    acquire_file_lease(&storage_member(path, LEASE_EXTENSION))
+}
+
+fn storage_member(path: &Path, suffix: &str) -> PathBuf {
+    let mut filename = path.as_os_str().to_owned();
+    filename.push(suffix);
+    filename.into()
+}
+
+fn validate_storage_files(path: &Path) -> Result<(), IndexError> {
+    for extension in STORAGE_FILE_SUFFIXES {
         let mut filename = path.as_os_str().to_os_string();
         filename.push(extension);
         match fs::symlink_metadata(Path::new(&filename)) {
@@ -73,9 +87,63 @@ pub(super) fn acquire_storage(path: &Path) -> Result<File, IndexError> {
             Err(error) => return Err(error.into()),
         }
     }
-    let mut lease_path = path.as_os_str().to_os_string();
-    lease_path.push(LEASE_EXTENSION);
-    acquire_file_lease(Path::new(&lease_path))
+    Ok(())
+}
+
+fn clear_quarantine_owned(path: &Path) -> Result<bool, IndexError> {
+    validate_storage_files(path)?;
+    let mut removed = false;
+    for suffix in STORAGE_FILE_SUFFIXES.into_iter().filter(|suffix| *suffix != LEASE_EXTENSION) {
+        match fs::remove_file(storage_member(path, suffix)) {
+            Ok(()) => removed = true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(removed)
+}
+
+pub(super) fn discard_quarantine(directory: &Path) -> Result<bool, IndexError> {
+    let path = directory.join(QUARANTINE_FILE_NAME);
+    let mut exists = false;
+    for suffix in STORAGE_FILE_SUFFIXES.into_iter().filter(|suffix| *suffix != LEASE_EXTENSION) {
+        exists |= storage_member(&path, suffix).try_exists()?;
+    }
+    if !exists {
+        return Ok(false);
+    }
+    let _namespace_lease = acquire_namespace_lease(directory)?;
+    let _lease = acquire_file_lease(&storage_member(&path, LEASE_EXTENSION))?;
+    clear_quarantine_owned(&path)
+}
+
+fn quarantine_owned(path: &Path, _source_lease: &File) -> Result<(), IndexError> {
+    let directory = path
+        .parent()
+        .ok_or(IndexError::Invalid("Directory-index path has no storage parent."))?;
+    let _namespace_lease = acquire_namespace_lease(directory)?;
+    let rejected = directory.join(QUARANTINE_FILE_NAME);
+    let _lease = acquire_file_lease(&storage_member(&rejected, LEASE_EXTENSION))?;
+    validate_storage_files(path)?;
+    clear_quarantine_owned(&rejected)?;
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for suffix in ["-wal", "-shm", "-journal", ""] {
+        let original = storage_member(path, suffix);
+        let target = storage_member(&rejected, suffix);
+        match fs::rename(&original, &target) {
+            Ok(()) => moved.push((original, target)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                for (original, target) in moved.into_iter().rev() {
+                    if fs::rename(target, original).is_err() {
+                        log::warn!("Directory recovery restore failed. Reconnect after restoring private storage.");
+                    }
+                }
+                return Err(error.into());
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn remove_orphan_lease(path: &Path) -> Result<bool, IndexError> {
@@ -210,6 +278,8 @@ pub enum IndexError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Invalid(&'static str),
+    #[error("{0}")]
+    RebuildRequired(&'static str),
     #[error("{0}")]
     StoragePaused(&'static str),
     #[error("Directory search was cancelled or timed out. Retry the search.")]
@@ -361,6 +431,15 @@ fn checked_sql_size(value: usize) -> Result<i64, IndexError> {
 
 impl DirectoryIndex {
     pub fn open(path: &Path, source_kind: SourceKind, source_identity: &serde_json::Value) -> Result<Self, IndexError> {
+        Self::open_with_recovery(path, source_kind, source_identity, None)
+    }
+
+    pub(super) fn open_with_recovery(
+        path: &Path,
+        source_kind: SourceKind,
+        source_identity: &serde_json::Value,
+        recovery_attempted: Option<&AtomicBool>,
+    ) -> Result<Self, IndexError> {
         if rusqlite::version_number() < MIN_SQLITE_VERSION_NUMBER {
             return Err(IndexError::Invalid(
                 "Directory indexing requires a patched SQLite runtime. Rebuild the companion from its pinned dependencies.",
@@ -369,6 +448,42 @@ impl DirectoryIndex {
         let absolute_path = std::path::absolute(path)?;
         let path = absolute_path.as_path();
         let lease = acquire_storage(path)?;
+        let (writer, fts_ready) = match Self::open_owned(path, source_kind, source_identity) {
+            Ok(storage) => storage,
+            Err(error) => {
+                let rebuildable = match &error {
+                    IndexError::RebuildRequired(_) => true,
+                    IndexError::Sql(rusqlite::Error::SqliteFailure(code, _)) => {
+                        matches!(code.code, rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase)
+                    }
+                    _ => false,
+                };
+                let Some(attempted) = recovery_attempted.filter(|_| rebuildable) else {
+                    return Err(error);
+                };
+                if attempted
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_err()
+                {
+                    return Err(IndexError::Invalid(
+                        "Directory recovery already failed after replacement. Restore private storage capacity and permissions, then reconnect the drive.",
+                    ));
+                }
+                quarantine_owned(path, &lease)?;
+                Self::open_owned(path, source_kind, source_identity)?
+            }
+        };
+        Ok(Self {
+            path: path.to_path_buf(),
+            writer,
+            page_cache_kib: PAGE_CACHE_KIB,
+            fts_ready: Arc::new(AtomicBool::new(fts_ready)),
+            fts_repair_cursor: None,
+            _lease: lease,
+        })
+    }
+
+    fn open_owned(path: &Path, source_kind: SourceKind, source_identity: &serde_json::Value) -> Result<(Connection, bool), IndexError> {
         let created = !path.try_exists()?;
         if created {
             let mut options = OpenOptions::new();
@@ -377,7 +492,7 @@ impl DirectoryIndex {
             options.mode(PRIVATE_FILE_MODE).custom_flags(libc::O_NOFOLLOW);
             drop(options.open(path)?);
         }
-        let mut writer = Connection::open(path)?;
+        let mut writer = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
         writer.busy_timeout(SQL_BUSY_TIMEOUT)?;
         if created {
             writer.execute_batch(SCHEMA)?;
@@ -393,34 +508,58 @@ impl DirectoryIndex {
         }
         let application_id: i64 = writer.query_row("PRAGMA application_id", [], |row| row.get(0))?;
         let schema_version: i64 = writer.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if application_id != APPLICATION_ID || schema_version != SCHEMA_VERSION {
+        if application_id != APPLICATION_ID {
             return Err(IndexError::Invalid(
+                "Directory database application identifier is invalid. Rebuild this source index.",
+            ));
+        }
+        if schema_version != SCHEMA_VERSION {
+            return Err(IndexError::RebuildRequired(
                 "Directory database schema is unsupported. Rebuild this source index.",
             ));
         }
-        let (kind, identity, normalization, traversal): (String, String, i64, i64) = writer.query_row(
-            "SELECT source_kind, source_identity, normalization_version, traversal_version FROM source_metadata WHERE id = 1",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )?;
-        if kind != source_kind.as_str()
-            || serde_json::from_str::<serde_json::Value>(&identity).ok().as_ref() != Some(source_identity)
-            || normalization != NORMALIZATION_VERSION
-            || traversal != TRAVERSAL_VERSION
-        {
+        for table in REQUIRED_DIRECTORY_TABLES {
+            if !writer.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?)",
+                [table],
+                |row| row.get::<_, bool>(0),
+            )? {
+                return Err(IndexError::RebuildRequired(
+                    "Directory database tables are missing. Rebuild this source index.",
+                ));
+            }
+        }
+        let metadata: Option<(String, String, i64, i64)> = writer
+            .query_row(
+                "SELECT source_kind, source_identity, normalization_version, traversal_version FROM source_metadata WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?;
+        let Some((kind, identity, normalization, traversal)) = metadata else {
+            return Err(IndexError::RebuildRequired(
+                "Directory database source metadata is missing. Rebuild this source index.",
+            ));
+        };
+        if kind != source_kind.as_str() || serde_json::from_str::<serde_json::Value>(&identity).ok().as_ref() != Some(source_identity) {
             return Err(IndexError::Invalid(
+                "Directory database source or policy does not match. Rebuild this source index.",
+            ));
+        }
+        if normalization != NORMALIZATION_VERSION || traversal != TRAVERSAL_VERSION {
+            return Err(IndexError::RebuildRequired(
                 "Directory database source or policy does not match. Rebuild this source index.",
             ));
         }
         let integrity: String = writer.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
         if integrity != "ok" || writer.prepare("PRAGMA foreign_key_check")?.query([])?.next()?.is_some() {
-            return Err(IndexError::Invalid(
+            return Err(IndexError::RebuildRequired(
                 "Directory database integrity check failed. Rebuild this source index.",
             ));
         }
         let invalid_metadata: bool = writer.query_row(GENERATION_VALIDATION, [], |row| row.get(0))?;
         if invalid_metadata {
-            return Err(IndexError::Invalid(
+            return Err(IndexError::RebuildRequired(
                 "Directory database generation metadata is invalid. Rebuild this source index.",
             ));
         }
@@ -432,14 +571,15 @@ impl DirectoryIndex {
             ));
         }
         writer.pragma_update(None, "cache_size", -PAGE_CACHE_KIB)?;
-        writer.execute_batch(FTS_SCHEMA)?;
-        let fts_ready = match writer.execute("INSERT INTO directory_fts(directory_fts, rank) VALUES ('integrity-check', 1)", []) {
-            Ok(_) => true,
-            Err(rusqlite::Error::SqliteFailure(error, _)) if error.code == rusqlite::ErrorCode::DatabaseCorrupt => {
-                writer.execute("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')", [])?;
-                false
+        let fts_ready = match Self::prepare_fts(&writer) {
+            Err(IndexError::Sql(rusqlite::Error::SqliteFailure(code, _)))
+                if matches!(code.code, rusqlite::ErrorCode::DatabaseCorrupt | rusqlite::ErrorCode::NotADatabase) =>
+            {
+                return Err(IndexError::StoragePaused(
+                    "Directory search token repair could not start. Validated directory data was retained. Restore private storage and retry the drive.",
+                ));
             }
-            Err(error) => return Err(error.into()),
+            result => result?,
         };
         let transaction = writer.transaction()?;
         transaction.execute(
@@ -451,14 +591,19 @@ impl DirectoryIndex {
             [],
         )?;
         transaction.commit()?;
-        Ok(Self {
-            path: path.to_path_buf(),
-            writer,
-            page_cache_kib: PAGE_CACHE_KIB,
-            fts_ready: Arc::new(AtomicBool::new(fts_ready)),
-            fts_repair_cursor: None,
-            _lease: lease,
-        })
+        Ok((writer, fts_ready))
+    }
+
+    fn prepare_fts(writer: &Connection) -> Result<bool, IndexError> {
+        writer.execute_batch(FTS_SCHEMA)?;
+        match writer.execute("INSERT INTO directory_fts(directory_fts, rank) VALUES ('integrity-check', 1)", []) {
+            Ok(_) => Ok(true),
+            Err(rusqlite::Error::SqliteFailure(error, _)) if error.code == rusqlite::ErrorCode::DatabaseCorrupt => {
+                writer.execute("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')", [])?;
+                Ok(false)
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     fn advance_revision(transaction: &rusqlite::Transaction<'_>) -> Result<(), IndexError> {
@@ -476,8 +621,26 @@ impl DirectoryIndex {
     pub fn write_paths(&mut self, paths: impl IntoIterator<Item = String>, generation_id: Option<i64>) -> Result<(), IndexError> {
         self.require_fts()?;
         let mut iterator = paths.into_iter();
+        let mut pending = None;
         loop {
-            let batch: Vec<_> = iterator.by_ref().take(ROW_BATCH_SIZE).collect();
+            let mut batch = Vec::new();
+            let mut bytes = 0;
+            while batch.len() < ROW_BATCH_SIZE {
+                let Some(path) = pending.take().or_else(|| iterator.next()) else {
+                    break;
+                };
+                if path.len() > SCAN_BATCH_BYTES {
+                    return Err(IndexError::Invalid(
+                        "Directory path exceeds the scan-batch byte limit. Source coverage is incomplete.",
+                    ));
+                }
+                if path.len() > SCAN_BATCH_BYTES - bytes {
+                    pending = Some(path);
+                    break;
+                }
+                bytes += path.len();
+                batch.push(path);
+            }
             if batch.is_empty() {
                 return Ok(());
             }
@@ -558,7 +721,7 @@ impl DirectoryIndex {
         }
         let mut statement = self
             .writer
-            .prepare("SELECT path FROM scan_queue WHERE generation_id = ? AND processed = 0 ORDER BY path LIMIT ?")?;
+            .prepare("SELECT path FROM scan_queue WHERE generation_id = ? AND processed = 0 ORDER BY rowid LIMIT ?")?;
         let rows = statement.query_map(params![generation_id, checked_sql_size(limit)?], |row| row.get(0))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
@@ -705,39 +868,62 @@ impl DirectoryIndex {
             ));
         }
         let prefix = if parent.is_empty() { String::new() } else { format!("{parent}/") };
-        let mut statement = self.writer.prepare(
-            "WITH suffixes AS (SELECT substr(path, length(?) + 1) AS suffix FROM directories WHERE generation_id = ? AND (? = '' OR substr(path, 1, length(?)) = ?)), children AS (SELECT ? || substr(suffix, 1, instr(suffix || '/', '/') - 1) AS path FROM suffixes) SELECT DISTINCT path FROM children WHERE (? IS NULL OR path > ?) ORDER BY path LIMIT ?"
-        )?;
-        let rows = statement.query_map(
-            params![
-                prefix,
-                generation_id,
-                prefix,
-                prefix,
-                prefix,
-                prefix,
-                after_path,
-                after_path,
-                checked_sql_size(ROW_BATCH_SIZE)?
-            ],
-            |row| row.get::<_, String>(0),
-        )?;
-        let mut result = Vec::new();
+        let lower = after_path.unwrap_or(&prefix).max(&prefix);
+        let upper = (!parent.is_empty()).then(|| format!("{parent}0"));
+        let mut statement = self.writer.prepare(if upper.is_some() {
+            "SELECT path FROM directories WHERE generation_id = ?1 AND path >= ?2 AND path < ?3 ORDER BY path"
+        } else {
+            "SELECT path FROM directories WHERE generation_id = ?1 AND path >= ?2 ORDER BY path"
+        })?;
+        let mut rows = if let Some(upper) = upper.as_ref() {
+            statement.query(params![generation_id, lower, upper])?
+        } else {
+            statement.query(params![generation_id, lower])?
+        };
+        let mut result = BTreeSet::new();
         let mut bytes = 0;
-        for path in rows {
-            let path = path?;
-            if path.len() > maximum_bytes {
-                return Err(IndexError::Invalid(
-                    "Directory child exceeds the scan-page byte budget. Source coverage is incomplete.",
-                ));
-            }
-            if path.len() > maximum_bytes - bytes {
+        let mut overflow: Option<String> = None;
+        let mut frontier: Option<String> = None;
+        while let Some(row) = rows.next()? {
+            let stored_path: String = row.get(0)?;
+            if frontier.as_ref().is_some_and(|boundary| &stored_path >= boundary) {
                 break;
             }
+            let suffix = &stored_path[prefix.len()..];
+            let path = format!("{prefix}{}", suffix.split('/').next().unwrap_or(suffix));
+            if after_path.is_some_and(|after| path.as_str() <= after)
+                || overflow.as_ref().is_some_and(|excluded| &path >= excluded)
+                || result.contains(&path)
+            {
+                continue;
+            }
             bytes += path.len();
-            result.push(path);
+            result.insert(path);
+            while result.len() > ROW_BATCH_SIZE || bytes > maximum_bytes {
+                let excluded = result
+                    .pop_last()
+                    .ok_or(IndexError::Invalid("Directory child-page accounting is invalid."))?;
+                bytes -= excluded.len();
+                overflow = Some(excluded);
+            }
+            let ceiling = overflow
+                .as_ref()
+                .or_else(|| if result.len() == ROW_BATCH_SIZE { result.last() } else { None });
+            if let Some(ceiling) = ceiling {
+                let name = &ceiling[prefix.len()..];
+                let cut = name
+                    .char_indices()
+                    .find_map(|(offset, character)| (offset > 0 && character < '/').then_some(offset))
+                    .unwrap_or(name.len());
+                frontier = Some(format!("{prefix}{}0", &name[..cut]));
+            }
         }
-        Ok(result)
+        if result.len() < ROW_BATCH_SIZE && overflow.is_some_and(|excluded| excluded.len() > maximum_bytes) {
+            return Err(IndexError::Invalid(
+                "Directory child exceeds the scan-page byte budget. Source coverage is incomplete.",
+            ));
+        }
+        Ok(result.into_iter().collect())
     }
 
     pub fn prune_subtree_batch(&mut self, generation_id: i64, path: &str) -> Result<bool, IndexError> {
@@ -918,6 +1104,39 @@ impl DirectoryIndex {
                 |row| row.get(0),
             )
             .optional()?)
+    }
+
+    pub(super) fn mutation_generations(&self) -> Result<Vec<i64>, IndexError> {
+        let mut statement = self
+            .writer
+            .prepare("SELECT id FROM generations WHERE state IN ('building', 'accepted', 'candidate')")?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    pub(super) fn mutation_subtree_paths(&self, generation: i64, path: &str, after: Option<&str>) -> Result<Vec<String>, IndexError> {
+        validate_directory_path(path)?;
+        let prefix = format!("{path}/");
+        let upper = format!("{path}0");
+        let mut statement = self.writer.prepare(
+            "SELECT path FROM directories WHERE generation_id = ?1 AND path >= ?2 AND path < ?3 AND (?4 IS NULL OR path > ?4) ORDER BY path LIMIT ?5",
+        )?;
+        let lower = after.unwrap_or(&prefix).max(&prefix);
+        let mut rows = statement.query(params![generation, lower, upper, after, checked_sql_size(ROW_BATCH_SIZE)?])?;
+        let mut paths = Vec::new();
+        let mut bytes = 0;
+        while let Some(row) = rows.next()? {
+            let child: String = row.get(0)?;
+            if child.len() > SCAN_BATCH_BYTES {
+                return Err(IndexError::Invalid("Directory mutation path exceeds the scan-batch byte limit."));
+            }
+            if child.len() > SCAN_BATCH_BYTES - bytes {
+                break;
+            }
+            bytes += child.len();
+            paths.push(child);
+        }
+        Ok(paths)
     }
 
     pub fn reconciliation_generation(&self) -> Result<Option<i64>, IndexError> {
@@ -1316,6 +1535,127 @@ impl DirectoryIndexReader {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn recovery_replaces_only_invalid_disposable_catalogues() {
+        for invalid in [
+            "PRAGMA user_version = 2",
+            "UPDATE generations SET indexed_count = indexed_count + 1",
+            "DELETE FROM source_metadata",
+            "DROP TABLE scan_queue",
+            "PRAGMA ignore_check_constraints = ON; UPDATE source_metadata SET normalization_version = 2",
+            "PRAGMA ignore_check_constraints = ON; UPDATE source_metadata SET traversal_version = 2",
+            "not_database",
+        ] {
+            let temporary = tempfile::tempdir().unwrap();
+            let path = temporary.path().join("private").join("source.sqlite3");
+            let identity = json!({"root": "fixture"});
+            let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+            index.write_paths(["rejected".to_owned()], None).unwrap();
+            index.finish_generation(1, 0).unwrap();
+            if invalid != "not_database" {
+                index.writer.execute_batch(invalid).unwrap();
+            }
+            drop(index);
+            if invalid == "not_database" {
+                fs::write(&path, b"not a SQLite catalogue").unwrap();
+            }
+            let before = fs::read(&path).unwrap();
+            let attempted = AtomicBool::new(false);
+            let mut index = DirectoryIndex::open_with_recovery(&path, SourceKind::Local, &identity, Some(&attempted)).unwrap();
+            let response = index
+                .search("rejected", 3, false, &Arc::new(AtomicBool::new(false)), false)
+                .unwrap();
+            assert_eq!(response.total_matches, 0);
+            assert_eq!(response.coverage, "partial");
+            assert_eq!(response.last_verified_at_ms, None);
+            assert!(attempted.load(Ordering::Acquire));
+            assert_eq!(fs::read(path.parent().unwrap().join(QUARANTINE_FILE_NAME)).unwrap(), before);
+            assert!(acquire_storage(&path).is_err());
+            index.write_paths(["fresh".to_owned()], None).unwrap();
+            assert!(index.finish_generation(1, 0).unwrap());
+        }
+    }
+
+    #[test]
+    fn recovery_refuses_wrong_application_and_source_without_modification() {
+        for invalid in ["PRAGMA application_id = 1", "UPDATE source_metadata SET source_identity = '{}'"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let path = temporary.path().join("private").join("source.sqlite3");
+            let identity = json!({"root": "fixture"});
+            let index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+            index.writer.execute_batch(invalid).unwrap();
+            drop(index);
+            let before = fs::read(&path).unwrap();
+            let attempted = AtomicBool::new(false);
+            assert!(DirectoryIndex::open_with_recovery(&path, SourceKind::Local, &identity, Some(&attempted)).is_err());
+            assert!(!attempted.load(Ordering::Acquire));
+            assert_eq!(fs::read(&path).unwrap(), before);
+            assert!(!path.parent().unwrap().join(QUARANTINE_FILE_NAME).exists());
+            assert!(acquire_storage(&path).is_ok());
+        }
+    }
+
+    #[test]
+    fn recovery_refuses_second_discard_after_quarantine_failure() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        index.writer.execute_batch("PRAGMA user_version = 2").unwrap();
+        drop(index);
+        let before = fs::read(&path).unwrap();
+        let rejected = path.parent().unwrap().join(QUARANTINE_FILE_NAME);
+        let lease = acquire_storage(&rejected).unwrap();
+        let attempted = AtomicBool::new(false);
+        assert!(DirectoryIndex::open_with_recovery(&path, SourceKind::Local, &identity, Some(&attempted)).is_err());
+        assert!(attempted.load(Ordering::Acquire));
+        assert_eq!(fs::read(&path).unwrap(), before);
+        drop(lease);
+        assert!(matches!(
+            DirectoryIndex::open_with_recovery(&path, SourceKind::Local, &identity, Some(&attempted)),
+            Err(IndexError::Invalid(message)) if message.contains("already failed")
+        ));
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(!rejected.exists());
+    }
+
+    #[test]
+    fn recovery_preserves_accepted_data_after_writer_contention() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        index.write_paths(["accepted".to_owned()], None).unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        drop(index);
+        let blocker = Connection::open(&path).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let attempted = AtomicBool::new(false);
+        assert!(DirectoryIndex::open_with_recovery(&path, SourceKind::Local, &identity, Some(&attempted)).is_err());
+        assert!(!attempted.load(Ordering::Acquire));
+        assert!(!path.parent().unwrap().join(QUARANTINE_FILE_NAME).exists());
+        blocker.execute_batch("ROLLBACK").unwrap();
+        let index = DirectoryIndex::open_with_recovery(&path, SourceKind::Local, &identity, Some(&attempted)).unwrap();
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+    }
+
+    #[test]
+    fn recovery_quarantine_retains_source_ownership_through_moves() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        drop(DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap());
+        let before = fs::read(&path).unwrap();
+        let lease = acquire_storage(&path).unwrap();
+        quarantine_owned(&path, &lease).unwrap();
+        assert!(acquire_storage(&path).is_err());
+        assert_eq!(fs::read(path.parent().unwrap().join(QUARANTINE_FILE_NAME)).unwrap(), before);
+        drop(lease);
+        assert!(acquire_storage(&path).is_ok());
+    }
+
+    #[test]
     fn subtree_rename_includes_all_signed_row_ids() {
         for identifier in [i64::MIN, -1, 0] {
             let temporary = tempfile::tempdir().unwrap();
@@ -1355,7 +1695,7 @@ mod tests {
             index.writer.execute_batch(corruption).unwrap();
             drop(index);
             assert!(
-                matches!(DirectoryIndex::open(&path, SourceKind::Local, &identity), Err(IndexError::Invalid(message)) if message.contains("generation metadata"))
+                matches!(DirectoryIndex::open(&path, SourceKind::Local, &identity), Err(IndexError::RebuildRequired(message)) if message.contains("generation metadata"))
             );
         }
     }
@@ -1493,6 +1833,61 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_partial_fts_repair_preserves_rows_cursor_and_retry() {
+        use std::sync::atomic::AtomicUsize;
+
+        const INTERRUPT_AFTER_STEPS: usize = 4096;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        index
+            .write_paths((0..ROW_BATCH_SIZE + 1).map(|number| format!("accepted/{number}")), None)
+            .unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        index
+            .writer
+            .execute_batch("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')")
+            .unwrap();
+        drop(index);
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut before = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        assert!(index.needs_fts_repair());
+        let cursor = index.fts_repair_cursor;
+        let changes_before: i64 = index.writer.query_row("SELECT total_changes()", [], |row| row.get(0)).unwrap();
+        let steps = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&steps);
+        index
+            .writer
+            .progress_handler(1, Some(move || observed.fetch_add(1, Ordering::Relaxed) >= INTERRUPT_AFTER_STEPS))
+            .unwrap();
+        let outcome = index.repair_fts_batch();
+        index.writer.progress_handler(0, None::<fn() -> bool>).unwrap();
+        assert!(outcome.is_err());
+        assert!(steps.load(Ordering::Relaxed) > INTERRUPT_AFTER_STEPS);
+        let changes_after: i64 = index.writer.query_row("SELECT total_changes()", [], |row| row.get(0)).unwrap();
+        assert!(
+            changes_after > changes_before,
+            "The interruption must occur after a partial token write."
+        );
+        assert_eq!(index.fts_repair_cursor, cursor);
+        assert!(index.needs_fts_repair());
+        let tokens: i64 = index
+            .writer
+            .query_row("SELECT count(*) FROM directory_fts_docsize", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tokens, 0);
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+        assert!(index.repair_fts_batch().unwrap());
+        assert!(!index.repair_fts_batch().unwrap());
+        assert!(!index.needs_fts_repair());
+        before.query_plan = "trigram";
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+    }
+
+    #[test]
     fn incremental_reclamation_preserves_results_and_verification() {
         let temporary = tempfile::tempdir().unwrap();
         let mut index = DirectoryIndex::open(
@@ -1576,6 +1971,12 @@ mod tests {
     #[test]
     fn shared_fixtures_match_scan_and_trigram() {
         let fixtures: serde_json::Value = serde_json::from_str(FIXTURES).unwrap();
+        assert!(search_terms(&"a".repeat(MAX_QUERY_BYTES)).is_ok());
+        assert!(search_terms(&"😀".repeat(MAX_QUERY_BYTES / 4)).is_ok());
+        assert!(search_terms(&"😀".repeat(MAX_QUERY_BYTES / 4 + 1)).is_err());
+        let terms = (0..MAX_QUERY_TERMS).map(|number| format!("term{number}")).collect::<Vec<_>>();
+        assert_eq!(search_terms(&terms.join(" ")).unwrap().len(), MAX_QUERY_TERMS);
+        assert!(search_terms(&format!("{} excess", terms.join(" "))).is_err());
         for case in fixtures["normalization"].as_array().unwrap() {
             assert_eq!(
                 normalize_search_text(case["input"].as_str().unwrap()),
@@ -1630,6 +2031,65 @@ mod tests {
                 assert_eq!(response.results.iter().map(|row| row.path.as_str()).collect::<Vec<_>>(), expected);
             }
         }
+        index
+            .write_paths(
+                (0..ROW_BATCH_SIZE)
+                    .map(|number| format!("single/{number}/needleone"))
+                    .chain(std::iter::once("last/needleone-needletwo".to_owned())),
+                None,
+            )
+            .unwrap();
+        for force_scan in [false, true] {
+            let response = index
+                .search("needleone needletwo", 1, false, &Arc::new(AtomicBool::new(false)), force_scan)
+                .unwrap();
+            assert_eq!(response.total_matches, ROW_BATCH_SIZE as i64 + 1);
+            assert_eq!(response.results.len(), 1);
+            assert_eq!(response.results[0].path, "last/needleone-needletwo");
+            assert_eq!(response.results[0].matched_term_count, 2);
+        }
+    }
+
+    #[test]
+    fn pending_scan_reads_do_not_walk_processed_prefix_or_sort_pending_jobs() {
+        use std::sync::atomic::AtomicUsize;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let mut index = DirectoryIndex::open(
+            &temporary.path().join("private").join("source.sqlite3"),
+            SourceKind::Local,
+            &json!({"root": "fixture"}),
+        )
+        .unwrap();
+        let transaction = index.writer.transaction().unwrap();
+        {
+            let mut statement = transaction
+                .prepare("INSERT INTO scan_queue(generation_id, path, processed) VALUES (1, ?, ?)")
+                .unwrap();
+            for number in 0..ROW_BATCH_SIZE * 32 {
+                statement.execute(params![format!("done-{number:06}"), 1]).unwrap();
+            }
+            for number in 0..ROW_BATCH_SIZE {
+                statement.execute(params![format!("pending-{number:06}"), 0]).unwrap();
+            }
+        }
+        transaction.commit().unwrap();
+        let steps = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&steps);
+        index
+            .writer
+            .progress_handler(
+                1,
+                Some(move || {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+        let pending = index.pending_scan_paths(1, 1).unwrap();
+        index.writer.progress_handler(0, None::<fn() -> bool>).unwrap();
+        assert_eq!(pending, ["pending-000000"]);
+        assert!(steps.load(Ordering::Relaxed) < ROW_BATCH_SIZE);
     }
 
     #[test]
@@ -1669,6 +2129,26 @@ mod tests {
     #[test]
     fn count_has_no_discovery_cutoff() {
         check_count_and_bounded_results(100_001);
+    }
+
+    #[test]
+    fn bulk_path_writes_bound_bytes_before_building_row_keys() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let suffix = "x".repeat(SCAN_BATCH_BYTES / 2);
+        index.write_paths((0..3).map(|number| format!("{number}/{suffix}")), None).unwrap();
+        let status = index.search("", 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap();
+        assert_eq!(status.directory_count, 3);
+        assert_eq!(status.accepted_revision, 3);
+        assert!(matches!(
+            index.write_paths(["x".repeat(SCAN_BATCH_BYTES + 1)], None),
+            Err(IndexError::Invalid(_))
+        ));
+        assert_eq!(
+            index.search("", 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap(),
+            status
+        );
     }
 
     #[test]
@@ -2177,10 +2657,9 @@ mod tests {
         index
             .mutate_observed_path(&DirectoryMutation::Add { path: "to/fresh".into() })
             .unwrap();
-        assert_eq!(
-            index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(),
-            vec!["from", "to", "to/fresh", "to/moved"]
-        );
+        let mut pending = index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap();
+        pending.sort_unstable();
+        assert_eq!(pending, ["from", "to", "to/fresh", "to/moved"]);
         index
             .mutate_observed_path(&DirectoryMutation::Remove { path: "to/fresh".into() })
             .unwrap();
@@ -2297,10 +2776,9 @@ mod tests {
             .last_verified_at_ms;
         index.mutate_path(&DirectoryMutation::Add { path: "later".into() }).unwrap();
         assert!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap().is_empty());
-        assert_eq!(
-            index.pending_scan_paths(candidate, ROW_BATCH_SIZE).unwrap(),
-            vec!["later", "moved-in"]
-        );
+        let mut pending = index.pending_scan_paths(candidate, ROW_BATCH_SIZE).unwrap();
+        pending.sort_unstable();
+        assert_eq!(pending, ["later", "moved-in"]);
         assert_eq!(
             index
                 .search("later", 3, false, &Arc::new(AtomicBool::new(false)), false)
@@ -2308,6 +2786,38 @@ mod tests {
                 .last_verified_at_ms,
             verified
         );
+    }
+
+    #[test]
+    fn mutation_subtree_pages_cover_candidates_without_changing_selected_data() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index
+            .write_paths(["root%_/child".into(), "root%_-other/leak".into()], None)
+            .unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let candidate = index.begin_verification().unwrap();
+        let paths: Vec<_> = (0..ROW_BATCH_SIZE + 1).map(|child| format!("root%_/child/{child:04}")).collect();
+        index.write_paths(paths.clone(), Some(candidate)).unwrap();
+        let before = index.search("root", 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap();
+        assert_eq!(index.mutation_generations().unwrap(), vec![1, candidate]);
+        assert_eq!(index.mutation_subtree_paths(1, "root%_", None).unwrap(), vec!["root%_/child"]);
+        let first = index.mutation_subtree_paths(candidate, "root%_", None).unwrap();
+        assert_eq!(first, paths[..ROW_BATCH_SIZE]);
+        assert_eq!(
+            index
+                .mutation_subtree_paths(candidate, "root%_", first.last().map(String::as_str))
+                .unwrap(),
+            paths[ROW_BATCH_SIZE..]
+        );
+        assert!(index.mutation_subtree_paths(candidate, "../root", None).is_err());
+        assert_eq!(
+            index.search("root", 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap(),
+            before
+        );
+        index.discard_generation(candidate).unwrap();
+        assert_eq!(index.mutation_generations().unwrap(), vec![1]);
     }
 
     #[test]
@@ -2365,6 +2875,90 @@ mod tests {
             cursor = page.last().cloned();
         }
         assert_eq!(count, ROW_BATCH_SIZE * 2 + 1);
+    }
+
+    #[test]
+    fn direct_child_pages_match_sorted_reference_with_interleaved_descendants() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let mut names = [
+            "a",
+            "a!",
+            "a!a",
+            "a!b",
+            "a-b",
+            "a.",
+            "a0",
+            "a !",
+            "a a",
+            "aä",
+            "!a",
+            "!a!",
+            "é",
+            "zzzzzzzzzzzzzzzzzzzz",
+        ];
+        names.sort_unstable();
+        index
+            .write_paths(names.iter().rev().map(|name| format!("parent/{name}/leaf")), None)
+            .unwrap();
+        for maximum_bytes in [8, 9, 10, 12, 16, 24, 64] {
+            for after_path in [None, Some("parent/a"), Some("parent/a-b"), Some("parent/a0")] {
+                let mut expected = Vec::new();
+                let mut bytes = 0;
+                let mut oversized = false;
+                for name in names {
+                    let path = format!("parent/{name}");
+                    if after_path.is_some_and(|after| path.as_str() <= after) {
+                        continue;
+                    }
+                    if path.len() > maximum_bytes {
+                        oversized = true;
+                        break;
+                    }
+                    if bytes + path.len() > maximum_bytes {
+                        break;
+                    }
+                    bytes += path.len();
+                    expected.push(path);
+                }
+                let page = index.direct_child_paths(1, "parent", after_path, maximum_bytes);
+                if oversized {
+                    assert!(matches!(page, Err(IndexError::Invalid(_))));
+                } else {
+                    assert_eq!(page.unwrap(), expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn direct_child_pages_stop_before_reading_the_remaining_flat_tree() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        let row_count = ROW_BATCH_SIZE * 32;
+        index
+            .write_paths((0..row_count).map(|number| format!("parent/{number:06}")), None)
+            .unwrap();
+        let steps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&steps);
+        index
+            .writer
+            .progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+        let page = index.direct_child_paths(1, "parent", None, SCAN_BATCH_BYTES);
+        index.writer.progress_handler(0, None::<fn() -> bool>).unwrap();
+        let page = page.unwrap();
+        assert_eq!(page.len(), ROW_BATCH_SIZE);
+        assert_eq!(page.last().unwrap(), &format!("parent/{:06}", ROW_BATCH_SIZE - 1));
+        assert!(steps.load(Ordering::Relaxed) < row_count);
     }
 
     #[test]
