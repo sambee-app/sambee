@@ -902,6 +902,33 @@ impl DirectoryIndex {
     }
 
     pub fn mutate_path(&mut self, mutation: &DirectoryMutation) -> Result<(), IndexError> {
+        self.apply_mutation(mutation, false)
+    }
+
+    pub fn mutate_observed_path(&mut self, mutation: &DirectoryMutation) -> Result<(), IndexError> {
+        self.apply_mutation(mutation, true)
+    }
+
+    pub fn accepted_generation(&self) -> Result<Option<i64>, IndexError> {
+        Ok(self
+            .writer
+            .query_row(
+                "SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    pub fn reconciliation_generation(&self) -> Result<Option<i64>, IndexError> {
+        Ok(self.writer.query_row(
+            "SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted' AND EXISTS(SELECT 1 FROM scan_queue q WHERE q.generation_id = g.id AND q.processed = 0)",
+            [],
+            |row| row.get(0),
+        ).optional()?)
+    }
+
+    fn apply_mutation(&mut self, mutation: &DirectoryMutation, reconcile: bool) -> Result<(), IndexError> {
         self.require_fts()?;
         let path = match mutation {
             DirectoryMutation::Add { path }
@@ -963,6 +990,28 @@ impl DirectoryIndex {
                     }
                 }
                 transaction.execute("UPDATE scan_queue SET path = ? || substr(path, length(?) + 1), processed = 0 WHERE generation_id IN (SELECT id FROM generations WHERE state IN ('building', 'accepted', 'candidate')) AND (path = ? OR substr(path, 1, length(?)) = ?)", params![new_path, path, path, prefix, prefix])?;
+            }
+        }
+        if reconcile {
+            let mut parents = Vec::new();
+            match mutation {
+                DirectoryMutation::ReadParent { path } => parents.push((path.as_str(), true)),
+                DirectoryMutation::Add { path } => {
+                    parents.push((path.as_str(), true));
+                    parents.push((path.rsplit_once('/').map_or("", |(parent, _)| parent), true));
+                }
+                DirectoryMutation::Remove { path } => parents.push((path.rsplit_once('/').map_or("", |(parent, _)| parent), true)),
+                DirectoryMutation::Rename { path, new_path } => {
+                    parents.push((path.rsplit_once('/').map_or("", |(parent, _)| parent), true));
+                    parents.push((new_path.rsplit_once('/').map_or("", |(parent, _)| parent), true));
+                    parents.push((new_path.as_str(), false));
+                }
+            }
+            for (parent, unconditional) in parents {
+                transaction.execute(
+                    "INSERT INTO scan_queue(generation_id, path) SELECT g.id, ? FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted' AND (? OR EXISTS(SELECT 1 FROM directories d WHERE d.generation_id = g.id AND d.path = ?)) ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
+                    params![parent, unconditional, parent],
+                )?;
             }
         }
         Self::advance_revision(&transaction)?;
@@ -2095,6 +2144,51 @@ mod tests {
         let after = index.search("existing root", 3, false, &cancelled, false).unwrap();
         assert_eq!(after.directory_count, 2);
         assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+    }
+
+    #[test]
+    fn observed_mutations_queue_accepted_parents_atomically() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap();
+        index
+            .write_paths(["from".into(), "from/moved".into(), "from/moved/child".into(), "to".into()], None)
+            .unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("from to", 3, false, &cancelled, false).unwrap();
+        let rename = DirectoryMutation::Rename {
+            path: "from/moved".into(),
+            new_path: "to/moved".into(),
+        };
+        index.writer.execute_batch("CREATE TRIGGER reject_owned_parent BEFORE INSERT ON scan_queue WHEN NEW.generation_id = 1 AND NEW.path = 'to' BEGIN SELECT RAISE(ABORT, 'injected'); END;").unwrap();
+        assert!(index.mutate_observed_path(&rename).is_err());
+        assert_eq!(index.search("from to", 3, false, &cancelled, false).unwrap(), before);
+        assert!(index.reconciliation_generation().unwrap().is_none());
+        assert!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap().is_empty());
+        index.writer.execute_batch("DROP TRIGGER reject_owned_parent").unwrap();
+        index.mutate_observed_path(&rename).unwrap();
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["from", "to", "to/moved"]);
+        assert_eq!(index.reconciliation_generation().unwrap(), Some(1));
+        let after = index.search("from to", 3, false, &cancelled, false).unwrap();
+        assert_eq!(after.directory_count, before.directory_count);
+        assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+        assert_eq!(index.search("from/moved", 3, false, &cancelled, false).unwrap().total_matches, 0);
+        index
+            .mutate_observed_path(&DirectoryMutation::Add { path: "to/fresh".into() })
+            .unwrap();
+        assert_eq!(
+            index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(),
+            vec!["from", "to", "to/fresh", "to/moved"]
+        );
+        index
+            .mutate_observed_path(&DirectoryMutation::Remove { path: "to/fresh".into() })
+            .unwrap();
+        assert_eq!(index.pending_scan_paths(1, ROW_BATCH_SIZE).unwrap(), vec!["from", "to", "to/moved"]);
+        assert_eq!(
+            index.search("from to", 3, false, &cancelled, false).unwrap().last_verified_at_ms,
+            before.last_verified_at_ms
+        );
     }
 
     #[test]

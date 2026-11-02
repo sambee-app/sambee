@@ -1810,6 +1810,184 @@ def test_new_database_and_lease_are_private(index):
         assert stat.S_IMODE(Path(str(index.path) + ".lease").stat().st_mode) == 0o600
 
 
+def test_accepted_parent_reconciliation_queues_only_new_subtrees(index):
+    index.write_paths(["parent", "parent/existing"])
+    assert index.finish_generation(1)
+    before = index.search("parent")
+    with pytest.raises(ValueError):
+        index.write_scan_children(1, [("parent/unowned", False)])
+    with pytest.raises(ValueError):
+        index.write_reconciliation_children(1, "parent", [("parent/unowned", False)])
+    index.queue_reconciliation_parent(1, "parent")
+    assert index.search("parent") == before
+    index.close()
+    index.open()
+    assert index.pending_scan_paths(1) == ["parent"]
+    index.write_reconciliation_children(1, "parent", [("parent/existing", True), ("parent/new", True)])
+    after = index.search("parent")
+    assert after.directory_count == 3
+    assert after.accepted_revision == before.accepted_revision + 1
+    assert after.last_verified_at_ms == before.last_verified_at_ms
+    assert index.pending_scan_paths(1) == ["parent", "parent/new"]
+    index.write_reconciliation_children(1, "parent", [("parent/existing", True), ("parent/new", True)])
+    assert index.search("parent") == after
+    index.write_reconciliation_children(1, "parent/new", [("parent/new/child", False)])
+    index.finish_reconciliation_parent(1, "parent/new")
+    index.finish_reconciliation_parent(1, "parent")
+    index.queue_reconciliation_parent(1, "parent")
+    before_repeat = index.search("parent")
+    index.write_reconciliation_children(1, "parent", [("parent/new", True)])
+    assert index.pending_scan_paths(1) == ["parent"]
+    assert index.search("parent") == before_repeat
+    assert before_repeat.directory_count == 4
+    assert before_repeat.last_verified_at_ms == before.last_verified_at_ms
+
+
+def test_accepted_parent_reconciliation_rejects_stale_and_unrelated_work(index):
+    from app.services.directory_index import MAX_SIGNED_INTEGER, ROW_BATCH_SIZE
+
+    assert index.accepted_generation() is None
+    with pytest.raises(ValueError):
+        index.queue_reconciliation_parent(1, "")
+    index.write_paths(["parent"])
+    assert index.finish_generation(1)
+    assert index.accepted_generation() == 1
+    index.queue_reconciliation_parent(1, "parent")
+    assert index.reconciliation_generation() == 1
+    before = index.search("parent other")
+    for invalid in ("other/child", "parent", "parent/deep/child"):
+        with pytest.raises(ValueError, match="immediate parent"):
+            index.write_reconciliation_children(1, "parent", [("parent/safe", False), (invalid, False)])
+        assert index.search("parent other") == before
+    with pytest.raises(ValueError, match="row batch"):
+        index.write_reconciliation_children(1, "parent", ((f"parent/{number}", False) for number in range(ROW_BATCH_SIZE + 1)))
+    assert index.search("parent other") == before
+    index.finish_reconciliation_parent(1, "parent")
+    assert index.reconciliation_generation() is None
+    with pytest.raises(ValueError):
+        index.finish_reconciliation_parent(1, "parent")
+    with pytest.raises(ValueError):
+        index.write_reconciliation_children(1, "parent", [("parent/late", False)])
+    index.queue_reconciliation_parent(1, "parent")
+    candidate = index.begin_verification()
+    for operation in (
+        lambda: index.queue_reconciliation_parent(candidate, "parent"),
+        lambda: index.write_reconciliation_children(candidate, "parent", [("parent/late", False)]),
+        lambda: index.finish_reconciliation_parent(candidate, "parent"),
+    ):
+        with pytest.raises(ValueError):
+            operation()
+    index.write_paths(["replacement"], generation_id=candidate)
+    assert index.finish_generation(candidate)
+    selected = index.search("replacement parent")
+    for generation in (1, MAX_SIGNED_INTEGER):
+        for operation in (
+            lambda: index.queue_reconciliation_parent(generation, "parent"),
+            lambda: index.write_reconciliation_children(generation, "parent", [("parent/late", False)]),
+            lambda: index.finish_reconciliation_parent(generation, "parent"),
+        ):
+            with pytest.raises(ValueError):
+                operation()
+            assert index.search("replacement parent") == selected
+
+
+def test_accepted_parent_reconciliation_bounds_bytes_and_root_children(index, monkeypatch):
+    index.write_paths(["existing"])
+    assert index.finish_generation(1)
+    index.queue_reconciliation_parent(1, "")
+    before = index.search("existing root")
+    consumed = []
+
+    def children():
+        for path in ("safe", "\u00e9" * 3):
+            consumed.append(path)
+            yield path, True
+        raise AssertionError("An oversized batch must not consume further children.")
+
+    with monkeypatch.context() as budget:
+        budget.setattr("app.services.directory_index.SCAN_BATCH_BYTES", 9)
+        with pytest.raises(ValueError, match="byte limit"):
+            index.write_reconciliation_children(1, "", children())
+        assert len(consumed) == 2
+        assert index.search("existing root") == before
+        assert index.pending_scan_paths(1) == [""]
+        index.write_reconciliation_children(1, "", [(prefix + "\u00e9", False) for prefix in ("a", "b", "c")])
+        assert index.status().directory_count == 4
+    before_invalid = index.status()
+    with pytest.raises(ValueError, match="immediate parent"):
+        index.write_reconciliation_children(1, "", [("root-child", True), ("nested/child", False)])
+    assert index.status() == before_invalid
+    index.write_reconciliation_children(1, "", [("root-child", True)])
+    index.finish_reconciliation_parent(1, "")
+    assert index.pending_scan_paths(1) == ["root-child"]
+    after = index.search("existing root")
+    assert after.directory_count == 5
+    assert after.last_verified_at_ms == before.last_verified_at_ms
+
+
+@pytest.mark.parametrize("failure", ["queue", "revision", "completion"])
+def test_failed_accepted_parent_reconciliation_rolls_back_rows_and_work(index, failure):
+    index.write_paths(["parent"])
+    assert index.finish_generation(1)
+    index.queue_reconciliation_parent(1, "parent")
+    before = index.search("parent")
+    triggers = {
+        "queue": "BEFORE INSERT ON scan_queue WHEN NEW.path = 'parent/abort'",
+        "revision": "BEFORE UPDATE ON source_metadata",
+        "completion": "BEFORE UPDATE ON scan_queue WHEN OLD.path = 'parent'",
+    }
+    index._connection().execute(f"CREATE TRIGGER reject_reconciliation {triggers[failure]} BEGIN SELECT RAISE(ABORT, 'injected'); END")
+
+    def operation():
+        if failure == "completion":
+            index.finish_reconciliation_parent(1, "parent")
+        else:
+            index.write_reconciliation_children(1, "parent", [("parent/abort", True)])
+
+    with pytest.raises(sqlite3.IntegrityError):
+        operation()
+    assert index.search("parent") == before
+    assert index.pending_scan_paths(1) == ["parent"]
+    index._connection().execute("DROP TRIGGER reject_reconciliation")
+    operation()
+    if failure == "completion":
+        assert index.pending_scan_paths(1) == []
+        assert index.search("parent") == before
+    else:
+        assert index.search("parent").directory_count == 2
+        assert index.pending_scan_paths(1) == ["parent", "parent/abort"]
+
+
+def test_accepted_parent_reconciliation_headroom_refusal_retains_work(index, monkeypatch):
+    from app.services.directory_index_resources import DirectoryDiskBudgetError
+
+    index.write_paths(["parent"])
+    assert index.finish_generation(1)
+    index.queue_reconciliation_parent(1, "parent")
+    before = index.search("parent")
+
+    def denied():
+        raise DirectoryDiskBudgetError("Injected reconciliation headroom refusal.")
+
+    with monkeypatch.context() as refusal:
+        refusal.setattr(index, "growth_guard", denied)
+        for operation in (
+            lambda: index.queue_reconciliation_parent(1, "other"),
+            lambda: index.write_reconciliation_children(1, "parent", [("parent/child", False)]),
+            lambda: index.finish_reconciliation_parent(1, "parent"),
+        ):
+            with pytest.raises(DirectoryDiskBudgetError):
+                operation()
+            assert index.pending_scan_paths(1) == ["parent"]
+            assert index.search("parent") == before
+    index.write_reconciliation_children(1, "parent", [("parent/child", False)])
+    index.finish_reconciliation_parent(1, "parent")
+    assert index.reconciliation_generation() is None
+    after = index.search("parent")
+    assert after.directory_count == 2
+    assert after.last_verified_at_ms == before.last_verified_at_ms
+
+
 def test_added_subtrees_queue_build_and_candidate_work_atomically(index):
     candidate = index.begin_verification()
     index.mutate_path("add", "moved-in")

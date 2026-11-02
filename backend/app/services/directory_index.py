@@ -547,22 +547,102 @@ class DirectoryIndex:
             ]
 
     def write_scan_children(self, generation_id: int, children: Iterable[tuple[str, bool]]) -> None:
-        batch = list(islice(children, ROW_BATCH_SIZE + 1))
+        self._write_children(generation_id, children)
+
+    def accepted_generation(self) -> int | None:
+        with self._writer_lock:
+            row = (
+                self._connection()
+                .execute("SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted'")
+                .fetchone()
+            )
+            return None if row is None else int(row[0])
+
+    def reconciliation_generation(self) -> int | None:
+        with self._writer_lock:
+            row = (
+                self._connection()
+                .execute(
+                    "SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted' "
+                    "AND EXISTS(SELECT 1 FROM scan_queue q WHERE q.generation_id = g.id AND q.processed = 0)"
+                )
+                .fetchone()
+            )
+            return None if row is None else int(row[0])
+
+    @staticmethod
+    def _require_reconciliation_parent(connection: sqlite3.Connection, generation_id: int, parent: str | None) -> None:
+        accepted = required_row(
+            connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM generations g JOIN source_metadata m ON m.selected_generation = g.id "
+                "WHERE g.id = ? AND g.state = 'accepted' AND (? IS NULL OR EXISTS(SELECT 1 FROM scan_queue q "
+                "WHERE q.generation_id = g.id AND q.path = ? AND q.processed = 0)))",
+                (generation_id, parent, parent),
+            )
+        )[0]
+        if not accepted:
+            if parent is None:
+                raise ValueError("Reconciliation generation is no longer selected and accepted. Request source verification.")
+            raise ValueError("Reconciliation parent is not pending on the selected accepted generation. Request source verification.")
+
+    def queue_reconciliation_parent(self, generation_id: int, parent: str) -> None:
+        """Queue an accepted parent without changing selected rows or verification time."""
+        if parent:
+            validate_directory_path(parent)
+        with self._writer_lock, self.growth_guard():
+            connection = self._connection()
+            with transaction(connection):
+                self._require_reconciliation_parent(connection, generation_id, None)
+                connection.execute(
+                    "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) "
+                    "ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
+                    (generation_id, parent),
+                )
+
+    def finish_reconciliation_parent(self, generation_id: int, parent: str) -> None:
+        with self._writer_lock, self.growth_guard():
+            connection = self._connection()
+            with transaction(connection):
+                self._require_reconciliation_parent(connection, generation_id, parent)
+                connection.execute("UPDATE scan_queue SET processed = 1 WHERE generation_id = ? AND path = ?", (generation_id, parent))
+
+    def write_reconciliation_children(self, generation_id: int, parent: str, children: Iterable[tuple[str, bool]]) -> None:
+        """Commit immediate children only for pending selected accepted work."""
+        if parent:
+            validate_directory_path(parent)
+        self._write_children(generation_id, children, parent=parent)
+
+    def _write_children(self, generation_id: int, children: Iterable[tuple[str, bool]], *, parent: str | None = None) -> None:
+        batch: list[tuple[str, bool]] = []
+        batch_bytes = 0
+        for path, descend in islice(children, ROW_BATCH_SIZE + 1):
+            if parent is not None:
+                path_bytes = len(path.encode("utf-8"))
+                if path_bytes > SCAN_BATCH_BYTES - batch_bytes:
+                    raise ValueError("Reconciliation children exceed the scan-batch byte limit. Split them into bounded batches.")
+                batch_bytes += path_bytes
+            batch.append((path, descend))
         if len(batch) > ROW_BATCH_SIZE:
             raise ValueError("Scan row batch exceeds the supported limit. Split the batch.")
         for path, _ in batch:
             validate_directory_path(path)
+            if parent is not None and path.rpartition("/")[0] != parent:
+                raise ValueError("Reconciliation child is outside its immediate parent. Request source verification.")
         with self._writer_lock, self.growth_guard():
             connection = self._connection()
             self._require_fts()
             with transaction(connection):
-                state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
-                if state is None or state[0] not in {"building", "candidate"}:
-                    raise ValueError("Scan generation is no longer active. Discard this batch and request verification.")
-                connection.executemany(
-                    "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) "
-                    "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
-                    (
+                if parent is None:
+                    state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
+                    if state is None or state[0] not in {"building", "candidate"}:
+                        raise ValueError("Scan generation is no longer active. Discard this batch and request verification.")
+                else:
+                    self._require_reconciliation_parent(connection, generation_id, parent)
+                changed = False
+                for path, descend in batch:
+                    inserted = connection.execute(
+                        "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) "
+                        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
                         (
                             generation_id,
                             path,
@@ -570,15 +650,17 @@ class DirectoryIndex:
                             normalize_search_text(path.rsplit("/", 1)[-1]),
                             path.count("/"),
                             any(part.startswith(".") for part in path.split("/")),
+                        ),
+                    ).rowcount
+                    changed |= bool(inserted)
+                    if descend and (parent is None or inserted):
+                        connection.execute(
+                            "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT DO NOTHING",
+                            (generation_id, path),
                         )
-                        for path, _ in batch
-                    ),
-                )
-                connection.executemany(
-                    "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT DO NOTHING",
-                    ((generation_id, path) for path, descend in batch if descend),
-                )
-                if required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0] == generation_id:
+                if (parent is None or changed) and required_row(
+                    connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1")
+                )[0] == generation_id:
                     self._revision(connection)
 
     def direct_child_paths(

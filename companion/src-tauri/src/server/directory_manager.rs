@@ -887,6 +887,9 @@ impl LocalSource {
             if writer.needs_fts_repair() {
                 break;
             }
+            if writer.reconciliation_generation()?.is_some() {
+                break;
+            }
             let _reservation = budget.reserve()?;
             self.cleanup_pending.store(writer.cleanup_retired_batch()?, Ordering::Release);
         }
@@ -903,7 +906,7 @@ impl LocalSource {
             if !self.busy.load(Ordering::Acquire) && self.active_queries.load(Ordering::Acquire) == 0 {
                 let writer = lock(&self.writer)?;
                 if let Some(writer) = writer.as_ref() {
-                    if writer.checkpoint_due()? {
+                    if writer.reconciliation_generation()?.is_none() && writer.checkpoint_due()? {
                         let _reservation = budget.reserve()?;
                         writer.checkpoint_if_due()?;
                     }
@@ -927,26 +930,33 @@ impl LocalSource {
             let Some((_, mutation, bytes)) = observations.pending.front() else {
                 break;
             };
-            writer.mutate_path(mutation)?;
+            writer.mutate_observed_path(mutation)?;
             observations.bytes -= *bytes;
             observations.pending.pop_front();
         }
         observations.retire_barriers();
-        if observations.pending.is_empty()
+        let reconciliation_pending = writer.reconciliation_generation()?.is_some();
+        if !reconciliation_pending
+            && observations.pending.is_empty()
             && !self.busy.load(Ordering::Acquire)
             && self.active_queries.load(Ordering::Acquire) == 0
             && self.cleanup_pending.load(Ordering::Acquire)
         {
             self.cleanup_pending.store(writer.cleanup_retired_batch()?, Ordering::Release);
         }
-        if observations.pending.is_empty()
+        if !reconciliation_pending
+            && observations.pending.is_empty()
             && !self.busy.load(Ordering::Acquire)
             && self.active_queries.load(Ordering::Acquire) == 0
             && self.reclamation_pending.load(Ordering::Acquire)
         {
             self.reclamation_pending.store(!writer.reclaim_pages()?, Ordering::Release);
         }
-        if !self.busy.load(Ordering::Acquire) && self.active_queries.load(Ordering::Acquire) == 0 {
+        if !reconciliation_pending
+            && observations.pending.is_empty()
+            && !self.busy.load(Ordering::Acquire)
+            && self.active_queries.load(Ordering::Acquire) == 0
+        {
             writer.checkpoint_if_due()?;
         }
         drop(_reservation);
@@ -972,10 +982,12 @@ impl LocalSource {
         }
         let _reservation = budget.reserve()?;
         let mut writer = lock(&self.writer)?;
-        writer
-            .as_mut()
-            .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
-            .write_scan_children(scan.id, children.iter().cloned())?;
+        let writer = writer.as_mut().ok_or(IndexError::Invalid("Directory writer is unavailable."))?;
+        if writer.accepted_generation()? == Some(scan.id) {
+            writer.write_reconciliation_children(scan.id, parent, children.iter().cloned())?;
+        } else {
+            writer.write_scan_children(scan.id, children.iter().cloned())?;
+        }
         Ok(())
     }
 
@@ -1070,6 +1082,171 @@ impl LocalSource {
         Ok(())
     }
 
+    fn scan_parent(self: &Arc<Self>, root: &NativeRoot, generation: i64, parent: &str, budget: &Arc<DiskBudget>) -> Result<(), IndexError> {
+        let read = self.begin_read()?;
+        let parent_identity = root.parent_identity(parent)?;
+        let mut batch = Vec::with_capacity(ROW_BATCH_SIZE);
+        let mut bytes = 0;
+        self.progress()?;
+        root.children(parent, |entry| {
+            self.progress()?;
+            if self.stopped.load(Ordering::Acquire) || !lock(&self.observations)?.is_current(read.token, parent) {
+                return Err(IndexError::Interrupted);
+            }
+            match entry {
+                Ok(Some((name, descend))) => {
+                    let path = if parent.is_empty() { name } else { format!("{parent}/{name}") };
+                    validate_directory_path(&path)?;
+                    if path.len() > limit("max_observation_bytes")? {
+                        return Err(IndexError::Invalid(
+                            "Directory path exceeds the scan-batch byte limit. Source coverage is incomplete.",
+                        ));
+                    }
+                    if !batch.is_empty() && (batch.len() == ROW_BATCH_SIZE || bytes + path.len() > limit("max_observation_bytes")?) {
+                        self.commit_children(
+                            root,
+                            parent,
+                            parent_identity,
+                            ScanGeneration {
+                                id: generation,
+                                read: read.token,
+                            },
+                            &batch,
+                            budget,
+                        )?;
+                        batch.clear();
+                        bytes = 0;
+                    }
+                    bytes += path.len();
+                    batch.push((path, descend));
+                }
+                Ok(None) => {}
+                Err(issue) => {
+                    root.verify_parent(parent, parent_identity)?;
+                    let observations = lock(&self.observations)?;
+                    if !observations.is_current(read.token, parent) || self.stopped.load(Ordering::Acquire) {
+                        return Err(IndexError::Interrupted);
+                    }
+                    let _reservation = budget.reserve()?;
+                    lock(&self.writer)?
+                        .as_mut()
+                        .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+                        .record_issue(generation, issue.code())?;
+                }
+            }
+            Ok(())
+        })?;
+        if !batch.is_empty() {
+            self.commit_children(
+                root,
+                parent,
+                parent_identity,
+                ScanGeneration {
+                    id: generation,
+                    read: read.token,
+                },
+                &batch,
+                budget,
+            )?;
+        }
+        self.prune_missing_children(
+            root,
+            parent,
+            parent_identity,
+            ScanGeneration {
+                id: generation,
+                read: read.token,
+            },
+            budget,
+        )?;
+        root.verify_parent(parent, parent_identity)?;
+        let observations = lock(&self.observations)?;
+        if self.stopped.load(Ordering::Acquire) || !observations.is_current(read.token, parent) {
+            return Err(IndexError::Interrupted);
+        }
+        let _reservation = budget.reserve()?;
+        let mut writer = lock(&self.writer)?;
+        let writer = writer.as_mut().ok_or(IndexError::Invalid("Directory writer is unavailable."))?;
+        if writer.accepted_generation()? == Some(generation) {
+            writer.finish_reconciliation_parent(generation, parent)?;
+        } else {
+            writer.finish_scan_parent(generation, parent)?;
+        }
+        Ok(())
+    }
+
+    fn reconcile(self: &Arc<Self>, budget: &Arc<DiskBudget>, scans: &Arc<Semaphore>) -> Result<(), IndexError> {
+        if self.stopped.load(Ordering::Acquire) || Instant::now() < lock(&self.status)?.retry_at {
+            return Ok(());
+        }
+        let generation = {
+            let writer = lock(&self.writer)?;
+            match writer.as_ref() {
+                Some(writer) if !writer.needs_fts_repair() => writer.reconciliation_generation()?,
+                _ => None,
+            }
+        };
+        let Some(_) = generation else {
+            return Ok(());
+        };
+        if self
+            .busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Ok(());
+        }
+        let Ok(permit) = Arc::clone(scans).try_acquire_owned() else {
+            self.busy.store(false, Ordering::Release);
+            return Ok(());
+        };
+        let _ownership = ScanOwnership {
+            source: Arc::clone(self),
+            _permit: permit,
+        };
+        self.progress()?;
+        let outcome = (|| {
+            if self.stopped.load(Ordering::Acquire) {
+                return Err(IndexError::Interrupted);
+            }
+            let Some(generation) = lock(&self.writer)?
+                .as_ref()
+                .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+                .reconciliation_generation()?
+            else {
+                return Ok(());
+            };
+            let root = lock(&self.root)?
+                .clone()
+                .ok_or(IndexError::Invalid("Directory root is unavailable. Request source verification."))?;
+            root.verify()?;
+            let baseline = self.begin_read()?;
+            loop {
+                if self.stopped.load(Ordering::Acquire) || !lock(&self.observations)?.is_current(baseline.token, "") {
+                    return Err(IndexError::Interrupted);
+                }
+                let parents = lock(&self.writer)?
+                    .as_ref()
+                    .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
+                    .pending_scan_paths(generation, 1)?;
+                let Some(parent) = parents.first() else {
+                    break;
+                };
+                self.scan_parent(&root, generation, parent, budget)?;
+            }
+            root.verify()?;
+            let observations = lock(&self.observations)?;
+            if self.stopped.load(Ordering::Acquire) || !observations.is_current(baseline.token, "") {
+                return Err(IndexError::Interrupted);
+            }
+            Ok(())
+        })();
+        if outcome.is_err() {
+            self.invalidate()?;
+        }
+        outcome
+    }
+
     fn scan(self: &Arc<Self>, budget: &Arc<DiskBudget>) -> Result<(), IndexError> {
         self.progress()?;
         let root = match lock(&self.root)?.clone() {
@@ -1135,92 +1312,7 @@ impl LocalSource {
                 let Some(parent) = parents.first() else {
                     break;
                 };
-                let read = self.begin_read()?;
-                let parent_identity = root.parent_identity(parent)?;
-                let mut batch = Vec::with_capacity(ROW_BATCH_SIZE);
-                let mut bytes = 0;
-                self.progress()?;
-                root.children(parent, |entry| {
-                    self.progress()?;
-                    if self.stopped.load(Ordering::Acquire) || !lock(&self.observations)?.is_current(read.token, parent) {
-                        return Err(IndexError::Interrupted);
-                    }
-                    match entry {
-                        Ok(Some((name, descend))) => {
-                            let path = if parent.is_empty() { name } else { format!("{parent}/{name}") };
-                            validate_directory_path(&path)?;
-                            if path.len() > limit("max_observation_bytes")? {
-                                return Err(IndexError::Invalid(
-                                    "Directory path exceeds the scan-batch byte limit. Source coverage is incomplete.",
-                                ));
-                            }
-                            if !batch.is_empty() && (batch.len() == ROW_BATCH_SIZE || bytes + path.len() > limit("max_observation_bytes")?)
-                            {
-                                self.commit_children(
-                                    &root,
-                                    parent,
-                                    parent_identity,
-                                    ScanGeneration {
-                                        id: generation,
-                                        read: read.token,
-                                    },
-                                    &batch,
-                                    budget,
-                                )?;
-                                batch.clear();
-                                bytes = 0;
-                            }
-                            bytes += path.len();
-                            batch.push((path, descend));
-                        }
-                        Ok(None) => {}
-                        Err(issue) => {
-                            let observations = lock(&self.observations)?;
-                            if !observations.is_current(read.token, parent) {
-                                return Err(IndexError::Interrupted);
-                            }
-                            let _reservation = budget.reserve()?;
-                            lock(&self.writer)?
-                                .as_mut()
-                                .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
-                                .record_issue(generation, issue.code())?;
-                        }
-                    }
-                    Ok(())
-                })?;
-                if !batch.is_empty() {
-                    self.commit_children(
-                        &root,
-                        parent,
-                        parent_identity,
-                        ScanGeneration {
-                            id: generation,
-                            read: read.token,
-                        },
-                        &batch,
-                        budget,
-                    )?;
-                }
-                self.prune_missing_children(
-                    &root,
-                    parent,
-                    parent_identity,
-                    ScanGeneration {
-                        id: generation,
-                        read: read.token,
-                    },
-                    budget,
-                )?;
-                root.verify_parent(parent, parent_identity)?;
-                let observations = lock(&self.observations)?;
-                if !observations.is_current(read.token, parent) {
-                    return Err(IndexError::Interrupted);
-                }
-                let _reservation = budget.reserve()?;
-                lock(&self.writer)?
-                    .as_mut()
-                    .ok_or(IndexError::Invalid("Directory writer is unavailable."))?
-                    .finish_scan_parent(generation, parent)?;
+                self.scan_parent(&root, generation, parent, budget)?;
             }
             self.accept_generation(&root, baseline.token, generation, budget)
         })();
@@ -1503,10 +1595,11 @@ impl LocalDirectoryManager {
                         _permit: permit,
                     };
                     let budget = Arc::clone(&self.budget);
+                    let scans = Arc::clone(&self.scans);
                     tauri::async_runtime::spawn(async move {
                         let result = tokio::task::spawn_blocking(move || {
                             let _ownership = ownership;
-                            let result = task_source.flush(&budget);
+                            let result = task_source.flush(&budget).and_then(|()| task_source.reconcile(&budget, &scans));
                             if let Err(error) = &result {
                                 task_source.fail(error, &budget);
                             }
@@ -1957,6 +2050,17 @@ mod tests {
         assert!(source.cleanup_pending.load(Ordering::Acquire));
         assert!(source.reclamation_pending.load(Ordering::Acquire));
         source.busy.store(false, Ordering::Release);
+        source.flush(&budget).unwrap();
+        assert!(source.cleanup_pending.load(Ordering::Acquire));
+        assert!(source.reclamation_pending.load(Ordering::Acquire));
+        {
+            let mut writer = lock(&source.writer).unwrap();
+            let writer = writer.as_mut().unwrap();
+            assert_eq!(writer.reconciliation_generation().unwrap(), Some(candidate));
+            while let Some(parent) = writer.pending_scan_paths(candidate, 1).unwrap().into_iter().next() {
+                writer.finish_reconciliation_parent(candidate, &parent).unwrap();
+            }
+        }
         Arc::get_mut(&mut budget).unwrap().space_probe = |_| Ok(0);
         assert!(matches!(source.flush(&budget), Err(IndexError::StoragePaused(_))));
         assert!(source.cleanup_pending.load(Ordering::Acquire));
@@ -2568,6 +2672,157 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn accepted_parent_reconciliation_updates_tree_without_full_verification() {
+        for mode in ["paired", "from-to", "to-from", "unknown"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root_path = temporary.path().join("root");
+            for path in ["stable", "old/child", "gone/child"] {
+                std::fs::create_dir_all(root_path.join(path)).unwrap();
+            }
+            std::fs::write(root_path.join("regular"), b"fixture").unwrap();
+            let source = LocalSource::new(root_path.clone(), &temporary.path().join("private"));
+            let mut budget = Arc::new(DiskBudget {
+                namespace: temporary.path().join("private"),
+                policy_gate: Mutex::new(()),
+                state: Mutex::new(DiskState {
+                    policy: DirectoryPolicy::defaults().unwrap(),
+                    reserved: 0,
+                    next_cleanup_at: Instant::now(),
+                }),
+                space_probe: available_disk_bytes,
+            });
+            source.scan(&budget).unwrap();
+            lock(&source.watcher).unwrap().take();
+            let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = reader.search("stable old gone", 3, false, &cancelled, false).unwrap();
+            let verified = lock(&source.status).unwrap().verified;
+            std::fs::rename(root_path.join("old"), root_path.join("new")).unwrap();
+            std::fs::create_dir_all(root_path.join("new/additional/deeper")).unwrap();
+            std::fs::create_dir_all(root_path.join("created/deep")).unwrap();
+            std::fs::remove_dir_all(root_path.join("gone")).unwrap();
+            std::fs::rename(root_path.join("regular"), root_path.join("moved-file")).unwrap();
+            let from = || Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From))).add_path(root_path.join("old"));
+            let to = || Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To))).add_path(root_path.join("new"));
+            match mode {
+                "paired" => source
+                    .observe(Ok(Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+                        .add_path(root_path.join("old"))
+                        .add_path(root_path.join("new"))))
+                    .unwrap(),
+                "from-to" => {
+                    source.observe(Ok(from())).unwrap();
+                    source.observe(Ok(to())).unwrap();
+                }
+                "to-from" => {
+                    source.observe(Ok(to())).unwrap();
+                    source.observe(Ok(from())).unwrap();
+                }
+                _ => source
+                    .observe(Ok(
+                        Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Any))).add_path(root_path.join("new"))
+                    ))
+                    .unwrap(),
+            }
+            source
+                .observe(Ok(
+                    Event::new(EventKind::Create(CreateKind::Folder)).add_path(root_path.join("created"))
+                ))
+                .unwrap();
+            source
+                .observe(Ok(
+                    Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Any))).add_path(root_path.join("moved-file"))
+                ))
+                .unwrap();
+            source.flush(&budget).unwrap();
+            {
+                let stale = source.begin_read().unwrap();
+                let root = lock(&source.root).unwrap().clone().unwrap();
+                let identity = root.parent_identity("").unwrap();
+                source.invalidate().unwrap();
+                assert!(matches!(
+                    source.commit_children(
+                        &root,
+                        "",
+                        identity,
+                        ScanGeneration { id: 1, read: stale.token },
+                        &[("stale".into(), false)],
+                        &budget,
+                    ),
+                    Err(IndexError::Interrupted)
+                ));
+            }
+            let paused = reader
+                .search("stable old new gone created moved-file", 3, false, &cancelled, false)
+                .unwrap();
+            let scans = Arc::new(Semaphore::new(1));
+            let held = Arc::clone(&scans).try_acquire_owned().unwrap();
+            source.reconcile(&budget, &scans).unwrap();
+            assert!(!source.busy.load(Ordering::Acquire));
+            assert!(lock(&source.writer)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .reconciliation_generation()
+                .unwrap()
+                .is_some());
+            assert_eq!(
+                reader
+                    .search("stable old new gone created moved-file", 3, false, &cancelled, false)
+                    .unwrap(),
+                paused
+            );
+            drop(held);
+            Arc::get_mut(&mut budget).unwrap().space_probe = |_| Ok(0);
+            let refusal = source.reconcile(&budget, &scans).unwrap_err();
+            assert!(matches!(refusal, IndexError::StoragePaused(_)));
+            assert_eq!(
+                reader
+                    .search("stable old new gone created moved-file", 3, false, &cancelled, false)
+                    .unwrap(),
+                paused
+            );
+            assert_eq!(scans.available_permits(), 1);
+            assert!(!source.busy.load(Ordering::Acquire));
+            assert!(lock(&source.observations).unwrap().producers.is_empty());
+            source.fail(&refusal, &budget);
+            Arc::get_mut(&mut budget).unwrap().space_probe = available_disk_bytes;
+            source.reconcile(&budget, &scans).unwrap();
+            assert_eq!(
+                reader
+                    .search("stable old new gone created moved-file", 3, false, &cancelled, false)
+                    .unwrap(),
+                paused
+            );
+            lock(&source.status).unwrap().retry_at = Instant::now();
+            source.reconcile(&budget, &scans).unwrap();
+            let after = reader.search("stable new created", 3, false, &cancelled, false).unwrap();
+            assert_eq!(after.total_matches, 7);
+            assert_eq!(after.directory_count, 7);
+            assert_eq!(
+                reader
+                    .search("old gone moved-file", 3, false, &cancelled, false)
+                    .unwrap()
+                    .total_matches,
+                0
+            );
+            assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+            assert_eq!(lock(&source.status).unwrap().verified, verified);
+            assert_eq!(after.coverage, "uncertain");
+            assert!(lock(&source.observations).unwrap().verification_required);
+            assert!(lock(&source.observations).unwrap().producers.is_empty());
+            assert_eq!(scans.available_permits(), 1);
+            assert!(!source.busy.load(Ordering::Acquire));
+            assert_eq!(lock(&budget.state).unwrap().reserved, 0);
+            let writer = lock(&source.writer).unwrap();
+            let writer = writer.as_ref().unwrap();
+            assert_eq!(writer.accepted_generation().unwrap(), Some(1));
+            assert!(writer.reconciliation_generation().unwrap().is_none());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn late_scan_batches_and_candidate_selection_cannot_restore_deleted_rows() {
         let temporary = tempfile::tempdir().unwrap();
         let namespace = temporary.path().join("private");
@@ -2671,6 +2926,67 @@ mod tests {
         assert!(outcome.is_err());
         assert!(!source.flush_busy.load(Ordering::Acquire));
         assert_eq!(semaphore.available_permits(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn accepted_parent_reconciliation_runs_in_update_worker() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir_all(root_path.join("stable")).unwrap();
+        let namespace = temporary.path().join("private");
+        let budget = Arc::new(DiskBudget {
+            namespace: namespace.clone(),
+            policy_gate: Mutex::new(()),
+            state: Mutex::new(DiskState {
+                policy: DirectoryPolicy::defaults().unwrap(),
+                reserved: 0,
+                next_cleanup_at: Instant::now(),
+            }),
+            space_probe: available_disk_bytes,
+        });
+        let source = LocalSource::new(root_path.clone(), &namespace);
+        source.scan(&budget).unwrap();
+        lock(&source.watcher).unwrap().take();
+        let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = reader.search("stable incoming", 3, false, &cancelled, false).unwrap();
+        let verified = lock(&source.status).unwrap().verified;
+        let manager = Arc::new(LocalDirectoryManager {
+            sources: Mutex::new(HashMap::from([("fixture".into(), Arc::clone(&source))])),
+            budget,
+            scans: Arc::new(Semaphore::new(limit("scan_workers").unwrap())),
+            queries: Arc::new(Semaphore::new(limit("query_workers").unwrap())),
+            updates: Arc::new(Semaphore::new(limit("query_workers").unwrap())),
+        });
+        std::fs::create_dir_all(root_path.join("incoming/child")).unwrap();
+        source
+            .observe(Ok(
+                Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::To))).add_path(root_path.join("incoming"))
+            ))
+            .unwrap();
+        manager.tick().unwrap();
+        let _updates = tokio::time::timeout(
+            Duration::from_secs(10),
+            Arc::clone(&manager.updates).acquire_many_owned(u32::try_from(limit("query_workers").unwrap()).unwrap()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let after = reader.search("stable incoming", 3, false, &cancelled, false).unwrap();
+        assert_eq!(after.directory_count, 3);
+        assert_eq!(after.total_matches, 3);
+        assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+        assert_eq!(lock(&source.status).unwrap().verified, verified);
+        assert_eq!(
+            lock(&source.writer).unwrap().as_ref().unwrap().accepted_generation().unwrap(),
+            Some(1)
+        );
+        assert!(!source.busy.load(Ordering::Acquire));
+        assert!(!source.flush_busy.load(Ordering::Acquire));
+        assert!(lock(&source.observations).unwrap().producers.is_empty());
+        assert_eq!(manager.scans.available_permits(), limit("scan_workers").unwrap());
+        assert_eq!(lock(&manager.budget.state).unwrap().reserved, 0);
     }
 
     #[cfg(target_os = "linux")]
