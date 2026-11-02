@@ -11,7 +11,7 @@ import { useDirectorySearchProvider } from "../search/useDirectorySearchProvider
 import { UnifiedSearchBar } from "../UnifiedSearchBar";
 
 const virtualizerSizeCache = new Map<string | number, number>();
-const INPUT_DEBOUNCE_MS = 200;
+const INPUT_DEBOUNCE_MS = 160;
 const QUIET_REFRESH_INTERVAL_MS = 500;
 const MOCK_HISTORY_RESPONSE_MS = 40;
 const MOCK_INDEX_RESPONSE_MS = 80;

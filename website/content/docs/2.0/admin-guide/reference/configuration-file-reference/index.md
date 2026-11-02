@@ -61,7 +61,7 @@ Backend changes apply to live backend sources. A saved companion policy is only 
 
 Companion keeps its last approved policy if delivery or persistence fails. **Refresh Status** checks the effective revision. Update an unsupported companion, restore an offline connection, or check pairing in Local Drives when authorization fails. A different backend owner requires a confirmed owner reset in native Preferences. Reset invalidates pending challenges. A late receipt cannot replace a newer approved revision.
 
-The new directory-index search capability remains disabled. Policy approval does not enable it. See [Directory-Index Consistency](../../../developer-guide/backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for source, storage, and recovery limits.
+Backend SQLite directory search and Linux and Windows Companion directory search advertise search contract version 1. Compatible clients can refresh partial results while an index builds or updates. Policy approval controls resource settings; it does not grant source access or change supported source types. macOS directory indexing remains unavailable. See [Directory-Index Consistency](../../../developer-guide/backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for source, storage, and recovery limits.
 
 ## Backend Logging Levels
 

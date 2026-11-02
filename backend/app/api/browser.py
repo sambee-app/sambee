@@ -1083,6 +1083,7 @@ async def search_directories(
 
     connection = _get_connection_or_404(session, current_user, connection_id)
 
+    from app.core.directory_index_contract import CONTRACT_VERSION
     from app.services.directory_index import search_terms
 
     try:
@@ -1121,6 +1122,7 @@ async def search_directories(
                 total_matches=response.total_matches,
                 cache_state=cache.state.value,
                 directory_count=response.directory_count,
+                search_contract_version=CONTRACT_VERSION,
                 accepted_revision=response.accepted_revision,
                 coverage=response.coverage,
                 coverage_issue_count=response.issue_count,

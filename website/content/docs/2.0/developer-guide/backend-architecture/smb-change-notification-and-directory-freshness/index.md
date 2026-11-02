@@ -152,7 +152,9 @@ Native policy changes serialize against source initialization. Persistence failu
 
 ### Support Limits
 
-The new directory-index search capability remains disabled. Available-runtime tests cover storage admission, namespace substitution, mutation reconciliation, idle revalidation, repair refusal, resource pressure, and policy delivery. They do not certify live SMB behavior, physical sleep, Windows native execution, cloud providers, arbitrary same-account filesystem races, or hard process/allocation ceilings. Capability activation remains a separate decision.
+Backend SQLite directory responses and Linux and Windows Companion directory responses advertise `search_contract_version: 1`, including initial responses while a catalogue builds. Legacy responses and unsupported companion platforms do not advertise a compatible contract. This capability identifies the search semantics and permits bounded quiet refresh; it does not bypass root validation, authorization, policy ownership, or resource admission.
+
+Available-runtime tests cover storage admission, namespace substitution, mutation reconciliation, idle revalidation, repair refusal, resource pressure, and policy delivery. They do not certify live SMB behavior, physical sleep, Windows native execution, cloud providers, arbitrary same-account filesystem races, or hard process/allocation ceilings.
 
 Linux native behavior and Windows cross-compilation are different kinds of evidence. Cross-compilation does not establish Windows handle, filesystem-alias, mapped-volume, provider, or recovery behavior. macOS directory indexing is unavailable. Generated storage fixtures do not establish native traversal speed, application memory use, or production latency.
 

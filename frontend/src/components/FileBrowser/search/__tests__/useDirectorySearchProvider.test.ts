@@ -81,6 +81,8 @@ describe("getDirectoryResultPresentation", () => {
       expected: null,
     },
     { cache_state: "building", search_contract_version: undefined, expected: null },
+    { cache_state: "building", search_contract_version: null, expected: null },
+    { cache_state: "building", search_contract_version: SEARCH_CONTRACT_VERSION + 1, expected: null },
   ] as const)("gates quiet refresh for $cache_state contract $search_contract_version", async ({ expected, ...status }) => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
     vi.mocked(api.searchDirectories).mockResolvedValue({ results: [], total_matches: 0, directory_count: 0, ...status });

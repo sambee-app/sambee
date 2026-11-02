@@ -41,7 +41,7 @@ import type { SearchProvider, SearchResult, SearchResultItem, SearchResultsUpdat
 // ============================================================================
 
 /** Debounce delay in milliseconds for directory search */
-const DIRECTORY_SEARCH_DEBOUNCE_MS = 200;
+const DIRECTORY_SEARCH_DEBOUNCE_MS = 160;
 const DIRECTORY_REFRESH_INTERVAL_MS = 500;
 
 /** Minimum query length to trigger a directory search */

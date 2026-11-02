@@ -2,7 +2,7 @@
 
 ## Status and Checklist Rules
 
-Updated 2026-11-02. Repository version: 2.0.26. Implementation and required validation are complete within the available-runtime scope below. The new directory-index search capability remains disabled. The recorded browser timing target miss is not a performance pass.
+Updated 2026-11-02. Repository version: 2.0.26. Implementation and required validation are complete within the available-runtime scope below. Separately authorized capability activation now advertises search contract version 1 for backend SQLite responses and Linux and Windows Companion responses. Legacy responses and unsupported companion platforms do not advertise a compatible contract. The latest focused browser timing check meets the 300 ms p95 target after the debounce change, but one initial sample still exceeds it. Earlier disabled-state statements and timing misses remain historical evidence, not current activation status or performance passes.
 
 The 12 completion gates below are the active backlog. An unchecked gate does not mean its implementation is absent. Close a gate when its stated acceptance conditions pass and its evidence is recorded. Credit existing tests before adding tests. Do not restart completed work or create another broad qualification checklist.
 
@@ -21,7 +21,7 @@ Legacy RAM/JSONL removal is complete and is not remaining implementation work. T
 
 ## Scope Constraints
 
-- Keep the eight approved decisions. The request to fully implement the remaining work resumed implementation within these constraints. This checklist update does not authorize capability activation before its required gates pass.
+- Keep the eight approved decisions. The request to fully implement the remaining work resumed implementation within these constraints. Capability activation was separately authorized after the required gates passed; it does not expand source support or authorize a release or deployment.
 - Keep backend SQLite on Debian's system library and the companion on its approved Rust binding. Do not restore APSW, build custom SQLite, or mix Debian distributions. Follow the dependency workflow for further dependency changes.
 - Keep SQLite as the only directory-index storage format. Keep recent history in the application database and local indexes on the companion computer.
 - Keep directory searches within the targeted connection and file matching within loaded basenames and accessible recent-file history. Do not add drive-wide file or content search.
@@ -235,6 +235,28 @@ The final fixed log fields were checked after the aggregate, without repeating i
 An additional `ruff check app tests` found an unrelated existing `F821` at `backend/tests/test_archive_topology_conformance_harness.py:351`: `_backend_extraction_trace` is undefined. That file is outside this change and was left unchanged. This extra check is broader than the aggregate's configured backend lint; it is not recorded as passing. No other reported error in the changed slice remains.
 
 All 12 gates have scoped evidence and explicit limits. This acceptance does not claim the unmet browser target, native Windows/live SMB/provider/device execution, universal race protection, hard process allocation ceilings, or capability activation. No commit, version change, dependency update, release, or deployment was made.
+
+## Acceptance Evidence: Search Contract Activation
+
+Separately authorized on 2026-11-02 after the G1-G12 acceptance and debounce follow-up. Backend SQLite responses advertise `search_contract_version: 1`; the legacy response path leaves it null. Linux and Windows Companion responses advertise version 1 both before a reader is ready and when accepted rows are available. Other companion platforms leave it null. The frontend type accepts absent or null versions, and the existing exact-version check refuses quiet refresh for absent, null, or unknown versions. Root validation, session binding, authorization, policy ownership, resource admission, ranking, counts, and source limits are unchanged.
+
+A temporary visible browser page used only `http://localhost:3000/browse/smb/demo`. Its real warm-up response advertised version 1 with building state and partial coverage. A subsequent controlled building-to-ready sequence used that live contract value, 40 ms history and 80 ms index responses, and the real provider and Quick Bar. It produced two merged options, requested history once, requested the index twice, preserved input focus, and stopped refreshing at ready. Request starts were 168 ms and 769 ms after input dispatch. The page closed in `finally`, removing its temporary service overrides without changing the shared page. This checks browser refresh integration, not live SMB freshness or native Companion transport speed.
+
+Focused validation: backend directory API **38 passed, 1 opt-in measurement skipped**; native manager **43 passed, 3 opt-in checks ignored**; frontend transport/provider/Quick Bar **96 passed**. Backend changed-file Ruff and configured two-module mypy passed, with only the existing unused `pyvips` configuration-section note. Frontend TypeScript and focused Biome, Rust formatting and strict host Clippy, Windows code/test cross-compilation, and changed-file editor diagnostics passed. Version 2.0 product references now describe the active contract and unchanged limits. Documentation validation and website build passed. The full aggregate was not repeated for this activation change; the earlier G12 record applies to its recorded revision.
+
+Native Windows execution, live SMB delivery, physical sleep, cloud/provider execution, physical-display paint, arbitrary same-account race protection, and hard allocation ceilings remain unverified. macOS indexing remains unavailable. The initial browser latency outlier remains recorded. No product-version, schema, dependency, commit, release, or deployment change was made.
+
+## Acceptance Evidence: Directory Search Debounce Follow-Up
+
+Verified on 2026-11-02 after the G12 acceptance record. Directory search now uses a 160 ms debounce instead of 200 ms. The existing pasted/incremental timing and cancellation-boundary tests use the new delay. Quiet refresh, result limits, ranking, progressive publication, and capability activation are unchanged.
+
+A fresh visible temporary browser page used only `http://localhost:3000/browse/smb/demo`, the application's loaded history-service module, mocked 40 ms history and 80 ms index responses, and 30 sequential input samples. The mocks used the actual connection binding and search-contract version, so each sample produced two merged options rather than a duplicate indexed history path. No browser timer override was used for the implemented-change check. The page closed in `finally`, removing its mocks without changing the shared page.
+
+The unchanged 200 ms baseline in this follow-up measured visible-result p95 **319.9 ms**, with **28/30** samples above 300 ms. With the implemented 160 ms debounce, median was **266.6 ms**, nearest-rank p95 **284.1 ms**, and maximum **349.8 ms**; **1/30** samples exceeded 300 ms. That miss was the initial sample. Request-start p95 was **173.8 ms**, index-response-completion p95 **266.9 ms**, and merged DOM-publication p95 **276.1 ms**. The p95 comparison passes for this mocked fixture; this does not establish that every query meets 300 ms or resolve the initial-render outlier. A shorter debounce can admit more requests during typing; existing cancellation and stale-response checks still pass.
+
+Timing starts immediately before input dispatch and ends at the first animation-frame callback after both merged options appear. The host reports Windows 10, VS Code/Electron 1.144.0/43.8.3, and Chromium 150.0.7871.250; the application runs in the Debian development container. These are visible-renderer publication approximations, not physical-display paint or native companion speed guarantees.
+
+Focused validation: provider and Quick Bar tests **61 passed**; frontend TypeScript, two-file Biome, and changed-file editor diagnostics passed. Product documentation was checked; no version 2.0 product page specifies the old directory-search delay, so no product text change was needed. The full aggregate was not repeated for this debounce-only change; the earlier G12 record applies to its recorded revision. Capability activation remains disabled. No dependency, schema, product-version, commit, release, or deployment change was made.
 
 ## Acceptance Evidence: Application Measurements
 

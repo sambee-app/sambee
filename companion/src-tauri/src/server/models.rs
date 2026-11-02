@@ -633,6 +633,7 @@ pub struct DirectorySearchResult {
     pub total_matches: usize,
     pub cache_state: String,
     pub directory_count: usize,
+    pub search_contract_version: Option<u32>,
     pub match_ranks: std::collections::HashMap<String, i64>,
     pub matched_term_counts: std::collections::HashMap<String, usize>,
     pub accepted_revision: Option<i64>,

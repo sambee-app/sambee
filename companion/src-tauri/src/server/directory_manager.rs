@@ -34,6 +34,7 @@ const FAILURE_RETRY_MAX: Duration = Duration::from_secs(300);
 const FAILURE_RETRY_JITTER_PERCENT: u8 = 10;
 const PERIODIC_VERIFICATION_JITTER_PERCENT: u8 = 10;
 const DEFAULT_RESULT_LIMIT: usize = 50;
+const SEARCH_CONTRACT_VERSION: u32 = 1;
 pub(super) const MAX_WIRE_INTEGER: i64 = 9_007_199_254_740_991;
 const POLICY_VERSION: u32 = 1;
 
@@ -2001,6 +2002,7 @@ impl LocalDirectoryManager {
                 total_matches: 0,
                 cache_state: status.state.into(),
                 directory_count: 0,
+                search_contract_version: cfg!(any(target_os = "linux", target_os = "windows")).then_some(SEARCH_CONTRACT_VERSION),
                 match_ranks: HashMap::new(),
                 matched_term_counts: HashMap::new(),
                 accepted_revision: Some(0),
@@ -2074,6 +2076,7 @@ impl LocalDirectoryManager {
             total_matches: wire_count(result.total_matches)?,
             directory_count: wire_count(result.directory_count)?,
             cache_state: status.state.into(),
+            search_contract_version: cfg!(any(target_os = "linux", target_os = "windows")).then_some(SEARCH_CONTRACT_VERSION),
             accepted_revision: Some(result.accepted_revision),
             coverage: Some(result.coverage),
             coverage_issue_count: wire_count(result.issue_count)?,
@@ -2620,6 +2623,16 @@ mod tests {
                 .as_ref()
                 .map(|reader| reader.search("accepted", 3, false, &cancelled, false).unwrap());
             source.fail(&IndexError::StoragePaused("Injected resource refusal."), &manager.budget);
+            if !initialized {
+                lock(&manager.sources).unwrap().insert("fixture".into(), Arc::clone(&source));
+                let response = manager
+                    .search("fixture".into(), source.root_path.clone(), "accepted".into(), false)
+                    .await
+                    .unwrap();
+                let expected = cfg!(any(target_os = "linux", target_os = "windows")).then_some(SEARCH_CONTRACT_VERSION);
+                assert_eq!(response.search_contract_version, expected);
+                assert_eq!(serde_json::to_value(&response).unwrap()["search_contract_version"], json!(expected));
+            }
             let (deadline, delay, message, progress) = {
                 let status = lock(&source.status).unwrap();
                 (status.retry_at, status.failure_delay, status.message.clone(), status.progress)
@@ -4350,6 +4363,7 @@ mod tests {
         let started = Instant::now();
         let cold = manager.search("fixture".into(), root.clone(), "".into(), false).await.unwrap();
         assert_eq!(cold.total_matches, 0);
+        assert_eq!(cold.search_contract_version, Some(SEARCH_CONTRACT_VERSION));
         assert!(started.elapsed() < Duration::from_secs(1));
         let source = Arc::clone(manager.sources.lock().unwrap().get("fixture").unwrap());
         tokio::time::timeout(Duration::from_secs(10), async {
@@ -4369,6 +4383,11 @@ mod tests {
         assert_eq!(warm.results, vec!["alpha"]);
         assert_eq!(warm.directory_count, 2);
         assert_eq!(warm.coverage.as_deref(), Some("complete"));
+        assert_eq!(warm.search_contract_version, Some(SEARCH_CONTRACT_VERSION));
+        assert_eq!(
+            serde_json::to_value(&warm).unwrap()["search_contract_version"],
+            SEARCH_CONTRACT_VERSION
+        );
         let progress = source.status.lock().unwrap().progress;
         manager.search("fixture".into(), root, "hidden alpha".into(), true).await.unwrap();
         assert_eq!(source.status.lock().unwrap().progress, progress);

@@ -602,7 +602,7 @@ export interface LocalLinkTargetListing {
 }
 
 export interface DirectorySearchResult {
-  search_contract_version?: number;
+  search_contract_version?: number | null;
   results: string[];
   match_ranks?: Record<string, number>;
   total_matches: number;

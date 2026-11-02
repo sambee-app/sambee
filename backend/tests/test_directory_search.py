@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.directory_index_contract import CONTRACT_VERSION
 from app.models.connection import Connection, ConnectionScope
 from app.models.file import DirectoryListing, DirectorySearchResult, FileInfo, FileType
 from app.services.directory_cache import CacheState, ConnectionDirectoryCache, SQLiteConnectionDirectoryCache
@@ -129,6 +130,17 @@ def test_directory_search_http_latency_measurement(client, mock_cache_manager, a
 class TestSearchDirectories:
     """Tests for GET /{connection_id}/directories endpoint."""
 
+    def test_legacy_search_does_not_advertise_index_contract(self, client, auth_headers_user, test_connection, mock_cache_manager):
+        """Only the SQLite implementation can opt in to compatible quiet refresh."""
+        cache = MagicMock(spec=ConnectionDirectoryCache)
+        cache.search.return_value = ([], 0)
+        cache.state = CacheState.READY
+        cache.directory_count = 0
+        mock_cache_manager.get_or_create_cache.return_value = cache
+        response = client.get(f"/api/browse/{test_connection.id}/directories", headers=auth_headers_user, params={"q": "photos"})
+        assert response.status_code == 200
+        assert response.json()["search_contract_version"] is None
+
     @pytest.mark.parametrize(
         "query,expected_status",
         [
@@ -164,6 +176,7 @@ class TestSearchDirectories:
         assert response.status_code == 200
         data = response.json()
         assert data["directory_count"] == data["total_matches"] == 100_001
+        assert data["search_contract_version"] == CONTRACT_VERSION
         assert len(data["results"]) == len(selected.results) < data["total_matches"]
         assert data["accepted_revision"] == selected.accepted_revision
         assert data["coverage"] == selected.coverage
@@ -337,6 +350,7 @@ class TestSearchDirectories:
         assert "total_matches" in data
         assert "cache_state" in data
         assert "directory_count" in data
+        assert data["search_contract_version"] == CONTRACT_VERSION
 
         # The mock_cache has 3 directories containing "documents"
         assert data["total_matches"] > 0

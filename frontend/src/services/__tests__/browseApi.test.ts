@@ -6,6 +6,7 @@
 
 import type { AxiosResponse } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SEARCH_CONTRACT_VERSION } from "../../components/FileBrowser/search/recentHistory";
 import { type DirectoryListing, type DirectorySearchResult, type FileInfo, FileType } from "../../types";
 
 // Mock axios before importing services
@@ -608,12 +609,13 @@ describe("Browse API Contract Tests", () => {
   // ==========================================================================
 
   describe("Contract Tests - GET /browse/{connection_id}/directories", () => {
-    it("should return directory search result format", async () => {
+    it.each([undefined, null, SEARCH_CONTRACT_VERSION])("preserves directory search contract version %s", async (searchContractVersion) => {
       const backendResponse: DirectorySearchResult = {
         results: ["documents", "documents/work", "documents/personal"],
         total_matches: 3,
         cache_state: "ready",
         directory_count: 150,
+        search_contract_version: searchContractVersion,
       };
 
       mockAxiosInstance.get.mockResolvedValueOnce({
@@ -627,6 +629,7 @@ describe("Browse API Contract Tests", () => {
       expect(result).toHaveProperty("total_matches");
       expect(result).toHaveProperty("cache_state");
       expect(result).toHaveProperty("directory_count");
+      expect(result.search_contract_version).toBe(searchContractVersion);
 
       // Verify types
       expect(Array.isArray(result.results)).toBe(true);

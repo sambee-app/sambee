@@ -151,6 +151,7 @@ class DirectorySearchResult(BaseModel):
     total_matches: int
     cache_state: str
     directory_count: int
+    search_contract_version: Literal[1] | None = None
     accepted_revision: int | None = Field(default=None, ge=0)
     coverage: str | None = None
     coverage_issue_count: int = Field(default=0, ge=0)
