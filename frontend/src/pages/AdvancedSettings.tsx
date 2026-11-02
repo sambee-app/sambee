@@ -443,7 +443,7 @@ const POLICY_APPROVAL_TIMEOUT_MS = 110_000;
 function CompanionPolicyDelivery({ desiredRevision, backendIdentity }: { desiredRevision: number; backendIdentity: string }) {
   const [status, setStatus] = useState<CompanionDirectoryPolicyStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [unavailable, setUnavailable] = useState<"offline" | "legacy" | null>(null);
+  const [unavailable, setUnavailable] = useState<"offline" | "legacy" | "authorization" | null>(null);
   const [busy, setBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const controller = useRef<AbortController | null>(null);
@@ -453,7 +453,8 @@ function CompanionPolicyDelivery({ desiredRevision, backendIdentity }: { desired
       setError(failure.message);
       return;
     }
-    setUnavailable(isApiError(failure) && failure.response?.status === 404 ? "legacy" : "offline");
+    const status = isApiError(failure) ? failure.response?.status : undefined;
+    setUnavailable(status === 404 ? "legacy" : status === 401 || status === 403 ? "authorization" : "offline");
     setError(getApiErrorMessage(failure, "Companion policy is unavailable. Check pairing and the companion connection, then retry."));
   }, []);
   useEffect(() => {
@@ -553,23 +554,25 @@ function CompanionPolicyDelivery({ desiredRevision, backendIdentity }: { desired
   const message =
     unavailable === "legacy"
       ? "Companion update required. Desired policy is saved, but this companion has no policy approval support."
-      : conflict
-        ? "Another backend owns companion policy. Reset that owner in native Preferences."
-        : busy
-          ? refreshing
-            ? "Refreshing companion policy status."
-            : status?.status === "pending_local_approval"
-              ? "Waiting for local companion approval."
-              : "Delivering approved companion policy."
-          : applied
-            ? "Companion policy is active."
-            : unavailable === "offline"
-              ? "Companion is offline or unavailable. Its last approved policy remains active."
-              : "Desired policy is saved. Companion approval or delivery is pending.";
+      : unavailable === "authorization"
+        ? "Companion authorization is unavailable. Check pairing in Local Drives, then refresh its status."
+        : conflict
+          ? "Another backend owns companion policy. Reset that owner in native Preferences."
+          : busy
+            ? refreshing
+              ? "Refreshing companion policy status."
+              : status?.status === "pending_local_approval"
+                ? "Waiting for local companion approval."
+                : "Delivering approved companion policy."
+            : applied
+              ? "Companion policy is active."
+              : unavailable === "offline"
+                ? "Companion is offline or unavailable. Its last approved policy remains active."
+                : "Desired policy is saved. Companion approval or delivery is pending.";
   return (
     <Stack spacing={1.5}>
       <Alert severity={error || conflict ? "warning" : "info"} role="status">
-        {error ?? status?.message ?? message}
+        {unavailable ? message : (error ?? status?.message ?? message)}
       </Alert>
       <Box sx={{ typography: "caption", color: "text.secondary" }}>
         Desired revision: {desiredRevision}. Active revision: {status?.effective_revision ?? "not applied"}.

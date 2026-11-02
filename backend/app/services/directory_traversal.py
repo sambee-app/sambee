@@ -24,10 +24,16 @@ from smbprotocol.open import (
     ShareAccess,
 )
 
+from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
 from app.services.directory_index import validate_directory_path
 
 DIRECTORY_READ_BUFFER_BYTES = 64 * 1024
+MAX_SOURCE_DEPTH = DIRECTORY_INDEX_CONTRACT.limits["max_source_depth"]
+MAX_SOURCE_PATH_BYTES = DIRECTORY_INDEX_CONTRACT.limits["max_source_path_bytes"]
 SOURCE_BINDING_ERROR = "Directory source binding changed or is unsupported. Reconnect the source and retry verification."
+TRAVERSAL_LIMIT_ERROR = (
+    "Directory path exceeds the supported traversal bounds. Shorten the path or reduce nesting, then reconnect the source."
+)
 UNSAFE_COMPONENT_CHARACTERS = frozenset('\\/:*?"<>|')
 SMB_TIME_ORIGIN = datetime(1601, 1, 1, tzinfo=timezone.utc)
 logger = logging.getLogger(__name__)
@@ -39,6 +45,15 @@ class DirectoryTraversalError(OSError):
 
 class DirectoryBindingChangedError(DirectoryTraversalError):
     """The pinned source root cannot be reused."""
+
+
+def _validate_traversal_path(path: str) -> None:
+    if (
+        len(path) > MAX_SOURCE_PATH_BYTES
+        or len(path.encode("utf-8")) > MAX_SOURCE_PATH_BYTES
+        or (bool(path) and path.count("/") >= MAX_SOURCE_DEPTH)
+    ):
+        raise DirectoryTraversalError(TRAVERSAL_LIMIT_ERROR)
 
 
 def _component(name: str) -> None:
@@ -173,6 +188,7 @@ class SmbDirectoryHandle:
             or native_name.startswith("\\\\")
         ):
             raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
+        _validate_traversal_path(native_name.replace("\\", "/").lstrip("/"))
         native_name.encode("utf-16-le", errors="strict")
         for component in native_name.split("\\")[1:]:
             if component:
@@ -234,6 +250,9 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
                 if name in (".", ".."):
                     continue
                 _component(name)
+                if attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
+                    parent = self._identities[-1].native_name.replace("\\", "/").lstrip("/")
+                    _validate_traversal_path(f"{parent}/{name}" if parent else name)
             except (UnicodeError, ValueError, DirectoryTraversalError):
                 if attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
                     return SmbDirectoryEntry(None, SmbDirectoryEntryInformation(attributes))
@@ -247,6 +266,8 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
 
     def has_directory_child(self, name: str) -> bool:
         _component(name)
+        parent = self._identities[-1].native_name.replace("\\", "/").lstrip("/")
+        _validate_traversal_path(f"{parent}/{name}" if parent else name)
         native_name = name.encode("utf-16-le", errors="strict")
         self.verify()
         records = self._handles[-1].records(self._check, pattern=name)
@@ -292,6 +313,7 @@ class SmbDirectoryRoot:
         if not self._path.is_absolute() or not self._path.drive.startswith("\\\\") or self._path.drive.startswith(("\\\\?", "\\\\.")):
             raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
         self._prefix = self._path.parts[1:]
+        _validate_traversal_path("/".join(self._prefix))
         for component in self._prefix:
             _component(component)
         self._binding: tuple[SmbDirectoryIdentity, ...] | None = None
@@ -306,6 +328,8 @@ class SmbDirectoryRoot:
         _close_handles(handles)
 
     def read(self, parent: str, check: Callable[[], None], **session: Any) -> SmbDirectoryRead:
+        _validate_traversal_path(parent)
+        _validate_traversal_path("/".join((*self._prefix, parent)) if parent else "/".join(self._prefix))
         if parent:
             validate_directory_path(parent)
         components = (*self._prefix, *(parent.split("/") if parent else ()))

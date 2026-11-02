@@ -1,9 +1,25 @@
 //! Descriptor-based traversal; unsupported platforms fail closed without a lossy walker.
 
-#[cfg(not(windows))]
 use std::path::Path;
 
 use super::directory_index::IndexError;
+
+fn validate_traversal_path(path: &Path) -> Result<(), IndexError> {
+    let maximum_bytes = super::directory_manager::limit("max_source_path_bytes")?;
+    let maximum_depth = super::directory_manager::limit("max_source_depth")?;
+    if path.as_os_str().as_encoded_bytes().len() > maximum_bytes
+        || path
+            .components()
+            .filter(|component| matches!(component, std::path::Component::Normal(_)))
+            .count()
+            > maximum_depth
+    {
+        return Err(IndexError::Invalid(
+            "Directory path exceeds supported traversal bounds. Shorten the path or reduce nesting, then reopen the drive.",
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TraversalIssue {
@@ -101,6 +117,25 @@ fn windows_record_name_range(
 #[cfg(test)]
 mod windows_policy_tests {
     use super::*;
+
+    #[test]
+    fn traversal_bounds_preserve_exact_depth_and_utf8_byte_limits_before_native_io() {
+        let depth = super::super::directory_manager::limit("max_source_depth").unwrap();
+        let bytes = super::super::directory_manager::limit("max_source_path_bytes").unwrap();
+        let allowed_depth = std::iter::repeat_n("entry", depth).collect::<Vec<_>>().join("/");
+        let allowed_bytes = "\u{e9}".repeat(bytes / 2);
+        for allowed in [&allowed_depth, &allowed_bytes] {
+            assert!(validate_traversal_path(Path::new(allowed)).is_ok());
+        }
+        let temporary = tempfile::tempdir().unwrap();
+        for refused in [format!("{allowed_depth}/child"), format!("{allowed_bytes}\u{e9}")] {
+            assert!(validate_traversal_path(Path::new(&refused)).is_err());
+            assert!(matches!(
+                super::NativeRoot::open(&temporary.path().join("missing").join(refused)),
+                Err(IndexError::Invalid(_))
+            ));
+        }
+    }
 
     #[test]
     fn windows_native_names_preserve_exact_spelling_and_reject_lossy_or_ambiguous_names() {
@@ -298,6 +333,7 @@ mod platform {
             if !path.is_absolute() {
                 return Err(IndexError::Invalid("Directory source root must be an absolute directory."));
             }
+            super::validate_traversal_path(path)?;
             let mut file = open_at(
                 libc::AT_FDCWD,
                 CStr::from_bytes_with_nul(ROOT_NAME).map_err(|_| IndexError::Invalid("Invalid root name."))?,
@@ -336,6 +372,7 @@ mod platform {
         }
 
         fn parent(&self, relative: &str) -> Result<File, IndexError> {
+            super::validate_traversal_path(&self.path.join(relative))?;
             self.verify()?;
             let mut file = open_at(
                 self.file.as_raw_fd(),
@@ -388,6 +425,7 @@ mod platform {
             if name.contains('/') {
                 return Err(IndexError::Invalid("Directory child check requires one native name."));
             }
+            super::validate_traversal_path(&self.path.join(parent).join(name))?;
             let file = self.parent(parent)?;
             if identity(&file)? != expected {
                 return Err(IndexError::Invalid(
@@ -484,6 +522,10 @@ mod platform {
                     continue;
                 }
                 if kind != libc::S_IFDIR {
+                    continue;
+                }
+                if super::validate_traversal_path(&self.path.join(parent).join(text)).is_err() {
+                    receive(Err(TraversalIssue::UnsafeTraversal))?;
                     continue;
                 }
                 match open_at(descriptor, name).and_then(|child| identity(&child).map_err(io::Error::other)) {
@@ -588,6 +630,9 @@ mod tests {
         }
         assert!(!platform::is_pseudo_filesystem(libc::TMPFS_MAGIC));
         assert!(!platform::is_pseudo_filesystem(libc::EXT4_SUPER_MAGIC));
+        let root = NativeRoot::open(Path::new("/")).unwrap();
+        assert!(root.parent_identity("proc").is_err());
+        assert!(root.parent_identity("dev").is_err());
     }
 
     #[test]
@@ -668,6 +713,42 @@ mod tests {
             root.verify().unwrap();
         }
         assert!(root.has_directory_child("", root.identity, "child").unwrap());
+    }
+
+    #[test]
+    fn traversal_depth_refusal_preserves_readable_branches() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        std::fs::create_dir_all(path.join("readable")).unwrap();
+        let maximum_depth = super::super::directory_manager::limit("max_source_depth").unwrap();
+        let root_depth = path
+            .components()
+            .filter(|component| matches!(component, std::path::Component::Normal(_)))
+            .count();
+        let parent = std::iter::repeat_n("d", maximum_depth - root_depth).collect::<Vec<_>>().join("/");
+        std::fs::create_dir_all(path.join(&parent).join("excluded")).unwrap();
+        let root = NativeRoot::open(&path).unwrap();
+        let mut entries = Vec::new();
+        let mut issues = Vec::new();
+        root.children(&parent, |entry| {
+            match entry {
+                Ok(Some(entry)) => entries.push(entry),
+                Err(issue) => issues.push(issue),
+                Ok(None) => {}
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert!(entries.is_empty());
+        assert_eq!(issues, [TraversalIssue::UnsafeTraversal]);
+        root.children("", |entry| {
+            if let Ok(Some(entry)) = entry {
+                entries.push(entry);
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert!(entries.iter().any(|(name, descend)| name == "readable" && *descend));
     }
 
     #[test]

@@ -29,6 +29,8 @@ Recent-directory history matches separate search terms. For example, `annual rep
 
 Directory sources that use the older search contract do not support this behavior. The status message identifies this limit for a multi-term search. Use one term for directory-source matches; recent history still supports separate terms.
 
+Directory matches use paths within the active connection, not other drives or file contents. An incomplete or unverified index can still show useful matches, but a missing match is not proof that a directory does not exist. Open its parent to check. Restore source access when the status identifies a connection failure; unreadable or unsupported branches can remain excluded. The displayed result limit does not limit the number of indexed directories.
+
 To remove only the selected item from Recent directories, press <kbd>Shift</kbd> + <kbd>Delete</kbd>. This removes history metadata; it never deletes the underlying directory or its contents.
 
 History is private to your account. See [File Browser Preferences](../../account-and-preferences/file-browser-preferences/#clear-personal-history) to clear it.

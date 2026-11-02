@@ -91,6 +91,37 @@ describe("getDirectoryResultPresentation", () => {
     expect(result.current.getRefreshIntervalMs?.()).toBe(expected);
   });
 
+  it.each(["connection-1", "local-C"])("keeps one full-query request and source-specific legacy status for %s", async (connectionId) => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    const response = {
+      results: ["alpha/beta"],
+      total_matches: 100_001,
+      directory_count: 100_001,
+      cache_state: "ready" as const,
+    };
+    vi.mocked(api.searchDirectories).mockResolvedValue(response);
+    vi.mocked(api.searchDirectories).mockClear();
+    const { result } = renderHook(() => useDirectorySearchProvider(connectionId, vi.fn()), { wrapper });
+    let rows: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+    await act(async () => {
+      rows = await result.current.fetchResults("alpha beta", new AbortController().signal);
+    });
+    expect(api.searchDirectories).toHaveBeenCalledTimes(1);
+    expect(api.searchDirectories).toHaveBeenCalledWith(connectionId, "alpha beta", expect.objectContaining({ signal: expect.anything() }));
+    expect(rows.some((row) => row.kind === "result" && row.value === "directory:alpha/beta")).toBe(true);
+    expect(result.current.getStatusInfo?.()).toEqual({
+      label:
+        "Multi-term directory search is not confirmed for this source. Search one directory term or check backend and companion support.",
+      showSpinner: false,
+    });
+    vi.mocked(api.searchDirectories).mockResolvedValue({ ...response, search_contract_version: SEARCH_CONTRACT_VERSION });
+    await act(async () => {
+      await result.current.fetchResults("alpha beta", new AbortController().signal);
+    });
+    expect(api.searchDirectories).toHaveBeenCalledTimes(2);
+    expect(result.current.getStatusInfo?.()).toBeNull();
+  });
+
   it("reuses same-query history, stops refresh on failure, and reloads invalidated history", async () => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
     vi.mocked(api.searchDirectories)

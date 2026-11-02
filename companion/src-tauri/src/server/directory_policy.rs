@@ -1259,6 +1259,8 @@ mod tests {
         unsafe_revision.revision = MAX_WIRE_INTEGER + 1;
         let mut invalid_policy = receipt.clone();
         invalid_policy.policy.page_cache_kib = 1;
+        let mut wrong_version = receipt.clone();
+        wrong_version.version = POLICY_VERSION + 1;
         for invalid in [
             wrong_companion,
             wrong_challenge,
@@ -1266,6 +1268,7 @@ mod tests {
             wrong_identity,
             unsafe_revision,
             invalid_policy,
+            wrong_version,
         ] {
             assert!(policy.select_receipt(invalid).is_err());
             assert!(load(&policy.directory.join(POLICY_FILE)).unwrap().approved.is_none());
@@ -1282,5 +1285,24 @@ mod tests {
             load(&policy.directory.join(POLICY_FILE)).unwrap().approved.unwrap().policy,
             receipt.policy
         );
+        let mut newer = receipt.clone();
+        newer.challenge = policy.status(Some(origin)).unwrap().challenge.unwrap();
+        newer.revision += 1;
+        policy.select_receipt(newer.clone()).unwrap();
+        policy.state.lock().unwrap().last_requested = None;
+        policy.create_challenge(origin).unwrap();
+        let mut late = receipt.clone();
+        late.challenge = policy.status(Some(origin)).unwrap().challenge.unwrap();
+        policy.state.lock().unwrap().pending.as_mut().unwrap().redeeming = true;
+        assert!(policy.select_receipt(late.clone()).is_err());
+        assert_eq!(policy.status(Some(origin)).unwrap().effective_revision, Some(newer.revision));
+        assert_eq!(
+            load(&policy.directory.join(POLICY_FILE)).unwrap().approved.unwrap().revision,
+            newer.revision
+        );
+        policy.reset().unwrap();
+        assert!(policy.select_receipt(late).is_err());
+        assert!(policy.status(Some(origin)).unwrap().owner_origin.is_none());
+        assert_eq!(policy.status(Some(origin)).unwrap().policy, DirectoryPolicy::defaults().unwrap());
     }
 }

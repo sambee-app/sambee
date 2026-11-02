@@ -154,6 +154,28 @@ describe("AdvancedSettings", () => {
     expect(api.updateAdvancedSettings).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [404, "Companion update required. Desired policy is saved, but this companion has no policy approval support.", true],
+    [503, "Companion is offline or unavailable. Its last approved policy remains active.", false],
+    [403, "Companion authorization is unavailable. Check pairing in Local Drives, then refresh its status.", false],
+  ])("shows actionable companion policy status for HTTP %s and recovers after refresh", async (status, message, blocked) => {
+    const user = userEvent.setup();
+    vi.mocked(companionService.getDirectoryPolicyStatus).mockRejectedValueOnce({ response: { status } });
+    render(
+      <SambeeThemeProvider>
+        <AdvancedSettings />
+      </SambeeThemeProvider>
+    );
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    const apply = screen.getByRole("button", { name: "Apply To This Companion" });
+    if (blocked) expect(apply).toBeDisabled();
+    else expect(apply).toBeEnabled();
+    expect(api.issueDirectoryPolicyGrant).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Refresh Status" }));
+    expect(await screen.findByText("Desired policy is saved. Companion approval or delivery is pending.")).toBeInTheDocument();
+    expect(apply).toBeEnabled();
+  });
+
   it("delivers only an opaque grant after native approval", async () => {
     const user = userEvent.setup();
     const pending = {

@@ -59,7 +59,7 @@ fn storage_member(path: &Path, suffix: &str) -> PathBuf {
     filename.into()
 }
 
-fn validate_storage_files(path: &Path) -> Result<(), IndexError> {
+pub(super) fn validate_storage_files(path: &Path) -> Result<(), IndexError> {
     for extension in STORAGE_FILE_SUFFIXES {
         let mut filename = path.as_os_str().to_os_string();
         filename.push(extension);
@@ -80,6 +80,18 @@ fn validate_storage_files(path: &Path) -> Result<(), IndexError> {
                 if metadata.uid() != unsafe { libc::geteuid() } || metadata.permissions().mode() & 0o022 != 0 {
                     return Err(IndexError::Invalid("Directory-index files must belong to the current user without public write access. Correct their owner and permissions."));
                 }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    use windows::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+                    let file = OpenOptions::new()
+                        .read(true)
+                        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+                        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+                        .open(&filename)?;
+                    validate_windows_storage_file(&file)?;
+                }
                 #[cfg(not(unix))]
                 let _ = metadata;
             }
@@ -90,14 +102,170 @@ fn validate_storage_files(path: &Path) -> Result<(), IndexError> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn validate_windows_storage_file(file: &File) -> Result<(), IndexError> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_REPARSE_POINT};
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: The file handle and output structure remain live for this call.
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut information) }
+        .map_err(|_| IndexError::Invalid("Directory file identity is unavailable. Select private local storage and retry."))?;
+    if information.nNumberOfLinks != 1 || information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        return Err(IndexError::Invalid(
+            "Directory-index files must not use links or redirections. Remove the alias or select private local storage.",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) struct StorageDirectory {
+    path: PathBuf,
+    handle: File,
+}
+
+impl StorageDirectory {
+    pub(super) fn open(path: &Path) -> Result<Self, IndexError> {
+        validate_storage_directory(path)?;
+        let directory = Self {
+            path: path.to_owned(),
+            handle: Self::open_handle(path)?,
+        };
+        directory.verify()?;
+        Ok(directory)
+    }
+
+    fn open_handle(path: &Path) -> Result<File, IndexError> {
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows::Win32::Storage::FileSystem::{
+                FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            };
+            options
+                .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0);
+        }
+        Ok(options.open(path)?)
+    }
+
+    pub(super) fn verify(&self) -> Result<(), IndexError> {
+        validate_storage_directory(&self.path)?;
+        #[cfg(unix)]
+        {
+            let held = self.handle.metadata()?;
+            let current = fs::symlink_metadata(&self.path)?;
+            if (held.dev(), held.ino()) != (current.dev(), current.ino()) {
+                return Err(IndexError::Invalid(
+                    "Directory storage changed during cleanup. Restore the private namespace and retry.",
+                ));
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows::Win32::Foundation::HANDLE;
+            use windows::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+            let current = Self::open_handle(&self.path)?;
+            let mut held_info = BY_HANDLE_FILE_INFORMATION::default();
+            let mut current_info = BY_HANDLE_FILE_INFORMATION::default();
+            // SAFETY: Both handles and output structures remain live for these calls.
+            unsafe {
+                GetFileInformationByHandle(HANDLE(self.handle.as_raw_handle()), &mut held_info)
+                    .and_then(|()| GetFileInformationByHandle(HANDLE(current.as_raw_handle()), &mut current_info))
+            }
+            .map_err(|_| IndexError::Invalid("Directory storage identity is unavailable. Select private local storage and retry."))?;
+            if (held_info.dwVolumeSerialNumber, held_info.nFileIndexHigh, held_info.nFileIndexLow)
+                != (
+                    current_info.dwVolumeSerialNumber,
+                    current_info.nFileIndexHigh,
+                    current_info.nFileIndexLow,
+                )
+            {
+                return Err(IndexError::Invalid(
+                    "Directory storage changed during cleanup. Restore the private namespace and retry.",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn member(&self, path: &Path) -> Result<std::ffi::CString, IndexError> {
+        if path.parent() != Some(self.path.as_path()) {
+            return Err(IndexError::Invalid("Directory cleanup target is outside its held namespace."));
+        }
+        std::ffi::CString::new(
+            path.file_name()
+                .ok_or(IndexError::Invalid("Directory cleanup target has no file name."))?
+                .as_encoded_bytes(),
+        )
+        .map_err(|_| IndexError::Invalid("Directory cleanup target has an unsupported native name."))
+    }
+
+    pub(super) fn remove(&self, path: &Path) -> Result<(), IndexError> {
+        self.verify()?;
+        let name = self.member(path)?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            // SAFETY: The directory descriptor and NUL-terminated member name remain live.
+            if unsafe { libc::unlinkat(self.handle.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = name;
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
+    fn rename(&self, original: &Path, target: &Path) -> Result<(), IndexError> {
+        self.verify()?;
+        let original_name = self.member(original)?;
+        let target_name = self.member(target)?;
+        #[cfg(unix)]
+        {
+            use std::os::fd::AsRawFd;
+            // SAFETY: Both member names and the held directory descriptor remain live.
+            if unsafe {
+                libc::renameat(
+                    self.handle.as_raw_fd(),
+                    original_name.as_ptr(),
+                    self.handle.as_raw_fd(),
+                    target_name.as_ptr(),
+                )
+            } != 0
+            {
+                return Err(std::io::Error::last_os_error().into());
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (original_name, target_name);
+            fs::rename(original, target)?;
+        }
+        Ok(())
+    }
+}
+
 fn clear_quarantine_owned(path: &Path) -> Result<bool, IndexError> {
+    let directory = StorageDirectory::open(
+        path.parent()
+            .ok_or(IndexError::Invalid("Directory quarantine has no private parent."))?,
+    )?;
     validate_storage_files(path)?;
     let mut removed = false;
     for suffix in STORAGE_FILE_SUFFIXES.into_iter().filter(|suffix| *suffix != LEASE_EXTENSION) {
-        match fs::remove_file(storage_member(path, suffix)) {
+        match directory.remove(&storage_member(path, suffix)) {
             Ok(()) => removed = true,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
+            Err(IndexError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
     }
     Ok(removed)
@@ -122,6 +290,7 @@ fn quarantine_owned(path: &Path, _source_lease: &File) -> Result<(), IndexError>
         .parent()
         .ok_or(IndexError::Invalid("Directory-index path has no storage parent."))?;
     let _namespace_lease = acquire_namespace_lease(directory)?;
+    let storage_directory = StorageDirectory::open(directory)?;
     let rejected = directory.join(QUARANTINE_FILE_NAME);
     let _lease = acquire_file_lease(&storage_member(&rejected, LEASE_EXTENSION))?;
     validate_storage_files(path)?;
@@ -130,16 +299,16 @@ fn quarantine_owned(path: &Path, _source_lease: &File) -> Result<(), IndexError>
     for suffix in ["-wal", "-shm", "-journal", ""] {
         let original = storage_member(path, suffix);
         let target = storage_member(&rejected, suffix);
-        match fs::rename(&original, &target) {
+        match storage_directory.rename(&original, &target) {
             Ok(()) => moved.push((original, target)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(IndexError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
                 for (original, target) in moved.into_iter().rev() {
-                    if fs::rename(target, original).is_err() {
+                    if storage_directory.rename(&target, &original).is_err() {
                         log::warn!("Directory recovery restore failed. Reconnect after restoring private storage.");
                     }
                 }
-                return Err(error.into());
+                return Err(error);
             }
         }
     }
@@ -151,6 +320,7 @@ pub(super) fn remove_orphan_lease(path: &Path) -> Result<bool, IndexError> {
         .parent()
         .ok_or(IndexError::Invalid("Directory-index path has no storage parent."))?;
     let _namespace_lease = acquire_namespace_lease(directory)?;
+    let storage_directory = StorageDirectory::open(directory)?;
     let mut lease_path = path.as_os_str().to_owned();
     lease_path.push(LEASE_EXTENSION);
     let lease = acquire_file_lease(Path::new(&lease_path))?;
@@ -164,40 +334,88 @@ pub(super) fn remove_orphan_lease(path: &Path) -> Result<bool, IndexError> {
         }
     }
     drop(lease);
-    fs::remove_file(Path::new(&lease_path))?;
+    storage_directory.remove(Path::new(&lease_path))?;
     Ok(true)
 }
 
-pub(super) fn acquire_namespace_lease(directory: &Path) -> Result<File, IndexError> {
+fn validate_storage_directory(directory: &Path) -> Result<(), IndexError> {
     for ancestor in directory.ancestors() {
         match fs::symlink_metadata(ancestor) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
                 return Err(IndexError::Invalid(
-                    "Directory-index storage must not use symbolic links. Select private local storage.",
+                    "Directory-index storage must use real directories without symbolic links. Select private local storage.",
                 ))
             }
-            Ok(_) => {}
+            Ok(metadata) => {
+                #[cfg(unix)]
+                {
+                    let mode = metadata.permissions().mode();
+                    let owner = unsafe { libc::geteuid() };
+                    if (metadata.uid() != owner && metadata.uid() != 0) || (mode & 0o022 != 0 && mode & 0o1000 == 0) {
+                        return Err(IndexError::Invalid(
+                            "Directory-index ancestors must have trusted owners and no shared write access without a sticky parent. Correct storage permissions.",
+                        ));
+                    }
+                    if ancestor == directory && (metadata.uid() != owner || mode & 0o077 != 0) {
+                        return Err(IndexError::Invalid(
+                            "Directory-index storage must belong to the current user with mode 0700. Correct its owner and permissions.",
+                        ));
+                    }
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::MetadataExt;
+                    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+                    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+                        return Err(IndexError::Invalid(
+                            "Directory-index storage ancestors must not use redirections. Select private local storage.",
+                        ));
+                    }
+                }
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         }
     }
+    Ok(())
+}
+
+pub(super) fn open_readonly_directory_database(path: &Path) -> Result<Connection, IndexError> {
+    open_directory_database(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+}
+
+pub(super) fn open_directory_database(path: &Path, access: OpenFlags) -> Result<Connection, IndexError> {
+    let directory = path
+        .parent()
+        .ok_or(IndexError::Invalid("Directory database has no private storage parent."))?;
+    let guard = StorageDirectory::open(directory)?;
+    validate_storage_directory(directory)?;
+    validate_storage_files(path)?;
+    let before = fs::symlink_metadata(path)?;
+    let connection = Connection::open_with_flags(path, access | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
+    guard.verify()?;
+    validate_storage_directory(directory)?;
+    validate_storage_files(path)?;
+    let after = fs::symlink_metadata(path)?;
+    #[cfg(unix)]
+    if (before.dev(), before.ino()) != (after.dev(), after.ino()) {
+        return Err(IndexError::Invalid(
+            "Directory database changed during open. Restore private storage and reconnect the source.",
+        ));
+    }
+    #[cfg(not(unix))]
+    let _ = (before, after);
+    Ok(connection)
+}
+
+pub(super) fn acquire_namespace_lease(directory: &Path) -> Result<File, IndexError> {
+    validate_storage_directory(directory)?;
     let mut builder = fs::DirBuilder::new();
     builder.recursive(true);
     #[cfg(unix)]
     builder.mode(PRIVATE_DIRECTORY_MODE);
     builder.create(directory)?;
-    let metadata = fs::symlink_metadata(directory)?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err(IndexError::Invalid(
-            "Directory-index storage is not a private directory. Select private local storage.",
-        ));
-    }
-    #[cfg(unix)]
-    if metadata.uid() != unsafe { libc::geteuid() } || metadata.permissions().mode() & 0o077 != 0 {
-        return Err(IndexError::Invalid(
-            "Directory-index storage must belong to the current user with mode 0700. Correct its owner and permissions.",
-        ));
-    }
+    validate_storage_directory(directory)?;
     acquire_file_lease(&directory.join(NAMESPACE_LEASE_NAME))
 }
 
@@ -206,7 +424,17 @@ pub(super) fn acquire_file_lease(path: &Path) -> Result<File, IndexError> {
     options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
     options.mode(PRIVATE_FILE_MODE).custom_flags(libc::O_NOFOLLOW);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE};
+        options
+            .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0);
+    }
     let lease = options.open(path)?;
+    #[cfg(windows)]
+    validate_windows_storage_file(&lease)?;
     let metadata = lease.metadata()?;
     if !metadata.is_file() {
         return Err(IndexError::Invalid(
@@ -273,9 +501,9 @@ fn is_word_character(character: char) -> bool {
 #[derive(Debug, thiserror::Error)]
 pub enum IndexError {
     #[error("Directory database operation failed. Check local storage and retry: {0}")]
-    Sql(#[from] rusqlite::Error),
+    Sql(rusqlite::Error),
     #[error("Directory database filesystem operation failed. Check local storage and retry: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
     #[error("{0}")]
     Invalid(&'static str),
     #[error("{0}")]
@@ -284,6 +512,35 @@ pub enum IndexError {
     StoragePaused(&'static str),
     #[error("Directory search was cancelled or timed out. Retry the search.")]
     Interrupted,
+}
+
+fn sqlite_failure_fields(error: &rusqlite::Error) -> (&'static str, i32) {
+    match error {
+        rusqlite::Error::SqliteFailure(code, _) => (
+            match code.code {
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked => "directory_storage_busy",
+                rusqlite::ErrorCode::OperationInterrupted => "directory_query_cancelled",
+                _ => "directory_transaction_failed",
+            },
+            code.extended_code,
+        ),
+        _ => ("directory_transaction_failed", 0),
+    }
+}
+
+impl From<rusqlite::Error> for IndexError {
+    fn from(error: rusqlite::Error) -> Self {
+        let (event, code) = sqlite_failure_fields(&error);
+        log::debug!("event={event} sqlite_code={code}");
+        Self::Sql(error)
+    }
+}
+
+impl From<std::io::Error> for IndexError {
+    fn from(error: std::io::Error) -> Self {
+        log::debug!("event=directory_storage_failed os_code={}", error.raw_os_error().unwrap_or(0));
+        Self::Io(error)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -470,9 +727,12 @@ impl DirectoryIndex {
                     ));
                 }
                 quarantine_owned(path, &lease)?;
-                Self::open_owned(path, source_kind, source_identity)?
+                let storage = Self::open_owned(path, source_kind, source_identity)?;
+                log::debug!("event=directory_storage_recovered");
+                storage
             }
         };
+        log::debug!("event=directory_storage_initialized");
         Ok(Self {
             path: path.to_path_buf(),
             writer,
@@ -484,6 +744,10 @@ impl DirectoryIndex {
     }
 
     fn open_owned(path: &Path, source_kind: SourceKind, source_identity: &serde_json::Value) -> Result<(Connection, bool), IndexError> {
+        let directory = StorageDirectory::open(
+            path.parent()
+                .ok_or(IndexError::Invalid("Directory database has no private parent."))?,
+        )?;
         let created = !path.try_exists()?;
         if created {
             let mut options = OpenOptions::new();
@@ -492,7 +756,8 @@ impl DirectoryIndex {
             options.mode(PRIVATE_FILE_MODE).custom_flags(libc::O_NOFOLLOW);
             drop(options.open(path)?);
         }
-        let mut writer = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
+        directory.verify()?;
+        let mut writer = open_directory_database(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         writer.busy_timeout(SQL_BUSY_TIMEOUT)?;
         if created {
             writer.execute_batch(SCHEMA)?;
@@ -1020,11 +1285,13 @@ impl DirectoryIndex {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?;
         if busy != 0 || total != completed {
+            log::debug!("event=directory_checkpoint_deferred busy={busy} total={total} completed={completed}");
             return Ok(false);
         }
         let (busy, total, completed): (i64, i64, i64) = self.writer.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?;
+        log::debug!("event=directory_checkpoint_completed busy={busy} total={total} completed={completed}");
         Ok(busy == 0 && total == completed)
     }
 
@@ -1054,6 +1321,7 @@ impl DirectoryIndex {
         while pages.next()?.is_some() {}
         drop(pages);
         drop(statement);
+        log::debug!("event=directory_pages_reclaimed");
         checkpoint(&self.writer, "PRAGMA wal_checkpoint(TRUNCATE)")
     }
 
@@ -1325,6 +1593,7 @@ impl DirectoryIndex {
                 Self::advance_revision(&transaction)?;
             }
             transaction.commit()?;
+            log::debug!("event=directory_scan_issues issue_count={unresolved}");
             return Ok(false);
         }
         if transaction.query_row(
@@ -1347,6 +1616,7 @@ impl DirectoryIndex {
         )?;
         Self::advance_revision(&transaction)?;
         transaction.commit()?;
+        log::debug!("event=directory_generation_accepted");
         Ok(true)
     }
 
@@ -1445,7 +1715,7 @@ impl DirectoryIndexReader {
         if interrupted() {
             return Err(IndexError::Interrupted);
         }
-        let mut connection = Connection::open_with_flags(&self.path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut connection = open_readonly_directory_database(&self.path)?;
         let cancellation = Arc::clone(cancelled);
         connection.progress_handler(
             SQL_PROGRESS_STEPS,
@@ -1534,6 +1804,23 @@ impl DirectoryIndexReader {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sqlite_log_fields_exclude_private_error_text() {
+        for (code, expected) in [
+            (rusqlite::ffi::SQLITE_BUSY, "directory_storage_busy"),
+            (rusqlite::ffi::SQLITE_INTERRUPT, "directory_query_cancelled"),
+            (rusqlite::ffi::SQLITE_IOERR_WRITE, "directory_transaction_failed"),
+        ] {
+            let error = rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(code),
+                Some("private/path?grant=secret search-term".into()),
+            );
+            let fields = sqlite_failure_fields(&error);
+            assert_eq!(fields, (expected, code));
+            assert!(!format!("event={} sqlite_code={}", fields.0, fields.1).contains("private"));
+        }
+    }
+
     #[test]
     fn recovery_replaces_only_invalid_disposable_catalogues() {
         for invalid in [
@@ -1715,6 +2002,11 @@ mod tests {
             assert!(
                 matches!(DirectoryIndex::open(&path, SourceKind::Local, &identity), Err(IndexError::Invalid(message)) if message.contains("hard links"))
             );
+            assert!(matches!(
+                index.search("", 3, false, &Arc::new(AtomicBool::new(false)), false),
+                Err(IndexError::Invalid(_))
+            ));
+            fs::remove_file(alias).unwrap();
             assert_eq!(
                 index
                     .search("", 3, false, &Arc::new(AtomicBool::new(false)), false)
@@ -1722,7 +2014,96 @@ mod tests {
                     .directory_count,
                 0
             );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn held_storage_directory_refuses_replaced_namespace_without_mutating_other_files() {
+        for replacement in ["link", "directory"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let namespace = temporary.path().join("private");
+            let path = namespace.join("source.sqlite3");
+            drop(DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "fixture"})).unwrap());
+            let directory = StorageDirectory::open(&namespace).unwrap();
+            let original = temporary.path().join("original");
+            let unrelated = temporary.path().join("unrelated");
+            fs::create_dir(&unrelated).unwrap();
+            fs::set_permissions(&unrelated, fs::Permissions::from_mode(PRIVATE_DIRECTORY_MODE)).unwrap();
+            let victim = unrelated.join("source.sqlite3");
+            fs::write(&victim, b"unrelated data").unwrap();
+            fs::rename(&namespace, &original).unwrap();
+            if replacement == "link" {
+                std::os::unix::fs::symlink(&unrelated, &namespace).unwrap();
+            } else {
+                fs::rename(&unrelated, &namespace).unwrap();
+            }
+            assert!(directory.remove(&path).is_err());
+            assert!(directory.rename(&path, &namespace.join(QUARANTINE_FILE_NAME)).is_err());
+            assert!(original.join("source.sqlite3").exists());
+            assert_eq!(fs::read(&path).unwrap(), b"unrelated data");
+            if replacement == "link" {
+                fs::remove_file(&namespace).unwrap();
+            } else {
+                fs::rename(&namespace, &unrelated).unwrap();
+            }
+            fs::rename(&original, &namespace).unwrap();
+            directory.rename(&path, &namespace.join("renamed.sqlite3")).unwrap();
+            directory.remove(&namespace.join("renamed.sqlite3")).unwrap();
+            assert_eq!(fs::read(&victim).unwrap(), b"unrelated data");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn readonly_queries_revalidate_private_namespace_files_and_ancestors() {
+        for changed in ["namespace", "database", "ancestor"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let path = temporary.path().join("private").join("source.sqlite3");
+            let identity = json!({"root": "fixture"});
+            let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+            index.write_paths(["retained".into()], None).unwrap();
+            assert!(index.finish_generation(1, 0).unwrap());
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = index.search("retained", 3, false, &cancelled, false).unwrap();
+            let (target, unsafe_mode) = match changed {
+                "namespace" => (path.parent().unwrap(), 0o755),
+                "database" => (path.as_path(), 0o620),
+                _ => (temporary.path(), 0o770),
+            };
+            let permissions = fs::metadata(target).unwrap().permissions();
+            fs::set_permissions(target, fs::Permissions::from_mode(unsafe_mode)).unwrap();
+            let refused = index.search("retained", 3, false, &cancelled, false);
+            fs::set_permissions(target, permissions).unwrap();
+            assert!(matches!(refused, Err(IndexError::Invalid(_))));
+            assert_eq!(index.search("retained", 3, false, &cancelled, false).unwrap(), before);
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_readers_reject_database_family_hard_links_and_recover_after_removal() {
+        for suffix in ["", ".lease", "-wal", "-shm"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let path = temporary.path().join("private").join("source.sqlite3");
+            let identity = json!({"root": "fixture"});
+            let index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+            let alias = path.parent().unwrap().join("\u{e9}-alias.data");
+            fs::hard_link(storage_member(&path, suffix), &alias).unwrap();
+            assert!(matches!(
+                index.search("", 3, false, &Arc::new(AtomicBool::new(false)), false),
+                Err(IndexError::Invalid(_))
+            ));
+            drop(index);
             fs::remove_file(alias).unwrap();
+            let reopened = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+            assert_eq!(
+                reopened
+                    .search("", 3, false, &Arc::new(AtomicBool::new(false)), false)
+                    .unwrap()
+                    .directory_count,
+                0
+            );
         }
     }
 
@@ -2332,6 +2713,103 @@ mod tests {
     #[ignore = "Separate million-path capacity check; run explicitly with --ignored."]
     fn million_path_capacity() {
         check_count_and_bounded_results(1_000_001);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "Explicit small operation-headroom measurement; not part of routine tests."]
+    fn operation_headroom_measurement() {
+        fn sample(namespace: &Path, peaks: &std::sync::Mutex<(u64, u64, usize)>) {
+            let managed = fs::read_dir(namespace)
+                .unwrap()
+                .map(|entry| entry.unwrap().metadata().unwrap().len())
+                .sum::<u64>();
+            let descriptors = fs::read_dir("/proc/self/fd").unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            let deleted = descriptors
+                .iter()
+                .filter_map(|entry| {
+                    let target = fs::read_link(entry.path()).ok()?;
+                    let target = target.to_string_lossy();
+                    (target.contains("etilqs") && target.ends_with(" (deleted)"))
+                        .then(|| fs::metadata(entry.path()).ok().map(|metadata| metadata.len()))
+                        .flatten()
+                })
+                .sum::<u64>();
+            let mut peaks = peaks.lock().unwrap();
+            peaks.0 = peaks.0.max(managed);
+            peaks.1 = peaks.1.max(deleted);
+            peaks.2 = peaks.2.max(descriptors.len());
+        }
+
+        let temporary = tempfile::tempdir().unwrap();
+        let namespace = temporary.path().join("private");
+        let path = namespace.join("source.sqlite3");
+        let second_path = namespace.join("second.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        let mut second = DirectoryIndex::open(&second_path, SourceKind::Local, &identity).unwrap();
+        let peaks = Arc::new(std::sync::Mutex::new((0, 0, 0)));
+        for writer in [&mut index.writer, &mut second.writer] {
+            let namespace = namespace.clone();
+            let peaks = Arc::clone(&peaks);
+            writer
+                .progress_handler(
+                    SQL_PROGRESS_STEPS,
+                    Some(move || {
+                        sample(&namespace, &peaks);
+                        false
+                    }),
+                )
+                .unwrap();
+        }
+        let paths = (0..4096)
+            .map(|number| format!("operation/{number:04}/repeated-token-{number:04}"))
+            .collect::<Vec<_>>();
+        index.write_paths(paths.iter().cloned(), None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        second.write_paths(paths.iter().cloned(), None).unwrap();
+        assert!(second.finish_generation(1, 0).unwrap());
+        let reader = open_readonly_directory_database(&path).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        let old_count: i64 = reader.query_row("SELECT COUNT(*) FROM directories", [], |row| row.get(0)).unwrap();
+        let candidate = index.begin_verification().unwrap();
+        index.write_paths(paths.iter().cloned(), Some(candidate)).unwrap();
+        index.write_paths(["operation/new".to_owned()], None).unwrap();
+        assert_eq!(
+            reader
+                .query_row("SELECT COUNT(*) FROM directories", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            old_count
+        );
+        index.checkpoint_if_due().unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("operation repeated", 3, false, &cancelled, false).unwrap();
+        index
+            .writer
+            .execute("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')", [])
+            .unwrap();
+        index.fts_ready.store(false, Ordering::Release);
+        index.fts_repair_cursor = None;
+        while index.repair_fts_batch().unwrap() {
+            sample(&namespace, &peaks);
+        }
+        assert_eq!(index.search("operation repeated", 3, false, &cancelled, false).unwrap(), before);
+        reader.execute_batch("ROLLBACK").unwrap();
+        drop(reader);
+        assert!(index.finish_generation(candidate, 0).unwrap());
+        while index.cleanup_retired_batch().unwrap() {
+            sample(&namespace, &peaks);
+        }
+        index.reclaim_pages().unwrap();
+        drop(second);
+        let lease = acquire_storage(&second_path).unwrap();
+        quarantine_owned(&second_path, &lease).unwrap();
+        sample(&namespace, &peaks);
+        let peaks = peaks.lock().unwrap();
+        eprintln!(
+            "DIRECTORY_INDEX_HEADROOM_MEASUREMENT rows_per_source=4096 managed_bytes={} sql_deleted_bytes={} descriptors={}",
+            peaks.0, peaks.1, peaks.2
+        );
     }
 
     fn check_count_and_bounded_results(count: i64) {

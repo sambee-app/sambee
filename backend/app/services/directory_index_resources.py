@@ -99,24 +99,56 @@ class DirectoryIndexResources:
     def _delete_inactive(self, path: Path, expected_access: int) -> bool:
         if path in self.active_paths:
             return False
-        descriptor = DirectoryIndex.acquire_storage_lease(path)
+        validate_storage_ancestors(path.parent)
+        directory_descriptor = (
+            os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)) if os.name == "posix" else None
+        )
         try:
-            if not path.is_file():
-                return False
-            with closing(connect_directory_database(path)) as connection:
-                if connection.execute("PRAGMA application_id").fetchone() != (APPLICATION_ID,):
+            directory_identity = os.fstat(directory_descriptor) if directory_descriptor is not None else path.parent.lstat()
+            descriptor = DirectoryIndex.acquire_storage_lease(path)
+            try:
+                if not path.is_file():
                     return False
-                if connection.execute("SELECT last_access_at_ms FROM source_metadata WHERE id = 1").fetchone() != (expected_access,):
-                    return False
-                checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
-                if checkpoint is None or checkpoint[0] or checkpoint[1] != checkpoint[2]:
-                    return False
-            for suffix in STORAGE_FILE_SUFFIXES:
-                if suffix != ".lease":
-                    Path(str(path) + suffix).unlink(missing_ok=True)
-            return True
+                database_identity = path.lstat()
+                with closing(connect_directory_database(path)) as connection:
+                    if connection.execute("PRAGMA application_id").fetchone() != (APPLICATION_ID,):
+                        return False
+                    if connection.execute("SELECT last_access_at_ms FROM source_metadata WHERE id = 1").fetchone() != (expected_access,):
+                        return False
+                    checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+                    if checkpoint is None or checkpoint[0] or checkpoint[1] != checkpoint[2]:
+                        return False
+                validate_storage_ancestors(path.parent)
+                current_directory = path.parent.lstat()
+                current_database = (
+                    os.stat(path.name, dir_fd=directory_descriptor, follow_symlinks=False)
+                    if directory_descriptor is not None
+                    else path.lstat()
+                )
+                if (directory_identity.st_dev, directory_identity.st_ino) != (current_directory.st_dev, current_directory.st_ino) or (
+                    database_identity.st_dev,
+                    database_identity.st_ino,
+                ) != (current_database.st_dev, current_database.st_ino):
+                    raise PermissionError("Directory storage changed during cleanup. Restore the private namespace and retry cleanup.")
+                DirectoryIndex._validate_storage_files(path)
+                for suffix in STORAGE_FILE_SUFFIXES:
+                    if suffix == ".lease":
+                        continue
+                    candidate = Path(str(path) + suffix)
+                    try:
+                        if directory_descriptor is not None:
+                            os.unlink(candidate.name, dir_fd=directory_descriptor)
+                        else:
+                            candidate.unlink()
+                    except FileNotFoundError:
+                        pass
+                logger.debug("Inactive directory storage removed.", extra={"event": "directory_inactive_evicted"})
+                return True
+            finally:
+                os.close(descriptor)
         finally:
-            os.close(descriptor)
+            if directory_descriptor is not None:
+                os.close(directory_descriptor)
 
     def cleanup_orphan_leases(self) -> int:
         """Remove a bounded set of unowned leases with no database or sidecars."""

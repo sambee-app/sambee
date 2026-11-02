@@ -246,6 +246,28 @@ def test_directory_policy_grant_rejects_changed_bindings(client, auth_headers_ad
     )
 
 
+@pytest.mark.parametrize("claim", ["purpose", "token_class", "scope", "backend_identity"])
+def test_directory_policy_grant_refuses_signed_claim_substitution_without_consumption(client, auth_headers_admin, claim):
+    from app.core.security import create_access_token, decode_access_token
+
+    binding = _policy_grant_binding()
+    issued = client.post(
+        "/api/admin/settings/directory-index/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
+    ).json()
+    claims = decode_access_token(issued["grant"])
+    assert claims is not None
+    claims[claim] = "substituted"
+    substituted = create_access_token(data=claims)
+    assert (
+        client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": substituted}).status_code
+        == 403
+    )
+    assert (
+        client.post("/api/admin/settings/directory-index/companion/grants/redeem", json={**binding, "grant": issued["grant"]}).status_code
+        == 200
+    )
+
+
 def test_directory_policy_grant_cannot_authenticate_browser_or_deliver_extra_policy(client, auth_headers_admin):
     binding = _policy_grant_binding()
     issued = client.post(

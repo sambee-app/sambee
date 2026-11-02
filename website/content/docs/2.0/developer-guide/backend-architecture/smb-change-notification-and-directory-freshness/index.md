@@ -84,6 +84,8 @@ Catalogue names are session-bound. A changed source or credential binding stops 
 
 SMB DFS shares, unverified identities, changed ancestry, and volume crossings are refused. Reparse descendants and unsupported directory names produce coverage issues. Windows junctions, name-surrogate redirections, cloud placeholders, and unknown reparse tags are excluded rather than followed. Unsupported identity APIs must not trigger a path-only fallback.
 
+Traversal supports at most 256 normal path components and 32 KiB of encoded path bytes. Local bounds include the configured native root; SMB bounds include the path within the share and its configured prefix. Oversized roots are refused before native opens. Oversized descendant directories produce coverage issues while readable branches continue. These bounds do not limit directory counts.
+
 Backend initialization withholds rows until a handle-bound root probe succeeds. Root identity, metadata, transport, or pool-entry failure makes the source unavailable without deleting accepted data; the directory API returns HTTP 503. Descendant access denial remains a separate partial-coverage condition. Late results cannot restore a stopped or invalidated binding.
 
 ### SQLite Storage
@@ -103,7 +105,9 @@ Older binaries use separate snapshot names and cannot update SQLite catalogues. 
 
 Both stores use WAL and `synchronous=FULL`. Active writes, checkpoints, maintenance, and close are serialized through the writer. Queries use strictly read-only connections and explicit transactions; they must never checkpoint or write. Close retains process ownership until admitted readers and workers finish. External writes to active managed indexes are unsupported. Preserve this ownership model when changing checkpoint behavior; see SQLite's [WAL reset-race documentation](https://www.sqlite.org/wal.html#walresetbug).
 
-Storage must be private and local. Backend ancestors must be real directories owned by the service account or root; group/public write access requires a trusted sticky parent. The namespace must be service-owned with mode 0700. Unix checks reject hard-linked database, sidecar, and lease files. Namespace leases serialize source-lease creation and orphan cleanup; active or externally owned database families cannot be evicted.
+Storage must be private and local. Unix ancestors must be real directories owned by the current service or OS account, or root; group/public write access requires a trusted sticky parent. The namespace must belong to that account with mode 0700. Database, sidecar, and lease aliases are refused. Windows checks use handle link counts and reparse attributes. Reader, writer, and inactive-resource opens validate the namespace and file family; Unix opens also compare main-file identities before and after open.
+
+Namespace leases serialize source-lease creation and orphan cleanup; active or externally owned database families cannot be evicted. POSIX cleanup and quarantine moves use held directory descriptors. Native Windows maintenance holds a no-delete namespace handle. Namespace replacement is refused before maintenance continues. These checks do not provide crash-atomic family moves or protection against every same-account replacement-and-restoration race.
 
 ### Resource Controls
 
@@ -120,7 +124,9 @@ Policy ranges and defaults belong to `shared/directory-index/contract.json`, not
 
 Normal WAL handling checks a 1 MiB threshold outside the async executor. Below it, no checkpoint SQL or maintenance reservation is requested. Due checkpoints use shared headroom, defer for active work or pinned readers, and retry when readers release their snapshots. Disk-pressure reclamation is coalesced per source; it is not periodic idle work.
 
-Disk admission is not a hard physical allocation ceiling. Complete SQL temporary-storage accounting, operation headroom, and application peak-resource limits are not established by these controls.
+Disk admission is not a hard physical allocation ceiling. Named managed files, including quarantine and sidecars, count toward usage. Each admitted growth operation reserves 32 MiB. SQL temporary files can be unlinked while open and can live outside the namespace; they are not included in named-file usage. Leave filesystem space for this work, pinned-reader WAL growth, token reset and repair, retained generations, and concurrent sources. A reservation does not limit how many bytes SQLite can allocate in one operation.
+
+The default disk budget is 2 GiB. It is not a promise that every tree or multi-source overlap fits. Increase the host budget or release eligible inactive data when growth pauses. Active accepted rows remain available and are never trimmed to meet the budget. SQLite allocation errors preserve validated data and require capacity restoration before retry. Queries stream matches with bounded top-K buffers; page-cache targets apply per connection, not to total process memory.
 
 ### Recovery and Shutdown
 
@@ -134,6 +140,8 @@ Each namespace has one rejected family, `.rejected-directory-index`, including s
 
 Initialization and verification failures use bounded retries with source-specific jitter. Existing accepted rows remain usable only while the source is available. Healthy and degraded verification intervals are separate from failure backoff; repeated requests must not bypass a retry deadline.
 
+Access after the ten-minute idle interval invalidates old read tokens. The retained root must be revalidated; old producers remain owned until actual exit. Idle access does not bypass a storage retry deadline or advance full-verification time.
+
 Idle sources release readers, writers, root handles, and watchers after ten minutes without active ownership. Cancellation does not release a still-running worker's SMB pool lease, producer, or process lease. Source replacement need not wait for that old worker, but its results must be rejected. Backend shutdown calls `shutdown_directory_cache()` and waits for admitted work before closing storage and root ownership.
 
 ### Resource Policy Ownership
@@ -144,7 +152,7 @@ Native policy changes serialize against source initialization. Persistence failu
 
 ### Support Limits
 
-The new directory-index search capability remains disabled. Storage and traversal replacement races, full mutation coverage, live SMB root/mount and idle/sleep recovery, complete resource accounting, interrupted recovery, and policy transport/persistence require further qualification before activation.
+The new directory-index search capability remains disabled. Available-runtime tests cover storage admission, namespace substitution, mutation reconciliation, idle revalidation, repair refusal, resource pressure, and policy delivery. They do not certify live SMB behavior, physical sleep, Windows native execution, cloud providers, arbitrary same-account filesystem races, or hard process/allocation ceilings. Capability activation remains a separate decision.
 
 Linux native behavior and Windows cross-compilation are different kinds of evidence. Cross-compilation does not establish Windows handle, filesystem-alias, mapped-volume, provider, or recovery behavior. macOS directory indexing is unavailable. Generated storage fixtures do not establish native traversal speed, application memory use, or production latency.
 
@@ -155,6 +163,8 @@ Quick-bar consumers must distinguish partial or uncertain coverage, source unava
 Providers publish selectable records before result rows and reject obsolete query/source responses. Quiet index refresh requires an explicit compatible search capability; it must not poll legacy full-scan endpoints. Typing, dismissal, source changes, hidden tabs, and terminal failures stop obsolete refresh work. See [File Browser and Navigation Model](../../frontend-architecture/file-browser-and-navigation-model/) for presentation and selection behavior.
 
 Companion browse-request completion logs contain the method, an allow-listed route template, HTTP status, monotonic duration, cancellation flag, and an optional validated revision. Unknown routes use a fixed placeholder. These debug records exclude request URLs, drive identities, terms, paths, headers, bodies, error text, grants, and signed values. Pairing-start logs contain no pairing identities, nonces, or displayed codes.
+
+Directory storage and worker events use fixed event names, durations, counts, retry delays, and numeric SQLite or OS failure codes. Transaction completion and generation acceptance are logged after commit. Storage failure logs omit exception text and private catalogue paths.
 
 ## Where to Continue
 

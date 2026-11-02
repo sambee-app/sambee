@@ -113,11 +113,52 @@ def connect_directory_database(path: Path, *, readonly: bool = False) -> sqlite3
 
 
 @contextmanager
+def held_storage_directory(directory: Path) -> Iterator[int | None]:
+    """Keep POSIX namespace mutations bound to the directory that was validated."""
+    validate_storage_ancestors(directory)
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW) if os.name == "posix" else None
+    try:
+        validate_storage_binding(directory, descriptor)
+        yield descriptor
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def validate_storage_binding(directory: Path, descriptor: int | None) -> None:
+    """Refuse a namespace replacement before a retained-directory mutation."""
+    validate_storage_ancestors(directory)
+    if descriptor is not None:
+        held = os.fstat(descriptor)
+        current = directory.lstat()
+        if (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino):
+            raise PermissionError("Directory storage changed during cleanup. Restore the private namespace and retry cleanup.")
+
+
+@contextmanager
 def transaction(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """Include initial reads and all changes in one explicitly started transaction."""
-    with connection:
-        connection.execute("BEGIN")
-        yield connection
+    started = time.monotonic()
+    try:
+        with connection:
+            connection.execute("BEGIN")
+            yield connection
+    except sqlite3.DatabaseError as error:
+        logger.warning(
+            "Directory transaction failed. Restore storage or retry after contention.",
+            extra={
+                "event": "directory_transaction_failed",
+                "sqlite_errorcode": getattr(error, "sqlite_errorcode", 0) & SQLITE_PRIMARY_ERROR_MASK,
+            },
+        )
+        raise
+    logger.debug(
+        "Directory transaction completed.",
+        extra={
+            "event": "directory_transaction_completed",
+            "duration_ms": round((time.monotonic() - started) * 1000, 3),
+        },
+    )
 
 
 def validate_sqlite_runtime() -> None:
@@ -288,18 +329,23 @@ class DirectoryIndex:
 
     @staticmethod
     def _clear_quarantine_owned(path: Path) -> bool:
-        DirectoryIndex._validate_storage_files(path)
-        removed = False
-        for suffix in STORAGE_FILE_SUFFIXES:
-            if suffix == ".lease":
-                continue
-            candidate = Path(str(path) + suffix)
-            try:
-                candidate.unlink()
-                removed = True
-            except FileNotFoundError:
-                pass
-        return removed
+        with held_storage_directory(path.parent) as directory_descriptor:
+            DirectoryIndex._validate_storage_files(path)
+            removed = False
+            for suffix in STORAGE_FILE_SUFFIXES:
+                if suffix == ".lease":
+                    continue
+                candidate = Path(str(path) + suffix)
+                validate_storage_binding(path.parent, directory_descriptor)
+                try:
+                    if directory_descriptor is None:
+                        candidate.unlink()
+                    else:
+                        os.unlink(candidate.name, dir_fd=directory_descriptor)
+                    removed = True
+                except FileNotFoundError:
+                    pass
+            return removed
 
     @staticmethod
     def discard_quarantine(directory: Path) -> bool:
@@ -330,26 +376,35 @@ class DirectoryIndex:
                 self._validate_storage_files(self.path)
                 self._clear_quarantine_owned(path)
                 moved: list[tuple[Path, Path]] = []
-                try:
-                    for suffix in (*[suffix for suffix in STORAGE_FILE_SUFFIXES if suffix not in {"", ".lease"}], ""):
-                        original = Path(str(self.path) + suffix)
-                        rejected = Path(str(path) + suffix)
-                        try:
-                            original.lstat()
-                        except FileNotFoundError:
-                            continue
-                        os.replace(original, rejected)
-                        moved.append((original, rejected))
-                except BaseException:
-                    for original, rejected in reversed(moved):
-                        try:
-                            os.replace(rejected, original)
-                        except OSError as error:
-                            self._quarantine_restore_failed = True
-                            logger.warning(
-                                "Directory recovery restore failed (%s). Reconnect after restoring private storage.", type(error).__name__
-                            )
-                    raise
+                with held_storage_directory(path.parent) as directory_descriptor:
+
+                    def move(original: Path, rejected: Path) -> None:
+                        validate_storage_binding(path.parent, directory_descriptor)
+                        if directory_descriptor is None:
+                            os.replace(original, rejected)
+                        else:
+                            os.replace(original.name, rejected.name, src_dir_fd=directory_descriptor, dst_dir_fd=directory_descriptor)
+
+                    try:
+                        for suffix in (*[suffix for suffix in STORAGE_FILE_SUFFIXES if suffix not in {"", ".lease"}], ""):
+                            original = Path(str(self.path) + suffix)
+                            rejected = Path(str(path) + suffix)
+                            try:
+                                move(original, rejected)
+                            except FileNotFoundError:
+                                continue
+                            moved.append((original, rejected))
+                    except BaseException:
+                        for original, rejected in reversed(moved):
+                            try:
+                                move(rejected, original)
+                            except OSError as error:
+                                self._quarantine_restore_failed = True
+                                logger.warning(
+                                    "Directory recovery restore failed (%s). Reconnect after restoring private storage.",
+                                    type(error).__name__,
+                                )
+                        raise
             finally:
                 os.close(descriptor)
         finally:
@@ -403,19 +458,25 @@ class DirectoryIndex:
         """Hold namespace ownership until an unused source lease inode is removed."""
         namespace_descriptor = DirectoryIndex.acquire_namespace_lease(path.parent)
         try:
-            descriptor = DirectoryIndex._acquire_file_lease(Path(str(path) + ".lease"))
-            try:
-                for suffix in STORAGE_FILE_SUFFIXES:
-                    if suffix == ".lease":
-                        continue
-                    try:
-                        Path(str(path) + suffix).lstat()
-                    except FileNotFoundError:
-                        continue
-                    return False
-            finally:
-                os.close(descriptor)
-            Path(str(path) + ".lease").unlink()
+            with held_storage_directory(path.parent) as directory_descriptor:
+                descriptor = DirectoryIndex._acquire_file_lease(Path(str(path) + ".lease"))
+                try:
+                    for suffix in STORAGE_FILE_SUFFIXES:
+                        if suffix == ".lease":
+                            continue
+                        try:
+                            Path(str(path) + suffix).lstat()
+                        except FileNotFoundError:
+                            continue
+                        return False
+                finally:
+                    os.close(descriptor)
+                validate_storage_binding(path.parent, directory_descriptor)
+                candidate = Path(str(path) + ".lease")
+                if directory_descriptor is None:
+                    candidate.unlink()
+                else:
+                    os.unlink(candidate.name, dir_fd=directory_descriptor)
             return True
         finally:
             os.close(namespace_descriptor)
@@ -468,6 +529,7 @@ class DirectoryIndex:
                             raise
                         self._recovery_attempted = True
                         self._open_owned()
+                        logger.debug("Directory storage recovered.", extra={"event": "directory_storage_recovered"})
                 finally:
                     if self._writer is None:
                         self._release_storage()
@@ -544,6 +606,7 @@ class DirectoryIndex:
                     )
                 self._writer = connection
                 self._closing = False
+                logger.debug("Directory storage initialized.", extra={"event": "directory_storage_initialized"})
             except BaseException:
                 connection.close()
                 raise
@@ -982,6 +1045,7 @@ class DirectoryIndex:
     def checkpoint(self) -> None:
         with self._writer_lock:
             self._connection().execute("PRAGMA wal_checkpoint(PASSIVE)")
+            logger.debug("Directory checkpoint completed.", extra={"event": "directory_checkpoint_completed"})
 
     def checkpoint_if_due(self) -> bool:
         """Checkpoint only a large WAL; pinned readers retain retry eligibility."""
@@ -1000,6 +1064,7 @@ class DirectoryIndex:
                 connection = self._connection()
                 busy, total, completed = required_row(connection.execute("PRAGMA wal_checkpoint(PASSIVE)"))
                 if busy or total != completed:
+                    logger.debug("Directory checkpoint deferred for readers.", extra={"event": "directory_checkpoint_deferred"})
                     return False
                 busy, total, completed = required_row(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)"))
                 return not busy and total == completed
@@ -1024,6 +1089,7 @@ class DirectoryIndex:
             if busy or total != completed:
                 return False
             connection.execute(f"PRAGMA incremental_vacuum({MAINTENANCE_PAGE_BATCH})").fetchall()
+            logger.debug("Directory page reclamation completed.", extra={"event": "directory_pages_reclaimed"})
             busy, total, completed = required_row(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)"))
             return not busy and total == completed
 
@@ -1219,6 +1285,7 @@ class DirectoryIndex:
                     selected = required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0]
                     if selected == generation_id:
                         self._revision(connection)
+                    logger.debug("Directory scan issues observed.", extra={"event": "directory_scan_issues", "issue_count": unresolved})
                     return False
                 if connection.execute(
                     "SELECT 1 FROM scan_queue WHERE generation_id = ? AND processed = 0 LIMIT 1", (generation_id,)
@@ -1234,8 +1301,8 @@ class DirectoryIndex:
                     (generation_id, epoch_milliseconds()),
                 )
                 self._revision(connection)
-                return True
-            raise RuntimeError("Directory generation selection did not complete. Retry verification.")
+            logger.debug("Directory generation accepted.", extra={"event": "directory_generation_accepted"})
+            return True
 
     def search(
         self,

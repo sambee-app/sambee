@@ -267,6 +267,7 @@ pub struct NativeRoot {
 
 impl NativeRoot {
     pub fn open(path: &Path) -> Result<Self, IndexError> {
+        super::validate_traversal_path(path)?;
         let path = root_path(path)?;
         let files = open_chain(&path)?;
         let identity = identity(last(&files)?)?;
@@ -303,6 +304,7 @@ impl NativeRoot {
                 path.push(name);
             }
         }
+        super::validate_traversal_path(&path)?;
         let files = open_chain(&path)?;
         let expected = if relative.is_empty() {
             self.binding.clone()
@@ -344,6 +346,7 @@ impl NativeRoot {
     ) -> Result<bool, IndexError> {
         check()?;
         validate_name(name)?;
+        super::validate_traversal_path(&self.path.join(parent.replace('/', "\\")).join(name))?;
         let files = self.parent(parent)?;
         let file = last(&files)?;
         if identity(file)? != expected {
@@ -411,6 +414,10 @@ impl NativeRoot {
                 return Ok(true);
             }
             let path = self.path.join(parent.replace('/', "\\")).join(&name);
+            if super::validate_traversal_path(&path).is_err() {
+                receive(Err(TraversalIssue::UnsafeTraversal))?;
+                return Ok(true);
+            }
             let event = match open_directory(&path).and_then(|child| {
                 if native_path(&child)? != native_path(file)?.join(&name) {
                     return Err(IndexError::Invalid(

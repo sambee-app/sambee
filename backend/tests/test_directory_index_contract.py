@@ -35,6 +35,36 @@ def test_standard_sqlite_runtime_has_required_features():
     validate_sqlite_runtime()
 
 
+def test_directory_storage_events_do_not_expose_paths_or_sql_error_text(index, caplog):
+    import logging
+
+    from app.services.directory_index import transaction
+
+    caplog.set_level(logging.DEBUG, logger="app.services.directory_index")
+    index.close()
+    index.open()
+    index.write_paths(["private-directory-term"])
+    assert index.finish_generation(1)
+    before = index.search("private-directory-term")
+    index.checkpoint()
+    with pytest.raises(sqlite3.DatabaseError):
+        with transaction(index._connection()) as writer:
+            writer.execute("SELECT * FROM private_sql_error_text")
+    assert index.search("private-directory-term") == before
+    events = {getattr(record, "event", None) for record in caplog.records}
+    assert {
+        "directory_storage_initialized",
+        "directory_transaction_completed",
+        "directory_transaction_failed",
+        "directory_generation_accepted",
+        "directory_checkpoint_completed",
+    } <= events
+    payload = " ".join(str(record.__dict__) for record in caplog.records)
+    assert str(index.path) not in payload
+    assert "private-directory-term" not in payload
+    assert "private_sql_error_text" not in payload
+
+
 def test_directory_query_connection_is_read_only(index):
     assert isinstance(index._connection(), sqlite3.Connection)
     with closing(index._connect(readonly=True)) as reader:
@@ -434,6 +464,50 @@ def test_invalid_database_quarantine_keeps_source_ownership_and_bounds_retention
     assert not rejected.exists()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="Descriptor-relative cleanup requires POSIX.")
+@pytest.mark.parametrize("replacement", ["link", "directory"])
+def test_quarantine_cleanup_refuses_replaced_namespace(index, monkeypatch, replacement):
+    from app.services.directory_index import QUARANTINE_FILE_NAME
+
+    index.write_paths(["retained"])
+    index.close()
+    namespace = index.path.parent
+    original = namespace.with_name(f"{namespace.name}-original")
+    unrelated = namespace.with_name(f"{namespace.name}-unrelated")
+    unrelated.mkdir(mode=0o700)
+    rejected = namespace / QUARANTINE_FILE_NAME
+    rejected.write_bytes(b"rejected data")
+    victim = unrelated / QUARANTINE_FILE_NAME
+    victim.write_bytes(b"unrelated data")
+    validate = DirectoryIndex._validate_storage_files
+
+    def replace_after_validation(path):
+        validate(path)
+        if path == rejected:
+            namespace.rename(original)
+            if replacement == "link":
+                namespace.symlink_to(unrelated, target_is_directory=True)
+            else:
+                unrelated.rename(namespace)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(DirectoryIndex, "_validate_storage_files", replace_after_validation)
+        try:
+            with pytest.raises(PermissionError):
+                DirectoryIndex._clear_quarantine_owned(rejected)
+            assert (original / QUARANTINE_FILE_NAME).read_bytes() == b"rejected data"
+            assert rejected.read_bytes() == b"unrelated data"
+        finally:
+            if replacement == "link":
+                namespace.unlink()
+            else:
+                namespace.rename(unrelated)
+            original.rename(namespace)
+    assert victim.read_bytes() == b"unrelated data"
+    index.open()
+    assert index.search("retained").total_matches == 1
+
+
 def test_quarantine_move_failure_restores_original_sidecars_and_preserves_error(index, monkeypatch):
     import app.services.directory_index as directory_index
 
@@ -445,10 +519,10 @@ def test_quarantine_move_failure_restores_original_sidecars_and_preserves_error(
     replace = os.replace
     failure = PermissionError("Injected main-file move refusal.")
 
-    def move(source, target):
-        if source == index.path:
+    def move(source, target, **kwargs):
+        if source in (index.path, index.path.name):
             raise failure
-        return replace(source, target)
+        return replace(source, target, **kwargs)
 
     monkeypatch.setattr(directory_index.os, "replace", move)
     index._acquire_storage()
@@ -730,6 +804,69 @@ def test_namespace_lease_serializes_source_lease_creation(tmp_path):
         assert source.search("").directory_count == 0
     finally:
         source.close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Descriptor-relative backend cleanup uses the Debian filesystem API")
+@pytest.mark.parametrize("replacement", ["namespace_link", "namespace_directory", "database", "sidecar_link"])
+def test_inactive_deletion_refuses_replaced_storage_without_deleting_unrelated_files(index, monkeypatch, replacement):
+    from app.services.directory_index import connect_directory_database
+    from app.services.directory_index_resources import DirectoryIndexResources
+
+    index.write_paths(["retained"])
+    assert index.finish_generation(1)
+    namespace = index.path.parent
+    resources = DirectoryIndexResources(namespace)
+    index.close()
+    accessed = resources._inactive_access(index.path)
+    assert isinstance(accessed, int)
+    unrelated = namespace.with_name(f"{namespace.name}-unrelated")
+    unrelated.mkdir(mode=0o700)
+    victim = unrelated / index.path.name
+    contents = b"Unrelated data must not be deleted."
+    victim.write_bytes(contents)
+    original_namespace = namespace.with_name(f"{namespace.name}-original")
+    original_database = namespace / "original-source.sqlite3"
+    sidecar = Path(str(index.path) + "-journal")
+    original_connect = connect_directory_database
+
+    def connect_and_replace(path, **kwargs):
+        connection = original_connect(path, **kwargs)
+
+        def close():
+            connection.close()
+            if replacement.startswith("namespace"):
+                namespace.rename(original_namespace)
+                if replacement == "namespace_link":
+                    namespace.symlink_to(unrelated, target_is_directory=True)
+                else:
+                    unrelated.rename(namespace)
+            elif replacement == "database":
+                index.path.rename(original_database)
+                index.path.write_bytes(contents)
+            else:
+                sidecar.symlink_to(victim)
+
+        return SimpleNamespace(execute=connection.execute, close=close)
+
+    monkeypatch.setattr("app.services.directory_index_resources.connect_directory_database", connect_and_replace)
+    try:
+        with pytest.raises(PermissionError):
+            resources._delete_inactive(index.path, accessed)
+    finally:
+        if namespace.is_symlink():
+            namespace.unlink()
+            original_namespace.rename(namespace)
+        elif original_namespace.exists():
+            namespace.rename(unrelated)
+            original_namespace.rename(namespace)
+        if original_database.exists():
+            index.path.unlink()
+            original_database.rename(index.path)
+        if sidecar.is_symlink():
+            sidecar.unlink()
+    assert victim.read_bytes() == contents
+    index.open()
+    assert index.search("retained").total_matches == 1
 
 
 def test_inactive_retention_count_and_leases_preserve_active_sources(tmp_path):
@@ -1629,6 +1766,53 @@ def smb_directory_server(monkeypatch):
     monkeypatch.setattr("app.services.directory_traversal.query_info", metadata)
     yield server
     assert all(not handle.connected for handle in server.handles)
+
+
+@pytest.mark.parametrize("bound", ["depth", "bytes"])
+def test_smb_traversal_bounds_reject_before_open_and_preserve_exact_limits(smb_directory_server, monkeypatch, bound):
+    from pathlib import PureWindowsPath
+
+    from app.services.directory_traversal import (
+        MAX_SOURCE_DEPTH,
+        MAX_SOURCE_PATH_BYTES,
+        DirectoryTraversalError,
+        SmbDirectoryRoot,
+        _validate_traversal_path,
+    )
+
+    if bound == "depth":
+        allowed = "/".join(["entry"] * MAX_SOURCE_DEPTH)
+        refused = f"{allowed}/child"
+    else:
+        allowed = "\u00e9" * (MAX_SOURCE_PATH_BYTES // 2)
+        refused = f"{allowed}\u00e9"
+    _validate_traversal_path(allowed)
+    with pytest.raises(DirectoryTraversalError, match="traversal bounds"):
+        _validate_traversal_path(refused)
+    root = SmbDirectoryRoot(r"\\host\share")
+    try:
+        with pytest.raises(DirectoryTraversalError, match="traversal bounds"):
+            root.read(refused, lambda: None)
+        with pytest.raises(DirectoryTraversalError, match="traversal bounds"):
+            SmbDirectoryRoot(str(PureWindowsPath(r"\\host\share", *refused.split("/"))))
+        assert not smb_directory_server.handles
+    finally:
+        root.close()
+
+    with monkeypatch.context() as bounds:
+        if bound == "depth":
+            bounds.setattr("app.services.directory_traversal.MAX_SOURCE_DEPTH", 2)
+        else:
+            bounds.setattr("app.services.directory_traversal.MAX_SOURCE_PATH_BYTES", len("base/parent".encode("utf-8")))
+        root = SmbDirectoryRoot(r"\\host\share\base")
+        try:
+            read = root.read("parent", lambda: None)
+            try:
+                assert [entry.name for entry in read] == [None, "file", None]
+            finally:
+                read.close()
+        finally:
+            root.close()
 
 
 def test_smb_root_holds_ancestors_and_checks_exact_children(smb_directory_server):
@@ -3553,9 +3737,13 @@ async def test_smb_hint_failure_preserves_mutation_result_and_private_error_text
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed", [False, True])
-@pytest.mark.parametrize("operation,prefix", [("create", ""), ("create", "scoped"), ("archive", "scoped"), ("mixed_archive", "scoped")])
+@pytest.mark.parametrize(
+    "operation,prefix",
+    [("create", ""), ("create", "scoped"), ("archive", "scoped"), ("mixed_archive", "scoped"), ("upload", "scoped")],
+)
 async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_cache, monkeypatch, failed, prefix, operation):
-    from contextlib import asynccontextmanager
+    from contextlib import asynccontextmanager, contextmanager
+    from io import BytesIO
     from pathlib import PureWindowsPath
     from unittest.mock import AsyncMock
 
@@ -3609,14 +3797,30 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
             if parent == relative:
                 yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
 
+    @contextmanager
+    def open_writer(path, **kwargs):
+        dispatched.append(path)
+        assert sqlite_cache.coordinator.pending[-1][1].path == relative_path(path).rpartition("/")[0]
+
+        def write(chunk):
+            source_directories.add("parent/discovered")
+            if failed:
+                raise PermissionError("Injected partial source mutation.")
+            return len(chunk)
+
+        yield SimpleNamespace(write=write)
+
     monkeypatch.setattr("app.storage.smb.get_connection_pool", pool)
     monkeypatch.setattr("app.storage.smb.smbclient.mkdir", create)
+    monkeypatch.setattr("app.storage.smb.smbclient.open_file", open_writer)
     monkeypatch.setattr("smbclient.scandir", scan)
     monkeypatch.setattr(backend, "get_file_info", AsyncMock(return_value=SimpleNamespace(type=FileType.DIRECTORY)))
     if operation == "archive":
         mutation = _ensure_live_directory(backend, "parent/new/deep")
     elif operation == "mixed_archive":
         mutation = _ensure_mixed_archive_parent_directories(backend, destination_root="parent", target_path="parent/new/deep/file")
+    elif operation == "upload":
+        mutation = backend.write_file("parent/new", BytesIO(b"uploaded"))
     else:
         mutation = backend.create_directory("parent/new")
     if failed:
@@ -5007,6 +5211,110 @@ def test_coverage_above_old_cutoff_and_bounded_results(index, count):
     assert index.search("directory").directory_count == index.search("directory").total_matches == count
     assert index.search("100000").total_matches == 0
     assert index.search("updated").results[0].path == "directory-updated"
+
+
+@pytest.mark.skipif(
+    os.environ.get("DIRECTORY_INDEX_HEADROOM_MEASUREMENT") != "1" or not Path("/proc/self/fd").is_dir(),
+    reason="Explicit Linux operation-headroom measurement; not part of routine tests.",
+)
+def test_directory_operation_headroom_measurement(index):
+    from app.services.directory_index import transaction
+    from app.services.directory_index_resources import WRITE_HEADROOM_BYTES, DirectoryIndexResources
+
+    resources = DirectoryIndexResources(index.path.parent)
+    resources.register_source(index.path)
+    index.growth_guard = resources.reserve_growth
+    peaks = {"managed_bytes": 0, "sql_deleted_bytes": 0, "all_deleted_bytes": 0, "descriptors": 0, "rss_kib": 0}
+
+    def sample():
+        peaks["managed_bytes"] = max(peaks["managed_bytes"], resources.usage().managed_bytes)
+        sql_deleted = 0
+        all_deleted = 0
+        descriptors = tuple(Path("/proc/self/fd").iterdir())
+        peaks["descriptors"] = max(peaks["descriptors"], len(descriptors))
+        for descriptor in descriptors:
+            try:
+                target = os.readlink(descriptor)
+                metadata = descriptor.stat()
+            except FileNotFoundError:
+                continue
+            if target.endswith(" (deleted)") and stat.S_ISREG(metadata.st_mode):
+                all_deleted += metadata.st_size
+                if "etilqs" in target:
+                    sql_deleted += metadata.st_size
+        peaks["sql_deleted_bytes"] = max(peaks["sql_deleted_bytes"], sql_deleted)
+        peaks["all_deleted_bytes"] = max(peaks["all_deleted_bytes"], all_deleted)
+        with Path("/proc/self/status").open() as status:
+            rss = next(int(line.split()[1]) for line in status if line.startswith("VmRSS:"))
+        peaks["rss_kib"] = max(peaks["rss_kib"], rss)
+        return False
+
+    initial_managed = resources.usage().managed_bytes
+    sample()
+    initial_rss = peaks["rss_kib"]
+    index._connection().set_progress_handler(sample, 1000)
+    second = DirectoryIndex(index.path.with_name("second.sqlite3"), source_kind="smb", source_identity={"root": "second"})
+    try:
+        second.open()
+        resources.register_source(second.path)
+        second.growth_guard = resources.reserve_growth
+        second._connection().set_progress_handler(sample, 1000)
+        paths = tuple(f"operation/{number:04d}/repeated-token-{number:04d}" for number in range(4096))
+        index.write_paths(paths)
+        assert index.finish_generation(1)
+        second.write_paths(paths)
+        assert second.finish_generation(1)
+        sample()
+        with closing(index._connect(readonly=True)) as reader, transaction(reader):
+            old_count = reader.execute("SELECT COUNT(*) FROM directories").fetchone()[0]
+            candidate = index.begin_verification()
+            index.write_paths(paths, generation_id=candidate)
+            index.write_paths(["operation/new"])
+            assert reader.execute("SELECT COUNT(*) FROM directories").fetchone() == (old_count,)
+            index.checkpoint()
+            before = index.search("operation repeated")
+            with transaction(index._connection()) as writer:
+                writer.execute("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')")
+            index._fts_ready = False
+            index._fts_repair_cursor = None
+            while index.repair_fts_batch():
+                sample()
+            assert index.search("operation repeated") == before
+            sample()
+        assert index.finish_generation(candidate)
+        while index.cleanup_retired_batch():
+            sample()
+        index.reclaim_pages()
+        second.close()
+        resources.release_source(second.path)
+        second._acquire_storage()
+        try:
+            second._quarantine_owned()
+            with resources.reserve_growth(), resources.reserve_growth():
+                sample()
+                assert resources.usage().reserved_bytes == 2 * WRITE_HEADROOM_BYTES
+        finally:
+            second._release_storage()
+        sample()
+        print(
+            "DIRECTORY_INDEX_HEADROOM_MEASUREMENT "
+            + json.dumps(
+                {
+                    "rows_per_source": len(paths),
+                    "initial_managed_bytes": initial_managed,
+                    "initial_rss_kib": initial_rss,
+                    "reservation_overlap_bytes": 2 * WRITE_HEADROOM_BYTES,
+                    **peaks,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+    finally:
+        index._connection().set_progress_handler(None, 0)
+        second.close()
+        resources.release_source(second.path)
+        resources.release_source(index.path)
 
 
 @pytest.mark.skipif(

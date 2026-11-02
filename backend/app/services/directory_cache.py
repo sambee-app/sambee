@@ -1410,6 +1410,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
         try:
             self._scan_running.set()
+            logger.debug("Directory scan started.", extra={"event": "directory_scan_started"})
             self._scan_progress = time.monotonic()
             with self._generation_lock, self.coordinator.read("") as baseline:
                 generation, selected = self.index.prepare_scan()
@@ -1436,6 +1437,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                             self._state = CacheState.READY
                             self._scan_error = None
                             self._last_scan_time = time.time()
+                            logger.debug("Directory scan finished.", extra={"event": "directory_scan_finished"})
                             break
                         self._scan_parent(current, parents[0], reconcile=reconciliation is not None)
                         status = self.index.status()
@@ -1460,6 +1462,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         percent = 100 - FAILURE_RETRY_JITTER_PERCENT + self._retry_jitter % (FAILURE_RETRY_JITTER_PERCENT * 2 + 1)
         delay = min(FAILURE_RETRY_MAX_SECONDS, max(FAILURE_RETRY_MIN_SECONDS, self._failure_retry_delay * percent / 100))
         self._resource_retry_at = (time.monotonic() if now is None else now) + delay
+        logger.debug("Directory retry scheduled.", extra={"event": "directory_retry_scheduled", "delay_seconds": delay})
 
     def _reset_retry(self) -> None:
         self._failure_retry_delay = 0.0

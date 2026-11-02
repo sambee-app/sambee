@@ -51,6 +51,8 @@ LIMIT_FIELDS = frozenset(
         "idle_release_seconds",
         "max_pending_observations",
         "max_observation_bytes",
+        "max_source_depth",
+        "max_source_path_bytes",
         "minimum_sqlite_version_number",
         "write_headroom_bytes",
         "maintenance_page_batch",

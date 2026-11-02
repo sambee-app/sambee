@@ -11,15 +11,18 @@ use notify::{
     event::{CreateKind, ModifyKind, RemoveKind, RenameMode},
     Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
 };
-use rusqlite::{Connection, OpenFlags};
+#[cfg(test)]
+use rusqlite::Connection;
+use rusqlite::OpenFlags;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use super::directory_index::{
-    acquire_storage, epoch_milliseconds, search_terms, validate_directory_path, DirectoryIndex, DirectoryIndexReader, DirectoryMutation,
-    IndexError, SourceKind, APPLICATION_ID, ROW_BATCH_SIZE, SCHEMA_VERSION, SQL_BUSY_TIMEOUT,
+    acquire_storage, epoch_milliseconds, open_directory_database, open_readonly_directory_database, search_terms, validate_directory_path,
+    validate_storage_files, DirectoryIndex, DirectoryIndexReader, DirectoryMutation, IndexError, SourceKind, StorageDirectory,
+    APPLICATION_ID, ROW_BATCH_SIZE, SCHEMA_VERSION, SQL_BUSY_TIMEOUT,
 };
 use super::directory_traversal::{NativeIdentity, NativeRoot};
 use super::models::DirectorySearchResult;
@@ -67,7 +70,7 @@ fn contract() -> Result<&'static Contract, IndexError> {
     Ok(contract)
 }
 
-fn limit(name: &str) -> Result<usize, IndexError> {
+pub(super) fn limit(name: &str) -> Result<usize, IndexError> {
     let value = contract()?.limits.get(name).ok_or(IndexError::Invalid(
         "Bundled directory resource limit is missing. Reinstall the companion.",
     ))?;
@@ -211,7 +214,7 @@ impl DiskBudget {
             return Ok(None);
         }
         let _lease = acquire_storage(path)?;
-        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
+        let connection = open_readonly_directory_database(path)?;
         connection.busy_timeout(SQL_BUSY_TIMEOUT)?;
         let application: i64 = connection.query_row("PRAGMA application_id", [], |row| row.get(0))?;
         let schema: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -227,11 +230,15 @@ impl DiskBudget {
     }
 
     fn delete_inactive(path: &Path, expected_access: i64) -> Result<bool, IndexError> {
+        let directory = StorageDirectory::open(
+            path.parent()
+                .ok_or(IndexError::Invalid("Directory cleanup has no private parent."))?,
+        )?;
         let _lease = acquire_storage(path)?;
         if !path.try_exists()? {
             return Ok(false);
         }
-        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NOFOLLOW)?;
+        let connection = open_directory_database(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         connection.busy_timeout(SQL_BUSY_TIMEOUT)?;
         let application: i64 = connection.query_row("PRAGMA application_id", [], |row| row.get(0))?;
         let accessed: i64 = connection.query_row("SELECT last_access_at_ms FROM source_metadata WHERE id = 1", [], |row| row.get(0))?;
@@ -243,15 +250,18 @@ impl DiskBudget {
             return Ok(false);
         }
         drop(connection);
+        directory.verify()?;
+        validate_storage_files(path)?;
         for suffix in ["", "-wal", "-shm", "-journal"] {
             let mut filename = path.as_os_str().to_os_string();
             filename.push(suffix);
-            match std::fs::remove_file(Path::new(&filename)) {
+            match directory.remove(Path::new(&filename)) {
                 Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.into()),
+                Err(IndexError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
             }
         }
+        log::debug!("event=directory_inactive_evicted");
         Ok(true)
     }
 
@@ -729,6 +739,7 @@ impl SourceStatus {
             .mul_f64(f64::from(percent) / 100.0)
             .clamp(FAILURE_RETRY_MIN, FAILURE_RETRY_MAX);
         self.retry_at = now + delay;
+        log::debug!("event=directory_retry_scheduled delay_ms={}", delay.as_millis());
     }
 
     fn verification_due(&self, now: Instant, interval: Duration, initialized: bool) -> bool {
@@ -796,6 +807,19 @@ impl LocalSource {
                 "Directory source was replaced or stopped. Retry the search on the current drive.",
             ));
         }
+        Ok(())
+    }
+
+    fn touch(&self) -> Result<(), IndexError> {
+        let now = Instant::now();
+        let accessed_at_ms = epoch_milliseconds()?;
+        let mut observations = lock(&self.observations)?;
+        let mut status = lock(&self.status)?;
+        if now.duration_since(status.accessed) >= Duration::from_secs(limit("idle_release_seconds")? as u64) {
+            observations.invalidate()?;
+        }
+        status.accessed = now;
+        status.accessed_at_ms = Some(accessed_at_ms);
         Ok(())
     }
 
@@ -969,15 +993,20 @@ impl LocalSource {
             if let Some(source) = weak.upgrade() {
                 if source.observe(event).is_err() {
                     let _ = source.invalidate();
-                    log::warn!("Directory observations were lost. Background verification is required.");
+                    log::warn!("event=directory_watcher_lost Directory observations were lost. Background verification is required.");
                 }
             }
         })
-        .map_err(|_| IndexError::Invalid("Directory watcher is unavailable. Background verification is required."))?;
-        watcher
-            .watch(&self.root_path, RecursiveMode::Recursive)
-            .map_err(|_| IndexError::Invalid("Directory watcher could not start. Background verification is required."))?;
+        .map_err(|_| {
+            log::warn!("event=directory_watcher_unavailable");
+            IndexError::Invalid("Directory watcher is unavailable. Background verification is required.")
+        })?;
+        watcher.watch(&self.root_path, RecursiveMode::Recursive).map_err(|_| {
+            log::warn!("event=directory_watcher_unavailable");
+            IndexError::Invalid("Directory watcher could not start. Background verification is required.")
+        })?;
         *lock(&self.watcher)? = Some(watcher);
+        log::debug!("event=directory_watcher_started");
         Ok(())
     }
 
@@ -1465,6 +1494,8 @@ impl LocalSource {
     }
 
     fn scan(self: &Arc<Self>, budget: &Arc<DiskBudget>) -> Result<(), IndexError> {
+        let started = Instant::now();
+        log::debug!("event=directory_scan_started");
         self.progress()?;
         let root = match lock(&self.root)?.clone() {
             Some(root) => {
@@ -1529,6 +1560,11 @@ impl LocalSource {
                 self.cleanup_pending.store(true, Ordering::Release);
             }
         }
+        log::debug!(
+            "event=directory_scan_finished success={} duration_ms={}",
+            outcome.is_ok(),
+            started.elapsed().as_millis()
+        );
         outcome
     }
 }
@@ -1955,11 +1991,7 @@ impl LocalDirectoryManager {
                     .or_insert_with(|| LocalSource::new(root, &self.budget.namespace)),
             )
         };
-        {
-            let mut status = lock(&source.status)?;
-            status.accessed = Instant::now();
-            status.accessed_at_ms = Some(epoch_milliseconds()?);
-        }
+        source.touch()?;
         self.start_scan_if_cold(&source)?;
         let reader = lock(&source.reader)?.clone();
         let Some(reader) = reader else {
@@ -2178,6 +2210,58 @@ mod tests {
                 assert_eq!(status.message, message);
                 assert_eq!(status.verified, verified);
             }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn idle_query_invalidates_old_reads_without_bypassing_retry_or_root_revalidation() {
+        for replaced in [false, true] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("root");
+            std::fs::create_dir_all(root.join("retained")).unwrap();
+            let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+            let source = LocalSource::new(root.clone(), manager.storage_directory());
+            source.scan(&manager.budget).unwrap();
+            lock(&source.watcher).unwrap().take();
+            let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let before = reader.search("retained", 3, false, &cancelled, false).unwrap();
+            let old_read = source.begin_read().unwrap();
+            source.fail(&IndexError::StoragePaused("Injected storage refusal."), &manager.budget);
+            let (retry_at, verified) = {
+                let mut status = lock(&source.status).unwrap();
+                status.accessed = Instant::now() - Duration::from_secs(limit("idle_release_seconds").unwrap() as u64);
+                (status.retry_at, status.verified)
+            };
+            lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+            if replaced {
+                std::fs::rename(&root, temporary.path().join("old-root")).unwrap();
+                std::fs::create_dir(&root).unwrap();
+            }
+            let response = manager.search("drive".into(), root, "retained".into(), false).await;
+            if replaced {
+                assert!(response.is_err());
+                assert!(source.stopped.load(Ordering::Acquire));
+            } else {
+                let response = response.unwrap();
+                assert_eq!(response.results, ["retained"]);
+                assert_eq!(response.last_verified_at_ms, before.last_verified_at_ms);
+            }
+            {
+                let observations = lock(&source.observations).unwrap();
+                assert!(!observations.is_current(old_read.token, ""));
+                assert!(observations.verification_required);
+                assert!(observations.producers.contains_key(&old_read.token.producer));
+            }
+            assert_eq!(lock(&source.status).unwrap().retry_at, retry_at);
+            assert_eq!(lock(&source.status).unwrap().verified, verified);
+            assert_eq!(reader.search("retained", 3, false, &cancelled, false).unwrap(), before);
+            drop(old_read);
+            assert!(lock(&source.observations).unwrap().producers.is_empty());
+            lock(&manager.sources).unwrap().remove("drive");
+            source.stopped.store(true, Ordering::Release);
+            source.close_idle(&manager.budget).unwrap();
         }
     }
 

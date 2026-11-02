@@ -27,7 +27,7 @@ Use `config.example.toml` as the source of truth for supported keys. This page e
 | `[frontend_logging]` | `logging_enabled`, `log_level` | Controls browser-console logging behavior. |
 | `[frontend_logging]` | `tracing_enabled`, `tracing_level`, `tracing_retention_hours` | Controls backend trace collection for frontend logging. |
 | `[frontend_logging]` | `tracing_components`, `tracing_username_regex` | Restricts tracing by component or user scope. |
-| `[directory_cache]` | `location`, `coalesce_interval_seconds`, `max_staleness_minutes` | Controls the saved directory index Sambee keeps to make browsing and search recover faster after restarts. |
+| `[directory_cache]` | `location` | Selects the private backend directory-index root. SQLite catalogues are session-bound and revalidated, not immediately trusted after restart. |
 | `[preprocessors.imagemagick]` | `max_file_size_bytes`, `timeout_seconds` | Sets conversion limits for ImageMagick preprocessing. |
 | `[companion_downloads]` | `metadata_feed_url` | Changes where Sambee resolves Companion download metadata. |
 | `[companion_downloads.pin]` | `version`, `published_at`, `notes`, asset URLs | Pins Companion download links to a specific published release instead of following the promoted feed. |
@@ -41,6 +41,27 @@ Use **Settings > File Search** for shared retention, results per group, and file
 Image, temporary, backup, and extension exclusions apply only to file history before storage. Enter one literal extension per exclusion; Sambee normalizes `TMP` to `.tmp`.
 
 Users can clear their own histories in **Settings > File Browser**. Removing history does not delete stored files or folders.
+
+## Directory-Index Policy
+
+**Settings > Advanced** has separate Backend Directory Indexes and Companion Directory Indexes groups. Database overrides take precedence over shared defaults. These resource policies have no TOML override; `directory_cache.location` selects only the backend storage root. The legacy `coalesce_interval_seconds` and `max_staleness_minutes` configuration keys do not control SQLite indexing.
+
+| Control | Default | Supported range |
+|---|---|---|
+| Disk budget | 2,048 MiB | 64-65,536 MiB |
+| Inactive-source retention | 604,800 seconds | 60-7,776,000 seconds |
+| Retained inactive sources | 4 | 1-64 |
+| Page-cache target per connection | 2,048 KiB | 64-16,384 KiB |
+| Healthy verification interval | 900 seconds | 60-86,400 seconds |
+| Degraded verification interval | 300 seconds | 30-3,600 seconds; no greater than the healthy interval |
+
+Lowering the disk budget can pause growth. It does not remove active directory rows. Age, count, and pressure cleanup apply only to inactive, unowned indexes. The budget and cache target are not hard filesystem or process-memory limits. Leave space for SQLite temporary work, WAL growth, retained generations, and concurrent sources.
+
+Backend changes apply to live backend sources. A saved companion policy is only the desired policy until **Apply To This Companion** completes local approval and direct redemption. Ordinary browser pairing does not grant policy ownership. The browser carries an opaque, single-use grant; Companion receives the policy from the approved backend over verified HTTPS, or literal-loopback HTTP for development, without redirects.
+
+Companion keeps its last approved policy if delivery or persistence fails. **Refresh Status** checks the effective revision. Update an unsupported companion, restore an offline connection, or check pairing in Local Drives when authorization fails. A different backend owner requires a confirmed owner reset in native Preferences. Reset invalidates pending challenges. A late receipt cannot replace a newer approved revision.
+
+The new directory-index search capability remains disabled. Policy approval does not enable it. See [Directory-Index Consistency](../../../developer-guide/backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for source, storage, and recovery limits.
 
 ## Backend Logging Levels
 

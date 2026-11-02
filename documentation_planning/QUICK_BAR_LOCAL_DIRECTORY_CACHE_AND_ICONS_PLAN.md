@@ -2,7 +2,7 @@
 
 ## Status and Checklist Rules
 
-Updated 2026-11-02. Repository version: 2.0.26. Implementation is partial. The new directory-index search capability remains disabled.
+Updated 2026-11-02. Repository version: 2.0.26. Implementation and required validation are complete within the available-runtime scope below. The new directory-index search capability remains disabled. The recorded browser timing target miss is not a performance pass.
 
 The 12 completion gates below are the active backlog. An unchecked gate does not mean its implementation is absent. Close a gate when its stated acceptance conditions pass and its evidence is recorded. Credit existing tests before adding tests. Do not restart completed work or create another broad qualification checklist.
 
@@ -58,7 +58,7 @@ These are implemented and have focused evidence. Their remaining integration lim
 
 ### G1: Source Identity and Safe Traversal
 
-- [ ] Close the remaining source-binding and traversal acceptance gaps without replacing the existing adapters.
+- [x] Close the remaining source-binding and traversal acceptance gaps without replacing the existing adapters.
 
 Reuse [SMB traversal tests](../backend/tests/test_directory_index_contract.py), the [Linux adapter](../companion/src-tauri/src/server/directory_traversal.rs), and the [Windows adapter and tests](../companion/src-tauri/src/server/directory_traversal_windows.rs). Retained handles, Windows tag classification, and backend pruning are implemented.
 
@@ -66,7 +66,7 @@ Reuse [SMB traversal tests](../backend/tests/test_directory_index_contract.py), 
 
 ### G2: Mutation-to-Query Reconciliation
 
-- [ ] Close missing application-operation and accepted/candidate integration cases through the existing notification and reconciliation paths.
+- [x] Close missing application-operation and accepted/candidate integration cases through the existing notification and reconciliation paths.
 
 Reuse [backend mutation and worker tests](../backend/tests/test_directory_index_contract.py), [SMB operation tests](../backend/tests/test_smb_backend.py), and [companion manager tests](../companion/src-tauri/src/server/directory_manager.rs). Parent discovery, missing-subtree pruning, both rename parents, and captured-sequence selection already exist in both runtimes.
 
@@ -74,7 +74,7 @@ Reuse [backend mutation and worker tests](../backend/tests/test_directory_index_
 
 ### G3: Recovery Scheduling and Worker Exit
 
-- [ ] Close source-loss, idle/resume, replacement, and shutdown integration gaps with the current admission and retry controls.
+- [x] Close source-loss, idle/resume, replacement, and shutdown integration gaps with the current admission and retry controls.
 
 Reuse existing blocked-read, queue/barrier overflow, watcher reconnect, retry-admission, periodic-jitter, and cleanup tests in the backend contract and companion manager suites.
 
@@ -82,7 +82,7 @@ Reuse existing blocked-read, queue/barrier overflow, watcher reconnect, retry-ad
 
 ### G4: Private Storage and Alias Safety
 
-- [ ] Close concurrent storage-replacement and deletion gaps, including Windows hard links and filesystem aliases.
+- [x] Close concurrent storage-replacement and deletion gaps, including Windows hard links and filesystem aliases.
 
 Reuse [backend ancestry and legacy-retirement evidence](#acceptance-evidence-backend-private-storage-ancestry) and existing storage-lease and companion protected-path tests. Legacy format removal is complete; do not restore or reimplement it.
 
@@ -90,7 +90,7 @@ Reuse [backend ancestry and legacy-retirement evidence](#acceptance-evidence-bac
 
 ### G5: SQLite Recovery and Serialization
 
-- [ ] Close interrupted-repair, replacement, transaction, and reader/writer lifecycle gaps in each runtime's existing storage suite.
+- [x] Close interrupted-repair, replacement, transaction, and reader/writer lifecycle gaps in each runtime's existing storage suite.
 
 Reuse [background replacement](#acceptance-evidence-background-database-replacement), [partial FTS repair](#acceptance-evidence-partial-fts-repair-failures), [checkpoint priority](#acceptance-evidence-backend-checkpoint-priority), and existing rollback/reopen tests.
 
@@ -98,7 +98,7 @@ Reuse [background replacement](#acceptance-evidence-background-database-replacem
 
 ### G6: Resource Accounting and Pressure
 
-- [ ] Account for missing temporary work and establish sufficient operation headroom; close resource-policy refusal and restoration cases.
+- [x] Account for missing temporary work and establish sufficient operation headroom; close resource-policy refusal and restoration cases.
 
 Reuse [application measurements](#acceptance-evidence-application-measurements), [bounded buffers](#acceptance-evidence-child-paging-and-bulk-buffer-bounds), and existing pressure/maintenance tests. Both million-path application experiments and smaller-cache count checks have run; they are not new outstanding builds.
 
@@ -106,7 +106,7 @@ Reuse [application measurements](#acceptance-evidence-application-measurements),
 
 ### G7: Administration and Policy Security
 
-- [ ] Close specific gaps in settings integration, grant security, transport, persistence, and delivery presentation.
+- [x] Close specific gaps in settings integration, grant security, transport, persistence, and delivery presentation.
 
 Credit [backend settings and grant tests](../backend/tests/test_system_settings.py) and [companion policy tests](../companion/src-tauri/src/server/directory_policy.rs) before adding checks. They already cover grant replay, changed bindings, revoked authority, redirect refusal, local approval, persistence failure, and cancellation ownership.
 
@@ -122,7 +122,7 @@ Reuse [shared fixtures](../shared/directory-index/search-fixtures.json), existin
 
 ### G9: Quick Bar, API, and Compatibility
 
-- [ ] Close missing presentation, source-failure, stale-response, and mixed-version cases in existing provider, row, and API tests.
+- [x] Close missing presentation, source-failure, stale-response, and mixed-version cases in existing provider, row, and API tests.
 
 Reuse [directory-provider tests](../frontend/src/components/FileBrowser/search/__tests__/useDirectorySearchProvider.test.ts), [Quick Bar tests](../frontend/src/components/FileBrowser/__tests__/UnifiedSearchBar.test.tsx), nearby file/row tests, and [backend API tests](../backend/tests/test_directory_search.py). Quiet-refresh scheduling and deterministic input timing already have focused evidence.
 
@@ -130,7 +130,7 @@ Reuse [directory-provider tests](../frontend/src/components/FileBrowser/search/_
 
 ### G10: Logs and Remaining Timing
 
-- [ ] Close lifecycle/query log privacy gaps and missing visible-result and mutation-freshness measurements.
+- [x] Close lifecycle/query log privacy gaps and missing visible-result and mutation-freshness measurements.
 
 Reuse [API timing-log evidence](#acceptance-evidence-companion-timing-log-privacy), [application measurements](#acceptance-evidence-application-measurements), and [mocked input timing](#acceptance-evidence-quiet-refresh-and-mocked-input-timing). The selective endpoint measurements and deterministic 240/280 ms history/merged publication checks are existing results, not native browser-paint guarantees.
 
@@ -138,13 +138,13 @@ Reuse [API timing-log evidence](#acceptance-evidence-companion-timing-log-privac
 
 ### G11: Runtime and Product Documentation
 
-- [ ] Record available-runtime SQLite evidence and complete final version 2.0 documentation against qualified behavior.
+- [x] Record available-runtime SQLite evidence and complete final version 2.0 documentation against qualified behavior.
 
 **Remaining and close condition:** Credit existing SQLite feature checks in the available backend and companion runtimes and record their versions and tokenizer settings. No Docker or other container-image check is required. Do not claim a Debian WAL-reset backport or unverified filesystem durability. Complete version 2.0 user, administration, and developer text for independent terms, path/basename scope, history icons, status/recovery actions, source limits, storage/generations/races, WAL ownership, disk/cache/retention, policy precedence/ownership/delivery, local locations, and privacy. Finish source-specific capability, first-start rebuild, and rollback notes without downgrade/migration/export procedures. Use the docs workflow and 2.0 overrides for inherited pages, validate documentation, build the website, and refresh derived artifacts. Do not add implementation diaries to product reference pages.
 
 ### G12: Final Validation and Acceptance
 
-- [ ] Run the final required checks on the completed revision and record acceptance without weakening the earlier gates.
+- [x] Run the final required checks on the completed revision and record acceptance without weakening the earlier gates.
 
 **Remaining and close condition:** Confirm G1-G11 have their acceptance evidence and explicit platform limits. Run `./scripts/test` once, then Rust formatting, companion lint, and companion frontend Vitest, which the aggregate does not cover. Run the Windows cross-check only if its toolchain is available and the aggregate skipped it; otherwise record it as unavailable. Run the small source-validated Python-to-Rust check if it was not covered. Resolve related warnings/errors; do not rerun full component suites already covered on the same unchanged revision. Capability activation requires its implementation, safety, policy, and compatibility gates to pass and remains outside this checklist-only edit. No commit, release, or deployment is required.
 
@@ -173,7 +173,7 @@ npm --prefix companion test
 
 ## Acceptance Evidence: Remaining-Work Follow-Up
 
-Verified in the Debian development container. G8 is complete for the defined search-contract checks. G1-G7 and G9-G12 remain open; the changes below do not complete those gates or authorize capability activation.
+Verified in the Debian development container. G1-G3 and G8 are complete for the defined available-runtime and injected checks. G4-G7 and G9-G12 remain open. Native Windows, live SMB delivery, physical sleep, and provider certification are not claimed. Capability activation is not authorized.
 
 - **G1:** An idle-resume regression first served rows without revalidation. Backend query access now invalidates old read tokens and clears source availability after the configured idle interval. The existing background worker must revalidate the retained source before queries resume. Two cases cover unchanged and replaced roots, preserved accepted rows, and refusal of the replaced identity. A Linux adapter check enumerates 513 regular files and one directory, interrupts at the existing batch boundary, then retries and discovers the directory without a directory-count cutoff. Native sleep and Windows execution are not claimed.
 - **G2:** The existing native SMB metadata fixture now verifies recursive copy as well as deletion through actual operation guards, accepted-parent reconciliation, and search. Successful and partial copies retain the original source, expose only created destinations, drain work, release ownership, and preserve full-verification time. The existing creation fixture now also calls both archive directory-chain helpers. Eight creation/archive cases and four recursive copy/delete cases pass. This does not certify complete upload, transfer, archive-member, or concurrent-build mutation coverage.
@@ -193,6 +193,48 @@ The implementation-completion aggregate was not run because implementation and q
 After the storage-open, lifecycle-log, and equal-status changes, the full backend cache/index contract selection passed **394 tests with 2 skipped**. Directory API tests passed **37 with 1 skipped**. Provider and Quick Bar tests passed **59 tests**. Changed-file Ruff, configured backend mypy, frontend TypeScript, focused Biome, editor diagnostics, and whitespace checks passed. Mypy retains its existing unused `pyvips` configuration-section note. These focused results do not replace the implementation-completion aggregate or qualify the remaining gates. Product reference text already states private-storage admission and the disabled capability; the equal-status change does not change the search contract.
 
 After the native reset, I/O-error, and small-tree timing additions, routine native manager tests passed **42 with 3 ignored**, and native index tests passed **48 with 2 ignored**. The small-tree timing test was invoked separately and passed. Rust formatting, strict host Clippy, and changed-file editor diagnostics passed. The other ignored capacity, HTTP, and compatibility checks were not rerun by these selections; earlier evidence applies only within its stated limits.
+
+## Acceptance Evidence: Source And Mutation Gate Closure
+
+G1 credits the existing retained-root/parent replacement, exact-name, encoding, reparse, mount, pseudo-filesystem, denial, per-record cancellation, session-binding, and bounded orphan-cleanup tests. The shared contract now bounds traversal to 256 normal directory components and 32 KiB of native path bytes; these limits do not cap directory counts. Backend and native checks cover exact limits, refusal before native opens, unsafe-branch reporting, and preserved readable branches. The Linux kernel-root test also refuses nested `proc` and `dev` parent lookups. Backend idle queries already invalidate old read tokens. Native query access now does so too, atomically with the access timestamp; unchanged and replaced roots go through actual manager queries with watcher delivery disabled. Old producers remain owned until exit, accepted rows remain unchanged, and retry/full-verification clocks are preserved. Native queries retain their before/after root-identity checks.
+
+G2 credits backend affected-path tests for directory/file creation, deletion, empty-directory removal, rename, copy, move, and writes; recursive copy/delete success and partial-failure reconciliation; both archive parent helpers; transfer destination file exclusion; and actual-exit cancellation/hint-failure checks. The existing creation fixture now also covers successful and partially failed upload writes through parent reconciliation and query, without inserting files. Backend uploads require existing parents. Native parent-creating uploads, transfers, recursive operations, and archive paths use the existing observed-operation guards; manager tests cover success/failure, ancestor creation, source bindings, overflow, accepted/candidate work, and late publication. The actual handler lifecycle test covers stream and archive integration. Shared guard and storage invariants are not retested as a Cartesian operation matrix.
+
+G3 credits the backend blocked-root/close/pool-worker, idle cleanup, source replacement, cancellation, retained process-lease, retry-admission, watcher reconnect/overflow, and jitter/deadline cases. Native tests cover actual scan/update/query permit lifetime, cancelled mutation ownership, queue/barrier loss, unchanged resource refusal, stopped-source publication, root replacement, idle close, and healthy/degraded deadlines. Existing exit-policy tests distinguish explicit exit from implicit last-window exit; hiding the window does not stop the manager. The new idle-query check preserves a storage retry deadline rather than bypassing it.
+
+Results on this revision: backend cache/index **398 passed, 2 skipped**; backend SMB operations **161 passed, 2 skipped**; native traversal **12 passed**; native manager baseline **42 passed, 3 ignored**, plus the new idle-query regression **1 passed**; actual handler lifecycle **1 passed**; exit-policy **2 passed**. Backend Ruff and configured mypy, strict host Clippy, Rust formatting, Windows production cross-check, and Windows test cross-compilation passed before the final idle-only addition. Final checks will cover that addition. Native Windows execution, live SMB, actual sleep, and cloud/provider execution remain unavailable, not passed. These limits satisfy the completion rules without expanding supported sources or enabling the capability.
+
+## Acceptance Evidence: Storage, Resource, Policy, And Presentation Gate Closure
+
+G4 credits existing creation, private ancestry, custom-root, file-family, source/namespace lease, protected-configuration, and Unicode alias checks. Backend inactive deletion now retains a directory descriptor and verifies namespace and main-file identity after SQLite closes. Four injected substitutions cover a namespace link, a different private directory, a different main database, and a linked sidecar; unrelated bytes and retained data remain unchanged. Quarantine and orphan cleanup also use held-directory mutations. Two quarantine-validation substitutions preserve both the original and unrelated data. Native reader and writer opens now share ancestry and family validation. Native cleanup and quarantine use descriptor-relative POSIX mutations or a held no-delete Windows namespace handle. A two-branch namespace replacement test verifies deletion and move refusal and recovery after restoration. Active native readers refuse database, lease, WAL, and SHM hard links; restored storage works again. Three permission cases cover namespace, main database, and ancestry. Windows handle link-count/reparse validation covers files and leases; its native regression compiles but was not executed. These checks do not claim universal same-account ABA protection or crash-atomic family moves.
+
+G5 credits both owning storage suites for transactional rows/FTS/counts/issues/revision/queue rollback, candidate publication, read snapshots, cancellation, close ownership, checkpoint deferral, maintenance priority, reopen, and denied replacement. Existing interrupted family-move rollback remains intact after descriptor anchoring. The native FULL, callback-injected IOERR, interrupted partial repair, and reset-refusal/reopen checks pass. Refusal does not discard validated rows or restart a discard loop. Backend query transactions are read-only; native queries use the read-only validated opener. Generation acceptance events now occur after commit, not before it.
+
+G6 adds one opt-in 4,096-row, two-source operation probe per runtime, not another large cutoff fixture. Both exercise an accepted generation and candidate, pinned reader, token reset and bounded repair, retired cleanup, vacuum, and quarantine; searches and pinned snapshots remain correct. SQLite progress callbacks sample named storage and Linux open descriptors, including deleted `etilqs` temporary files. Backend sampled **19,225,416 managed bytes**, **127,100 deleted SQLite temporary bytes**, **25 descriptors**, and RSS **230,308 to 230,472 KiB**. Two simultaneous reservations total **67,108,864 bytes**. Native sampled **16,864,656 managed bytes**, **zero deleted SQLite temporary bytes**, and **19 descriptors**. Zero is a sample result, not proof of absence. Sampling can miss short-lived files; it is not a hard allocation bound or device fault test. These probes qualify operation overlap separately from the earlier million-path builds.
+
+Resource accounting includes every named namespace file, main/WAL/SHM/journals, accepted/candidate/retired pages, the single rejected family, legacy retention, and outstanding reservations. Deleted SQL work is outside named usage and requires separate filesystem headroom. Each operation reserves 32 MiB; this is admission, not a physical ceiling. The recorded one-million-source peak plus one equally sized rejected family and two reservations is about 1.02 GB in the backend and fits the 2 GiB default for that fixture, before additional pinned-WAL or temporary growth. Add each active/inactive source's actual size when planning capacity; no unlimited-source guarantee follows. Existing shrink, age/count eviction, active-source protection, restored-capacity, logical cleanup, vacuum, checkpoint retry, and foreground-priority tests are credited.
+
+Memory and descriptor accounting remains explicit rather than a fabricated hard cap. Each manager has one scan and two query permits. Page-cache targets scale with writer connections for active sources plus admitted readers; they do not include all SQLite or process memory. Scan input is bounded to 256 rows and 1 MiB before key construction; normalization and repair-row buffers can expand beyond input bytes. Queries retain at most 200 ranked path/key records, not a complete match list. Pending observations and prefix barriers have 1,024-entry and 1 MiB limits; retained producers, source roots, watcher handles, sockets, and Windows ancestry handles scale with active sources and admitted blocked work. Earlier 100k/million RSS and descriptor samples remain valid within their stated methods. The small probes add overlap evidence, not production process ceilings.
+
+G7 credits backend scoped/default/range/correlated-update/revision tests, native origin/redirect/approval/persistence/reset/cancellation ownership tests, and manager policy-save rollback and initialization serialization. Four correctly signed substitutions now test token purpose, class, scope, and backend identity; refused substitutions do not consume the valid grant. Atomic concurrent redemption retains one winner. Native receipt tests now reject unsupported versions and late lower revisions, retain the durable newer revision, and refuse reset-invalidated challenges. Existing single-prompt ownership prevents competing in-flight redemption. Settings tests cover desired versus effective policy, competing owners, cancellation on close, and opaque grant delivery. Three added transport cases verify actionable old/offline/authorization notices and successful status refresh. Certificate-checked HTTPS and timeout behavior use the existing client configuration; no public TLS server, network-device, or native prompt certification is claimed.
+
+G9 credits shared Unicode highlights/order, provider duplicate-history actions, early loaded-file/history publication, stale query/source/selection rejection, keyboard/accessibility, removal, and quiet-refresh tests. Two added source cases preserve legacy rows and the source-specific multi-term support notice, make one full-query request without per-term caps, and clear the notice after an explicit supported contract. Exact-count, truncation, source-loss, storage-error privacy, and cancellation remain owned by existing API tests. The new capability is not enabled.
+
+G10 credits the earlier API, watcher, and shutdown privacy tests, selective endpoint measurements, deterministic input publication, demo-browser measurement, native small-tree freshness, admission, and verification-deadline tests. Added storage and worker events carry fixed names, numeric errors, durations, and retry details; SQL/private-path text is excluded. The backend real-method log test preserves data after an SQL failure. Native failure-field checks distinguish busy, cancellation, and IOERR without private text. The browser comparison remains **p95 321.5 ms against 300 ms**, with **24/30 misses**; it is not a performance pass, physical-display proof, or native latency guarantee. The selective endpoint and native ordinary-event comparisons met their fixture targets. This closes measurement and reporting work, not the unmet browser target or capability activation.
+
+G11 credits the available Python 3.14.7/system SQLite 3.46.1 and native bundled SQLite 3.54.1 feature checks. FTS uses `trigram case_sensitive 1` with `detail=full` over shared normalized keys. No Debian WAL-reset backport, container image, or unverified filesystem durability is claimed. Existing version 2.0 user/admin/developer pages now state source/path bounds, useful partial results, source recovery, private opens and held namespace mutations, session-bound restart behavior, policy precedence/units/ranges/ownership, temporary-work limits, and log privacy. Reference text contains operating rules, not measurement diaries. Documentation validation passes; website build and derived refresh are required under G12.
+
+Focused results before final validation: backend cache/storage **404 passed, 3 skipped**; backend policy **26 passed**; native directory baseline **122 passed, 5 ignored**, followed by native writer **50 passed, 2 ignored**, headroom **1 passed**, and failure-field **1 passed**; frontend combined policy/search **84 passed**, followed by provider **25 passed**. New headroom probes ran explicitly. Windows code and test cross-compilation, strict host Clippy, backend Ruff/configured mypy, frontend TypeScript, and changed-file diagnostics passed at their recorded intermediate revisions. Native Windows, live SMB, physical sleep, provider execution, and physical-display paint remain unavailable, not passed.
+
+### G12 Final Validation Record
+
+`PYTEST_WORKERS=4 ./scripts/test` ran once and passed the required dependency/image checks, backend Ruff/configured mypy/tests, serial performance checks, frontend types/lint/tests, companion types/Windows production cross-check/strict Clippy/Rust tests, and archive topology verification. The native aggregate finished with **432 passed, 6 ignored**; topology verification finished with **19 passed**. Companion Rust formatting and lint passed separately, and companion frontend tests finished with **28 passed**. Documentation validation and the website build passed, and the derived documentation report was refreshed. Unrelated CSS-statistics changes from the build were removed.
+
+The final fixed log fields were checked after the aggregate, without repeating it: native directory tests **123 passed, 6 ignored**, backend recovery/partial-scan/watcher/storage selection **60 passed**, changed-backend Ruff passed, configured mypy passed for **114 source files**, strict host Clippy and Rust formatting passed, Windows test code cross-compiled, and the source-validated Python-to-Rust check passed. Recovery, watcher start/loss/unavailability, inactive eviction, and aggregate scan-issue events now omit raw source and error data. Backend scan-issue counts describe observed failures; generation acceptance still logs only after commit.
+
+An additional `ruff check app tests` found an unrelated existing `F821` at `backend/tests/test_archive_topology_conformance_harness.py:351`: `_backend_extraction_trace` is undefined. That file is outside this change and was left unchanged. This extra check is broader than the aggregate's configured backend lint; it is not recorded as passing. No other reported error in the changed slice remains.
+
+All 12 gates have scoped evidence and explicit limits. This acceptance does not claim the unmet browser target, native Windows/live SMB/provider/device execution, universal race protection, hard process allocation ceilings, or capability activation. No commit, version change, dependency update, release, or deployment was made.
 
 ## Acceptance Evidence: Application Measurements
 
