@@ -671,6 +671,44 @@ mod tests {
     }
 
     #[test]
+    fn many_regular_files_keep_enumeration_cancellable_without_a_directory_cutoff() {
+        use super::super::directory_index::ROW_BATCH_SIZE;
+
+        const FILE_COUNT: usize = ROW_BATCH_SIZE * 2 + 1;
+
+        let temporary = tempfile::tempdir().unwrap();
+        for number in 0..FILE_COUNT {
+            std::fs::write(temporary.path().join(format!("file-{number}")), b"").unwrap();
+        }
+        std::fs::create_dir(temporary.path().join("directory")).unwrap();
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        let mut checks = 0;
+        let outcome = root.children("", |_| {
+            checks += 1;
+            if checks == ROW_BATCH_SIZE {
+                Err(IndexError::Interrupted)
+            } else {
+                Ok(())
+            }
+        });
+        assert!(matches!(outcome, Err(IndexError::Interrupted)));
+        assert_eq!(checks, ROW_BATCH_SIZE);
+        root.verify().unwrap();
+        let mut rows = Vec::new();
+        checks = 0;
+        root.children("", |entry| {
+            checks += 1;
+            if let Some(row) = entry.unwrap() {
+                rows.push(row);
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert!(checks >= FILE_COUNT);
+        assert_eq!(rows, vec![("directory".to_owned(), true)]);
+    }
+
+    #[test]
     fn parent_and_root_replacement_invalidate_observations() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("root");

@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from joserfc.errors import JoseError
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, update
 from sqlmodel import Session, col, select
 
 from app.core.authorization import Capability, user_has_capability
@@ -152,8 +152,19 @@ def redeem_directory_policy_grant(binding: DirectoryPolicyGrantRedeem, session: 
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Companion policy changed. Request a new approval grant for the current revision."
         )
-    record.consumed_at = now
-    session.add(record)
+    consumed = session.execute(
+        update(CompanionDirectoryPolicyGrant)
+        .where(
+            col(CompanionDirectoryPolicyGrant.jti) == jti,
+            col(CompanionDirectoryPolicyGrant.consumed_at).is_(None),
+            col(CompanionDirectoryPolicyGrant.expires_at) > now,
+        )
+        .values(consumed_at=now)
+        .returning(col(CompanionDirectoryPolicyGrant.jti))
+    ).first()
+    if consumed is None:
+        session.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Policy grant was used or expired. Request a new approval grant.")
     session.commit()
     return DirectoryPolicyGrantReceipt(
         companion_id=binding.companion_id,

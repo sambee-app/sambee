@@ -132,6 +132,51 @@ def test_directory_policy_grant_is_single_use_and_returns_backend_policy(client,
     assert client.post("/api/admin/settings/directory-index/companion/grants/redeem", json=redeem).status_code == 409
 
 
+def test_directory_policy_grant_concurrent_redemption_has_one_winner(tmp_path, admin_user, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from fastapi import HTTPException
+    from sqlmodel import SQLModel
+
+    from app.models.system_settings import DirectoryPolicyGrantBinding, DirectoryPolicyGrantRedeem
+    from app.services import directory_policy_grants
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'policy.sqlite3'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(engine)
+    try:
+        binding = DirectoryPolicyGrantBinding(**_policy_grant_binding())
+        with Session(engine) as session:
+            administrator = User.model_validate(admin_user.model_dump(exclude={"username_key"}))
+            session.add(administrator)
+            session.commit()
+            issued = directory_policy_grants.issue_directory_policy_grant(binding, administrator, session)
+        redeem = DirectoryPolicyGrantRedeem(**binding.model_dump(), grant=issued.grant)
+        ready = Barrier(2)
+        authorize = directory_policy_grants._administrator
+
+        def concurrent_authorization(session, user_id):
+            administrator = authorize(session, user_id)
+            ready.wait(timeout=5)
+            return administrator
+
+        monkeypatch.setattr(directory_policy_grants, "_administrator", concurrent_authorization)
+
+        def consume():
+            with Session(engine) as session:
+                try:
+                    directory_policy_grants.redeem_directory_policy_grant(redeem, session)
+                except HTTPException as error:
+                    return error.status_code
+                return 200
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(workers.map(lambda _: consume(), range(2)))
+        assert sorted(results) == [200, 409]
+    finally:
+        engine.dispose()
+
+
 def test_directory_policy_revisions_are_safe_wire_integers():
     from app.core.directory_index_contract import MAX_WIRE_INTEGER
     from app.models.system_settings import DirectoryIndexPolicy, DirectoryIndexSettingsRead

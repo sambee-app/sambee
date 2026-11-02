@@ -1888,6 +1888,56 @@ mod tests {
     }
 
     #[test]
+    fn full_fts_repair_preserves_rows_cursor_and_retry() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        index
+            .write_paths((0..ROW_BATCH_SIZE + 1).map(|number| format!("accepted/{number}")), None)
+            .unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        index
+            .writer
+            .execute_batch("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')")
+            .unwrap();
+        drop(index);
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut before = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        let cursor = index.fts_repair_cursor;
+        let page_size: i64 = index.writer.query_row("PRAGMA page_size", [], |row| row.get(0)).unwrap();
+        let free_pages: i64 = index.writer.query_row("PRAGMA freelist_count", [], |row| row.get(0)).unwrap();
+        index.writer.execute_batch("CREATE TABLE pressure(payload BLOB)").unwrap();
+        index
+            .writer
+            .execute("INSERT INTO pressure VALUES (zeroblob(?))", [(free_pages + 1) * page_size])
+            .unwrap();
+        let original_limit: i64 = index.writer.query_row("PRAGMA max_page_count", [], |row| row.get(0)).unwrap();
+        let pages: i64 = index.writer.query_row("PRAGMA page_count", [], |row| row.get(0)).unwrap();
+        index.writer.pragma_update(None, "max_page_count", pages).unwrap();
+        assert!(matches!(
+            index.repair_fts_batch(),
+            Err(IndexError::Sql(rusqlite::Error::SqliteFailure(code, _))) if code.code == rusqlite::ErrorCode::DiskFull
+        ));
+        assert_eq!(index.fts_repair_cursor, cursor);
+        assert!(index.needs_fts_repair());
+        let tokens: i64 = index
+            .writer
+            .query_row("SELECT count(*) FROM directory_fts_docsize", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tokens, 0);
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+        index.writer.pragma_update(None, "max_page_count", original_limit).unwrap();
+        index.writer.execute_batch("DROP TABLE pressure").unwrap();
+        assert!(index.repair_fts_batch().unwrap());
+        assert!(!index.repair_fts_batch().unwrap());
+        assert!(!index.needs_fts_repair());
+        before.query_plan = "trigram";
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+    }
+
+    #[test]
     fn incremental_reclamation_preserves_results_and_verification() {
         let temporary = tempfile::tempdir().unwrap();
         let mut index = DirectoryIndex::open(
@@ -2176,16 +2226,39 @@ mod tests {
             assert_eq!(response.directory_count, count);
             assert_eq!(response.results.len(), 3);
         }
-        index.finish_generation(1, 0).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let verified = index.search("", 3, false, &cancelled, false).unwrap().last_verified_at_ms;
+        let candidate = index.begin_verification().unwrap();
+        index
+            .write_paths((0..count).map(|number| format!("directory-{number:06}")), Some(candidate))
+            .unwrap();
+        assert_eq!(
+            index.search("directory", 3, false, &cancelled, false).unwrap().directory_count,
+            count
+        );
+        index
+            .mutate_path(&DirectoryMutation::Rename {
+                path: "directory-100000".into(),
+                new_path: "directory-updated".into(),
+            })
+            .unwrap();
+        assert_eq!(index.search("100000", 3, false, &cancelled, false).unwrap().total_matches, 0);
+        assert_eq!(
+            index.search("updated", 3, false, &cancelled, false).unwrap().results[0].path,
+            "directory-updated"
+        );
+        assert_eq!(index.search("", 3, false, &cancelled, false).unwrap().last_verified_at_ms, verified);
+        assert!(index.finish_generation(candidate, 0).unwrap());
         drop(index);
         let index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        let response = index.search("directory", 3, false, &cancelled, false).unwrap();
+        assert_eq!(response.directory_count, count);
+        assert_eq!(response.total_matches, count);
+        assert_eq!(index.search("100000", 3, false, &cancelled, false).unwrap().total_matches, 0);
         assert_eq!(
-            index
-                .search("100000", 3, false, &Arc::new(AtomicBool::new(false)), false)
-                .unwrap()
-                .results[0]
-                .path,
-            "directory-100000"
+            index.search("updated", 3, false, &cancelled, false).unwrap().results[0].path,
+            "directory-updated"
         );
     }
 

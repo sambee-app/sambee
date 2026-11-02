@@ -909,7 +909,13 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._source_root = SmbDirectoryRoot(self._smb_base_path)
 
     def touch(self) -> None:
-        self._last_access = time.monotonic()
+        now = time.monotonic()
+        with self.coordinator.lock:
+            if now - self._last_access >= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] and self._source_available.is_set():
+                self.coordinator.invalidate()
+                self._source_available.clear()
+                self._source_probe_completed.set()
+            self._last_access = now
         self._last_access_at_ms = int(time.time() * 1000)
 
     def can_release_idle(self) -> bool:

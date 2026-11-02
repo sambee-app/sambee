@@ -1673,6 +1673,43 @@ def test_smb_native_read_checks_cancellation_after_protocol_calls(smb_directory_
         root.close()
 
 
+@pytest.mark.parametrize("replaced", [False, True])
+def test_idle_source_queries_wait_for_handle_bound_revalidation(sqlite_cache, smb_directory_server, replaced):
+    from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+    from app.services.directory_cache import DirectorySourceUnavailableError, SQLiteConnectionDirectoryCache
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    cache = sqlite_cache
+    cache._source_root = SmbDirectoryRoot(r"\\host\share\base")
+    cache._open_source_read = SQLiteConnectionDirectoryCache._open_source_read.__get__(cache)
+    cache.index.write_paths(["parent/Exact"])
+    assert cache.index.finish_generation(1)
+    cache._probe_source_root()
+    accepted = cache.index.search("Exact")
+    token = cache.coordinator.begin_read("parent")
+    try:
+        cache._last_access -= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"]
+        if replaced:
+            smb_directory_server.identifiers["base"] += 1
+        with pytest.raises(DirectorySourceUnavailableError):
+            cache.search_index("Exact")
+        assert not cache.coordinator.is_current(token)
+        assert cache.coordinator.verification_required
+        assert cache.index.search("Exact") == accepted
+        if replaced:
+            with pytest.raises(DirectorySourceUnavailableError):
+                cache._probe_source_root()
+            with pytest.raises(DirectorySourceUnavailableError):
+                cache.search_index("Exact")
+        else:
+            cache._probe_source_root()
+            assert cache.search_index("Exact") == accepted
+        assert cache.index.search("Exact") == accepted
+    finally:
+        cache.coordinator.end_read(token)
+        cache._source_root.close()
+
+
 def test_smb_reconciliation_worker_prunes_missing_subtrees_and_discovers_children(sqlite_cache, smb_directory_server):
     from app.services.directory_cache import SQLiteConnectionDirectoryCache
     from app.services.directory_traversal import SmbDirectoryRoot
@@ -1702,8 +1739,9 @@ def test_smb_reconciliation_worker_prunes_missing_subtrees_and_discovers_childre
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["delete", "copy"])
 @pytest.mark.parametrize("failed", [False, True])
-async def test_recursive_smb_delete_reconciles_removed_descendants(sqlite_cache, smb_directory_server, monkeypatch, failed):
+async def test_recursive_smb_mutations_reconcile_partial_results(sqlite_cache, smb_directory_server, monkeypatch, failed, operation):
     import stat
     from contextlib import asynccontextmanager
     from pathlib import PureWindowsPath
@@ -1749,7 +1787,7 @@ async def test_recursive_smb_delete_reconciles_removed_descendants(sqlite_cache,
     def scan(path, **kwargs):
         relative = "\\".join(PureWindowsPath(path).parts[1:])
         for name, _attributes in server.directories[relative]:
-            yield SimpleNamespace(path=str(PureWindowsPath(path) / name))
+            yield SimpleNamespace(name=name, path=str(PureWindowsPath(path) / name))
 
     def remove(path, **kwargs):
         relative = "\\".join(PureWindowsPath(path).parts[1:])
@@ -1759,23 +1797,41 @@ async def test_recursive_smb_delete_reconciles_removed_descendants(sqlite_cache,
         server.directories[parent] = [(child, attributes) for child, attributes in server.directories[parent] if child != name]
         del server.directories[relative]
 
+    def create(path, **kwargs):
+        relative = "\\".join(PureWindowsPath(path).parts[1:])
+        if failed and relative.endswith("\\protected"):
+            raise PermissionError("Injected descendant copy denial.")
+        parent, _, name = relative.rpartition("\\")
+        server.directories[parent].append((name, directory_attributes))
+        server.directories[relative] = []
+
     monkeypatch.setattr("app.storage.smb.get_connection_pool", pool)
-    monkeypatch.setattr("app.storage.smb.smbclient.stat", lambda *args, **kwargs: SimpleNamespace(st_mode=stat.S_IFDIR))
+    monkeypatch.setattr(
+        "app.storage.smb.smbclient.stat", lambda *args, **kwargs: SimpleNamespace(st_mode=stat.S_IFDIR, st_atime=0, st_mtime=0)
+    )
     monkeypatch.setattr("app.storage.smb.smbclient.scandir", scan)
     monkeypatch.setattr("app.storage.smb.smbclient.rmdir", remove)
+    monkeypatch.setattr("app.storage.smb.smbclient.mkdir", create)
+    monkeypatch.setattr("app.storage.smb.smbclient.path.exists", lambda *args, **kwargs: False)
+    monkeypatch.setattr("app.storage.smb.smbclient.utime", lambda *args, **kwargs: None)
     try:
+        mutation = backend.delete_item("parent/target") if operation == "delete" else backend.copy_item("parent/target", "parent/copied")
         if failed:
-            with pytest.raises(PermissionError, match="descendant deletion denial"):
-                await backend.delete_item("parent/target")
+            with pytest.raises(PermissionError, match="Injected descendant"):
+                await mutation
         else:
-            await backend.delete_item("parent/target")
-        assert "base\\parent\\target\\removed" not in server.directories
+            await mutation
+        assert ("base\\parent\\target\\removed" in server.directories) == (operation == "copy")
         assert index.search("removed").total_matches == 1
         sqlite_cache.coordinator.apply_pending()
         sqlite_cache._reconcile_disk_queue()
         after = sqlite_cache.search_index("parent outside")
         expected = {"parent", "outside"}
-        if failed:
+        if operation == "copy":
+            expected.update({"parent/target", "parent/target/removed", "parent/target/protected", "parent/copied", "parent/copied/removed"})
+            if not failed:
+                expected.add("parent/copied/protected")
+        elif failed:
             expected.update({"parent/target", "parent/target/protected"})
         assert {row.path for row in after.results} == expected
         assert after.total_matches == after.directory_count == len(expected)
@@ -3443,12 +3499,17 @@ async def test_smb_hint_failure_preserves_mutation_result_and_private_error_text
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failed", [False, True])
-@pytest.mark.parametrize("prefix", ["", "scoped"])
-async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_cache, monkeypatch, failed, prefix):
+@pytest.mark.parametrize("operation,prefix", [("create", ""), ("create", "scoped"), ("archive", "scoped"), ("mixed_archive", "scoped")])
+async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_cache, monkeypatch, failed, prefix, operation):
     from contextlib import asynccontextmanager
+    from pathlib import PureWindowsPath
+    from unittest.mock import AsyncMock
 
     from smbclient._os import FileAttributes
 
+    from app.api.archive_operations import _ensure_mixed_archive_parent_directories
+    from app.models.file import FileType
+    from app.services.archive.extraction import _ensure_live_directory
     from app.storage.smb import SMBBackend
 
     index = sqlite_cache.index
@@ -3462,7 +3523,13 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
         host="fixture", share_name="share", username="user", password="password", connection_context_key="fixture", path_prefix=prefix
     )
     dispatched = []
-    source_directories = set()
+    source_directories = {"parent"}
+    root = PureWindowsPath(backend._build_smb_path(""))
+    sqlite_cache._smb_base_path = str(root)
+
+    def relative_path(path):
+        relative = PureWindowsPath(path).relative_to(root).as_posix()
+        return "" if relative == "." else relative
 
     @asynccontextmanager
     async def connected(**kwargs):
@@ -3473,34 +3540,45 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
 
     def create(path, **kwargs):
         dispatched.append(path)
-        assert len(sqlite_cache.coordinator.pending) == 1
-        assert sqlite_cache.coordinator.pending[0][1].path == "parent"
-        source_directories.add("new")
+        relative = relative_path(path)
+        assert sqlite_cache.coordinator.pending[-1][1].path == relative.rpartition("/")[0]
+        if relative in source_directories:
+            raise FileExistsError(relative)
+        source_directories.add(relative)
         if failed:
             raise PermissionError("Injected partial source mutation.")
 
     def scan(path, **kwargs):
-        if path.endswith("\\parent"):
-            for name in sorted(source_directories):
+        relative = relative_path(path)
+        for directory in sorted(source_directories):
+            parent, _, name = directory.rpartition("/")
+            if parent == relative:
                 yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
 
     monkeypatch.setattr("app.storage.smb.get_connection_pool", pool)
     monkeypatch.setattr("app.storage.smb.smbclient.mkdir", create)
     monkeypatch.setattr("smbclient.scandir", scan)
+    monkeypatch.setattr(backend, "get_file_info", AsyncMock(return_value=SimpleNamespace(type=FileType.DIRECTORY)))
+    if operation == "archive":
+        mutation = _ensure_live_directory(backend, "parent/new/deep")
+    elif operation == "mixed_archive":
+        mutation = _ensure_mixed_archive_parent_directories(backend, destination_root="parent", target_path="parent/new/deep/file")
+    else:
+        mutation = backend.create_directory("parent/new")
     if failed:
         with pytest.raises(PermissionError, match="partial source mutation"):
-            await backend.create_directory("parent/new")
+            await mutation
     else:
-        await backend.create_directory("parent/new")
-    assert dispatched == [backend._build_smb_path("parent/new")]
-    assert len(sqlite_cache.coordinator.pending) == 2
+        await mutation
+    assert backend._build_smb_path("parent/new") in dispatched
+    assert len(sqlite_cache.coordinator.pending) == 2 * len(dispatched)
     sqlite_cache.coordinator.apply_pending()
-    assert index.pending_scan_paths(1) == ["parent"]
+    assert set(index.pending_scan_paths(1)) == {relative_path(path).rpartition("/")[0] for path in dispatched}
     assert index.search("parent") == before
     sqlite_cache._reconcile_disk_queue()
     after = sqlite_cache.search_index("parent new")
-    assert {row.path for row in after.results} == {"parent", "parent/new"}
-    assert after.total_matches == after.directory_count == 2
+    assert {row.path for row in after.results} == source_directories
+    assert after.total_matches == after.directory_count == len(source_directories)
     assert after.last_verified_at_ms == before.last_verified_at_ms
     assert index.accepted_generation() == 1
     assert index.reconciliation_generation() is None
@@ -4861,10 +4939,21 @@ def test_coverage_above_old_cutoff_and_bounded_results(index, count):
         assert response.directory_count == response.total_matches == count
         assert len(response.results) == 3
     assert index.search("100000").results[0].path == "directory-100000"
-    index.finish_generation(1)
+    assert index.finish_generation(1)
+    verified = index.search("").last_verified_at_ms
+    candidate = index.begin_verification()
+    index.write_paths((f"directory-{number:06d}" for number in range(count)), generation_id=candidate)
+    assert index.search("directory").directory_count == count
+    index.mutate_path("rename", "directory-100000", "directory-updated")
+    assert index.search("100000").total_matches == 0
+    assert index.search("updated").results[0].path == "directory-updated"
+    assert index.search("").last_verified_at_ms == verified
+    assert index.finish_generation(candidate)
     index.close()
     index.open()
-    assert index.search("100000").directory_count == count
+    assert index.search("directory").directory_count == index.search("directory").total_matches == count
+    assert index.search("100000").total_matches == 0
+    assert index.search("updated").results[0].path == "directory-updated"
 
 
 @pytest.mark.skipif(
