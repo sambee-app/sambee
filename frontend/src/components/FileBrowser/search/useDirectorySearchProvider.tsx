@@ -236,12 +236,19 @@ export function useDirectorySearchProvider(
   const updateIndexStatus = useCallback((response: DirectorySearchResult) => {
     setCacheState(response.cache_state);
     setDirectoryCount(response.directory_count);
-    setCoverageStatus({
-      coverage: response.coverage,
-      coverage_issue_count: response.coverage_issue_count,
-      last_verified_at_ms: response.last_verified_at_ms,
-      status_message: response.status_message,
-    });
+    setCoverageStatus((previous) =>
+      previous?.coverage === response.coverage &&
+      previous?.coverage_issue_count === response.coverage_issue_count &&
+      previous?.last_verified_at_ms === response.last_verified_at_ms &&
+      previous?.status_message === response.status_message
+        ? previous
+        : {
+            coverage: response.coverage,
+            coverage_issue_count: response.coverage_issue_count,
+            last_verified_at_ms: response.last_verified_at_ms,
+            status_message: response.status_message,
+          }
+    );
   }, []);
 
   useEffect(() => {

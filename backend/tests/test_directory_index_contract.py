@@ -14,10 +14,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from smbprotocol.exceptions import SMBResponseException
+from smbprotocol.header import NtStatus, SMB2HeaderResponse
 
 from app.services.directory_index import MAX_QUERY_BYTES, MAX_QUERY_TERMS, DirectoryIndex, normalize_search_text, search_terms
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "shared" / "directory-index"
+
+
+def _smb_response_error(status: int) -> SMBResponseException:
+    """Build the registered SMB error subtype from an explicit response status."""
+    header = SMB2HeaderResponse()
+    header["status"] = status
+    return SMBResponseException(header)
 
 
 def test_standard_sqlite_runtime_has_required_features():
@@ -254,9 +263,52 @@ def test_hard_linked_database_and_sidecars_are_rejected(index, suffix):
     try:
         with pytest.raises(PermissionError, match="hard links"):
             other.open()
-        assert index.search("").directory_count == 0
+        with pytest.raises(PermissionError, match="hard links"):
+            index.search("")
     finally:
         alias.unlink()
+    assert index.search("").directory_count == 0
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Unix database-open ownership policy")
+@pytest.mark.parametrize("change", ["alias", "database_permissions", "namespace_permissions"])
+def test_database_open_revalidates_private_storage_after_connect(index, monkeypatch, change):
+    from app.services.directory_index import connect_directory_database
+
+    index.write_paths(["accepted"])
+    before = index.search("accepted")
+    database_mode = stat.S_IMODE(index.path.stat().st_mode)
+    namespace_mode = stat.S_IMODE(index.path.parent.stat().st_mode)
+    alias = index.path.parent / "alias.data"
+    connections = []
+    original = sqlite3.connect
+
+    def connect(*args, **kwargs):
+        connection = original(*args, **kwargs)
+        connections.append(connection)
+        if change == "alias":
+            os.link(index.path, alias)
+        elif change == "database_permissions":
+            index.path.chmod(database_mode | stat.S_IWGRP)
+        else:
+            index.path.parent.chmod(namespace_mode | stat.S_IRGRP)
+        return connection
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(sqlite3, "connect", connect)
+            with pytest.raises(PermissionError):
+                connect_directory_database(index.path, readonly=True)
+        assert len(connections) == 1
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            connections[0].execute("SELECT 1")
+    finally:
+        for connection in connections:
+            connection.close()
+        alias.unlink(missing_ok=True)
+        index.path.chmod(database_mode)
+        index.path.parent.chmod(namespace_mode)
+    assert index.search("accepted") == before
 
 
 @pytest.mark.parametrize(
@@ -480,10 +532,10 @@ def test_recovery_never_discards_data_after_storage_refusal(index, monkeypatch, 
 
     index.close()
     before = index.path.read_bytes()
-    failure = (
-        PermissionError("Injected permission refusal.") if code is None else sqlite3.OperationalError("Injected SQLite storage refusal.")
-    )
-    if code is not None:
+    if code is None:
+        failure = PermissionError("Injected permission refusal.")
+    else:
+        failure = sqlite3.OperationalError("Injected SQLite storage refusal.")
         failure.sqlite_errorcode = code
 
     def refuse():
@@ -1420,22 +1472,25 @@ def sqlite_cache(index):
             )
         )
 
-    cache._open_source_read = open_read
-    yield cache
-    cache._request_stop()
-    cache._finish_stop()
+    with pytest.MonkeyPatch.context() as reader_patch:
+        reader_patch.setattr(cache, "_open_source_read", open_read)
+        try:
+            yield cache
+        finally:
+            cache._request_stop()
+            cache._finish_stop()
 
 
 def test_smb_handle_uses_no_redirect_open_and_bounded_native_reads(monkeypatch):
     from types import SimpleNamespace
 
-    from smbprotocol.exceptions import NoMoreFiles, PathNotCovered
+    from smbprotocol.exceptions import PathNotCovered
     from smbprotocol.open import CreateOptions, ShareAccess
 
     from app.services.directory_traversal import DIRECTORY_READ_BUFFER_BYTES, SmbDirectoryHandle
 
     calls = []
-    replies = [[object()], NoMoreFiles(), PathNotCovered()]
+    replies = [[object()], _smb_response_error(NtStatus.STATUS_NO_MORE_FILES), _smb_response_error(NtStatus.STATUS_PATH_NOT_COVERED)]
 
     class Handle:
         connected = True
@@ -1479,7 +1534,6 @@ def smb_directory_server(monkeypatch):
     from types import SimpleNamespace
     from uuid import UUID
 
-    from smbprotocol.exceptions import AccessDenied, NoMoreFiles
     from smbprotocol.file_info import FileFsVolumeInformation, FileIdFullDirectoryInformation
 
     server = SimpleNamespace(
@@ -1518,7 +1572,7 @@ def smb_directory_server(monkeypatch):
 
         def query_directory(self, pattern, info_class, *, flags, max_output):
             if self.path in server.denied:
-                raise AccessDenied()
+                raise _smb_response_error(NtStatus.STATUS_ACCESS_DENIED)
             server.on_query()
             server.patterns.append(pattern)
             if flags:
@@ -1527,7 +1581,7 @@ def smb_directory_server(monkeypatch):
             if pattern != "*":
                 entries = [(name, attributes) for name, attributes in entries if name.casefold() == pattern.casefold()]
             if self.cursor >= len(entries):
-                raise NoMoreFiles()
+                raise _smb_response_error(NtStatus.STATUS_NO_MORE_FILES)
             records = []
             for name, attributes in entries[self.cursor : self.cursor + 2]:
                 record = FileIdFullDirectoryInformation()
@@ -1552,7 +1606,7 @@ def smb_directory_server(monkeypatch):
         information = kind()
         path = transaction.raw.fd.path
         if path in server.metadata_denied:
-            raise server.metadata_error if server.metadata_error is not None else AccessDenied()
+            raise server.metadata_error if server.metadata_error is not None else _smb_response_error(NtStatus.STATUS_ACCESS_DENIED)
         if isinstance(information, FileFsVolumeInformation):
             information["volume_serial_number"] = server.volumes.get(path, 1)
             information["volume_creation_time"] = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -1917,7 +1971,7 @@ def test_smb_worker_closes_all_ancestors_and_preserves_primary_failure(sqlite_ca
     sqlite_cache.index.write_paths(["parent", "parent/old"])
     assert sqlite_cache.index.finish_generation(1)
     sqlite_cache.index.queue_reconciliation_parent(1, "parent")
-    failure = PathNotCovered()
+    failure = _smb_response_error(NtStatus.STATUS_PATH_NOT_COVERED)
     handle_type = directory_traversal.Open
     original_close = handle_type.close
 
@@ -4498,7 +4552,6 @@ def test_failed_generation_issue_count_agrees_with_issue_rows(index):
 @pytest.mark.parametrize("direct_exception", [False, True])
 def test_watcher_notify_overflow_requests_verification(sqlite_cache, monkeypatch, direct_exception):
     from smbprotocol.change_notify import FileSystemWatcher
-    from smbprotocol.exceptions import NotifyEnumDir
     from smbprotocol.header import NtStatus
 
     index = sqlite_cache.index
@@ -4510,12 +4563,12 @@ def test_watcher_notify_overflow_requests_verification(sqlite_cache, monkeypatch
 
     def receive(request):
         if not request.cancelled:
-            raise NotifyEnumDir()
+            raise _smb_response_error(NtStatus.STATUS_NOTIFY_ENUM_DIR)
 
     def start(watcher, **kwargs):
         calls.append(kwargs)
         if direct_exception and len(calls) <= 2:
-            watcher._t_exc = NotifyEnumDir()
+            watcher._t_exc = _smb_response_error(NtStatus.STATUS_NOTIFY_ENUM_DIR)
         request = SimpleNamespace(
             cancelled=len(calls) > 2,
             response={"status": SimpleNamespace(get_value=lambda: NtStatus.STATUS_NOTIFY_ENUM_DIR)},
@@ -4973,7 +5026,9 @@ def test_injected_application_capacity_measurement(sqlite_cache, monkeypatch):
     started = time.perf_counter()
     finished = threading.Event()
     first_partial = []
-    peaks = dict.fromkeys(("rss_kib", "fds", "managed_bytes", "main_bytes", "wal_bytes", "shm_bytes", "producers", "pending"), 0)
+    peaks: dict[str, int] = dict.fromkeys(
+        ("rss_kib", "fds", "managed_bytes", "main_bytes", "wal_bytes", "shm_bytes", "producers", "pending"), 0
+    )
     failures = []
     metrics = {"rows": count, "python": platform.python_version(), "sqlite": sqlite3.sqlite_version, "host": platform.platform()}
 

@@ -2072,6 +2072,90 @@ impl Drop for LocalDirectoryManager {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    #[ignore = "Explicit small-tree native watcher timing measurement; not part of routine tests."]
+    async fn small_many_file_tree_reports_first_result_and_native_watcher_freshness() {
+        const FRESHNESS_TARGET: Duration = Duration::from_secs(2);
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let regular_files = limit("row_batch_size").unwrap() * 2 + 1;
+        for number in 0..regular_files {
+            std::fs::write(root.join(format!("file-{number:04}")), b"file").unwrap();
+        }
+        std::fs::create_dir(root.join("Reports")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let poll_period = Duration::from_millis(limit("event_coalescing_ms").unwrap() as u64);
+        let timeout = Duration::from_secs(limit("query_timeout_seconds").unwrap() as u64);
+        let mut polling = tokio::time::interval(poll_period);
+        let started = Instant::now();
+        let mut first_result = None;
+        let before = tokio::time::timeout(timeout, async {
+            loop {
+                polling.tick().await;
+                let response = manager
+                    .search("measurement".into(), root.clone(), "reports".into(), false)
+                    .await
+                    .unwrap();
+                if !response.results.is_empty() {
+                    first_result.get_or_insert_with(|| started.elapsed());
+                }
+                if response.cache_state == "ready" && response.directory_count == 1 {
+                    break response;
+                }
+            }
+        })
+        .await
+        .expect("The native many-file build must finish before the query timeout.");
+        let ready = started.elapsed();
+        let source = lock(&manager.sources).unwrap().get("measurement").unwrap().clone();
+        assert!(lock(&source.watcher).unwrap().is_some());
+        let mutated = Instant::now();
+        std::fs::create_dir_all(root.join("Reports New/Child")).unwrap();
+        let after = tokio::time::timeout(timeout, async {
+            loop {
+                polling.tick().await;
+                let response = manager
+                    .search("measurement".into(), root.clone(), "reports".into(), false)
+                    .await
+                    .unwrap();
+                if response.directory_count == 3 && response.results.iter().any(|path| path == "Reports New/Child") {
+                    break response;
+                }
+            }
+        })
+        .await;
+        let freshness = mutated.elapsed();
+        lock(&manager.sources).unwrap().remove("measurement");
+        source.stopped.store(true, Ordering::Release);
+        let _scan_exit = manager.scans.acquire().await.unwrap();
+        let _update_exit = manager.updates.acquire_many(limit("query_workers").unwrap() as u32).await.unwrap();
+        let _query_exit = manager.queries.acquire_many(limit("query_workers").unwrap() as u32).await.unwrap();
+        source.close_idle(&manager.budget).unwrap();
+        let after = after.expect("The real watcher and background scheduler must publish the new subtree before the query timeout.");
+        assert_eq!(after.total_matches, 3);
+        assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
+        println!(
+            "{}",
+            serde_json::json!({
+                "measurement": "small_native_many_file_tree",
+                "os": std::env::consts::OS,
+                "regular_files": regular_files,
+                "initial_directories": before.directory_count,
+                "final_directories": after.directory_count,
+                "poll_resolution_ms": poll_period.as_millis(),
+                "first_result_ms": first_result.unwrap().as_millis(),
+                "ready_ms": ready.as_millis(),
+                "mutation_freshness_ms": freshness.as_millis(),
+                "freshness_target_ms": FRESHNESS_TARGET.as_millis(),
+                "freshness_target_met": freshness <= FRESHNESS_TARGET,
+                "native_watcher": true,
+                "application_mutation_hint": false
+            })
+        );
+    }
+
     #[tokio::test]
     async fn cooperative_mutation_interruption_preserves_retry_deadline_and_failure_state() {
         let temporary = tempfile::tempdir().unwrap();

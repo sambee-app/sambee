@@ -1938,6 +1938,133 @@ mod tests {
     }
 
     #[test]
+    fn ioerr_during_partial_fts_repair_preserves_rows_cursor_and_retry() {
+        unsafe extern "C" fn fail_write(
+            context: *mut rusqlite::ffi::sqlite3_context,
+            _argument_count: std::ffi::c_int,
+            _arguments: *mut *mut rusqlite::ffi::sqlite3_value,
+        ) {
+            // SAFETY: SQLite supplies a live context for this registered callback.
+            unsafe { rusqlite::ffi::sqlite3_result_error_code(context, rusqlite::ffi::SQLITE_IOERR_WRITE) };
+        }
+
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        index
+            .write_paths((0..ROW_BATCH_SIZE + 1).map(|number| format!("accepted/{number}")), None)
+            .unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        index
+            .writer
+            .execute_batch("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')")
+            .unwrap();
+        drop(index);
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut before = index.search("accepted", 3, false, &cancelled, false).unwrap();
+        let cursor = index.fts_repair_cursor;
+        let changes_before: i64 = index.writer.query_row("SELECT total_changes()", [], |row| row.get(0)).unwrap();
+        // SAFETY: The connection is live, the name is static, and the callback has no user data or destructor.
+        let registered = unsafe {
+            rusqlite::ffi::sqlite3_create_function_v2(
+                index.writer.handle(),
+                c"test_directory_ioerr".as_ptr(),
+                0,
+                rusqlite::ffi::SQLITE_UTF8 | rusqlite::ffi::SQLITE_INNOCUOUS,
+                std::ptr::null_mut(),
+                Some(fail_write),
+                None,
+                None,
+                None,
+            )
+        };
+        assert_eq!(registered, rusqlite::ffi::SQLITE_OK);
+        index
+            .writer
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_fts_write BEFORE INSERT ON directory_fts_docsize
+                 WHEN (SELECT count(*) FROM directory_fts_docsize) > 0
+                 BEGIN SELECT test_directory_ioerr(); END;",
+            )
+            .unwrap();
+        assert!(matches!(
+            index.repair_fts_batch(),
+            Err(IndexError::Sql(rusqlite::Error::SqliteFailure(code, _)))
+                if code.extended_code == rusqlite::ffi::SQLITE_IOERR_WRITE
+        ));
+        let changes_after: i64 = index.writer.query_row("SELECT total_changes()", [], |row| row.get(0)).unwrap();
+        assert!(
+            changes_after > changes_before,
+            "The I/O error must occur after a partial token write."
+        );
+        assert_eq!(index.fts_repair_cursor, cursor);
+        assert!(index.needs_fts_repair());
+        let tokens: i64 = index
+            .writer
+            .query_row("SELECT count(*) FROM directory_fts_docsize", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(tokens, 0);
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+        index.writer.execute_batch("DROP TRIGGER fail_fts_write").unwrap();
+        assert!(index.repair_fts_batch().unwrap());
+        assert!(!index.repair_fts_batch().unwrap());
+        assert!(!index.needs_fts_repair());
+        before.query_plan = "trigram";
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+    }
+
+    #[test]
+    fn refused_fts_reset_does_not_replace_rows_and_retries_after_reopen() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("source.sqlite3");
+        let identity = json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        index
+            .write_paths(["accepted/first".into(), "accepted/second".into()], None)
+            .unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("accepted", 3, false, &cancelled, true).unwrap();
+        index
+            .writer
+            .execute_batch(
+                "INSERT INTO directory_fts(directory_fts) VALUES ('delete-all');
+                 CREATE TRIGGER refuse_fts_reset BEFORE DELETE ON directory_fts_data
+                 BEGIN SELECT RAISE(ABORT, 'Injected FTS reset refusal.'); END;",
+            )
+            .unwrap();
+        drop(index);
+        assert!(matches!(
+            DirectoryIndex::open(&path, SourceKind::Local, &identity),
+            Err(IndexError::Sql(rusqlite::Error::SqliteFailure(code, _)))
+                if code.code == rusqlite::ErrorCode::ConstraintViolation
+        ));
+        assert!(path.is_file());
+        let connection = Connection::open(&path).unwrap();
+        let retained: i64 = connection
+            .query_row("SELECT count(*) FROM directories", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(retained, before.directory_count);
+        connection.execute_batch("DROP TRIGGER refuse_fts_reset").unwrap();
+        drop(connection);
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        assert!(index.needs_fts_repair());
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), before);
+        assert!(!index.repair_fts_batch().unwrap());
+        assert!(!index.needs_fts_repair());
+        assert_eq!(index.search("accepted", 3, false, &cancelled, true).unwrap(), before);
+        let mut repaired = before;
+        repaired.query_plan = "trigram";
+        assert_eq!(index.search("accepted", 3, false, &cancelled, false).unwrap(), repaired);
+        drop(index);
+        let reopened = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        assert!(!reopened.needs_fts_repair());
+        assert_eq!(reopened.search("accepted", 3, false, &cancelled, false).unwrap(), repaired);
+    }
+
+    #[test]
     fn incremental_reclamation_preserves_results_and_verification() {
         let temporary = tempfile::tempdir().unwrap();
         let mut index = DirectoryIndex::open(

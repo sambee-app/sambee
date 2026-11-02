@@ -605,10 +605,10 @@ class ConnectionDirectoryCache(ABC):
         self._watcher_thread = threading.Thread(
             target=self._watcher_loop,
             daemon=True,
-            name=f"dir-cache-watcher-{self.connection_id[:8]}",
+            name="directory-cache-watcher",
         )
         self._watcher_thread.start()
-        logger.info(f"Started CHANGE_NOTIFY watcher for connection {self.connection_id}")
+        logger.info("Directory watcher started.", extra={"event": "directory_watcher_started"})
 
     #
     # _watcher_loop
@@ -629,7 +629,7 @@ class ConnectionDirectoryCache(ABC):
                 self._connect_watcher()
                 self._run_watcher_inner()
 
-            except Exception as e:
+            except Exception as error:
                 if self._stop_event.is_set():
                     break
 
@@ -637,7 +637,9 @@ class ConnectionDirectoryCache(ABC):
                 retry_count = 1 if self._watcher_received_events else retry_count + 1
                 if retry_count > MAX_WATCHER_RETRIES:
                     logger.error(
-                        f"CHANGE_NOTIFY watcher for connection {self.connection_id} exceeded max retries ({MAX_WATCHER_RETRIES}), stopping"
+                        "Directory watcher reached its retry limit (%s attempts). Reconnect the source to resume live updates.",
+                        MAX_WATCHER_RETRIES,
+                        extra={"event": "directory_watcher_retry_exhausted"},
                     )
                     break
 
@@ -646,9 +648,12 @@ class ConnectionDirectoryCache(ABC):
                     WATCHER_RETRY_MAX_DELAY,
                 )
                 logger.warning(
-                    f"CHANGE_NOTIFY watcher error for connection {self.connection_id}, "
-                    f"retrying in {delay:.0f}s (attempt {retry_count}/{MAX_WATCHER_RETRIES}): "
-                    f"{type(e).__name__}: {e}"
+                    "Directory watcher failed (%s); retrying in %s seconds (attempt %s/%s).",
+                    type(error).__name__,
+                    delay,
+                    retry_count,
+                    MAX_WATCHER_RETRIES,
+                    extra={"event": "directory_watcher_retry", "error_type": type(error).__name__, "retry_seconds": delay},
                 )
 
                 self._cleanup_watcher()
@@ -657,7 +662,7 @@ class ConnectionDirectoryCache(ABC):
                     break  # Stop event was set during wait
 
         self._cleanup_watcher()
-        logger.info(f"CHANGE_NOTIFY watcher stopped for connection {self.connection_id}")
+        logger.info("Directory watcher stopped.", extra={"event": "directory_watcher_stopped"})
 
     #
     # _connect_watcher
@@ -702,7 +707,7 @@ class ConnectionDirectoryCache(ABC):
             create_options=CreateOptions.FILE_DIRECTORY_FILE,
         )
 
-        logger.debug(f"CHANGE_NOTIFY watcher connected for connection {self.connection_id} ({self.host}/{self.share_name})")
+        logger.debug("Directory watcher connected.", extra={"event": "directory_watcher_connected"})
 
     #
     # _run_watcher_inner
@@ -766,36 +771,36 @@ class ConnectionDirectoryCache(ABC):
         if self._watcher_open:
             try:
                 self._watcher_open.close()
-            except Exception as e:
-                logger.debug(f"Error closing watcher handle: {e}")
+            except Exception as error:
+                logger.debug("Directory watcher handle cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_open = None
 
         if self._watcher_tree:
             try:
                 self._watcher_tree.disconnect()
-            except Exception as e:
-                logger.debug(f"Error disconnecting watcher tree: {e}")
+            except Exception as error:
+                logger.debug("Directory watcher tree cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_tree = None
 
         if self._watcher_session:
             try:
                 self._watcher_session.disconnect()
-            except Exception as e:
-                logger.debug(f"Error disconnecting watcher session: {e}")
+            except Exception as error:
+                logger.debug("Directory watcher session cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_session = None
 
         if self._watcher_connection:
             try:
                 self._watcher_connection.disconnect()
-            except RuntimeError as e:
+            except RuntimeError as error:
                 # smbprotocol bug: disconnect() tries to join the current
                 # thread when called from the message-worker after a timeout.
-                logger.debug(f"Ignored RuntimeError during watcher connection disconnect: {e}")
-            except Exception as e:
-                logger.debug(f"Error disconnecting watcher connection: {e}")
+                logger.debug("Directory watcher connection cleanup failed (%s).", type(error).__name__)
+            except Exception as error:
+                logger.debug("Directory watcher connection cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_connection = None
 
@@ -832,7 +837,7 @@ class ConnectionDirectoryCache(ABC):
     def stop(self) -> None:
         """Stop all background tasks and clean up resources."""
 
-        logger.info(f"Stopping directory cache for connection {self.connection_id}")
+        logger.info("Stopping directory cache.", extra={"event": "directory_source_stopping"})
         self._request_stop()
         self._finish_stop()
 
@@ -1642,8 +1647,12 @@ class DirectoryCacheManager:
                 await self.release_idle_caches()
             except asyncio.CancelledError:
                 return
-            except Exception:
-                logger.exception("Directory idle release failed. Existing sources remain protected; retrying background cleanup.")
+            except Exception as error:
+                logger.error(
+                    "Directory idle release failed (%s). Existing sources remain protected; retrying background cleanup.",
+                    type(error).__name__,
+                    extra={"event": "directory_idle_release_failed", "error_type": type(error).__name__},
+                )
 
     def apply_policy(self, policy: DirectoryIndexPolicy) -> None:
         self.resources.apply_policy(policy)
@@ -1766,7 +1775,7 @@ class DirectoryCacheManager:
 
         if cache:
             cache.stop()
-            logger.info(f"Removed directory cache for connection {connection_id}")
+            logger.info("Directory cache removed.", extra={"event": "directory_source_removed"})
 
     async def remove_cache_async(self, connection_id: str) -> None:
         """Remove one cache without blocking the application event loop."""
@@ -1780,10 +1789,14 @@ class DirectoryCacheManager:
         cache._request_stop()
         try:
             await asyncio.to_thread(cache._finish_stop)
-        except Exception:
-            logger.exception("Error stopping cache for connection %s", connection_id)
+        except Exception as error:
+            logger.error(
+                "Directory cache shutdown failed (%s). Storage ownership remains held until workers exit.",
+                type(error).__name__,
+                extra={"event": "directory_source_shutdown_failed", "error_type": type(error).__name__},
+            )
         else:
-            logger.info(f"Removed directory cache for connection {connection_id}")
+            logger.info("Directory cache removed.", extra={"event": "directory_source_removed"})
 
     #
     # stop_all
@@ -1800,10 +1813,11 @@ class DirectoryCacheManager:
         for cache in caches:
             try:
                 cache.stop()
-            except Exception as e:
+            except Exception as error:
                 logger.error(
-                    f"Error stopping cache for connection {cache.connection_id}: {e}",
-                    exc_info=True,
+                    "Directory cache shutdown failed (%s). Storage ownership remains held until workers exit.",
+                    type(error).__name__,
+                    extra={"event": "directory_source_shutdown_failed", "error_type": type(error).__name__},
                 )
 
         logger.info("All directory caches stopped")
@@ -1827,8 +1841,9 @@ class DirectoryCacheManager:
         for cache, result in zip(caches, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error(
-                    f"Error stopping cache for connection {cache.connection_id}: {result}",
-                    exc_info=result,
+                    "Directory cache shutdown failed (%s). Storage ownership remains held until workers exit.",
+                    type(result).__name__,
+                    extra={"event": "directory_source_shutdown_failed", "error_type": type(result).__name__},
                 )
             elif isinstance(cache, SQLiteConnectionDirectoryCache):
                 with self._lock:

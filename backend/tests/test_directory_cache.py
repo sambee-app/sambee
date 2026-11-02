@@ -41,6 +41,56 @@ def cache_fixture(tmp_path, monkeypatch):
     cache.stop()
 
 
+def test_watcher_logs_omit_source_identity_and_private_error_text(cache, monkeypatch):
+    logger = MagicMock()
+    monkeypatch.setattr("app.services.directory_cache.logger", logger)
+    private_error = f"{cache.host}/{cache.share_name} {cache.username} {cache.password} private-source-path"
+    failure = OSError(private_error)
+    monkeypatch.setattr(cache, "_connect_watcher", MagicMock(side_effect=failure))
+    monkeypatch.setattr(cache._stop_event, "wait", lambda _delay: True)
+    cache._watcher_loop()
+    for attribute, method in (
+        ("_watcher_open", "close"),
+        ("_watcher_tree", "disconnect"),
+        ("_watcher_session", "disconnect"),
+        ("_watcher_connection", "disconnect"),
+    ):
+        resource = MagicMock()
+        getattr(resource, method).side_effect = failure
+        setattr(cache, attribute, resource)
+    cache._cleanup_watcher()
+    cache.stop()
+    logged = repr(logger.mock_calls)
+    for private_value in (cache.connection_id, cache.host, cache.share_name, cache.username, cache.password, private_error):
+        assert private_value not in logged
+    assert "OSError" in logged
+    logger.exception.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["remove_cache_async", "stop_all_async", "stop_all"])
+async def test_manager_shutdown_logs_omit_source_identity_and_private_error_text(cache, monkeypatch, operation):
+    logger = MagicMock()
+    manager = DirectoryCacheManager()
+    manager._caches[cache.connection_id] = cache
+    failure = OSError(f"{cache.host}/{cache.share_name} {cache.username} {cache.password} private-source-path")
+    with monkeypatch.context() as scope:
+        scope.setattr("app.services.directory_cache.logger", logger)
+        scope.setattr(cache, "_finish_stop", MagicMock(side_effect=failure))
+        if operation == "remove_cache_async":
+            await manager.remove_cache_async(cache.connection_id)
+        elif operation == "stop_all_async":
+            await manager.stop_all_async()
+        else:
+            manager.stop_all()
+    logged = repr(logger.mock_calls)
+    for private_value in (cache.connection_id, cache.host, cache.share_name, cache.username, cache.password, str(failure)):
+        assert private_value not in logged
+    assert "OSError" in logged
+    assert "exc_info" not in logged
+    logger.exception.assert_not_called()
+
+
 @pytest.fixture(name="populated_cache")
 def populated_cache_fixture(cache: ConnectionDirectoryCache) -> ConnectionDirectoryCache:
     """Create a cache pre-populated with directory paths."""

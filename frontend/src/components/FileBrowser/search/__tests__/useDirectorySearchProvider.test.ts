@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { createElement, type ReactNode } from "react";
+import { createElement, type ReactNode, useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 import "../../../../i18n";
 import api from "../../../../services/api";
@@ -17,6 +17,57 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("getDirectoryResultPresentation", () => {
+  it("publishes new rows without recommitting unchanged status and still publishes changed coverage", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    const response: Awaited<ReturnType<typeof api.searchDirectories>> = {
+      results: ["Reports"],
+      total_matches: 1,
+      directory_count: 100_000,
+      cache_state: "ready",
+      coverage: "complete",
+      coverage_issue_count: 0,
+      last_verified_at_ms: 1,
+      search_contract_version: SEARCH_CONTRACT_VERSION,
+    };
+    vi.mocked(api.searchDirectories).mockResolvedValue(response);
+    let commits = 0;
+    const onNavigate = vi.fn();
+    const { result } = renderHook(
+      () => {
+        const provider = useDirectorySearchProvider("connection-1", onNavigate);
+        useEffect(() => {
+          commits += 1;
+        });
+        return provider;
+      },
+      { wrapper }
+    );
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    const settledCommits = commits;
+    vi.mocked(api.searchDirectories).mockResolvedValue({ ...response, results: ["Quarterly Reports"] });
+    let rows: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+    await act(async () => {
+      rows = await result.current.fetchResults("quarterly", new AbortController().signal);
+    });
+    expect(rows.some((row) => row.kind === "result" && row.value === "directory:Quarterly Reports")).toBe(true);
+    expect(commits).toBe(settledCommits);
+    const statusMessage = "Directory indexing is paused. Increase its disk budget and retry.";
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      ...response,
+      coverage: "partial",
+      coverage_issue_count: 1,
+      last_verified_at_ms: 2,
+      status_message: statusMessage,
+    });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(commits).toBeGreaterThan(settledCommits);
+    expect(result.current.getStatusInfo?.()).toEqual({ label: statusMessage, showSpinner: false });
+  });
+
   it.each([
     { cache_state: "building", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
     { cache_state: "updating", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },

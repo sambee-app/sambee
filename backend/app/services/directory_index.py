@@ -88,6 +88,7 @@ def connect_directory_database(path: Path, *, readonly: bool = False) -> sqlite3
     """Open existing private storage without creating a file or accepting a link."""
     path = path.absolute()
     validate_storage_ancestors(path.parent)
+    DirectoryIndex._validate_storage_files(path)
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode):
         raise PermissionError("Directory-index database must be a regular file without symbolic links. Correct private cache storage.")
@@ -103,6 +104,8 @@ def connect_directory_database(path: Path, *, readonly: bool = False) -> sqlite3
         after = path.lstat()
         if not stat.S_ISREG(after.st_mode) or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
             raise PermissionError("Directory-index database changed during open. Stop the source and correct private cache storage.")
+        validate_storage_ancestors(path.parent)
+        DirectoryIndex._validate_storage_files(path)
         return connection
     except BaseException:
         connection.close()
