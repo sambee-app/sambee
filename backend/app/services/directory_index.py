@@ -51,6 +51,7 @@ STORAGE_FILE_SUFFIXES = ("", "-wal", "-shm", "-journal", ".lease")
 MIN_SQLITE_VERSION_NUMBER = DIRECTORY_INDEX_CONTRACT.limits["minimum_sqlite_version_number"]
 MIN_SQLITE_VERSION = (MIN_SQLITE_VERSION_NUMBER // 1_000_000, MIN_SQLITE_VERSION_NUMBER // 1_000 % 1_000, MIN_SQLITE_VERSION_NUMBER % 1_000)
 SQLITE_PRIMARY_ERROR_MASK = 0xFF
+SLOW_TRANSACTION_SECONDS = 1.0
 logger = logging.getLogger(__name__)
 
 
@@ -152,13 +153,12 @@ def transaction(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
             },
         )
         raise
-    logger.debug(
-        "Directory transaction completed.",
-        extra={
-            "event": "directory_transaction_completed",
-            "duration_ms": round((time.monotonic() - started) * 1000, 3),
-        },
-    )
+    duration = time.monotonic() - started
+    if duration >= SLOW_TRANSACTION_SECONDS:
+        logger.warning(
+            "Directory transaction was slow.",
+            extra={"event": "directory_transaction_slow", "duration_ms": round(duration * 1000, 3)},
+        )
 
 
 def validate_sqlite_runtime() -> None:
@@ -744,19 +744,51 @@ class DirectoryIndex:
     def status(self) -> DirectoryIndexSearch:
         return self.search("")
 
+    def has_resumable_scan(self) -> bool:
+        """Return whether an issue-free candidate has completed work to retain."""
+        with self._writer_lock:
+            return bool(
+                required_row(
+                    self._connection().execute("SELECT EXISTS(SELECT 1 FROM generations WHERE state = 'candidate' AND issue_count = 0)")
+                )[0]
+            )
+
     def prepare_scan(self) -> tuple[int, bool]:
-        """Resume only an untouched initial generation; verify existing data separately."""
+        """Resume issue-free verification work without trusting the selected rows."""
         with self._writer_lock, self.growth_guard():
             connection = self._connection()
             self._require_fts()
             with transaction(connection):
+                retained = connection.execute(
+                    "SELECT id FROM generations WHERE state = 'candidate' AND issue_count = 0 ORDER BY id DESC LIMIT 1"
+                ).fetchone()
+                if retained is not None:
+                    return int(retained[0]), False
+                connection.execute("UPDATE generations SET state = 'retired' WHERE state = 'candidate'")
                 generation, state, count, queued, issues = required_row(
                     connection.execute(
                         "SELECT g.id, g.state, g.indexed_count, EXISTS(SELECT 1 FROM scan_queue q WHERE q.generation_id = g.id), g.issue_count "
                         "FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE m.id = 1"
                     )
                 )
-                if state == "building" and not count and not queued and not issues:
+                if (
+                    state == "building"
+                    and not count
+                    and not queued
+                    and (
+                        not issues
+                        or not required_row(
+                            connection.execute(
+                                "SELECT EXISTS(SELECT 1 FROM coverage_issues WHERE generation_id = ? AND code <> 'event_loss')",
+                                (generation,),
+                            )
+                        )[0]
+                    )
+                ):
+                    if issues:
+                        connection.execute("DELETE FROM coverage_issues WHERE generation_id = ? AND code = 'event_loss'", (generation,))
+                        connection.execute("UPDATE generations SET coverage = 'partial', issue_count = 0 WHERE id = ?", (generation,))
+                        self._revision(connection)
                     return int(generation), True
                 candidate = required_row(
                     connection.execute("INSERT INTO generations(state, coverage) VALUES ('candidate', 'partial') RETURNING id")
@@ -783,6 +815,22 @@ class DirectoryIndex:
 
     def write_scan_children(self, generation_id: int, children: Iterable[tuple[str, bool]]) -> None:
         self._write_children(generation_id, children)
+
+    def requeue_completed_scan_batch(self, generation_id: int) -> bool:
+        """Revalidate retained work after an observation gap without discarding rows."""
+        with self._writer_lock, self.growth_guard():
+            connection = self._connection()
+            with transaction(connection):
+                state = required_row(connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)))[0]
+                if state not in ("building", "candidate"):
+                    raise ValueError("Scan generation is no longer active. Request source verification.")
+                changed = connection.execute(
+                    "UPDATE scan_queue SET processed = 0 WHERE rowid IN "
+                    "(SELECT rowid FROM scan_queue WHERE generation_id = ? AND processed = 1 LIMIT ?)",
+                    (generation_id, ROW_BATCH_SIZE),
+                ).rowcount
+                return changed == ROW_BATCH_SIZE
+        raise RuntimeError("Scan revalidation did not complete. Retry source verification.")
 
     def accepted_generation(self) -> int | None:
         with self._writer_lock:

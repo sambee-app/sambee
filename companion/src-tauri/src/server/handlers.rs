@@ -5643,6 +5643,7 @@ pub async fn browse_search_directories(
         .await
         .map(Json)
         .map_err(|error| match error {
+            super::directory_index::IndexError::QueryBusy => ApiError::TooManyRequests(error.to_string()),
             super::directory_index::IndexError::Invalid(message) => ApiError::BadRequest(message.to_owned()),
             super::directory_index::IndexError::Interrupted => {
                 ApiError::TooManyRequests("Directory query was cancelled or timed out. Retry the search.".to_owned())
@@ -7017,11 +7018,22 @@ mod tests {
             let mut last_status = String::new();
             let settled = tokio::time::timeout(SETTLE_TIMEOUT, async {
                 loop {
-                    let result = state
+                    let result = match state
                         .0
                         .search(drive.to_owned(), root.to_path_buf(), "created renamed".to_owned(), false)
                         .await
-                        .unwrap();
+                    {
+                        Ok(result) => result,
+                        Err(
+                            error @ (super::super::directory_index::IndexError::Interrupted
+                            | super::super::directory_index::IndexError::QueryBusy),
+                        ) => {
+                            last_status = error.to_string();
+                            tokio::time::sleep(RETRY_INTERVAL).await;
+                            continue;
+                        }
+                        Err(error) => panic!("background directory query failed: {error}"),
+                    };
                     if result.cache_state == "ready"
                         && result.last_verified_at_ms.is_some()
                         && result.results.iter().map(String::as_str).collect::<Vec<_>>() == expected

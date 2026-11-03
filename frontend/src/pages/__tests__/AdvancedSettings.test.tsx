@@ -128,179 +128,11 @@ describe("AdvancedSettings", () => {
     expect(screen.getByLabelText("Conversion timeout")).toBeInTheDocument();
     expect(screen.queryByLabelText("Value")).not.toBeInTheDocument();
     expect(screen.queryByText(/exact value:/i)).not.toBeInTheDocument();
-  });
-
-  it("shows separate directory scopes and persists only the selected host", async () => {
-    const user = userEvent.setup();
-    render(
-      <SambeeThemeProvider>
-        <AdvancedSettings />
-      </SambeeThemeProvider>
-    );
-    const fields = await screen.findAllByLabelText("SQLite page-cache target");
-    expect(fields).toHaveLength(2);
-    expect(await screen.findByText("Desired policy is saved. Companion approval or delivery is pending.")).toBeInTheDocument();
-    await user.clear(fields[0]!);
-    await user.type(fields[0]!, "1024");
-    await user.keyboard("{Enter}");
-    await waitFor(() =>
-      expect(api.updateDirectoryIndexSettings).toHaveBeenCalledWith(
-        "backend",
-        { field: "page_cache_kib", value: 1024 },
-        expect.objectContaining({ signal: expect.anything() })
-      )
-    );
-    expect(fields[1]).toHaveValue("2048");
-    expect(api.updateAdvancedSettings).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [404, "Companion update required. Desired policy is saved, but this companion has no policy approval support.", true],
-    [503, "Companion is offline or unavailable. Its last approved policy remains active.", false],
-    [403, "Companion authorization is unavailable. Check pairing in Local Drives, then refresh its status.", false],
-  ])("shows actionable companion policy status for HTTP %s and recovers after refresh", async (status, message, blocked) => {
-    const user = userEvent.setup();
-    vi.mocked(companionService.getDirectoryPolicyStatus).mockRejectedValueOnce({ response: { status } });
-    render(
-      <SambeeThemeProvider>
-        <AdvancedSettings />
-      </SambeeThemeProvider>
-    );
-    expect(await screen.findByText(message)).toBeInTheDocument();
-    const apply = screen.getByRole("button", { name: "Apply To This Companion" });
-    if (blocked) expect(apply).toBeDisabled();
-    else expect(apply).toBeEnabled();
-    expect(api.issueDirectoryPolicyGrant).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Refresh Status" }));
-    expect(await screen.findByText("Desired policy is saved. Companion approval or delivery is pending.")).toBeInTheDocument();
-    expect(apply).toBeEnabled();
-  });
-
-  it("delivers only an opaque grant after native approval", async () => {
-    const user = userEvent.setup();
-    const pending = {
-      version: 1,
-      companion_id: "native-id",
-      status: "pending_delivery" as const,
-      owner_origin: null,
-      backend_identity: null,
-      effective_revision: null,
-      policy: directorySettings("companion").policy,
-      challenge: "native-challenge",
-      approved: true,
-      message: null,
-    };
-    vi.mocked(companionService.requestDirectoryPolicyChallenge).mockResolvedValue(pending);
-    vi.mocked(api.issueDirectoryPolicyGrant).mockResolvedValue({
-      grant: "opaque-grant",
-      expires_in_seconds: 60,
-      revision: 0,
-      backend_identity: "verified-backend",
-    });
-    vi.mocked(companionService.redeemDirectoryPolicyGrant).mockResolvedValue({
-      ...pending,
-      status: "applied",
-      challenge: null,
-      owner_origin: window.location.origin,
-      backend_identity: "verified-backend",
-      effective_revision: 0,
-    });
-    render(
-      <SambeeThemeProvider>
-        <AdvancedSettings />
-      </SambeeThemeProvider>
-    );
-    await user.click(await screen.findByRole("button", { name: "Apply To This Companion" }));
-    await waitFor(() =>
-      expect(api.issueDirectoryPolicyGrant).toHaveBeenCalledWith(
-        { companion_id: "native-id", challenge: "native-challenge", origin: window.location.origin },
-        expect.objectContaining({ signal: expect.anything() })
-      )
-    );
-    expect(companionService.redeemDirectoryPolicyGrant).toHaveBeenCalledWith(
-      "opaque-grant",
-      expect.objectContaining({ signal: expect.anything() })
-    );
-    expect(await screen.findByText("Companion policy is active.")).toBeInTheDocument();
-  });
-
-  it("does not issue a grant after the settings surface is closed", async () => {
-    const user = userEvent.setup();
-    let approve!: (status: Awaited<ReturnType<typeof companionService.requestDirectoryPolicyChallenge>>) => void;
-    vi.mocked(companionService.requestDirectoryPolicyChallenge).mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          approve = resolve;
-        })
-    );
-    const view = render(
-      <SambeeThemeProvider>
-        <AdvancedSettings />
-      </SambeeThemeProvider>
-    );
-    await user.click(await screen.findByRole("button", { name: "Apply To This Companion" }));
-    view.unmount();
-    approve({
-      version: 1,
-      companion_id: "native-id",
-      status: "pending_delivery",
-      owner_origin: null,
-      backend_identity: null,
-      effective_revision: null,
-      policy: directorySettings("companion").policy,
-      challenge: "native-challenge",
-      approved: true,
-      message: null,
-    });
-    await Promise.resolve();
-    expect(api.issueDirectoryPolicyGrant).not.toHaveBeenCalled();
-    expect(companionService.redeemDirectoryPolicyGrant).not.toHaveBeenCalled();
-  });
-
-  it("requires native owner reset instead of delivering to a conflicting owner", async () => {
-    vi.mocked(companionService.getDirectoryPolicyStatus).mockResolvedValue({
-      version: 1,
-      companion_id: "native-id",
-      status: "owner_conflict",
-      owner_origin: "https://other.example",
-      backend_identity: "other-backend",
-      effective_revision: 0,
-      policy: directorySettings("companion").policy,
-      challenge: null,
-      approved: false,
-      message: null,
-    });
-    render(
-      <SambeeThemeProvider>
-        <AdvancedSettings />
-      </SambeeThemeProvider>
-    );
-    expect(await screen.findByText("Another backend owns companion policy. Reset that owner in native Preferences.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply To This Companion" })).toBeDisabled();
-    expect(api.issueDirectoryPolicyGrant).not.toHaveBeenCalled();
-  });
-
-  it("does not treat an equal revision from a different backend identity as active", async () => {
-    vi.mocked(companionService.getDirectoryPolicyStatus).mockResolvedValue({
-      version: 1,
-      companion_id: "native-id",
-      status: "applied",
-      owner_origin: window.location.origin,
-      backend_identity: "previous-backend",
-      effective_revision: 0,
-      policy: directorySettings("companion").policy,
-      challenge: null,
-      approved: false,
-      message: null,
-    });
-    render(
-      <SambeeThemeProvider>
-        <AdvancedSettings />
-      </SambeeThemeProvider>
-    );
-    expect(await screen.findByText("Another backend owns companion policy. Reset that owner in native Preferences.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Apply To This Companion" })).toBeDisabled();
-    expect(screen.queryByText("Companion policy is active.")).not.toBeInTheDocument();
+    expect(api.getDirectoryIndexSettings).not.toHaveBeenCalled();
+    expect(companionService.getDirectoryPolicyStatus).not.toHaveBeenCalled();
+    expect(screen.queryByText("Companion Directory Indexes")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Conversion timeout")).toHaveAccessibleDescription(/Maximum time allowed/);
+    expect(screen.getByLabelText("Maximum file size")).toHaveAccessibleDescription(/Largest input file/);
   });
 
   it("persists a valid updated value on blur", async () => {
@@ -374,5 +206,20 @@ describe("AdvancedSettings", () => {
 
     expect(maximumFileSize).toHaveValue("102400");
     expect(api.updateAdvancedSettings).not.toHaveBeenCalled();
+  });
+
+  it("commits a byte-size value on Enter without changing its unit", async () => {
+    const user = userEvent.setup();
+    render(<AdvancedSettings />);
+    const maximumFileSize = await screen.findByLabelText("Maximum file size");
+    await user.clear(maximumFileSize);
+    await user.type(maximumFileSize, "128");
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(api.updateAdvancedSettings).toHaveBeenCalledWith(
+        { field: "preprocessors.imagemagick.max_file_size_bytes", value: 134217728 },
+        expect.objectContaining({ signal: expect.anything() })
+      )
+    );
   });
 });

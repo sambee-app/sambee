@@ -4,6 +4,9 @@ use std::path::Path;
 
 use super::directory_index::IndexError;
 
+pub(super) const MOUNT_BOUNDARY_CAPABILITY_ERROR: &str =
+    "The kernel cannot check directory mount boundaries. Restart the companion after enabling statx mount IDs or /proc/self/fdinfo.";
+
 fn validate_traversal_path(path: &Path) -> Result<(), IndexError> {
     let maximum_bytes = super::directory_manager::limit("max_source_path_bytes")?;
     let maximum_depth = super::directory_manager::limit("max_source_depth")?;
@@ -306,20 +309,34 @@ mod platform {
                 extended.as_mut_ptr(),
             )
         };
-        if result != 0 {
-            return Err(io::Error::last_os_error().into());
-        }
         let extended = unsafe { extended.assume_init() };
-        if extended.stx_mask & libc::STATX_MNT_ID == 0 {
-            return Err(IndexError::Invalid(
-                "Directory mount identity is unavailable. Use a supported local filesystem.",
-            ));
-        }
+        let mount = if result == 0 && extended.stx_mask & libc::STATX_MNT_ID != 0 {
+            extended.stx_mnt_id
+        } else {
+            descriptor_mount_id(
+                &std::fs::read_to_string(format!("/proc/self/fdinfo/{}", file.as_raw_fd()))
+                    .map_err(|_| IndexError::Invalid(MOUNT_BOUNDARY_CAPABILITY_ERROR))?,
+            )?
+        };
         Ok(NativeIdentity {
             device: metadata.dev(),
             inode: metadata.ino(),
-            mount: extended.stx_mnt_id,
+            mount,
         })
+    }
+
+    fn descriptor_mount_id(information: &str) -> Result<u64, IndexError> {
+        information
+            .lines()
+            .find_map(|line| line.strip_prefix("mnt_id:").and_then(|value| value.trim().parse().ok()))
+            .ok_or(IndexError::Invalid(MOUNT_BOUNDARY_CAPABILITY_ERROR))
+    }
+
+    #[test]
+    fn descriptor_mount_fallback_requires_the_kernel_mount_id() {
+        assert_eq!(descriptor_mount_id("pos:\t0\nmnt_id:\t42\nino:\t1\n").unwrap(), 42);
+        assert!(descriptor_mount_id("ino:\t42\n").is_err());
+        assert!(descriptor_mount_id("mnt_id:\tinvalid\n").is_err());
     }
 
     pub struct NativeRoot {
@@ -364,9 +381,11 @@ mod platform {
 
         pub fn verify(&self) -> Result<(), IndexError> {
             if Self::open(&self.path)?.identity != self.identity {
-                return Err(IndexError::Invalid(
-                    "Directory source identity changed. Reopen the drive to build a new index.",
-                ));
+                return Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "Directory root binding changed. Background verification will bind the root again.",
+                )
+                .into());
             }
             Ok(())
         }
@@ -480,6 +499,7 @@ mod platform {
             mut receive: impl FnMut(Result<Option<(String, bool)>, TraversalIssue>) -> Result<(), IndexError>,
         ) -> Result<(), IndexError> {
             let file = self.parent(parent)?;
+            let parent_identity = identity(&file)?;
             let descriptor = file.into_raw_fd();
             let pointer = unsafe { libc::fdopendir(descriptor) };
             let Some(pointer) = NonNull::new(pointer) else {
@@ -512,7 +532,14 @@ mod platform {
                 let mut metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
                 let result = unsafe { libc::fstatat(descriptor, name.as_ptr(), metadata.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) };
                 if result != 0 {
-                    receive(Err(io_issue(&io::Error::last_os_error())))?;
+                    let error = io::Error::last_os_error();
+                    if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
+                        if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
+                            return Err(IndexError::Interrupted);
+                        }
+                    } else {
+                        receive(Err(io_issue(&error)))?;
+                    }
                     continue;
                 }
                 let metadata = unsafe { metadata.assume_init() };
@@ -537,6 +564,12 @@ mod platform {
                         receive(Err(TraversalIssue::UnsafeTraversal))?;
                     }
                     Err(error) => {
+                        if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
+                            if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
+                                return Err(IndexError::Interrupted);
+                            }
+                            continue;
+                        }
                         receive(Ok(Some((text.to_owned(), false))))?;
                         receive(Err(io_issue(&error)))?;
                     }

@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import PureWindowsPath
 from threading import Lock
 from typing import Any
@@ -11,8 +11,9 @@ from uuid import UUID
 
 from smbclient._io import SMBFileTransaction, query_info
 from smbclient._pool import get_smb_tree
-from smbprotocol.exceptions import NoMoreFiles, NoSuchFile, SMBException
+from smbprotocol.exceptions import NoMoreFiles, NoSuchFile, SMBException, SMBResponseException
 from smbprotocol.file_info import FileAllInformation, FileFsVolumeInformation, FileInformationClass
+from smbprotocol.header import NtStatus
 from smbprotocol.open import (
     CreateDisposition,
     CreateOptions,
@@ -35,7 +36,10 @@ TRAVERSAL_LIMIT_ERROR = (
     "Directory path exceeds the supported traversal bounds. Shorten the path or reduce nesting, then reconnect the source."
 )
 UNSAFE_COMPONENT_CHARACTERS = frozenset('\\/:*?"<>|')
-SMB_TIME_ORIGIN = datetime(1601, 1, 1, tzinfo=timezone.utc)
+SMB_UNAVAILABLE_FILE_IDS = frozenset((0, 0xFFFFFFFFFFFFFFFF))
+OPTIONAL_INFORMATION_UNAVAILABLE = frozenset(
+    (NtStatus.STATUS_INVALID_INFO_CLASS, NtStatus.STATUS_NOT_SUPPORTED, NtStatus.STATUS_INVALID_PARAMETER)
+)
 logger = logging.getLogger(__name__)
 
 
@@ -67,25 +71,21 @@ class SmbDirectoryIdentity:
     server_guid: UUID
     session_id: int
     tree_id: int
-    volume_serial: int
-    volume_created: datetime
+    volume_serial: int | None
+    volume_created: datetime | None
     file_id: int
     native_name: str
 
-    def same_volume(self, other: "SmbDirectoryIdentity") -> bool:
+    def same_binding(self, other: "SmbDirectoryIdentity") -> bool:
         return (
-            self.server_guid,
             self.session_id,
             self.tree_id,
-            self.volume_serial,
-            self.volume_created,
+            self.native_name,
         ) == (
-            other.server_guid,
             other.session_id,
             other.tree_id,
-            other.volume_serial,
-            other.volume_created,
-        )
+            other.native_name,
+        ) and (self.file_id in SMB_UNAVAILABLE_FILE_IDS or other.file_id in SMB_UNAVAILABLE_FILE_IDS or self.file_id == other.file_id)
 
 
 @dataclass(frozen=True)
@@ -102,8 +102,9 @@ class SmbDirectoryEntry:
 class SmbDirectoryHandle:
     """Own one no-follow handle; disconnected handles cannot reopen themselves."""
 
-    def __init__(self, path: str, check: Callable[[], None], **session: Any) -> None:
+    def __init__(self, path: str, check: Callable[[], None], *, capabilities: dict[str, bool] | None = None, **session: Any) -> None:
         check()
+        self._capabilities = capabilities if capabilities is not None else {}
         requested = PureWindowsPath(path)
         tree, native_path = get_smb_tree(path, **session)
         expected_native = "\\".join(requested.parts[1:])
@@ -153,22 +154,33 @@ class SmbDirectoryHandle:
     def identity(self, check: Callable[[], None]) -> SmbDirectoryIdentity:
         check()
         with SMBFileTransaction(self) as transaction:
-            query_info(transaction, FileFsVolumeInformation, output_buffer_length=DIRECTORY_READ_BUFFER_BYTES)
             query_info(transaction, FileAllInformation, output_buffer_length=DIRECTORY_READ_BUFFER_BYTES)
         check()
-        volume, information = transaction.results
+        (information,) = transaction.results
+        volume_serial = None
+        volume_created = None
+        if self._capabilities.get("volume_information", True):
+            try:
+                with SMBFileTransaction(self) as volume_transaction:
+                    query_info(volume_transaction, FileFsVolumeInformation, output_buffer_length=DIRECTORY_READ_BUFFER_BYTES)
+                (volume,) = volume_transaction.results
+                volume_serial = volume["volume_serial_number"].get_value()
+                volume_created = volume["volume_creation_time"].get_value()
+            except SMBResponseException as error:
+                if error.status not in OPTIONAL_INFORMATION_UNAVAILABLE:
+                    raise
+                self._capabilities["volume_information"] = False
+        check()
         internal = information["internal_information"].get_value()
         name = information["name_information"].get_value()
         standard = information["standard_information"].get_value()
         basic = information["basic_information"].get_value()
         tree = self.fd.tree_connect
         server_guid = self.fd.connection.server_guid
-        volume_created = volume["volume_creation_time"].get_value()
         native_name = name["file_name"].get_value()
         numbers = (
             tree.session.session_id,
             tree.tree_connect_id,
-            volume["volume_serial_number"].get_value(),
             internal["index_number"].get_value(),
         )
         if (
@@ -178,11 +190,7 @@ class SmbDirectoryHandle:
             or standard["delete_pending"].get_value()
             or basic["file_attributes"].get_value() & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT
             or not isinstance(server_guid, UUID)
-            or not server_guid.int
-            or any(type(value) is not int or value <= 0 for value in numbers)
-            or not isinstance(volume_created, datetime)
-            or volume_created.tzinfo is None
-            or volume_created <= SMB_TIME_ORIGIN
+            or any(type(value) is not int for value in numbers)
             or not isinstance(native_name, str)
             or not native_name.startswith("\\")
             or native_name.startswith("\\\\")
@@ -195,7 +203,7 @@ class SmbDirectoryHandle:
                 _component(component)
             elif native_name != "\\":
                 raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
-        return SmbDirectoryIdentity(server_guid, numbers[0], numbers[1], numbers[2], volume_created, numbers[3], native_name)
+        return SmbDirectoryIdentity(server_guid, numbers[0], numbers[1], volume_serial, volume_created, numbers[2], native_name)
 
     def records(self, check: Callable[[], None], *, pattern: str = "*") -> Generator[Any, None, None]:
         flags = QueryDirectoryFlags.SMB2_RESTART_SCANS | QueryDirectoryFlags.SMB2_REOPEN
@@ -261,7 +269,7 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
 
     def verify(self) -> None:
         self._check()
-        if not self._handles or self._handles[-1].identity(self._check) != self._identities[-1]:
+        if not self._handles or not self._handles[-1].identity(self._check).same_binding(self._identities[-1]):
             raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
 
     def has_directory_child(self, name: str) -> bool:
@@ -317,6 +325,7 @@ class SmbDirectoryRoot:
         for component in self._prefix:
             _component(component)
         self._binding: tuple[SmbDirectoryIdentity, ...] | None = None
+        self._capabilities: dict[str, bool] = {}
         self._held_handles: list[SmbDirectoryHandle] = []
         self._closed = False
         self._lock = Lock()
@@ -326,6 +335,12 @@ class SmbDirectoryRoot:
             self._closed = True
             handles, self._held_handles = self._held_handles, []
         _close_handles(handles)
+
+    def replacement(self) -> "SmbDirectoryRoot":
+        """Bind fresh handles after a connection or root-binding change."""
+        replacement = SmbDirectoryRoot(str(self._path))
+        self.close()
+        return replacement
 
     def read(self, parent: str, check: Callable[[], None], **session: Any) -> SmbDirectoryRead:
         _validate_traversal_path(parent)
@@ -342,7 +357,7 @@ class SmbDirectoryRoot:
                     raise DirectoryBindingChangedError(SOURCE_BINDING_ERROR)
                 for held, expected in zip(self._held_handles, self._binding or (), strict=True):
                     try:
-                        if held.identity(check) != expected:
+                        if not held.identity(check).same_binding(expected):
                             raise DirectoryBindingChangedError(SOURCE_BINDING_ERROR)
                     except (OSError, SMBException, ValueError) as error:
                         if isinstance(error, InterruptedError):
@@ -356,7 +371,7 @@ class SmbDirectoryRoot:
                     _component(component)
                     path /= component
                 try:
-                    handle = SmbDirectoryHandle(str(path), check, **session)
+                    handle = SmbDirectoryHandle(str(path), check, capabilities=self._capabilities, **session)
                     handles.append(handle)
                     identity = handle.identity(check)
                 except (OSError, SMBException, ValueError) as error:
@@ -364,7 +379,8 @@ class SmbDirectoryRoot:
                         raise DirectoryBindingChangedError(SOURCE_BINDING_ERROR) from error
                     raise
                 if identities and (
-                    not identity.same_volume(identities[-1])
+                    identity.session_id != identities[-1].session_id
+                    or identity.tree_id != identities[-1].tree_id
                     or identity.native_name != identities[-1].native_name.rstrip("\\") + "\\" + components[position - 1]
                 ):
                     raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
@@ -378,7 +394,7 @@ class SmbDirectoryRoot:
                     self._binding = binding
                     self._held_handles = handles[: len(binding)]
                     return SmbDirectoryRead(handles, identities, check, retained=len(binding))
-                elif binding != self._binding:
+                elif not all(current.same_binding(expected) for current, expected in zip(binding, self._binding, strict=True)):
                     raise DirectoryBindingChangedError(SOURCE_BINDING_ERROR)
             return SmbDirectoryRead(handles, identities, check)
         except BaseException:

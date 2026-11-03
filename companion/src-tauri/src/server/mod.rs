@@ -19,6 +19,8 @@ pub mod links;
 pub mod localization;
 pub mod models;
 pub mod pairing;
+#[cfg(feature = "recovery-verification")]
+mod recovery_verification;
 pub mod target_resolution;
 pub mod watcher;
 
@@ -85,12 +87,19 @@ async fn run_server(
     localization: Arc<LocalizationState>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     archive::cleanup_stale_temporary_archive_downloads()?;
-    let directory_indexes = LocalDirectoryManager::new(app.path().app_cache_dir()?.join("directory-index").join("sqlite"))?;
-    let directory_policy =
-        directory_policy::DirectoryPolicyState::open(app.path().app_config_dir()?.join("directory-index-policy"), &directory_indexes)
-            .map_err(|_| {
-                std::io::Error::other("Approved directory policy storage is unavailable. Correct private configuration storage.")
-            })?;
+    let namespace = app.path().app_cache_dir()?.join("directory-index").join("sqlite");
+    #[cfg(feature = "recovery-verification")]
+    let namespace = std::env::var_os(recovery_verification::ROOT_ENV)
+        .map(|root| std::path::PathBuf::from(root).with_extension("cache"))
+        .unwrap_or(namespace);
+    let directory_indexes = LocalDirectoryManager::new(namespace)?;
+    let policy_namespace = app.path().app_config_dir()?.join("directory-index-policy");
+    #[cfg(feature = "recovery-verification")]
+    let policy_namespace = std::env::var_os(recovery_verification::ROOT_ENV)
+        .map(|root| std::path::PathBuf::from(root).with_extension("policy"))
+        .unwrap_or(policy_namespace);
+    let directory_policy = directory_policy::DirectoryPolicyState::open(policy_namespace, &directory_indexes)
+        .map_err(|_| std::io::Error::other("Approved directory policy storage is unavailable. Correct private configuration storage."))?;
     app.manage(Arc::clone(&directory_policy));
     directory_policy
         .protect_storage(directory_indexes.storage_directory())
@@ -259,13 +268,16 @@ fn build_router(state: Arc<AppState>) -> Router {
     // WebSocket route — uses query-param auth (browser WS API has no custom headers).
     let ws_routes = Router::new().route("/api/ws", axum::routing::get(handlers::ws_upgrade));
 
-    Router::new()
+    let router = Router::new()
         .merge(public_routes)
         .merge(authenticated_routes)
         .merge(viewer_routes)
         .merge(ws_routes)
         .layer(cors)
-        .with_state(state)
+        .with_state(Arc::clone(&state));
+    #[cfg(feature = "recovery-verification")]
+    let router = router.merge(recovery_verification::routes().with_state(state));
+    router
 }
 
 fn transfer_routes<S>() -> Router<S>

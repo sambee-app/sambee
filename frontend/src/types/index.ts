@@ -614,6 +614,8 @@ export interface DirectorySearchResult {
   coverage_issue_count?: number;
   last_verified_at_ms?: number | null;
   status_message?: string | null;
+  monitoring_state?: "starting" | "healthy" | "recovering" | "unavailable" | null;
+  retry_after_ms?: number | null;
 }
 
 export interface EditLockInfo {

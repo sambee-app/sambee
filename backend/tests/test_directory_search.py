@@ -212,7 +212,12 @@ class TestSearchDirectories:
             mock_cache._source_available.clear()
         response = client.get(f"/api/browse/{test_connection.id}/directories", headers=auth_headers_user, params={"q": "photos"})
         assert response.status_code == 503
-        assert "retry" in response.json()["detail"].lower()
+        detail = response.json()["detail"]
+        assert "retry" in detail["message"].lower()
+        assert detail["code"] == "directory_temporarily_unavailable"
+        assert detail["recoverable"] is True
+        assert detail["retry_after_ms"] == 5000
+        assert response.headers["Retry-After"] == "5"
         assert "results" not in response.json()
         assert mock_cache.index.search("photos") == selected
 

@@ -277,6 +277,64 @@ function renderWithProvider(component: React.ReactElement) {
 }
 
 describe("UnifiedSearchBar", () => {
+  it.each(["connection-1", "local-C"])("completes activation, recovery, source switching, and dismissal for %s", async (connectionId) => {
+    vi.useFakeTimers();
+    const retryMs = 2000;
+    let phase: "paused" | "failed" | "healthy" = "paused";
+    const history = {
+      ...browserHistoryService,
+      searchRecentDirectories: vi.fn().mockResolvedValue({ result_limit: 10, results: [] }),
+      searchDirectories: vi.fn(async () => {
+        if (phase === "failed") throw { response: { status: 503, data: { detail: { recoverable: true, retry_after_ms: retryMs } } } };
+        return {
+          results: phase === "healthy" ? ["Recovered Reports"] : [],
+          total_matches: phase === "healthy" ? 1 : 0,
+          directory_count: 1,
+          cache_state: "ready" as const,
+          monitoring_state: phase === "healthy" ? ("healthy" as const) : ("unavailable" as const),
+          retry_after_ms: phase === "healthy" ? null : retryMs,
+          search_contract_version: SEARCH_CONTRACT_VERSION,
+        };
+      }),
+    };
+    function RecoveryHarness({ source }: { source: string }) {
+      const provider = useDirectorySearchProvider(source, vi.fn(), { history });
+      return <UnifiedSearchBar provider={provider} />;
+    }
+    try {
+      const { rerender } = renderWithProvider(<RecoveryHarness source={connectionId} />);
+      const input = screen.getByRole("textbox");
+      await act(async () => input.focus());
+      fireEvent.change(input, { target: { value: "reports" } });
+      await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS));
+      expect(history.searchDirectories).toHaveBeenCalledWith(connectionId, "", expect.anything());
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      phase = "failed";
+      await act(() => vi.advanceTimersByTimeAsync(retryMs));
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      phase = "healthy";
+      await act(() => vi.advanceTimersByTimeAsync(retryMs));
+      expect(screen.getByRole("option", { name: /Recovered Reports/ })).toBeInTheDocument();
+      phase = "paused";
+      const replacement = connectionId === "connection-1" ? "local-C" : "connection-1";
+      rerender(
+        <SambeeThemeProvider>
+          <RecoveryHarness source={replacement} />
+        </SambeeThemeProvider>
+      );
+      await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS));
+      expect(history.searchDirectories).toHaveBeenCalledWith(replacement, expect.any(String), expect.anything());
+      expect(screen.queryByRole("option", { name: /Recovered Reports/ })).not.toBeInTheDocument();
+      fireEvent.keyDown(input, { key: "Escape" });
+      const calls = history.searchDirectories.mock.calls.length;
+      await act(() => vi.advanceTimersByTimeAsync(retryMs * 3));
+      expect(history.searchDirectories).toHaveBeenCalledTimes(calls);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["pasted", "incremental"])("publishes selectable merged rows within the mocked %s-query timing budget", async (inputMode) => {
     vi.useFakeTimers();
     try {
@@ -414,6 +472,47 @@ describe("UnifiedSearchBar", () => {
       await new Promise((resolve) => setTimeout(resolve, 550));
     });
     expect(fetchResults).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["", "reports"])("restarts recovery when a dismissed query '%s' is focused again", async (query) => {
+    vi.useFakeTimers();
+    try {
+      const fetchResults = vi
+        .fn<SearchProvider["fetchResults"]>()
+        .mockResolvedValue([{ kind: "result", id: "stable", value: "stable", icon: "directory", primaryText: "Stable" }]);
+      const onActivate = vi.fn();
+      renderWithProvider(
+        <UnifiedSearchBar
+          provider={{
+            ...testProvider,
+            minQueryLength: query ? 1 : 0,
+            fetchResults,
+            onActivate,
+            getRefreshIntervalMs: () => QUIET_REFRESH_INTERVAL_MS,
+          }}
+        />
+      );
+      const input = screen.getByPlaceholderText("Search");
+      await act(async () => input.focus());
+      if (query) {
+        fireEvent.change(input, { target: { value: query } });
+        await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS));
+      }
+      expect(fetchResults).toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(input, { key: "Escape" });
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS * 2));
+      expect(fetchResults).toHaveBeenCalledTimes(1);
+      act(() => input.blur());
+      await act(async () => input.focus());
+      expect(onActivate).toHaveBeenCalledTimes(2);
+      expect(fetchResults).toHaveBeenCalledTimes(2);
+      expect(fetchResults.mock.lastCall?.[0]).toBe(query);
+      await act(() => vi.advanceTimersByTimeAsync(QUIET_REFRESH_INTERVAL_MS));
+      expect(fetchResults).toHaveBeenCalledTimes(3);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
   });
 
   it("pauses hidden-tab work, resumes once, and cancels refresh on unmount", async () => {

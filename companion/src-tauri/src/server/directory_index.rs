@@ -169,22 +169,30 @@ impl StorageDirectory {
         {
             use std::os::windows::io::AsRawHandle;
             use windows::Win32::Foundation::HANDLE;
-            use windows::Win32::Storage::FileSystem::{GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION};
+            use windows::Win32::Storage::FileSystem::{FileIdInfo, GetFileInformationByHandleEx, FILE_ID_INFO};
             let current = Self::open_handle(&self.path)?;
-            let mut held_info = BY_HANDLE_FILE_INFORMATION::default();
-            let mut current_info = BY_HANDLE_FILE_INFORMATION::default();
+            let mut held_info = FILE_ID_INFO::default();
+            let mut current_info = FILE_ID_INFO::default();
             // SAFETY: Both handles and output structures remain live for these calls.
             unsafe {
-                GetFileInformationByHandle(HANDLE(self.handle.as_raw_handle()), &mut held_info)
-                    .and_then(|()| GetFileInformationByHandle(HANDLE(current.as_raw_handle()), &mut current_info))
+                GetFileInformationByHandleEx(
+                    HANDLE(self.handle.as_raw_handle()),
+                    FileIdInfo,
+                    std::ptr::from_mut(&mut held_info).cast(),
+                    size_of::<FILE_ID_INFO>() as u32,
+                )
+                .and_then(|()| {
+                    GetFileInformationByHandleEx(
+                        HANDLE(current.as_raw_handle()),
+                        FileIdInfo,
+                        std::ptr::from_mut(&mut current_info).cast(),
+                        size_of::<FILE_ID_INFO>() as u32,
+                    )
+                })
             }
             .map_err(|_| IndexError::Invalid("Directory storage identity is unavailable. Select private local storage and retry."))?;
-            if (held_info.dwVolumeSerialNumber, held_info.nFileIndexHigh, held_info.nFileIndexLow)
-                != (
-                    current_info.dwVolumeSerialNumber,
-                    current_info.nFileIndexHigh,
-                    current_info.nFileIndexLow,
-                )
+            if (held_info.VolumeSerialNumber, held_info.FileId.Identifier)
+                != (current_info.VolumeSerialNumber, current_info.FileId.Identifier)
             {
                 return Err(IndexError::Invalid(
                     "Directory storage changed during cleanup. Restore the private namespace and retry.",
@@ -510,6 +518,8 @@ pub enum IndexError {
     RebuildRequired(&'static str),
     #[error("{0}")]
     StoragePaused(&'static str),
+    #[error("Directory query workers are busy. Wait briefly and retry.")]
+    QueryBusy,
     #[error("Directory search was cancelled or timed out. Retry the search.")]
     Interrupted,
 }
@@ -687,6 +697,46 @@ fn checked_sql_size(value: usize) -> Result<i64, IndexError> {
 }
 
 impl DirectoryIndex {
+    pub(super) fn bind_volume(&mut self, current: &super::drives::VolumeEvidence) -> Result<super::drives::VolumeChange, IndexError> {
+        use super::drives::{VolumeChange, VolumeEvidence};
+        let transaction = self.writer.transaction()?;
+        let identity: String = transaction.query_row("SELECT source_identity FROM source_metadata WHERE id = 1", [], |row| row.get(0))?;
+        let mut identity: serde_json::Value =
+            serde_json::from_str(&identity).map_err(|_| IndexError::Invalid("Directory source metadata is invalid."))?;
+        let previous = identity
+            .get("evidence")
+            .cloned()
+            .map(serde_json::from_value::<VolumeEvidence>)
+            .transpose()
+            .map_err(|_| IndexError::Invalid("Directory volume metadata is invalid."))?;
+        let change = previous.as_ref().map_or(VolumeChange::Keep, |previous| previous.compare(current));
+        if matches!(change, VolumeChange::Index | VolumeChange::Unavailable) {
+            return Ok(change);
+        }
+        if change == VolumeChange::Generation {
+            transaction.execute("UPDATE generations SET state = 'retired' WHERE state <> 'retired'", [])?;
+            transaction.execute("INSERT INTO generations(state, coverage) VALUES ('building', 'partial')", [])?;
+            let generation = transaction.last_insert_rowid();
+            transaction.execute(
+                "UPDATE source_metadata SET selected_generation = ?, last_verified_at_ms = NULL WHERE id = 1",
+                [generation],
+            )?;
+            Self::advance_revision(&transaction)?;
+        }
+        let mut evidence = current.clone();
+        if let Some(previous) = previous {
+            evidence.retain_available(&previous);
+        }
+        identity["evidence"] =
+            serde_json::to_value(evidence).map_err(|_| IndexError::Invalid("Directory volume metadata cannot be saved."))?;
+        transaction.execute(
+            "UPDATE source_metadata SET source_identity = ? WHERE id = 1",
+            [identity.to_string()],
+        )?;
+        transaction.commit()?;
+        Ok(change)
+    }
+
     pub fn open(path: &Path, source_kind: SourceKind, source_identity: &serde_json::Value) -> Result<Self, IndexError> {
         Self::open_with_recovery(path, source_kind, source_identity, None)
     }
@@ -806,7 +856,13 @@ impl DirectoryIndex {
                 "Directory database source metadata is missing. Rebuild this source index.",
             ));
         };
-        if kind != source_kind.as_str() || serde_json::from_str::<serde_json::Value>(&identity).ok().as_ref() != Some(source_identity) {
+        let mut stored_identity = serde_json::from_str::<serde_json::Value>(&identity).ok();
+        if source_kind == SourceKind::Local {
+            if let Some(serde_json::Value::Object(identity)) = stored_identity.as_mut() {
+                identity.remove("evidence");
+            }
+        }
+        if kind != source_kind.as_str() || stored_identity.as_ref() != Some(source_identity) {
             return Err(IndexError::Invalid(
                 "Directory database source or policy does not match. Rebuild this source index.",
             ));
@@ -989,6 +1045,17 @@ impl DirectoryIndex {
             .prepare("SELECT path FROM scan_queue WHERE generation_id = ? AND processed = 0 ORDER BY rowid LIMIT ?")?;
         let rows = statement.query_map(params![generation_id, checked_sql_size(limit)?], |row| row.get(0))?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub(super) fn requeue_completed_scan_batch(&mut self, generation_id: i64) -> Result<bool, IndexError> {
+        let transaction = self.writer.transaction()?;
+        Self::require_scan_generation(&transaction, generation_id)?;
+        let changed = transaction.execute(
+            "UPDATE scan_queue SET processed = 0 WHERE rowid IN (SELECT rowid FROM scan_queue WHERE generation_id = ? AND processed = 1 LIMIT ?)",
+            params![generation_id, checked_sql_size(ROW_BATCH_SIZE)?],
+        )?;
+        transaction.commit()?;
+        Ok(changed == ROW_BATCH_SIZE)
     }
 
     pub fn write_scan_children(
@@ -1515,17 +1582,58 @@ impl DirectoryIndex {
     pub fn prepare_scan(&mut self) -> Result<(i64, bool), IndexError> {
         self.require_fts()?;
         let transaction = self.writer.transaction()?;
+        let retained: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM generations WHERE state = 'candidate' AND issue_count = 0 ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(retained) = retained {
+            transaction.commit()?;
+            return Ok((retained, false));
+        }
+        transaction.execute("UPDATE generations SET state = 'retired' WHERE state = 'candidate'", [])?;
         let (generation, state, count, queued, issues): (i64, String, i64, bool, i64) = transaction.query_row(
             "SELECT g.id, g.state, g.indexed_count, EXISTS(SELECT 1 FROM scan_queue q WHERE q.generation_id = g.id), g.issue_count FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE m.id = 1",
             [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
         )?;
-        if state == "building" && count == 0 && !queued && issues == 0 {
+        if state == "building"
+            && count == 0
+            && !queued
+            && (issues == 0
+                || !transaction.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM coverage_issues WHERE generation_id = ? AND code <> 'event_loss')",
+                    [generation],
+                    |row| row.get::<_, bool>(0),
+                )?)
+        {
+            if issues != 0 {
+                transaction.execute(
+                    "DELETE FROM coverage_issues WHERE generation_id = ? AND code = 'event_loss'",
+                    [generation],
+                )?;
+                transaction.execute(
+                    "UPDATE generations SET coverage = 'partial', issue_count = 0 WHERE id = ?",
+                    [generation],
+                )?;
+                Self::advance_revision(&transaction)?;
+            }
+            transaction.commit()?;
             return Ok((generation, true));
         }
         transaction.execute("INSERT INTO generations(state, coverage) VALUES ('candidate', 'partial')", [])?;
         let candidate = transaction.last_insert_rowid();
         transaction.commit()?;
         Ok((candidate, false))
+    }
+
+    pub(super) fn has_resumable_scan(&self) -> Result<bool, IndexError> {
+        Ok(self.writer.query_row(
+            "SELECT EXISTS(SELECT 1 FROM generations WHERE state = 'candidate' AND issue_count = 0)",
+            [],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn mark_uncertain(&mut self) -> Result<(), IndexError> {
@@ -1804,6 +1912,119 @@ impl DirectoryIndexReader {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn removable_evidence_retires_rows_exactly_once_and_missing_evidence_keeps_them() {
+        use super::super::drives::{VolumeChange, VolumeEvidence};
+        use super::super::models::DriveType;
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("evidence.sqlite3");
+        let identity = serde_json::json!({"root": "fixture"});
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        let mut evidence = VolumeEvidence {
+            class: DriveType::Removable,
+            volume: Some("first".into()),
+            label: Some("label".into()),
+            ..Default::default()
+        };
+        assert_eq!(index.bind_volume(&evidence).unwrap(), VolumeChange::Keep);
+        index.write_paths(["old".to_owned()], None).unwrap();
+        index.finish_generation(1, 0).unwrap();
+        evidence.label = Some("renamed".into());
+        assert_eq!(index.bind_volume(&evidence).unwrap(), VolumeChange::Generation);
+        let selected: i64 = index
+            .writer
+            .query_row("SELECT selected_generation FROM source_metadata", [], |row| row.get(0))
+            .unwrap();
+        assert_ne!(selected, 1);
+        assert_eq!(
+            index
+                .search("old", 5, false, &Arc::new(AtomicBool::new(false)), false)
+                .unwrap()
+                .directory_count,
+            0
+        );
+        assert_eq!(index.bind_volume(&evidence).unwrap(), VolumeChange::Keep);
+        assert_eq!(index.bind_volume(&VolumeEvidence::default()).unwrap(), VolumeChange::Keep);
+        assert_eq!(
+            index
+                .writer
+                .query_row("SELECT selected_generation FROM source_metadata", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            selected
+        );
+        drop(index);
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &identity).unwrap();
+        evidence.volume = Some("other".into());
+        assert_eq!(index.bind_volume(&evidence).unwrap(), VolumeChange::Index);
+        assert_eq!(
+            index
+                .writer
+                .query_row("SELECT selected_generation FROM source_metadata", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            selected
+        );
+    }
+
+    #[test]
+    fn interrupted_candidate_retains_completed_parent_progress() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("progress.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &serde_json::json!({"root": "fixture"})).unwrap();
+        index.write_paths(["accepted".to_owned()], None).unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let (candidate, selected) = index.prepare_scan().unwrap();
+        assert!(!selected);
+        index.seed_scan(candidate).unwrap();
+        index.write_scan_children(candidate, [("retained".to_owned(), true)]).unwrap();
+        index.finish_scan_parent(candidate, "").unwrap();
+        assert!(index.has_resumable_scan().unwrap());
+        assert_eq!(index.prepare_scan().unwrap(), (candidate, false));
+        assert_eq!(index.pending_scan_paths(candidate, 1).unwrap(), ["retained"]);
+    }
+
+    #[test]
+    fn completed_scan_revalidation_is_bounded_and_preserves_rows() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("private").join("revalidation.sqlite3");
+        let mut index = DirectoryIndex::open(&path, SourceKind::Local, &serde_json::json!({"root": "fixture"})).unwrap();
+        index.write_paths(["accepted".to_owned()], None).unwrap();
+        index.finish_generation(1, 0).unwrap();
+        let (candidate, selected) = index.prepare_scan().unwrap();
+        assert!(!selected);
+        index.seed_scan(candidate).unwrap();
+        let paths: Vec<_> = (0..=ROW_BATCH_SIZE).map(|number| format!("child-{number}")).collect();
+        for batch in paths.chunks(ROW_BATCH_SIZE) {
+            index
+                .write_scan_children(candidate, batch.iter().map(|path| (path.clone(), true)))
+                .unwrap();
+        }
+        index.finish_scan_parent(candidate, "").unwrap();
+        for path in &paths {
+            index.finish_scan_parent(candidate, path).unwrap();
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = index.search("accepted", 5, false, &cancelled, false).unwrap();
+        assert!(index.requeue_completed_scan_batch(candidate).unwrap());
+        assert_eq!(index.pending_scan_paths(candidate, ROW_BATCH_SIZE).unwrap().len(), ROW_BATCH_SIZE);
+        assert!(!index.requeue_completed_scan_batch(candidate).unwrap());
+        let pending: i64 = index
+            .writer
+            .query_row(
+                "SELECT count(*) FROM scan_queue WHERE generation_id = ? AND processed = 0",
+                [candidate],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending, checked_sql_size(paths.len() + 1).unwrap());
+        assert!(!index.requeue_completed_scan_batch(candidate).unwrap());
+        assert!(index.requeue_completed_scan_batch(1).is_err());
+        let after = index.search("accepted", 5, false, &cancelled, false).unwrap();
+        assert_eq!(before.accepted_revision, after.accepted_revision);
+        assert_eq!(before.last_verified_at_ms, after.last_verified_at_ms);
+        assert_eq!(after.directory_count, 1);
+        assert_eq!(after.results[0].path, "accepted");
+    }
+
     #[test]
     fn sqlite_log_fields_exclude_private_error_text() {
         for (code, expected) in [
@@ -2998,6 +3219,35 @@ mod tests {
         let (candidate, selected) = index.prepare_scan().unwrap();
         assert!(!selected);
         assert_ne!(candidate, 1);
+    }
+
+    #[test]
+    fn startup_event_loss_only_restarts_unobserved_empty_generation() {
+        for observed in ["empty", "rows", "queue", "issue"] {
+            let temporary = tempfile::tempdir().unwrap();
+            let path = temporary.path().join("private").join("source.sqlite3");
+            let mut index = DirectoryIndex::open(&path, SourceKind::Local, &json!({"root": "startup-fixture"})).unwrap();
+            index.mark_uncertain().unwrap();
+            match observed {
+                "rows" => index.write_paths(["retained".into()], None).unwrap(),
+                "queue" => index.seed_scan(1).unwrap(),
+                "issue" => index.record_issue(1, "access_denied").unwrap(),
+                _ => {}
+            }
+            let (generation, selected) = index.prepare_scan().unwrap();
+            assert_eq!(selected, observed == "empty");
+            let response = index.search("", 3, false, &Arc::new(AtomicBool::new(false)), false).unwrap();
+            assert_eq!(response.last_verified_at_ms, None);
+            if selected {
+                assert_eq!(generation, 1);
+                assert_eq!(response.coverage, "partial");
+                assert_eq!(response.issue_count, 0);
+            } else {
+                assert_ne!(generation, 1);
+                assert_eq!(response.coverage, "uncertain");
+                assert!(response.issue_count >= 1);
+            }
+        }
     }
 
     #[test]

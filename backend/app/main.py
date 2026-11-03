@@ -38,7 +38,7 @@ from app.api.archive_v2_errors import archive_v2_http_exception_handler, archive
 from app.core.config import consume_unsupported_config_settings, settings
 from app.core.environment import DEV_CORS_ORIGINS, IS_DEVELOPMENT, IS_PRODUCTION
 from app.core.exceptions import ConfigurationError, SambeeError
-from app.core.logging import SensitiveDataLogFilter, configure_uvicorn_loggers, log_error, set_request_id
+from app.core.logging import RecoveryLogFormatter, SensitiveDataLogFilter, configure_uvicorn_loggers, log_error, set_request_id
 from app.core.secrets import generate_admin_password
 from app.core.security import get_password_hash
 from app.db.database import DATABASE_FILE_PATH, engine, init_db
@@ -87,6 +87,8 @@ def bootstrap_admin_if_pristine(session: Session) -> tuple[User | None, str | No
 # This allows config.toml to use human-readable strings like "DEBUG" or "ERROR"
 log_level = getattr(logging, settings.log_level)
 logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
+for handler in handlers:
+    handler.setFormatter(RecoveryLogFormatter(log_format))
 
 configure_uvicorn_loggers(
     handlers=handlers,
@@ -98,6 +100,7 @@ configure_uvicorn_loggers(
 
 # Reduce noise from third-party libraries (only show warnings/errors)
 logging.getLogger("smbprotocol").setLevel(logging.WARNING)
+logging.getLogger("smbclient").setLevel(logging.WARNING)
 logging.getLogger("sqlalchemy.engine.Engine").setLevel(logging.WARNING)
 logging.getLogger("pyvips").setLevel(logging.WARNING)
 

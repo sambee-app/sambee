@@ -1,5 +1,7 @@
 """SQLite directory-cache binding, watcher, manager, and shutdown checks."""
 
+import io
+import logging
 from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,6 +9,7 @@ import pytest
 import pytest_asyncio
 
 from app.core.config import static
+from app.core.logging import RecoveryLogFormatter
 from app.services.directory_cache import (
     CHANGE_NOTIFY_BUFFER_SIZE,
     MAX_SEARCH_RESULTS,
@@ -65,6 +68,65 @@ def test_watcher_logs_omit_source_identity_and_private_error_text(cache, monkeyp
         assert private_value not in logged
     assert "OSError" in logged
     logger.exception.assert_not_called()
+
+
+@pytest.mark.parametrize("watcher_was_ready", [False, True])
+def test_failed_watcher_retries_preserve_fallback_scan(cache, monkeypatch, watcher_was_ready):
+    from app.services.directory_cache import MAX_WATCHER_RETRIES
+
+    if watcher_was_ready:
+        cache._watcher_ready.set()
+    initial_epoch = cache.coordinator.epoch
+    baseline = None
+    attempts = 0
+
+    def wait_for_retry(_delay):
+        nonlocal baseline, attempts
+        attempts += 1
+        if baseline is None:
+            assert cache.coordinator.epoch == initial_epoch + 1
+            baseline = cache.coordinator.begin_read("")
+        else:
+            assert cache.coordinator.is_current(baseline)
+        return attempts > MAX_WATCHER_RETRIES
+
+    monkeypatch.setattr(cache, "_connect_watcher", MagicMock(side_effect=OSError("Directory notifications are unavailable")))
+    monkeypatch.setattr(cache._stop_event, "wait", wait_for_retry)
+    try:
+        cache._watcher_loop()
+        assert attempts > MAX_WATCHER_RETRIES
+    finally:
+        if baseline is not None:
+            cache.coordinator.end_read(baseline)
+
+
+def test_recovery_logs_have_context_one_cause_and_bounded_failure_volume(cache, monkeypatch):
+    from app.services.directory_cache import MAX_WATCHER_RETRIES
+
+    output = io.StringIO()
+    logger = logging.Logger("app.services.directory_cache", level=logging.DEBUG)
+    handler = logging.StreamHandler(output)
+    handler.setFormatter(RecoveryLogFormatter("%(message)s"))
+    logger.addHandler(handler)
+    monkeypatch.setattr("app.services.directory_cache.logger", logger)
+    monkeypatch.setattr(cache, "_connect_watcher", MagicMock(side_effect=OSError("private source and password")))
+    monkeypatch.setattr(cache._stop_event, "wait", MagicMock(side_effect=[False] * (MAX_WATCHER_RETRIES + 4) + [True]))
+    cache._watcher_loop()
+    logs = output.getvalue()
+    assert logs.count("Recovery traceback:") == 1
+    assert logs.count("event='directory_watcher_retry'") == MAX_WATCHER_RETRIES
+    assert logs.count("event='directory_watcher_retry_exhausted'") == 1
+    assert "private source" not in logs
+    assert cache.connection_id not in logs
+    assert f"source_id='{cache._log_context['source_id']}'" in logs
+    assert f"generation_id='{cache._diagnostic_generation}'" in logs
+    assert "retry_seconds=" in logs
+    cache._schedule_retry()
+    cache._reset_retry()
+    recovered = output.getvalue()
+    assert recovered.count("event='directory_verification_recovered'") == 1
+    cache._reset_retry()
+    assert output.getvalue() == recovered
 
 
 @pytest.mark.asyncio
@@ -305,6 +367,8 @@ def test_watcher_repeated_post_connect_failure_keeps_backoff(cache, receives_eve
         nonlocal attempts
         attempts += 1
         cache._watcher_received_events = receives_events and attempts == 4
+        if cache._watcher_received_events:
+            cache._watcher_ready.set()
         raise ConnectionError("Injected watcher failure.")
 
     with (
@@ -312,13 +376,16 @@ def test_watcher_repeated_post_connect_failure_keeps_backoff(cache, receives_eve
         patch.object(cache, "_run_watcher_inner", side_effect=fail),
         patch.object(cache, "_cleanup_watcher"),
         patch.object(cache, "_observation_lost") as lost,
-        patch.object(cache._stop_event, "wait", return_value=False) as wait,
+        patch.object(cache._stop_event, "wait", side_effect=[False] * (MAX_WATCHER_RETRIES + 4) + [True]) as wait,
     ):
         cache._watcher_loop()
-    assert connect.call_count == MAX_WATCHER_RETRIES + (4 if receives_events else 1)
-    assert lost.call_count == connect.call_count
-    expected = [min(WATCHER_RETRY_BASE_DELAY * 2**attempt, WATCHER_RETRY_MAX_DELAY) for attempt in range(MAX_WATCHER_RETRIES)]
-    assert [call.args[0] for call in wait.call_args_list] == (expected[:3] + expected if receives_events else expected)
+    assert connect.call_count == MAX_WATCHER_RETRIES + 5
+    assert lost.call_count == 1 + int(receives_events)
+    delays = [call.args[0] for call in wait.call_args_list]
+    assert all(0 < delay <= WATCHER_RETRY_MAX_DELAY for delay in delays)
+    assert delays[1] > delays[0] >= WATCHER_RETRY_BASE_DELAY * 0.9
+    assert delays[3] < delays[2] if receives_events else delays[3] > delays[2]
+    assert not cache._watcher_ready.is_set()
 
 
 # ============================================================================

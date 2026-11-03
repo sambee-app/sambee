@@ -884,6 +884,7 @@ export function UnifiedSearchBar({
   // handleInputFocus
   //
   const handleInputFocus = useCallback(() => {
+    const newlyActivated = !activatedRef.current;
     setIsFocused(true);
     handleFocus();
 
@@ -900,8 +901,11 @@ export function UnifiedSearchBar({
       return;
     }
 
-    if (!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) {
-      void executeSearch("");
+    if (
+      (!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) ||
+      (newlyActivated && hasSearched && query.length >= effectiveMinQueryLength)
+    ) {
+      void executeSearch(query);
     }
 
     // Re-open dropdown if there are results to show

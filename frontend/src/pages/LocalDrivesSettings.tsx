@@ -12,6 +12,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { CompactBadge as Chip } from "../components/CompactBadge";
 import CompanionPairingDialog from "../components/FileBrowser/CompanionPairingDialog";
 import { FormRow, FormSurface } from "../components/Form/FormLayout";
+import { CompanionDirectoryStatus } from "../components/Settings/CompanionPolicyDelivery";
 import { LOCAL_DRIVES_PAGE_COPY } from "../components/Settings/localDrivesCopy";
 import { SettingsInlineAlert, SettingsNotificationSnackbar, type SettingsNotificationState } from "../components/Settings/SettingsFeedback";
 import { SettingsGroup } from "../components/Settings/SettingsGroup";
@@ -92,6 +93,7 @@ function isUnsupportedMobileCompanionPlatform(): boolean {
 }
 
 interface LocalDrivesSettingsProps {
+  isAdmin?: boolean;
   onConnectionsChanged?: () => void;
   sectionTitle?: string;
   sectionDescription?: ReactNode;
@@ -128,7 +130,7 @@ const EMPTY_LOCAL_DRIVES_STATE: LocalDrivesSettingsData = {
  * Browser-side management UI for the Sambee Companion pairing that exposes
  * local drives inside the file browser.
  */
-export function LocalDrivesSettings({ onConnectionsChanged, sectionTitle, sectionDescription }: LocalDrivesSettingsProps) {
+export function LocalDrivesSettings({ isAdmin = false, onConnectionsChanged, sectionTitle, sectionDescription }: LocalDrivesSettingsProps) {
   const companionUnsupportedOnCurrentDevice = useMemo(() => isUnsupportedMobileCompanionPlatform(), []);
   const companionSigningAvailable = canSignCompanionRequests();
   const [testing, setTesting] = useState(false);
@@ -523,6 +525,8 @@ export function LocalDrivesSettings({ onConnectionsChanged, sectionTitle, sectio
               )}
             </FormSurface>
           </SettingsGroup>
+
+          {viewState === "paired" && <CompanionDirectoryStatus isAdmin={isAdmin} />}
 
           {shouldShowInstallSection && (
             <SettingsGroup title={LOCAL_DRIVES_PAGE_COPY.downloadSectionTitle}>

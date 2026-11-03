@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from app.core.security import decrypt_password
 from app.models.connection import Connection
 from app.storage.smb import SMBBackend
+from app.storage.smb_errors import SMBConnectionCapacityError, SMBConnectionRetired, SMBMutationUncertain
 
 BACKEND_DISCONNECT_TIMEOUT_SECONDS = 5.0
 ITEM_NOT_FOUND_CODE = "item_not_found"
@@ -20,6 +21,26 @@ FILE_UNAVAILABLE_CODE = "file_unavailable"
 
 def file_target_http_error(error: Exception, *, requires_file: bool = True) -> HTTPException:
     """Map physical item failures without exposing storage or operating-system details."""
+    if isinstance(error, SMBMutationUncertain):
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "smb_mutation_uncertain", "message": str(error), "recoverable": False, "mutation_uncertain": True},
+        )
+    if isinstance(error, SMBConnectionRetired):
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "smb_recovery_busy",
+                "message": (
+                    "SMB recovery capacity is occupied. Wait and retry. If workers remain blocked, restart the service."
+                    if isinstance(error, SMBConnectionCapacityError)
+                    else "SMB recovery is busy. Wait briefly, then retry the request."
+                ),
+                "recoverable": True,
+                "retry_after_ms": error.retry_after_seconds * 1000,
+            },
+            headers={"Retry-After": str(error.retry_after_seconds)},
+        )
     if isinstance(error, FileNotFoundError):
         status_code, code, message = (
             status.HTTP_404_NOT_FOUND,

@@ -1,9 +1,46 @@
+import importlib.util
+import json
 import re
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, Mock
 
+import pytest
 import yaml
 
 WORKSPACE = Path(__file__).parents[2]
+
+
+@pytest.mark.parametrize("cleanup_error", [subprocess.TimeoutExpired("taskkill", 15), subprocess.CalledProcessError(1, "taskkill")])
+def test_companion_recovery_smoke_kills_process_when_taskkill_fails(tmp_path, monkeypatch, cleanup_error):
+    script = WORKSPACE / "companion/scripts/recovery-smoke.py"
+    spec = importlib.util.spec_from_file_location("recovery_smoke", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    options = SimpleNamespace(executable=tmp_path / "companion.exe", report_dir=tmp_path, source_sha="test-sha", run_id="test-run")
+    monkeypatch.setattr(module.argparse.ArgumentParser, "parse_args", lambda self: options)
+    monkeypatch.setattr(module, "os", SimpleNamespace(name="nt", environ={}))
+    monkeypatch.setattr(module, "socket", SimpleNamespace(socket=MagicMock()))
+    opener = Mock()
+    opener.open.side_effect = RuntimeError("Controlled startup failure")
+    monkeypatch.setattr(module.urllib.request, "build_opener", lambda *args: opener)
+    process = Mock()
+    process.poll.return_value = None
+    cleanup = Mock(side_effect=cleanup_error)
+    monkeypatch.setattr(
+        module, "subprocess", SimpleNamespace(Popen=Mock(return_value=process), run=cleanup, SubprocessError=subprocess.SubprocessError)
+    )
+
+    assert module.main() == 1
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=module.SHUTDOWN_TIMEOUT_SECONDS)
+    assert cleanup.call_args.kwargs["check"] is True
+    report = json.loads((tmp_path / "recovery.json").read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["source_sha"] == options.source_sha
+    assert report["run_id"] == options.run_id
 
 
 def load_workflow(name: str) -> dict:
@@ -213,6 +250,27 @@ def test_companion_verification_packages_are_never_signed() -> None:
     assert "if (" not in configure["run"]
     assert not any("trusted-signing-cli" in step.get("run", "") for step in steps)
     assert any(step.get("name") == "Install trusted-signing-cli" for step in release_steps)
+
+
+def test_companion_recovery_verification_builds_before_smoke_and_keeps_evidence() -> None:
+    workflow = load_workflow("verify-companion-build.yml")
+    assert set(workflow["jobs"]) == {"change-scope", "windows-x64"}
+    job = workflow["jobs"]["windows-x64"]
+    assert job["timeout-minutes"] <= 45
+    steps = job["steps"]
+    build = next(index for index, step in enumerate(steps) if step.get("name") == "Build Windows x64 package")
+    smoke = next(index for index, step in enumerate(steps) if step.get("name") == "Run packaged-process recovery smoke test")
+    assert build < smoke
+    assert "--features recovery-verification" in steps[build]["run"]
+    assert "--source-sha '${{ github.sha }}' --run-id '${{ github.run_id }}'" in steps[smoke]["run"]
+    assert steps[smoke]["timeout-minutes"] <= 5
+    artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@"))
+    assert artifact["if"] == "${{ always() }}"
+    assert "${{ github.sha }}" in artifact["with"]["name"]
+    assert "recovery-report/" in artifact["with"]["path"]
+    assert not any(
+        "recovery-verification" in step.get("run", "") for step in load_workflow("build-companion.yml")["jobs"]["build"]["steps"]
+    )
 
 
 def test_workflow_output_references_use_direct_dependencies() -> None:

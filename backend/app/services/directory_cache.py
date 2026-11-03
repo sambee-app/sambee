@@ -55,6 +55,7 @@ from app.services.directory_index_resources import DirectoryDiskBudgetError, Dir
 from app.services.directory_traversal import DirectoryBindingChangedError, DirectoryTraversalError, SmbDirectoryRead, SmbDirectoryRoot
 from app.services.system_settings import get_directory_index_policy, get_smbclient_policy_kwargs
 from app.storage.smb_pool import SMBConnectionPool, get_connection_pool, get_smb_connection_cache
+from app.utils.worker_wait import wait_for_worker
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ SQLITE_CACHE_EXTENSION = ".sqlite3"
 DEGRADED_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].default
 HEALTHY_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].default
 OBSERVATION_POLL_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["event_coalescing_ms"] / 1000
+OBSERVATION_RETRY_SECONDS = 1.0
 WORKER_POLL_SECONDS = SQL_BUSY_TIMEOUT_MS / 1000
 FAILURE_RETRY_MIN_SECONDS = 30.0
 FAILURE_RETRY_MAX_SECONDS = 300.0
@@ -393,18 +395,25 @@ class ConnectionDirectoryCache(ABC):
         self.username = username
         self.password = password
         self.port = port
+        self._source_revision = source_revision
         self._connection_cache = get_smb_connection_cache(connection_id)
+        self._diagnostic_generation = uuid4().hex
+        self._log_context = {
+            "source_id": hashlib.sha256(connection_id.encode()).hexdigest()[:16],
+            "generation_id": self._diagnostic_generation,
+            "operation": "directory_index",
+        }
 
         # Normalize path_prefix: strip slashes so "" means share root
         cleaned = (path_prefix or "/").replace("\\", "/").strip("/")
         self._path_prefix = cleaned  # e.g. "photos" or ""
         self._source_identity: dict[str, str | int] = {
+            "source_kind": "smb",
             "host": host,
             "share_name": share_name,
             "port": port,
             "path_prefix": cleaned,
             "username": username,
-            "revision": source_revision,
         }
         # Pre-compute the SMB base path (share root + prefix)
         share_base = f"\\\\{host}\\{share_name}"
@@ -431,6 +440,8 @@ class ConnectionDirectoryCache(ABC):
         self._watcher_tree: Optional[TreeConnect] = None
         self._watcher_open: Optional[Open] = None
         self._watcher_received_events = False
+        self._watcher_ready = threading.Event()
+        self._watcher_retry_at = 0.0
 
         self._cache_root = self._resolve_cache_root()
 
@@ -439,6 +450,10 @@ class ConnectionDirectoryCache(ABC):
         """Current cache state."""
 
         return self._state
+
+    @property
+    def _logger(self) -> logging.LoggerAdapter[logging.Logger]:
+        return logging.LoggerAdapter(logger, self._log_context, merge_extra=True)
 
     @staticmethod
     def _resolve_cache_root() -> Path:
@@ -633,34 +648,45 @@ class ConnectionDirectoryCache(ABC):
                 if self._stop_event.is_set():
                     break
 
-                self._observation_lost()
+                if retry_count == 0 or self._watcher_ready.is_set():
+                    self._observation_lost()
                 retry_count = 1 if self._watcher_received_events else retry_count + 1
-                if retry_count > MAX_WATCHER_RETRIES:
-                    logger.error(
-                        "Directory watcher reached its retry limit (%s attempts). Reconnect the source to resume live updates.",
+                self._watcher_ready.clear()
+                if retry_count == MAX_WATCHER_RETRIES + 1:
+                    self._logger.error(
+                        "Directory watcher exhausted %s fast retries. Capped background retries remain active.",
                         MAX_WATCHER_RETRIES,
                         extra={"event": "directory_watcher_retry_exhausted"},
                     )
-                    break
 
                 delay = min(
-                    WATCHER_RETRY_BASE_DELAY * (2 ** (retry_count - 1)),
+                    WATCHER_RETRY_BASE_DELAY * (2 ** min(retry_count - 1, MAX_WATCHER_RETRIES)),
                     WATCHER_RETRY_MAX_DELAY,
                 )
-                logger.warning(
-                    "Directory watcher failed (%s); retrying in %s seconds (attempt %s/%s).",
-                    type(error).__name__,
-                    delay,
-                    retry_count,
-                    MAX_WATCHER_RETRIES,
-                    extra={"event": "directory_watcher_retry", "error_type": type(error).__name__, "retry_seconds": delay},
-                )
+                jitter = hashlib.sha256(self.connection_id.encode("utf-8")).digest()[0]
+                delay = min(WATCHER_RETRY_MAX_DELAY, delay * (90 + jitter % 21) / 100)
+                self._watcher_retry_at = time.monotonic() + delay
+                if retry_count <= MAX_WATCHER_RETRIES:
+                    self._logger.warning(
+                        "Directory watcher failed (%s); retrying in %.1f seconds.",
+                        type(error).__name__,
+                        delay,
+                        extra={
+                            "event": "directory_watcher_retry",
+                            "stage": "watcher",
+                            "error_type": type(error).__name__,
+                            "retry_seconds": delay,
+                        },
+                        exc_info=retry_count == 1,
+                    )
 
                 self._cleanup_watcher()
 
                 if self._stop_event.wait(delay):
                     break  # Stop event was set during wait
 
+        self._watcher_ready.clear()
+        self._watcher_retry_at = 0.0
         self._cleanup_watcher()
         logger.info("Directory watcher stopped.", extra={"event": "directory_watcher_stopped"})
 
@@ -731,6 +757,12 @@ class ConnectionDirectoryCache(ABC):
                 output_buffer_length=CHANGE_NOTIFY_BUFFER_SIZE,
                 send=True,
             )
+            if self._stop_event.is_set():
+                break
+            if not self._watcher_ready.is_set():
+                self._observation_lost()
+                self._watcher_ready.set()
+                self._watcher_retry_at = 0.0
 
             try:
                 result = watcher.wait()
@@ -864,6 +896,19 @@ class DirectoryScanCapacityError(TimeoutError):
 class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     """Disk-backed SMB source with shared scan work and bounded observations."""
 
+    @property
+    def monitoring_state(self) -> str:
+        if not self._watcher_ready.is_set():
+            return "unavailable" if self._watcher_retry_at else "starting"
+        return "recovering" if self.coordinator.verification_required else "healthy"
+
+    @property
+    def retry_after_ms(self) -> int | None:
+        now = time.monotonic()
+        deadlines = (self._resource_retry_at, self._watcher_retry_at, self._verification_retry_at)
+        pending = [deadline - now for deadline in deadlines if deadline is not None and deadline > now]
+        return max(1, int(min(pending) * 1000)) if pending else None
+
     def __init__(
         self,
         connection_id: str,
@@ -880,7 +925,6 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     ) -> None:
         super().__init__(connection_id, host, share_name, username, password, port, path_prefix, source_revision)
         self._source_identity["connection_id"] = connection_id
-        self._source_identity["runtime_session"] = uuid4().hex
         identity = json.dumps(self._source_identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         filename = hashlib.sha256(identity.encode("utf-8")).hexdigest() + SQLITE_CACHE_EXTENSION
         self._persist_path = self._cache_root / SQLITE_CACHE_SUBDIR / filename
@@ -901,6 +945,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._scan_progress = time.monotonic()
         self._scan_running = threading.Event()
         self._resource_retry_at = 0.0
+        self._verification_retry_at: float | None = None
+        self._next_full_pass_at = 0.0
+        self._scan_epoch: tuple[int, int] | None = None
         self._failure_retry_delay = 0.0
         self._retry_jitter = hashlib.sha256(identity.encode("utf-8")).digest()[0]
         self._owning_loop: asyncio.AbstractEventLoop | None = None
@@ -1007,11 +1054,11 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
 
         try:
             if pool is None:
-                return await asyncio.shield(future)
+                return await wait_for_worker(future)
             self._scan_progress = time.monotonic()
             while True:
                 try:
-                    return await asyncio.wait_for(asyncio.shield(future), timeout=WORKER_POLL_SECONDS)
+                    return await wait_for_worker(future, WORKER_POLL_SECONDS)
                 except TimeoutError:
                     if future.done():
                         return future.result()
@@ -1062,6 +1109,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     def _initialize_storage(self) -> None:
         self.apply_policy(get_directory_index_policy())
         self.index.open(rebuild_invalid=True)
+        self.coordinator.invalidate()
+        self.coordinator.apply_pending()
 
     def apply_policy(self, policy: DirectoryIndexPolicy) -> None:
         changed = policy != self.policy
@@ -1147,20 +1196,38 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     class _DescendantAccessDenied(PermissionError):
         """A source operation failed, not a local index write."""
 
+    class _DescendantMissing(FileNotFoundError):
+        """A source directory disappeared, not a local index file."""
+
     def _source_call(self, parent: str, operation: Callable[[], WorkerResult]) -> WorkerResult:
         if not parent:
             self._root_reading.set()
         try:
             return operation()
+        except ScanObservationInvalidated:
+            raise
         except DirectoryBindingChangedError as error:
             self._source_available.clear()
             self._source_probe_completed.set()
             self.coordinator.invalidate()
+            self._source_root = self._source_root.replacement()
             raise DirectorySourceUnavailableError(
-                "Directory source identity changed or cannot be verified. Reconnect the source to rebuild its directory index."
+                "Directory source is temporarily unavailable. Background verification will bind the root again."
             ) from error
         except Exception as error:
             if parent:
+                if (
+                    isinstance(error, (FileNotFoundError, NotADirectoryError))
+                    or isinstance(error, SMBOSError)
+                    and error.ntstatus
+                    in (NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND, NtStatus.STATUS_NOT_A_DIRECTORY)
+                    or isinstance(error, SMBResponseException)
+                    and error.status
+                    in (NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND, NtStatus.STATUS_NOT_A_DIRECTORY)
+                ):
+                    raise self._DescendantMissing(
+                        "Directory descendant disappeared. Verify its parent before retrying directory indexing."
+                    ) from error
                 if (
                     isinstance(error, PermissionError)
                     or (isinstance(error, SMBOSError) and error.ntstatus == NtStatus.STATUS_ACCESS_DENIED)
@@ -1239,6 +1306,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         with self.coordinator.read(parent) as token:
             try:
                 self._scan_parent_read(generation, parent, token, reconcile=reconcile)
+            except self._DescendantMissing as error:
+                self._recover_missing_parent(generation, parent, token, error, reconcile=reconcile)
             except self._DescendantAccessDenied:
                 if self._stop_event.is_set():
                     raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.") from None
@@ -1253,6 +1322,32 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     raise
                 self.coordinator.record_unsafe_traversal(token, generation)
                 self.coordinator.finish_parent(token, generation)
+
+    def _recover_missing_parent(self, generation: int, parent: str, token: ScanReadToken, error: Exception, *, reconcile: bool) -> None:
+        """Verify absence through a held ancestor before deferring the missing job."""
+        ancestor = parent.rpartition(PATH_SEPARATOR)[0]
+        while True:
+            with self.coordinator.read(ancestor) as ancestor_token:
+                try:
+                    entries = self._source_call(ancestor, lambda: self._open_source_read(ancestor, ancestor_token))
+                except self._DescendantMissing:
+                    ancestor = ancestor.rpartition(PATH_SEPARATOR)[0]
+                    continue
+                child = parent[len(ancestor) + 1 :].split(PATH_SEPARATOR)[0] if ancestor else parent.split(PATH_SEPARATOR)[0]
+                with self._source_read(ancestor, entries.close):
+                    if self._source_call(ancestor, lambda: entries.has_directory_child(child)):
+                        raise error
+                    self._source_call(ancestor, entries.verify)
+                with self.coordinator.lock:
+                    if (
+                        self._stop_event.is_set()
+                        or not self.coordinator.is_current(token)
+                        or not self.coordinator.is_current(ancestor_token)
+                    ):
+                        raise ScanObservationInvalidated("Directory ancestor observation became stale. Retry source verification.")
+                    self.index.queue_observed_parent(ancestor)
+                    self.coordinator.finish_parent(token, generation, reconcile=reconcile)
+                return
 
     def _scan_parent_read(self, generation: int, parent: str, token: ScanReadToken, *, reconcile: bool = False) -> None:
         entries = self._source_call(parent, lambda: self._open_source_read(parent, token))
@@ -1386,6 +1481,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             return
         connected = False
         try:
+            await self._refresh_connection_generation()
             pool = await get_connection_pool()
             async with pool.get_connection(
                 host=self.host,
@@ -1397,6 +1493,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             ):
                 connected = True
                 await self._blocking(self._reconcile_disk_queue, pool=pool)
+        except ScanObservationInvalidated:
+            raise
         except Exception:
             if not connected:
                 self._source_available.clear()
@@ -1408,13 +1506,21 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             self._scan_progress = time.monotonic()
             if self._stop_event.is_set():
                 raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+        started = time.monotonic()
+        success = False
         try:
             self._scan_running.set()
-            logger.debug("Directory scan started.", extra={"event": "directory_scan_started"})
+            self._logger.debug("Directory scan started.", extra={"event": "directory_scan_started", "stage": "scan"})
             self._scan_progress = time.monotonic()
             with self._generation_lock, self.coordinator.read("") as baseline:
-                generation, selected = self.index.prepare_scan()
-                self.index.seed_scan(generation)
+                with self.coordinator.lock:
+                    self.coordinator.apply_pending()
+                    resuming = self.index.has_resumable_scan()
+                    generation, _selected = self.index.prepare_scan()
+                    if not resuming:
+                        self._scan_epoch = (generation, baseline.epoch)
+                    self._cleanup_pending = True
+                    self.index.seed_scan(generation)
                 try:
                     while not self._stop_event.is_set():
                         with self.coordinator.lock:
@@ -1427,17 +1533,34 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                         current = reconciliation if reconciliation is not None else generation
                         parents = self.index.pending_scan_paths(current, limit=1)
                         if not parents:
+                            if self._scan_epoch != (generation, baseline.epoch):
+                                while True:
+                                    with self.coordinator.lock:
+                                        if self._stop_event.is_set() or baseline.epoch != self.coordinator.epoch:
+                                            raise ScanObservationInvalidated("Directory scan epoch changed. Retry source verification.")
+                                        more = self.index.requeue_completed_scan_batch(generation)
+                                        if not more:
+                                            self._scan_epoch = (generation, baseline.epoch)
+                                            break
+                                continue
                             with self.coordinator.read("") as root_token:
                                 self._probe_source_root_read(root_token)
                             with self.coordinator.lock:
                                 if self._stop_event.is_set():
                                     raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
-                                self.coordinator.accept_generation(baseline, generation)
+                                complete = self.coordinator.accept_generation(baseline, generation)
                             self._cleanup_pending = True
                             self._state = CacheState.READY
-                            self._scan_error = None
-                            self._last_scan_time = time.time()
-                            logger.debug("Directory scan finished.", extra={"event": "directory_scan_finished"})
+                            self._scan_error = (
+                                "Directory coverage is incomplete. Some paths cannot be indexed safely."
+                                if not complete
+                                else None
+                                if self._watcher_ready.is_set()
+                                else "Directory monitoring is unavailable. Background verification remains active."
+                            )
+                            if complete:
+                                self._last_scan_time = time.time()
+                            success = complete
                             break
                         self._scan_parent(current, parents[0], reconcile=reconciliation is not None)
                         status = self.index.status()
@@ -1446,13 +1569,26 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                         raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
                 except BaseException:
                     self.coordinator.invalidate()
-                    if not selected:
-                        self.index.discard_generation(generation)
-                        self._cleanup_pending = True
                     raise
         finally:
             self._scan_running.clear()
             self._manager_scan_slots.release()
+            self._logger.debug(
+                "Directory scan finished (success=%s).",
+                success,
+                extra={"event": "directory_scan_finished", "stage": "scan", "duration_ms": (time.monotonic() - started) * 1000},
+            )
+
+    def _schedule_observation_retry(self) -> None:
+        """Coalesce stale-read retries without classifying them as source failures."""
+        now = time.monotonic()
+        deadline = now + OBSERVATION_RETRY_SECONDS
+        if self._verification_retry_at is None or self._verification_retry_at <= now:
+            self._verification_retry_at = deadline
+        else:
+            self._verification_retry_at = min(self._verification_retry_at, deadline)
+        self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
+        self._scan_error = "Directory source changed during verification. Background verification will retry."
 
     def _schedule_retry(self, *, now: float | None = None) -> None:
         """Spread bounded retries without changing the configured full-pass interval."""
@@ -1462,28 +1598,64 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         percent = 100 - FAILURE_RETRY_JITTER_PERCENT + self._retry_jitter % (FAILURE_RETRY_JITTER_PERCENT * 2 + 1)
         delay = min(FAILURE_RETRY_MAX_SECONDS, max(FAILURE_RETRY_MIN_SECONDS, self._failure_retry_delay * percent / 100))
         self._resource_retry_at = (time.monotonic() if now is None else now) + delay
-        logger.debug("Directory retry scheduled.", extra={"event": "directory_retry_scheduled", "delay_seconds": delay})
+        self._logger.debug(
+            "Directory retry scheduled.", extra={"event": "directory_retry_scheduled", "stage": "verification", "retry_seconds": delay}
+        )
 
     def _reset_retry(self) -> None:
+        if self._failure_retry_delay:
+            self._logger.info(
+                "Directory verification recovered.", extra={"event": "directory_verification_recovered", "stage": "verification"}
+            )
         self._failure_retry_delay = 0.0
         self._resource_retry_at = 0.0
+        self._verification_retry_at = None
 
     def _verification_due(self, verified_at: float, *, now: float | None = None) -> bool:
         current = time.monotonic() if now is None else now
         interval = (
             self.policy.degraded_verification_seconds
-            if self.coordinator.verification_required
+            if self.coordinator.verification_required or not self._watcher_ready.is_set()
             else self.policy.healthy_verification_seconds
         )
         delay = interval * (100 - self._retry_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1)) / 100
-        return current >= self._resource_retry_at and (bool(self._failure_retry_delay) or current >= verified_at + delay)
+        return current >= self._resource_retry_at and (
+            bool(self._failure_retry_delay)
+            or (self._verification_retry_at is not None and current >= self._verification_retry_at)
+            or current >= verified_at + delay
+        )
+
+    async def _refresh_connection_generation(self) -> None:
+        replacement = get_smb_connection_cache(self.connection_id)
+        if replacement is self._connection_cache:
+            return
+        with self._workers:
+            if self._active_workers:
+                raise DirectoryScanCapacityError(
+                    "Previous directory work is still running. Wait for its cleanup before retrying verification."
+                )
+        self.coordinator.invalidate()
+        self._source_available.clear()
+        self._source_probe_completed.set()
+        self._source_root = await self._blocking(self._source_root.replacement)
+        self._connection_cache = replacement
 
     async def _run_rescan(self) -> None:
-        if not self._opened.is_set() or self._scan_running.is_set() or time.monotonic() < self._resource_retry_at:
+        now = time.monotonic()
+        if (
+            not self._opened.is_set()
+            or self._scan_running.is_set()
+            or now < self._resource_retry_at
+            or (self._verification_retry_at is not None and now < self._verification_retry_at)
+        ):
+            return
+        resumable = await self._blocking(self.index.has_resumable_scan)
+        if now < self._next_full_pass_at and not resumable and self._source_available.is_set():
             return
         self._state = CacheState.UPDATING if self._directory_count else CacheState.BUILDING
         root_checked = False
         try:
+            await self._refresh_connection_generation()
             pool = await get_connection_pool()
             async with pool.get_connection(
                 host=self.host,
@@ -1495,14 +1667,21 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             ):
                 await self._blocking(self._probe_source_root, pool=pool)
                 root_checked = True
+                if now < self._next_full_pass_at and not resumable:
+                    self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
+                    return
                 if self.index.needs_fts_repair:
                     self._scan_error = "Directory search index is being rebuilt. Existing directory rows remain searchable."
                     await self._blocking(self._repair_fts_work)
+                if not resumable:
+                    self._next_full_pass_at = time.monotonic() + DIRECTORY_INDEX_CONTRACT.limits["minimum_full_pass_spacing_seconds"]
                 await self._blocking(self._scan_disk_queue, pool=pool)
             self._reset_retry()
         except asyncio.CancelledError:
             self.coordinator.invalidate()
             raise
+        except ScanObservationInvalidated:
+            self._schedule_observation_retry()
         except Exception as error:
             capacity_busy = isinstance(error, DirectoryScanCapacityError)
             if not capacity_busy and (not root_checked or self._root_reading.is_set()):
@@ -1522,8 +1701,13 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 else "Directory verification failed. Check source access; existing results remain available."
             )
             self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
+            if not self._failure_retry_delay:
+                self._logger.warning(
+                    "Directory verification failed. Background retries remain active.",
+                    extra={"event": "directory_verification_unavailable", "stage": "verification", "error_type": type(error).__name__},
+                    exc_info=True,
+                )
             self._schedule_retry()
-            logger.warning("Directory verification failed (%s).", type(error).__name__)
 
     async def _periodic_rescan_loop(self) -> None:
         verified_at = time.monotonic()
@@ -1555,6 +1739,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     verified_at = time.monotonic()
             except asyncio.CancelledError:
                 return
+            except ScanObservationInvalidated:
+                self._schedule_observation_retry()
             except Exception as error:
                 self.coordinator.invalidate()
                 if isinstance(error, DirectoryDiskBudgetError):
@@ -1636,7 +1822,7 @@ class DirectoryCacheManager:
         if expired:
             closing = asyncio.gather(*(self._finish_idle_cache(cache) for cache in expired))
             closing.add_done_callback(lambda completed: completed.exception() if not completed.cancelled() else None)
-            await asyncio.shield(closing)
+            await wait_for_worker(closing)
 
     async def _finish_idle_cache(self, cache: SQLiteConnectionDirectoryCache) -> None:
         await asyncio.to_thread(cache._finish_stop)
@@ -1723,7 +1909,7 @@ class DirectoryCacheManager:
                 and previous.password == password
                 and previous.port == port
                 and previous._path_prefix == (path_prefix or "/").replace("\\", "/").strip("/")
-                and previous._source_identity["revision"] == source_revision
+                and previous._source_revision == source_revision
             ):
                 if isinstance(previous, SQLiteConnectionDirectoryCache):
                     previous.touch()

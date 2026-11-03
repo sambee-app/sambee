@@ -125,11 +125,13 @@ from app.services.recent_files import (
 from app.services.system_settings import get_integer_setting_value
 from app.services.target_resolution import TargetResolutionDisposition, TargetResolutionPolicy, TargetSnapshot, resolve_target_mutation
 from app.storage.smb import SMBBackend
+from app.storage.smb_errors import SMB_RECOVERY_RETRY_SECONDS, SMBConnectionRetired
 
 router = APIRouter()
 logger = get_logger(__name__)
 
 DIRECTORY_LIST_ROUTE_TIMEOUT_SECONDS = 35.0
+DIRECTORY_SEARCH_RETRY_SECONDS = 5
 TRANSFER_RECEIPT_TTL_SECONDS = 5 * 60
 TRANSFER_OPERATION_TTL = timedelta(seconds=TRANSFER_RECEIPT_TTL_SECONDS)
 TRANSFER_OPERATION_PROGRESS_PERSIST_INTERVAL_BYTES = 1024 * 1024
@@ -956,19 +958,24 @@ async def list_directory(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "directory_access_denied", "message": "You do not have permission to open this folder."},
         ) from error
+    except SMBConnectionRetired as error:
+        raise file_target_http_error(error, requires_file=False) from error
     except asyncio.TimeoutError:
-        logger.error(
-            f"Timed out listing directory: connection_id={connection_id}, path='{path}', host={connection.host}, share={connection.share_name}"
-        )
+        logger.warning("SMB directory listing timed out. Active work remains owned until its worker exits.")
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Directory listing timed out. The remote share did not respond in time.",
+            detail={
+                "code": "directory_timeout",
+                "message": "Directory listing timed out. Check the connection and retry.",
+                "recoverable": True,
+                "retry_after_ms": SMB_RECOVERY_RETRY_SECONDS * 1000,
+            },
+            headers={"Retry-After": str(SMB_RECOVERY_RETRY_SECONDS)},
         )
     except Exception as e:
         logger.error(
-            f"Failed to list directory: connection_id={connection_id}, path='{path}', "
-            f"host={connection.host}, share={connection.share_name}, "
-            f"error={type(e).__name__}: {e}",
+            "Directory listing failed. Check the connection and retry.",
+            extra={"event": "directory_listing_failed", "operation": "list_directory", "error_type": type(e).__name__},
             exc_info=True,
         )
         raise HTTPException(
@@ -1128,6 +1135,8 @@ async def search_directories(
                 coverage_issue_count=response.issue_count,
                 last_verified_at_ms=response.last_verified_at_ms,
                 status_message=cache.scan_error,
+                monitoring_state=cache.monitoring_state,
+                retry_after_ms=cache.retry_after_ms,
             )
 
         results, total_matches = await asyncio.to_thread(cache.search, q, include_dot_directories=include_dot_directories) if q else ([], 0)
@@ -1144,7 +1153,16 @@ async def search_directories(
     except HTTPException:
         raise
     except (TimeoutError, InterruptedError) as error:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "directory_temporarily_unavailable",
+                "message": str(error),
+                "recoverable": True,
+                "retry_after_ms": DIRECTORY_SEARCH_RETRY_SECONDS * 1000,
+            },
+            headers={"Retry-After": str(DIRECTORY_SEARCH_RETRY_SECONDS)},
+        ) from error
     except Exception as error:
         logger.error("Directory search failed (%s).", type(error).__name__)
         raise HTTPException(
@@ -1506,6 +1524,8 @@ async def upload_file(
         )
     except HTTPException:
         raise
+    except SMBConnectionRetired as error:
+        raise file_target_http_error(error) from error
     except TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -2145,6 +2165,8 @@ async def delete_item(
 
         logger.info(f"Deleted item: connection_id={connection_id}, path='{path}', user={current_user.username}")
 
+    except SMBConnectionRetired as error:
+        raise file_target_http_error(error) from error
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2338,6 +2360,8 @@ async def rename_item(
         logger.info(f"Renamed item: connection_id={connection_id}, '{path}' -> '{new_name}', user={current_user.username}")
         return file_info
 
+    except SMBConnectionRetired as error:
+        raise file_target_http_error(error) from error
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2458,6 +2482,8 @@ async def create_item(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="Create timed out. The remote share did not respond in time.",
         )
+    except SMBConnectionRetired as error:
+        raise file_target_http_error(error) from error
     except OSError as e:
         logger.error(
             f"Failed to create item: connection_id={connection_id}, path='{new_item_path}', error={type(e).__name__}: {e}",
@@ -2801,6 +2827,10 @@ async def copy_item(
     except HTTPException as error:
         await _record_transfer_http_error(current_user, body, error)
         raise
+    except SMBConnectionRetired as error:
+        response = file_target_http_error(error)
+        await _record_transfer_http_error(current_user, body, response)
+        raise response from error
     except TimeoutError:
         await _raise_recorded_transfer_http_error(
             current_user,
@@ -2969,6 +2999,10 @@ async def move_item(
     except HTTPException as error:
         await _record_transfer_http_error(current_user, body, error)
         raise
+    except SMBConnectionRetired as error:
+        response = file_target_http_error(error)
+        await _record_transfer_http_error(current_user, body, response)
+        raise response from error
     except TimeoutError:
         await _raise_recorded_transfer_http_error(
             current_user,

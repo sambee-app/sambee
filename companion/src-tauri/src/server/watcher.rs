@@ -152,6 +152,11 @@ pub struct DirectoryWatcher {
 }
 
 impl DirectoryWatcher {
+    #[cfg(feature = "recovery-verification")]
+    pub(super) async fn verification_subscription_count(&self) -> usize {
+        self.entries.lock().await.values().map(|entry| entry.subscriber_count).sum()
+    }
+
     /// Create a new watcher manager.
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(BROADCAST_CAPACITY);

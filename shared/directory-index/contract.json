@@ -16,6 +16,7 @@
     "status_publication_ms": 250,
     "event_coalescing_ms": 300,
     "idle_release_seconds": 600,
+    "minimum_full_pass_spacing_seconds": 30,
     "max_pending_observations": 1024,
     "max_observation_bytes": 1048576,
     "max_source_depth": 256,

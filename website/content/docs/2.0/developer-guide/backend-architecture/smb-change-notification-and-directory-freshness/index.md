@@ -42,7 +42,9 @@ The browser retains loaded rows during automatic refresh, including an empty lis
 
 A monitor acquires its connection, session, tree, directory handle, and `FileSystemWatcher` in that order. Cleanup runs in reverse order, including after partial initialization.
 
-Connection, socket, and timeout failures use capped exponential reconnect backoff with jitter. Deletion of the watched directory stops its monitor. Shutdown calls `shutdown_monitor()` to release watchers and SMB handles explicitly.
+Cancellation during startup retains the pending worker. When startup finishes, cleanup releases only the subscription acquired by that worker, not a replacement subscription. Shutdown rejects new monitor startup.
+
+Transient failures use capped exponential reconnect backoff with jitter. Recovery continues after fast retries are exhausted, while the subscription remains active. Deletion of the watched directory stops its monitor. A stopped monitor is not reused for new subscribers. Shutdown calls `shutdown_monitor()`; a worker that is still running retains its handles until it exits.
 
 ## Directory-Index Consistency
 
@@ -52,41 +54,39 @@ The index watcher observes directory-name changes recursively from the share roo
 
 ### Generations and Observation Order
 
-Full verification builds a candidate while the accepted generation remains selected. An interrupted initial build is verified through a fresh candidate. Only an issue-free full pass advances `last_verified_at_ms`; incremental changes, writes, and query access do not.
+Full verification builds a candidate while accepted data remains searchable. Only an issue-free full pass advances `last_verified_at_ms`; incremental changes and queries do not.
 
-Each source read has a producer token, scan epoch, and observation sequence. Changed-prefix barriers reject overlapping stale reads before child writes or parent completion. Lost events and queue overflow invalidate the epoch, retain admitted work, and request verification. Event loss marks accepted coverage uncertain without deleting its rows. Failed SQL mutations remain queued.
-
-Candidate selection occurs under the coordinator lock after root revalidation. It requires a live baseline, the same epoch, no pending observations or uncertainty write, no other current-epoch producer, and no unfinished accepted or candidate parents. A later event remains queued for the selected generation.
+Read tokens and observation barriers reject stale results. Lost events or queue overflow mark coverage uncertain and request verification without deleting accepted data. Candidate selection requires a valid root and no outstanding observations or reads that could invalidate the pass.
 
 Directory rows, FTS entries, counts, issues, queued subtree work, and revision updates must remain transactionally consistent. Queries read results and metadata from one selected-generation transaction.
 
 ### Parent Reconciliation
 
-Background workers reconcile affected parents between full passes. Additions and moved-in directories queue descendant reads; removals retire missing subtrees. Both rename parents are reconciled without requiring paired events. New-name hints do not insert an assumed directory, so a regular file cannot enter the index through a transfer notification.
+Background workers reconcile affected parents between full passes. Renames check both parents, and new directories trigger descendant reads. Removal requires a confirmed absence under a held, validated parent; a listing omission or access error is not sufficient. Failed work remains pending. Reconciliation does not establish full verification or clear uncertain coverage.
 
-Reconciliation uses the same source identity, read-token, scan-admission, and bounded-write checks as full scans. Exact missing-child checks use a held, revalidated parent and the original native name. A listing omission, access error, redirected child, or failed cleanup is not proof of absence. Failed work remains pending. Reconciliation does not advance full-verification time or clear uncertainty and the verification request.
-
-Application mutation guards queue parent hints before dispatch and after the synchronous operation actually exits, including failure. They validate the active source binding and preserve the original operation result if hint delivery fails. Recursive SMB copy and deletion guard each child operation. Companion guards cover directory creation, rename, empty and recursive deletion, upload and file-transfer parent creation, and direct or relayed archive extraction.
-
-Parent creation queues checks for each source-relative ancestor. Retained archive workers bind these checks to the destination root, including resumed cross-drive extraction. Recursive deletion pages indexed subtree paths from active generations to queue affected parents without changing native deletion behavior. Queue refusal preserves accepted rows and requires verification. A missing hinted descendant queues an ancestor check; it is not proof of absence and does not start failure backoff.
-
-Cancellation or timeout cannot send a completion hint or release a producer early. Cooperative stale-read interruption leaves existing failure backoff unchanged so queued reconciliation can resume on the next maintenance tick.
+File operations queue parent hints before dispatch and after actual worker completion, including failure. New mutation paths must preserve this rule. Cancellation must not release worker ownership early or change the original operation result when hint delivery fails.
 
 ### Source Identity and Traversal
 
-Catalogue names are session-bound. A changed source or credential binding stops the old source; retained rows must never be exposed as data from a replacement root. Cross-session catalogue reuse is disabled because durable root identity is not established.
+Catalogue names are SHA-256 hashes of source boundary settings. SMB uses the connection ID, host, port, share, configured folder, and username. Passwords, display names, connection edit times, and runtime session IDs do not change the file name. Local sources use the configured root path and, for fixed, removable, and unknown drives, available volume serial or file-system UUID evidence. Network and virtual drives use the root path alone. Runtime session IDs remain diagnostic values.
+
+Reused rows are unverified until a verification pass completes. An SMB reconnect binds new handles and invalidates unfinished reads without comparing file IDs across connections. SMB server GUIDs and volume metadata are diagnostic values, not proof of storage continuity. File IDs of zero or all ones are unavailable; comparisons skip them. Session and tree IDs are compared only within one connection.
 
 | Source | Traversal rules |
 |---|---|
-| SMB | Direct no-follow handles without delete sharing or automatic DFS retries; retained ancestors; server, session, tree, volume, file ID, and native-name validation |
+| SMB | Direct no-follow handles without delete sharing or automatic DFS retries; retained ancestors; connection-scoped session, tree, available file-ID, and exact native-name checks |
 | Linux local drive | Retained directory descriptors, no-follow opens, exact native names, device and mount checks; kernel pseudo-filesystems and device-tree aliases excluded |
 | Windows local drive | Retained no-delete ancestor handles, 128-bit file IDs, volume and native-device paths; bounded enumeration and strict UTF-16 decoding |
 
-SMB DFS shares, unverified identities, changed ancestry, and volume crossings are refused. Reparse descendants and unsupported directory names produce coverage issues. Windows junctions, name-surrogate redirections, cloud placeholders, and unknown reparse tags are excluded rather than followed. Unsupported identity APIs must not trigger a path-only fallback.
+The SMB boundary is logical: the configured share and folder. Storage mounted inside a share can be indexed; SMB does not promise physical-volume containment. DFS shares, redirected ancestry, and reparse descendants remain excluded. Local traversal does not cross mounts. Windows junctions, name-surrogate redirections, cloud placeholders, and unknown reparse tags are excluded rather than followed. Missing optional volume metadata does not weaken these traversal checks.
 
-Traversal supports at most 256 normal path components and 32 KiB of encoded path bytes. Local bounds include the configured native root; SMB bounds include the path within the share and its configured prefix. Oversized roots are refused before native opens. Oversized descendant directories produce coverage issues while readable branches continue. These bounds do not limit directory counts.
+The drive browser and local index share one classifier. USB, SD, MMC, and hot-plug disks are removable even when Windows reports a fixed drive. Failed classification uses the unknown class. Fixed drives select another index only when available volume serial or UUID evidence changes. Removable and unknown drives also retire the current generation when available label, file-system type, or total-capacity evidence changes. Missing evidence and drive-class changes alone do not replace data. Windows uses the 64-bit serial from `FILE_ID_INFO`, including zero. Local file IDs are session-scoped checks, not replacement signals.
 
-Backend initialization withholds rows until a handle-bound root probe succeeds. Root identity, metadata, transport, or pool-entry failure makes the source unavailable without deleting accepted data; the directory API returns HTTP 503. Descendant access denial remains a separate partial-coverage condition. Late results cannot restore a stopped or invalidated binding.
+Volume evidence is checked again when the root binds. An unmounted Linux source stays unavailable instead of indexing its mount-point folder. Linux mount checks use descriptor-bound `statx` mount IDs with `/proc/self/fdinfo` as a fallback. A missing mount-boundary capability stops that source until Companion restarts. Idle removable sources without active work or a watcher release their root handles. Windows removal notifications pause source work and release handles before removal is allowed.
+
+Depth and path-length bounds are defined in `shared/directory-index/contract.json`. Excluded descendants produce partial coverage while readable branches continue.
+
+Backend initialization withholds rows until a handle-bound root probe succeeds. Root failure returns HTTP 503 without deleting accepted data. Descendant access denial produces partial coverage instead. Late results cannot restore an invalidated source.
 
 ### SQLite Storage
 
@@ -95,84 +95,70 @@ Backend initialization withholds rows until a handle-bound root probe succeeds. 
 | Backend | `data/directory_cache/sqlite/`, or `sqlite/` below `directory_cache_location`; standard Python `sqlite3` with Debian system SQLite |
 | Companion | `directory-index/sqlite/` in the OS-user cache directory; bundled Rust SQLite binding |
 
-Stored source metadata excludes passwords. Indexes are disposable directory data, separate from recent history. SQLite sources do not import legacy JSONL snapshots or export full-index mirrors.
+Indexes are disposable directory data, separate from recent history. Stored source metadata excludes passwords. `shared/directory-index/` owns the schema, search normalization, validation rules, and contract fixtures.
 
-The backend has no RAM catalogue or JSONL reader/writer fallback. Each cleanup pass can remove at most 64 recognized legacy snapshots, backups, or expired temporary files from the configured cache root. Recent temporary files remain until the inactive-retention interval expires. Cleanup skips unknown names, links, foreign-owned entries, and shared writable roots; these skipped files can still consume disk space.
+Both stores use WAL and `synchronous=FULL`. Writes, checkpoints, maintenance, and close are serialized through the writer. Queries use read-only connections and explicit transactions. Storage leases remain held until admitted readers and workers finish; active database families cannot be evicted.
 
-Older binaries use separate snapshot names and cannot update SQLite catalogues. Stop the backend before switching binaries. A rollback rebuilds its disposable index when its snapshot is absent; it does not downgrade or import the SQLite database. Recent-file and recent-directory history remain separate and unchanged.
-
-`shared/directory-index/` owns the schema, FTS definition, generation validation, and search fixtures. `unicode.json` supplies shared normalization and word-character data for Rust and TypeScript; Python checks it against its interpreter's Unicode data. Runtime validation requires serialized threading, STRICT tables, RETURNING, and FTS5 with the specified trigram settings. The backend requires SQLite 3.37 or later; the companion requires 3.51.3 or later.
-
-Both stores use WAL and `synchronous=FULL`. Active writes, checkpoints, maintenance, and close are serialized through the writer. Queries use strictly read-only connections and explicit transactions; they must never checkpoint or write. Close retains process ownership until admitted readers and workers finish. External writes to active managed indexes are unsupported. Preserve this ownership model when changing checkpoint behavior; see SQLite's [WAL reset-race documentation](https://www.sqlite.org/wal.html#walresetbug).
-
-Storage must be private and local. Unix ancestors must be real directories owned by the current service or OS account, or root; group/public write access requires a trusted sticky parent. The namespace must belong to that account with mode 0700. Database, sidecar, and lease aliases are refused. Windows checks use handle link counts and reparse attributes. Reader, writer, and inactive-resource opens validate the namespace and file family; Unix opens also compare main-file identities before and after open.
-
-Namespace leases serialize source-lease creation and orphan cleanup; active or externally owned database families cannot be evicted. POSIX cleanup and quarantine moves use held directory descriptors. Native Windows maintenance holds a no-delete namespace handle. Namespace replacement is refused before maintenance continues. These checks do not provide crash-atomic family moves or protection against every same-account replacement-and-restoration race.
+Storage must be private and local. Opens and cleanup validate directory ownership, file identity, and aliases. Do not write to managed databases externally or weaken these checks to permit a path-only fallback.
 
 ### Resource Controls
 
-| Control | Rule |
-|---|---|
-| Worker admission | One shared scan permit and two query permits per manager |
-| Scan and bulk-write batches | Bounded by both row count and input path bytes before row-key construction |
-| Child paging | Ordered index scan with a row- and byte-bounded sorted buffer, including branches without ancestor rows |
-| Observations | Entry- and byte-bounded pending queues and changed-prefix barriers |
-| Disk growth | Shared write-headroom reservation and filesystem free-space check before growth |
-| Maintenance | Bounded retired-row cleanup and incremental vacuum; pending updates, scans, queries, and pinned readers take priority |
+Worker counts, batches, and observation queues are bounded by the shared contract. Disk growth requires headroom and free-space admission. Maintenance yields to active work.
 
-Policy ranges and defaults belong to `shared/directory-index/contract.json`, not duplicated runtime settings. Lowering a disk budget may pause growth but must not trim active accepted rows. Retention and disk-pressure eviction apply only to inactive, unowned catalogues. Query access is recorded separately from writes and verification.
+Automatic full passes have a minimum spacing of 30 seconds, defined in the shared contract. Requests cannot bypass this limit or failure backoff. Interrupted issue-free candidates retain completed directory work. After an observation gap, retained directory reads are revalidated in bounded batches before candidate acceptance. Parent reconciliation does not start a new full pass or advance the full-verification clock.
 
-Normal WAL handling checks a 1 MiB threshold outside the async executor. Below it, no checkpoint SQL or maintenance reservation is requested. Due checkpoints use shared headroom, defer for active work or pinned readers, and retry when readers release their snapshots. Disk-pressure reclamation is coalesced per source; it is not periodic idle work.
+Policy defaults and ranges belong to `shared/directory-index/contract.json`. A lower budget may pause growth but must not trim active data. Eviction applies only to inactive, unowned indexes. Disk and cache settings are not hard filesystem or process-memory ceilings.
 
-Disk admission is not a hard physical allocation ceiling. Named managed files, including quarantine and sidecars, count toward usage. Each admitted growth operation reserves 32 MiB. SQL temporary files can be unlinked while open and can live outside the namespace; they are not included in named-file usage. Leave filesystem space for this work, pinned-reader WAL growth, token reset and repair, retained generations, and concurrent sources. A reservation does not limit how many bytes SQLite can allocate in one operation.
-
-The default disk budget is 2 GiB. It is not a promise that every tree or multi-source overlap fits. Increase the host budget or release eligible inactive data when growth pauses. Active accepted rows remain available and are never trimmed to meet the budget. SQLite allocation errors preserve validated data and require capacity restoration before retry. Queries stream matches with bounded top-K buffers; page-cache targets apply per connection, not to total process memory.
+See [Directory-Index Policy Delivery](../../companion-architecture/local-drive-and-save-back-pipeline/#directory-index-policy-delivery) for Companion ownership and [Manage Directory Search](../../../admin-guide/operations-and-maintenance/manage-directory-search/) for administration.
 
 ### Recovery and Shutdown
 
-Startup validates application and source identities, schema, directory rows, generation counts, and issues before publishing a reader. SQLite integrity checks alone do not establish application consistency.
+Startup validates source identity and application consistency before exposing rows. Damaged search tokens rebuild from validated directory rows. Replacement is restricted to recognized invalid index data; permission, capacity, busy-storage, and general I/O failures must not trigger discard.
 
-Missing or inconsistent FTS data uses complete literal scans of validated rows while tokens rebuild in bounded background batches. Mutations wait; observations remain queued. Repair preserves counts, revisions, and verification time. Token-reset failure must not authorize replacement of valid directory rows.
+Failures use bounded retries. Requests must not bypass retry deadlines. Idle sources release resources and revalidate the root on reuse. Shutdown waits for admitted work before closing storage and root ownership, even when a request has been cancelled.
 
-Background replacement is limited to recognized application-schema or policy incompatibility, invalid core metadata, failed integrity or generation checks, and SQLite corruption or invalid-database errors. Wrong application/source identity, busy storage, FULL, general I/O errors, and permission failures do not authorize discard. Replacement retains the source lease and requires operation headroom. Fresh data starts empty with partial coverage and no complete-verification time.
+Index recovery does not reset a shared SMB connection or remove recent-directory history. A source binding mismatch pauses publication, re-binds source handles, and schedules verification. Source and storage failures are not evidence that a directory was deleted.
 
-Each namespace has one rejected family, `.rejected-directory-index`, including sidecars and a separate lease. Pressure cleanup may remove it only when unowned. Ordinary move failures attempt to restore moved members and preserve the primary error. A failed replacement cannot cause a repeated discard loop on the same source. Restore capacity and permissions before reconnecting after a storage failure; family moves are not guaranteed crash-atomic.
+SMB setup runs outside the shared pool lock. Concurrent requests share setup for the same private cache. The pool bounds admitted work, setup tasks, and retained connection generations, both per source and across the process. A retired generation keeps its own cache until its workers and cleanup finish; replacement requests use a separate cache. Capacity failures return retry information rather than enter an unbounded queue. Shutdown stops new admission. Writes are not replayed automatically.
 
-Initialization and verification failures use bounded retries with source-specific jitter. Existing accepted rows remain usable only while the source is available. Healthy and degraded verification intervals are separate from failure backoff; repeated requests must not bypass a retry deadline.
+A caller timeout or cancellation does not itself stop a blocking SMB operation. Reader handles, connection leases, and worker permits remain owned until actual completion. Late successful opens are closed before their leases are released.
 
-Access after the ten-minute idle interval invalidates old read tokens. The retained root must be revalidated; old producers remain owned until actual exit. Idle access does not bypass a storage retry deadline or advance full-verification time.
+An operation deadline retires its connection generation and requests one pool-owned transport abort through public `Connection.disconnect(close=False)`. The abort runs outside the event loop and pool lock, uses a snapshot of that generation's connections, and does not send session logoff requests or touch replacement connections. Ordinary caller cancellation retains work without aborting unrelated operations on the shared generation. Long-lived watcher subscriptions use their own lifecycle, not ordinary operation deadlines.
 
-Idle sources release readers, writers, root handles, and watchers after ten minutes without active ownership. Cancellation does not release a still-running worker's SMB pool lease, producer, or process lease. Source replacement need not wait for that old worker, but its results must be rejected. Backend shutdown calls `shutdown_directory_cache()` and waits for admitted work before closing storage and root ownership.
+Public abort wakes blocked receive requests in the installed client. It cannot provide a universal operation deadline: disconnect shares a lock with socket send and can remain blocked behind a send. Abort work retains capacity until it exits. If workers cannot finish, admission remains bounded and requests return capacity errors. Wait before retrying; restart the backend service if retained work continues to occupy capacity.
 
-### Resource Policy Ownership
+A mutation interrupted by abort, or whose caller deadline expires after dispatch, has uncertain completion. The API reports `smb_mutation_uncertain` with `mutation_uncertain: true` and `recoverable: false`. Check the source before retrying; the change may already be applied. Sambee does not replay the write automatically.
 
-Backend and companion policies have separate host scopes. Backend settings apply to live sources. Companion delivery requires administrator authority, a native challenge, and local approval of one backend owner. The browser carries only an opaque single-use grant; the companion redeems it directly over verified HTTPS, or HTTP to a literal loopback host, without redirects. Failed delivery preserves the last approved policy.
+Backend and Companion watcher startup and native event failures trigger background recovery independently of index storage initialization. A successful scan does not clear an unavailable-watcher warning. Degraded verification remains active while monitoring is unavailable; recovered monitoring requires verification of the event gap.
 
-Native policy changes serialize against source initialization. Persistence failure restores prior runtime targets; failed recovery blocks further delivery with a specific error. Native Preferences provides a confirmed owner reset. Companion mutation APIs must protect the configuration and SQLite directories, including their ancestors and filesystem aliases.
+Recovery diagnostics use opaque source and lifecycle-generation IDs. Failure transitions record one sanitized cause; repeated failures use bounded summaries. Recovery logs omit private exception text and paths; third-party SMB payloads are not rendered. Scan summaries include duration even when a scan fails.
+
+### Quick-Bar Status Contract
+
+Work state, snapshot coverage, verification time, and monitoring health are separate. `monitoring_state` is `starting`, `healthy`, `recovering`, or `unavailable`. `retry_after_ms` is a relative delay from response receipt, not a timestamp. Missing or null fields mean that the server supplies no monitoring state or retry delay; they do not prove healthy monitoring.
+
+| Response or condition | Quick-bar behavior |
+|---|---|
+| Building or updating, without a retry delay | Show active work and check status again |
+| Paused work with a retry delay | Show the status message without an active-work spinner; wait before checking |
+| Empty data, uncertain coverage, or unavailable monitoring | Keep history available and continue bounded status checks |
+| Recoverable request failure | Keep accepted results for the same query, show failure, and retry |
+| Terminal or unsupported request failure | Stop automatic retries until reactivation or a source change |
+| Ready, healthy data without a warning | Stop periodic status checks |
+| Closed menu or hidden page | Stop periodic checks; reject stale responses when the query or source changes |
+
+Status checks do not require a minimum search length. Empty-query activation initializes status and history. The directory provider limits retry delays to 1-60 seconds and uses a five-second fallback. Structured errors use `recoverable` and `retry_after_ms`; the client does not infer recovery rules from message text. Older responses without the shared search contract do not enable periodic status checks. Requests are bound to the current source, history client, storage capability revision, and request sequence. A replaced binding cannot publish old results, status, or retry timing.
 
 ### Support Limits
 
-Backend SQLite directory responses and Linux and Windows Companion directory responses advertise `search_contract_version: 1`, including initial responses while a catalogue builds. Legacy responses and unsupported companion platforms do not advertise a compatible contract. This capability identifies the search semantics and permits bounded quiet refresh; it does not bypass root validation, authorization, policy ownership, or resource admission.
-
-Available-runtime tests cover storage admission, namespace substitution, mutation reconciliation, idle revalidation, repair refusal, resource pressure, and policy delivery. They do not certify live SMB behavior, physical sleep, Windows native execution, cloud providers, arbitrary same-account filesystem races, or hard process/allocation ceilings.
-
-Linux native behavior and Windows cross-compilation are different kinds of evidence. Cross-compilation does not establish Windows handle, filesystem-alias, mapped-volume, provider, or recovery behavior. macOS directory indexing is unavailable. Generated storage fixtures do not establish native traversal speed, application memory use, or production latency.
-
-### Progressive Quick-Bar Results
-
-Quick-bar consumers must distinguish partial or uncertain coverage, source unavailability, and query failure. Usable history and loaded-file results remain available while slower index work completes. Index results carry exact counts and coverage metadata; the returned-result cap does not imply incomplete indexing.
-
-Providers publish selectable records before result rows and reject obsolete query/source responses. Quiet index refresh requires an explicit compatible search capability; it must not poll legacy full-scan endpoints. Typing, dismissal, source changes, hidden tabs, and terminal failures stop obsolete refresh work. See [File Browser and Navigation Model](../../frontend-architecture/file-browser-and-navigation-model/) for presentation and selection behavior.
-
-Companion browse-request completion logs contain the method, an allow-listed route template, HTTP status, monotonic duration, cancellation flag, and an optional validated revision. Unknown routes use a fixed placeholder. These debug records exclude request URLs, drive identities, terms, paths, headers, bodies, error text, grants, and signed values. Pairing-start logs contain no pairing identities, nonces, or displayed codes.
-
-Directory storage and worker events use fixed event names, durations, counts, retry delays, and numeric SQLite or OS failure codes. Transaction completion and generation acceptance are logged after commit. Storage failure logs omit exception text and private catalogue paths.
+Companion directory indexing supports Linux and Windows, not macOS. Drive visibility alone does not establish index support. Changes to native traversal or recovery require tests on the affected platform; cross-compilation does not validate runtime behavior.
 
 ## Where to Continue
 
 - [Request Flow and Service Boundaries](../request-flow-and-service-boundaries/): backend service ownership
 - [File Operations and Edit Locking](../file-operations-and-edit-locking/): uploads, moves, renames, and edit sessions
 - [Local-Drive and Save-Back Pipeline](../../companion-architecture/local-drive-and-save-back-pipeline/): companion file operations
+- [Logging and Localization](../../cross-cutting-systems/logging-and-localization/#directory-search-diagnostics): directory-search diagnostics and privacy rules
 - [Test Strategy Overview](../../testing-and-quality-gates/test-strategy-overview/): test scope and repository gates
 
 ## Validation Expectations

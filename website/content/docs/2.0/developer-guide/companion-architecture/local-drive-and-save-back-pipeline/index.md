@@ -98,13 +98,21 @@ Authentication also changes:
 - backend requests use the normal server-side auth model
 - companion requests use the pairing-derived HMAC model described in [Browser-to-Companion Trust Model](../browser-to-companion-trust-model/)
 
-The localhost bootstrap boundary also changed in an important way:
+Localhost bootstrap follows these rules:
 
 - production trust is established by exact-origin approval during pairing
 - development remains practical through loopback-origin allowance
 - browser-facing pairing management is limited to the current origin rather than arbitrary origin inventory or deletion
 
 That distinction is critical. Local-drive access is not "server auth pointed at localhost". It is a separate authenticated browser-to-desktop channel.
+
+## Directory-Index Policy Delivery
+
+Companion accepts resource policy from one locally approved backend owner, separately from browser pairing. An administrator starts delivery through a single-use grant; Companion retrieves the policy directly from that backend without redirects and validates its identity and revision.
+
+Updates serialize against source initialization. Failed delivery or persistence must preserve the last approved policy. Owner reset invalidates pending approvals. File APIs must protect policy and index storage from modification.
+
+See [Directory-Index Consistency](../../backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for shared index rules and [Manage Directory Search](../../../admin-guide/operations-and-maintenance/manage-directory-search/) for the administrator workflow.
 
 ## Local-Drive Watching and WebSockets
 

@@ -49,6 +49,7 @@ LIMIT_FIELDS = frozenset(
         "status_publication_ms",
         "event_coalescing_ms",
         "idle_release_seconds",
+        "minimum_full_pass_spacing_seconds",
         "max_pending_observations",
         "max_observation_bytes",
         "max_source_depth",

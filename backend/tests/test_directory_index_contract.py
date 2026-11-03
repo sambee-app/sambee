@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from smbprotocol.exceptions import SMBResponseException
@@ -35,6 +36,78 @@ def test_standard_sqlite_runtime_has_required_features():
     validate_sqlite_runtime()
 
 
+def test_candidate_progress_survives_an_interrupted_scan(index):
+    index.write_paths(["accepted"])
+    assert index.finish_generation(1)
+    candidate, selected = index.prepare_scan()
+    assert not selected
+    index.seed_scan(candidate)
+    index.write_scan_children(candidate, [("retained", True)])
+    index.finish_scan_parent(candidate, "")
+    before = index.search("accepted retained")
+    assert index.has_resumable_scan()
+    assert index.prepare_scan() == (candidate, False)
+    assert index.pending_scan_paths(candidate) == ["retained"]
+    assert index.search("accepted retained") == before
+
+
+def test_completed_scan_revalidation_is_bounded_and_preserves_rows(index):
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    index.write_paths(["accepted"])
+    assert index.finish_generation(1)
+    candidate, selected = index.prepare_scan()
+    assert not selected
+    index.seed_scan(candidate)
+    paths = [f"child-{number}" for number in range(ROW_BATCH_SIZE + 1)]
+    for offset in range(0, len(paths), ROW_BATCH_SIZE):
+        index.write_scan_children(candidate, [(path, True) for path in paths[offset : offset + ROW_BATCH_SIZE]])
+    for path in ["", *paths]:
+        index.finish_scan_parent(candidate, path)
+    before = index.search("accepted")
+    assert index.requeue_completed_scan_batch(candidate)
+    assert len(index.pending_scan_paths(candidate)) == ROW_BATCH_SIZE
+    assert not index.requeue_completed_scan_batch(candidate)
+    assert (
+        index._connection().execute("SELECT count(*) FROM scan_queue WHERE generation_id = ? AND processed = 0", (candidate,)).fetchone()[0]
+        == len(paths) + 1
+    )
+    assert not index.requeue_completed_scan_batch(candidate)
+    with pytest.raises(ValueError, match="no longer active"):
+        index.requeue_completed_scan_batch(1)
+    assert index.search("accepted") == before
+
+
+@pytest.mark.asyncio
+async def test_automatic_full_pass_spacing_cannot_be_bypassed_by_requests(sqlite_cache, monkeypatch):
+    from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+
+    cache = sqlite_cache
+    cache.index.write_paths(["retained"])
+    assert cache.index.finish_generation(1)
+    cache._source_available.set()
+    cache._next_full_pass_at = time.monotonic() + DIRECTORY_INDEX_CONTRACT.limits["minimum_full_pass_spacing_seconds"]
+    pool = AsyncMock()
+    monkeypatch.setattr("app.services.directory_cache.get_connection_pool", pool)
+    for _attempt in range(10):
+        await cache._run_rescan()
+    pool.assert_not_awaited()
+    assert cache.index.search("retained").directory_count == 1
+
+
+def test_reopened_backend_storage_retains_rows_but_not_verified_coverage(sqlite_cache):
+    cache = sqlite_cache
+    cache.index.write_paths(["retained"])
+    assert cache.index.finish_generation(1)
+    before = cache.index.search("retained")
+    cache.index.close()
+    cache._initialize_storage()
+    after = cache.index.search("retained")
+    assert after.results == before.results
+    assert after.coverage == "uncertain"
+    assert cache.coordinator.verification_required
+
+
 def test_directory_storage_events_do_not_expose_paths_or_sql_error_text(index, caplog):
     import logging
 
@@ -54,15 +127,35 @@ def test_directory_storage_events_do_not_expose_paths_or_sql_error_text(index, c
     events = {getattr(record, "event", None) for record in caplog.records}
     assert {
         "directory_storage_initialized",
-        "directory_transaction_completed",
         "directory_transaction_failed",
         "directory_generation_accepted",
         "directory_checkpoint_completed",
     } <= events
+    assert "directory_transaction_completed" not in events
     payload = " ".join(str(record.__dict__) for record in caplog.records)
     assert str(index.path) not in payload
     assert "private-directory-term" not in payload
     assert "private_sql_error_text" not in payload
+
+
+def test_idle_directory_transactions_are_quiet_but_slow_work_is_reported(index, caplog, monkeypatch):
+    import logging
+
+    from app.services.directory_index import transaction
+
+    connection = index._connection()
+    caplog.set_level(logging.DEBUG, logger="app.services.directory_index")
+    for _ in range(10):
+        with transaction(connection) as reader:
+            reader.execute("SELECT 1").fetchall()
+    assert not caplog.records
+    clock = iter((0.0, 2.0))
+    monkeypatch.setattr("app.services.directory_index.time.monotonic", lambda: next(clock))
+    with transaction(connection) as reader:
+        reader.execute("SELECT 1").fetchall()
+    assert len(caplog.records) == 1
+    assert caplog.records[0].event == "directory_transaction_slow"
+    assert caplog.records[0].duration_ms == 2000
 
 
 def test_directory_query_connection_is_read_only(index):
@@ -1683,6 +1776,8 @@ def smb_directory_server(monkeypatch):
         denied=set(),
         metadata_denied=set(),
         metadata_error=None,
+        volume_error=None,
+        volume_queries=0,
         on_query=lambda: None,
         connection=SimpleNamespace(server_guid=UUID(int=1)),
     )
@@ -1745,6 +1840,9 @@ def smb_directory_server(monkeypatch):
         if path in server.metadata_denied:
             raise server.metadata_error if server.metadata_error is not None else _smb_response_error(NtStatus.STATUS_ACCESS_DENIED)
         if isinstance(information, FileFsVolumeInformation):
+            server.volume_queries += 1
+            if server.volume_error is not None:
+                raise server.volume_error
             information["volume_serial_number"] = server.volumes.get(path, 1)
             information["volume_creation_time"] = datetime(2026, 1, 1, tzinfo=timezone.utc)
         else:
@@ -1815,6 +1913,53 @@ def test_smb_traversal_bounds_reject_before_open_and_preserve_exact_limits(smb_d
             root.close()
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_smb_root_replacement_binds_fresh_identity_across_sessions(smb_directory_server, changed):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    root.read("", lambda: None).close()
+    replacement = root.replacement()
+    smb_directory_server.tree.session.session_id += 1
+    smb_directory_server.tree.tree_connect_id += 1
+    if changed:
+        smb_directory_server.identifiers["base"] += 1
+    try:
+        replacement.read("", lambda: None).close()
+    finally:
+        replacement.close()
+
+
+@pytest.mark.asyncio
+async def test_directory_rebinding_waits_for_retained_workers(sqlite_cache, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.services.directory_cache import DirectoryScanCapacityError
+
+    original = sqlite_cache._connection_cache
+    replacement = {}
+    root = MagicMock()
+    replacement_root = MagicMock()
+    root.replacement.return_value = replacement_root
+    sqlite_cache._source_root = root
+    sqlite_cache._source_available.set()
+    monkeypatch.setattr("app.services.directory_cache.get_smb_connection_cache", lambda _source: replacement)
+    sqlite_cache._active_workers = 1
+    try:
+        with pytest.raises(DirectoryScanCapacityError):
+            await sqlite_cache._refresh_connection_generation()
+        root.replacement.assert_not_called()
+        assert sqlite_cache._connection_cache is original
+    finally:
+        sqlite_cache._active_workers = 0
+    await sqlite_cache._refresh_connection_generation()
+    assert sqlite_cache._connection_cache is replacement
+    assert sqlite_cache._source_root is replacement_root
+    assert not sqlite_cache._source_available.is_set()
+    assert sqlite_cache.coordinator.verification_required
+    root.replacement.assert_called_once()
+
+
 def test_smb_root_holds_ancestors_and_checks_exact_children(smb_directory_server):
     from app.services.directory_traversal import DirectoryTraversalError, SmbDirectoryRoot
 
@@ -1838,7 +1983,7 @@ def test_smb_root_holds_ancestors_and_checks_exact_children(smb_directory_server
     assert all(not handle.connected for handle in smb_directory_server.handles)
 
 
-@pytest.mark.parametrize("replacement", ["file", "volume", "server", "session", "tree", "name"])
+@pytest.mark.parametrize("replacement", ["file", "session", "tree", "name"])
 def test_smb_root_rejects_replaced_bindings(smb_directory_server, replacement):
     from uuid import UUID
 
@@ -1865,7 +2010,7 @@ def test_smb_root_rejects_replaced_bindings(smb_directory_server, replacement):
         root.close()
 
 
-@pytest.mark.parametrize("unsafe", ["dfs", "zero_id", "zero_volume", "redirected_parent", "nested_volume"])
+@pytest.mark.parametrize("unsafe", ["dfs", "redirected_parent"])
 def test_smb_root_refuses_unverified_parent_sources(smb_directory_server, unsafe):
     from app.services.directory_traversal import DirectoryTraversalError, SmbDirectoryRoot
 
@@ -1881,6 +2026,45 @@ def test_smb_root_refuses_unverified_parent_sources(smb_directory_server, unsafe
         smb_directory_server.volumes["base\\parent"] = 2
     with pytest.raises(DirectoryTraversalError):
         SmbDirectoryRoot(r"\\host\share\base").read("parent", lambda: None)
+
+
+@pytest.mark.parametrize("file_id", [0, 0xFFFFFFFFFFFFFFFF, 1])
+def test_smb_root_accepts_unavailable_ids_and_inconsistent_volume_metadata(smb_directory_server, file_id):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    smb_directory_server.identifiers["base"] = file_id
+    smb_directory_server.volumes["base"] = 0
+    smb_directory_server.volumes["base\\parent"] = 2
+    smb_directory_server.tree.session.session_id = 0
+    smb_directory_server.tree.tree_connect_id = 0
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        read = root.read("parent", lambda: None)
+        try:
+            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            smb_directory_server.volumes["base\\parent"] += 1
+            read.verify()
+        finally:
+            read.close()
+    finally:
+        root.close()
+
+
+def test_smb_optional_volume_query_does_not_prevent_safe_traversal(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    smb_directory_server.volume_error = _smb_response_error(NtStatus.STATUS_NOT_SUPPORTED)
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        read = root.read("parent", lambda: None)
+        try:
+            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            read.verify()
+            assert smb_directory_server.volume_queries == 1
+        finally:
+            read.close()
+    finally:
+        root.close()
 
 
 @pytest.mark.parametrize("lookup", [False, True])
@@ -1937,11 +2121,8 @@ def test_idle_source_queries_wait_for_handle_bound_revalidation(sqlite_cache, sm
         if replaced:
             with pytest.raises(DirectorySourceUnavailableError):
                 cache._probe_source_root()
-            with pytest.raises(DirectorySourceUnavailableError):
-                cache.search_index("Exact")
-        else:
-            cache._probe_source_root()
-            assert cache.search_index("Exact") == accepted
+        cache._probe_source_root()
+        assert cache.search_index("Exact") == accepted
         assert cache.index.search("Exact") == accepted
     finally:
         cache.coordinator.end_read(token)
@@ -1974,6 +2155,140 @@ def test_smb_reconciliation_worker_prunes_missing_subtrees_and_discovers_childre
     sqlite_cache._request_stop()
     sqlite_cache._finish_stop()
     assert all(not handle.connected for handle in smb_directory_server.handles)
+
+
+@pytest.fixture
+def smb_source_cache(sqlite_cache, smb_directory_server):
+    from app.services.directory_cache import SQLiteConnectionDirectoryCache
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    sqlite_cache._source_root = SmbDirectoryRoot(r"\\host\share\base")
+    sqlite_cache._open_source_read = SQLiteConnectionDirectoryCache._open_source_read.__get__(sqlite_cache)
+    try:
+        yield sqlite_cache
+    finally:
+        sqlite_cache._request_stop()
+        sqlite_cache._finish_stop()
+
+
+def test_reconnected_candidate_revalidates_completed_branches(smb_source_cache, smb_directory_server, monkeypatch):
+    cache = smb_source_cache
+    server = smb_directory_server
+    server.directories["base"] = [("old", 16), ("later", 16)]
+    server.directories["base\\old"] = []
+    server.directories["base\\later"] = []
+    cache.index.write_paths(["accepted"])
+    assert cache.index.finish_generation(1)
+    scan_parent = cache._scan_parent
+
+    def interrupt(generation, parent, **kwargs):
+        if parent == "later":
+            raise ConnectionError("Injected disconnection after a completed branch.")
+        return scan_parent(generation, parent, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cache, "_scan_parent", interrupt)
+        with pytest.raises(ConnectionError):
+            cache._scan_disk_queue()
+    candidate, selected = cache.index.prepare_scan()
+    assert not selected
+    assert cache.index.pending_scan_paths(candidate) == ["later"]
+    server.directories["base"] = [("later", 16), ("new", 16)]
+    del server.directories["base\\old"]
+    server.directories["base\\new"] = []
+    server.tree.session.session_id += 1
+    cache.coordinator.invalidate()
+    cache._source_root = cache._source_root.replacement()
+    cache._probe_source_root()
+    cache._scan_disk_queue()
+    result = cache.index.search("old new later")
+    assert {row.path for row in result.results} == {"new", "later"}
+    assert result.coverage == "complete"
+    assert result.last_verified_at_ms is not None
+    assert cache.index._connection().execute("SELECT selected_generation FROM source_metadata").fetchone()[0] == candidate
+
+
+@pytest.mark.parametrize("reconcile", [False, True])
+@pytest.mark.parametrize("parent", ["parent", "parent/old"])
+@pytest.mark.parametrize("missing_status", [None, NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, NtStatus.STATUS_NOT_A_DIRECTORY])
+def test_missing_queued_smb_parent_recovers_without_watcher_hint(
+    smb_source_cache, smb_directory_server, monkeypatch, reconcile, parent, missing_status
+):
+    from app.services import directory_traversal
+
+    sqlite_cache = smb_source_cache
+    server = smb_directory_server
+    sqlite_cache.index.write_paths(["parent", "parent/old", "outside"])
+    assert sqlite_cache.index.finish_generation(1)
+    before = sqlite_cache.index.status()
+    sqlite_cache._probe_source_root()
+    sqlite_cache.index.queue_reconciliation_parent(1, parent)
+    server.directories["base"] = [("outside", 16)]
+    server.directories["base\\outside"] = []
+    del server.directories["base\\parent"]
+    original_create = directory_traversal.Open.create
+
+    def create(handle, *args):
+        if missing_status is not None and handle.path.startswith("base\\parent"):
+            raise _smb_response_error(missing_status)
+        return original_create(handle, *args)
+
+    monkeypatch.setattr(directory_traversal.Open, "create", create)
+    if reconcile:
+        sqlite_cache._reconcile_disk_queue()
+    else:
+        sqlite_cache._scan_disk_queue()
+    after = sqlite_cache.index.search("parent outside")
+    assert [row.path for row in after.results] == ["outside"]
+    assert sqlite_cache.index.reconciliation_generation() is None
+    assert sqlite_cache._source_available.is_set()
+    assert not sqlite_cache.coordinator._producers
+    assert sqlite_cache._failure_retry_delay == 0
+    if reconcile:
+        assert after.last_verified_at_ms == before.last_verified_at_ms
+        sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.index.status().coverage == "complete"
+
+
+def test_missing_smb_parent_recovery_does_not_hide_storage_failure(smb_source_cache, smb_directory_server, monkeypatch):
+    sqlite_cache = smb_source_cache
+    smb_directory_server.directories["base\\parent"] = []
+    sqlite_cache.index.write_paths(["parent", "parent/old"])
+    assert sqlite_cache.index.finish_generation(1)
+    sqlite_cache.index.queue_reconciliation_parent(1, "parent")
+    before = sqlite_cache.index.status()
+    original = FileNotFoundError("Injected local index failure.")
+    monkeypatch.setattr(sqlite_cache, "_prune_missing_children", Mock(side_effect=original))
+    with pytest.raises(FileNotFoundError) as caught:
+        sqlite_cache._reconcile_disk_queue()
+    assert caught.value is original
+    assert sqlite_cache.index.status() == before
+    assert sqlite_cache.index.pending_scan_paths(1) == ["parent"]
+
+
+def test_missing_smb_parent_recovery_rejects_stale_ancestor(smb_source_cache, smb_directory_server, monkeypatch):
+    from app.services.directory_cache import ScanObservationInvalidated
+    from app.services.directory_traversal import SmbDirectoryRead
+
+    sqlite_cache = smb_source_cache
+    sqlite_cache.index.write_paths(["parent", "parent/old"])
+    assert sqlite_cache.index.finish_generation(1)
+    sqlite_cache.index.queue_reconciliation_parent(1, "parent")
+    smb_directory_server.directories["base"] = []
+    del smb_directory_server.directories["base\\parent"]
+    before = sqlite_cache.index.status()
+    lookup = SmbDirectoryRead.has_directory_child
+
+    def invalidate(read, name):
+        result = lookup(read, name)
+        sqlite_cache.coordinator.invalidate()
+        return result
+
+    monkeypatch.setattr(SmbDirectoryRead, "has_directory_child", invalidate)
+    with pytest.raises(ScanObservationInvalidated):
+        sqlite_cache._reconcile_disk_queue()
+    assert sqlite_cache.index.status() == before
+    assert sqlite_cache.index.pending_scan_paths(1) == ["parent"]
 
 
 @pytest.mark.asyncio
@@ -2020,7 +2335,7 @@ async def test_recursive_smb_mutations_reconcile_partial_results(sqlite_cache, s
         yield
 
     async def pool():
-        return SimpleNamespace(get_connection=connected)
+        return SimpleNamespace(get_connection=connected, connection_diagnostics=lambda _cache: {}, generation_aborting=lambda _cache: False)
 
     def scan(path, **kwargs):
         relative = "\\".join(PureWindowsPath(path).parts[1:])
@@ -2096,7 +2411,7 @@ def test_smb_worker_root_replacement_hides_results_without_deleting_accepted_row
     before = sqlite_cache.index.search("parent")
     sqlite_cache.index.queue_reconciliation_parent(1, "parent")
     smb_directory_server.identifiers["base"] += 1
-    with pytest.raises(DirectorySourceUnavailableError, match="identity changed"):
+    with pytest.raises(DirectorySourceUnavailableError, match="temporarily unavailable"):
         sqlite_cache._reconcile_disk_queue()
     assert sqlite_cache.index.search("parent") == before
     assert sqlite_cache.index.reconciliation_generation() == 1
@@ -2275,15 +2590,18 @@ def test_backend_capture_refusal_preserves_selected_rows_and_freshness(sqlite_ca
     assert not sqlite_cache.coordinator._producers
 
 
-def test_backend_source_catalogues_are_session_bound_until_durable_identity_is_qualified():
+def test_backend_source_catalogues_use_boundary_settings_not_runtime_or_credentials():
     from app.services.directory_cache import SQLiteConnectionDirectoryCache
 
     first = SQLiteConnectionDirectoryCache("fixture", "fixture", "share", "user", "password")
-    second = SQLiteConnectionDirectoryCache("fixture", "fixture", "share", "user", "password")
+    second = SQLiteConnectionDirectoryCache("fixture", "fixture", "share", "user", "changed-password", source_revision="changed-time")
     try:
         assert first._persist_path.parent == second._persist_path.parent
-        assert first._persist_path != second._persist_path
-        assert first._source_identity["runtime_session"] != second._source_identity["runtime_session"]
+        assert first._persist_path == second._persist_path
+        assert first._source_identity == second._source_identity
+        assert first._diagnostic_generation != second._diagnostic_generation
+        assert "runtime_session" not in first._source_identity
+        assert "revision" not in first._source_identity
         assert first._source_root._binding is None
         assert second._source_root._binding is None
         assert first.search_index("retained").directory_count == 0
@@ -2457,13 +2775,16 @@ def test_root_read_failure_blocks_retained_results_but_descendant_failure_does_n
 
     sqlite_cache.index.write_paths(["accepted"])
 
-    def missing(*args, **kwargs):
-        raise FileNotFoundError("Injected missing source.")
+    def missing(path, **kwargs):
+        if path.endswith("\\descendant"):
+            raise FileNotFoundError("Injected missing source descendant.")
+        return (entry for entry in ())
 
     monkeypatch.setattr("smbclient.scandir", missing)
     with pytest.raises(FileNotFoundError):
         sqlite_cache._scan_parent(1, "descendant")
     assert sqlite_cache.search_index("accepted").total_matches == 1
+    monkeypatch.setattr("smbclient.scandir", Mock(side_effect=FileNotFoundError("Injected missing source root.")))
     with pytest.raises(DirectorySourceUnavailableError, match="root is unavailable"):
         sqlite_cache._scan_parent(1, "")
     with pytest.raises(DirectorySourceUnavailableError, match="root is unavailable"):
@@ -2687,7 +3008,7 @@ async def test_pool_entry_failure_marks_root_unavailable_without_discarding_rows
         yield
 
     async def pool():
-        return SimpleNamespace(get_connection=unavailable)
+        return SimpleNamespace(get_connection=unavailable, invalidate_connection_cache=AsyncMock())
 
     monkeypatch.setattr("app.services.directory_cache.get_connection_pool", pool)
     if reconcile:
@@ -2724,6 +3045,105 @@ async def test_scan_admission_refusal_preserves_known_root_and_retries(sqlite_ca
         assert before < sqlite_cache._resource_retry_at <= monotonic() + sqlite_cache.policy.degraded_verification_seconds
     finally:
         sqlite_cache._manager_scan_slots.release()
+
+
+@pytest.mark.asyncio
+async def test_stale_rescan_preserves_root_and_uses_bounded_observation_retry(sqlite_cache, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from app.services.directory_cache import OBSERVATION_RETRY_SECONDS, ScanObservationInvalidated
+
+    @asynccontextmanager
+    async def connected(**kwargs):
+        yield
+
+    pool = SimpleNamespace(get_connection=connected, invalidate_connection_cache=AsyncMock())
+    monkeypatch.setattr("app.services.directory_cache.get_connection_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(sqlite_cache, "_refresh_connection_generation", AsyncMock())
+    probe = Mock(side_effect=ScanObservationInvalidated("Injected watcher startup."))
+    monkeypatch.setattr(sqlite_cache, "_probe_source_root", probe)
+    clock = SimpleNamespace(monotonic=lambda: 1000.0)
+    monkeypatch.setattr("app.services.directory_cache.time", clock)
+
+    await sqlite_cache._run_rescan()
+    assert sqlite_cache._source_available.is_set()
+    pool.invalidate_connection_cache.assert_not_awaited()
+    assert sqlite_cache._failure_retry_delay == 0
+    assert sqlite_cache._resource_retry_at == 0
+    assert sqlite_cache._verification_retry_at == 1000.0 + OBSERVATION_RETRY_SECONDS
+    assert not sqlite_cache._verification_due(1000.0, now=1000.0)
+    assert sqlite_cache._verification_due(1000.0, now=sqlite_cache._verification_retry_at)
+    await sqlite_cache._run_rescan()
+    assert probe.call_count == 1
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_watcher_startup_uncertainty_is_drained_before_initial_generation(sqlite_cache, monkeypatch, partial):
+    from smbclient._os import FileAttributes
+
+    def scan(path, **kwargs):
+        if path == sqlite_cache._smb_base_path:
+            yield SimpleNamespace(name="visible", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+            if partial:
+                yield SimpleNamespace(
+                    name="redirect",
+                    smb_info=SimpleNamespace(
+                        file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY | FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT
+                    ),
+                )
+
+    monkeypatch.setattr("smbclient.scandir", scan)
+    sqlite_cache.coordinator.invalidate()
+    sqlite_cache._watcher_ready.set()
+    sqlite_cache._scan_disk_queue()
+    response = sqlite_cache.index.status()
+    assert response.directory_count == 1
+    assert sqlite_cache.index.search("visible").total_matches == 1
+    assert response.coverage == ("partial" if partial else "complete")
+    assert response.issue_count == int(partial)
+    assert (response.last_verified_at_ms is None) == partial
+    assert sqlite_cache.coordinator.verification_required == partial
+    assert (sqlite_cache.scan_error is not None) == partial
+
+
+@pytest.mark.parametrize("observed", ["empty", "rows", "queue", "issue"])
+def test_startup_event_loss_only_restarts_unobserved_empty_generation(index, observed):
+    index.mark_uncertain()
+    if observed == "rows":
+        index.write_paths(["retained"])
+    elif observed == "queue":
+        index.seed_scan(1)
+    elif observed == "issue":
+        index.record_access_denied(1)
+    generation, selected = index.prepare_scan()
+    assert selected == (observed == "empty")
+    response = index.status()
+    assert response.last_verified_at_ms is None
+    if selected:
+        assert generation == 1
+        assert response.coverage == "partial"
+        assert response.issue_count == 0
+    else:
+        assert generation != 1
+        assert response.coverage == "uncertain"
+        assert response.issue_count >= 1
+
+
+def test_incomplete_generation_is_not_reported_as_verified(sqlite_cache, monkeypatch):
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    finish = sqlite_cache.index.finish_generation
+
+    def incomplete(generation, **kwargs):
+        sqlite_cache.index.record_access_denied(generation)
+        return finish(generation, **kwargs)
+
+    monkeypatch.setattr(sqlite_cache.index, "finish_generation", incomplete)
+    sqlite_cache._watcher_ready.set()
+    sqlite_cache._scan_disk_queue()
+    assert "coverage is incomplete" in sqlite_cache.scan_error
+    assert sqlite_cache.index.status().last_verified_at_ms is None
+    assert sqlite_cache.last_scan_time is None
+    assert sqlite_cache.coordinator.verification_required
 
 
 def test_sqlite_source_policy_applies_at_connection_boundaries(sqlite_cache):
@@ -2764,6 +3184,7 @@ def test_periodic_verification_jitter_preserves_deadlines_and_retry_priority(sql
     from app.services.directory_cache import PERIODIC_VERIFICATION_JITTER_PERCENT
 
     sqlite_cache.coordinator.verification_required = degraded
+    sqlite_cache._watcher_ready.set()
     interval = sqlite_cache.policy.degraded_verification_seconds if degraded else sqlite_cache.policy.healthy_verification_seconds
     verified_at = 1000.0
     deadlines = set()
@@ -2833,7 +3254,7 @@ async def test_failed_root_retries_back_off_and_success_resets_delay(sqlite_cach
         yield
 
     async def pool():
-        return SimpleNamespace(get_connection=connection)
+        return SimpleNamespace(get_connection=connection, invalidate_connection_cache=AsyncMock())
 
     monkeypatch.setattr("app.services.directory_cache.get_connection_pool", pool)
     await sqlite_cache._run_rescan()
@@ -2867,8 +3288,9 @@ def test_root_unavailable_api_returns_specific_service_error(sqlite_cache, monke
     monkeypatch.setattr("app.services.directory_cache.get_directory_cache_manager", lambda: SimpleNamespace(get_or_create_cache=get_source))
     response = client.get(f"/api/browse/{test_connection.id}/directories", headers=auth_headers_user, params={"q": "accepted"})
     assert response.status_code == 503
-    assert "root is unavailable" in response.json()["detail"]
-    assert "Restore source access" in response.json()["detail"]
+    assert "root is unavailable" in response.json()["detail"]["message"]
+    assert response.json()["detail"]["recoverable"] is True
+    assert "Restore source access" in response.json()["detail"]["message"]
 
 
 def test_sqlite_source_warm_search_does_not_traverse(sqlite_cache, monkeypatch):
@@ -3144,6 +3566,23 @@ def test_sqlite_source_denied_candidate_preserves_accepted_rows_and_recovers(sql
     assert not sqlite_cache.coordinator.verification_required
 
 
+@pytest.mark.parametrize("parent", ["", "parent"])
+def test_stale_source_call_preserves_source_availability(sqlite_cache, parent):
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    original = ScanObservationInvalidated("Injected stale source observation.")
+
+    def stale():
+        raise original
+
+    with pytest.raises(ScanObservationInvalidated) as caught:
+        sqlite_cache._source_call(parent, stale)
+    assert caught.value is original
+    assert sqlite_cache._source_available.is_set()
+    assert sqlite_cache._source_probe_completed.is_set()
+    assert not sqlite_cache._root_reading.is_set()
+
+
 def test_sqlite_source_root_permission_denial_blocks_results(sqlite_cache, monkeypatch):
     from app.services.directory_cache import DirectorySourceUnavailableError
 
@@ -3337,7 +3776,7 @@ async def test_sqlite_source_stalled_read_retains_worker_and_pool_ownership(sqli
 
     release = threading.Event()
     started = threading.Event()
-    pool = SimpleNamespace(retain_connection_until_future_complete=AsyncMock())
+    pool = SimpleNamespace(retain_connection_until_future_complete=AsyncMock(), invalidate_connection_cache=AsyncMock())
 
     def blocked():
         started.set()
@@ -3351,6 +3790,7 @@ async def test_sqlite_source_stalled_read_retains_worker_and_pool_ownership(sqli
         assert started.is_set()
         assert sqlite_cache._active_workers == 1
         pool.retain_connection_until_future_complete.assert_awaited_once()
+        pool.invalidate_connection_cache.assert_not_awaited()
         future = pool.retain_connection_until_future_complete.call_args.args[1]
         assert not future.done()
         assert sqlite_cache.coordinator.verification_required
@@ -3624,6 +4064,7 @@ def test_accepted_parent_reconciliation_headroom_refusal_retains_work(index, mon
 @pytest.mark.parametrize("abandon", ["cancel", "timeout"])
 async def test_abandoned_smb_mutation_requeues_only_after_actual_worker_exit(sqlite_cache, monkeypatch, abandon):
     from app.storage.smb import SMBBackend
+    from app.storage.smb_errors import SMBMutationUncertain
 
     backend = SMBBackend(host="fixture", share_name="share", username="user", password="password", connection_context_key="fixture")
     manager = SimpleNamespace(get_cache=lambda _connection_id: sqlite_cache)
@@ -3644,7 +4085,11 @@ async def test_abandoned_smb_mutation_requeues_only_after_actual_worker_exit(sql
         return None
 
     async def pool():
-        return SimpleNamespace(retain_connection_until_future_complete=retain, invalidate_connection=invalidate)
+        return SimpleNamespace(
+            retain_connection_until_future_complete=retain,
+            invalidate_connection=invalidate,
+            connection_diagnostics=lambda _cache: {},
+        )
 
     async def timeout(future, **kwargs):
         assert await asyncio.to_thread(entered.wait, 5)
@@ -3668,7 +4113,7 @@ async def test_abandoned_smb_mutation_requeues_only_after_actual_worker_exit(sql
         token = sqlite_cache.coordinator.begin_read("parent")
         if abandon == "cancel":
             task.cancel()
-        with pytest.raises(asyncio.CancelledError if abandon == "cancel" else TimeoutError):
+        with pytest.raises(asyncio.CancelledError if abandon == "cancel" else SMBMutationUncertain):
             await task
         assert len(retained) == 1
         assert not retained[0].done()
@@ -3778,7 +4223,7 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
         yield
 
     async def pool():
-        return SimpleNamespace(get_connection=connected)
+        return SimpleNamespace(get_connection=connected, connection_diagnostics=lambda _cache: {}, generation_aborting=lambda _cache: False)
 
     def create(path, **kwargs):
         dispatched.append(path)
@@ -4820,6 +5265,7 @@ def test_watcher_shutdown_does_not_report_observation_loss(sqlite_cache, monkeyp
     assert sqlite_cache.index.finish_generation(1)
     before = sqlite_cache.index.search("accepted")
     sqlite_cache.coordinator.verification_required = False
+    sqlite_cache._watcher_ready.set()
 
     def wait():
         sqlite_cache._stop_event.set()
@@ -4866,7 +5312,11 @@ def test_sqlite_source_watcher_gap_invalidates_scan_and_coverage(sqlite_cache, m
     assert recovered.coverage == "complete"
     assert recovered.issue_count == 0
     assert not sqlite_cache.coordinator.verification_required
+    assert "monitoring is unavailable" in sqlite_cache.scan_error
+    sqlite_cache._watcher_ready.set()
+    sqlite_cache._scan_disk_queue()
     assert sqlite_cache.scan_error is None
+    recovered = sqlite_cache.search_index("accepted")
     sqlite_cache._observation_lost()
     sqlite_cache.coordinator.apply_pending()
     lost_again = sqlite_cache.search_index("accepted")

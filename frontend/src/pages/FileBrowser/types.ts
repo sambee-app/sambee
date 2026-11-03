@@ -153,6 +153,7 @@ export interface UseFileBrowserPaneConfig {
 
   /** Recent-history and directory-navigation service composed at the page boundary. */
   history?: BrowserHistoryService;
+  sourceRevision?: number;
 
   /** Link-target metadata service composed at the page boundary. */
   linkTargets?: BrowserLinkTargetService;

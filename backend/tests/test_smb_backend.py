@@ -42,6 +42,7 @@ from app.services.archive.target_write import TargetWriteFailure
 from app.services.content_transfer import SourceDeleteError, SourceDeletionOutcomeUnknown
 from app.services.cross_connection import cross_connection_move
 from app.storage.smb import SMB_FILETIME_TICKS_PER_SECOND, SMBBackend
+from app.storage.smb_errors import SMBMutationUncertain
 
 _LIVE_SMB_ENVIRONMENT_VARIABLES = ("TEST_SMB_HOST", "TEST_SMB_SHARE", "TEST_SMB_USERNAME", "TEST_SMB_PASSWORD")
 _LIVE_SMB_ENABLED = all(os.environ.get(name) for name in _LIVE_SMB_ENVIRONMENT_VARIABLES)
@@ -100,6 +101,8 @@ def mock_smb_pool(request: pytest.FixtureRequest):
         mock_pool_instance = MagicMock()
         mock_pool_instance.get_connection = mock_get_connection
         mock_pool_instance.retain_connection_until_future_complete = AsyncMock()
+        mock_pool_instance.invalidate_connection = AsyncMock()
+        mock_pool_instance.generation_aborting.return_value = False
         mock_pool.return_value = mock_pool_instance
         yield mock_pool
 
@@ -1299,6 +1302,93 @@ class TestRandomAccessReading:
     """Test operation-scoped SMB readers used by archive operations."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("cancelled", [False, True])
+    @pytest.mark.parametrize("late_failure", [False, True])
+    async def test_abandoned_read_keeps_handle_until_worker_exits(self, cancelled, late_failure):
+        started = Event()
+        finish = Event()
+        released = asyncio.Event()
+        handle = MagicMock(spec=["close", "seek", "read"])
+
+        @asynccontextmanager
+        async def lease(**_kwargs):
+            try:
+                yield
+            finally:
+                released.set()
+
+        def read(_length):
+            started.set()
+            assert finish.wait(2)
+            if late_failure:
+                raise OSError("read failed after caller left")
+            return b"data"
+
+        handle.read.side_effect = read
+        pool = MagicMock()
+        pool.get_connection = lease
+        pool.invalidate_connection = AsyncMock()
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch("app.storage.smb.smbclient.open_file", return_value=handle),
+            patch("app.storage.smb.SMB_READ_CHUNK_TIMEOUT_SECONDS", 2 if cancelled else 0.01),
+            patch("app.storage.smb.SMB_FILE_CLOSE_TIMEOUT_SECONDS", 0.01),
+        ):
+            reader = await backend.open_random_access_reader("backup.zip")
+            try:
+                reading = asyncio.create_task(reader.read_at(0, 4))
+                assert await asyncio.to_thread(started.wait, 2)
+                if cancelled:
+                    reading.cancel()
+                with pytest.raises(asyncio.CancelledError if cancelled else TimeoutError):
+                    await reading
+                with pytest.raises(ValueError, match="closed"):
+                    await reader.read_at(0, 4)
+                with pytest.raises(TimeoutError):
+                    await reader.close()
+                handle.close.assert_not_called()
+                assert not released.is_set()
+            finally:
+                finish.set()
+            await asyncio.wait_for(released.wait(), 2)
+            await reader.close()
+        handle.close.assert_called_once()
+        assert pool.invalidate_connection.await_count == (0 if cancelled else 1)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reader_method", ["open_random_access_reader", "open_move_source_reader"])
+    async def test_close_failure_releases_lease_and_reports_once(self, reader_method):
+        released = asyncio.Event()
+        handle = MagicMock(spec=["close", "seek", "read", "fd"])
+        handle.close.side_effect = OSError("private close failure")
+
+        @asynccontextmanager
+        async def lease(**_kwargs):
+            try:
+                yield
+            finally:
+                released.set()
+
+        pool = MagicMock()
+        pool.get_connection = lease
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.get_connection_pool", new_callable=AsyncMock, return_value=pool),
+            patch("app.storage.smb.smbclient.open_file", return_value=handle),
+            patch("app.storage.smb.logger.warning") as warning,
+        ):
+            reader = await getattr(backend, reader_method)("private-source")
+            for _attempt in range(2):
+                with pytest.raises(OSError, match="private close failure"):
+                    await reader.close()
+        assert released.is_set()
+        handle.close.assert_called_once()
+        failures = [call for call in warning.call_args_list if call.kwargs.get("extra", {}).get("event") == "smb_cleanup_failed"]
+        assert len(failures) == 1
+        assert "private" not in failures[0].args[0]
+
+    @pytest.mark.asyncio
     @patch("app.storage.smb.smbclient.open_file")
     async def test_random_reader_reads_at_offset_and_closes(self, mock_open):
         mock_file = MagicMock()
@@ -1431,11 +1521,15 @@ class TestRandomAccessReading:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("cancelled", [False, True])
-    async def test_timed_out_move_open_disposes_late_handle_and_releases_lease(self, cancelled):
+    @pytest.mark.parametrize("reader_method", ["open_move_source_reader", "open_random_access_reader"])
+    @pytest.mark.parametrize("late_failure", [None, "open", "close"])
+    async def test_timed_out_move_open_disposes_late_handle_and_releases_lease(self, cancelled, reader_method, late_failure):
         started = Event()
         finish = Event()
         released = asyncio.Event()
         handle = MagicMock(spec=["close", "fd", "seek", "read"])
+        if late_failure == "close":
+            handle.close.side_effect = OSError("private close failure")
 
         @asynccontextmanager
         async def lease(**_kwargs):
@@ -1447,33 +1541,43 @@ class TestRandomAccessReading:
         def open_handle(*_args, **_kwargs):
             started.set()
             assert finish.wait(2)
+            if late_failure == "open":
+                raise OSError("private open failure")
             return handle
 
         pool = MagicMock()
         pool.get_connection = lease
+        pool.invalidate_connection = AsyncMock()
         backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
         with (
             patch("app.storage.smb.get_connection_pool", new_callable=AsyncMock, return_value=pool),
             patch("app.storage.smb.smbclient.open_file", side_effect=open_handle),
             patch("app.storage.smb.SMB_FILE_OPEN_TIMEOUT_SECONDS", 2 if cancelled else 0.01),
+            patch("app.storage.smb.logger.warning") as warning,
         ):
             try:
                 if cancelled:
-                    opening = asyncio.create_task(backend.open_move_source_reader("source.txt"))
+                    opening = asyncio.create_task(getattr(backend, reader_method)("source.txt"))
                     assert await asyncio.to_thread(started.wait, 2)
                     opening.cancel()
                     with pytest.raises(asyncio.CancelledError):
                         await opening
                 else:
                     with pytest.raises(TimeoutError):
-                        await backend.open_move_source_reader("source.txt")
+                        await getattr(backend, reader_method)("source.txt")
                 assert started.is_set()
                 assert not released.is_set()
                 handle.close.assert_not_called()
+                assert pool.invalidate_connection.await_count == (0 if cancelled else 1)
+                if not cancelled:
+                    assert pool.invalidate_connection.call_args.kwargs["abort"] is True
             finally:
                 finish.set()
             await asyncio.wait_for(released.wait(), 2)
-        handle.close.assert_called_once()
+            await asyncio.sleep(0)
+        assert handle.close.call_count == (0 if late_failure == "open" else 1)
+        failures = [call for call in warning.call_args_list if call.kwargs.get("extra", {}).get("event") == "smb_cleanup_failed"]
+        assert len(failures) == (0 if late_failure is None else 1)
 
     @pytest.mark.asyncio
     async def test_timed_out_delete_closes_only_after_dispatch_settles(self):
@@ -2251,7 +2355,7 @@ class TestDeleteItem:
 
     @pytest.mark.asyncio
     async def test_delete_timeout_raises(self):
-        """Test that a slow delete operation raises TimeoutError without starting a worker."""
+        """A delete deadline leaves the dispatched change uncertain."""
         backend = SMBBackend(
             host="server.local",
             share_name="share",
@@ -2262,10 +2366,10 @@ class TestDeleteItem:
 
         with (
             patch("app.storage.smb.asyncio.get_running_loop") as mock_get_running_loop,
-            patch("app.storage.smb.asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+            patch("app.storage.smb.wait_for_worker", side_effect=asyncio.TimeoutError()),
         ):
             mock_get_running_loop.return_value.run_in_executor.return_value = pending_operation
-            with pytest.raises(TimeoutError, match="timed out"):
+            with pytest.raises(SMBMutationUncertain, match="Check the source before retrying"):
                 await backend.delete_item("/big-file.zip")
 
         mock_get_running_loop.return_value.run_in_executor.assert_called_once()
@@ -2290,6 +2394,7 @@ class TestDeleteItem:
                     operation_name="test operation",
                     smb_path=r"\\server.local\share\file.txt",
                     timeout_seconds=0.001,
+                    diagnostics={"source_id": "opaque-source", "generation_id": "retired-generation", "retained_worker_count": 1},
                 )
 
             assert started.wait(timeout=1.0)
@@ -2298,10 +2403,16 @@ class TestDeleteItem:
                 await operation_future
             await asyncio.sleep(0)
 
-        mock_warning.assert_any_call(
-            "SMB %s for '%s' failed after timing out",
-            "test operation",
-            r"\\server.local\share\file.txt",
+        mock_warning.assert_called_once_with(
+            "SMB operation failed after caller exit.",
+            extra={
+                "source_id": "opaque-source",
+                "generation_id": "retired-generation",
+                "retained_worker_count": 1,
+                "operation": "test_operation",
+                "stage": "late_completion",
+                "event": "smb_operation_late_failure",
+            },
             exc_info=True,
         )
 
@@ -2427,7 +2538,7 @@ class TestRenameItem:
     @pytest.mark.asyncio
     @patch("app.storage.smb.smbclient.rename")
     async def test_rename_timeout_raises(self, mock_rename):
-        """Test that a slow rename operation raises TimeoutError."""
+        """A rename deadline must not invite automatic replay."""
         import asyncio
 
         backend = SMBBackend(
@@ -2437,8 +2548,8 @@ class TestRenameItem:
             password="pass",
         )
 
-        with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()):
-            with pytest.raises(TimeoutError, match="timed out"):
+        with patch("app.storage.smb.wait_for_worker", side_effect=asyncio.TimeoutError()):
+            with pytest.raises(SMBMutationUncertain, match="Check the source before retrying"):
                 await backend.rename_item("/document.txt", "renamed.txt")
 
     @pytest.mark.asyncio

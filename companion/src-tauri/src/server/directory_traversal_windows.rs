@@ -39,21 +39,32 @@ fn query<T>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS, output: &mut T) -> Re
 fn identity(file: &File) -> Result<NativeIdentity, IndexError> {
     let mut information = FILE_ID_INFO::default();
     query(file, FileIdInfo, &mut information)?;
+    Ok(identity_information(&information))
+}
+
+fn identity_information(information: &FILE_ID_INFO) -> NativeIdentity {
     let bytes = information.FileId.Identifier;
-    if information.VolumeSerialNumber == 0 || bytes == [0; size_of::<u128>()] {
-        return Err(IndexError::Invalid(
-            "Directory volume identity is unavailable. Use a supported local filesystem.",
-        ));
-    }
     let mut low = [0; FILE_ID_HALF_BYTES];
     let mut high = [0; FILE_ID_HALF_BYTES];
     low.copy_from_slice(&bytes[..FILE_ID_HALF_BYTES]);
     high.copy_from_slice(&bytes[FILE_ID_HALF_BYTES..]);
-    Ok(NativeIdentity {
+    NativeIdentity {
         device: information.VolumeSerialNumber,
         inode: u64::from_le_bytes(low),
         mount: u64::from_le_bytes(high),
-    })
+    }
+}
+
+#[test]
+fn zero_volume_serial_and_full_file_id_are_valid_native_values() {
+    let mut information = FILE_ID_INFO::default();
+    assert_eq!(identity_information(&information).device, 0);
+    information.VolumeSerialNumber = u64::from(u32::MAX) + 1;
+    information.FileId.Identifier = [u8::MAX; size_of::<u128>()];
+    let found = identity_information(&information);
+    assert_eq!(found.device, u64::from(u32::MAX) + 1);
+    assert_eq!(found.inode, u64::MAX);
+    assert_eq!(found.mount, u64::MAX);
 }
 
 fn attributes(file: &File) -> Result<FILE_ATTRIBUTE_TAG_INFO, IndexError> {
@@ -287,9 +298,11 @@ impl NativeRoot {
             || native_path(last(&current)?)? != self.binding
             || native_path(last(&self.files)?)? != self.binding
         {
-            return Err(IndexError::Invalid(
-                "Directory source identity changed. Reopen the drive to build a new index.",
-            ));
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Directory root binding changed. Background verification will bind the root again.",
+            )
+            .into());
         }
         Ok(())
     }

@@ -83,6 +83,10 @@ vi.mock("../../../pages/AdvancedSettings", () => ({
   AdvancedSettings: () => <div>System Settings Content</div>,
 }));
 
+vi.mock("../../../pages/DirectorySearchSettings", () => ({
+  DirectorySearchSettings: () => <div>Directory Search Settings Content</div>,
+}));
+
 vi.mock("../../../pages/AboutSettings", () => ({
   AboutSettings: () => <div>About Settings Content</div>,
 }));
@@ -179,6 +183,7 @@ describe("SettingsDialog Component", () => {
     expect(authenticationOption.querySelector("svg")).toBeInTheDocument();
     expect(userManagementOption).toBeInTheDocument();
     expect(systemOption).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^directory search$/i }).querySelector("svg")).toBeInTheDocument();
     expect(aboutOption).toBeInTheDocument();
     expect(aboutOption.querySelector("svg")).toBeInTheDocument();
     expect(screen.getByText("Administration")).toBeInTheDocument();
@@ -448,6 +453,18 @@ describe("SettingsDialog Component", () => {
     await user.click(systemOption);
 
     expect(await screen.findByText("System Settings Content")).toBeInTheDocument();
+  });
+
+  it("opens Directory Search for admins but does not render it for regular users", async () => {
+    const denied = renderWithTheme(<SettingsCategoryContent item="admin-directory-search" isAdmin={false} />);
+    expect(screen.queryByText("Directory Search Settings Content")).not.toBeInTheDocument();
+    expect(scheduleSettingsPagePrefetch).toHaveBeenLastCalledWith(expect.not.arrayContaining(["admin-directory-search"]));
+    denied.unmount();
+    vi.mocked(api.getCurrentUser).mockResolvedValue({ id: "admin-id", username: "admin", role: "admin" });
+    const user = userEvent.setup();
+    renderWithTheme(<SettingsDialog open onClose={mockOnClose} />);
+    await user.click(await screen.findByRole("option", { name: /^directory search$/i }));
+    expect(await screen.findByText("Directory Search Settings Content")).toBeInTheDocument();
   });
 
   it("switches to About when an admin clicks it", async () => {

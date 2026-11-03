@@ -1,15 +1,5 @@
 # TODO
 
-## Directory search v2
-
-- Document the storage location of Companion's SQLite database files in the admin guide (for Linux and Windows)
-- Settings:
-   - Move the settings from Admin > System to a new category Admin > Directory Search. Don't forget a category icon.
-   - The "Companion directory indexes" mixes admin settings that apply to all devices with status of the current device's companion connection.
-      - Disentangle those by moving the current device companion status to Settings > Local Drives.
-   - The explanations below each setting are unnecessarily limited in width to the setting's input. make the explanations wider, as in Settings > Text Editor.
-      - Apply the same wider explanation styling to Settings > System, too.
-
 ## Viewers
 
 - Delete: add a delete function to all viewers.

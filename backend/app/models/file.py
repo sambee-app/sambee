@@ -157,3 +157,5 @@ class DirectorySearchResult(BaseModel):
     coverage_issue_count: int = Field(default=0, ge=0)
     last_verified_at_ms: int | None = Field(default=None, ge=0)
     status_message: str | None = None
+    monitoring_state: Literal["starting", "healthy", "recovering", "unavailable"] | None = None
+    retry_after_ms: int | None = Field(default=None, ge=0)

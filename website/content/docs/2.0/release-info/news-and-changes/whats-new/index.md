@@ -60,7 +60,7 @@ Directory cache for instant navigation:
 - Quick directory navigation keeps its existing index when a background scan times out or fails.
 - Background scans keep the live directory index when a removal or rename overlaps a read, including when its notification arrives late. This prevents changes from being applied twice when a folder's name is reused.
 - Changing a connection's target or sign-in details no longer reuses directory suggestions from its old configuration.
-- Directory junctions remain searchable but are no longer followed recursively, preventing indexing loops. DFS referrals are still followed, keeping their subfolders searchable.
+- Directory indexing excludes junctions, other reparse descendants, and DFS shares to prevent unsafe traversal.
 - Startup verification and scheduled directory scans now stop cleanly when their cache is removed.
 
 #### Other Fixes
@@ -108,14 +108,14 @@ Text editor and Markdown editor performance was significantly boosted, especiall
 
 When you print or save as PDF from the browser, the Markdown viewer reformats the full rendered document to fit the page, spanning multiple pages as needed. A new print icon in the top bar makes the new functionality discoverable.
 
-### Quick Bar: Directory Navigation v2
-
-Directory search and navigation in the quick bar was put on a new foundation. The backend's directory index was upgraded from JSONL to an SQLite database. The local drive directory index was missing entirely in earlier versions. That has been rectified so that almost instantaneous nagivation works on local drives as well as SMB connections.
-
 ### Other Changes
 
 - Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
 - When reloading a browser tab with an editor, Sambee now recovers the file lock. This prevents the error `Unable to enter edit mode. File is locked for editing by <username>`.
+
+## Quick Bar: Directory Navigation v2
+
+Directory search and navigation in the quick bar was put on a new foundation. The backend's directory index was upgraded from JSONL to an SQLite database. The local drive directory index was missing entirely in earlier versions. That has been rectified so that almost instantaneous nagivation works on local drives as well as SMB connections.
 
 ## Miscellaneous
 

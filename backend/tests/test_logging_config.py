@@ -1,11 +1,83 @@
 """Tests for backend logging configuration and frontend logging API."""
 
+import errno
 import io
 import logging
+import sqlite3
+import sys
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.core.logging import SensitiveDataLogFilter, UvicornProtocolLogFilter, configure_uvicorn_loggers
+from app.core.logging import RecoveryLogFormatter, SensitiveDataLogFilter, UvicornProtocolLogFilter, configure_uvicorn_loggers
+
+
+def test_recovery_formatter_renders_safe_codes_from_causes_without_tracebacks():
+    cause = sqlite3.OperationalError("private database path")
+    cause.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    error = OSError(errno.EACCES, "private source path")
+    error.__cause__ = cause
+    record = logging.LogRecord("app.storage.smb", logging.WARNING, __file__, 1, "Recovery failed", (), (type(error), error, None))
+    output = RecoveryLogFormatter("%(message)s").format(record)
+    assert f"errno={errno.EACCES}" in output
+    assert f"sqlite_errorcode={sqlite3.SQLITE_BUSY}" in output
+    assert "PermissionError" in output
+    assert "OperationalError" in output
+    assert "private" not in output
+
+
+@pytest.mark.parametrize("name", ["smbclient._io", "smbprotocol.connection"])
+def test_protocol_diagnostics_omit_private_payload_and_exception_text(name):
+    try:
+        raise OSError("private host, path and credentials")
+    except OSError:
+        record = logging.LogRecord(name, logging.WARNING, __file__, 1, "private payload %s", ("private user",), sys.exc_info())
+    output = RecoveryLogFormatter("%(name)s %(message)s").format(record)
+    assert name in output
+    assert "OSError" in output
+    assert "private host, path and credentials" not in output
+    assert "private payload private user" not in output
+    assert "private user" not in output
+    assert __file__ not in output
+    assert record.getMessage() == "private payload private user"
+
+
+def test_recovery_formatter_handles_unhashable_and_cyclic_exceptions() -> None:
+    class UnhashableError(RuntimeError):
+        __hash__ = None
+
+    try:
+        raise UnhashableError("private exception text")
+    except UnhashableError as error:
+        error.__cause__ = error
+        record = logging.LogRecord("app.storage.smb", logging.WARNING, __file__, 1, "SMB recovery failed", (), sys.exc_info())
+    output = RecoveryLogFormatter("%(message)s").format(record)
+    assert output.count("UnhashableError") == 1
+    assert "private exception text" not in output
+    assert __file__ not in output
+
+
+def test_recovery_formatter_renders_fields_without_private_exception_text() -> None:
+    try:
+        try:
+            raise OSError("private-path password=secret-private-value")
+        except OSError as cause:
+            raise RuntimeError("private-wrapper") from cause
+    except RuntimeError:
+        record = logging.LogRecord("app.storage.smb", logging.WARNING, __file__, 1, "SMB recovery failed", (), sys.exc_info())
+    record.operation = "read_file"
+    record.source_id = "opaque-source"
+    record.generation_id = "opaque-generation"
+    record.retained_worker_count = 2
+    output = RecoveryLogFormatter("%(message)s").format(record)
+    assert "private-path" not in output
+    assert "secret-private-value" not in output
+    assert "private-wrapper" not in output
+    assert __file__ not in output
+    assert "OSError" in output
+    assert "RuntimeError" in output
+    assert "operation='read_file'" in output
+    assert "retained_worker_count=2" in output
 
 
 def test_sensitive_data_log_filter_redacts_access_credentials() -> None:
