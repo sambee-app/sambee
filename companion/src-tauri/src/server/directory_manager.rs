@@ -2417,7 +2417,12 @@ impl LocalDirectoryManager {
                 lock(&source.reader)?.is_some(),
             );
             drop(status);
-            if due {
+            let resumable = lock(&source.writer)?
+                .as_ref()
+                .map(DirectoryIndex::has_resumable_scan)
+                .transpose()?
+                .unwrap_or(false);
+            if due || resumable {
                 self.start_scan(&source)?;
             }
         }
@@ -2800,6 +2805,41 @@ mod tests {
         assert_eq!(index.search("retained", 5, false, &cancelled, false).unwrap().directory_count, 1);
         index.mark_uncertain().unwrap();
         assert_eq!(index.search("retained", 5, false, &cancelled, false).unwrap().coverage, "uncertain");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn background_tick_resumes_interrupted_initial_scan_before_verification_interval() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("retained")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root, manager.storage_directory());
+        source.bind_root(&manager.budget).unwrap();
+        {
+            let mut writer = lock(&source.writer).unwrap();
+            let index = writer.as_mut().unwrap();
+            let (generation, _) = index.prepare_scan().unwrap();
+            index.seed_scan(generation).unwrap();
+        }
+        source.fail(&IndexError::Interrupted, &manager.budget);
+        let next_full_pass = Instant::now() + Duration::from_secs(limit("minimum_full_pass_spacing_seconds").unwrap() as u64);
+        *lock(&source.next_full_pass).unwrap() = Some(next_full_pass);
+        lock(&manager.sources)
+            .unwrap()
+            .insert(source.source_id.clone(), Arc::clone(&source));
+
+        manager.tick().unwrap();
+        let _scan_exit = manager.scans.acquire().await.unwrap();
+        let writer = lock(&source.writer).unwrap();
+        let index = writer.as_ref().unwrap();
+        assert!(index.accepted_generation().unwrap().is_some());
+        let result = index
+            .search("retained", 5, false, &Arc::new(AtomicBool::new(false)), false)
+            .unwrap();
+        assert_eq!(result.total_matches, 1);
+        assert!(result.last_verified_at_ms.is_some());
+        assert_eq!(*lock(&source.next_full_pass).unwrap(), Some(next_full_pass));
     }
 
     #[cfg(target_os = "linux")]

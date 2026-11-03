@@ -1630,7 +1630,9 @@ impl DirectoryIndex {
 
     pub(super) fn has_resumable_scan(&self) -> Result<bool, IndexError> {
         Ok(self.writer.query_row(
-            "SELECT EXISTS(SELECT 1 FROM generations WHERE state = 'candidate' AND issue_count = 0)",
+            "SELECT EXISTS(SELECT 1 FROM generations g WHERE (g.state = 'candidate' AND g.issue_count = 0) OR \
+             (g.state = 'building' AND NOT EXISTS(SELECT 1 FROM generations WHERE state = 'candidate') AND \
+             NOT EXISTS(SELECT 1 FROM coverage_issues WHERE generation_id = g.id AND code <> 'event_loss')))",
             [],
             |row| row.get(0),
         )?)
