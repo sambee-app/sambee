@@ -159,6 +159,16 @@ fn root_path(path: &Path) -> Result<PathBuf, IndexError> {
     Ok(result)
 }
 
+/// Compare handle-normalized paths, not input components that can contain DOS aliases.
+fn verify_native_parent(parent: &Path, child: &Path) -> Result<(), IndexError> {
+    if child.parent() != Some(parent) {
+        return Err(IndexError::Invalid(
+            "Directory ancestry changed or redirected during open. Retry source verification.",
+        ));
+    }
+    Ok(())
+}
+
 /// No ancestor permits deletion or rename while a descendant is opened or read.
 fn open_chain(path: &Path) -> Result<Vec<File>, IndexError> {
     let mut current = PathBuf::new();
@@ -173,10 +183,8 @@ fn open_chain(path: &Path) -> Result<Vec<File>, IndexError> {
         let file = open_directory(&current)?;
         let found = identity(&file)?;
         let native = native_path(&file)?;
-        if binding.as_ref().is_some_and(|parent| parent.join(component) != native) {
-            return Err(IndexError::Invalid(
-                "Directory ancestry changed or redirected during open. Retry source verification.",
-            ));
+        if let Some(parent) = binding.as_ref() {
+            verify_native_parent(parent, &native)?;
         }
         if volume.is_some_and(|expected| expected != found.device) {
             return Err(IndexError::Invalid(
@@ -461,6 +469,93 @@ impl NativeRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+
+    #[test]
+    fn normalized_ancestry_accepts_aliases_but_rejects_different_parents() {
+        let parent = Path::new(r"\Device\HarddiskVolume1\Users");
+        let normalized = parent.join("runneradmin");
+        assert_ne!(parent.join("RUNNER~1"), normalized);
+        verify_native_parent(parent, &normalized).unwrap();
+        for redirected in [
+            r"\Device\HarddiskVolume1\UsersElse\runneradmin",
+            r"\Device\HarddiskVolume1\Users\runneradmin\AppData",
+            r"\Device\HarddiskVolume2\Users\runneradmin",
+            r"\Device\HarddiskVolume1\users\runneradmin",
+            r"\Device\HarddiskVolume1\Users",
+        ] {
+            assert!(
+                verify_native_parent(parent, Path::new(redirected)).is_err(),
+                "Unexpected ancestry: {redirected}"
+            );
+        }
+    }
+
+    #[test]
+    fn short_root_paths_preserve_handle_identity_verification_and_enumeration() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("Mixed Case Source Directory");
+        std::fs::create_dir_all(path.join("parent/child")).unwrap();
+        let native: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut buffer = vec![0u16; MAX_NATIVE_PATH_UNITS];
+        let length = unsafe { GetShortPathNameW(PCWSTR(native.as_ptr()), Some(&mut buffer)) } as usize;
+        assert!(
+            length > 0 && length < buffer.len(),
+            "Short path query failed: {}",
+            io::Error::last_os_error()
+        );
+        let alias = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..length]));
+        let root = NativeRoot::open(&path).unwrap();
+        let short_root = NativeRoot::open(&alias).unwrap();
+        assert_eq!(short_root.identity, root.identity);
+        assert_eq!(short_root.binding, root.binding);
+        short_root.verify().unwrap();
+        let parent = short_root.parent_identity("parent").unwrap();
+        assert!(short_root.has_directory_child("parent", parent, "child").unwrap());
+        let mut rows = Vec::new();
+        short_root
+            .children("parent", |event| {
+                match event {
+                    Ok(Some(row)) => rows.push(row),
+                    Ok(None) => {}
+                    Err(issue) => panic!("Unexpected traversal issue: {issue:?}"),
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(rows, vec![("child".to_owned(), true)]);
+    }
+
+    #[test]
+    fn junction_ancestors_and_children_are_rejected() {
+        let temporary = tempfile::tempdir().unwrap();
+        let target = temporary.path().join("target");
+        let junction = temporary.path().join("redirected");
+        std::fs::create_dir_all(target.join("child")).unwrap();
+        let result = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "Junction creation failed: {result:?}");
+        for path in [&junction, &junction.join("child")] {
+            assert!(matches!(NativeRoot::open(path), Err(IndexError::Invalid(_))));
+        }
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        let mut issues = Vec::new();
+        root.children("", |event| {
+            if let Err(issue) = event {
+                issues.push(issue);
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(issues, vec![TraversalIssue::UnsafeTraversal]);
+        assert!(root.has_directory_child("", root.identity, "redirected").is_err());
+    }
 
     #[test]
     fn native_handles_preserve_exact_names_and_exclude_regular_files() {
