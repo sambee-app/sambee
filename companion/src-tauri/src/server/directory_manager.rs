@@ -4156,7 +4156,10 @@ mod tests {
             assert!(!lock(&source.observations).unwrap().is_current(baseline.token, ""));
             drop(baseline);
             source.flush(&budget).unwrap();
-            assert_eq!(reader.search("accepted", 3, false, &cancelled, false).unwrap(), *uncertain.as_ref().unwrap());
+            assert_eq!(
+                reader.search("accepted", 3, false, &cancelled, false).unwrap(),
+                *uncertain.as_ref().unwrap()
+            );
             let writer = lock(&source.writer).unwrap();
             let index = writer.as_ref().unwrap();
             assert!(index.has_resumable_scan().unwrap());
@@ -4165,7 +4168,10 @@ mod tests {
         source.scan(&budget).unwrap();
         assert!(lock(&source.watcher).unwrap().is_none());
         assert!(source.watcher_failed.load(Ordering::Acquire));
-        assert_eq!(lock(&source.writer).unwrap().as_ref().unwrap().accepted_generation().unwrap(), candidate);
+        assert_eq!(
+            lock(&source.writer).unwrap().as_ref().unwrap().accepted_generation().unwrap(),
+            candidate
+        );
         let recovered = reader.search("accepted", 3, false, &cancelled, false).unwrap();
         assert_eq!(recovered.coverage, "complete");
         assert_eq!(recovered.issue_count, 0);
