@@ -4125,7 +4125,47 @@ mod tests {
             uncertain = Some(response);
             assert!(lock(&source.observations).unwrap().verification_required);
         }
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
+        let root = lock(&source.root).unwrap().as_ref().unwrap().clone();
+        let mut candidate = None;
+        for event in [
+            Err(notify::Error::generic("Injected watcher loss during verification.")),
+            Ok(Event::new(EventKind::Modify(ModifyKind::Any)).add_path(root_path.join("accepted"))),
+        ] {
+            source.flush(&budget).unwrap();
+            let baseline = source.begin_read().unwrap();
+            let generation = {
+                let mut writer = lock(&source.writer).unwrap();
+                let index = writer.as_mut().unwrap();
+                let (generation, selected) = index.prepare_scan().unwrap();
+                assert!(!selected);
+                index.seed_scan(generation).unwrap();
+                generation
+            };
+            if let Some(previous) = candidate {
+                assert_eq!(generation, previous);
+            }
+            candidate = Some(generation);
+            let mut interruption = Some(event);
+            let outcome = source.scan_to_acceptance_with(&root, baseline.token, generation, &budget, |generation, parent| {
+                source.scan_parent(&root, generation, parent, &budget)?;
+                source.observe(interruption.take().unwrap())
+            });
+            assert!(matches!(outcome, Err(IndexError::Interrupted)));
+            assert!(interruption.is_none());
+            assert!(!lock(&source.observations).unwrap().is_current(baseline.token, ""));
+            drop(baseline);
+            source.flush(&budget).unwrap();
+            assert_eq!(reader.search("accepted", 3, false, &cancelled, false).unwrap(), *uncertain.as_ref().unwrap());
+            let writer = lock(&source.writer).unwrap();
+            let index = writer.as_ref().unwrap();
+            assert!(index.has_resumable_scan().unwrap());
+            assert!(!index.pending_scan_paths(generation, 1).unwrap().is_empty());
+        }
         source.scan(&budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
+        assert!(source.watcher_failed.load(Ordering::Acquire));
+        assert_eq!(lock(&source.writer).unwrap().as_ref().unwrap().accepted_generation().unwrap(), candidate);
         let recovered = reader.search("accepted", 3, false, &cancelled, false).unwrap();
         assert_eq!(recovered.coverage, "complete");
         assert_eq!(recovered.issue_count, 0);
