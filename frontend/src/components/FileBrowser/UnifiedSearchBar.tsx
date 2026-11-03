@@ -159,6 +159,8 @@ export interface UnifiedSearchBarModeOption {
   onSelect: () => void;
 }
 
+const MIN_BACKGROUND_REFRESH_MS = 500;
+
 // ============================================================================
 // Component
 // ============================================================================
@@ -210,6 +212,12 @@ export function UnifiedSearchBar({
   const anchorRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const quietRequestRef = useRef(false);
+  const acceptedQueryRef = useRef<string | null>(null);
+  const executeSearchRef = useRef<(value: string, openDropdown: boolean, quiet: boolean) => Promise<void>>(async () => {});
+  const dropdownOpenRef = useRef(false);
+  dropdownOpenRef.current = isDropdownOpen && !disableDropdown && !suppressDropdown;
   const pendingQueryRef = useRef<string>("");
   const providerRef = useRef(provider);
   const internalInputRef = useRef<HTMLInputElement>(null);
@@ -218,6 +226,9 @@ export function UnifiedSearchBar({
   const lastActivationTokenRef = useRef(activationToken);
   const lastRefreshTokenRef = useRef(refreshToken);
   const wasDropdownSuppressedRef = useRef(suppressDropdown);
+  const queryGenerationRef = useRef(0);
+  const selectedValueRef = useRef<string | undefined>(undefined);
+  selectedValueRef.current = results[selectedIndex]?.value;
 
   // Always keep providerRef current so stable callbacks use the latest provider
   providerRef.current = provider;
@@ -227,6 +238,14 @@ export function UnifiedSearchBar({
 
   const setQuery = useCallback(
     (value: string) => {
+      queryGenerationRef.current += 1;
+      acceptedQueryRef.current = null;
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+      abortControllerRef.current?.abort();
+      setIsLoading(false);
       providerRef.current.onQueryChange?.(value);
       onQueryValueChange?.(value);
 
@@ -450,7 +469,17 @@ export function UnifiedSearchBar({
   // executeSearch
   //
   const executeSearch = useCallback(
-    async (searchQuery: string, openDropdown = true) => {
+    async (searchQuery: string, openDropdown = true, quiet = false) => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+      if (
+        quiet &&
+        (document.visibilityState === "hidden" ||
+          !dropdownOpenRef.current ||
+          acceptedQueryRef.current !== searchQuery ||
+          providerRef.current.getRefreshIntervalMs?.() == null)
+      )
+        return;
       // Cancel any in-flight request
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
@@ -458,30 +487,54 @@ export function UnifiedSearchBar({
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      quietRequestRef.current = quiet;
+      const generation = queryGenerationRef.current;
+      const activeProvider = providerRef.current;
+      const isCurrent = () =>
+        !controller.signal.aborted &&
+        generation === queryGenerationRef.current &&
+        activeProvider.id === providerRef.current.id &&
+        activeProvider.sourceKey === providerRef.current.sourceKey;
+      const publishResults = (updatedResults: SearchResult[]) => {
+        if (!isCurrent()) return;
+        const previousValue = selectedValueRef.current;
+        const previousIndex = updatedResults.findIndex((result) => result.kind === "result" && result.value === previousValue);
+        const firstIndex = updatedResults.findIndex((result) => result.kind === "result");
+        setResults(updatedResults);
+        setSelectedIndex(Math.max(previousIndex >= 0 ? previousIndex : firstIndex, 0));
+        setHasSearched(true);
+        if (openDropdown) setIsDropdownOpen(true);
+      };
 
       try {
-        setIsSearchPending(false);
-        setIsLoading(true);
-        setSearchError(false);
-        setRemoveError(false);
-        const fetchedResults = await providerRef.current.fetchResults(searchQuery, controller.signal);
-
-        if (!controller.signal.aborted) {
-          setResults(fetchedResults);
-          setSelectedIndex(
-            Math.max(
-              fetchedResults.findIndex((result) => result.kind !== "group-header"),
-              0
-            )
-          );
-          setHasSearched(true);
-          if (openDropdown) {
-            setIsDropdownOpen(true);
+        if (!quiet) {
+          acceptedQueryRef.current = null;
+          setIsSearchPending(false);
+          setIsLoading(true);
+          setSearchError(false);
+          setRemoveError(false);
+        }
+        const fetchedResults = await activeProvider.fetchResults(searchQuery, controller.signal, publishResults);
+        publishResults(fetchedResults);
+        if (isCurrent()) {
+          acceptedQueryRef.current = searchQuery;
+          const interval = providerRef.current.getRefreshIntervalMs?.();
+          if (
+            interval != null &&
+            Number.isFinite(interval) &&
+            interval >= MIN_BACKGROUND_REFRESH_MS &&
+            document.visibilityState !== "hidden"
+          ) {
+            refreshTimerRef.current = setTimeout(() => {
+              refreshTimerRef.current = null;
+              if (isCurrent()) void executeSearchRef.current(searchQuery, false, true);
+            }, interval);
           }
         }
       } catch {
-        if (!controller.signal.aborted) {
-          setResults([]);
+        if (isCurrent()) {
+          acceptedQueryRef.current = null;
+          if (!quiet) setResults([]);
           setHasSearched(true);
           setSearchError(true);
           if (openDropdown) {
@@ -489,7 +542,7 @@ export function UnifiedSearchBar({
           }
         }
       } finally {
-        if (!controller.signal.aborted) {
+        if (isCurrent()) {
           setIsLoading(false);
         }
       }
@@ -497,6 +550,7 @@ export function UnifiedSearchBar({
     // providerRef is stable — no dependency on provider object identity
     []
   );
+  executeSearchRef.current = executeSearch;
 
   // ── Input handling ─────────────────────────────────────────────────────
 
@@ -623,6 +677,23 @@ export function UnifiedSearchBar({
     return "associated-viewer";
   }, []);
 
+  const dismissSearch = useCallback(() => {
+    queryGenerationRef.current += 1;
+    acceptedQueryRef.current = null;
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = null;
+    abortControllerRef.current?.abort();
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+    setIsLoading(false);
+    setIsSearchPending(false);
+    setIsDropdownOpen(false);
+    activatedRef.current = false;
+    providerRef.current.onDeactivate?.();
+  }, []);
+
   // ── Keyboard navigation ────────────────────────────────────────────────
 
   //
@@ -708,7 +779,7 @@ export function UnifiedSearchBar({
           }
           if (isDropdownOpen) {
             // First Escape: close the dropdown
-            setIsDropdownOpen(false);
+            dismissSearch();
           } else if (query) {
             // Second Escape: clear the query
             setQuery("");
@@ -723,13 +794,14 @@ export function UnifiedSearchBar({
 
         case "Tab":
           if (isDropdownOpen) {
-            setIsDropdownOpen(false);
+            dismissSearch();
           }
           break;
       }
     },
     [
       disableDropdown,
+      dismissSearch,
       findSelectableResultIndex,
       getSelectionAction,
       handleSelect,
@@ -804,14 +876,15 @@ export function UnifiedSearchBar({
   // handleClickAway
   //
   const handleClickAway = useCallback(() => {
-    setIsDropdownOpen(false);
-  }, []);
+    dismissSearch();
+  }, [dismissSearch]);
 
   // ── Re-open on typing after click-away ─────────────────────────────────
   //
   // handleInputFocus
   //
   const handleInputFocus = useCallback(() => {
+    const newlyActivated = !activatedRef.current;
     setIsFocused(true);
     handleFocus();
 
@@ -828,8 +901,11 @@ export function UnifiedSearchBar({
       return;
     }
 
-    if (!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) {
-      void executeSearch("");
+    if (
+      (!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) ||
+      (newlyActivated && hasSearched && query.length >= effectiveMinQueryLength)
+    ) {
+      void executeSearch(query);
     }
 
     // Re-open dropdown if there are results to show
@@ -871,6 +947,7 @@ export function UnifiedSearchBar({
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       providerRef.current.onDeactivate?.();
     };
   }, []);
@@ -879,7 +956,7 @@ export function UnifiedSearchBar({
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reset only on explicit provider identity / activation changes
   useEffect(() => {
     const previousProvider = lastResetProviderRef.current;
-    const providerChanged = previousProvider.id !== provider.id;
+    const providerChanged = previousProvider.id !== provider.id || previousProvider.sourceKey !== provider.sourceKey;
     const activationChanged = lastActivationTokenRef.current !== activationToken;
 
     if (!providerChanged && !activationChanged) {
@@ -887,6 +964,10 @@ export function UnifiedSearchBar({
     }
 
     previousProvider.onDeactivate?.();
+    queryGenerationRef.current += 1;
+    acceptedQueryRef.current = null;
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = null;
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -949,8 +1030,32 @@ export function UnifiedSearchBar({
     getEffectiveMinQueryLength,
     isControlledQuery,
     provider.id,
+    provider.sourceKey,
     query,
   ]);
+
+  useEffect(() => {
+    const stopQuietRefresh = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+      if (quietRequestRef.current) abortControllerRef.current?.abort();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        stopQuietRefresh();
+        abortControllerRef.current?.abort();
+        if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+        setIsLoading(false);
+        setIsSearchPending(false);
+      } else if (dropdownOpenRef.current && acceptedQueryRef.current === query && providerRef.current.getRefreshIntervalMs?.() != null) {
+        void executeSearchRef.current(query, false, true);
+      }
+    };
+    if (!isDropdownOpen || disableDropdown || suppressDropdown) stopQuietRefresh();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [disableDropdown, isDropdownOpen, query, suppressDropdown]);
 
   useEffect(() => {
     if (lastRefreshTokenRef.current === refreshToken) {
@@ -959,6 +1064,7 @@ export function UnifiedSearchBar({
 
     lastRefreshTokenRef.current = refreshToken;
     if (!disableDropdown && !suppressDropdown && query.length >= getEffectiveMinQueryLength(query)) {
+      providerRef.current.invalidateResults?.();
       void executeSearch(query, false);
     }
   }, [disableDropdown, executeSearch, getEffectiveMinQueryLength, query, refreshToken, suppressDropdown]);

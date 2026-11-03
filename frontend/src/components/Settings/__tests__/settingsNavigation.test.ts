@@ -41,6 +41,7 @@ describe("settingsNavigation", () => {
           "admin-users",
           "admin-smb",
           "admin-file-search",
+          "admin-directory-search",
           "admin-system",
           "admin-about",
         ],
@@ -60,6 +61,7 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryByPath("/settings/admin/users")).toBe("admin-users");
     expect(getSettingsCategoryByPath("/settings/admin/smb")).toBe("admin-smb");
     expect(getSettingsCategoryByPath("/settings/admin/file-search")).toBe("admin-file-search");
+    expect(getSettingsCategoryByPath("/settings/admin/directory-search")).toBe("admin-directory-search");
     expect(getSettingsCategoryByPath("/settings/admin/system")).toBe("admin-system");
   });
 
@@ -97,6 +99,7 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryLabel("file-browser")).toBe("File Browser");
     expect(getSettingsCategoryLabel("text-editor")).toBe("Text Editor");
     expect(getSettingsCategoryLabel("admin-file-search")).toBe("File Search");
+    expect(getSettingsCategoryLabel("admin-directory-search")).toBe("Directory Search");
     expect(getSettingsNavItemLabel("local-drives")).toBe("Local Drives");
     expect(getSettingsViewTitle("main")).toBe("Settings");
 
@@ -110,6 +113,7 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryLabel("text-editor")).toMatch(/^\[.*\]$/);
     expect(getSettingsCategoryLabel("admin-file-search")).not.toBe("File Search");
     expect(getSettingsCategoryLabel("admin-file-search")).toMatch(/^\[.*\]$/);
+    expect(getSettingsCategoryLabel("admin-directory-search")).toMatch(/^\[.*\]$/);
     expect(getSettingsNavItemLabel("local-drives")).not.toBe("Local Drives");
     expect(getSettingsNavItemLabel("local-drives")).toMatch(/^\[.*\]$/);
     expect(getSettingsViewTitle("main")).toBe("[Šéťťíńğš]");

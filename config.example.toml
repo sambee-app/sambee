@@ -71,18 +71,18 @@ username = "admin"
 # tracing_username_regex = ""
 
 [directory_cache]
-# Directory cache persistence settings for instant directory navigation.
-# The cache stores an index of all directories on each SMB share so that
-# search results are available immediately when the backend restarts.
+# Private backend directory-index storage. SQLite catalogues are session-bound;
+# source revalidation and rebuild are required after a backend restart.
+# Resource policies are managed in Settings > Advanced, not in this section.
 
 # Location on disk (relative to data directory, or absolute path).
 # Default: "directory_cache" (i.e. data/directory_cache/)
 # location = "directory_cache"
 
-# Minimum seconds between disk writes (coalesces rapid changes).
+# Legacy snapshot setting; does not control SQLite writes.
 # coalesce_interval_seconds = 30
 
-# Ignore cached snapshots older than this many minutes (default: 43200 = 30 days).
+# Legacy snapshot setting; does not control SQLite retention.
 # max_staleness_minutes = 43200
 
 [preprocessors.imagemagick]

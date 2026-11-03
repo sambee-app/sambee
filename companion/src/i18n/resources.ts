@@ -157,6 +157,23 @@ export const EN_TRANSLATIONS = {
     pairedBrowsersHint:
       "These trusted browser origins can access local drives through this companion. Removing one forces that origin to request approval again.",
     pairedBrowsersEmpty: "No browser origins are currently trusted by this companion.",
+    directoryPolicy: {
+      title: "Directory-Index Policy",
+      loading: "Directory policy status is loading.",
+      unavailable: "Directory policy is unavailable. Wait briefly and refresh its status, or restart the companion.",
+      resetFailed: "Policy owner could not be reset. Check private configuration storage and retry.",
+      active: "Approved backend policy is active.",
+      defaults: "Local default policy is active. No backend owner is approved.",
+      owner: "Approved Owner",
+      revision: "Effective Revision",
+      refresh: "Refresh Policy Status",
+      reset: "Reset Policy Owner",
+      resetTitle: "Reset Directory-Index Policy Owner?",
+      resetBody:
+        "Remove the approved backend owner and restore local policy defaults? Existing directory indexes are retained. Another backend will need local approval.",
+      resetting: "Resetting Policy Owner",
+      confirmReset: "Reset Owner",
+    },
     localizationStatusHint: "Shows the last localization synchronized from a trusted Sambee browser origin.",
     localizationStatus: {
       syncedBadge: "Synced from browser",

@@ -6,9 +6,11 @@ Provides request ID tracking and context-aware logging throughout the applicatio
 
 import logging
 import re
+import traceback
 import uuid
 from collections.abc import MutableMapping
 from contextvars import ContextVar
+from copy import copy
 from typing import Any, Optional
 
 # Context variables for request tracking
@@ -112,6 +114,58 @@ class SensitiveDataLogFilter(logging.Filter):
             record.msg = redacted_message
             record.args = ()
         return True
+
+
+class RecoveryLogFormatter(logging.Formatter):
+    """Render safe diagnostic fields and omit private recovery exception text."""
+
+    _FIELDS = (
+        "event",
+        "operation",
+        "stage",
+        "source_id",
+        "generation_id",
+        "duration_ms",
+        "retry_seconds",
+        "retry_after_ms",
+        "retained_worker_count",
+        "error_type",
+        "errno",
+        "sqlite_errorcode",
+    )
+    _PROTOCOL_LOGGERS = ("smbclient", "smbprotocol")
+    _RECOVERY_LOGGERS = ("app.storage.smb", "app.services.directory_", "app.api.browser", *_PROTOCOL_LOGGERS)
+
+    def format(self, record: logging.LogRecord) -> str:
+        safe_record = copy(record)
+        if record.name.startswith(self._PROTOCOL_LOGGERS):
+            safe_record.msg = "SMB client diagnostic. Check source access if the operation failed."
+            safe_record.args = ()
+        if record.name.startswith(self._RECOVERY_LOGGERS) and record.exc_info:
+            error_type, error, trace = record.exc_info
+            causes = []
+            seen = set()
+            while error is not None and id(error) not in seen:
+                seen.add(id(error))
+                for field in ("errno", "sqlite_errorcode"):
+                    code = getattr(error, field, None)
+                    if isinstance(code, int) and getattr(safe_record, field, None) is None:
+                        setattr(safe_record, field, code)
+                frames = " -> ".join(f"{frame.name}:{frame.lineno}" for frame in traceback.extract_tb(trace))
+                causes.append(f"{frames}; {error_type.__name__ if error_type else 'UnknownError'}")
+                error = error.__cause__ or (None if error.__suppress_context__ else error.__context__) if error is not None else None
+                if error is None:
+                    break
+                error_type, trace = type(error), error.__traceback__
+            safe_record.exc_info = None
+            safe_record.exc_text = f"Recovery traceback: {'; caused by '.join(causes)}"
+        message = super().format(safe_record)
+        fields = {}
+        for key in self._FIELDS:
+            value = getattr(safe_record, key, None)
+            if isinstance(value, (int, float)) or (isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", value)):
+                fields[key] = value
+        return f"{message} | {format_audit_fields(**fields)}" if fields else message
 
 
 class AccessLogLevelFilter(logging.Filter):

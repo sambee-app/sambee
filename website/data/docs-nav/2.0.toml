@@ -164,6 +164,7 @@ items = [
   "view-logs-and-restart-services",
   "update-sambee-safely",
   "backup-and-restore-planning",
+  "manage-directory-search",
 ]
 
 [[sections.admin-guide.items]]

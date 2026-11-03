@@ -495,7 +495,7 @@ pub struct DriveInfo {
 }
 
 /// Classification of a drive's physical/logical type.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 #[allow(dead_code)]
 pub enum DriveType {
@@ -503,6 +503,7 @@ pub enum DriveType {
     Removable,
     Network,
     Virtual,
+    #[default]
     Unknown,
 }
 
@@ -633,4 +634,14 @@ pub struct DirectorySearchResult {
     pub total_matches: usize,
     pub cache_state: String,
     pub directory_count: usize,
+    pub search_contract_version: Option<u32>,
+    pub match_ranks: std::collections::HashMap<String, i64>,
+    pub matched_term_counts: std::collections::HashMap<String, usize>,
+    pub accepted_revision: Option<i64>,
+    pub coverage: Option<String>,
+    pub coverage_issue_count: usize,
+    pub last_verified_at_ms: Option<i64>,
+    pub status_message: Option<String>,
+    pub monitoring_state: Option<String>,
+    pub retry_after_ms: Option<u64>,
 }

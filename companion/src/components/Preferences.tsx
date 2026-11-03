@@ -49,6 +49,131 @@ type UpdateActionState =
   | { kind: "installed"; version: string | null; checkedChannel: CompanionUpdateChannel }
   | { kind: "error"; message: string; checkedChannel: CompanionUpdateChannel };
 
+interface NativeDirectoryPolicyStatus {
+  status: string;
+  owner_origin: string | null;
+  effective_revision: number | null;
+  message: string | null;
+}
+
+function DirectoryPolicyPreferences() {
+  const [status, setStatus] = useState<NativeDirectoryPolicyStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setStatus((await invoke<NativeDirectoryPolicyStatus>("get_native_directory_policy_status")) ?? null);
+      setError(null);
+    } catch {
+      setError(translate("preferences.directoryPolicy.unavailable"));
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const reset = async () => {
+    setResetting(true);
+    setError(null);
+    try {
+      await invoke("reset_native_directory_policy_owner");
+      await load();
+      setConfirmReset(false);
+    } catch {
+      setError(translate("preferences.directoryPolicy.resetFailed"));
+    } finally {
+      setResetting(false);
+    }
+  };
+  return (
+    <div class="preferences__section">
+      <span class="preferences__section-title">{translate("preferences.directoryPolicy.title")}</span>
+      <div class="preferences__field">
+        <span class="preferences__hint" role="status">
+          {error ??
+            status?.message ??
+            (!status
+              ? translate("preferences.directoryPolicy.loading")
+              : status.owner_origin
+                ? translate("preferences.directoryPolicy.active")
+                : translate("preferences.directoryPolicy.defaults"))}
+        </span>
+        {status?.owner_origin && (
+          <dl class="preferences__status-grid">
+            <div class="preferences__status-row">
+              <dt class="preferences__status-label">{translate("preferences.directoryPolicy.owner")}</dt>
+              <dd class="preferences__status-value preferences__status-value--code">{status.owner_origin}</dd>
+            </div>
+            <div class="preferences__status-row">
+              <dt class="preferences__status-label">{translate("preferences.directoryPolicy.revision")}</dt>
+              <dd class="preferences__status-value">{status.effective_revision}</dd>
+            </div>
+          </dl>
+        )}
+        <div class="preferences__confirm-actions">
+          <button
+            type="button"
+            class="preferences__confirm-btn preferences__confirm-btn--ghost"
+            onClick={() => void load()}
+            disabled={resetting}
+          >
+            {translate("preferences.directoryPolicy.refresh")}
+          </button>
+          <button
+            type="button"
+            class="preferences__confirm-btn preferences__confirm-btn--danger"
+            onClick={() => setConfirmReset(true)}
+            disabled={!status || resetting || status.status === "unowned"}
+          >
+            {translate("preferences.directoryPolicy.reset")}
+          </button>
+        </div>
+      </div>
+      {confirmReset && (
+        <ModalDialog
+          role="alertdialog"
+          titleId="directory-policy-reset-title"
+          initialFocusRef={cancelRef}
+          onRequestClose={() => {
+            if (!resetting) setConfirmReset(false);
+          }}
+          panelClassName="preferences__confirm-panel"
+        >
+          <h3 id="directory-policy-reset-title" class="preferences__confirm-title">
+            {translate("preferences.directoryPolicy.resetTitle")}
+          </h3>
+          <p class="preferences__confirm-body">{translate("preferences.directoryPolicy.resetBody")}</p>
+          {error && (
+            <p class="preferences__confirm-body" role="alert">
+              {error}
+            </p>
+          )}
+          <div class="preferences__confirm-actions">
+            <button
+              type="button"
+              ref={cancelRef}
+              class="preferences__confirm-btn preferences__confirm-btn--ghost"
+              onClick={() => setConfirmReset(false)}
+              disabled={resetting}
+            >
+              {translate("common.actions.cancel")}
+            </button>
+            <button
+              type="button"
+              class="preferences__confirm-btn preferences__confirm-btn--danger"
+              onClick={() => void reset()}
+              disabled={resetting}
+            >
+              {translate(resetting ? "preferences.directoryPolicy.resetting" : "preferences.directoryPolicy.confirmReset")}
+            </button>
+          </div>
+        </ModalDialog>
+      )}
+    </div>
+  );
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -459,6 +584,9 @@ export function Preferences({ onClose }: PreferencesProps) {
         </div>
       </div>
 
+      <hr class="preferences__divider" />
+
+      <DirectoryPolicyPreferences />
       <hr class="preferences__divider" />
 
       {/* ── Localization Sync ── */}

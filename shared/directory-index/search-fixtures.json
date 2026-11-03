@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "normalization": [
+    {
+      "input": "Straße",
+      "expected": "strasse"
+    },
+    {
+      "input": "CAFÉ",
+      "expected": "cafe"
+    },
+    {
+      "input": "Café",
+      "expected": "cafe"
+    },
+    {
+      "input": "ﬃ",
+      "expected": "ffi"
+    },
+    {
+      "input": "Σςσ",
+      "expected": "σσσ"
+    },
+    {
+      "input": "a᪰",
+      "expected": "a"
+    }
+  ],
+  "queries": [
+    {
+      "query": "alpha beta",
+      "terms": [
+        "alpha",
+        "beta"
+      ]
+    },
+    {
+      "query": "ALPHA alpha",
+      "terms": [
+        "alpha"
+      ]
+    },
+    {
+      "query": "  \t\n",
+      "terms": []
+    },
+    {
+      "query": "́",
+      "terms": []
+    },
+    {
+      "query": "a% _* \"x\"",
+      "terms": [
+        "a%",
+        "_*",
+        "\"x\""
+      ]
+    }
+  ],
+  "paths": [
+    "alpha/beta",
+    "beta/alpha",
+    "alpha",
+    "beta",
+    "neither",
+    ".hidden/alpha"
+  ],
+  "searches": [
+    {
+      "query": "alpha beta",
+      "include_dot": false,
+      "count": 4,
+      "results": [
+        "alpha/beta",
+        "beta/alpha",
+        "alpha",
+        "beta"
+      ]
+    },
+    {
+      "query": "beta alpha",
+      "include_dot": false,
+      "count": 4,
+      "results": [
+        "alpha/beta",
+        "beta/alpha",
+        "alpha",
+        "beta"
+      ]
+    },
+    {
+      "query": "al beta",
+      "include_dot": false,
+      "count": 4,
+      "results": [
+        "alpha/beta",
+        "beta/alpha",
+        "beta",
+        "alpha"
+      ]
+    },
+    {
+      "query": "",
+      "include_dot": true,
+      "count": 0,
+      "results": []
+    }
+  ]
+}

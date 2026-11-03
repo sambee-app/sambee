@@ -2,234 +2,173 @@
 title = "SMB Change Notification and Directory Freshness"
 +++
 
-Sambee uses SMB2/SMB3 `CHANGE_NOTIFY` support to keep directory state fresh without falling back to naive polling.
+Sambee uses two separate SMB2/SMB3 `CHANGE_NOTIFY` paths: one tells an open browser to refresh its directory listing; the other maintains the directory-search index. They have different subscription, event, and consistency rules.
 
-That capability is used in two different backend paths:
+## Components
 
-- `backend/app/services/directory_monitor.py` for browser-visible WebSocket refresh notifications
-- `backend/app/services/directory_cache.py` for per-connection directory-cache freshness
-
-Use this page when a backend change affects WebSocket directory updates, SMB watcher lifecycle, or how the product maintains fresh directory state over time.
-
-## Why This Matters
-
-Directory freshness is a cross-boundary product contract.
-
-Users expect Sambee to react when:
-
-- another SMB client creates, deletes, renames, or edits content in the current directory
-- the current browser view should refresh because the underlying SMB directory changed
-- cached directory-search data should stay reasonably current without rescanning the entire tree on every request
-
-That is why the backend owns change-notification behavior instead of leaving refresh decisions entirely to the browser.
-
-## The Two Change-Notification Paths
-
-Sambee does not have a single watcher for all purposes.
-
-### Browser Notification Path
-
-`directory_monitor.py` is responsible for directory-specific monitoring tied to active WebSocket subscriptions.
-
-Its job is to:
-
-- start watching a directory when the first browser subscriber appears
-- share one SMB monitor across multiple subscribers for the same watched path
-- stop monitoring when the last subscriber leaves
-- send `directory_changed` messages back through the WebSocket layer
-
-This is the path that keeps an open file browser view fresh.
-
-### Directory-Cache Freshness Path
-
-`directory_cache.py` uses its own `CHANGE_NOTIFY` watcher for a different reason.
-
-Its job is to:
-
-- watch the share root or effective path prefix for directory-name changes
-- keep the in-memory directory cache aligned with adds, removes, and renames
-- combine event-driven updates with periodic full rescans as a safety net
-- preserve fast directory-search behavior without rebuilding the entire cache on every navigation event
-
-This is not the same as the browser WebSocket monitor, even though both rely on SMB `CHANGE_NOTIFY`.
-
-## Browser Notification Flow
-
-At a high level, the browser-facing flow is:
-
-1. the browser opens the backend WebSocket endpoint
-2. it sends a subscription message for a connection and directory path
-3. `ConnectionManager` resolves access, applies any `path_prefix`, and starts monitoring if this is the first subscriber
-4. `DirectoryMonitor` opens SMB resources for that resolved directory and starts a background watcher thread
-5. when the SMB server reports a change, the backend emits `directory_changed` to all subscribers for the user-facing path
-6. when the last subscriber leaves, the monitor stops and releases its SMB resources
-
-Representative client messages include:
-
-- subscribe: `{ "action": "subscribe", "connection_id": "uuid", "path": "/dir" }`
-- unsubscribe: `{ "action": "unsubscribe", "connection_id": "uuid", "path": "/dir" }`
-- server notification: `{ "type": "directory_changed", "connection_id": "uuid", "path": "/dir" }`
-
-## Path Resolution and Subscription Keys
-
-One subtle but important part of the design is that browser subscriptions and SMB watches do not always use the same path string.
-
-The WebSocket layer keys subscriptions by the user-facing path.
-
-If the SMB connection has a `path_prefix`, the backend resolves the actual watched SMB path by combining:
-
-- the normalized connection prefix
-- the user-facing relative path
-
-That resolved SMB path is what `DirectoryMonitor` actually watches.
-
-The callback then maps notifications back to the user-facing path before sending `directory_changed` over the WebSocket.
-
-If you remove that mapping, subscriptions stop lining up with the paths the browser thinks it subscribed to.
-
-## Main Components
-
-| Path | Responsibility |
+| Component | Responsibility |
 |---|---|
-| `backend/app/api/websocket.py` | WebSocket endpoint, subscription bookkeeping, access checks, path-prefix resolution, and delivery of `directory_changed` events |
-| `backend/app/services/directory_monitor.py` | per-directory SMB watchers for active browser subscriptions |
-| `backend/app/services/directory_cache.py` | per-connection directory cache plus root-level `CHANGE_NOTIFY` watcher for cache freshness |
-| `backend/app/main.py` | application shutdown hooks for directory caches and directory monitors |
+| `backend/app/api/websocket.py` | Browser subscriptions, access checks, path-prefix mapping, and `directory_changed` delivery |
+| `backend/app/services/directory_monitor.py` | Shared per-directory SMB watchers for active browser subscriptions |
+| `backend/app/services/directory_cache.py` | Per-connection index lifecycle, recursive directory-name notifications, and background verification |
+| `backend/app/services/directory_index.py` | SQLite storage, generations, search, and maintenance |
+| `backend/app/services/directory_traversal.py` | Handle-bound SMB enumeration, identity validation, and exact missing-child checks |
+| `companion/src-tauri/src/server/directory_manager.rs` | Local-drive index lifecycle, native observations, and background workers |
+| `backend/app/main.py` | Backend monitor and cache shutdown |
 
-## Directory Monitor Lifecycle
+## Browser Notifications
 
-The browser-facing monitor is reference-counted by subscription demand.
+### Subscriptions and Paths
 
-`DirectoryMonitor` keeps one `MonitoredDirectory` per `connection_id:path` key and tracks subscriber counts.
+`DirectoryMonitor` shares one `MonitoredDirectory` per `connection_id:path`. The first subscriber starts it; the last unsubscribe stops it. A WebSocket disconnect must release that client's subscriptions.
 
-That means:
+The WebSocket layer uses user-facing paths. `ConnectionManager` applies the connection's `path_prefix` to obtain the native SMB path. Notification callbacks map that path back to the user-facing path before delivery. Subscription keys and native watch paths must not be used interchangeably.
 
-- the first subscriber starts the monitor
-- later subscribers reuse the same watched directory instance
-- unsubscribing decrements the count
-- the monitor only stops when the count reaches zero
+| Message | Example |
+|---|---|
+| Subscribe | `{ "action": "subscribe", "connection_id": "uuid", "path": "/dir" }` |
+| Unsubscribe | `{ "action": "unsubscribe", "connection_id": "uuid", "path": "/dir" }` |
+| Change notification | `{ "type": "directory_changed", "connection_id": "uuid", "path": "/dir" }` |
 
-This avoids opening duplicate SMB watcher handles for the same directory just because multiple browser clients are watching it.
+### Events and Refreshes
 
-## SMB Resource Management
+Browser watchers observe file names, directory names, sizes, and last-write changes in the subscribed directory's immediate children. They do not watch the whole subtree. A deep write does not invalidate every ancestor listing, although metadata changes reported for an immediate child directory can trigger a refresh.
 
-`MonitoredDirectory` owns low-level SMB resources directly.
+The browser retains loaded rows during automatic refresh, including an empty listing. It waits for an active listing request, combines notifications into one pending refresh, and starts at most one automatic refresh per second. Navigation and pane disposal cancel queued refreshes.
 
-Creation follows this order:
+`directory_changed` requests a new listing; it is not a file-difference protocol. See [File Browser and Navigation Model](../../frontend-architecture/file-browser-and-navigation-model/) for browser state and request handling.
 
-1. connection
-2. session
-3. tree connect
-4. directory open handle
-5. `FileSystemWatcher`
+### Resource Ownership
 
-Cleanup happens in reverse order so partial failure does not leak handles.
+A monitor acquires its connection, session, tree, directory handle, and `FileSystemWatcher` in that order. Cleanup runs in reverse order, including after partial initialization.
 
-That ordering is important because change-notification bugs are often really handle-lifecycle bugs.
+Cancellation during startup retains the pending worker. When startup finishes, cleanup releases only the subscription acquired by that worker, not a replacement subscription. Shutdown rejects new monitor startup.
 
-## Watched Events
-
-The browser-facing monitor currently watches for:
-
-- file-name changes
-- directory-name changes
-- size changes
-- last-write changes
-
-The browser-facing monitor watches only immediate children of the subscribed directory. Writes deeper in the tree, such as installing packages in a project's `node_modules` folder, don't invalidate an ancestor's file list. If the SMB server reports a metadata change for an immediate child directory, that change can still trigger a refresh.
-
-The directory-cache watcher is narrower by design.
-
-It watches directory-name changes across the tree because the cache only needs enough signal to update its directory index efficiently.
+Transient failures use capped exponential reconnect backoff with jitter. Recovery continues after fast retries are exhausted, while the subscription remains active. Deletion of the watched directory stops its monitor. A stopped monitor is not reused for new subscribers. Shutdown calls `shutdown_monitor()`; a worker that is still running retains its handles until it exits.
 
 ## Directory-Index Consistency
 
-A full rescan builds a replacement index while the current index continues to serve directory searches. If any directory read fails or times out, the replacement isn't published or persisted. The existing index remains available, and the scan error is recorded for diagnosis. A later successful rescan can replace it.
+The backend and companion maintain SQLite directory indexes through shared background managers, not per-request tree walks. Cold queries return status while initialization proceeds. Committed initial batches are searchable with partial coverage; result limits do not limit indexed coverage or exact match counts.
 
-While a rescan is running, directory additions, removals, and renames update the live index and are also recorded in order. Under the cache lock, Sambee checks pending operations before and after each directory read and before publication. Additions are safe to merge. Removals and renames can only be merged when they don't overlap a read that's already started.
+The index watcher observes directory-name changes recursively from the share root or configured prefix. Events drive parent reconciliation. Periodic full verification covers missed notifications; it must not become a full rescan on every navigation or query.
 
-If a removal or rename changes a directory that's already been read, one being read, an ancestor of either, or an immediate child's name, the replacement is ambiguous. Notifications can arrive after a read already reflects the change, so replaying them could rename or remove fresh paths a second time. Sambee discards the replacement rather than publishing or persisting it; the live index, including its recent changes, remains available. Only one rescan can run at a time, and cancellation discards pending reconciliation without discarding live updates.
+### Generations and Observation Order
 
-Directory junctions, symbolic links, and unrecognized directory reparse points are indexed as destinations, but scans don't descend into their targets. This prevents ancestor links from causing repeated traversal. DFS referrals are identified by their reparse tag and remain traversable through the SMB client's referral support, so directories below DFS links stay searchable.
+Full verification builds a candidate while accepted data remains searchable. Only an issue-free full pass advances `last_verified_at_ms`; incremental changes and queries do not.
 
-### Persisted Snapshots
+Read tokens and observation barriers reject stale results. Lost events or queue overflow mark coverage uncertain and request verification without deleting accepted data. Candidate selection requires a valid root and no outstanding observations or reads that could invalidate the pass.
 
-Version 2 snapshots are bound to the connection's host, port, share, normalized path prefix, username, and connection revision. The revision changes when the connection is edited, including credential changes. Passwords aren't stored in snapshot metadata.
+Directory rows, FTS entries, counts, issues, queued subtree work, and revision updates must remain transactionally consistent. Queries read results and metadata from one selected-generation transaction.
 
-A snapshot with a different source identity is ignored, including when trying the backup file. Older version 1 snapshots are also ignored, so existing installations rebuild the directory index once after upgrading. Matching snapshots still provide immediate search results while background verification checks freshness.
+### Parent Reconciliation
 
-Startup verification and the periodic rescan loop have separate tracked tasks. Removing a cache or shutting down the application cancels both tasks, along with initial scanning and snapshot flushing.
+Background workers reconcile affected parents between full passes. Renames check both parents, and new directories trigger descendant reads. Removal requires a confirmed absence under a held, validated parent; a listing omission or access error is not sufficient. Failed work remains pending. Reconciliation does not establish full verification or clear uncertain coverage.
 
-## Recovery and Failure Handling
+File operations queue parent hints before dispatch and after actual worker completion, including failure. New mutation paths must preserve this rule. Cancellation must not release worker ownership early or change the original operation result when hint delivery fails.
 
-The directory monitor treats connection failures as part of normal long-lived operation, not as impossible edge cases.
+### Source Identity and Traversal
 
-Current behavior includes:
+Catalogue names are SHA-256 hashes of source boundary settings. SMB uses the connection ID, host, port, share, configured folder, and username. Passwords, display names, connection edit times, and runtime session IDs do not change the file name. Local sources use the configured root path and, for fixed, removable, and unknown drives, available volume serial or file-system UUID evidence. Network and virtual drives use the root path alone. Runtime session IDs remain diagnostic values.
 
-- exponential backoff for reconnect attempts
-- retry jitter to avoid synchronized reconnect storms
-- capped retry attempts before giving up
-- explicit detection of connection, socket, and timeout failures
-- stop-on-delete behavior when the watched directory itself is deleted
+Reused rows are unverified until a verification pass completes. An SMB reconnect binds new handles and invalidates unfinished reads without comparing file IDs across connections. SMB server GUIDs and volume metadata are diagnostic values, not proof of storage continuity. File IDs of zero or all ones are unavailable; comparisons skip them. Session and tree IDs are compared only within one connection.
 
-The cache watcher has its own retry loop and also tolerates `CHANGE_NOTIFY` buffer-overflow conditions by relying on later rescans to restore correctness.
+| Source | Traversal rules |
+|---|---|
+| SMB | Direct no-follow handles without delete sharing or automatic DFS retries; retained ancestors; connection-scoped session, tree, available file-ID, and exact native-name checks |
+| Linux local drive | Retained directory descriptors, no-follow opens, exact native names, device and mount checks; kernel pseudo-filesystems and device-tree aliases excluded |
+| Windows local drive | Retained no-delete ancestor handles, 128-bit file IDs, volume and native-device paths; bounded enumeration and strict UTF-16 decoding |
 
-That distinction matters: browser notification is path-specific and subscriber-driven, while the cache watcher is connection-scoped and consistency-oriented.
+The SMB boundary is logical: the configured share and folder. Storage mounted inside a share can be indexed; SMB does not promise physical-volume containment. DFS shares, redirected ancestry, and reparse descendants remain excluded. Local traversal does not cross mounts. Windows junctions, name-surrogate redirections, cloud placeholders, and unknown reparse tags are excluded rather than followed. Missing optional volume metadata does not weaken these traversal checks.
 
-## Shutdown Behavior
+The drive browser and local index share one classifier. USB, SD, MMC, and hot-plug disks are removable even when Windows reports a fixed drive. Failed classification uses the unknown class. Fixed drives select another index only when available volume serial or UUID evidence changes. Removable and unknown drives also retire the current generation when available label, file-system type, or total-capacity evidence changes. Missing evidence and drive-class changes alone do not replace data. Windows uses the 64-bit serial from `FILE_ID_INFO`, including zero. Local file IDs are session-scoped checks, not replacement signals.
 
-Sambee shuts these systems down explicitly.
+Volume evidence is checked again when the root binds. An unmounted Linux source stays unavailable instead of indexing its mount-point folder. Linux mount checks use descriptor-bound `statx` mount IDs with `/proc/self/fdinfo` as a fallback. A missing mount-boundary capability stops that source until Companion restarts. Idle removable sources without active work or a watcher release their root handles. Windows removal notifications pause source work and release handles before removal is allowed.
 
-During application shutdown:
+Depth and path-length bounds are defined in `shared/directory-index/contract.json`. Excluded descendants produce partial coverage while readable branches continue.
 
-- directory caches are stopped through `shutdown_directory_cache()`
-- directory monitors are stopped through `shutdown_monitor()`
+Backend initialization withholds rows until a handle-bound root probe succeeds. Root failure returns HTTP 503 without deleting accepted data. Descendant access denial produces partial coverage instead. Late results cannot restore an invalidated source.
 
-That explicit shutdown path exists to release watcher threads and SMB handles cleanly instead of depending on interpreter teardown.
+### SQLite Storage
 
-## Performance Characteristics
+| Runtime | Location and driver |
+|---|---|
+| Backend | `data/directory_cache/sqlite/`, or `sqlite/` below `directory_cache_location`; standard Python `sqlite3` with Debian system SQLite |
+| Companion | `directory-index/sqlite/` in the OS-user cache directory; bundled Rust SQLite binding |
 
-The design tries to keep freshness inexpensive without resorting to constant polling.
+Indexes are disposable directory data, separate from recent history. Stored source metadata excludes passwords. `shared/directory-index/` owns the schema, search normalization, validation rules, and contract fixtures.
 
-- SMB `CHANGE_NOTIFY` is event-driven rather than poll-based
-- multiple browser subscribers share one monitor for the same watched path
-- browser-facing monitors don't request recursive subtree notifications
-- each browser pane keeps loaded physical-directory rows visible during automatic refreshes, including a previously loaded empty listing
-- automatic refreshes wait for an active listing request and combine newer notifications into one pending refresh, starting at most once per second
-- navigation and pane disposal cancel queued refreshes
-- directory-cache updates avoid full rescans for every single directory rename or add event
-- periodic rescans remain in place as a correctness safety net, not the primary freshness mechanism
+Both stores use WAL and `synchronous=FULL`. Writes, checkpoints, maintenance, and close are serialized through the writer. Queries use read-only connections and explicit transactions. Storage leases remain held until admitted readers and workers finish; active database families cannot be evicted.
 
-## Limits and Tradeoffs
+Storage must be private and local. Opens and cleanup validate directory ownership, file identity, and aliases. Do not write to managed databases externally or weaken these checks to permit a path-only fallback.
 
-Contributors need to preserve a few constraints here.
+### Resource Controls
 
-- this requires SMB2 or later
-- some notifications can still be missed during network instability, which is why manual refresh and periodic cache rescans still matter
-- the browser-facing path is optimized for telling clients to refresh, not for transmitting rich per-file diffs
-- cache freshness and browser freshness are related concerns, but they are not the same subsystem and should not be collapsed casually
+Worker counts, batches, and observation queues are bounded by the shared contract. Disk growth requires headroom and free-space admission. Maintenance yields to active work.
 
-## Common Failure Modes
+Automatic full passes have a minimum spacing of 30 seconds, defined in the shared contract. Requests cannot bypass this limit or failure backoff. Interrupted issue-free candidates retain completed directory work. After an observation gap, retained directory reads are revalidated in bounded batches before candidate acceptance. Parent reconciliation does not start a new full pass or advance the full-verification clock.
 
-- path-prefix resolution is ignored, so the monitor watches the wrong SMB directory
-- subscriber bookkeeping drifts, so monitors are leaked or stopped too early
-- WebSocket disconnect cleanup forgets to release the last subscriber's monitor
-- a recovery change handles one timeout path but leaks SMB resources on reconnect
-- buffer-overflow or rename-edge handling is simplified in ways that quietly degrade cache correctness
+Policy defaults and ranges belong to `shared/directory-index/contract.json`. A lower budget may pause growth but must not trim active data. Eviction applies only to inactive, unowned indexes. Disk and cache settings are not hard filesystem or process-memory ceilings.
+
+See [Directory-Index Policy Delivery](../../companion-architecture/local-drive-and-save-back-pipeline/#directory-index-policy-delivery) for Companion ownership and [Manage Directory Search](../../../admin-guide/operations-and-maintenance/manage-directory-search/) for administration.
+
+### Recovery and Shutdown
+
+Startup validates source identity and application consistency before exposing rows. Damaged search tokens rebuild from validated directory rows. Replacement is restricted to recognized invalid index data; permission, capacity, busy-storage, and general I/O failures must not trigger discard.
+
+Failures use bounded retries. Requests must not bypass retry deadlines. Idle sources release resources and revalidate the root on reuse. Shutdown waits for admitted work before closing storage and root ownership, even when a request has been cancelled.
+
+Index recovery does not reset a shared SMB connection or remove recent-directory history. A source binding mismatch pauses publication, re-binds source handles, and schedules verification. Source and storage failures are not evidence that a directory was deleted.
+
+SMB setup runs outside the shared pool lock. Concurrent requests share setup for the same private cache. The pool bounds admitted work, setup tasks, and retained connection generations, both per source and across the process. A retired generation keeps its own cache until its workers and cleanup finish; replacement requests use a separate cache. Capacity failures return retry information rather than enter an unbounded queue. Shutdown stops new admission. Writes are not replayed automatically.
+
+A caller timeout or cancellation does not itself stop a blocking SMB operation. Reader handles, connection leases, and worker permits remain owned until actual completion. Late successful opens are closed before their leases are released.
+
+An operation deadline retires its connection generation and requests one pool-owned transport abort through public `Connection.disconnect(close=False)`. The abort runs outside the event loop and pool lock, uses a snapshot of that generation's connections, and does not send session logoff requests or touch replacement connections. Ordinary caller cancellation retains work without aborting unrelated operations on the shared generation. Long-lived watcher subscriptions use their own lifecycle, not ordinary operation deadlines.
+
+Public abort wakes blocked receive requests in the installed client. It cannot provide a universal operation deadline: disconnect shares a lock with socket send and can remain blocked behind a send. Abort work retains capacity until it exits. If workers cannot finish, admission remains bounded and requests return capacity errors. Wait before retrying; restart the backend service if retained work continues to occupy capacity.
+
+A mutation interrupted by abort, or whose caller deadline expires after dispatch, has uncertain completion. The API reports `smb_mutation_uncertain` with `mutation_uncertain: true` and `recoverable: false`. Check the source before retrying; the change may already be applied. Sambee does not replay the write automatically.
+
+Backend and Companion watcher startup and native event failures trigger background recovery independently of index storage initialization. A successful scan does not clear an unavailable-watcher warning. Degraded verification remains active while monitoring is unavailable; recovered monitoring requires verification of the event gap.
+
+Recovery diagnostics use opaque source and lifecycle-generation IDs. Failure transitions record one sanitized cause; repeated failures use bounded summaries. Recovery logs omit private exception text and paths; third-party SMB payloads are not rendered. Scan summaries include duration even when a scan fails.
+
+### Quick-Bar Status Contract
+
+Work state, snapshot coverage, verification time, and monitoring health are separate. `monitoring_state` is `starting`, `healthy`, `recovering`, or `unavailable`. `retry_after_ms` is a relative delay from response receipt, not a timestamp. Missing or null fields mean that the server supplies no monitoring state or retry delay; they do not prove healthy monitoring.
+
+| Response or condition | Quick-bar behavior |
+|---|---|
+| Building or updating, without a retry delay | Show active work and check status again |
+| Paused work with a retry delay | Show the status message without an active-work spinner; wait before checking |
+| Empty data, uncertain coverage, or unavailable monitoring | Keep history available and continue bounded status checks |
+| Recoverable request failure | Keep accepted results for the same query, show failure, and retry |
+| Terminal or unsupported request failure | Stop automatic retries until reactivation or a source change |
+| Ready, healthy data without a warning | Stop periodic status checks |
+| Closed menu or hidden page | Stop periodic checks; reject stale responses when the query or source changes |
+
+Status checks do not require a minimum search length. Empty-query activation initializes status and history. The directory provider limits retry delays to 1-60 seconds and uses a five-second fallback. Structured errors use `recoverable` and `retry_after_ms`; the client does not infer recovery rules from message text. Older responses without the shared search contract do not enable periodic status checks. Requests are bound to the current source, history client, storage capability revision, and request sequence. A replaced binding cannot publish old results, status, or retry timing.
+
+### Support Limits
+
+Companion directory indexing supports Linux and Windows, not macOS. Drive visibility alone does not establish index support. Changes to native traversal or recovery require tests on the affected platform; cross-compilation does not validate runtime behavior.
 
 ## Where to Continue
 
-- Use [Request Flow and Service Boundaries](../request-flow-and-service-boundaries/) for the broader backend layering model.
-- Use [File Operations and Edit Locking](../file-operations-and-edit-locking/) when the changed behavior interacts with uploads, moves, renames, or companion-assisted editing.
-- Use [Test Strategy Overview](../../testing-and-quality-gates/test-strategy-overview/) when the change requires wider backend or browser validation.
+- [Request Flow and Service Boundaries](../request-flow-and-service-boundaries/): backend service ownership
+- [File Operations and Edit Locking](../file-operations-and-edit-locking/): uploads, moves, renames, and edit sessions
+- [Local-Drive and Save-Back Pipeline](../../companion-architecture/local-drive-and-save-back-pipeline/): companion file operations
+- [Logging and Localization](../../cross-cutting-systems/logging-and-localization/#directory-search-diagnostics): directory-search diagnostics and privacy rules
+- [Test Strategy Overview](../../testing-and-quality-gates/test-strategy-overview/): test scope and repository gates
 
 ## Validation Expectations
 
-When you change SMB change-notification behavior, usually run:
+Select focused watcher, cache, storage, directory API, and SMB operation tests for the changed boundary. Verify source binding, partial failures, lost events, stale-read rejection, exact counts, and retained ownership through cancellation. For example:
 
 ```bash
-cd backend && pytest -v
-cd backend && mypy app
+cd backend
+.venv/bin/python -m pytest tests/test_directory_cache.py tests/test_directory_index_contract.py tests/test_directory_search.py tests/test_smb_backend.py
+.venv/bin/python -m mypy app
 ```
 
-If the change affects browser-visible refresh behavior, add the relevant frontend checks as well.
+For companion index changes, run the relevant Rust manager, storage, traversal, and handler tests. Add frontend checks when refresh, status, selection, or progressive result behavior changes.

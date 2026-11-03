@@ -39,11 +39,13 @@ class RecentDirectoryRead(SQLModel):
     last_visited_at: datetime
     usage_score: float = 0
     match_rank: int = 3
+    matched_term_count: int = 0
 
 
 class RecentDirectorySearchRead(SQLModel):
     results: list[RecentDirectoryRead]
     result_limit: int
+    search_contract_version: int = 1
 
 
 class RecentDirectoryClearRead(SQLModel):

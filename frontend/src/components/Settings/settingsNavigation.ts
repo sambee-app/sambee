@@ -36,6 +36,7 @@ export const SETTINGS_ROUTE_BY_CATEGORY: Record<SettingsCategory, string> = {
   "admin-users": "/settings/admin/users",
   "admin-smb": "/settings/admin/smb",
   "admin-file-search": "/settings/admin/file-search",
+  "admin-directory-search": "/settings/admin/directory-search",
   "admin-system": "/settings/admin/system",
   "admin-about": "/settings/admin/about",
 };
@@ -142,6 +143,15 @@ export const SETTINGS_CATEGORY_META: Record<SettingsCategory, SettingsCategoryMe
     },
     descriptionKey: "settings.categories.adminFileSearch.description",
     route: SETTINGS_ROUTE_BY_CATEGORY["admin-file-search"],
+    section: "administration",
+    adminOnly: true,
+  },
+  "admin-directory-search": {
+    get label() {
+      return translate("settings.categories.adminDirectorySearch.label");
+    },
+    descriptionKey: "settings.categories.adminDirectorySearch.description",
+    route: SETTINGS_ROUTE_BY_CATEGORY["admin-directory-search"],
     section: "administration",
     adminOnly: true,
   },

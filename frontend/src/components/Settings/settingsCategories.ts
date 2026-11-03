@@ -10,6 +10,7 @@ export const SETTINGS_CATEGORY_ORDER = [
   "admin-users",
   "admin-smb",
   "admin-file-search",
+  "admin-directory-search",
   "admin-system",
   "admin-about",
 ] as const;

@@ -2,6 +2,7 @@ import {
   Article as ArticleIcon,
   ChevronRight as ChevronRightIcon,
   Dns as DnsIcon,
+  Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
   InfoOutlined as InfoOutlinedIcon,
   ManageAccounts as ManageAccountsIcon,
@@ -133,6 +134,8 @@ function renderCategoryIcon(item: SettingsNavItem, iconGlyphSx?: SxProps<Theme>)
       return <DnsIcon sx={iconGlyphSx} />;
     case "admin-file-search":
       return <ManageSearchIcon sx={iconGlyphSx} />;
+    case "admin-directory-search":
+      return <FolderIcon sx={iconGlyphSx} />;
     case "admin-system":
       return <TuneIcon sx={iconGlyphSx} />;
     case "admin-about":

@@ -17,6 +17,21 @@ from app.services import recent_files
 
 
 class TestRecentFileService:
+    def test_independent_filename_terms_rank_before_frequency(self, session: Session, regular_user: User) -> None:
+        for name, score in (("alpha.txt", 1000), ("beta.txt", 1000), ("alpha-beta.txt", 1), ("none.txt", 1000)):
+            session.add(
+                RecentFile(
+                    user_id=regular_user.id, connection_id="local-drive:c", path=f"parent/alpha/{name}", file_name=name, usage_score=score
+                )
+            )
+        session.commit()
+        for query in ("alpha beta", "beta alpha", "ALPHA alpha beta"):
+            results = recent_files.search_recent_files(query=query, limit=1, current_user=regular_user, session=session)
+            assert results[0].file_name == "alpha-beta.txt"
+            assert results[0].matched_term_count == 2
+        results = recent_files.search_recent_files(query="alpha beta", limit=50, current_user=regular_user, session=session)
+        assert {record.file_name for record in results} == {"alpha.txt", "beta.txt", "alpha-beta.txt"}
+
     def test_ranks_quality_before_decaying_frequency(self, session: Session, regular_user: User) -> None:
         now = datetime.now(timezone.utc)
         for name, score, age in (("report-old.txt", 8, 1), ("report-new.txt", 1, 0), ("report", 1, 2), ("report-stale.txt", 8, 120)):
@@ -58,6 +73,14 @@ class TestRecentFileService:
 
 
 class TestRecentFilesApi:
+    @pytest.mark.parametrize("endpoint", ["recent-files", "recent-directories"])
+    def test_rejects_excess_terms_with_actionable_error(self, client: TestClient, auth_headers_user: dict[str, str], endpoint: str) -> None:
+        response = client.get(
+            f"/api/browse/{endpoint}", headers=auth_headers_user, params={"q": " ".join(f"term{number}" for number in range(33))}
+        )
+        assert response.status_code == 400
+        assert "distinct terms" in response.json()["detail"]
+
     @pytest.fixture(autouse=True)
     def mock_remote_target(self, monkeypatch: MonkeyPatch) -> None:
         import app.api.browser as browser_api

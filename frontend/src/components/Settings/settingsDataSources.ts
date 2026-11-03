@@ -31,6 +31,8 @@ export const SETTINGS_DATA_CACHE_KEYS = {
   adminUsers: "settings-data/admin-users",
   adminUserContext: "settings-data/admin-user-context",
   adminSystem: "settings-data/admin-system",
+  directoryIndexBackend: "settings-data/directory-index/backend",
+  directoryIndexCompanion: "settings-data/directory-index/companion",
   adminSmb: "settings-data/admin-smb",
   adminNetwork: "settings-data/admin-network",
   adminAuthentication: "settings-data/admin-authentication",

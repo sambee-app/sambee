@@ -29,7 +29,12 @@ import type {
   CurrentAccount,
   CurrentUserSettings,
   CurrentUserSettingsUpdate,
+  DirectoryIndexPolicyScope,
+  DirectoryIndexSettings,
+  DirectoryIndexSettingUpdate,
   DirectoryListing,
+  DirectoryPolicyGrant,
+  DirectoryPolicyGrantBinding,
   DirectorySearchResult,
   EditLockInfo,
   EditLockStatus,
@@ -80,6 +85,9 @@ import { setPasswordChangeRequired } from "./passwordChange";
 import { type ContentTransferResult, ExpiredEditLockError, type TargetResolutionPolicy } from "./storageContracts";
 
 export { ExpiredEditLockError } from "./storageContracts";
+
+const COMPANION_TIMING_BROWSE_OPERATIONS = new Set(["directories", "list", "info"]);
+const COMPANION_TIMING_OTHER_ROUTE = "/{route}";
 
 export interface DirectorySearchOptions {
   includeDotDirectories?: boolean;
@@ -372,6 +380,7 @@ class ApiService {
   private api: AxiosInstance;
   /** Separate axios instance for companion requests (no Bearer interceptor). */
   private companionApi: AxiosInstance;
+  private companionRequestStarts = new WeakMap<AxiosRequestConfig, number>();
 
   constructor() {
     // Use absolute URL for tests (required by MSW), relative for production
@@ -553,11 +562,52 @@ class ApiService {
     });
     this.companionApi.interceptors.request.use(async (config) => {
       Object.assign(config.headers, await companionSession.getSigningHeaders(config.method ?? "GET", this.companionApi.getUri(config)));
+      this.companionRequestStarts.set(config, performance.now());
       return config;
     });
+    this.companionApi.interceptors.response.use(
+      (response) => {
+        this.logCompanionTiming(response.config, response.status, false, response.data?.accepted_revision);
+        return response;
+      },
+      (error: AxiosError) => {
+        this.logCompanionTiming(error.config, error.response?.status ?? null, isLocalAbortError(error));
+        return Promise.reject(error);
+      }
+    );
   }
 
   // ── Routing helpers ─────────────────────────────────────────────────────
+
+  private logCompanionTiming(config: AxiosRequestConfig | undefined, status: number | null, cancelled: boolean, revision?: unknown): void {
+    if (!config) return;
+    const started = this.companionRequestStarts.get(config);
+    if (started === undefined) return;
+    this.companionRequestStarts.delete(config);
+    let route = COMPANION_TIMING_OTHER_ROUTE;
+    try {
+      const segments = new URL(config.url ?? "", `${COMPANION_BASE_URL}/`).pathname.split("/").filter(Boolean);
+      if (segments[0] === "api") segments.shift();
+      const operation = segments[2];
+      if (segments.length === 3 && segments[0] === "browse" && operation && COMPANION_TIMING_BROWSE_OPERATIONS.has(operation)) {
+        route = `/browse/{drive}/${operation}`;
+      }
+    } catch {
+      route = COMPANION_TIMING_OTHER_ROUTE;
+    }
+    logger.debug(
+      "Companion API request finished",
+      {
+        method: config.method?.toUpperCase() ?? "GET",
+        route,
+        status,
+        duration_ms: Math.max(0, performance.now() - started),
+        cancelled,
+        ...(typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0 ? { accepted_revision: revision } : {}),
+      },
+      "companion"
+    );
+  }
 
   /**
    * Build HMAC auth headers for companion requests.
@@ -905,6 +955,25 @@ class ApiService {
 
   async getAdvancedSettings(): Promise<AdvancedSystemSettings> {
     const response = await this.api.get<AdvancedSystemSettings>("/admin/settings/advanced");
+    return response.data;
+  }
+
+  async getDirectoryIndexSettings(scope: DirectoryIndexPolicyScope): Promise<DirectoryIndexSettings> {
+    const response = await this.api.get<DirectoryIndexSettings>(`/admin/settings/directory-index/${scope}`);
+    return response.data;
+  }
+
+  async issueDirectoryPolicyGrant(binding: DirectoryPolicyGrantBinding, options?: { signal?: AbortSignal }): Promise<DirectoryPolicyGrant> {
+    const response = await this.api.post<DirectoryPolicyGrant>("/admin/settings/directory-index/companion/grants", binding, options);
+    return response.data;
+  }
+
+  async updateDirectoryIndexSettings(
+    scope: DirectoryIndexPolicyScope,
+    payload: DirectoryIndexSettingUpdate,
+    options?: { signal?: AbortSignal }
+  ): Promise<DirectoryIndexSettingUpdate> {
+    const response = await this.api.put<DirectoryIndexSettingUpdate>(`/admin/settings/directory-index/${scope}`, payload, options);
     return response.data;
   }
 

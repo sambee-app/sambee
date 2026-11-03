@@ -213,8 +213,12 @@ describe("Browser - Image View Integration", () => {
       })),
     });
     mockedApi.getFileInfo.mockResolvedValue({ type: FileType.FILE, mime_type: "image/jpeg", size: 10 } as never);
+    let rejectSelectedImage: ((reason: unknown) => void) | undefined;
+    const selectedImageRequest = new Promise<Blob>((_resolve, reject) => {
+      rejectSelectedImage = reject;
+    });
     loadImageBlob.mockImplementation(async (path: string) => {
-      if (path === "two.jpg") throw { response: { status: 404, data: { detail: { code: "item_not_found" } } } };
+      if (path === "two.jpg") return selectedImageRequest;
       return new Blob(["image"], { type: "image/jpeg" });
     });
     await renderBrowser();
@@ -222,6 +226,10 @@ describe("Browser - Image View Integration", () => {
     await screen.findByTestId("image-view");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
+    await act(async () => {
+      requireTestValue(rejectSelectedImage)({ response: { status: 404, data: { detail: { code: "item_not_found" } } } });
+    });
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
       expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg");

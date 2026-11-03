@@ -4,7 +4,7 @@ import stat
 import uuid
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from time import monotonic
 from typing import Any, Awaitable, BinaryIO, TypeVar, cast
 
@@ -29,9 +29,10 @@ from app.services.archive.zip_reader import ArchiveSourceUnavailableError
 from app.services.content_transfer import SourceDeleteError, SourceDeletionOutcomeUnknown
 from app.services.system_settings import get_integer_setting_value, get_smbclient_policy_kwargs
 from app.storage.base import ExclusiveWriter, MoveSourceReader, ProgressCallback, RandomAccessReader, StorageBackend
-from app.storage.smb_errors import translate_smb_target_error
+from app.storage.smb_errors import SMBConnectionRetired, SMBMutationUncertain, SMBOperationTimeout, translate_smb_target_error
 from app.storage.smb_pool import get_connection_pool, get_smb_connection_cache
 from app.utils.file_type_registry import get_mime_type
+from app.utils.worker_wait import wait_for_worker
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,14 @@ def _retain_move_cleanup(task: asyncio.Task[None]) -> None:
 
     def completed(result: asyncio.Task[None]) -> None:
         _MOVE_CLEANUP_TASKS.discard(result)
-        if not result.cancelled() and result.exception() is not None:
-            logger.warning("Deferred SMB move cleanup failed", exc_info=result.exception())
+        if not result.cancelled():
+            error = result.exception()
+            if error is not None:
+                logger.warning(
+                    "Deferred SMB cleanup failed. Reconnect before retrying.",
+                    extra={"event": "smb_cleanup_failed", "error_type": type(error).__name__, "errno": getattr(error, "errno", None)},
+                    exc_info=error,
+                )
 
     task.add_done_callback(completed)
 
@@ -70,6 +77,45 @@ class _SMBRandomAccessReader:
         self._connection_lease = connection_lease
         self._lock = asyncio.Lock()
         self._closed = False
+        self._inflight: asyncio.Future[Any] | None = None
+        self._cleanup: asyncio.Task[None] | None = None
+
+    async def _operate(
+        self, operation: Callable[[], BlockingResultT], timeout: float, *, mutation_paths: tuple[str, ...] = ()
+    ) -> BlockingResultT:
+        if self._closed:
+            raise ValueError("SMB reader is closed")
+        if self._inflight is not None and not self._inflight.done():
+            raise RuntimeError("Previous SMB reader operation is still running")
+        future = asyncio.get_running_loop().run_in_executor(None, lambda: self._backend._run_observed_operation(operation, mutation_paths))
+        self._inflight = future
+        try:
+            result = await wait_for_worker(future, timeout)
+        except TimeoutError as error:
+            self._closed = True
+            try:
+                await self._backend._invalidate_pooled_connection("reader_timeout", abort=True)
+            except Exception:
+                logger.warning("SMB reader generation retirement failed. Reconnect before retrying.", exc_info=True)
+            if mutation_paths:
+                raise SMBMutationUncertain() from error
+            raise SMBOperationTimeout("SMB reader timed out. Reconnect before retrying; active work remains owned.") from error
+        except asyncio.CancelledError:
+            self._closed = True
+            raise
+        except Exception as error:
+            pool = await get_connection_pool()
+            if mutation_paths and pool.generation_aborting(self._backend._connection_cache):
+                raise SMBMutationUncertain() from error
+            raise
+        else:
+            pool = await get_connection_pool()
+            if pool.generation_aborting(self._backend._connection_cache):
+                self._closed = True
+                if mutation_paths:
+                    raise SMBMutationUncertain()
+                raise SMBConnectionRetired("SMB reader connection changed. Reopen the source before retrying.")
+            return result
 
     async def read_at(self, offset: int, length: int) -> bytes:
         if offset < 0 or length < 0:
@@ -83,27 +129,28 @@ class _SMBRandomAccessReader:
                 self._handle.seek(offset)
                 return self._handle.read(length)
 
-            return await self._backend._run_blocking_smb_call(
-                "read_file_at",
-                _read_at,
-                SMB_READ_CHUNK_TIMEOUT_SECONDS,
-                smb_path=self._smb_path,
-            )
+            return await self._operate(_read_at, SMB_READ_CHUNK_TIMEOUT_SECONDS)
 
     async def close(self) -> None:
         async with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            try:
-                await self._backend._run_blocking_smb_call(
-                    "close_file_after_random_read",
-                    self._handle.close,
-                    SMB_FILE_CLOSE_TIMEOUT_SECONDS,
-                    smb_path=self._smb_path,
-                )
-            finally:
-                await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
+            if self._cleanup is None:
+                self._closed = True
+
+                async def cleanup() -> None:
+                    try:
+                        if self._inflight is not None:
+                            try:
+                                await wait_for_worker(self._inflight)
+                            except Exception:
+                                pass
+                        await asyncio.get_running_loop().run_in_executor(None, self._handle.close)
+                    finally:
+                        await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
+
+                self._cleanup = asyncio.create_task(cleanup())
+                _retain_move_cleanup(self._cleanup)
+            cleanup_task = self._cleanup
+        await wait_for_worker(cleanup_task, SMB_FILE_CLOSE_TIMEOUT_SECONDS)
 
 
 class _SMBMoveSourceReader(_SMBRandomAccessReader):
@@ -114,15 +161,12 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
         self._source_path = source_path
         self._inflight: asyncio.Future[Any] | None = None
         self._cleanup: asyncio.Task[None] | None = None
+        self._delete_dispatched = False
 
-    async def _operate(self, operation: Callable[[], BlockingResultT], timeout: float) -> BlockingResultT:
-        if self._closed:
-            raise ValueError("SMB move source reader is closed")
-        if self._inflight is not None and not self._inflight.done():
-            raise RuntimeError("Previous SMB move source operation is still running")
-        future = asyncio.get_running_loop().run_in_executor(None, operation)
-        self._inflight = future
-        return await asyncio.wait_for(asyncio.shield(future), timeout)
+    async def _operate(
+        self, operation: Callable[[], BlockingResultT], timeout: float, *, mutation_paths: tuple[str, ...] = ()
+    ) -> BlockingResultT:
+        return await super()._operate(lambda: self._backend._run_observed_operation(operation, mutation_paths), timeout)
 
     async def read_at(self, offset: int, length: int) -> bytes:
         if offset < 0 or length < 0:
@@ -168,17 +212,22 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
                     try:
                         if self._inflight is not None:
                             try:
-                                await asyncio.shield(self._inflight)
-                            except BaseException:
+                                await wait_for_worker(self._inflight)
+                            except Exception:
                                 pass
-                        await asyncio.get_running_loop().run_in_executor(None, self._handle.close)
+                        await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            lambda: self._backend._run_observed_operation(
+                                self._handle.close, (self._smb_path,) if self._delete_dispatched else ()
+                            ),
+                        )
                     finally:
                         await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
 
                 self._cleanup = asyncio.create_task(cleanup())
                 _retain_move_cleanup(self._cleanup)
             cleanup_task = self._cleanup
-        await asyncio.wait_for(asyncio.shield(cleanup_task), SMB_FILE_CLOSE_TIMEOUT_SECONDS)
+        await wait_for_worker(cleanup_task, SMB_FILE_CLOSE_TIMEOUT_SECONDS)
 
     async def commit_delete(self, *, cancellation: Callable[[], bool] | None = None) -> None:
         async with self._lock:
@@ -217,13 +266,14 @@ class _SMBMoveSourceReader(_SMBRandomAccessReader):
                             destination_mutated=True,
                         )
                 dispatched = True
+                self._delete_dispatched = True
                 pending = connection.send(request, session_id, tree_connect_id)
                 response = connection.receive(pending)
                 parsed = SMB2SetInfoResponse()
                 parsed.unpack(response["data"].get_value())
 
             try:
-                await self._operate(_delete_opened_file, SMB_DELETE_TIMEOUT_SECONDS)
+                await self._operate(_delete_opened_file, SMB_DELETE_TIMEOUT_SECONDS, mutation_paths=(self._smb_path,))
             except SourceDeleteError:
                 raise
             except SMBResponseException as error:
@@ -279,6 +329,7 @@ class _SMBExclusiveWriter:
                     self._handle.close,
                     SMB_FILE_CLOSE_TIMEOUT_SECONDS,
                     smb_path=self._smb_path,
+                    mutation_paths=(self._smb_path,),
                 )
             finally:
                 await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
@@ -293,6 +344,7 @@ class _SMBExclusiveWriter:
                     lambda: smbclient.remove(self._smb_path, **self._backend._smb_auth_kwargs()),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=self._smb_path,
+                    mutation_paths=(self._smb_path,),
                 )
             except OSError:
                 return False
@@ -301,6 +353,7 @@ class _SMBExclusiveWriter:
                 self._handle.close,
                 SMB_FILE_CLOSE_TIMEOUT_SECONDS,
                 smb_path=self._smb_path,
+                mutation_paths=(self._smb_path,),
             )
             self._closed = True
             await self._connection_lease.__aexit__(None, None, None)  # type: ignore[attr-defined]
@@ -353,6 +406,7 @@ class SMBBackend(StorageBackend):
         # Persisted connections share one isolated cache across request-scoped
         # backend instances. Detail-only test backends remain self-contained.
         self._connection_cache = get_smb_connection_cache(connection_context_key) if connection_context_key is not None else {}
+        self._connection_context_key = connection_context_key
         self._close_connection_cache_on_disconnect = close_connection_cache_on_disconnect
 
         # Normalize path_prefix: strip slashes, collapse to empty string for root
@@ -385,7 +439,7 @@ class SMBBackend(StorageBackend):
         """
 
         # Connection pooling is handled transparently in operations.
-        logger.debug(f"SMB backend ready (will use pooled connection): //{self.host}:{self.port}/{self.share_name}")
+        logger.debug("SMB backend is ready for pooled work.")
 
     #
     # disconnect
@@ -411,7 +465,7 @@ class SMBBackend(StorageBackend):
             )
             return
 
-        logger.debug(f"SMB backend released (connection remains in pool): //{self.host}/{self.share_name}")
+        logger.debug("SMB backend released; pooled connections remain owned.")
 
     #
     # _normalize_prefix
@@ -472,7 +526,7 @@ class SMBBackend(StorageBackend):
             return f"{self._base_path}\\{full_rel.replace('/', '\\')}"
         return self._base_path
 
-    async def _invalidate_pooled_connection(self, reason: str) -> None:
+    async def _invalidate_pooled_connection(self, reason: str, *, abort: bool = False) -> None:
         pool = await get_connection_pool()
         await pool.invalidate_connection(
             host=self.host,
@@ -481,6 +535,7 @@ class SMBBackend(StorageBackend):
             share_name=self.share_name,
             connection_cache=self._connection_cache,
             reason=reason,
+            abort=abort,
         )
 
     async def _run_blocking_smb_call(
@@ -490,6 +545,7 @@ class SMBBackend(StorageBackend):
         timeout_seconds: float,
         *,
         smb_path: str,
+        mutation_paths: tuple[str, ...] = (),
     ) -> BlockingResultT:
         try:
             return await self._run_blocking_smb_operation(
@@ -497,14 +553,54 @@ class SMBBackend(StorageBackend):
                 operation,
                 timeout_seconds,
                 smb_path=smb_path,
+                mutation_paths=mutation_paths,
             )
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(f"SMB operation timed out during {operation_name}") from exc
+            raise SMBOperationTimeout(f"SMB operation timed out during {operation_name}. Check the connection before retrying.") from exc
         except Exception as error:
             translated = translate_smb_target_error(error, smb_path)
             if translated is not error:
                 raise translated from error
             raise
+
+    def _observe_mutation_paths(self, paths: tuple[str, ...]) -> None:
+        """Keep disposable index hints separate from the source operation result."""
+        if not paths or self._connection_context_key is None:
+            return
+        from app.services.directory_cache import SQLiteConnectionDirectoryCache, get_directory_cache_manager
+
+        cache = None
+        try:
+            cache = get_directory_cache_manager().get_cache(self._connection_context_key)
+            if not isinstance(cache, SQLiteConnectionDirectoryCache):
+                return
+            if (
+                cache._connection_cache is not self._connection_cache
+                or (cache.host, cache.share_name, cache.port, cache.username, cache.password, cache._path_prefix)
+                != (self.host, self.share_name, self.port, self.username, self.password, self._path_prefix)
+                or cache._stop_event.is_set()
+            ):
+                return
+            root = PureWindowsPath(self._build_smb_path(""))
+            parents = set()
+            for path in paths:
+                relative = PureWindowsPath(path).relative_to(root)
+                normalized = self._normalize_relative_path(relative.as_posix()) if relative.parts else ""
+                parents.add(normalized.rpartition("/")[0])
+            for parent in sorted(parents):
+                cache.observe_parent(parent)
+        except Exception as error:
+            if isinstance(cache, SQLiteConnectionDirectoryCache):
+                cache._observation_lost()
+            logger.warning("Directory mutation hints could not be queued (%s).", type(error).__name__)
+
+    def _run_observed_operation(self, operation: Callable[[], BlockingResultT], mutation_paths: tuple[str, ...]) -> BlockingResultT:
+        """Fence source reads before dispatch and reconcile only after actual exit."""
+        self._observe_mutation_paths(mutation_paths)
+        try:
+            return operation()
+        finally:
+            self._observe_mutation_paths(mutation_paths)
 
     async def _run_blocking_smb_operation(
         self,
@@ -513,41 +609,61 @@ class SMBBackend(StorageBackend):
         timeout_seconds: float,
         *,
         smb_path: str,
+        mutation_paths: tuple[str, ...] = (),
     ) -> BlockingResultT:
         """Run executor work without releasing its SMB cache before it completes."""
 
         loop = asyncio.get_running_loop()
-        operation_future = loop.run_in_executor(None, operation)
+        pool = await get_connection_pool()
+        diagnostics = pool.connection_diagnostics(self._connection_cache)
+        operation_future = loop.run_in_executor(None, lambda: self._run_observed_operation(operation, mutation_paths))
 
         try:
-            return await self._wait_for_blocking_smb_operation(
+            result = await self._wait_for_blocking_smb_operation(
                 operation_future,
                 operation_name=operation_name,
                 smb_path=smb_path,
                 timeout_seconds=timeout_seconds,
+                diagnostics=diagnostics,
             )
         except asyncio.TimeoutError:
             pool = await get_connection_pool()
             await pool.retain_connection_until_future_complete(self._connection_cache, operation_future)
-            logger.error(
-                "Timeout during SMB %s for '%s' after %.1fs",
-                operation_name,
-                smb_path,
-                timeout_seconds,
+            logger.warning(
+                "SMB operation timed out. Active work remains owned until its worker exits.",
+                extra={
+                    **pool.connection_diagnostics(self._connection_cache),
+                    "event": "smb_operation_timeout",
+                    "operation": operation_name.replace(" ", "_"),
+                    "stage": "operation",
+                    "duration_ms": timeout_seconds * 1000,
+                },
             )
             try:
-                await self._invalidate_pooled_connection(f"timeout during {operation_name}")
+                await self._invalidate_pooled_connection(f"timeout during {operation_name}", abort=True)
             except Exception:
                 logger.warning(
                     "Failed to invalidate pooled SMB connection after timeout during %s",
                     operation_name,
                     exc_info=True,
                 )
+            if mutation_paths:
+                raise SMBMutationUncertain() from None
             raise
         except asyncio.CancelledError:
             pool = await get_connection_pool()
             await pool.retain_connection_until_future_complete(self._connection_cache, operation_future)
             raise
+        except Exception as error:
+            if mutation_paths and pool.generation_aborting(self._connection_cache):
+                raise SMBMutationUncertain() from error
+            raise
+        else:
+            if pool.generation_aborting(self._connection_cache):
+                if mutation_paths:
+                    raise SMBMutationUncertain()
+                raise SMBConnectionRetired("SMB connection changed during the operation. Refresh the source and retry the request.")
+            return result
 
     async def _wait_for_blocking_smb_operation(
         self,
@@ -556,15 +672,17 @@ class SMBBackend(StorageBackend):
         operation_name: str,
         smb_path: str,
         timeout_seconds: float,
+        diagnostics: dict[str, str | int] | None = None,
     ) -> BlockingResultT:
         try:
-            return await asyncio.wait_for(asyncio.shield(operation_future), timeout=timeout_seconds)
+            return await wait_for_worker(operation_future, timeout_seconds)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             operation_future.add_done_callback(
                 lambda completed_operation: self._report_late_smb_operation_result(
                     completed_operation,
                     operation_name=operation_name,
                     smb_path=smb_path,
+                    diagnostics=diagnostics,
                 )
             )
             raise
@@ -575,15 +693,19 @@ class SMBBackend(StorageBackend):
         *,
         operation_name: str,
         smb_path: str,
+        diagnostics: dict[str, str | int] | None = None,
     ) -> None:
+        fields = {**(diagnostics or {}), "operation": operation_name.replace(" ", "_"), "stage": "late_completion"}
         try:
             operation_future.result()
         except asyncio.CancelledError:
-            logger.warning("SMB %s for '%s' was cancelled after timing out", operation_name, smb_path)
+            logger.warning("SMB operation was cancelled after caller exit.", extra={**fields, "event": "smb_operation_late_cancel"})
         except Exception:
-            logger.warning("SMB %s for '%s' failed after timing out", operation_name, smb_path, exc_info=True)
+            logger.warning(
+                "SMB operation failed after caller exit.", extra={**fields, "event": "smb_operation_late_failure"}, exc_info=True
+            )
         else:
-            logger.warning("SMB %s for '%s' completed after timing out", operation_name, smb_path)
+            logger.warning("SMB operation completed after caller exit.", extra={**fields, "event": "smb_operation_late_success"})
 
     #
     # list_directory
@@ -592,7 +714,7 @@ class SMBBackend(StorageBackend):
         """List contents of a directory"""
 
         smb_path = self._build_smb_path(path)
-        logger.debug(f"Listing directory: path='{path}' -> smb_path='{smb_path}'")
+        logger.debug("SMB directory listing started.", extra={"operation": "list_directory"})
 
         try:
             # Acquire connection from pool
@@ -638,7 +760,7 @@ class SMBBackend(StorageBackend):
                             )
                             result.append(file_info)
                         except Exception as e:
-                            logger.warning(f"Failed to process {entry.name}: {e}")
+                            logger.warning("SMB directory entry metadata is unavailable.", extra={"error_type": type(e).__name__})
                             # Add basic entry even if processing fails
                             result.append(
                                 FileInfo(
@@ -663,11 +785,8 @@ class SMBBackend(StorageBackend):
 
                 return DirectoryListing(path=path or "/", items=items, total=len(items))
 
-        except TimeoutError:
-            logger.error(
-                f"Timeout listing directory '{path}' (smb_path='{smb_path}') after {SMB_LIST_DIRECTORY_TIMEOUT_SECONDS:.0f} seconds"
-            )
-            raise TimeoutError(f"SMB operation timed out while listing directory: {path}")
+        except TimeoutError as error:
+            raise SMBOperationTimeout("SMB operation timed out while listing a directory. Check the connection before retrying.") from error
         except (FileNotFoundError, PermissionError, NotADirectoryError):
             raise
 
@@ -749,9 +868,6 @@ class SMBBackend(StorageBackend):
         # Larger chunks also use more SMB credits
         chunk_size = get_integer_setting_value(SystemSettingKey.SMB_READ_CHUNK_SIZE_BYTES)
 
-        # Build full SMB path
-        smb_path = self._build_smb_path(path)
-
         try:
             # Acquire connection from pool
             pool = await get_connection_pool()
@@ -772,19 +888,14 @@ class SMBBackend(StorageBackend):
 
                 for attempt in range(max_retries):
                     try:
-                        file_handle = await self._run_blocking_smb_call(
-                            "open_file_for_read",
-                            lambda: smbclient.open_file(
-                                smb_path,
-                                mode="rb",
-                                share_access="rwd",
-                                **self._smb_auth_kwargs(),
+                        file_handle = cast(
+                            _SMBRandomAccessReader,
+                            await self._open_random_access_reader(
+                                path, share_access="rwd", operation_name="open_file_for_read", buffering=None
                             ),
-                            SMB_FILE_OPEN_TIMEOUT_SECONDS,
-                            smb_path=smb_path,
                         )
                         if attempt > 0:
-                            logger.info(f"Successfully opened file after {attempt + 1} attempts: {path}")
+                            logger.info("SMB read open recovered.", extra={"operation": "read_file", "event": "smb_read_recovered"})
                         break  # Success
                     except Exception as e:
                         # Check for retryable errors
@@ -794,8 +905,7 @@ class SMBBackend(StorageBackend):
 
                         if (is_lock_error or is_credit_error) and attempt < max_retries - 1:
                             # Wait with exponential backoff and retry
-                            error_type = "credits exhausted" if is_credit_error else "file locked"
-                            logger.warning(f"SMB {error_type}, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries}): {path}")
+                            logger.warning("SMB read open will retry.", extra={"operation": "read_file", "retry_seconds": retry_delay})
                             await asyncio.sleep(retry_delay)
                             retry_delay *= 2  # Double the delay each time
                         else:
@@ -808,12 +918,7 @@ class SMBBackend(StorageBackend):
                 try:
                     while True:
                         try:
-                            chunk = await self._run_blocking_smb_call(
-                                "read_file_chunk",
-                                lambda: file_handle.read(chunk_size),
-                                SMB_READ_CHUNK_TIMEOUT_SECONDS,
-                                smb_path=smb_path,
-                            )
+                            chunk = await file_handle._operate(lambda: file_handle._handle.read(chunk_size), SMB_READ_CHUNK_TIMEOUT_SECONDS)
                             if not chunk:
                                 break
                             yield chunk
@@ -824,35 +929,36 @@ class SMBBackend(StorageBackend):
                             # NtStatus 0xc0000043 = SHARING_VIOLATION (file locked during read)
                             # Credit exhaustion = "Request requires X credits but only Y credits are available"
                             if "0xc0000034" in error_str or "does not exist" in error_str.lower():
-                                logger.warning(f"File was deleted during read: {path}")
+                                logger.warning("SMB source was deleted during read.", extra={"operation": "read_file"})
                                 raise FileNotFoundError(f"File was deleted: {path}")
                             elif "0xc0000043" in error_str or "sharing violation" in error_str.lower():
-                                logger.warning(f"File sharing violation during read (possibly being modified): {path}")
+                                logger.warning("SMB read failed because of a sharing violation.", extra={"operation": "read_file"})
                                 raise IOError(f"File access conflict: {path}")
                             elif "credits" in error_str.lower() and "available" in error_str.lower():
-                                logger.error(f"SMB credit exhaustion during read: {path} - {read_error}")
+                                logger.error("SMB server credit capacity is unavailable.", extra={"operation": "read_file"})
                                 raise IOError(f"SMB server out of credits (too many concurrent requests): {path}")
                             else:
                                 # Unknown error during read
-                                logger.error(f"Error reading chunk from {path}: {read_error}")
+                                logger.error(
+                                    "SMB chunk read failed.", extra={"operation": "read_file", "error_type": type(read_error).__name__}
+                                )
                                 raise
                 finally:
                     try:
-                        await self._run_blocking_smb_call(
-                            "close_file_after_read",
-                            file_handle.close,
-                            SMB_FILE_CLOSE_TIMEOUT_SECONDS,
-                            smb_path=smb_path,
-                        )
+                        await file_handle.close()
                     except Exception as close_error:
                         # Log but don't raise - we're already in cleanup
-                        logger.warning(f"Error closing file handle for {path}: {close_error}")
+                        logger.warning(
+                            "SMB read cleanup failed.", extra={"operation": "close_reader", "error_type": type(close_error).__name__}
+                        )
 
         except Exception as e:
-            logger.error(f"Failed to read file {path}: {e}")
+            logger.error("SMB read failed.", extra={"operation": "read_file", "error_type": type(e).__name__})
             raise
 
-    async def _open_random_access_reader(self, path: str, *, share_access: str, operation_name: str) -> RandomAccessReader:
+    async def _open_random_access_reader(
+        self, path: str, *, share_access: str, operation_name: str, buffering: int | None = 0
+    ) -> RandomAccessReader:
         """Open one pooled SMB handle for serialized bounded offset reads."""
 
         smb_path = self._build_smb_path(path)
@@ -867,21 +973,30 @@ class SMBBackend(StorageBackend):
         )
 
         await connection_lease.__aenter__()
+        open_future = asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: smbclient.open_file(
+                smb_path,
+                mode="rb",
+                share_access=share_access,
+                **({"buffering": buffering} if buffering is not None else {}),
+                **self._smb_auth_kwargs(),
+            ),
+        )
         try:
-            handle = await self._run_blocking_smb_call(
-                operation_name,
-                lambda: smbclient.open_file(
-                    smb_path,
-                    mode="rb",
-                    buffering=0,
-                    share_access=share_access,
-                    **self._smb_auth_kwargs(),
-                ),
-                SMB_FILE_OPEN_TIMEOUT_SECONDS,
-                smb_path=smb_path,
-            )
-        except BaseException:
-            await connection_lease.__aexit__(None, None, None)
+            handle = await wait_for_worker(open_future, SMB_FILE_OPEN_TIMEOUT_SECONDS)
+        except BaseException as error:
+
+            async def dispose_late_open() -> None:
+                try:
+                    late_handle = await wait_for_worker(open_future)
+                    await asyncio.get_running_loop().run_in_executor(None, late_handle.close)
+                finally:
+                    await connection_lease.__aexit__(None, None, None)
+
+            _retain_move_cleanup(asyncio.create_task(dispose_late_open()))
+            if isinstance(error, TimeoutError):
+                await self._invalidate_pooled_connection("reader_open_timeout", abort=True)
             raise
 
         return _SMBRandomAccessReader(
@@ -931,19 +1046,19 @@ class SMBBackend(StorageBackend):
             ),
         )
         try:
-            handle = await asyncio.wait_for(asyncio.shield(open_future), SMB_FILE_OPEN_TIMEOUT_SECONDS)
-        except BaseException:
+            handle = await wait_for_worker(open_future, SMB_FILE_OPEN_TIMEOUT_SECONDS)
+        except BaseException as error:
 
             async def dispose_late_open() -> None:
                 try:
-                    late_handle = await asyncio.shield(open_future)
+                    late_handle = await wait_for_worker(open_future)
                     await asyncio.get_running_loop().run_in_executor(None, late_handle.close)
-                except Exception:
-                    logger.warning("Failed to dispose late SMB move source open: path=%s", path, exc_info=True)
                 finally:
                     await connection_lease.__aexit__(None, None, None)
 
             _retain_move_cleanup(asyncio.create_task(dispose_late_open()))
+            if isinstance(error, TimeoutError):
+                await self._invalidate_pooled_connection("move_source_open_timeout", abort=True)
             raise
         reader = _SMBMoveSourceReader(
             backend=self,
@@ -964,7 +1079,10 @@ class SMBBackend(StorageBackend):
                 operation_name="open_file_for_archive_source_read",
             )
         except Exception as exc:
-            logger.warning("Unable to open pinned archive source '%s': %s", path, exc)
+            logger.warning(
+                "Pinned SMB archive source could not be opened.",
+                extra={"operation": "open_archive_source", "error_type": type(exc).__name__},
+            )
             raise ArchiveSourceUnavailableError("Archive source cannot be opened with required sharing") from exc
 
     async def open_exclusive_writer(self, path: str) -> ExclusiveWriter:
@@ -993,6 +1111,7 @@ class SMBBackend(StorageBackend):
                 ),
                 SMB_FILE_OPEN_TIMEOUT_SECONDS,
                 smb_path=smb_path,
+                mutation_paths=(smb_path,),
             )
         except BaseException:
             await connection_lease.__aexit__(None, None, None)
@@ -1028,7 +1147,7 @@ class SMBBackend(StorageBackend):
         # Write chunk size — 4 MB matches read_file for consistency
         write_chunk_size: int = 4 * 1024 * 1024
         smb_path = self._build_smb_path(path)
-        logger.debug(f"Writing file: path='{path}' -> smb_path='{smb_path}'")
+        logger.debug("SMB write started.", extra={"operation": "write_file"})
 
         try:
             pool = await get_connection_pool()
@@ -1063,25 +1182,26 @@ class SMBBackend(StorageBackend):
                     _write,
                     SMB_WRITE_FILE_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
-                logger.debug(f"Successfully wrote {bytes_written} bytes: path='{path}'")
+                logger.debug("SMB write completed.", extra={"operation": "write_file"})
                 return bytes_written
 
         except TimeoutError:
-            logger.error(f"Timeout writing '{path}' after {SMB_WRITE_FILE_TIMEOUT_SECONDS:.0f} seconds")
+            logger.error("SMB write timed out.", extra={"operation": "write_file"})
             raise TimeoutError(f"SMB operation timed out while writing: {path}")
         except (FileNotFoundError, PermissionError, IsADirectoryError, NotADirectoryError):
             raise
         except OSError as e:
             error_str = str(e)
             if "0xc0000043" in error_str or "being used by another process" in error_str:
-                logger.warning(f"File locked during write: path='{path}'")
+                logger.warning("SMB write target is locked.", extra={"operation": "write_file"})
                 raise IOError(f"File is locked and cannot be written: {path}") from e
-            logger.error(f"Failed to write '{path}': {type(e).__name__}: {e}", exc_info=True)
+            logger.error("SMB write failed.", extra={"operation": "write_file", "error_type": type(e).__name__}, exc_info=True)
             raise
         except Exception as e:
-            logger.error(f"Failed to write '{path}': {type(e).__name__}: {e}", exc_info=True)
+            logger.error("SMB write failed.", extra={"operation": "write_file", "error_type": type(e).__name__}, exc_info=True)
             raise
 
     #
@@ -1150,6 +1270,7 @@ class SMBBackend(StorageBackend):
             lambda: _remove(smb_path),
             SMB_DELETE_TIMEOUT_SECONDS,
             smb_path=smb_path,
+            mutation_paths=(smb_path,),
         )
 
     async def _remove_regular_file_if_exists(self, smb_path: str) -> bool:
@@ -1169,6 +1290,7 @@ class SMBBackend(StorageBackend):
             lambda: _remove(smb_path),
             SMB_DELETE_TIMEOUT_SECONDS,
             smb_path=smb_path,
+            mutation_paths=(smb_path,),
         )
 
     #
@@ -1214,7 +1336,9 @@ class SMBBackend(StorageBackend):
                 )
 
         except Exception as e:
-            logger.warning(f"Failed to set modification time on '{path}': {type(e).__name__}: {e}")
+            logger.warning(
+                "SMB modification time could not be set.", extra={"operation": "set_modified_time", "error_type": type(e).__name__}
+            )
 
     #
     # delete_item
@@ -1234,7 +1358,7 @@ class SMBBackend(StorageBackend):
         """
 
         smb_path = self._build_smb_path(path)
-        logger.debug(f"Deleting item: path='{path}' -> smb_path='{smb_path}'")
+        logger.debug("SMB delete started.", extra={"operation": "delete_item"})
 
         try:
             pool = await get_connection_pool()
@@ -1265,7 +1389,7 @@ class SMBBackend(StorageBackend):
                         # before we call rmdir.
                         children = [entry.path for entry in smbclient.scandir(target, **self._smb_auth_kwargs())]
                         for child_path in children:
-                            _delete_recursive(child_path)
+                            self._run_observed_operation(lambda: _delete_recursive(child_path), (child_path,))
                         smbclient.rmdir(target, **self._smb_auth_kwargs())
                     else:
                         smbclient.remove(target, **self._smb_auth_kwargs())
@@ -1275,12 +1399,13 @@ class SMBBackend(StorageBackend):
                     lambda: _delete_recursive(smb_path),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
-                logger.debug(f"Successfully deleted: path='{path}'")
+                logger.debug("SMB delete completed.", extra={"operation": "delete_item"})
 
         except TimeoutError as error:
-            logger.error(f"Timeout deleting '{path}' after {SMB_DELETE_TIMEOUT_SECONDS:.0f} seconds")
+            logger.error("SMB delete timed out.", extra={"operation": "delete_item"})
             raise TimeoutError(f"SMB operation timed out while deleting: {path}") from error
         except OSError as e:
             error_str = str(e)
@@ -1290,20 +1415,22 @@ class SMBBackend(StorageBackend):
             # 0xc0000056 = STATUS_DELETE_PENDING — item is already being
             # deleted by the server.  Treat as success.
             if "0xc0000056" in error_str:
-                logger.info(f"Item already being deleted (STATUS_DELETE_PENDING): path='{path}'")
+                logger.debug("SMB delete is already pending.", extra={"operation": "delete_item"})
                 return
             logger.error(
-                f"Failed to delete '{path}': {type(e).__name__}: {e}",
+                "SMB delete failed.",
+                extra={"operation": "delete_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
         except Exception as e:
             error_str = str(e)
             if "0xc0000056" in error_str or "DeletePending" in type(e).__name__:
-                logger.info(f"Item already being deleted (STATUS_DELETE_PENDING): path='{path}'")
+                logger.debug("SMB delete is already pending.", extra={"operation": "delete_item"})
                 return
             logger.error(
-                f"Failed to delete '{path}': {type(e).__name__}: {e}",
+                "SMB delete failed.",
+                extra={"operation": "delete_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
@@ -1327,6 +1454,7 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.rmdir(smb_path, **self._smb_auth_kwargs()),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
         except OSError as error:
             error_text = str(error)
@@ -1338,10 +1466,11 @@ class SMBBackend(StorageBackend):
             # smbprotocol may raise non-OSError exceptions that still
             # carry the NTSTATUS code in their message.
             if "0xc0000056" in error_str or "DeletePending" in type(e).__name__:
-                logger.info(f"Item already being deleted (STATUS_DELETE_PENDING): path='{path}'")
+                logger.debug("SMB delete is already pending.", extra={"operation": "remove_empty_directory"})
                 return
             logger.error(
-                f"Failed to delete '{path}': {type(e).__name__}: {e}",
+                "SMB empty-directory removal failed.",
+                extra={"operation": "remove_empty_directory", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
@@ -1375,7 +1504,7 @@ class SMBBackend(StorageBackend):
         parent = smb_src.rsplit("\\", 1)[0]
         smb_dst = f"{parent}\\{normalized_name}"
 
-        logger.debug(f"Renaming item: path='{path}' -> new_name='{new_name}' (smb: '{smb_src}' -> '{smb_dst}')")
+        logger.debug("SMB rename started.", extra={"operation": "rename_item"})
 
         try:
             pool = await get_connection_pool()
@@ -1393,12 +1522,13 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.rename(smb_src, smb_dst, **self._smb_auth_kwargs()),
                     30.0,
                     smb_path=smb_src,
+                    mutation_paths=(smb_src, smb_dst),
                 )
 
-                logger.debug(f"Successfully renamed: '{path}' -> '{new_name}'")
+                logger.debug("SMB rename completed.", extra={"operation": "rename_item"})
 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout renaming '{path}' after 30 seconds")
+            logger.error("SMB rename timed out.", extra={"operation": "rename_item"})
             raise TimeoutError(f"SMB operation timed out while renaming: {path}")
         except OSError as e:
             error_str = str(e)
@@ -1409,13 +1539,15 @@ class SMBBackend(StorageBackend):
             if "0xc0000035" in error_str:
                 raise FileExistsError(f"An item named '{new_name}' already exists") from e
             logger.error(
-                f"Failed to rename '{path}': {type(e).__name__}: {e}",
+                "SMB rename failed.",
+                extra={"operation": "rename_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
         except Exception as e:
             logger.error(
-                f"Failed to rename '{path}': {type(e).__name__}: {e}",
+                "SMB rename failed.",
+                extra={"operation": "rename_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
@@ -1436,7 +1568,7 @@ class SMBBackend(StorageBackend):
         """
 
         smb_path = self._build_smb_path(path)
-        logger.debug(f"Creating directory: path='{path}' -> smb_path='{smb_path}'")
+        logger.debug("SMB directory creation started.", extra={"operation": "create_directory"})
 
         try:
             pool = await get_connection_pool()
@@ -1454,12 +1586,13 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.mkdir(smb_path, **self._smb_auth_kwargs()),
                     30.0,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
-                logger.debug(f"Successfully created directory: '{path}'")
+                logger.debug("SMB directory creation completed.", extra={"operation": "create_directory"})
 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout creating directory '{path}' after 30 seconds")
+            logger.error("SMB directory creation timed out.", extra={"operation": "create_directory"})
             raise TimeoutError(f"SMB operation timed out while creating directory: {path}")
         except OSError as e:
             error_str = str(e)
@@ -1470,13 +1603,15 @@ class SMBBackend(StorageBackend):
             if "0xc0000034" in error_str or "No such file" in error_str:
                 raise FileNotFoundError(f"Parent directory not found for: {path}") from e
             logger.error(
-                f"Failed to create directory '{path}': {type(e).__name__}: {e}",
+                "SMB directory creation failed.",
+                extra={"operation": "create_directory", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
         except Exception as e:
             logger.error(
-                f"Failed to create directory '{path}': {type(e).__name__}: {e}",
+                "SMB directory creation failed.",
+                extra={"operation": "create_directory", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
@@ -1499,7 +1634,7 @@ class SMBBackend(StorageBackend):
         """
 
         smb_path = self._build_smb_path(path)
-        logger.debug(f"Creating file: path='{path}' -> smb_path='{smb_path}'")
+        logger.debug("SMB file creation started.", extra={"operation": "create_file"})
 
         try:
             pool = await get_connection_pool()
@@ -1522,12 +1657,13 @@ class SMBBackend(StorageBackend):
                     _create_empty_file,
                     30.0,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
 
-                logger.debug(f"Successfully created file: '{path}'")
+                logger.debug("SMB file creation completed.", extra={"operation": "create_file"})
 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout creating file '{path}' after 30 seconds")
+            logger.error("SMB file creation timed out.", extra={"operation": "create_file"})
             raise TimeoutError(f"SMB operation timed out while creating file: {path}")
         except OSError as e:
             error_str = str(e)
@@ -1538,13 +1674,15 @@ class SMBBackend(StorageBackend):
             if "0xc0000034" in error_str or "No such file" in error_str:
                 raise FileNotFoundError(f"Parent directory not found for: {path}") from e
             logger.error(
-                f"Failed to create file '{path}': {type(e).__name__}: {e}",
+                "SMB file creation failed.",
+                extra={"operation": "create_file", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
         except Exception as e:
             logger.error(
-                f"Failed to create file '{path}': {type(e).__name__}: {e}",
+                "SMB file creation failed.",
+                extra={"operation": "create_file", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
@@ -1581,7 +1719,7 @@ class SMBBackend(StorageBackend):
             error_str = str(e)
             if "0xc0000034" in error_str or "No such file" in error_str:
                 raise FileNotFoundError(f"Path not found: {path}") from e
-            logger.error(f"Failed to get file size for '{path}': {e}")
+            logger.error("SMB file size could not be read.", extra={"operation": "get_file_size", "error_type": type(e).__name__})
             raise
 
     #
@@ -1609,7 +1747,7 @@ class SMBBackend(StorageBackend):
 
         smb_src = self._build_smb_path(source_path)
         smb_dst = self._build_smb_path(dest_path)
-        logger.debug(f"Copying item: '{source_path}' -> '{dest_path}' (smb: '{smb_src}' -> '{smb_dst}')")
+        logger.debug("SMB copy started.", extra={"operation": "copy_item"})
 
         try:
             pool = await get_connection_pool()
@@ -1653,7 +1791,8 @@ class SMBBackend(StorageBackend):
                         # generator is fully consumed before deeper calls.
                         children = [(entry.name, entry.path) for entry in smbclient.scandir(src, **self._smb_auth_kwargs())]
                         for child_name, child_path in children:
-                            _copy_recursive(child_path, f"{dst}\\{child_name}")
+                            child_destination = f"{dst}\\{child_name}"
+                            self._run_observed_operation(lambda: _copy_recursive(child_path, child_destination), (child_destination,))
                         # Restore directory timestamps after all children are
                         # copied (adding children updates the directory mtime).
                         smbclient.utime(dst, ns=(atime_ns, mtime_ns), **self._smb_auth_kwargs())
@@ -1666,12 +1805,13 @@ class SMBBackend(StorageBackend):
                     lambda: _copy_recursive(smb_src, smb_dst),
                     300.0,  # Large copies may take time
                     smb_path=smb_src,
+                    mutation_paths=(smb_dst,),
                 )
 
-                logger.debug(f"Successfully copied: '{source_path}' -> '{dest_path}'")
+                logger.debug("SMB copy completed.", extra={"operation": "copy_item"})
 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout copying '{source_path}' after 300 seconds")
+            logger.error("SMB copy timed out.", extra={"operation": "copy_item"})
             raise TimeoutError(f"SMB operation timed out while copying: {source_path}")
         except OSError as e:
             error_str = str(e)
@@ -1682,13 +1822,15 @@ class SMBBackend(StorageBackend):
             if "0xc0000035" in error_str:
                 raise FileExistsError(f"Destination already exists: {dest_path}") from e
             logger.error(
-                f"Failed to copy '{source_path}' -> '{dest_path}': {type(e).__name__}: {e}",
+                "SMB copy failed.",
+                extra={"operation": "copy_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
         except Exception as e:
             logger.error(
-                f"Failed to copy '{source_path}' -> '{dest_path}': {type(e).__name__}: {e}",
+                "SMB copy failed.",
+                extra={"operation": "copy_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
@@ -1717,7 +1859,7 @@ class SMBBackend(StorageBackend):
 
         smb_src = self._build_smb_path(source_path)
         smb_dst = self._build_smb_path(dest_path)
-        logger.debug(f"Moving item: '{source_path}' -> '{dest_path}' (smb: '{smb_src}' -> '{smb_dst}')")
+        logger.debug("SMB move started.", extra={"operation": "move_item"})
 
         try:
             pool = await get_connection_pool()
@@ -1751,12 +1893,13 @@ class SMBBackend(StorageBackend):
                     ),
                     30.0,
                     smb_path=smb_src,
+                    mutation_paths=(smb_src, smb_dst),
                 )
 
-                logger.debug(f"Successfully moved: '{source_path}' -> '{dest_path}'")
+                logger.debug("SMB move completed.", extra={"operation": "move_item"})
 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout moving '{source_path}' after 30 seconds")
+            logger.error("SMB move timed out.", extra={"operation": "move_item"})
             raise TimeoutError(f"SMB operation timed out while moving: {source_path}")
         except OSError as e:
             error_str = str(e)
@@ -1767,13 +1910,15 @@ class SMBBackend(StorageBackend):
             if "0xc0000035" in error_str:
                 raise FileExistsError(f"Destination already exists: {dest_path}") from e
             logger.error(
-                f"Failed to move '{source_path}' -> '{dest_path}': {type(e).__name__}: {e}",
+                "SMB move failed.",
+                extra={"operation": "move_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
         except Exception as e:
             logger.error(
-                f"Failed to move '{source_path}' -> '{dest_path}': {type(e).__name__}: {e}",
+                "SMB move failed.",
+                extra={"operation": "move_item", "error_type": type(e).__name__},
                 exc_info=True,
             )
             raise
@@ -1819,7 +1964,7 @@ class SMBBackend(StorageBackend):
         chunk_write_timeout_s: float = 60.0
 
         smb_path = self._build_smb_path(path)
-        logger.debug(f"write_file_from_stream: path='{path}' -> smb_path='{smb_path}'")
+        logger.debug("SMB stream write started.", extra={"operation": "write_file_from_stream"})
 
         bytes_written = 0
         replaced = False
@@ -1854,6 +1999,7 @@ class SMBBackend(StorageBackend):
                     ),
                     15.0,
                     smb_path=smb_path,
+                    mutation_paths=(smb_path,),
                 )
                 target_may_have_changed = True
 
@@ -1880,6 +2026,7 @@ class SMBBackend(StorageBackend):
                         file_handle.close,
                         5.0,
                         smb_path=smb_path,
+                        mutation_paths=(smb_path,),
                     )
 
                 # Preserve the original modification timestamp inside
@@ -1897,11 +2044,11 @@ class SMBBackend(StorageBackend):
                         smb_path=smb_path,
                     )
 
-                logger.debug(f"write_file_from_stream: wrote {bytes_written} bytes to '{path}'")
+                logger.debug("SMB stream write completed.", extra={"operation": "write_file_from_stream"})
                 return TargetWriteResult(bytes_written, replaced=replaced)
 
         except asyncio.TimeoutError as exc:
-            logger.error(f"Timeout during write_file_from_stream for '{path}'")
+            logger.error("SMB stream write timed out.", extra={"operation": "write_file_from_stream"})
             timeout_error = TimeoutError(f"SMB operation timed out while writing: {path}")
             if target_may_have_changed:
                 raise TargetWriteFailure(timeout_error, bytes_written) from exc
@@ -1914,12 +2061,16 @@ class SMBBackend(StorageBackend):
                 raise TargetExistsBeforeContent(f"Destination already exists: {path}") from e
             if "0xc0000043" in error_str or "being used by another process" in error_str:
                 raise IOError(f"File is locked and cannot be written: {path}") from e
-            logger.error(f"Failed write_file_from_stream '{path}': {type(e).__name__}: {e}", exc_info=True)
+            logger.error(
+                "SMB stream write failed.", extra={"operation": "write_file_from_stream", "error_type": type(e).__name__}, exc_info=True
+            )
             raise
         except Exception as e:
             if target_may_have_changed:
                 raise TargetWriteFailure(e, bytes_written) from e
-            logger.error(f"Failed write_file_from_stream '{path}': {type(e).__name__}: {e}", exc_info=True)
+            logger.error(
+                "SMB stream write failed.", extra={"operation": "write_file_from_stream", "error_type": type(e).__name__}, exc_info=True
+            )
             raise
 
     async def stage_and_commit_new_file_from_stream(
@@ -1961,12 +2112,13 @@ class SMBBackend(StorageBackend):
                     lambda: smbclient.remove(smb_stage_path, **self._smb_auth_kwargs()),
                     SMB_DELETE_TIMEOUT_SECONDS,
                     smb_path=smb_stage_path,
+                    mutation_paths=(smb_stage_path,),
                 )
             except Exception as cleanup_error:
                 logger.warning(
-                    "Failed to discard SMB transfer stage '%s': %s",
-                    stage_path,
-                    cleanup_error,
+                    "SMB transfer stage cleanup failed.",
+                    extra={"operation": "discard_transfer_stage", "error_type": type(cleanup_error).__name__},
+                    exc_info=True,
                 )
 
         try:
@@ -1989,6 +2141,7 @@ class SMBBackend(StorageBackend):
                     ),
                     SMB_FILE_OPEN_TIMEOUT_SECONDS,
                     smb_path=smb_stage_path,
+                    mutation_paths=(smb_stage_path,),
                 )
                 try:
                     async for chunk in stream:
@@ -2041,9 +2194,10 @@ class SMBBackend(StorageBackend):
                     lambda: commit_stage(smb_stage_path, smb_path, **self._smb_auth_kwargs()),
                     SMB_FILE_OPEN_TIMEOUT_SECONDS,
                     smb_path=smb_path,
+                    mutation_paths=(smb_stage_path, smb_path),
                 )
                 committed = True
-                logger.debug("Committed staged SMB transfer: '%s'", path)
+                logger.debug("Staged SMB transfer committed.", extra={"operation": "commit_transfer_stage"})
                 return bytes_written
         except OSError as error:
             error_text = str(error)

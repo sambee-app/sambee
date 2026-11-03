@@ -597,6 +597,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     {
       includeDotDirectories: includeDotDirectoriesInQuickNav,
       history,
+      sourceRevision: config.sourceRevision,
       getConnectionName: (targetConnectionId) => getConnectionById(connections, targetConnectionId)?.name ?? targetConnectionId,
       onNavigateDirectory: (targetConnectionId, path, recordId) => {
         pendingRecentDirectoryRecordRef.current = recordId ? { id: recordId, connectionId: targetConnectionId, path } : null;

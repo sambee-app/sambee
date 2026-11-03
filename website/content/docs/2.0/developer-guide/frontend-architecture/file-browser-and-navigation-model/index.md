@@ -90,6 +90,12 @@ A listing with unprocessed change notifications can remain visible, but it isn't
 
 SMB file-list subscriptions watch immediate children rather than the whole subtree. The separate backend directory-search cache retains recursive directory-name monitoring. See [SMB Change Notification and Directory Freshness](../../backend-architecture/smb-change-notification-and-directory-freshness/) for watcher ownership and lifecycle.
 
+## Progressive Quick-Bar Results
+
+Publish usable history and loaded-file results without waiting for index requests. Publish selectable records before rendering rows, merge duplicate history/index results, and reject responses for obsolete queries or sources.
+
+Treat incomplete coverage separately from request failure. Background refresh requires `search_contract_version: 1` and must stop when the query, source, visibility, or search session changes, or on terminal failure. See [Directory-Index Consistency](../../backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for storage and freshness rules.
+
 ## URL-Driven Workspace Navigation
 
 The URL selects the directory, pane layout, viewer, editing intent, and settings view. The file browser stays mounted under overlays. Loaded content, drafts, locks, selection, scroll, search panels, and zoom remain runtime state.

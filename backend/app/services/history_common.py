@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -9,11 +8,14 @@ from sqlmodel import Session
 
 from app.models.user import User
 from app.services.connection_access import get_accessible_connection_or_404
+from app.services.directory_index import normalize_search_text, single_term_rank
 
 LOCAL_DRIVE_PREFIX = "local-drive:"
 HISTORY_SCORE_HALF_LIFE_SECONDS = 30 * 24 * 60 * 60
 HISTORY_REPEAT_INTERVAL_SECONDS = 60
 HISTORY_SUBSTRING_MATCH_RANK = 3
+HISTORY_QUERY_BATCH_SIZE = 256
+SEARCH_CONTRACT_VERSION = 1
 
 
 def history_usage_score(score: float, last_used: datetime, now: datetime) -> float:
@@ -29,8 +31,16 @@ def updated_history_usage_score(score: float, last_used: datetime, now: datetime
 
 
 def normalize_history_search_text(value: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", value)
-    return "".join(character for character in decomposed if not unicodedata.combining(character)).casefold()
+    return normalize_search_text(value)
+
+
+def history_search_relevance(field_key: str, basename_key: str, terms: tuple[str, ...]) -> tuple[int, int] | None:
+    if not terms:
+        return 0, HISTORY_SUBSTRING_MATCH_RANK
+    matched = tuple(term for term in terms if term in field_key)
+    if not matched:
+        return None
+    return len(matched), min(single_term_rank(basename_key, term) for term in matched)
 
 
 def history_match_rank(normalized_name: str, normalized_query: str) -> int | None:

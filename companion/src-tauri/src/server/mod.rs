@@ -7,6 +7,10 @@
 pub mod archive;
 pub mod archive_sessions;
 pub mod auth;
+pub mod directory_index;
+mod directory_manager;
+pub mod directory_policy;
+mod directory_traversal;
 pub mod drives;
 pub mod edit_locks;
 pub mod errors;
@@ -15,6 +19,8 @@ pub mod links;
 pub mod localization;
 pub mod models;
 pub mod pairing;
+#[cfg(feature = "recovery-verification")]
+mod recovery_verification;
 pub mod target_resolution;
 pub mod watcher;
 
@@ -25,11 +31,12 @@ use std::time::Instant;
 use axum::http::{header, Method};
 use axum::Router;
 use log::{error, info};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use self::archive_sessions::ArchiveSessionManager;
 use self::auth::AuthState;
+use self::directory_manager::LocalDirectoryManager;
 use self::edit_locks::EditLockManager;
 use self::localization::LocalizationState;
 use self::pairing::PairingState;
@@ -56,6 +63,8 @@ pub struct AppState {
     pub archive_sessions: Arc<ArchiveSessionManager>,
     pub edit_locks: Arc<EditLockManager>,
     pub watcher: DirectoryWatcher,
+    pub directory_indexes: Arc<LocalDirectoryManager>,
+    pub directory_policy: Arc<directory_policy::DirectoryPolicyState>,
 }
 
 /// Start the local HTTP API server.
@@ -78,6 +87,27 @@ async fn run_server(
     localization: Arc<LocalizationState>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     archive::cleanup_stale_temporary_archive_downloads()?;
+    let namespace = app.path().app_cache_dir()?.join("directory-index").join("sqlite");
+    #[cfg(feature = "recovery-verification")]
+    let namespace = std::env::var_os(recovery_verification::ROOT_ENV)
+        .map(|root| std::path::PathBuf::from(root).with_extension("cache"))
+        .unwrap_or(namespace);
+    let directory_indexes = LocalDirectoryManager::new(namespace)?;
+    let policy_namespace = app.path().app_config_dir()?.join("directory-index-policy");
+    #[cfg(feature = "recovery-verification")]
+    let policy_namespace = std::env::var_os(recovery_verification::ROOT_ENV)
+        .map(|root| std::path::PathBuf::from(root).with_extension("policy"))
+        .unwrap_or(policy_namespace);
+    let directory_policy = directory_policy::DirectoryPolicyState::open(policy_namespace, &directory_indexes)
+        .map_err(|_| std::io::Error::other("Approved directory policy storage is unavailable. Correct private configuration storage."))?;
+    app.manage(Arc::clone(&directory_policy));
+    directory_policy
+        .protect_storage(directory_indexes.storage_directory())
+        .map_err(|_| {
+            std::io::Error::other(
+                "Approved policy storage cannot be protected. Correct private configuration storage and restart the companion.",
+            )
+        })?;
     let state = Arc::new(AppState {
         app,
         pairing,
@@ -86,6 +116,8 @@ async fn run_server(
         archive_sessions: Arc::new(ArchiveSessionManager::new()),
         edit_locks: Arc::new(EditLockManager::new()),
         watcher: DirectoryWatcher::new(),
+        directory_indexes,
+        directory_policy,
     });
 
     let app = build_router(state);
@@ -125,6 +157,15 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/pair/cancel", axum::routing::post(handlers::pair_cancel));
 
     let authenticated_routes = Router::new()
+        .route("/api/directory-index/policy", axum::routing::get(handlers::directory_policy_status))
+        .route(
+            "/api/directory-index/policy/challenge",
+            axum::routing::post(handlers::directory_policy_challenge),
+        )
+        .route(
+            "/api/directory-index/policy/redeem",
+            axum::routing::post(handlers::directory_policy_redeem),
+        )
         .route("/api/download-intents", axum::routing::post(handlers::create_download_intent))
         .route("/api/pair/test", axum::routing::post(handlers::test_pairing))
         .route("/api/pair/current", axum::routing::delete(handlers::delete_current_pairing))
@@ -151,7 +192,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         )
         .route("/api/browse/{drive}/rename", axum::routing::post(handlers::browse_rename))
         .route("/api/browse/{drive}/create", axum::routing::post(handlers::browse_create))
-        .merge(transfer_routes().with_state::<Arc<AppState>>(()))
+        .merge(transfer_routes())
         .route("/api/browse/{drive}/open", axum::routing::post(handlers::browse_open))
         .route(
             "/api/browse/{drive}/directories",
@@ -227,16 +268,23 @@ fn build_router(state: Arc<AppState>) -> Router {
     // WebSocket route — uses query-param auth (browser WS API has no custom headers).
     let ws_routes = Router::new().route("/api/ws", axum::routing::get(handlers::ws_upgrade));
 
-    Router::new()
+    let router = Router::new()
         .merge(public_routes)
         .merge(authenticated_routes)
         .merge(viewer_routes)
         .merge(ws_routes)
         .layer(cors)
-        .with_state(state)
+        .with_state(Arc::clone(&state));
+    #[cfg(feature = "recovery-verification")]
+    let router = router.merge(recovery_verification::routes().with_state(state));
+    router
 }
 
-fn transfer_routes() -> Router {
+fn transfer_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+    handlers::DirectoryMutationState: axum::extract::FromRef<S>,
+{
     Router::new()
         .route(
             "/api/browse/{drive}/transfer-attempts/{attempt_id}/cancel",
@@ -259,7 +307,10 @@ mod tests {
 
     #[tokio::test]
     async fn transfer_stream_route_is_registered() {
+        let temporary = tempfile::tempdir().unwrap();
+        let indexes = super::directory_manager::LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let response = transfer_routes()
+            .with_state(super::handlers::DirectoryMutationState(indexes))
             .oneshot(
                 Request::builder()
                     .method("GET")

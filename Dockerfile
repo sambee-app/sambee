@@ -103,6 +103,7 @@ COPY frontend/package*.json ./
 COPY frontend/scripts ./scripts
 RUN npm ci
 COPY frontend/ ./
+COPY shared/ /shared/
 COPY VERSION /VERSION
 COPY GIT_COMMIT /GIT_COMMIT
 RUN npm run build

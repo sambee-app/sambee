@@ -43,6 +43,7 @@ jobs:
     needs: change-scope
     if: needs.change-scope.outputs.requires-build == 'true'
     runs-on: windows-latest
+    timeout-minutes: 45
     env:
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
     steps:
@@ -66,11 +67,20 @@ jobs:
       - name: Run Companion checks
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force companion/recovery-report | Out-Null
+          @{ source_sha = '${{ github.sha }}'; run_id = '${{ github.run_id }}'; target = 'windows-x64' } |
+            ConvertTo-Json | Set-Content companion/recovery-report/source.json
           cd companion
           npx tsc --noEmit
+          if ($LASTEXITCODE -ne 0) { throw 'Companion TypeScript check failed.' }
           npm run lint
+          if ($LASTEXITCODE -ne 0) { throw 'Companion lint failed.' }
           cd src-tauri
           cargo test
+          if ($LASTEXITCODE -ne 0) { throw 'Native Rust tests failed.' }
+          cargo test --features recovery-verification server::directory_manager::tests -- --test-threads=2 2>&1 |
+            Tee-Object -FilePath ../recovery-report/native-tests.log
+          if ($LASTEXITCODE -ne 0) { throw 'Native recovery tests failed.' }
 
       - name: Assert verification-only secret boundary
         shell: pwsh
@@ -102,7 +112,20 @@ jobs:
 
       - name: Build Windows x64 package
         shell: pwsh
-        run: cd companion; npm run tauri -- build --config $env:TAURI_CI_CONFIG --target x86_64-pc-windows-msvc --bundles nsis -v
+        run: |
+          cd companion
+          npm run tauri -- build --config $env:TAURI_CI_CONFIG --target x86_64-pc-windows-msvc --features recovery-verification --bundles nsis -v
+          if ($LASTEXITCODE -ne 0) { throw 'Verification package build failed.' }
+
+      - name: Run packaged-process recovery smoke test
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          python companion/scripts/recovery-smoke.py `
+            --executable companion/src-tauri/target/x86_64-pc-windows-msvc/release/sambee-companion.exe `
+            --report-dir companion/recovery-report `
+            --source-sha '${{ github.sha }}' --run-id '${{ github.run_id }}'
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged recovery smoke test failed. Inspect recovery-report.' }
 
       - name: Assert updater artifacts are absent
         shell: pwsh
@@ -113,9 +136,13 @@ jobs:
           }
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ always() }}
         with:
-          name: companion-verification-windows-x64-${{ github.run_id }}
-          path: companion/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
+          name: companion-verification-windows-x64-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            companion/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/
+            companion/src-tauri/target/x86_64-pc-windows-msvc/release/sambee-companion.exe
+            companion/recovery-report/
           if-no-files-found: error
           retention-days: 7
 

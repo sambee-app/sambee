@@ -27,7 +27,7 @@ Use `config.example.toml` as the source of truth for supported keys. This page e
 | `[frontend_logging]` | `logging_enabled`, `log_level` | Controls browser-console logging behavior. |
 | `[frontend_logging]` | `tracing_enabled`, `tracing_level`, `tracing_retention_hours` | Controls backend trace collection for frontend logging. |
 | `[frontend_logging]` | `tracing_components`, `tracing_username_regex` | Restricts tracing by component or user scope. |
-| `[directory_cache]` | `location`, `coalesce_interval_seconds`, `max_staleness_minutes` | Controls the saved directory index Sambee keeps to make browsing and search recover faster after restarts. |
+| `[directory_cache]` | `location` | Selects the private backend directory-index root. SQLite catalogues are reused after restart and marked unverified until background verification completes. |
 | `[preprocessors.imagemagick]` | `max_file_size_bytes`, `timeout_seconds` | Sets conversion limits for ImageMagick preprocessing. |
 | `[companion_downloads]` | `metadata_feed_url` | Changes where Sambee resolves Companion download metadata. |
 | `[companion_downloads.pin]` | `version`, `published_at`, `notes`, asset URLs | Pins Companion download links to a specific published release instead of following the promoted feed. |
@@ -41,6 +41,12 @@ Use **Settings > File Search** for shared retention, results per group, and file
 Image, temporary, backup, and extension exclusions apply only to file history before storage. Enter one literal extension per exclusion; Sambee normalizes `TMP` to `.tmp`.
 
 Users can clear their own histories in **Settings > File Browser**. Removing history does not delete stored files or folders.
+
+## Directory-Index Policy
+
+Directory-index resource policies have no TOML override. Configure them in **Admin > Directory Search**; see [Manage Directory Search](../../operations-and-maintenance/manage-directory-search/) for controls, Companion approval, and recovery.
+
+`directory_cache.location` selects only the backend storage root.
 
 ## Backend Logging Levels
 

@@ -60,7 +60,7 @@ Directory cache for instant navigation:
 - Quick directory navigation keeps its existing index when a background scan times out or fails.
 - Background scans keep the live directory index when a removal or rename overlaps a read, including when its notification arrives late. This prevents changes from being applied twice when a folder's name is reused.
 - Changing a connection's target or sign-in details no longer reuses directory suggestions from its old configuration.
-- Directory junctions remain searchable but are no longer followed recursively, preventing indexing loops. DFS referrals are still followed, keeping their subfolders searchable.
+- Directory indexing excludes junctions, other reparse descendants, and DFS shares to prevent unsafe traversal.
 - Startup verification and scheduled directory scans now stop cleanly when their cache is removed.
 
 #### Other Fixes
@@ -113,6 +113,10 @@ When you print or save as PDF from the browser, the Markdown viewer reformats th
 - Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
 - When reloading a browser tab with an editor, Sambee now recovers the file lock. This prevents the error `Unable to enter edit mode. File is locked for editing by <username>`.
 
+## Quick Bar: Directory Navigation v2
+
+Directory search and navigation in the quick bar was put on a new foundation. The backend's directory index was upgraded from JSONL to an SQLite database. The local drive directory index was missing entirely in earlier versions. That has been rectified so that almost instantaneous nagivation works on local drives as well as SMB connections.
+
 ## Miscellaneous
 
 ### Native Mobile Sharing
@@ -122,10 +126,6 @@ Consolidated the native mobile sharing implementation across the file list and i
 Text editor and Markdown viewer/editor now have an option to share the current content as text as an alternative to sharing the stored file. This helps circumvent Chrome restrictions that prevent sharing file types such as Markdown.
 
 Image and PDF viewers alway share the displayed content, which may have been normalized for viewing in the browser.
-
-### Quick Bar: File & Directory Search Improvements
-
-Directory navigation and file search in the quick bar now use frequency-aware ranking. This puts the files and folders you're working with most at the top of the list of search results, making access faster and requiring less scrolling. The default number of retained items was increased from 50 to 200 and is configurable in a combined setting for files and folders.
 
 ### Full Browser History Navigation
 

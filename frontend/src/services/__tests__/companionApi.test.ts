@@ -1,5 +1,5 @@
 import type { AxiosResponse } from "axios";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock axios before importing the API service
 vi.mock("axios", () => {
@@ -9,6 +9,7 @@ vi.mock("axios", () => {
     put: vi.fn(),
     delete: vi.fn(),
     defaults: { baseURL: "/api" },
+    getUri: vi.fn(() => "http://localhost:21549/api/browse/private-drive/directories"),
     interceptors: {
       request: {
         use: vi.fn(),
@@ -30,11 +31,15 @@ vi.mock("axios", () => {
 
 import axios from "axios";
 import apiService from "../api";
+import { companionSession } from "../companionSession";
+import { logger } from "../logger";
 
 const mockedAxios = vi.mocked(axios);
 const mockAxiosInstance = mockedAxios.create() as ReturnType<typeof mockedAxios.create> & {
   post: ReturnType<typeof vi.fn>;
 };
+const companionRequestInterceptor = vi.mocked(mockAxiosInstance.interceptors.request.use).mock.calls.at(-1)?.[0];
+const companionResponseInterceptors = vi.mocked(mockAxiosInstance.interceptors.response.use).mock.calls.at(-1);
 
 describe("Companion API", () => {
   beforeEach(() => {
@@ -51,6 +56,86 @@ describe("Companion API", () => {
   afterEach(() => {
     vi.clearAllMocks();
   });
+
+  it.each([
+    {
+      status: 200,
+      code: undefined,
+      cancelled: false,
+      url: "/browse/private-drive/directories",
+      route: "/browse/{drive}/directories",
+      revision: 7,
+    },
+    {
+      status: 503,
+      code: "ERR_BAD_RESPONSE",
+      cancelled: false,
+      url: "/browse/private-drive/directories",
+      route: "/browse/{drive}/directories",
+      revision: undefined,
+    },
+    {
+      status: null,
+      code: "ERR_CANCELED",
+      cancelled: true,
+      url: "/browse/private-drive/directories",
+      route: "/browse/{drive}/directories",
+      revision: undefined,
+    },
+    {
+      status: 200,
+      code: undefined,
+      cancelled: false,
+      url: "/browse/private-drive/private-filename?token=private-token",
+      route: "/{route}",
+      revision: "private-revision",
+    },
+  ])(
+    "logs private-safe companion timing for status $status cancellation $cancelled",
+    async ({ status, code, cancelled, url, route, revision }) => {
+      const { AxiosError, AxiosHeaders } = await vi.importActual<typeof import("axios")>("axios");
+      assert(companionRequestInterceptor);
+      assert(companionResponseInterceptors?.[0]);
+      assert(companionResponseInterceptors?.[1]);
+      const debug = vi.spyOn(logger, "debug").mockImplementation(() => undefined);
+      vi.spyOn(companionSession, "getSigningHeaders").mockResolvedValue({ "X-Companion-Secret": "private-signature" });
+      vi.spyOn(performance, "now").mockReturnValueOnce(100).mockReturnValue(125);
+      const config = await companionRequestInterceptor({
+        method: "get",
+        url,
+        headers: new AxiosHeaders({ Authorization: "private-authorization" }),
+        params: { q: "private-terms", path: "private-path", hmac: "private-signed-value" },
+        data: { grant: "private-grant" },
+      });
+      const response = {
+        config,
+        status: status ?? 0,
+        statusText: "private-status-text",
+        headers: new AxiosHeaders(),
+        data: { accepted_revision: revision },
+      };
+      if (code) {
+        const error = new AxiosError("private-error-message", code, config, undefined, status === null ? undefined : response);
+        await expect(companionResponseInterceptors[1](error)).rejects.toBe(error);
+      } else {
+        expect(companionResponseInterceptors[0](response)).toBe(response);
+      }
+      expect(debug).toHaveBeenCalledWith(
+        "Companion API request finished",
+        {
+          method: "GET",
+          route,
+          status,
+          duration_ms: 25,
+          cancelled,
+          ...(typeof revision === "number" ? { accepted_revision: revision } : {}),
+        },
+        "companion"
+      );
+      expect(debug).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(debug.mock.calls)).not.toContain("private-");
+    }
+  );
 
   describe("getCompanionUri()", () => {
     it("builds a sambee:// URI with server, token, connection, and path", async () => {

@@ -508,7 +508,11 @@ const Browser: React.FC = () => {
     t,
     setTransferNotice
   );
-  useSyncExternalStore(browserContentServices.subscribe, browserContentServices.getSnapshot, browserContentServices.getSnapshot);
+  const storageSnapshot = useSyncExternalStore(
+    browserContentServices.subscribe,
+    browserContentServices.getSnapshot,
+    browserContentServices.getSnapshot
+  );
 
   useEffect(() => {
     browserContentServices.updateConnections(allConnections);
@@ -704,6 +708,7 @@ const Browser: React.FC = () => {
     contentProviders: browserContentServices.providers,
     storageRegistry: browserContentServices.registry,
     history: browserContentServices.history,
+    sourceRevision: storageSnapshot.capabilityRevision,
     linkTargets: browserContentServices.linkTargets,
     rowHeight,
     disabled: settingsOpen || mobileSettingsOpen,
@@ -724,6 +729,7 @@ const Browser: React.FC = () => {
     contentProviders: browserContentServices.providers,
     storageRegistry: browserContentServices.registry,
     history: browserContentServices.history,
+    sourceRevision: storageSnapshot.capabilityRevision,
     linkTargets: browserContentServices.linkTargets,
     rowHeight,
     disabled: settingsOpen || mobileSettingsOpen || paneMode === "single",

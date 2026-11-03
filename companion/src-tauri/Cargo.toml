@@ -1,6 +1,6 @@
 [package]
 name = "sambee-companion"
-version = "2.0.26"
+version = "2.0.27"
 edition = "2021"
 description = "Sambee Companion — opens files from Sambee in native desktop editors"
 authors = []
@@ -8,6 +8,9 @@ authors = []
 [lib]
 name = "sambee_companion_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+recovery-verification = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -50,6 +53,7 @@ bzip2 = "0.5"
 flate2 = { version = "1.1.9", default-features = false, features = ["zlib-rs"] }
 unicode-normalization = "0.1"
 unicode-casefold = "0.2.0"
+rusqlite = { version = "0.41.1", features = ["bundled", "hooks"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
@@ -58,11 +62,15 @@ filetime = "0.2"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 windows = { version = "0.61", features = [
+    "Win32_Globalization",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Graphics_Gdi",
     "Win32_System_Com",
     "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_LibraryLoader",
 ] }
 png = "0.17"
 base64 = "0.22"

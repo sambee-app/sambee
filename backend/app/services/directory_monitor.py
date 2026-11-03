@@ -4,11 +4,13 @@ Monitors directories for changes and notifies WebSocket clients.
 """
 
 import asyncio
+import hashlib
 import logging
 import random
 import threading
 from collections.abc import Awaitable, Callable
 from typing import Dict, Optional
+from uuid import uuid4
 
 from smbprotocol.change_notify import (
     CompletionFilter,
@@ -31,6 +33,7 @@ from smbprotocol.tree import TreeConnect
 
 from app.services.system_settings import get_smbclient_policy_kwargs
 from app.storage.smb_errors import translate_smb_target_error
+from app.utils.worker_wait import wait_for_worker
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +66,7 @@ class DirectoryMonitor:
         self._starting: dict[str, threading.Event] = {}
         self._connection_generations: dict[str, int] = {}
         self._running = True
+        self._startup_cleanups: set[asyncio.Task[None]] = set()
 
     def get_connection_generation(self, connection_id: str) -> int:
         """Return the lifecycle generation used to detect stale startups."""
@@ -84,7 +88,7 @@ class DirectoryMonitor:
         port: int = 445,
         on_change_callback: Optional[Callable[[str, str], Awaitable[None]]] = None,
         expected_generation: int | None = None,
-    ) -> None:
+    ) -> "MonitoredDirectory":
         """
         Start monitoring a directory for changes.
 
@@ -107,14 +111,19 @@ class DirectoryMonitor:
 
         while True:
             with self._lock:
+                if not self._running:
+                    raise RuntimeError("Directory monitoring is shutting down. Reconnect after the service restarts.")
                 if self._connection_generations.get(connection_id, 0) != requested_generation:
-                    raise RuntimeError(f"Connection was retired before monitor {key} could start")
+                    raise RuntimeError("Connection was retired before monitoring could start. Reconnect and subscribe again.")
 
                 existing_monitor = self._monitors.get(key)
+                if existing_monitor is not None and existing_monitor.stopped is True:
+                    del self._monitors[key]
+                    existing_monitor = None
                 if existing_monitor is not None:
                     existing_monitor.subscriber_count += 1
-                    logger.debug(f"Increased subscriber count for {key} to {existing_monitor.subscriber_count}")
-                    return
+                    logger.debug("File-list subscriber added.")
+                    return existing_monitor
 
                 start_event = self._starting.get(key)
                 if start_event is None:
@@ -156,7 +165,7 @@ class DirectoryMonitor:
             raise
 
         with self._lock:
-            connection_retired = self._connection_generations.get(connection_id, 0) != connection_generation
+            connection_retired = not self._running or self._connection_generations.get(connection_id, 0) != connection_generation
             stopped_during_start = monitor_stopped.is_set()
             if not connection_retired and not stopped_during_start:
                 self._monitors[key] = monitor
@@ -165,11 +174,12 @@ class DirectoryMonitor:
 
         if connection_retired:
             monitor.stop()
-            raise RuntimeError(f"Connection was retired while monitor {key} was starting")
+            raise RuntimeError("Connection was retired during monitoring startup. Reconnect and subscribe again.")
         if stopped_during_start:
             raise RuntimeError("Directory monitoring stopped during startup")
 
-        logger.debug(f"Started monitoring: {key}")
+        logger.debug("File-list monitoring started.")
+        return monitor
 
     async def start_monitoring_async(
         self,
@@ -185,18 +195,27 @@ class DirectoryMonitor:
     ) -> None:
         """Start a monitor without blocking the application event loop."""
 
-        await asyncio.to_thread(
-            self.start_monitoring,
-            connection_id,
-            path,
-            host,
-            share_name,
-            username,
-            password,
-            port,
-            on_change_callback,
-            expected_generation,
+        future = asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: self.start_monitoring(
+                connection_id, path, host, share_name, username, password, port, on_change_callback, expected_generation
+            ),
         )
+        try:
+            await wait_for_worker(future)
+        except asyncio.CancelledError:
+
+            async def release_cancelled_start() -> None:
+                try:
+                    acquired = await wait_for_worker(future)
+                    await asyncio.to_thread(self._release_subscription, f"{connection_id}:{path}", acquired)
+                except Exception:
+                    logger.warning("Cancelled file-list startup finished with an error.", exc_info=True)
+
+            cleanup = asyncio.create_task(release_cancelled_start())
+            self._startup_cleanups.add(cleanup)
+            cleanup.add_done_callback(self._startup_cleanups.discard)
+            raise
 
     #
     # stop_monitoring
@@ -211,26 +230,29 @@ class DirectoryMonitor:
         """
 
         key = f"{connection_id}:{path}"
+        self._release_subscription(key)
 
+    def _release_subscription(self, key: str, expected: "MonitoredDirectory | None" = None) -> None:
+        """Release only the monitor acquired by an abandoned startup, if supplied."""
         with self._lock:
-            if key not in self._monitors:
-                logger.debug(f"Attempted to stop monitoring non-existent key: {key}")
+            if key not in self._monitors or (expected is not None and self._monitors[key] is not expected):
+                logger.debug("File-list subscription is already stopped.")
                 return
 
             monitor = self._monitors[key]
             monitor.subscriber_count -= 1
 
             if monitor.subscriber_count <= 0:
-                logger.debug(f"Stopping monitoring: {key}")
+                logger.debug("Last file-list subscriber removed.")
                 del self._monitors[key]
             else:
-                logger.debug(f"Decreased subscriber count for {key} to {monitor.subscriber_count}")
+                logger.debug("File-list subscriber removed.")
                 return
 
         try:
             monitor.stop()
         except Exception:
-            logger.error("Error stopping monitor %s", key, exc_info=True)
+            logger.error("File-list monitor could not be stopped. Retry after its worker exits.", exc_info=True)
 
     def stop_connection(self, connection_id: str) -> None:
         """Stop every active monitor associated with a connection."""
@@ -245,7 +267,7 @@ class DirectoryMonitor:
             try:
                 monitor.stop()
             except Exception:
-                logger.warning("Error stopping monitor %s for retired connection", key, exc_info=True)
+                logger.warning("Retired file-list monitor is still stopping.", exc_info=True)
 
     async def stop_connection_async(self, connection_id: str) -> None:
         """Stop a connection's monitors without blocking the application event loop."""
@@ -262,7 +284,7 @@ class DirectoryMonitor:
             try:
                 monitor.restart()
             except Exception:
-                logger.warning("Error restarting monitor %s after SMB policy update", key, exc_info=True)
+                logger.warning("File-list monitor could not restart after the policy update.", exc_info=True)
 
     async def restart_all_async(self) -> None:
         """Reconnect monitors without blocking the application event loop."""
@@ -283,8 +305,8 @@ class DirectoryMonitor:
         for key, monitor in monitors:
             try:
                 monitor.stop()
-            except Exception as e:
-                logger.error(f"Error stopping monitor {key}: {e}", exc_info=True)
+            except Exception:
+                logger.error("File-list monitor shutdown failed. Its worker retains resources until exit.", exc_info=True)
 
         logger.info("All directory monitors stopped")
 
@@ -330,10 +352,36 @@ class MonitoredDirectory:
         self._stop_event = threading.Event()
         self._lifecycle_lock = threading.Lock()
         self._retired = False
+        self._restarting = False
 
         # Retry state
         self._retry_count = 0
         self._consecutive_failures = 0
+        self._failure_reported = False
+        self._log_context = {
+            "source_id": hashlib.sha256(connection_id.encode()).hexdigest()[:16],
+            "generation_id": uuid4().hex,
+            "operation": "file_list_watch",
+            "stage": "watcher",
+        }
+
+    @property
+    def _logger(self) -> logging.LoggerAdapter[logging.Logger]:
+        return logging.LoggerAdapter(logger, self._log_context, merge_extra=True)
+
+    def _report_watcher_failure(self, error: Exception) -> None:
+        """Keep one cause until a watcher result confirms recovery."""
+        if not self._failure_reported:
+            self._failure_reported = True
+            self._logger.warning(
+                "File-list watcher is unavailable. Background recovery remains active.",
+                extra={"event": "directory_watcher_unavailable", "error_type": type(error).__name__},
+                exc_info=error,
+            )
+
+    @property
+    def stopped(self) -> bool:
+        return self._retired or (self._stop_event.is_set() and not self._restarting)
 
     #
     # start
@@ -382,10 +430,16 @@ class MonitoredDirectory:
             self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
             self._monitor_thread.start()
 
-        except Exception:
-            # Clean up on error
+        except Exception as error:
             self._cleanup()
-            raise
+            translated = translate_smb_target_error(error, self.path)
+            if isinstance(translated, (FileNotFoundError, PermissionError, NotADirectoryError)):
+                raise translated from error
+            if self._stop_event.is_set():
+                raise
+            self._report_watcher_failure(error)
+            self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self._monitor_thread.start()
 
     #
     # _reconnect
@@ -395,23 +449,25 @@ class MonitoredDirectory:
 
         self._consecutive_failures += 1
 
-        if self._consecutive_failures > MAX_RETRY_ATTEMPTS:
-            logger.error(f"Max retry attempts ({MAX_RETRY_ATTEMPTS}) reached for {self.connection_id}:{self.path}, giving up")
-            self._stop_event.set()
-            return
+        if self._consecutive_failures == MAX_RETRY_ATTEMPTS + 1:
+            self._logger.warning(
+                "File-list watcher fast retries exhausted. Capped background retries remain active.",
+                extra={"event": "directory_watcher_retry_exhausted"},
+            )
 
         # Calculate delay with exponential backoff and jitter
         base_delay = min(
-            INITIAL_RETRY_DELAY * (RETRY_BACKOFF_MULTIPLIER ** (self._consecutive_failures - 1)),
+            INITIAL_RETRY_DELAY * (RETRY_BACKOFF_MULTIPLIER ** min(self._consecutive_failures - 1, MAX_RETRY_ATTEMPTS + 1)),
             MAX_RETRY_DELAY,
         )
         jitter = base_delay * RETRY_JITTER_FACTOR * (random.random() * 2 - 1)  # +/- 10%
-        delay = max(0, base_delay + jitter)
+        delay = min(MAX_RETRY_DELAY, max(0, base_delay + jitter))
 
-        logger.info(
-            f"Reconnecting monitor for {self.connection_id}:{self.path} "
-            f"(attempt {self._consecutive_failures}/{MAX_RETRY_ATTEMPTS}, delay: {delay:.1f}s)"
-        )
+        if self._consecutive_failures <= MAX_RETRY_ATTEMPTS:
+            self._logger.info(
+                "File-list watcher retry scheduled.",
+                extra={"event": "directory_watcher_retry", "retry_seconds": delay},
+            )
 
         # Wait before reconnecting
         if self._stop_event.wait(delay):
@@ -424,8 +480,7 @@ class MonitoredDirectory:
         try:
             self._connection = Connection(guid=None, server_name=self.host, port=self.port, require_signing=True)
             self._connection.connect(timeout=int(policy["connection_timeout"]))
-        except Exception as e:
-            logger.error(f"Connection failed during reconnect: {e}", exc_info=True)
+        except Exception:
             raise
 
         # Create new session
@@ -458,30 +513,19 @@ class MonitoredDirectory:
         # Create new watcher
         self._watcher = FileSystemWatcher(self._open)
 
-        logger.info(f"Successfully reconnected monitor for {self.connection_id}:{self.path}")
-
     def _handle_change_result(self, result: object) -> None:
         """Handle a completed watcher result from smbprotocol."""
 
         if result is None:
-            return
+            raise ConnectionError("File-list monitoring stopped. Reconnect monitoring and refresh the listing.")
 
         if not isinstance(result, list):
             raise TypeError(f"Unexpected watcher result type: {type(result).__name__}")
 
+        if self._failure_reported:
+            self._logger.info("File-list watcher recovered.", extra={"event": "directory_watcher_recovered"})
+        self._failure_reported = False
         self._consecutive_failures = 0
-
-        for action_info in result:
-            action = action_info["action"].get_value()
-            filename = action_info["file_name"].get_value()
-            action_name = self._get_action_name(action)
-            logger.debug(
-                "Change detected in %s:%s - %s: %s",
-                self.connection_id,
-                self.path,
-                action_name,
-                filename,
-            )
 
         self._notify_change()
 
@@ -495,8 +539,8 @@ class MonitoredDirectory:
             try:
                 asyncio.set_event_loop(loop)
                 loop.run_until_complete(self.on_change_callback(self.connection_id, self.path))
-            except Exception as cb_error:
-                logger.error("Error in change callback: %s", cb_error, exc_info=True)
+            except Exception:
+                logger.error("File-list invalidation callback failed. Refresh the listing to verify changes.", exc_info=True)
             finally:
                 asyncio.set_event_loop(None)
                 loop.close()
@@ -519,8 +563,14 @@ class MonitoredDirectory:
                 )
 
                 if self._watcher is None:
-                    logger.warning(f"Watcher is None for {self.connection_id}:{self.path}, exiting loop")
-                    break
+                    try:
+                        self._cleanup()
+                        self._reconnect()
+                        if not self._stop_event.is_set():
+                            self._notify_change()
+                    except Exception as error:
+                        self._report_watcher_failure(error)
+                    continue
 
                 # Start the watcher (this is a blocking call until change occurs)
                 # Wait for response (blocking)
@@ -540,9 +590,6 @@ class MonitoredDirectory:
 
                 except Exception as e:
                     if not self._stop_event.is_set():
-                        error_type = type(e).__name__
-                        error_msg = str(e).lower()
-
                         # STATUS_DELETE_PENDING (0xc0000056) means the
                         # directory we are watching was deleted.  This is
                         # normal — stop monitoring instead of retrying.
@@ -552,79 +599,20 @@ class MonitoredDirectory:
                             NtStatus.STATUS_OBJECT_NAME_NOT_FOUND,
                             NtStatus.STATUS_OBJECT_PATH_NOT_FOUND,
                         ) or isinstance(e, FileNotFoundError):
-                            logger.info(
-                                "Watched directory deleted, stopping monitor: %s:%s",
-                                self.connection_id,
-                                self.path,
-                            )
+                            logger.info("Watched directory was deleted. File-list monitoring stopped.")
                             self._notify_change()
                             break
 
-                        logger.error(
-                            "Error waiting for changes in %s:%s: %s: %s",
-                            self.connection_id,
-                            self.path,
-                            error_type,
-                            e,
-                            exc_info=True,
-                        )
+                        self._report_watcher_failure(e)
+                        self._cleanup()
 
-                        # Check if the error is due to connection/timeout issues
-                        is_connection_error = (
-                            "socket" in error_msg
-                            or "connection" in error_msg
-                            or "closed" in error_msg
-                            or "timeout" in error_msg
-                            or "timed out" in error_msg
-                            or error_type in ("TimeoutError", "ConnectionError", "OSError")
-                        )
-
-                        if is_connection_error:
-                            logger.warning(
-                                "Connection/timeout issue detected for %s:%s, attempting recovery (consecutive failures: %s)",
-                                self.connection_id,
-                                self.path,
-                                self._consecutive_failures,
-                            )
-                            # Clean up old resources
-                            self._cleanup()
-                            # Try to reconnect with exponential backoff
-                            try:
-                                self._reconnect()
-                                # Success - reset failure counter
-                                self._consecutive_failures = 0
-                                logger.info("Successfully reconnected %s:%s", self.connection_id, self.path)
-                            except Exception as reconnect_error:
-                                logger.error(
-                                    "Failed to reconnect (attempt %s/%s): %s",
-                                    self._consecutive_failures,
-                                    MAX_RETRY_ATTEMPTS,
-                                    reconnect_error,
-                                    exc_info=True,
-                                )
-                                # _reconnect handles retry logic and stop event
-                                if self._stop_event.is_set():
-                                    break
-                        else:
-                            # Other errors - wait briefly and retry with same connection
-                            logger.info("Non-connection error, recreating watcher after 5s delay")
-                            self._stop_event.wait(5)
-                            if not self._stop_event.is_set() and self._open:
-                                self._watcher = FileSystemWatcher(self._open)
-
-        except Exception as e:
-            logger.error(
-                "Monitor loop error for %s:%s: %s",
-                self.connection_id,
-                self.path,
-                e,
-                exc_info=True,
-            )
+        except Exception:
+            logger.error("File-list monitor stopped unexpectedly. Reopen the directory to subscribe again.", exc_info=True)
         finally:
             self._cleanup()
-            if self.on_stopped and not self._stop_event.is_set():
+            if self.on_stopped and not self._restarting:
                 self.on_stopped()
-            logger.debug("Monitor loop stopped for %s:%s", self.connection_id, self.path)
+            logger.debug("File-list monitor worker stopped.")
 
     #
     # _get_action_name
@@ -657,16 +645,28 @@ class MonitoredDirectory:
         with self._lifecycle_lock:
             if self._retired:
                 return
-            self._stop_locked()
-            self._stop_event.clear()
-            self._retry_count = 0
-            self._consecutive_failures = 0
-            self.start()
+            self._restarting = True
+            try:
+                try:
+                    stopped = self._stop_locked()
+                    if not stopped:
+                        return
+                    self._stop_event.clear()
+                finally:
+                    self._restarting = False
+                self._retry_count = 0
+                self._consecutive_failures = 0
+                self.start()
+            except Exception:
+                self._stop_event.set()
+                if self.on_stopped:
+                    self.on_stopped()
+                raise
 
-    def _stop_locked(self) -> None:
+    def _stop_locked(self) -> bool:
         """Stop monitor resources while holding the lifecycle lock."""
 
-        logger.debug(f"Stopping monitor for {self.connection_id}:{self.path}")
+        logger.debug("File-list monitor stop requested.")
         self._stop_event.set()
 
         # Cancel any pending watcher
@@ -674,16 +674,18 @@ class MonitoredDirectory:
             try:
                 self._watcher.cancel()
             except Exception as e:
-                logger.warning(f"Error canceling watcher: {e}")
+                logger.warning("File-list watcher cancellation failed.", extra={"error_type": type(e).__name__})
 
         # Wait for monitor thread to finish
         if self._monitor_thread and self._monitor_thread.is_alive():
             self._monitor_thread.join(timeout=5.0)
             if self._monitor_thread.is_alive():
-                logger.warning(f"Monitor thread did not stop cleanly for {self.connection_id}:{self.path}")
+                logger.warning("File-list watcher is still stopping. Its worker retains resources until exit.")
+                return False
 
         # Clean up SMB resources
         self._cleanup()
+        return True
 
     #
     # _cleanup
@@ -691,45 +693,46 @@ class MonitoredDirectory:
     def _cleanup(self) -> None:
         """Clean up SMB resources in proper order."""
 
+        self._watcher = None
         # Close in reverse order of creation to prevent leaks
 
         if self._open:
             try:
                 self._open.close()
-                logger.debug(f"Closed directory handle for {self.connection_id}:{self.path}")
+                logger.debug("File-list directory handle closed.")
             except Exception as e:
-                logger.warning(f"Error closing directory handle: {e}")
+                logger.warning("File-list directory handle cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._open = None
 
         if self._tree:
             try:
                 self._tree.disconnect()
-                logger.debug(f"Disconnected tree for {self.connection_id}:{self.path}")
+                logger.debug("File-list tree disconnected.")
             except Exception as e:
-                logger.warning(f"Error disconnecting tree: {e}")
+                logger.warning("File-list tree cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._tree = None
 
         if self._session:
             try:
                 self._session.disconnect()
-                logger.debug(f"Disconnected session for {self.connection_id}:{self.path}")
+                logger.debug("File-list session disconnected.")
             except Exception as e:
-                logger.warning(f"Error disconnecting session: {e}")
+                logger.warning("File-list session cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._session = None
 
         if self._connection:
             try:
                 self._connection.disconnect()
-                logger.debug(f"Disconnected connection for {self.connection_id}:{self.path}")
+                logger.debug("File-list connection disconnected.")
             except RuntimeError as e:
                 # smbprotocol bug: disconnect() tries to join the current
                 # thread when called from the message-worker after a timeout.
-                logger.debug(f"Ignored RuntimeError during connection disconnect for {self.connection_id}:{self.path}: {e}")
+                logger.debug("File-list disconnect worker could not join itself.", extra={"error_type": type(e).__name__})
             except Exception as e:
-                logger.warning(f"Error disconnecting connection: {e}")
+                logger.warning("File-list connection cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._connection = None
 

@@ -1,41 +1,20 @@
-"""
-Directory cache service for instant directory navigation.
-
-Maintains an in-memory cache of all directory paths per SMB connection,
-enabling instant substring search across the entire directory tree.
-
-Architecture:
-- One cache per connection (not per user)
-- BFS scan using smbclient.scandir() via the connection pool
-- CHANGE_NOTIFY watcher on share root for live updates (DIR_NAME only)
-- Periodic full rescan as safety net (default: 60 min)
-- Stale serving during rescans (eventual consistency)
-- JSONL snapshot persistence for instant availability on restart
-
-Persistence:
-- Snapshots are written to the configured location (default: data/<CACHE_PERSIST_SUBDIR>/)
-- Format: JSONL — header line with version/timestamp/count, then one {"p":"path"} per directory
-- Write-behind with dirty flag + coalesced flush (configurable interval, default 30s)
-- Atomic writes via temp file + os.replace(); previous file kept as .bak backup
-- Snapshots older than the configured max staleness (default 30 days) are ignored
-- On startup, a valid snapshot is loaded instantly, then a background rescan verifies freshness
-
-See documentation_developers/INSTANT_DIRECTORY_NAVIGATION.md for full design.
-"""
+"""SQLite directory catalogues with shared SMB observation and verification workers."""
 
 import asyncio
+import hashlib
 import json
 import logging
-import os
-import tempfile
 import threading
 import time
+from abc import ABC, abstractmethod
+from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Iterable, Iterator, Optional, TypeVar
+from uuid import uuid4
 
-import smbclient
 from smbclient._os import FileAttributes
 from smbprotocol.change_notify import (
     ChangeNotifyFlags,
@@ -44,6 +23,8 @@ from smbprotocol.change_notify import (
     FileSystemWatcher,
 )
 from smbprotocol.connection import Connection
+from smbprotocol.exceptions import NotifyEnumDir, SMBOSError, SMBResponseException
+from smbprotocol.header import NtStatus
 from smbprotocol.open import (
     CreateDisposition,
     CreateOptions,
@@ -55,14 +36,26 @@ from smbprotocol.open import (
 from smbprotocol.open import (
     FileAttributes as SMBFileAttributes,
 )
-from smbprotocol.reparse_point import ReparseTags
 from smbprotocol.session import Session
 from smbprotocol.tree import TreeConnect
 
 from app.core.config import settings, static
-from app.services.history_common import directory_match_rank, normalize_history_search_text
-from app.services.system_settings import get_smbclient_policy_kwargs
+from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+from app.models.system_settings import DirectoryIndexPolicy
+from app.services.directory_index import (
+    MAX_SIGNED_INTEGER,
+    QUERY_WORKERS,
+    ROW_BATCH_SIZE,
+    SQL_BUSY_TIMEOUT_MS,
+    DirectoryIndex,
+    DirectoryIndexSearch,
+    validate_directory_path,
+)
+from app.services.directory_index_resources import DirectoryDiskBudgetError, DirectoryIndexResources
+from app.services.directory_traversal import DirectoryBindingChangedError, DirectoryTraversalError, SmbDirectoryRead, SmbDirectoryRoot
+from app.services.system_settings import get_directory_index_policy, get_smbclient_policy_kwargs
 from app.storage.smb_pool import SMBConnectionPool, get_connection_pool, get_smb_connection_cache
+from app.utils.worker_wait import wait_for_worker
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +76,10 @@ class CacheState(str, Enum):
 
 
 # Scan configuration
-SCAN_BATCH_SIZE = 50  # Directories to process per BFS batch
 SCAN_TIMEOUT_SECONDS = 30.0  # Timeout for single scandir call
-RESCAN_INTERVAL_SECONDS = 3600  # 60 minutes between periodic rescans
 
 # CHANGE_NOTIFY configuration
 CHANGE_NOTIFY_BUFFER_SIZE = 65536  # 64 KB — protocol maximum
-CHANGE_NOTIFY_DEBOUNCE_SECONDS = 2  # Aggregate events before processing
 
 # Reconnect configuration
 MAX_WATCHER_RETRIES = 5
@@ -99,31 +89,24 @@ WATCHER_RETRY_MAX_DELAY = 120.0  # seconds
 # Search configuration
 MAX_SEARCH_RESULTS = 200
 PATH_SEPARATOR = "/"
-HIDDEN_DIRECTORY_PREFIX = "."
 
 # Persistence configuration
 CACHE_PERSIST_SUBDIR = "directory_cache"  # Default subdirectory under data_dir
-CACHE_FILE_EXTENSION = ".idx"
-CACHE_BACKUP_EXTENSION = ".bak"  # Backup kept alongside the main file
-CACHE_FILE_VERSION = 2
-
-
-def path_contains_dot_directory(path: str) -> bool:
-    """Return True when any path segment is dot-prefixed."""
-
-    return any(segment.startswith(HIDDEN_DIRECTORY_PREFIX) for segment in path.split(PATH_SEPARATOR) if segment)
-
-
-@dataclass(frozen=True)
-class _ScannedDirectory:
-    path: str
-    is_reparse_point: bool = False
-    is_dfs_referral: bool = False
-
-    @property
-    def can_descend(self) -> bool:
-        """Follow DFS referrals, but do not follow arbitrary directory links."""
-        return not self.is_reparse_point or self.is_dfs_referral
+MAX_PENDING_OBSERVATIONS = DIRECTORY_INDEX_CONTRACT.limits["max_pending_observations"]
+MAX_OBSERVATION_BYTES = DIRECTORY_INDEX_CONTRACT.limits["max_observation_bytes"]
+SQLITE_CACHE_SUBDIR = "sqlite"
+SQLITE_CACHE_EXTENSION = ".sqlite3"
+DEGRADED_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].default
+HEALTHY_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].default
+OBSERVATION_POLL_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["event_coalescing_ms"] / 1000
+OBSERVATION_RETRY_SECONDS = 1.0
+WORKER_POLL_SECONDS = SQL_BUSY_TIMEOUT_MS / 1000
+FAILURE_RETRY_MIN_SECONDS = 30.0
+FAILURE_RETRY_MAX_SECONDS = 300.0
+FAILURE_RETRY_JITTER_PERCENT = 10
+PERIODIC_VERIFICATION_JITTER_PERCENT = 10
+READ_PARENT_ACTION = -1
+WorkerResult = TypeVar("WorkerResult")
 
 
 @dataclass(frozen=True)
@@ -144,23 +127,231 @@ class _DirectoryMutation:
             if path is not None
         )
 
-    def apply(self, directories: set[str]) -> set[str]:
-        """Apply the same path operation to a live index or a rescan snapshot."""
 
-        if self.action == FileAction.FILE_ACTION_ADDED:
-            directories.add(self.path)
-            return directories
+@dataclass(frozen=True)
+class ScanReadToken:
+    epoch: int
+    sequence: int
+    path: str
+    producer_id: int
 
-        prefix = self.path + PATH_SEPARATOR
-        if self.action == FileAction.FILE_ACTION_REMOVED:
-            return {path for path in directories if path != self.path and not path.startswith(prefix)}
 
-        if self.action == FileAction.FILE_ACTION_RENAMED_NEW_NAME and self.new_path:
-            return {
-                self.new_path + path[len(self.path) :] if path == self.path or path.startswith(prefix) else path for path in directories
-            }
+class ScanObservationInvalidated(RuntimeError):
+    """A filesystem observation can no longer be safely committed."""
 
-        raise ValueError(f"Invalid directory cache mutation: action={self.action}, path={self.path!r}")
+
+class DirectoryScanCoordinator:
+    """Serialize bounded observations and reject stale filesystem batches."""
+
+    def __init__(
+        self, index: DirectoryIndex, *, maximum_pending: int = MAX_PENDING_OBSERVATIONS, maximum_bytes: int = MAX_OBSERVATION_BYTES
+    ) -> None:
+        if maximum_pending < 1 or maximum_bytes < 1:
+            raise ValueError("Directory observation limits must be positive.")
+        self.index = index
+        self.maximum_pending = maximum_pending
+        self.maximum_bytes = maximum_bytes
+        self.lock = threading.RLock()
+        self.pending: deque[tuple[int, _DirectoryMutation, int]] = deque()
+        self.barriers: deque[tuple[int, str, int]] = deque()
+        self.pending_bytes = 0
+        self.barrier_bytes = 0
+        self.sequence = 0
+        self.epoch = 0
+        self.verification_required = True
+        self._uncertain_pending = False
+        self._next_producer_id = 0
+        self._producers: dict[int, ScanReadToken] = {}
+
+    def invalidate(self) -> None:
+        with self.lock:
+            self.epoch += 1
+            self.barriers.clear()
+            self.barrier_bytes = 0
+            self.verification_required = True
+            self._uncertain_pending = True
+
+    def enqueue(self, mutation: _DirectoryMutation) -> bool:
+        if mutation.path or mutation.action != READ_PARENT_ACTION:
+            validate_directory_path(mutation.path)
+        if mutation.new_path is not None:
+            validate_directory_path(mutation.new_path)
+        paths = (mutation.path,) if mutation.new_path is None else (mutation.path, mutation.new_path)
+        size = sum(len(path.encode("utf-8")) for path in paths)
+        with self.lock:
+            if self.sequence >= MAX_SIGNED_INTEGER:
+                self.invalidate()
+                raise OverflowError("Directory observation sequence is exhausted. Reinitialize this source.")
+            self.sequence += 1
+            if len(self.pending) >= self.maximum_pending or self.pending_bytes + size > self.maximum_bytes:
+                self.invalidate()
+                return False
+            self.pending.append((self.sequence, mutation, size))
+            self.pending_bytes += size
+            self.verification_required = True
+            for path in paths:
+                self._record_barrier(path)
+            return True
+
+    def _record_barrier(self, path: str) -> None:
+        """Merge overlapping prefixes without allowing an older read to publish."""
+        retained: deque[tuple[int, str, int]] = deque()
+        prefix = path
+        for sequence, existing, size in self.barriers:
+            if not existing or path == existing or path.startswith(existing + PATH_SEPARATOR):
+                prefix = existing
+            elif path and not existing.startswith(path + PATH_SEPARATOR):
+                retained.append((sequence, existing, size))
+        size = len(prefix.encode("utf-8"))
+        total_bytes = sum(entry[2] for entry in retained) + size
+        if len(retained) >= self.maximum_pending or total_bytes > self.maximum_bytes:
+            self.invalidate()
+            return
+        retained.append((self.sequence, prefix, size))
+        self.barriers = retained
+        self.barrier_bytes = total_bytes
+
+    def begin_read(self, path: str) -> ScanReadToken:
+        if path:
+            validate_directory_path(path)
+        with self.lock:
+            if len(self._producers) >= MAX_PENDING_OBSERVATIONS or self._next_producer_id >= MAX_SIGNED_INTEGER:
+                self.invalidate()
+                raise ScanObservationInvalidated("Directory read capacity is exhausted. Wait for active source reads to finish.")
+            self._next_producer_id += 1
+            token = ScanReadToken(self.epoch, self.sequence, path, self._next_producer_id)
+            self._producers[token.producer_id] = token
+            return token
+
+    def end_read(self, token: ScanReadToken) -> None:
+        """Release a producer only after its reads and synchronous batches have exited."""
+        with self.lock:
+            if self._producers.get(token.producer_id) == token:
+                del self._producers[token.producer_id]
+                self._retire_barriers()
+
+    @contextmanager
+    def read(self, path: str) -> Iterator[ScanReadToken]:
+        token = self.begin_read(path)
+        try:
+            yield token
+        finally:
+            self.end_read(token)
+
+    def _retire_barriers(self) -> None:
+        """Pending mutations and older live reads retain their rejection fences."""
+        oldest = min(
+            (token.sequence for token in self._producers.values() if token.epoch == self.epoch),
+            default=self.sequence,
+        )
+        if self.pending:
+            oldest = min(oldest, self.pending[0][0] - 1)
+        self.barriers = deque(entry for entry in self.barriers if entry[0] > oldest)
+        self.barrier_bytes = sum(entry[2] for entry in self.barriers)
+
+    def is_current(self, token: ScanReadToken) -> bool:
+        with self.lock:
+            return (
+                self._producers.get(token.producer_id) == token
+                and token.epoch == self.epoch
+                and not any(
+                    sequence > token.sequence
+                    and (
+                        not path
+                        or not token.path
+                        or path == token.path
+                        or path.startswith(token.path + PATH_SEPARATOR)
+                        or token.path.startswith(path + PATH_SEPARATOR)
+                    )
+                    for sequence, path, _size in self.barriers
+                )
+            )
+
+    def apply_pending(self) -> int:
+        with self.lock:
+            if self._uncertain_pending:
+                self.index.mark_uncertain()
+                self._uncertain_pending = False
+            applied = 0
+            while self.pending and applied < ROW_BATCH_SIZE:
+                _sequence, mutation, size = self.pending[0]
+                if mutation.action == READ_PARENT_ACTION:
+                    self.index.queue_observed_parent(mutation.path)
+                elif mutation.action == FileAction.FILE_ACTION_ADDED:
+                    self.index.mutate_observed_path("add", mutation.path)
+                elif mutation.action == FileAction.FILE_ACTION_REMOVED:
+                    self.index.mutate_observed_path("remove", mutation.path)
+                elif mutation.action == FileAction.FILE_ACTION_RENAMED_NEW_NAME:
+                    self.index.mutate_observed_path("rename", mutation.path, mutation.new_path)
+                else:
+                    self.invalidate()
+                    raise ValueError("Directory observation action is unsupported. Request source verification.")
+                self.pending.popleft()
+                self.pending_bytes -= size
+                applied += 1
+            self._retire_barriers()
+            return applied
+
+    def commit_children(
+        self, token: ScanReadToken, generation_id: int, children: Iterable[tuple[str, bool]], *, reconcile: bool = False
+    ) -> None:
+        with self.lock:
+            if not self.is_current(token):
+                self.verification_required = True
+                raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+            self.apply_pending()
+            if reconcile:
+                self.index.write_reconciliation_children(generation_id, token.path, children)
+            else:
+                self.index.write_scan_children(generation_id, children)
+
+    def record_unsafe_traversal(self, token: ScanReadToken, generation_id: int) -> None:
+        self._record_scan_issue(token, generation_id, self.index.record_unsafe_traversal)
+
+    def record_access_denied(self, token: ScanReadToken, generation_id: int) -> None:
+        self._record_scan_issue(token, generation_id, self.index.record_access_denied)
+
+    def _record_scan_issue(self, token: ScanReadToken, generation_id: int, record: Callable[[int], None]) -> None:
+        with self.lock:
+            if not self.is_current(token):
+                self.verification_required = True
+                raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+            self.apply_pending()
+            record(generation_id)
+
+    def finish_parent(self, token: ScanReadToken, generation_id: int, *, reconcile: bool = False) -> None:
+        with self.lock:
+            if not self.is_current(token):
+                self.verification_required = True
+                raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+            self.apply_pending()
+            if reconcile:
+                self.index.finish_reconciliation_parent(generation_id, token.path)
+            else:
+                self.index.finish_scan_parent(generation_id, token.path)
+
+    def accept_generation(self, token: ScanReadToken, generation_id: int, *, issue_count: int = 0) -> bool:
+        with self.lock:
+            if (
+                token.path
+                or self._producers.get(token.producer_id) != token
+                or token.epoch != self.epoch
+                or self._uncertain_pending
+                or self.pending
+                or any(producer != token and producer.epoch == self.epoch for producer in self._producers.values())
+            ):
+                self.verification_required = True
+                raise ScanObservationInvalidated("Directory scan capture is not current. Drain source observations and retry verification.")
+            if self.index.reconciliation_generation() is not None or self.index.pending_scan_paths(generation_id, limit=1):
+                self.verification_required = True
+                raise ScanObservationInvalidated(
+                    "Directory parent work remains pending. Complete reconciliation before source verification."
+                )
+            accepted = self.index.finish_generation(generation_id, issue_count=issue_count)
+            self.verification_required = not accepted
+            if accepted:
+                self._uncertain_pending = False
+            return accepted
 
 
 # ============================================================================
@@ -168,17 +359,8 @@ class _DirectoryMutation:
 # ============================================================================
 
 
-class ConnectionDirectoryCache:
-    """
-    In-memory cache of all directory paths for a single SMB connection.
-
-    Lifecycle:
-    1. Created when first needed (user opens a connection)
-    2. BFS scans all directories from share root
-    3. CHANGE_NOTIFY watcher keeps cache updated
-    4. Periodic rescan as safety net
-    5. Destroyed when DirectoryCacheManager shuts down
-    """
+class ConnectionDirectoryCache(ABC):
+    """Shared SMB binding, watcher, and task lifecycle for a directory catalogue."""
 
     #
     # __init__
@@ -204,7 +386,7 @@ class ConnectionDirectoryCache:
             password: SMB password
             port: SMB port (default 445)
             path_prefix: Base path within the share (e.g. "/photos")
-            source_revision: Connection revision used to invalidate snapshots after edits
+            source_revision: Connection revision used to invalidate source bindings after edits
         """
 
         self.connection_id = connection_id
@@ -213,18 +395,25 @@ class ConnectionDirectoryCache:
         self.username = username
         self.password = password
         self.port = port
+        self._source_revision = source_revision
         self._connection_cache = get_smb_connection_cache(connection_id)
+        self._diagnostic_generation = uuid4().hex
+        self._log_context = {
+            "source_id": hashlib.sha256(connection_id.encode()).hexdigest()[:16],
+            "generation_id": self._diagnostic_generation,
+            "operation": "directory_index",
+        }
 
         # Normalize path_prefix: strip slashes so "" means share root
         cleaned = (path_prefix or "/").replace("\\", "/").strip("/")
         self._path_prefix = cleaned  # e.g. "photos" or ""
-        self._source_identity = {
+        self._source_identity: dict[str, str | int] = {
+            "source_kind": "smb",
             "host": host,
             "share_name": share_name,
             "port": port,
             "path_prefix": cleaned,
             "username": username,
-            "revision": source_revision,
         }
         # Pre-compute the SMB base path (share root + prefix)
         share_base = f"\\\\{host}\\{share_name}"
@@ -232,12 +421,6 @@ class ConnectionDirectoryCache:
             self._smb_base_path = f"{share_base}\\{cleaned.replace('/', '\\')}"
         else:
             self._smb_base_path = share_base
-
-        # The cache: a set of all directory paths (relative to share root)
-        # Root is represented as ""
-        self._directories: set[str] = set()
-        self._lock = threading.Lock()
-        self._rescan_changes: Optional[list[_DirectoryMutation]] = None
 
         # State tracking
         self._state = CacheState.EMPTY
@@ -248,7 +431,6 @@ class ConnectionDirectoryCache:
         # Background tasks
         self._scan_task: Optional[asyncio.Task[None]] = None
         self._rescan_task: Optional[asyncio.Task[None]] = None
-        self._verification_task: Optional[asyncio.Task[None]] = None
         self._watcher_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -257,11 +439,11 @@ class ConnectionDirectoryCache:
         self._watcher_session: Optional[Session] = None
         self._watcher_tree: Optional[TreeConnect] = None
         self._watcher_open: Optional[Open] = None
+        self._watcher_received_events = False
+        self._watcher_ready = threading.Event()
+        self._watcher_retry_at = 0.0
 
-        # Disk persistence
-        self._dirty = False
-        self._coalesce_task: Optional[asyncio.Task[None]] = None
-        self._persist_path: Path = self._resolve_persist_path(connection_id)
+        self._cache_root = self._resolve_cache_root()
 
     @property
     def state(self) -> CacheState:
@@ -269,9 +451,13 @@ class ConnectionDirectoryCache:
 
         return self._state
 
+    @property
+    def _logger(self) -> logging.LoggerAdapter[logging.Logger]:
+        return logging.LoggerAdapter(logger, self._log_context, merge_extra=True)
+
     @staticmethod
-    def _resolve_persist_path(connection_id: str) -> Path:
-        """Compute the on-disk path for a connection's index file.
+    def _resolve_cache_root() -> Path:
+        """Resolve the configured parent of the private SQLite namespace.
 
         Uses ``settings.directory_cache_location`` when set (relative paths
         are resolved against *data_dir*); otherwise falls back to
@@ -286,7 +472,7 @@ class ConnectionDirectoryCache:
         else:
             base = static.data_dir / CACHE_PERSIST_SUBDIR
 
-        return base / f"{connection_id}{CACHE_FILE_EXTENSION}"
+        return base
 
     @property
     def directory_count(self) -> int:
@@ -313,54 +499,40 @@ class ConnectionDirectoryCache:
     #
     # search
     #
-    def search(
-        self,
-        query: str,
-        max_results: int = MAX_SEARCH_RESULTS,
-        *,
-        include_dot_directories: bool = False,
-    ) -> tuple[list[str], int]:
-        """Search for directories matching query (case-insensitive substring).
+    @abstractmethod
+    def search(self, query: str, max_results: int = MAX_SEARCH_RESULTS, *, include_dot_directories: bool = False) -> tuple[list[str], int]:
+        """Query the selected catalogue without traversing the source."""
+        raise NotImplementedError
 
-        Supports path separators in the query: both ``/`` and ``\\`` are
-        normalised to ``/`` so that queries like ``abc/def`` or ``abc\\def``
-        match across directory levels.
+    @abstractmethod
+    def _apply_mutations(self, mutations: list[_DirectoryMutation]) -> None:
+        """Queue bounded source observations for the owning writer."""
+        raise NotImplementedError
 
-        Args:
-            query: Search term (substring match, may contain path separators)
-            max_results: Maximum results to return (server-side cap)
-            include_dot_directories: Whether to include dot-prefixed path segments
+    @abstractmethod
+    async def start_scan(self) -> None:
+        """Start or join background catalogue initialization."""
+        raise NotImplementedError
 
-        Returns:
-            Tuple of (matching directory paths sorted by relevance, total match count).
-            The list is capped at max_results; total_count reflects all matches
-            before capping, so callers can detect truncation.
-        """
+    @abstractmethod
+    async def _run_rescan(self) -> None:
+        """Verify the source while preserving the selected catalogue."""
+        raise NotImplementedError
 
-        if not query:
-            return [], 0
+    @abstractmethod
+    def _process_change_events(self, events: list[dict[str, Any]]) -> None:
+        """Route native hints without inferring unverified directory rows."""
+        raise NotImplementedError
 
-        # Normalise backslashes to forward slashes so users can type either
-        query_lower = normalize_history_search_text(query.replace("\\", "/").strip())
+    @abstractmethod
+    def _observation_lost(self) -> None:
+        """Invalidate live reads and retain a verification request."""
+        raise NotImplementedError
 
-        with self._lock:
-            # Substring match on all cached paths
-            matches = [
-                directory
-                for directory in self._directories
-                if query_lower in normalize_history_search_text(directory)
-                and (include_dot_directories or not path_contains_dot_directory(directory))
-            ]
-
-        def sort_key(path: str) -> tuple[int, int, str]:
-            """Sorting key: (priority_tier, path_depth, path_string)."""
-
-            depth = path.count("/")
-            return (directory_match_rank(path, query_lower), depth, path.lower())
-
-        matches.sort(key=sort_key)
-        total_count = len(matches)
-        return matches[:max_results], total_count
+    @abstractmethod
+    def _finish_stop(self) -> None:
+        """Retain source and storage ownership until actual worker exit."""
+        raise NotImplementedError
 
     #
     # add_directory
@@ -432,591 +604,6 @@ class ConnectionDirectoryCache:
 
         self._apply_mutations([_DirectoryMutation(FileAction.FILE_ACTION_RENAMED_NEW_NAME, old_normalized, new_normalized)])
 
-    def _apply_mutations(self, mutations: list[_DirectoryMutation]) -> None:
-        """Update the live index and retain changes for an active rescan."""
-
-        with self._lock:
-            for mutation in mutations:
-                self._directories = mutation.apply(self._directories)
-            if self._rescan_changes is not None:
-                self._rescan_changes.extend(mutations)
-            self._directory_count = len(self._directories)
-            self._dirty = True
-
-    # ========================================================================
-    # Disk persistence
-    # ========================================================================
-
-    #
-    # save_to_disk
-    #
-    def save_to_disk(self) -> None:
-        """Persist the current directory set to disk as JSONL.
-
-        Uses atomic write (temp file + rename) so readers never see a
-        half-written file.  Before replacing the main file, the current
-        version is kept as a ``.bak`` backup so a valid snapshot always
-        exists even if the process is killed mid-write.
-
-        File format (JSONL):
-            Line 1 (header): version, connection ID, source identity, timestamp, count
-            Lines 2+:        {"p":"relative/dir/path"}
-        """
-
-        with self._lock:
-            dirs = list(self._directories)
-            self._dirty = False
-
-        backup_path = self._persist_path.with_suffix(CACHE_BACKUP_EXTENSION)
-
-        try:
-            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(self._persist_path.parent),
-                prefix=f".{self.connection_id[:8]}_",
-                suffix=".tmp",
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    header = {
-                        "v": CACHE_FILE_VERSION,
-                        "connection_id": self.connection_id,
-                        "source": self._source_identity,
-                        "ts": time.time(),
-                        "count": len(dirs),
-                    }
-                    f.write(json.dumps(header, separators=(",", ":")) + "\n")
-
-                    for d in dirs:
-                        f.write(json.dumps({"p": d}, separators=(",", ":")) + "\n")
-
-                # Rotate: current -> backup, then temp -> current
-                if self._persist_path.exists():
-                    try:
-                        os.replace(str(self._persist_path), str(backup_path))
-                    except OSError as e:
-                        logger.debug(f"Could not create backup for connection {self.connection_id}: {e}")
-
-                os.replace(tmp_path, str(self._persist_path))
-                logger.debug(f"Saved directory cache to disk for connection {self.connection_id}: {len(dirs)} directories")
-            except BaseException:
-                # Clean up temp file on any error
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
-
-        except Exception as e:
-            logger.warning(f"Failed to save directory cache to disk for connection {self.connection_id}: {type(e).__name__}: {e}")
-
-    #
-    # load_from_disk
-    #
-    def load_from_disk(self) -> bool:
-        """Load the directory set from a JSONL snapshot on disk.
-
-        Tries the main index file first; if it is missing, corrupt, or stale,
-        falls back to the ``.bak`` backup file.
-
-        Returns True if a valid, non-stale snapshot was loaded.
-        """
-
-        backup_path = self._persist_path.with_suffix(CACHE_BACKUP_EXTENSION)
-
-        # Try main file first, then backup
-        for path, label in [(self._persist_path, "index"), (backup_path, "backup")]:
-            if not path.exists():
-                continue
-
-            result = self._load_snapshot_file(path, label)
-            if result:
-                return True
-
-        return False
-
-    #
-    # _load_snapshot_file
-    #
-    def _load_snapshot_file(self, path: Path, label: str) -> bool:
-        """Attempt to load a single JSONL snapshot file.
-
-        Returns True if valid and non-stale, False otherwise.
-
-        Args:
-            path: Path to the JSONL file
-            label: Human-readable label for log messages (e.g. "index", "backup")
-        """
-
-        try:
-            with open(path, encoding="utf-8") as f:
-                header_line = f.readline()
-                if not header_line:
-                    logger.warning(f"Empty {label} file for connection {self.connection_id}, ignoring")
-                    return False
-
-                header = json.loads(header_line)
-
-                # Version check
-                if header.get("v") != CACHE_FILE_VERSION:
-                    logger.info(
-                        f"{label.capitalize()} version mismatch for connection {self.connection_id} "
-                        f"(got {header.get('v')}, expected {CACHE_FILE_VERSION}), ignoring"
-                    )
-                    return False
-
-                # Connection ID check
-                if header.get("connection_id") != self.connection_id:
-                    logger.warning(f"{label.capitalize()} connection_id mismatch for connection {self.connection_id}, ignoring")
-                    return False
-
-                if header.get("source") != self._source_identity:
-                    logger.info("Ignoring %s for connection %s: connection target or revision changed", label, self.connection_id)
-                    return False
-
-                # Staleness check
-                ts = header.get("ts", 0)
-                age = time.time() - ts
-                max_staleness_seconds = settings.directory_cache_max_staleness_minutes * 60
-                if age > max_staleness_seconds:
-                    logger.info(
-                        f"{label.capitalize()} file for connection {self.connection_id} is stale ({age / 86400:.1f} days old), ignoring"
-                    )
-                    return False
-
-                expected_count = header.get("count", 0)
-
-                # Read directory entries
-                dirs: set[str] = set()
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    entry = json.loads(line)
-                    dir_path = entry.get("p", "")
-                    if dir_path:
-                        dirs.add(dir_path)
-
-            # Validate count matches
-            if len(dirs) != expected_count:
-                logger.warning(
-                    f"{label.capitalize()} count mismatch for connection {self.connection_id}: "
-                    f"header says {expected_count}, found {len(dirs)} entries"
-                )
-                # Still usable — load what we have
-
-            with self._lock:
-                self._directories = dirs
-                self._directory_count = len(dirs)
-
-            self._last_scan_time = ts
-            self._state = CacheState.READY
-            logger.info(
-                f"Loaded directory cache from {label} for connection {self.connection_id}: "
-                f"{len(dirs)} directories (snapshot age: {age:.0f}s)"
-            )
-            return True
-
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-            logger.warning(f"Corrupt {label} file for connection {self.connection_id}: {type(e).__name__}: {e}")
-            return False
-        except Exception as e:
-            logger.warning(f"Failed to load directory cache from {label} for connection {self.connection_id}: {type(e).__name__}: {e}")
-            return False
-
-    #
-    # _start_coalesce_flush
-    #
-    def _start_coalesce_flush(self) -> None:
-        """Start the coalesced flush background task if not already running."""
-
-        if self._coalesce_task is not None and not self._coalesce_task.done():
-            return
-
-        try:
-            loop = asyncio.get_running_loop()
-            self._coalesce_task = loop.create_task(self._coalesce_flush_loop())
-        except RuntimeError:
-            # No running event loop — save synchronously
-            if self._dirty:
-                self.save_to_disk()
-
-    #
-    # _coalesce_flush_loop
-    #
-    async def _coalesce_flush_loop(self) -> None:
-        """Periodically flush dirty cache to disk.
-
-        Runs until stopped, writing at most once per the configured
-        coalesce interval.
-        """
-
-        interval = settings.directory_cache_coalesce_interval_seconds
-        while not self._stop_event.is_set():
-            try:
-                await asyncio.sleep(interval)
-                if self._stop_event.is_set():
-                    break
-                if self._dirty:
-                    self.save_to_disk()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(f"Error in coalesce flush for connection {self.connection_id}: {type(e).__name__}: {e}")
-
-    #
-    # delete_persist_file
-    #
-    def delete_persist_file(self) -> None:
-        """Remove the on-disk index and backup files for this connection."""
-
-        backup_path = self._persist_path.with_suffix(CACHE_BACKUP_EXTENSION)
-        for path, label in [(self._persist_path, "index"), (backup_path, "backup")]:
-            try:
-                if path.exists():
-                    path.unlink()
-                    logger.debug(f"Deleted {label} file for connection {self.connection_id}")
-            except Exception as e:
-                logger.warning(f"Failed to delete {label} file for connection {self.connection_id}: {type(e).__name__}: {e}")
-
-    # ========================================================================
-    # Initial scan (BFS)
-    # ========================================================================
-
-    #
-    # start_scan
-    #
-    async def start_scan(self) -> None:
-        """Start the initial directory scan in the background.
-
-        Safe to call multiple times — will not start a new scan if one is
-        already in progress.
-        """
-
-        if self._state in (CacheState.BUILDING, CacheState.UPDATING):
-            logger.debug(f"Scan already in progress for connection {self.connection_id}")
-            return
-
-        self._state = CacheState.BUILDING
-        self._scan_error = None
-        self._scan_task = asyncio.create_task(self._run_scan())
-
-    #
-    # _run_scan
-    #
-    async def _run_scan(self) -> None:
-        """Execute a full BFS scan of the share directory tree.
-
-        Uses smbclient.scandir() via the connection pool for each directory.
-        Results are added progressively so search works during scan.
-        """
-
-        logger.info(f"Starting directory scan for connection {self.connection_id} ({self.host}/{self.share_name})")
-
-        scan_start = time.monotonic()
-        scanned_count = 0
-        error_count = 0
-
-        try:
-            pool = await get_connection_pool()
-            base_path = self._smb_base_path
-
-            async with pool.get_connection(
-                host=self.host,
-                port=self.port,
-                username=self.username,
-                password=self.password,
-                share_name=self.share_name,
-                connection_cache=self._connection_cache,
-            ):
-                # BFS queue: list of relative paths to scan
-                queue: list[str] = [""]
-                discovered: set[str] = set()
-
-                while queue:
-                    # Process in batches to avoid holding the event loop too long
-                    batch = queue[:SCAN_BATCH_SIZE]
-                    queue = queue[SCAN_BATCH_SIZE:]
-
-                    for rel_path in batch:
-                        if self._stop_event.is_set():
-                            logger.info(f"Scan cancelled for connection {self.connection_id}")
-                            return
-
-                        # Build SMB path (relative to the prefix-adjusted base)
-                        if rel_path:
-                            smb_path = f"{base_path}\\{rel_path.replace('/', '\\')}"
-                        else:
-                            smb_path = base_path
-
-                        try:
-                            subdirs = await self._scan_directory_with_pool_lease(pool, smb_path, rel_path)
-
-                            # Add discovered directories to cache and queue
-                            for subdir in subdirs:
-                                if subdir.path not in discovered:
-                                    discovered.add(subdir.path)
-                                    self.add_directory(subdir.path)
-                                    if subdir.can_descend:
-                                        queue.append(subdir.path)
-
-                            scanned_count += 1
-                        except asyncio.TimeoutError:
-                            logger.warning(f"Timeout scanning directory '{rel_path}' for connection {self.connection_id}")
-                            error_count += 1
-                        except Exception as e:
-                            logger.warning(
-                                f"Error scanning directory '{rel_path}' for connection {self.connection_id}: {type(e).__name__}: {e}"
-                            )
-                            error_count += 1
-
-                    # Yield to event loop between batches
-                    await asyncio.sleep(0)
-
-            elapsed = time.monotonic() - scan_start
-            self._last_scan_time = time.time()
-            self._state = CacheState.READY
-            logger.info(
-                f"Directory scan complete for connection {self.connection_id}: "
-                f"{self._directory_count} directories found, "
-                f"{scanned_count} dirs scanned, {error_count} errors, "
-                f"{elapsed:.1f}s elapsed"
-            )
-
-            # Start the CHANGE_NOTIFY watcher and periodic rescan
-            self._start_watcher()
-            self._start_periodic_rescan()
-
-            # Persist snapshot to disk and start coalesced flushing
-            self.save_to_disk()
-            self._start_coalesce_flush()
-
-        except Exception as e:
-            elapsed = time.monotonic() - scan_start
-            self._scan_error = f"{type(e).__name__}: {e}"
-            # Keep whatever we found so far — partial cache is better than nothing
-            if self._directory_count > 0:
-                self._state = CacheState.READY
-            else:
-                self._state = CacheState.EMPTY
-            logger.error(
-                f"Directory scan failed for connection {self.connection_id} "
-                f"after {elapsed:.1f}s ({self._directory_count} dirs found before failure): "
-                f"{type(e).__name__}: {e}",
-                exc_info=True,
-            )
-
-    #
-    # _scan_single_directory
-    #
-    def _scan_single_directory(self, smb_path: str, rel_path: str) -> list[_ScannedDirectory]:
-        """Scan a single directory for subdirectories (runs in executor).
-
-        Args:
-            smb_path: Full UNC path to the directory
-            rel_path: Relative path from share root
-
-        Returns:
-            Relative directory paths and whether each entry is a reparse point
-        """
-
-        subdirs: list[_ScannedDirectory] = []
-
-        try:
-            entries = smbclient.scandir(
-                smb_path,
-                username=self.username,
-                password=self.password,
-                port=self.port,
-                connection_cache=self._connection_cache,
-                **get_smbclient_policy_kwargs(),
-            )
-            for entry in entries:
-                if entry.name in (".", ".."):
-                    continue
-
-                try:
-                    info = entry.smb_info
-                    is_dir = bool(info.file_attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
-
-                    if is_dir:
-                        child_path = f"{rel_path}/{entry.name}" if rel_path else entry.name
-                        subdirs.append(
-                            _ScannedDirectory(
-                                child_path,
-                                is_reparse_point=bool(info.file_attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT),
-                                is_dfs_referral=bool(info.file_attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT)
-                                and info.ea_size == ReparseTags.IO_REPARSE_TAG_DFS,
-                            )
-                        )
-                except Exception as e:
-                    logger.debug(f"Error processing entry '{entry.name}' in '{rel_path}': {e}")
-                    raise
-        except Exception as e:
-            logger.debug(f"Error scanning '{smb_path}': {type(e).__name__}: {e}")
-            raise
-
-        return subdirs
-
-    async def _scan_directory_with_pool_lease(self, pool: SMBConnectionPool, smb_path: str, rel_path: str) -> list[_ScannedDirectory]:
-        """Run a blocking scan without releasing its pool lease prematurely."""
-
-        future = asyncio.get_running_loop().run_in_executor(None, self._scan_single_directory, smb_path, rel_path)
-        try:
-            return await asyncio.wait_for(asyncio.shield(future), timeout=SCAN_TIMEOUT_SECONDS)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            await pool.retain_connection_until_future_complete(self._connection_cache, future)
-            raise
-
-    #
-    # _run_rescan
-    #
-    async def _run_rescan(self) -> None:
-        """Execute a periodic rescan, replacing the cache when done.
-
-        During rescan, the old cache continues to serve search requests
-        (stale serving / eventual consistency).
-        """
-
-        with self._lock:
-            if self._state in (CacheState.BUILDING, CacheState.UPDATING):
-                return
-            previous_state = self._state
-            self._state = CacheState.UPDATING
-            self._rescan_changes = []
-
-        logger.info(f"Starting periodic rescan for connection {self.connection_id}")
-
-        scan_start = time.monotonic()
-        scanned_count = 0
-        error_count = 0
-
-        try:
-            pool = await get_connection_pool()
-            base_path = self._smb_base_path
-
-            # Build a new set — don't modify the live one yet
-            new_directories: set[str] = set()
-            discovered: set[str] = set()
-            applied_changes = 0
-            read_directories: set[str] = set()
-
-            def apply_pending_changes() -> None:
-                """Called under the cache lock; delayed events make overlapping reads ambiguous."""
-                nonlocal new_directories, applied_changes
-                changes = self._rescan_changes or []
-                pending = changes[applied_changes:]
-                if any(
-                    mutation.invalidates_read(directory)
-                    for mutation in pending
-                    if mutation.action != FileAction.FILE_ACTION_ADDED
-                    for directory in read_directories
-                ):
-                    raise RuntimeError("Directory namespace changed after an overlapping read started; keeping the existing index")
-                for mutation in pending:
-                    new_directories = mutation.apply(new_directories)
-                applied_changes = len(changes)
-
-            async with pool.get_connection(
-                host=self.host,
-                port=self.port,
-                username=self.username,
-                password=self.password,
-                share_name=self.share_name,
-                connection_cache=self._connection_cache,
-            ):
-                queue: list[str] = [""]
-
-                while queue:
-                    batch = queue[:SCAN_BATCH_SIZE]
-                    queue = queue[SCAN_BATCH_SIZE:]
-
-                    for rel_path in batch:
-                        if self._stop_event.is_set():
-                            logger.info(f"Rescan cancelled for connection {self.connection_id}")
-                            self._state = previous_state
-                            return
-
-                        if rel_path:
-                            smb_path = f"{base_path}\\{rel_path.replace('/', '\\')}"
-                        else:
-                            smb_path = base_path
-
-                        try:
-                            with self._lock:
-                                apply_pending_changes()
-                                read_directories.add(rel_path)
-
-                            subdirs = await self._scan_directory_with_pool_lease(pool, smb_path, rel_path)
-
-                            with self._lock:
-                                apply_pending_changes()
-
-                                for subdir in subdirs:
-                                    if subdir.path not in discovered:
-                                        discovered.add(subdir.path)
-                                        new_directories.add(subdir.path)
-                                        if subdir.can_descend:
-                                            queue.append(subdir.path)
-
-                            scanned_count += 1
-                        except asyncio.TimeoutError:
-                            logger.warning(f"Timeout during rescan of '{rel_path}' for connection {self.connection_id}")
-                            error_count += 1
-                        except Exception as e:
-                            logger.warning(
-                                f"Error during rescan of '{rel_path}' for connection {self.connection_id}: {type(e).__name__}: {e}"
-                            )
-                            error_count += 1
-
-                    await asyncio.sleep(0)
-
-            if error_count:
-                self._state = previous_state
-                self._scan_error = (
-                    f"Directory rescan incomplete: {error_count} directories could not be scanned; keeping the existing index."
-                )
-                logger.warning("%s Connection: %s", self._scan_error, self.connection_id)
-                return
-
-            # Atomically replace the cache
-            with self._lock:
-                apply_pending_changes()
-                self._directories = new_directories
-                self._directory_count = len(new_directories)
-                self._rescan_changes = None
-
-            self._scan_error = None
-            self._last_scan_time = time.time()
-            self._state = CacheState.READY
-            elapsed = time.monotonic() - scan_start
-            logger.info(
-                f"Periodic rescan complete for connection {self.connection_id}: "
-                f"{self._directory_count} directories, "
-                f"{scanned_count} dirs scanned, {error_count} errors, "
-                f"{elapsed:.1f}s elapsed"
-            )
-
-            # Persist updated snapshot to disk
-            self.save_to_disk()
-
-        except asyncio.CancelledError:
-            self._state = previous_state
-            raise
-        except Exception as e:
-            # Keep the old cache on failure
-            self._state = previous_state
-            self._scan_error = f"{type(e).__name__}: {e}"
-            elapsed = time.monotonic() - scan_start
-            logger.error(
-                f"Periodic rescan failed for connection {self.connection_id} after {elapsed:.1f}s: {type(e).__name__}: {e}",
-                exc_info=True,
-            )
-        finally:
-            with self._lock:
-                self._rescan_changes = None
-
     # ========================================================================
     # CHANGE_NOTIFY watcher
     # ========================================================================
@@ -1033,10 +620,10 @@ class ConnectionDirectoryCache:
         self._watcher_thread = threading.Thread(
             target=self._watcher_loop,
             daemon=True,
-            name=f"dir-cache-watcher-{self.connection_id[:8]}",
+            name="directory-cache-watcher",
         )
         self._watcher_thread.start()
-        logger.info(f"Started CHANGE_NOTIFY watcher for connection {self.connection_id}")
+        logger.info("Directory watcher started.", extra={"event": "directory_watcher_started"})
 
     #
     # _watcher_loop
@@ -1052,40 +639,56 @@ class ConnectionDirectoryCache:
         retry_count = 0
 
         while not self._stop_event.is_set():
+            self._watcher_received_events = False
             try:
                 self._connect_watcher()
-                retry_count = 0  # Reset on successful connect
-
                 self._run_watcher_inner()
 
-            except Exception as e:
+            except Exception as error:
                 if self._stop_event.is_set():
                     break
 
-                retry_count += 1
-                if retry_count > MAX_WATCHER_RETRIES:
-                    logger.error(
-                        f"CHANGE_NOTIFY watcher for connection {self.connection_id} exceeded max retries ({MAX_WATCHER_RETRIES}), stopping"
+                if retry_count == 0 or self._watcher_ready.is_set():
+                    self._observation_lost()
+                retry_count = 1 if self._watcher_received_events else retry_count + 1
+                self._watcher_ready.clear()
+                if retry_count == MAX_WATCHER_RETRIES + 1:
+                    self._logger.error(
+                        "Directory watcher exhausted %s fast retries. Capped background retries remain active.",
+                        MAX_WATCHER_RETRIES,
+                        extra={"event": "directory_watcher_retry_exhausted"},
                     )
-                    break
 
                 delay = min(
-                    WATCHER_RETRY_BASE_DELAY * (2 ** (retry_count - 1)),
+                    WATCHER_RETRY_BASE_DELAY * (2 ** min(retry_count - 1, MAX_WATCHER_RETRIES)),
                     WATCHER_RETRY_MAX_DELAY,
                 )
-                logger.warning(
-                    f"CHANGE_NOTIFY watcher error for connection {self.connection_id}, "
-                    f"retrying in {delay:.0f}s (attempt {retry_count}/{MAX_WATCHER_RETRIES}): "
-                    f"{type(e).__name__}: {e}"
-                )
+                jitter = hashlib.sha256(self.connection_id.encode("utf-8")).digest()[0]
+                delay = min(WATCHER_RETRY_MAX_DELAY, delay * (90 + jitter % 21) / 100)
+                self._watcher_retry_at = time.monotonic() + delay
+                if retry_count <= MAX_WATCHER_RETRIES:
+                    self._logger.warning(
+                        "Directory watcher failed (%s); retrying in %.1f seconds.",
+                        type(error).__name__,
+                        delay,
+                        extra={
+                            "event": "directory_watcher_retry",
+                            "stage": "watcher",
+                            "error_type": type(error).__name__,
+                            "retry_seconds": delay,
+                        },
+                        exc_info=retry_count == 1,
+                    )
 
                 self._cleanup_watcher()
 
                 if self._stop_event.wait(delay):
                     break  # Stop event was set during wait
 
+        self._watcher_ready.clear()
+        self._watcher_retry_at = 0.0
         self._cleanup_watcher()
-        logger.info(f"CHANGE_NOTIFY watcher stopped for connection {self.connection_id}")
+        logger.info("Directory watcher stopped.", extra={"event": "directory_watcher_stopped"})
 
     #
     # _connect_watcher
@@ -1108,7 +711,7 @@ class ConnectionDirectoryCache:
             username=self.username,
             password=self.password,
             require_encryption=bool(policy["encrypt"]),
-            auth_protocol=str(policy["auth_protocol"]),
+            auth_protocol=policy["auth_protocol"],
         )
         self._watcher_session.connect()
 
@@ -1130,7 +733,7 @@ class ConnectionDirectoryCache:
             create_options=CreateOptions.FILE_DIRECTORY_FILE,
         )
 
-        logger.debug(f"CHANGE_NOTIFY watcher connected for connection {self.connection_id} ({self.host}/{self.share_name})")
+        logger.debug("Directory watcher connected.", extra={"event": "directory_watcher_connected"})
 
     #
     # _run_watcher_inner
@@ -1154,66 +757,34 @@ class ConnectionDirectoryCache:
                 output_buffer_length=CHANGE_NOTIFY_BUFFER_SIZE,
                 send=True,
             )
+            if self._stop_event.is_set():
+                break
+            if not self._watcher_ready.is_set():
+                self._observation_lost()
+                self._watcher_ready.set()
+                self._watcher_retry_at = 0.0
 
             try:
                 result = watcher.wait()
-            except Exception as e:
-                error_msg = str(e).lower()
-                # STATUS_NOTIFY_ENUM_DIR (buffer overflow) — ignore per plan
-                if "0xc000010c" in error_msg or "notify_enum_dir" in error_msg:
-                    logger.info(f"CHANGE_NOTIFY buffer overflow for connection {self.connection_id}, ignoring (next rescan will catch up)")
-                    continue
-                raise
+            except NotifyEnumDir:
+                result = []
 
-            if self._stop_event.is_set() or result is None:
+            if self._stop_event.is_set():
                 break
+            if result is None:
+                raise ConnectionError("Directory observation stopped unexpectedly. Reconnect and verify the source.")
+            if not result:
+                self._observation_lost()
+                logger.info("Directory observation details were lost; source verification is required.")
+                continue
 
             # Debounce: collect events for a short period
             self._process_change_events(result)
+            self._watcher_received_events = True
 
     #
     # _process_change_events
     #
-    def _process_change_events(self, events: list[dict]) -> None:  # type: ignore[type-arg]
-        """Process CHANGE_NOTIFY events and update the cache.
-
-        Args:
-            events: List of FILE_NOTIFY_INFORMATION dictionaries from the watcher
-        """
-
-        for event in events:
-            try:
-                action = event["action"].get_value()
-                # Filename is relative to the watched directory (share root)
-                # and uses backslash separators
-                raw_path = event["file_name"].get_value()
-                rel_path = raw_path.replace("\\", "/")
-
-                if action == FileAction.FILE_ACTION_ADDED:
-                    logger.debug(f"Directory added: '{rel_path}' (connection {self.connection_id})")
-                    self.add_directory(rel_path)
-
-                elif action == FileAction.FILE_ACTION_REMOVED:
-                    logger.debug(f"Directory removed: '{rel_path}' (connection {self.connection_id})")
-                    self.remove_directory(rel_path)
-
-                elif action == FileAction.FILE_ACTION_RENAMED_OLD_NAME:
-                    # Store the old name; the next event should be RENAMED_NEW_NAME
-                    self._pending_rename_old = rel_path
-
-                elif action == FileAction.FILE_ACTION_RENAMED_NEW_NAME:
-                    old_path = getattr(self, "_pending_rename_old", None)
-                    if old_path:
-                        logger.debug(f"Directory renamed: '{old_path}' -> '{rel_path}' (connection {self.connection_id})")
-                        self.rename_directory(old_path, rel_path)
-                        self._pending_rename_old = None
-                    else:
-                        # Got rename-new without rename-old; treat as add
-                        logger.debug(f"Directory rename-new without old: '{rel_path}' (connection {self.connection_id})")
-                        self.add_directory(rel_path)
-
-            except Exception as e:
-                logger.warning(f"Error processing CHANGE_NOTIFY event for connection {self.connection_id}: {type(e).__name__}: {e}")
 
     #
     # _cleanup_watcher
@@ -1232,36 +803,36 @@ class ConnectionDirectoryCache:
         if self._watcher_open:
             try:
                 self._watcher_open.close()
-            except Exception as e:
-                logger.debug(f"Error closing watcher handle: {e}")
+            except Exception as error:
+                logger.debug("Directory watcher handle cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_open = None
 
         if self._watcher_tree:
             try:
                 self._watcher_tree.disconnect()
-            except Exception as e:
-                logger.debug(f"Error disconnecting watcher tree: {e}")
+            except Exception as error:
+                logger.debug("Directory watcher tree cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_tree = None
 
         if self._watcher_session:
             try:
                 self._watcher_session.disconnect()
-            except Exception as e:
-                logger.debug(f"Error disconnecting watcher session: {e}")
+            except Exception as error:
+                logger.debug("Directory watcher session cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_session = None
 
         if self._watcher_connection:
             try:
                 self._watcher_connection.disconnect()
-            except RuntimeError as e:
+            except RuntimeError as error:
                 # smbprotocol bug: disconnect() tries to join the current
                 # thread when called from the message-worker after a timeout.
-                logger.debug(f"Ignored RuntimeError during watcher connection disconnect: {e}")
-            except Exception as e:
-                logger.debug(f"Error disconnecting watcher connection: {e}")
+                logger.debug("Directory watcher connection cleanup failed (%s).", type(error).__name__)
+            except Exception as error:
+                logger.debug("Directory watcher connection cleanup failed (%s).", type(error).__name__)
             finally:
                 self._watcher_connection = None
 
@@ -1283,22 +854,10 @@ class ConnectionDirectoryCache:
     #
     # _periodic_rescan_loop
     #
+    @abstractmethod
     async def _periodic_rescan_loop(self) -> None:
-        """Periodically trigger a full rescan."""
-
-        while not self._stop_event.is_set():
-            try:
-                await asyncio.sleep(RESCAN_INTERVAL_SECONDS)
-                if self._stop_event.is_set():
-                    break
-                await self._run_rescan()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(
-                    f"Error in periodic rescan for connection {self.connection_id}: {type(e).__name__}: {e}",
-                    exc_info=True,
-                )
+        """Run observation, verification, retry, and maintenance scheduling."""
+        raise NotImplementedError
 
     # ========================================================================
     # Shutdown
@@ -1310,7 +869,7 @@ class ConnectionDirectoryCache:
     def stop(self) -> None:
         """Stop all background tasks and clean up resources."""
 
-        logger.info(f"Stopping directory cache for connection {self.connection_id}")
+        logger.info("Stopping directory cache.", extra={"event": "directory_source_stopping"})
         self._request_stop()
         self._finish_stop()
 
@@ -1325,33 +884,903 @@ class ConnectionDirectoryCache:
         if self._rescan_task and not self._rescan_task.done():
             self._rescan_task.cancel()
 
-        if self._verification_task and not self._verification_task.done():
-            self._verification_task.cancel()
 
-        if self._coalesce_task and not self._coalesce_task.done():
-            self._coalesce_task.cancel()
+class DirectorySourceUnavailableError(InterruptedError):
+    """A failed root read prevents retained results from leaving the binding."""
+
+
+class DirectoryScanCapacityError(TimeoutError):
+    """A source must retry without starting another blocking root probe."""
+
+
+class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
+    """Disk-backed SMB source with shared scan work and bounded observations."""
+
+    @property
+    def monitoring_state(self) -> str:
+        if not self._watcher_ready.is_set():
+            return "unavailable" if self._watcher_retry_at else "starting"
+        return "recovering" if self.coordinator.verification_required else "healthy"
+
+    @property
+    def retry_after_ms(self) -> int | None:
+        now = time.monotonic()
+        deadlines = (self._resource_retry_at, self._watcher_retry_at, self._verification_retry_at)
+        pending = [deadline - now for deadline in deadlines if deadline is not None and deadline > now]
+        return max(1, int(min(pending) * 1000)) if pending else None
+
+    def __init__(
+        self,
+        connection_id: str,
+        host: str,
+        share_name: str,
+        username: str,
+        password: str,
+        port: int = 445,
+        path_prefix: str = "/",
+        source_revision: str = "",
+        *,
+        query_slots: threading.BoundedSemaphore | None = None,
+        scan_slots: threading.BoundedSemaphore | None = None,
+    ) -> None:
+        super().__init__(connection_id, host, share_name, username, password, port, path_prefix, source_revision)
+        self._source_identity["connection_id"] = connection_id
+        identity = json.dumps(self._source_identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        filename = hashlib.sha256(identity.encode("utf-8")).hexdigest() + SQLITE_CACHE_EXTENSION
+        self._persist_path = self._cache_root / SQLITE_CACHE_SUBDIR / filename
+        self.index = DirectoryIndex(self._persist_path, source_kind="smb", source_identity=self._source_identity)
+        self.policy = DirectoryIndexPolicy()
+        self.resources = DirectoryIndexResources(self._persist_path.parent, self.policy)
+        self.resources.register_source(self._persist_path)
+        self.index.growth_guard = self.resources.reserve_growth
+        self.coordinator = DirectoryScanCoordinator(self.index)
+        self._manager_query_slots = query_slots if query_slots is not None else threading.BoundedSemaphore(QUERY_WORKERS)
+        self._manager_scan_slots = scan_slots if scan_slots is not None else threading.BoundedSemaphore(1)
+        self._workers = threading.Condition()
+        self._finish_lock = threading.Lock()
+        self._storage_released = False
+        self._active_workers = 0
+        self._opened = threading.Event()
+        self._generation_lock = threading.Lock()
+        self._scan_progress = time.monotonic()
+        self._scan_running = threading.Event()
+        self._resource_retry_at = 0.0
+        self._verification_retry_at: float | None = None
+        self._next_full_pass_at = 0.0
+        self._scan_epoch: tuple[int, int] | None = None
+        self._failure_retry_delay = 0.0
+        self._retry_jitter = hashlib.sha256(identity.encode("utf-8")).digest()[0]
+        self._owning_loop: asyncio.AbstractEventLoop | None = None
+        self._last_access = time.monotonic()
+        self._last_access_at_ms = int(time.time() * 1000)
+        self._cleanup_pending = True
+        self._reclamation_pending = False
+        self._source_available = threading.Event()
+        self._source_probe_completed = threading.Event()
+        self._root_reading = threading.Event()
+        self._source_root = SmbDirectoryRoot(self._smb_base_path)
+
+    def touch(self) -> None:
+        now = time.monotonic()
+        with self.coordinator.lock:
+            if now - self._last_access >= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] and self._source_available.is_set():
+                self.coordinator.invalidate()
+                self._source_available.clear()
+                self._source_probe_completed.set()
+            self._last_access = now
+        self._last_access_at_ms = int(time.time() * 1000)
+
+    def can_release_idle(self) -> bool:
+        with self._workers:
+            return (
+                time.monotonic() - self._last_access >= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"]
+                and not self._active_workers
+                and not self._scan_running.is_set()
+                and not self.index.has_active_queries
+            )
+
+    def _maintenance_blocked(self) -> bool:
+        return (
+            self._stop_event.is_set()
+            or bool(self.coordinator.pending)
+            or self.index.has_active_queries
+            or self._scan_running.is_set()
+            or self.index.reconciliation_generation() is not None
+        )
+
+    def _cleanup_retired_work(self) -> None:
+        deadline = time.monotonic() + WORKER_POLL_SECONDS
+        while self._cleanup_pending and not self._stop_event.is_set() and time.monotonic() < deadline:
+            with self.coordinator.lock:
+                if self._maintenance_blocked():
+                    return
+                self._cleanup_pending = self.index.cleanup_retired_batch()
+
+    def _reclaim_disk_work(self) -> None:
+        with self.coordinator.lock:
+            if not self._reclamation_pending or self._maintenance_blocked():
+                return
+            self._reclamation_pending = not self.index.reclaim_pages()
+
+    def _checkpoint_work(self) -> None:
+        with self.coordinator.lock:
+            if self._maintenance_blocked():
+                return
+            self.index.checkpoint_if_due()
+
+    def _repair_fts_work(self) -> None:
+        while not self._manager_scan_slots.acquire(timeout=WORKER_POLL_SECONDS):
+            if self._stop_event.is_set():
+                raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+        try:
+            self._scan_running.set()
+            while self.index.needs_fts_repair:
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                with self.coordinator.lock:
+                    self.index.repair_fts_batch()
+        finally:
+            self._scan_running.clear()
+            self._manager_scan_slots.release()
+
+    async def _blocking(self, operation: Callable[[], WorkerResult], *, pool: SMBConnectionPool | None = None) -> WorkerResult:
+        def run() -> WorkerResult:
+            try:
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                return operation()
+            finally:
+                with self._workers:
+                    self._active_workers -= 1
+                    self._workers.notify_all()
+
+        with self._workers:
+            if self._stop_event.is_set():
+                raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+            self._active_workers += 1
+        try:
+            future = asyncio.get_running_loop().run_in_executor(None, run)
+        except BaseException:
+            with self._workers:
+                self._active_workers -= 1
+                self._workers.notify_all()
+            raise
+
+        def report_abandoned(completed: asyncio.Future[WorkerResult]) -> None:
+            if not completed.cancelled():
+                error = completed.exception()
+                if error is not None:
+                    logger.warning("Abandoned directory worker failed (%s).", type(error).__name__)
+
+        try:
+            if pool is None:
+                return await wait_for_worker(future)
+            self._scan_progress = time.monotonic()
+            while True:
+                try:
+                    return await wait_for_worker(future, WORKER_POLL_SECONDS)
+                except TimeoutError:
+                    if future.done():
+                        return future.result()
+                    if time.monotonic() - self._scan_progress >= SCAN_TIMEOUT_SECONDS:
+                        self.coordinator.invalidate()
+                        future.add_done_callback(report_abandoned)
+                        await pool.retain_connection_until_future_complete(self._connection_cache, future)
+                        raise TimeoutError("Directory read has stalled. Scan capacity stays reserved until the worker exits.") from None
+        except asyncio.CancelledError:
+            self.coordinator.invalidate()
+            future.add_done_callback(report_abandoned)
+            if pool is not None:
+                await pool.retain_connection_until_future_complete(self._connection_cache, future)
+            raise
+
+    async def start_scan(self) -> None:
+        if self._stop_event.is_set() or time.monotonic() < self._resource_retry_at:
+            return
+        if self._scan_task is not None and not self._scan_task.done():
+            return
+        self._owning_loop = asyncio.get_running_loop()
+        self._state = CacheState.BUILDING
+        self._scan_task = asyncio.create_task(self._initialize())
+
+    async def _initialize(self) -> None:
+        try:
+            await self._blocking(self._initialize_storage)
+            self._opened.set()
+            self._directory_count = (await self._blocking(self.index.status)).directory_count
+            self._start_watcher()
+            await self._run_rescan()
+            self._start_periodic_rescan()
+        except asyncio.CancelledError:
+            return
+        except Exception as error:
+            self._scan_error = (
+                str(error)
+                if isinstance(error, DirectoryDiskBudgetError)
+                else "Directory index storage is in use. Wait for active workers to finish, then retry."
+                if isinstance(error, BlockingIOError)
+                else "Directory index initialization failed. Check private local storage and reopen the connection."
+            )
+            self._state = CacheState.READY if self._opened.is_set() else CacheState.EMPTY
+            self._schedule_retry()
+            self._start_periodic_rescan()
+            logger.warning("Directory index initialization failed (%s).", type(error).__name__)
+
+    def _initialize_storage(self) -> None:
+        self.apply_policy(get_directory_index_policy())
+        self.index.open(rebuild_invalid=True)
+        self.coordinator.invalidate()
+        self.coordinator.apply_pending()
+
+    def apply_policy(self, policy: DirectoryIndexPolicy) -> None:
+        changed = policy != self.policy
+        self.resources.apply_policy(policy)
+        self.index.configure_page_cache(policy.page_cache_kib)
+        self.policy = DirectoryIndexPolicy.model_validate(policy.model_dump())
+        if changed:
+            self._reset_retry()
+        if not self._opened.is_set() and self._owning_loop is not None and not self._stop_event.is_set():
+            if self._scan_task is None or self._scan_task.done():
+                self._owning_loop.call_soon_threadsafe(lambda: asyncio.create_task(self.start_scan()))
+
+    def search(self, query: str, max_results: int = MAX_SEARCH_RESULTS, *, include_dot_directories: bool = False) -> tuple[list[str], int]:
+        response = self.search_index(query, max_results, include_dot_directories=include_dot_directories)
+        return [row.path for row in response.results], response.total_matches
+
+    def search_index(
+        self,
+        query: str,
+        max_results: int = MAX_SEARCH_RESULTS,
+        *,
+        include_dot_directories: bool = False,
+        cancelled: threading.Event | None = None,
+    ) -> DirectoryIndexSearch:
+        self.touch()
+        if self._stop_event.is_set():
+            raise InterruptedError("Directory source was replaced or stopped. Retry the search on the current connection.")
+        if not self._opened.is_set():
+            return DirectoryIndexSearch((), 0, 0, 0, "partial", None, "empty")
+        if not self._source_available.is_set():
+            if not self._source_probe_completed.is_set():
+                return DirectoryIndexSearch((), 0, 0, 0, "partial", None, "empty")
+            raise DirectorySourceUnavailableError(
+                "Directory source root is unavailable. Restore source access and retry the search after verification."
+            )
+        if not self._manager_query_slots.acquire(timeout=WORKER_POLL_SECONDS):
+            raise TimeoutError("Directory query workers are busy. Wait briefly and retry the search.")
+        try:
+            response = self.index.search(
+                query.replace("\\", "/"), limit=max_results, include_dot_directories=include_dot_directories, cancelled=cancelled
+            )
+            if self._stop_event.is_set():
+                raise InterruptedError("Directory source was replaced or stopped. Retry the search on the current connection.")
+            if not self._source_available.is_set():
+                raise DirectorySourceUnavailableError(
+                    "Directory source root is unavailable. Restore source access and retry the search after verification."
+                )
+            return response
+        finally:
+            self._manager_query_slots.release()
+
+    def _apply_mutations(self, mutations: list[_DirectoryMutation]) -> None:
+        for mutation in mutations:
+            if not self.coordinator.enqueue(mutation):
+                self._scan_error = "Directory observations were lost. Background verification is required."
+
+    def observe_parent(self, parent: str) -> None:
+        """Queue source validation without assuming that a destination is a directory."""
+        self._apply_mutations([_DirectoryMutation(READ_PARENT_ACTION, parent.strip("/"))])
+
+    def _observation_lost(self) -> None:
+        self.coordinator.invalidate()
+        self._scan_error = "Directory observations were lost. Background verification is required."
+
+    def _process_change_events(self, events: list[dict[str, Any]]) -> None:
+        """Treat rename directions independently and discover destinations from parents."""
+        for event in events:
+            try:
+                action = event["action"].get_value()
+                path = event["file_name"].get_value().replace("\\", "/")
+                validate_directory_path(path)
+                parent = path.rpartition(PATH_SEPARATOR)[0]
+                if action in (FileAction.FILE_ACTION_REMOVED, FileAction.FILE_ACTION_RENAMED_OLD_NAME):
+                    self._apply_mutations([_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, path)])
+                elif action not in (FileAction.FILE_ACTION_ADDED, FileAction.FILE_ACTION_RENAMED_NEW_NAME):
+                    self._observation_lost()
+                    continue
+                self._apply_mutations([_DirectoryMutation(READ_PARENT_ACTION, parent)])
+            except Exception as error:
+                self._observation_lost()
+                logger.warning("Directory observation could not be queued (%s).", type(error).__name__)
+
+    class _DescendantAccessDenied(PermissionError):
+        """A source operation failed, not a local index write."""
+
+    class _DescendantMissing(FileNotFoundError):
+        """A source directory disappeared, not a local index file."""
+
+    def _source_call(self, parent: str, operation: Callable[[], WorkerResult]) -> WorkerResult:
+        if not parent:
+            self._root_reading.set()
+        try:
+            return operation()
+        except ScanObservationInvalidated:
+            raise
+        except DirectoryBindingChangedError as error:
+            self._source_available.clear()
+            self._source_probe_completed.set()
+            self.coordinator.invalidate()
+            self._source_root = self._source_root.replacement()
+            raise DirectorySourceUnavailableError(
+                "Directory source is temporarily unavailable. Background verification will bind the root again."
+            ) from error
+        except Exception as error:
+            if parent:
+                if (
+                    isinstance(error, (FileNotFoundError, NotADirectoryError))
+                    or isinstance(error, SMBOSError)
+                    and error.ntstatus
+                    in (NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND, NtStatus.STATUS_NOT_A_DIRECTORY)
+                    or isinstance(error, SMBResponseException)
+                    and error.status
+                    in (NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND, NtStatus.STATUS_NOT_A_DIRECTORY)
+                ):
+                    raise self._DescendantMissing(
+                        "Directory descendant disappeared. Verify its parent before retrying directory indexing."
+                    ) from error
+                if (
+                    isinstance(error, PermissionError)
+                    or (isinstance(error, SMBOSError) and error.ntstatus == NtStatus.STATUS_ACCESS_DENIED)
+                    or (isinstance(error, SMBResponseException) and error.status == NtStatus.STATUS_ACCESS_DENIED)
+                ):
+                    raise self._DescendantAccessDenied(
+                        "Directory descendant access was denied. Restore source permissions and retry verification."
+                    ) from error
+                raise
+            self._source_available.clear()
+            self._source_probe_completed.set()
+            raise DirectorySourceUnavailableError(
+                "Directory source root is unavailable. Restore source access and retry verification."
+            ) from error
+        finally:
+            if not parent:
+                self._root_reading.clear()
+
+    @contextmanager
+    def _source_read(self, parent: str, close: Callable[[], None]) -> Iterator[None]:
+        """Keep the primary read failure when cleanup also fails."""
+        try:
+            yield
+        except BaseException:
+            try:
+                self._source_call(parent, close)
+            except Exception as error:
+                logger.warning("Directory source read cleanup failed (%s).", type(error).__name__)
+            raise
+        else:
+            self._source_call(parent, close)
+
+    def _probe_source_root(self) -> None:
+        if not self._manager_scan_slots.acquire(blocking=False):
+            raise DirectoryScanCapacityError("Directory scan capacity is in use. Wait for active work to finish, then retry.")
+        try:
+            self._scan_running.set()
+            with self.coordinator.read("") as token:
+                self._probe_source_root_read(token)
+        finally:
+            self._scan_running.clear()
+            self._manager_scan_slots.release()
+
+    def _probe_source_root_read(self, token: ScanReadToken) -> None:
+        entries = self._source_call("", lambda: self._open_source_read("", token))
+        with self._source_read("", entries.close):
+            self._source_call("", lambda: next(entries, None))
+            self._source_call("", entries.verify)
+            if self._stop_event.is_set() or not self.coordinator.is_current(token):
+                raise ScanObservationInvalidated("Directory root observation became stale. Retry source verification.")
+        with self.coordinator.lock:
+            if self._stop_event.is_set() or not self.coordinator.is_current(token):
+                raise ScanObservationInvalidated("Directory root observation became stale. Retry source verification.")
+            self._source_available.set()
+            self._source_probe_completed.set()
+
+    def _open_source_read(self, parent: str, token: ScanReadToken) -> SmbDirectoryRead:
+        def check() -> None:
+            if self._stop_event.is_set():
+                raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+            if not self.coordinator.is_current(token):
+                raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+            self._scan_progress = time.monotonic()
+
+        return self._source_root.read(
+            parent,
+            check,
+            username=self.username,
+            password=self.password,
+            port=self.port,
+            connection_cache=self._connection_cache,
+            **get_smbclient_policy_kwargs(),
+        )
+
+    def _scan_parent(self, generation: int, parent: str, *, reconcile: bool = False) -> None:
+        with self.coordinator.read(parent) as token:
+            try:
+                self._scan_parent_read(generation, parent, token, reconcile=reconcile)
+            except self._DescendantMissing as error:
+                self._recover_missing_parent(generation, parent, token, error, reconcile=reconcile)
+            except self._DescendantAccessDenied:
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.") from None
+                if reconcile:
+                    raise
+                self.coordinator.record_access_denied(token, generation)
+                self.coordinator.finish_parent(token, generation)
+            except DirectoryTraversalError:
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.") from None
+                if reconcile:
+                    raise
+                self.coordinator.record_unsafe_traversal(token, generation)
+                self.coordinator.finish_parent(token, generation)
+
+    def _recover_missing_parent(self, generation: int, parent: str, token: ScanReadToken, error: Exception, *, reconcile: bool) -> None:
+        """Verify absence through a held ancestor before deferring the missing job."""
+        ancestor = parent.rpartition(PATH_SEPARATOR)[0]
+        while True:
+            with self.coordinator.read(ancestor) as ancestor_token:
+                try:
+                    entries = self._source_call(ancestor, lambda: self._open_source_read(ancestor, ancestor_token))
+                except self._DescendantMissing:
+                    ancestor = ancestor.rpartition(PATH_SEPARATOR)[0]
+                    continue
+                child = parent[len(ancestor) + 1 :].split(PATH_SEPARATOR)[0] if ancestor else parent.split(PATH_SEPARATOR)[0]
+                with self._source_read(ancestor, entries.close):
+                    if self._source_call(ancestor, lambda: entries.has_directory_child(child)):
+                        raise error
+                    self._source_call(ancestor, entries.verify)
+                with self.coordinator.lock:
+                    if (
+                        self._stop_event.is_set()
+                        or not self.coordinator.is_current(token)
+                        or not self.coordinator.is_current(ancestor_token)
+                    ):
+                        raise ScanObservationInvalidated("Directory ancestor observation became stale. Retry source verification.")
+                    self.index.queue_observed_parent(ancestor)
+                    self.coordinator.finish_parent(token, generation, reconcile=reconcile)
+                return
+
+    def _scan_parent_read(self, generation: int, parent: str, token: ScanReadToken, *, reconcile: bool = False) -> None:
+        entries = self._source_call(parent, lambda: self._open_source_read(parent, token))
+        batch: list[tuple[str, bool]] = []
+        batch_bytes = 0
+        with self._source_read(parent, entries.close):
+            while True:
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                if not self.coordinator.is_current(token):
+                    raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+                self._scan_progress = time.monotonic()
+                entry = self._source_call(parent, lambda: next(entries, None))
+                if self._stop_event.is_set():
+                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                if not self.coordinator.is_current(token):
+                    raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+                if entry is None:
+                    break
+                self._scan_progress = time.monotonic()
+                if entry.name is None:
+                    if reconcile:
+                        raise DirectoryTraversalError(
+                            "Directory reconciliation found an unsupported name. Complete source verification is required."
+                        )
+                    self.coordinator.record_unsafe_traversal(token, generation)
+                    continue
+                if entry.name in (".", ".."):
+                    continue
+                if PATH_SEPARATOR in entry.name or "\\" in entry.name:
+                    raise ValueError("Directory entry has an unsupported separator. Source coverage is incomplete.")
+                attributes = entry.smb_info.file_attributes
+                if not attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
+                    continue
+                if attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT:
+                    if reconcile:
+                        raise OSError("Directory reconciliation found a redirected directory. Complete source verification is required.")
+                    self.coordinator.record_unsafe_traversal(token, generation)
+                    continue
+                path = parent + PATH_SEPARATOR + entry.name if parent else entry.name
+                validate_directory_path(path)
+                path_bytes = len(path.encode("utf-8"))
+                if path_bytes > MAX_OBSERVATION_BYTES:
+                    raise ValueError("Directory path exceeds the scan-batch byte limit. Source coverage is incomplete.")
+                if batch and batch_bytes + path_bytes > MAX_OBSERVATION_BYTES:
+                    self._source_call(parent, entries.verify)
+                    self.coordinator.commit_children(token, generation, batch, reconcile=reconcile)
+                    batch.clear()
+                    batch_bytes = 0
+                batch.append((path, True))
+                batch_bytes += path_bytes
+                if len(batch) == ROW_BATCH_SIZE:
+                    self._source_call(parent, entries.verify)
+                    self.coordinator.commit_children(token, generation, batch, reconcile=reconcile)
+                    batch.clear()
+                    batch_bytes = 0
+            if batch:
+                self._source_call(parent, entries.verify)
+                self.coordinator.commit_children(token, generation, batch, reconcile=reconcile)
+            self._source_call(parent, entries.verify)
+            self._prune_missing_children(generation, parent, token, entries, reconcile=reconcile)
+        with self.coordinator.lock:
+            if self._stop_event.is_set():
+                raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+            self.coordinator.finish_parent(token, generation, reconcile=reconcile)
+            if not parent:
+                self._source_available.set()
+                self._source_probe_completed.set()
+
+    def _prune_missing_children(
+        self, generation: int, parent: str, token: ScanReadToken, entries: SmbDirectoryRead, *, reconcile: bool
+    ) -> None:
+        cursor: str | None = None
+        while True:
+            page = self.index.direct_child_paths(generation, parent, after_path=cursor)
+            if not page:
+                return
+            for path in page:
+                if self._source_call(parent, lambda: entries.has_directory_child(path.rsplit(PATH_SEPARATOR, 1)[-1])):
+                    continue
+                more = True
+                while more:
+                    self._source_call(parent, entries.verify)
+                    with self.coordinator.lock:
+                        if self._stop_event.is_set():
+                            raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                        if not self.coordinator.is_current(token):
+                            raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+                        self.coordinator.apply_pending()
+                        if reconcile:
+                            self.index.write_reconciliation_children(generation, parent, ())
+                        more = self.index.prune_subtree_batch(generation, path)
+            cursor = page[-1]
+
+    def _reconcile_disk_queue(self) -> None:
+        """Read bounded accepted-parent work without advancing full-pass clocks."""
+        if self._stop_event.is_set() or time.monotonic() < self._resource_retry_at or not self._source_available.is_set():
+            return
+        if not self._generation_lock.acquire(blocking=False):
+            return
+        try:
+            if not self._manager_scan_slots.acquire(blocking=False):
+                return
+            try:
+                self._scan_running.set()
+                deadline = time.monotonic() + WORKER_POLL_SECONDS
+                generation = self.index.reconciliation_generation()
+                while generation is not None and time.monotonic() < deadline:
+                    if self._stop_event.is_set():
+                        raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                    if self.index.reconciliation_generation() != generation:
+                        return
+                    parents = self.index.pending_scan_paths(generation, limit=1)
+                    if not parents:
+                        return
+                    self._scan_parent(generation, parents[0], reconcile=True)
+            finally:
+                self._scan_running.clear()
+                self._manager_scan_slots.release()
+        finally:
+            self._generation_lock.release()
+
+    async def _run_reconciliation(self) -> None:
+        if (
+            self._stop_event.is_set()
+            or self._scan_running.is_set()
+            or time.monotonic() < self._resource_retry_at
+            or not self._source_available.is_set()
+            or await self._blocking(self.index.reconciliation_generation) is None
+        ):
+            return
+        connected = False
+        try:
+            await self._refresh_connection_generation()
+            pool = await get_connection_pool()
+            async with pool.get_connection(
+                host=self.host,
+                port=self.port,
+                username=self.username,
+                password=self.password,
+                share_name=self.share_name,
+                connection_cache=self._connection_cache,
+            ):
+                connected = True
+                await self._blocking(self._reconcile_disk_queue, pool=pool)
+        except ScanObservationInvalidated:
+            raise
+        except Exception:
+            if not connected:
+                self._source_available.clear()
+                self._source_probe_completed.set()
+            raise
+
+    def _scan_disk_queue(self) -> None:
+        while not self._manager_scan_slots.acquire(timeout=WORKER_POLL_SECONDS):
+            self._scan_progress = time.monotonic()
+            if self._stop_event.is_set():
+                raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+        started = time.monotonic()
+        success = False
+        try:
+            self._scan_running.set()
+            self._logger.debug("Directory scan started.", extra={"event": "directory_scan_started", "stage": "scan"})
+            self._scan_progress = time.monotonic()
+            with self._generation_lock, self.coordinator.read("") as baseline:
+                with self.coordinator.lock:
+                    self.coordinator.apply_pending()
+                    resuming = self.index.has_resumable_scan()
+                    generation, _selected = self.index.prepare_scan()
+                    if not resuming:
+                        self._scan_epoch = (generation, baseline.epoch)
+                    self._cleanup_pending = True
+                    self.index.seed_scan(generation)
+                try:
+                    while not self._stop_event.is_set():
+                        with self.coordinator.lock:
+                            if baseline.epoch != self.coordinator.epoch:
+                                raise ScanObservationInvalidated("Directory scan epoch changed. Retry source verification.")
+                            self.coordinator.apply_pending()
+                            if self.coordinator.pending:
+                                continue
+                        reconciliation = self.index.reconciliation_generation()
+                        current = reconciliation if reconciliation is not None else generation
+                        parents = self.index.pending_scan_paths(current, limit=1)
+                        if not parents:
+                            if self._scan_epoch != (generation, baseline.epoch):
+                                while True:
+                                    with self.coordinator.lock:
+                                        if self._stop_event.is_set() or baseline.epoch != self.coordinator.epoch:
+                                            raise ScanObservationInvalidated("Directory scan epoch changed. Retry source verification.")
+                                        more = self.index.requeue_completed_scan_batch(generation)
+                                        if not more:
+                                            self._scan_epoch = (generation, baseline.epoch)
+                                            break
+                                continue
+                            with self.coordinator.read("") as root_token:
+                                self._probe_source_root_read(root_token)
+                            with self.coordinator.lock:
+                                if self._stop_event.is_set():
+                                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                                complete = self.coordinator.accept_generation(baseline, generation)
+                            self._cleanup_pending = True
+                            self._state = CacheState.READY
+                            self._scan_error = (
+                                "Directory coverage is incomplete. Some paths cannot be indexed safely."
+                                if not complete
+                                else None
+                                if self._watcher_ready.is_set()
+                                else "Directory monitoring is unavailable. Background verification remains active."
+                            )
+                            if complete:
+                                self._last_scan_time = time.time()
+                            success = complete
+                            break
+                        self._scan_parent(current, parents[0], reconcile=reconciliation is not None)
+                        status = self.index.status()
+                        self._directory_count = status.directory_count
+                    else:
+                        raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                except BaseException:
+                    self.coordinator.invalidate()
+                    raise
+        finally:
+            self._scan_running.clear()
+            self._manager_scan_slots.release()
+            self._logger.debug(
+                "Directory scan finished (success=%s).",
+                success,
+                extra={"event": "directory_scan_finished", "stage": "scan", "duration_ms": (time.monotonic() - started) * 1000},
+            )
+
+    def _schedule_observation_retry(self) -> None:
+        """Coalesce stale-read retries without classifying them as source failures."""
+        now = time.monotonic()
+        deadline = now + OBSERVATION_RETRY_SECONDS
+        if self._verification_retry_at is None or self._verification_retry_at <= now:
+            self._verification_retry_at = deadline
+        else:
+            self._verification_retry_at = min(self._verification_retry_at, deadline)
+        self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
+        self._scan_error = "Directory source changed during verification. Background verification will retry."
+
+    def _schedule_retry(self, *, now: float | None = None) -> None:
+        """Spread bounded retries without changing the configured full-pass interval."""
+        self._failure_retry_delay = (
+            FAILURE_RETRY_MIN_SECONDS if not self._failure_retry_delay else min(self._failure_retry_delay * 2, FAILURE_RETRY_MAX_SECONDS)
+        )
+        percent = 100 - FAILURE_RETRY_JITTER_PERCENT + self._retry_jitter % (FAILURE_RETRY_JITTER_PERCENT * 2 + 1)
+        delay = min(FAILURE_RETRY_MAX_SECONDS, max(FAILURE_RETRY_MIN_SECONDS, self._failure_retry_delay * percent / 100))
+        self._resource_retry_at = (time.monotonic() if now is None else now) + delay
+        self._logger.debug(
+            "Directory retry scheduled.", extra={"event": "directory_retry_scheduled", "stage": "verification", "retry_seconds": delay}
+        )
+
+    def _reset_retry(self) -> None:
+        if self._failure_retry_delay:
+            self._logger.info(
+                "Directory verification recovered.", extra={"event": "directory_verification_recovered", "stage": "verification"}
+            )
+        self._failure_retry_delay = 0.0
+        self._resource_retry_at = 0.0
+        self._verification_retry_at = None
+
+    def _verification_due(self, verified_at: float, *, now: float | None = None) -> bool:
+        current = time.monotonic() if now is None else now
+        interval = (
+            self.policy.degraded_verification_seconds
+            if self.coordinator.verification_required or not self._watcher_ready.is_set()
+            else self.policy.healthy_verification_seconds
+        )
+        delay = interval * (100 - self._retry_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1)) / 100
+        return current >= self._resource_retry_at and (
+            bool(self._failure_retry_delay)
+            or (self._verification_retry_at is not None and current >= self._verification_retry_at)
+            or current >= verified_at + delay
+        )
+
+    async def _refresh_connection_generation(self) -> None:
+        replacement = get_smb_connection_cache(self.connection_id)
+        if replacement is self._connection_cache:
+            return
+        with self._workers:
+            if self._active_workers:
+                raise DirectoryScanCapacityError(
+                    "Previous directory work is still running. Wait for its cleanup before retrying verification."
+                )
+        self.coordinator.invalidate()
+        self._source_available.clear()
+        self._source_probe_completed.set()
+        self._source_root = await self._blocking(self._source_root.replacement)
+        self._connection_cache = replacement
+
+    async def _run_rescan(self) -> None:
+        now = time.monotonic()
+        if (
+            not self._opened.is_set()
+            or self._scan_running.is_set()
+            or now < self._resource_retry_at
+            or (self._verification_retry_at is not None and now < self._verification_retry_at)
+        ):
+            return
+        resumable = await self._blocking(self.index.has_resumable_scan)
+        if now < self._next_full_pass_at and not resumable and self._source_available.is_set():
+            return
+        self._state = CacheState.UPDATING if self._directory_count else CacheState.BUILDING
+        root_checked = False
+        try:
+            await self._refresh_connection_generation()
+            pool = await get_connection_pool()
+            async with pool.get_connection(
+                host=self.host,
+                port=self.port,
+                username=self.username,
+                password=self.password,
+                share_name=self.share_name,
+                connection_cache=self._connection_cache,
+            ):
+                await self._blocking(self._probe_source_root, pool=pool)
+                root_checked = True
+                if now < self._next_full_pass_at and not resumable:
+                    self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
+                    return
+                if self.index.needs_fts_repair:
+                    self._scan_error = "Directory search index is being rebuilt. Existing directory rows remain searchable."
+                    await self._blocking(self._repair_fts_work)
+                if not resumable:
+                    self._next_full_pass_at = time.monotonic() + DIRECTORY_INDEX_CONTRACT.limits["minimum_full_pass_spacing_seconds"]
+                await self._blocking(self._scan_disk_queue, pool=pool)
+            self._reset_retry()
+        except asyncio.CancelledError:
+            self.coordinator.invalidate()
+            raise
+        except ScanObservationInvalidated:
+            self._schedule_observation_retry()
+        except Exception as error:
+            capacity_busy = isinstance(error, DirectoryScanCapacityError)
+            if not capacity_busy and (not root_checked or self._root_reading.is_set()):
+                self._source_available.clear()
+                self._source_probe_completed.set()
+            if isinstance(error, DirectoryDiskBudgetError):
+                self._reclamation_pending = True
+            self._scan_error = (
+                str(error)
+                if capacity_busy
+                else "Directory source root is unavailable. Restore source access and retry verification."
+                if not self._source_available.is_set()
+                else str(error)
+                if isinstance(error, DirectoryDiskBudgetError)
+                else "Directory read has stalled. Existing results remain available; scan capacity stays reserved until the worker exits."
+                if isinstance(error, TimeoutError)
+                else "Directory verification failed. Check source access; existing results remain available."
+            )
+            self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
+            if not self._failure_retry_delay:
+                self._logger.warning(
+                    "Directory verification failed. Background retries remain active.",
+                    extra={"event": "directory_verification_unavailable", "stage": "verification", "error_type": type(error).__name__},
+                    exc_info=True,
+                )
+            self._schedule_retry()
+
+    async def _periodic_rescan_loop(self) -> None:
+        verified_at = time.monotonic()
+        while not self._stop_event.is_set():
+            try:
+                await asyncio.sleep(OBSERVATION_POLL_SECONDS)
+                if time.monotonic() < self._resource_retry_at:
+                    continue
+                if not self._opened.is_set():
+                    await self.start_scan()
+                    return
+                if self._opened.is_set():
+                    if self.index.needs_fts_repair or not self._source_available.is_set():
+                        await self._run_rescan()
+                        verified_at = time.monotonic()
+                        continue
+                    await self._blocking(self.coordinator.apply_pending)
+                    await self._run_reconciliation()
+                    response = await self._blocking(self.index.status)
+                    self._directory_count = response.directory_count
+                    if self._cleanup_pending:
+                        await self._blocking(self._cleanup_retired_work)
+                    if self._reclamation_pending:
+                        await self._blocking(self._reclaim_disk_work)
+                    if not self._scan_running.is_set():
+                        await self._blocking(self._checkpoint_work)
+                if self._verification_due(verified_at):
+                    await self._run_rescan()
+                    verified_at = time.monotonic()
+            except asyncio.CancelledError:
+                return
+            except ScanObservationInvalidated:
+                self._schedule_observation_retry()
+            except Exception as error:
+                self.coordinator.invalidate()
+                if isinstance(error, DirectoryDiskBudgetError):
+                    self._reclamation_pending = True
+                self._scan_error = (
+                    str(error)
+                    if isinstance(error, DirectoryDiskBudgetError)
+                    else "Directory updates failed. Check source access and private local storage, then retry."
+                )
+                self._schedule_retry()
+                logger.warning("Directory updates paused (%s).", type(error).__name__)
+
+    def _request_stop(self) -> None:
+        self.coordinator.invalidate()
+        super()._request_stop()
 
     def _finish_stop(self) -> None:
-        """Wait for blocking watcher cleanup after asynchronous tasks stop."""
-
-        # Wait for watcher thread
-        if self._watcher_thread and self._watcher_thread.is_alive():
-            self._watcher_thread.join(timeout=5.0)
-            if self._watcher_thread.is_alive():
-                logger.warning(f"Watcher thread did not stop cleanly for connection {self.connection_id}")
-
-        self._cleanup_watcher()
-
-        # Flush dirty cache to disk before clearing
-        if self._dirty and self._directory_count > 0:
-            self.save_to_disk()
-
-        with self._lock:
-            self._directories.clear()
-            self._directory_count = 0
-
-        self._state = CacheState.EMPTY
-        logger.info(f"Directory cache stopped for connection {self.connection_id}")
+        with self._finish_lock:
+            if self._storage_released:
+                return
+            with self._workers:
+                while self._active_workers:
+                    self._workers.wait()
+            self._cleanup_watcher()
+            if self._watcher_thread is not None and self._watcher_thread.is_alive():
+                self._watcher_thread.join()
+            try:
+                self._source_root.close()
+            except Exception as error:
+                logger.warning("Directory root handle cleanup failed (%s).", type(error).__name__)
+            try:
+                if self._opened.is_set():
+                    self.index.touch_access(self._last_access_at_ms)
+            except Exception:
+                logger.warning("Directory last-access time could not be saved. Closed cache data can be rebuilt after cleanup.")
+            self.index.close()
+            self.resources.release_source(self._persist_path)
+            self._storage_released = True
+            self._opened.clear()
+            self._state = CacheState.EMPTY
 
 
 # ============================================================================
@@ -1370,9 +1799,57 @@ class DirectoryCacheManager:
     #
     # __init__
     #
-    def __init__(self) -> None:
+    def __init__(self, cache_factory: type[ConnectionDirectoryCache] = SQLiteConnectionDirectoryCache) -> None:
         self._caches: dict[str, ConnectionDirectoryCache] = {}
         self._lock = threading.Lock()
+        self._cache_factory = cache_factory
+        self._query_slots = threading.BoundedSemaphore(QUERY_WORKERS)
+        self._scan_slots = threading.BoundedSemaphore(1)
+        namespace = ConnectionDirectoryCache._resolve_cache_root() / SQLITE_CACHE_SUBDIR
+        self.resources = DirectoryIndexResources(namespace)
+        self._idle_task: asyncio.Task[None] | None = None
+        self._retiring_caches: set[SQLiteConnectionDirectoryCache] = set()
+
+    async def release_idle_caches(self) -> None:
+        with self._lock:
+            expired = [
+                cache for cache in self._caches.values() if isinstance(cache, SQLiteConnectionDirectoryCache) and cache.can_release_idle()
+            ]
+            for cache in expired:
+                self._caches.pop(cache.connection_id)
+                self._retiring_caches.add(cache)
+                cache._request_stop()
+        if expired:
+            closing = asyncio.gather(*(self._finish_idle_cache(cache) for cache in expired))
+            closing.add_done_callback(lambda completed: completed.exception() if not completed.cancelled() else None)
+            await wait_for_worker(closing)
+
+    async def _finish_idle_cache(self, cache: SQLiteConnectionDirectoryCache) -> None:
+        await asyncio.to_thread(cache._finish_stop)
+        with self._lock:
+            self._retiring_caches.discard(cache)
+
+    async def _idle_release_loop(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(OBSERVATION_POLL_SECONDS)
+                await self.release_idle_caches()
+            except asyncio.CancelledError:
+                return
+            except Exception as error:
+                logger.error(
+                    "Directory idle release failed (%s). Existing sources remain protected; retrying background cleanup.",
+                    type(error).__name__,
+                    extra={"event": "directory_idle_release_failed", "error_type": type(error).__name__},
+                )
+
+    def apply_policy(self, policy: DirectoryIndexPolicy) -> None:
+        self.resources.apply_policy(policy)
+        with self._lock:
+            caches = list(self._caches.values())
+        for cache in caches:
+            if isinstance(cache, SQLiteConnectionDirectoryCache):
+                cache.apply_policy(policy)
 
     #
     # get_cache
@@ -1406,9 +1883,8 @@ class DirectoryCacheManager:
     ) -> ConnectionDirectoryCache:
         """Get or create a directory cache for a connection.
 
-        If the cache doesn't exist, creates it.  Tries to load a persisted
-        snapshot first for instant availability; always starts a background
-        scan (which doubles as a verification / refresh of the snapshot).
+        If the cache doesn't exist, create it and start shared background
+        initialization. Only validated SQLite catalogues can supply results.
 
         Args:
             connection_id: UUID string of the connection
@@ -1425,10 +1901,21 @@ class DirectoryCacheManager:
         """
 
         with self._lock:
-            if connection_id in self._caches:
-                return self._caches[connection_id]
+            previous = self._caches.get(connection_id)
+            if previous is not None and (
+                previous.host == host
+                and previous.share_name == share_name
+                and previous.username == username
+                and previous.password == password
+                and previous.port == port
+                and previous._path_prefix == (path_prefix or "/").replace("\\", "/").strip("/")
+                and previous._source_revision == source_revision
+            ):
+                if isinstance(previous, SQLiteConnectionDirectoryCache):
+                    previous.touch()
+                return previous
 
-            cache = ConnectionDirectoryCache(
+            cache = self._cache_factory(
                 connection_id=connection_id,
                 host=host,
                 share_name=share_name,
@@ -1438,22 +1925,27 @@ class DirectoryCacheManager:
                 path_prefix=path_prefix,
                 source_revision=source_revision,
             )
+            if isinstance(cache, SQLiteConnectionDirectoryCache):
+                cache._manager_query_slots = self._query_slots
+                cache._manager_scan_slots = self._scan_slots
+                cache.resources = self.resources
+                self.resources.register_source(cache._persist_path)
+                cache.index.growth_guard = self.resources.reserve_growth
+                if self._idle_task is None or self._idle_task.done():
+                    self._idle_task = asyncio.create_task(self._idle_release_loop())
             self._caches[connection_id] = cache
 
-        # Try to load cached snapshot from disk for instant availability
-        loaded = cache.load_from_disk()
+        if previous is not None:
+            previous._request_stop()
+            if isinstance(previous, SQLiteConnectionDirectoryCache):
+                with self._lock:
+                    self._retiring_caches.add(previous)
+                closing = asyncio.create_task(self._finish_idle_cache(previous))
+                closing.add_done_callback(lambda completed: completed.exception() if not completed.cancelled() else None)
+            else:
+                await asyncio.to_thread(previous._finish_stop)
 
-        if loaded:
-            # Snapshot loaded — start a background rescan to verify freshness,
-            # plus the watcher and coalesce flush loop
-            cache._start_watcher()
-            cache._start_periodic_rescan()
-            cache._start_coalesce_flush()
-            # Also kick off a verification rescan immediately (non-blocking)
-            cache._verification_task = asyncio.create_task(cache._run_rescan())
-        else:
-            # No snapshot — do a full scan from scratch
-            await cache.start_scan()
+        await cache.start_scan()
 
         return cache
 
@@ -1472,7 +1964,7 @@ class DirectoryCacheManager:
 
         if cache:
             cache.stop()
-            logger.info(f"Removed directory cache for connection {connection_id}")
+            logger.info("Directory cache removed.", extra={"event": "directory_source_removed"})
 
     async def remove_cache_async(self, connection_id: str) -> None:
         """Remove one cache without blocking the application event loop."""
@@ -1486,10 +1978,14 @@ class DirectoryCacheManager:
         cache._request_stop()
         try:
             await asyncio.to_thread(cache._finish_stop)
-        except Exception:
-            logger.exception("Error stopping cache for connection %s", connection_id)
+        except Exception as error:
+            logger.error(
+                "Directory cache shutdown failed (%s). Storage ownership remains held until workers exit.",
+                type(error).__name__,
+                extra={"event": "directory_source_shutdown_failed", "error_type": type(error).__name__},
+            )
         else:
-            logger.info(f"Removed directory cache for connection {connection_id}")
+            logger.info("Directory cache removed.", extra={"event": "directory_source_removed"})
 
     #
     # stop_all
@@ -1498,16 +1994,19 @@ class DirectoryCacheManager:
         """Stop all caches and clean up resources."""
 
         with self._lock:
-            caches = list(self._caches.values())
+            caches = list(self._caches.values()) + list(self._retiring_caches)
             self._caches.clear()
+            if self._idle_task is not None:
+                self._idle_task.cancel()
 
         for cache in caches:
             try:
                 cache.stop()
-            except Exception as e:
+            except Exception as error:
                 logger.error(
-                    f"Error stopping cache for connection {cache.connection_id}: {e}",
-                    exc_info=True,
+                    "Directory cache shutdown failed (%s). Storage ownership remains held until workers exit.",
+                    type(error).__name__,
+                    extra={"event": "directory_source_shutdown_failed", "error_type": type(error).__name__},
                 )
 
         logger.info("All directory caches stopped")
@@ -1516,8 +2015,10 @@ class DirectoryCacheManager:
         """Stop all caches without blocking the application event loop."""
 
         with self._lock:
-            caches = list(self._caches.values())
+            caches = list(self._caches.values()) + list(self._retiring_caches)
             self._caches.clear()
+            if self._idle_task is not None:
+                self._idle_task.cancel()
 
         for cache in caches:
             cache._request_stop()
@@ -1529,9 +2030,13 @@ class DirectoryCacheManager:
         for cache, result in zip(caches, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error(
-                    f"Error stopping cache for connection {cache.connection_id}: {result}",
-                    exc_info=result,
+                    "Directory cache shutdown failed (%s). Storage ownership remains held until workers exit.",
+                    type(result).__name__,
+                    extra={"event": "directory_source_shutdown_failed", "error_type": type(result).__name__},
                 )
+            elif isinstance(cache, SQLiteConnectionDirectoryCache):
+                with self._lock:
+                    self._retiring_caches.discard(cache)
 
         logger.info("All directory caches stopped")
 

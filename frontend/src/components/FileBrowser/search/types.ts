@@ -24,7 +24,7 @@ import type React from "react";
 // ============================================================================
 
 /** Icons understood by the shared quick-bar result renderer. */
-export type SearchResultIcon = "command" | "directory" | "file" | "recent-file";
+export type SearchResultIcon = "command" | "directory" | "recent-directory" | "file" | "recent-file";
 
 /** An inclusive-exclusive text range highlighted by the shared renderer. */
 export interface SearchTextHighlight {
@@ -46,12 +46,16 @@ export interface SearchResultItem {
   /** Optional muted result context. */
   secondaryText?: string;
   /** Optional highlighted range in the primary label. */
-  primaryHighlight?: SearchTextHighlight;
+  primaryHighlight?: SearchTextHighlight | SearchTextHighlight[];
   /** Optional highlighted range in the secondary label. */
-  secondaryHighlight?: SearchTextHighlight;
+  secondaryHighlight?: SearchTextHighlight | SearchTextHighlight[];
   /** Optional keyboard shortcut badge, used by commands. */
   shortcutLabel?: string;
   matchRank?: number;
+  matchedTermCount?: number;
+  sortPath?: string;
+  depth?: number;
+  lastUsedAt?: string;
   usageScore?: number;
 }
 
@@ -66,6 +70,8 @@ export interface SearchResultGroupHeader {
 
 /** A structured result rendered by UnifiedSearchBar. */
 export type SearchResult = SearchResultItem | SearchResultGroupHeader;
+
+export type SearchResultsUpdate = (results: SearchResult[]) => void;
 
 /** Status information from the provider (e.g., indexing progress) */
 export interface SearchStatusInfo {
@@ -91,6 +97,8 @@ export type SearchSelectionAction = "associated-viewer" | "force-viewer-picker" 
 export interface SearchProvider {
   /** Unique identifier for this provider */
   id: string;
+  sourceKey?: string;
+  invalidateResults?: () => void;
 
   /** Stable mode identifier used for UI logic without coupling to translated labels. */
   modeId?: string;
@@ -116,7 +124,9 @@ export interface SearchProvider {
    * @param signal AbortSignal for cancellation
    * @returns Array of search results
    */
-  fetchResults: (query: string, signal: AbortSignal) => Promise<SearchResult[]>;
+  fetchResults: (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate) => Promise<SearchResult[]>;
+
+  getRefreshIntervalMs?: () => number | null;
 
   /**
    * Called when a result is selected (via click or Enter).

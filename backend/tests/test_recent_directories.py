@@ -158,6 +158,17 @@ class TestRecentDirectoriesApi:
 
 
 class TestRecentDirectoryService:
+    def test_independent_terms_rank_before_frequency_and_before_limit(self, session: Session, regular_user: User) -> None:
+        for path, score in (("alpha", 1000), ("beta", 1000), ("alpha/beta", 1), ("none", 1000)):
+            session.add(RecentDirectory(user_id=regular_user.id, connection_id="local-drive:c", path=path, usage_score=score))
+        session.commit()
+        for query in ("alpha beta", "beta alpha", "ALPHA alpha beta"):
+            results = recent_directories.search_recent_directories(query=query, limit=1, current_user=regular_user, session=session)
+            assert results[0].path == "alpha/beta"
+            assert results[0].matched_term_count == 2
+        results = recent_directories.search_recent_directories(query="alpha beta", limit=50, current_user=regular_user, session=session)
+        assert {record.path for record in results} == {"alpha", "beta", "alpha/beta"}
+
     def test_frequency_decay_and_duplicate_events(self) -> None:
         now = datetime.now(timezone.utc)
         assert history_usage_score(8, now - timedelta(days=30), now) == pytest.approx(4)

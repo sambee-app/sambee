@@ -47,6 +47,7 @@ vi.mock("../../services/companion", () => ({
     unpairCurrentOrigin: mockUnpairCurrentOrigin,
     cancelPairing: vi.fn(),
     initiatePairing: vi.fn(),
+    getDirectoryPolicyStatus: vi.fn().mockResolvedValue({ status: "unowned", effective_revision: null }),
   },
   clearStoredSecret: vi.fn(),
   hasStoredSecret: mockHasStoredSecret,
@@ -198,7 +199,8 @@ describe("LocalDrivesSettings", () => {
 
     await user.click(await screen.findByRole("button", { name: LOCAL_DRIVES_PAGE_COPY.testCurrentPairingButton }));
 
-    const successStatus = await screen.findByRole("status");
+    const successStatus = await screen.findByText(LOCAL_DRIVES_PAGE_COPY.pairingTestSucceeded);
+    expect(successStatus.closest('[role="status"]')).toBeInTheDocument();
     expect(successStatus).toHaveTextContent(LOCAL_DRIVES_PAGE_COPY.pairingTestSucceeded);
     expect(screen.queryByText("Pairing with http://localhost:3000 is working.")).not.toBeInTheDocument();
   });

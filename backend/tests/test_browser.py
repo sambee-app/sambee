@@ -30,10 +30,32 @@ from app.models.file import ContentTransferEffects, ContentTransferResult, CopyM
 from app.models.transfer_operation import TransferOperation, TransferOperationPhase
 from app.services.content_transfer import SourceChangedError, SourceDeleteError, SourceDeletionOutcomeUnknown
 from app.services.preprocessor import PreprocessorFileTooLargeError
+from app.storage.smb_errors import SMBMutationUncertain
 
 PUBLISH_CONTRACT = json.loads(
     (Path(__file__).resolve().parents[2] / "archive-contract/v2/fixtures/browser-file-publish-scenarios-v2.json").read_text()
 )["staged_publish"]
+
+
+@pytest.mark.parametrize("operation", ["delete", "rename"])
+def test_uncertain_smb_mutation_returns_non_replayable_conflict(client, auth_headers_user, test_connection, mock_smb_backend, operation):
+    _backend_class, backend = mock_smb_backend
+    if operation == "delete":
+        backend.delete_item.side_effect = SMBMutationUncertain()
+        response = client.delete(f"/api/browse/{test_connection.id}/item", headers=auth_headers_user, params={"path": "/document.txt"})
+    else:
+        backend.rename_item.side_effect = SMBMutationUncertain()
+        response = client.post(
+            f"/api/browse/{test_connection.id}/rename", headers=auth_headers_user, json={"path": "/document.txt", "new_name": "renamed.txt"}
+        )
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "smb_mutation_uncertain",
+        "message": "SMB change confirmation was lost. Check the source before retrying; the change may already be applied.",
+        "recoverable": False,
+        "mutation_uncertain": True,
+    }
+    backend.disconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,9 @@ This module tests:
 - Thread safety
 """
 
+import asyncio
+import io
+import logging
 import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,11 +20,140 @@ import pytest
 from smbprotocol.exceptions import SMBOSError
 from smbprotocol.header import NtStatus
 
+from app.core.logging import RecoveryLogFormatter
 from app.services.directory_monitor import DirectoryMonitor, MonitoredDirectory
+
+
+def test_watcher_failure_has_one_safe_cause_until_recovery(monkeypatch):
+    output = io.StringIO()
+    logger = logging.Logger("app.services.directory_monitor", level=logging.DEBUG)
+    handler = logging.StreamHandler(output)
+    handler.setFormatter(RecoveryLogFormatter("%(message)s"))
+    logger.addHandler(handler)
+    monkeypatch.setattr("app.services.directory_monitor.logger", logger)
+    monitor = MonitoredDirectory(
+        "private-connection", "private-path", "private-host", "private-share", "private-user", "private-password", 445
+    )
+    try:
+        raise OSError("private-path private-password")
+    except OSError as error:
+        for _attempt in range(10):
+            monitor._report_watcher_failure(error)
+    logs = output.getvalue()
+    assert logs.count("event='directory_watcher_unavailable'") == 1
+    assert logs.count("Recovery traceback:") == 1
+    for private_value in (monitor.connection_id, monitor.path, monitor.host, monitor.share_name, monitor.username, monitor.password):
+        assert private_value not in logs
+    assert "source_id=" in logs
+    assert "generation_id=" in logs
+    with patch("app.services.directory_monitor.FileSystemWatcher"):
+        monitor._handle_change_result([])
+        monitor._handle_change_result([])
+    assert output.getvalue().count("event='directory_watcher_recovered'") == 1
+    monitor._report_watcher_failure(OSError("another private-path"))
+    assert output.getvalue().count("event='directory_watcher_unavailable'") == 2
 
 
 class TestDirectoryMonitorLifecycle:
     """Test directory monitor lifecycle operations."""
+
+    @pytest.mark.asyncio
+    async def test_subscription_during_restart_reuses_its_desired_monitor(self):
+        manager = DirectoryMonitor()
+        monitor = MonitoredDirectory("conn", "/", "host", "share", "user", "pass", 445)
+        manager._monitors["conn:/"] = monitor
+        entered = threading.Event()
+        release = threading.Event()
+
+        def stop_worker():
+            monitor._stop_event.set()
+            entered.set()
+            assert release.wait(3)
+            return True
+
+        with patch.object(monitor, "_stop_locked", side_effect=stop_worker), patch.object(monitor, "start") as start:
+            restarting = asyncio.create_task(asyncio.to_thread(manager.restart_all))
+            try:
+                assert await asyncio.to_thread(entered.wait, 2)
+                with patch("app.services.directory_monitor.MonitoredDirectory") as replacement:
+                    acquired = manager.start_monitoring("conn", "/", "host", "share", "user", "pass")
+                    assert acquired is monitor
+                    assert monitor.subscriber_count == 2
+                    replacement.assert_not_called()
+            finally:
+                release.set()
+                await asyncio.wait_for(restarting, 2)
+            start.assert_called_once()
+        assert manager._monitors["conn:/"] is monitor
+        assert not monitor.stopped
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("retirement", [None, "shutdown", "replacement"])
+    async def test_cancelled_start_retains_ownership_and_cannot_release_replacement(self, retirement):
+        manager = DirectoryMonitor()
+        started = threading.Event()
+        finish = threading.Event()
+        acquired = MagicMock(subscriber_count=1)
+        acquired.stopped = False
+        replacement = MagicMock(subscriber_count=1)
+
+        def start():
+            started.set()
+            assert finish.wait(3)
+
+        acquired.start.side_effect = start
+        with patch("app.services.directory_monitor.MonitoredDirectory", return_value=acquired):
+            starting = asyncio.create_task(manager.start_monitoring_async("conn", "/", "host", "share", "user", "pass"))
+            try:
+                assert await asyncio.to_thread(started.wait, 2)
+                starting.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await starting
+                assert len(manager._startup_cleanups) == 1
+                acquired.stop.assert_not_called()
+                if retirement == "shutdown":
+                    manager.stop_all()
+                elif retirement == "replacement":
+                    manager.stop_connection("conn")
+                    manager._monitors["conn:/"] = replacement
+            finally:
+                finish.set()
+            await asyncio.wait_for(asyncio.gather(*tuple(manager._startup_cleanups)), 2)
+        acquired.stop.assert_called_once()
+        replacement.stop.assert_not_called()
+        assert manager._monitors == ({"conn:/": replacement} if retirement == "replacement" else {})
+        assert manager._starting == {}
+
+    def test_shutdown_rejects_new_monitor_start(self):
+        manager = DirectoryMonitor()
+        manager.stop_all()
+        with patch("app.services.directory_monitor.MonitoredDirectory") as monitor_type:
+            with pytest.raises(RuntimeError, match="shutting down"):
+                manager.start_monitoring("conn", "/", "host", "share", "user", "pass")
+        monitor_type.assert_not_called()
+
+    def test_terminal_restart_failure_retires_registration(self):
+        monitor = MonitoredDirectory("conn", "/", "host", "share", "user", "pass", 445)
+        monitor.on_stopped = MagicMock()
+        with patch.object(monitor, "_stop_locked", return_value=True), patch.object(monitor, "start", side_effect=FileNotFoundError):
+            with pytest.raises(FileNotFoundError):
+                monitor.restart()
+        assert monitor.stopped
+        assert not monitor._restarting
+        monitor.on_stopped.assert_called_once()
+
+    def test_new_worker_exit_during_restart_retires_registration(self):
+        monitor = MonitoredDirectory("conn", "/", "host", "share", "user", "pass", 445)
+        monitor.on_stopped = MagicMock()
+
+        def finish_new_worker():
+            monitor._stop_event.set()
+            monitor._monitor_loop()
+
+        with patch.object(monitor, "_stop_locked", return_value=True), patch.object(monitor, "start", side_effect=finish_new_worker):
+            monitor.restart()
+        assert monitor.stopped
+        monitor.on_stopped.assert_called_once()
 
     @pytest.mark.parametrize("error_status", [NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND])
     def test_missing_monitor_target_is_translated_and_released(self, error_status, caplog):
@@ -268,6 +400,44 @@ class TestDirectoryMonitorLifecycle:
 class TestMonitoredDirectoryLifecycle:
     """Test MonitoredDirectory class lifecycle."""
 
+    def test_watcher_failure_clears_old_watcher_before_reconnect(self):
+        monitored = MonitoredDirectory("conn", "/", "host", "share", "user", "pass", 445)
+        watcher = MagicMock()
+        watcher.wait.side_effect = RuntimeError("Opaque failure without transport keywords")
+        monitored._watcher = watcher
+
+        def reconnect():
+            assert monitored._watcher is None
+            monitored._stop_event.set()
+
+        with patch.object(monitored, "_reconnect", side_effect=reconnect) as recover:
+            monitored._monitor_loop()
+        recover.assert_called_once()
+
+    @pytest.mark.parametrize("restart", [False, True])
+    def test_active_worker_retains_resources_after_stop_deadline(self, restart):
+        monitored = MonitoredDirectory("conn", "/", "host", "share", "user", "pass", 445)
+        monitored._monitor_thread = MagicMock()
+        monitored._monitor_thread.is_alive.return_value = True
+        with patch.object(monitored, "_cleanup") as cleanup, patch.object(monitored, "start") as start:
+            if restart:
+                monitored.restart()
+            else:
+                monitored.stop()
+            cleanup.assert_not_called()
+            start.assert_not_called()
+        assert monitored.stopped
+
+    @patch("app.services.directory_monitor.MonitoredDirectory")
+    def test_stopped_registration_is_not_reused(self, monitor_type):
+        manager = DirectoryMonitor()
+        stopped = MagicMock()
+        stopped.stopped = True
+        manager._monitors["conn:/"] = stopped
+        manager.start_monitoring("conn", "/", "host", "share", "user", "pass")
+        monitor_type.return_value.start.assert_called_once()
+        assert manager._monitors["conn:/"] is monitor_type.return_value
+
     def test_monitored_directory_initialization(self):
         """Test MonitoredDirectory initialization."""
         callback = AsyncMock()
@@ -399,8 +569,11 @@ class TestMonitoredDirectoryLifecycle:
             port=445,
         )
 
-        with pytest.raises(Exception, match="Connection failed"):
+        with patch("app.services.directory_monitor.threading.Thread") as thread:
             monitored.start()
+            thread.return_value.start.assert_called_once()
+            assert not monitored._stop_event.is_set()
+            monitored.stop()
 
     @patch("app.services.directory_monitor.threading.Thread")
     @patch("app.services.directory_monitor.Connection")
@@ -461,6 +634,34 @@ class TestMonitoredDirectoryLifecycle:
 
 class TestChangeNotifications:
     """Test change notification handling."""
+
+    def test_failed_reconnect_remains_active_until_unsubscribe(self):
+        monitored = MonitoredDirectory("conn-123", "documents", "server", "share", "user", "password", 445)
+        attempts = 0
+
+        def reconnect():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 3:
+                monitored._stop_event.set()
+            raise ConnectionError("Source is unavailable")
+
+        retired = MagicMock()
+        monitored.on_stopped = retired
+        with patch.object(monitored, "_reconnect", side_effect=reconnect), patch.object(monitored, "_cleanup"):
+            monitored._monitor_loop()
+        assert attempts == 3
+        retired.assert_called_once()
+
+    def test_retry_exhaustion_keeps_bounded_recovery_active(self):
+        from app.services.directory_monitor import MAX_RETRY_ATTEMPTS, MAX_RETRY_DELAY
+
+        monitored = MonitoredDirectory("conn-123", "documents", "server", "share", "user", "password", 445)
+        monitored._consecutive_failures = MAX_RETRY_ATTEMPTS + 1
+        with patch.object(monitored._stop_event, "wait", return_value=True) as wait:
+            monitored._reconnect()
+        assert 0 < wait.call_args.args[0] <= MAX_RETRY_DELAY
+        assert not monitored._stop_event.is_set()
 
     @pytest.mark.parametrize("status", [NtStatus.STATUS_DELETE_PENDING, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND])
     def test_deleted_watch_invalidates_and_retires(self, status, caplog):
@@ -635,6 +836,7 @@ class TestThreadSafety:
             def __init__(self):
                 self.subscriber_count = 1
                 self.start_called = False
+                self.stopped = False
 
             def start(self):
                 self.start_called = True

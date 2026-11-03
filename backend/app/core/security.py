@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 
 from app.core.authorization import Capability, user_has_capability
 from app.core.config import settings, static
+from app.core.directory_index_contract import DIRECTORY_POLICY_TOKEN_CLAIM, DIRECTORY_POLICY_TOKEN_CLASS
 from app.core.exceptions import ConfigurationError
 from app.core.logging import get_logger
 from app.db.database import get_session
@@ -106,6 +107,8 @@ def _ensure_user_is_current(user: User | None, failure_exception: HTTPException)
 
 
 def _reject_non_browser_token(payload: dict[str, Any], failure_exception: HTTPException) -> None:
+    if payload.get(DIRECTORY_POLICY_TOKEN_CLAIM) or payload.get("token_class") == DIRECTORY_POLICY_TOKEN_CLASS:
+        raise failure_exception
     if payload.get(_COMPANION_URI_TOKEN_CLAIM):
         raise failure_exception
 
