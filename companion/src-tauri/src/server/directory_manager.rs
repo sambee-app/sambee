@@ -2535,10 +2535,7 @@ impl LocalDirectoryManager {
             let _ownership = ownership;
             let observation = task_source.begin_read()?;
             task_source.ensure_available()?;
-            let root = lock(&task_source.root)?
-                .as_ref()
-                .ok_or(IndexError::Invalid("Directory source identity is unavailable."))?
-                .clone();
+            let root = lock(&task_source.root)?.as_ref().ok_or(IndexError::QueryBusy)?.clone();
             if let Err(error) = root.verify() {
                 task_source.root_invalid.store(true, Ordering::Release);
                 return Err(error);
@@ -2870,7 +2867,14 @@ mod tests {
         let root = temporary.path().join("source");
         std::fs::create_dir_all(root.join("retained-reports")).unwrap();
         let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
-        let search = || manager.search("verification".into(), root.clone(), "reports".into(), false);
+        let search = || async {
+            loop {
+                match manager.search("verification".into(), root.clone(), "reports".into(), false).await {
+                    Err(IndexError::Interrupted | IndexError::QueryBusy) => tokio::time::sleep(POLL_INTERVAL).await,
+                    result => break result,
+                }
+            }
+        };
         tokio::time::timeout(DEADLINE, async {
             loop {
                 let response = search().await.unwrap();
@@ -2885,6 +2889,10 @@ mod tests {
             assert!(retained.results.contains(&"retained-reports".into()));
             std::fs::create_dir(root.join("gap-reports")).unwrap();
             manager.verification_watcher_loss("verification", true).unwrap();
+            {
+                let source = lock(&manager.sources).unwrap().get("verification").unwrap().clone();
+                *lock(&source.next_full_pass).unwrap() = Some(Instant::now());
+            }
             loop {
                 let response = search().await.unwrap();
                 if response.monitoring_state.as_deref() == Some("healthy") && response.coverage.as_deref() == Some("complete") {
@@ -2902,6 +2910,33 @@ mod tests {
         })
         .await
         .expect("bounded verification lifecycle");
+    }
+
+    #[tokio::test]
+    async fn released_root_returns_query_busy_until_rebound_without_losing_rows() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("retained-reports")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root.clone(), manager.storage_directory());
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
+        source.scan(&manager.budget).unwrap();
+        let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let before = reader.search("reports", 3, false, &cancelled, false).unwrap();
+        lock(&source.root).unwrap().take();
+        source.busy.store(true, Ordering::Release);
+        lock(&manager.sources).unwrap().insert("fixture".into(), Arc::clone(&source));
+        assert!(matches!(
+            manager.search("fixture".into(), root.clone(), "reports".into(), false).await,
+            Err(IndexError::QueryBusy)
+        ));
+        assert_eq!(reader.search("reports", 3, false, &cancelled, false).unwrap(), before);
+        source.bind_root(&manager.budget).unwrap();
+        source.busy.store(false, Ordering::Release);
+        let recovered = manager.search("fixture".into(), root, "reports".into(), false).await.unwrap();
+        assert_eq!(recovered.results, ["retained-reports"]);
+        assert_eq!(recovered.last_verified_at_ms, before.last_verified_at_ms);
     }
 
     #[test]
