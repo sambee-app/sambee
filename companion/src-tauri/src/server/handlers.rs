@@ -26,7 +26,7 @@ use http_body_util::BodyExt;
 use log::{info, warn};
 use reqwest::{Client, Response as ReqwestResponse};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
@@ -522,22 +522,13 @@ pub async fn pair_confirm(
 }
 
 /// `POST /api/localization` — synchronize browser localization to the companion.
-pub async fn sync_localization(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(body): Json<LocalizationSyncRequest>,
-) -> Result<Json<LocalizationSyncResponse>, ApiError> {
-    let origin = extract_origin(&headers)?;
-    let (current, applied) = state
-        .localization
-        .apply_update(&state.app, &origin, body)
-        .map_err(ApiError::BadRequest)?;
-
-    if applied {
-        let _ = state.app.emit("localization-updated", &current);
-    }
-
-    Ok(Json(LocalizationSyncResponse { applied, state: current }))
+pub async fn sync_localization(Json(_body): Json<LocalizationSyncRequest>) -> impl axum::response::IntoResponse {
+    (
+        axum::http::StatusCode::UPGRADE_REQUIRED,
+        Json(
+            serde_json::json!({"code": "settings_update_required", "detail": "Separate localization delivery is no longer supported. Update the Sambee browser application."}),
+        ),
+    )
 }
 
 #[derive(Deserialize)]
@@ -5598,21 +5589,60 @@ pub async fn directory_policy_status(
     state.directory_policy.status(Some(&origin)).map(Json)
 }
 
-pub async fn directory_policy_challenge(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Result<Json<super::directory_policy::DirectoryPolicyStatus>, ApiError> {
-    let origin = extract_origin(&headers)?;
-    state.directory_policy.challenge(&origin, &state.app).map(Json)
+pub async fn directory_policy_challenge(State(_state): State<Arc<AppState>>, _headers: HeaderMap) -> impl axum::response::IntoResponse {
+    (
+        axum::http::StatusCode::UPGRADE_REQUIRED,
+        Json(
+            serde_json::json!({"code": "settings_update_required", "detail": "Manual policy approval is no longer supported. Update the Sambee browser application."}),
+        ),
+    )
 }
 
 pub async fn directory_policy_redeem(
+    State(_state): State<Arc<AppState>>,
+    _headers: HeaderMap,
+    Json(_delivery): Json<serde_json::Value>,
+) -> impl axum::response::IntoResponse {
+    (
+        axum::http::StatusCode::UPGRADE_REQUIRED,
+        Json(
+            serde_json::json!({"code": "settings_update_required", "detail": "Legacy policy delivery is no longer supported. Update the Sambee browser application."}),
+        ),
+    )
+}
+
+pub async fn companion_settings_status(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(delivery): Json<super::directory_policy::PolicyGrantDelivery>,
-) -> Result<Json<super::directory_policy::DirectoryPolicyStatus>, ApiError> {
+) -> Result<Json<super::directory_policy::CompanionSettingsStatus>, ApiError> {
     let origin = extract_origin(&headers)?;
-    state.directory_policy.redeem(&origin, delivery).await.map(Json)
+    state.directory_policy.settings_status(Some(&origin), &state.pairing).map(Json)
+}
+
+pub async fn companion_settings_challenge(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<super::directory_policy::CompanionSettingsStatus>, ApiError> {
+    let origin = extract_origin(&headers)?;
+    state.directory_policy.settings_challenge(&origin, &state.pairing).map(Json)
+}
+
+pub async fn companion_settings_redeem(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(delivery): Json<super::directory_policy::SettingsGrantDelivery>,
+) -> Result<Json<super::directory_policy::CompanionSettingsStatus>, ApiError> {
+    let origin = extract_origin(&headers)?;
+    let result = state
+        .directory_policy
+        .redeem_settings(&origin, delivery, &state.pairing, &state.app, &state.localization)
+        .await;
+    if let Err(error) = &result {
+        if let Err(record_error) = state.directory_policy.record_settings_error(error.to_string()) {
+            log::warn!("Settings delivery failure could not be recorded: {record_error}");
+        }
+    }
+    result.map(Json)
 }
 
 /// Query parameters for directory search.

@@ -20,6 +20,8 @@ Once the selected page mounts, prefetch the other permitted pages during idle ti
 
 Compose settings pages with `SettingsPage`, `SettingsSectionList`, and `SettingsGroup`. Use `FormSurface` for the subdued background of an action section, not an additional bordered card. For action sections, put the description or metadata on the left and controls on the right in a `FormRow`: the columns stack below `md` and share the row at `md` and above. Right-align actions on desktop, allow them to wrap, and keep result notices below the row. An informational section such as Local Drives' Current status can keep its own layout; don't force it into an action row.
 
+The Local Drives settings-delivery section uses the shared synchronization lifecycle for all authenticated users. Keep its heading, wrap every status in one `FormSurface`, and put section metadata and Refresh or Retry in a `FormRow`. Notices remain below the row. Do not add a manual Apply control, policy approval prompt, administrator-only status read, or nested surface. Show synchronization failure separately from directory-search health.
+
 Choose button styling by the action's role, not by whether its MUI variant is `outlined` or `contained`:
 
 | Role | Treatment | Example |

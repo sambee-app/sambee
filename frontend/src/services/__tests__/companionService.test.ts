@@ -205,14 +205,14 @@ describe("companionService.getPairStatus", () => {
   });
 });
 
-describe("companionService.syncLocalization", () => {
+describe("companionService shared settings", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
     localStorage.setItem("companion_secret", "shared-secret");
   });
 
-  it("sends authenticated localization updates to the companion", async () => {
+  it("sends an authenticated opaque grant without browser settings values", async () => {
     mockAxiosInstance.post.mockResolvedValueOnce({
       data: {
         applied: true,
@@ -223,19 +223,12 @@ describe("companionService.syncLocalization", () => {
       },
     });
 
-    const result = await companionService.syncLocalization({
-      language: "en-XA",
-      regional_locale: "en-GB",
-      updated_at: "2026-03-22T12:00:00.000Z",
-    });
-
-    expect(result.applied).toBe(true);
+    await companionService.redeemSettingsGrant("opaque-grant");
     expect(mockAxiosInstance.post).toHaveBeenCalledWith(
-      "/localization",
+      "/settings/redeem",
       {
-        language: "en-XA",
-        regional_locale: "en-GB",
-        updated_at: "2026-03-22T12:00:00.000Z",
+        version: 1,
+        grant: "opaque-grant",
       },
       {
         headers: expect.objectContaining({

@@ -1,5 +1,6 @@
 """SQLite directory-cache binding, watcher, manager, and shutdown checks."""
 
+import asyncio
 import io
 import logging
 from dataclasses import replace
@@ -17,6 +18,7 @@ from app.services.directory_cache import (
     CacheState,
     ConnectionDirectoryCache,
     DirectoryCacheManager,
+    InvalidationReason,
     SQLiteConnectionDirectoryCache,
     get_directory_cache_manager,
     shutdown_directory_cache,
@@ -42,6 +44,144 @@ def cache_fixture(tmp_path, monkeypatch):
     )
     yield cache
     cache.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retained", [False, True])
+async def test_initial_verification_waits_for_first_watcher_attempt(cache, monkeypatch, retained):
+    cache.index.open()
+    if retained:
+        cache.index.write_paths(["retained"])
+        assert cache.index.finish_generation(1)
+    waiting = asyncio.Event()
+    scanned = []
+
+    async def wait():
+        waiting.set()
+        return await original_wait()
+
+    original_wait = cache._wait_for_watcher_startup
+    monkeypatch.setattr(cache, "_initialize_storage", lambda: None)
+    monkeypatch.setattr(cache, "_start_watcher", lambda: None)
+    monkeypatch.setattr(cache, "_wait_for_watcher_startup", wait)
+    monkeypatch.setattr(cache, "_run_rescan", AsyncMock(side_effect=lambda: scanned.append(cache.coordinator.epoch)))
+    monkeypatch.setattr(cache, "_start_periodic_rescan", lambda: None)
+    task = asyncio.create_task(cache._initialize())
+    await waiting.wait()
+    assert not scanned
+    assert not cache._active_workers
+    assert cache._manager_scan_slots.acquire(blocking=False)
+    cache._manager_scan_slots.release()
+    cache.coordinator.invalidate(InvalidationReason.WATCHER_START)
+    cache._watcher_ready.set()
+    cache._publish_watcher_startup(True)
+    await task
+    assert scanned == [cache.coordinator.epoch]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", [True, False])
+async def test_watcher_startup_result_is_separate_from_current_readiness(cache, result):
+    cache._publish_watcher_startup(result)
+    cache._watcher_ready.clear()
+    assert await cache._wait_for_watcher_startup() is result
+    cache._publish_watcher_startup(not result)
+    assert await cache._wait_for_watcher_startup() is result
+
+
+@pytest.mark.asyncio
+async def test_watcher_startup_timeout_and_cancellation_leave_no_worker(cache, monkeypatch):
+    monkeypatch.setattr("app.services.directory_cache.WATCHER_STARTUP_TIMEOUT_SECONDS", 0)
+    assert await cache._wait_for_watcher_startup() is None
+    assert cache._active_workers == 0
+    monkeypatch.setattr("app.services.directory_cache.WATCHER_STARTUP_TIMEOUT_SECONDS", 30)
+    task = asyncio.create_task(cache._wait_for_watcher_startup())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cache._active_workers == 0
+    assert not cache._watcher_startup_waiters
+
+
+@pytest.mark.parametrize("stage", ["connect", "notify"])
+def test_first_watcher_attempt_failure_publishes_fallback(cache, monkeypatch, stage):
+    failure = OSError("Injected first notification attempt failure.")
+    monkeypatch.setattr(cache, "_connect_watcher", MagicMock(side_effect=failure if stage == "connect" else None))
+    if stage == "notify":
+        monkeypatch.setattr(cache, "_watcher_open", MagicMock())
+        watcher = MagicMock()
+        watcher.start.side_effect = failure
+        monkeypatch.setattr("app.services.directory_cache.FileSystemWatcher", MagicMock(return_value=watcher))
+    monkeypatch.setattr(cache._stop_event, "wait", lambda _delay: True)
+    cache._watcher_loop()
+    assert cache._watcher_startup_result is False
+    assert not cache._watcher_ready.is_set()
+    assert cache.coordinator.epoch == 0
+    assert not cache.coordinator.observation_lost
+
+
+def test_first_connection_failure_reports_monitoring_unavailable_not_observation_loss(cache, monkeypatch):
+    from app.services.directory_cache import InvalidationReason
+
+    def retry(_delay):
+        assert cache._watcher_startup_result is False
+        assert cache.monitoring_state == "unavailable"
+        assert not cache.coordinator.observation_lost
+        assert "monitoring is unavailable" in cache.scan_error
+        return True
+
+    monkeypatch.setattr(cache, "_connect_watcher", MagicMock(side_effect=OSError("Injected first connection failure.")))
+    monkeypatch.setattr(cache._stop_event, "wait", retry)
+    cache._watcher_loop()
+    cache._observation_started()
+    cache._watcher_ready.set()
+    assert cache.coordinator.last_reason == InvalidationReason.WATCHER_START
+    assert cache.scan_error is None
+    assert cache._watcher_startup_result is False
+    cache._observation_started()
+    assert cache.coordinator.last_reason == InvalidationReason.OBSERVATION_LOSS
+    assert "observations were lost" in cache.scan_error
+
+
+@pytest.mark.asyncio
+async def test_readiness_at_timeout_boundary_uses_completed_result(cache, monkeypatch):
+    async def timeout(waiter, _timeout):
+        cache._watcher_ready.set()
+        cache._publish_watcher_startup(True)
+        waiter.cancel()
+        raise TimeoutError
+
+    with patch("app.services.directory_cache.asyncio.wait_for", timeout):
+        assert await cache._wait_for_watcher_startup() is True
+    assert not cache._watcher_startup_waiters
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop", [False, True])
+async def test_cancel_or_shutdown_during_startup_wait_never_starts_scan(cache, monkeypatch, stop):
+    cache.index.open()
+    entered = asyncio.Event()
+    original = cache._wait_for_watcher_startup
+
+    async def wait():
+        entered.set()
+        return await original()
+
+    monkeypatch.setattr(cache, "_initialize_storage", lambda: None)
+    monkeypatch.setattr(cache, "_start_watcher", lambda: None)
+    monkeypatch.setattr(cache, "_wait_for_watcher_startup", wait)
+    scan = AsyncMock()
+    monkeypatch.setattr(cache, "_run_rescan", scan)
+    cache._scan_task = asyncio.create_task(cache._initialize())
+    await entered.wait()
+    if stop:
+        cache._request_stop()
+    else:
+        cache._scan_task.cancel()
+    await cache._scan_task
+    scan.assert_not_awaited()
+    assert not cache._watcher_startup_waiters
+    assert cache._active_workers == 0
 
 
 def test_watcher_logs_omit_source_identity_and_private_error_text(cache, monkeypatch):
@@ -84,7 +224,7 @@ def test_failed_watcher_retries_preserve_fallback_scan(cache, monkeypatch, watch
         nonlocal baseline, attempts
         attempts += 1
         if baseline is None:
-            assert cache.coordinator.epoch == initial_epoch + 1
+            assert cache.coordinator.epoch == initial_epoch + int(watcher_was_ready)
             baseline = cache.coordinator.begin_read("")
         else:
             assert cache.coordinator.is_current(baseline)
@@ -380,7 +520,7 @@ def test_watcher_repeated_post_connect_failure_keeps_backoff(cache, receives_eve
     ):
         cache._watcher_loop()
     assert connect.call_count == MAX_WATCHER_RETRIES + 5
-    assert lost.call_count == 1 + int(receives_events)
+    assert lost.call_count == int(receives_events)
     delays = [call.args[0] for call in wait.call_args_list]
     assert all(0 < delay <= WATCHER_RETRY_MAX_DELAY for delay in delays)
     assert delays[1] > delays[0] >= WATCHER_RETRY_BASE_DELAY * 0.9

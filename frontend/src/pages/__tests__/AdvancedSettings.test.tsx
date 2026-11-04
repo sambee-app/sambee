@@ -20,14 +20,14 @@ vi.mock("../../services/api", () => ({
     updateAdvancedSettings: vi.fn(),
     getDirectoryIndexSettings: vi.fn(),
     updateDirectoryIndexSettings: vi.fn(),
-    issueDirectoryPolicyGrant: vi.fn(),
+    issueCompanionSettingsGrant: vi.fn(),
   },
 }));
 
 import api from "../../services/api";
 
 vi.mock("../../services/companion", () => ({
-  default: { getDirectoryPolicyStatus: vi.fn(), requestDirectoryPolicyChallenge: vi.fn(), redeemDirectoryPolicyGrant: vi.fn() },
+  default: { getSettingsStatus: vi.fn(), requestSettingsChallenge: vi.fn(), redeemSettingsGrant: vi.fn() },
 }));
 
 import companionService from "../../services/companion";
@@ -97,16 +97,14 @@ describe("AdvancedSettings", () => {
     vi.mocked(api.updateAdvancedSettings).mockImplementation(async (update) => update);
     vi.mocked(api.getDirectoryIndexSettings).mockImplementation(async (scope) => directorySettings(scope));
     vi.mocked(api.updateDirectoryIndexSettings).mockImplementation(async (_scope, update) => update);
-    vi.mocked(companionService.getDirectoryPolicyStatus).mockResolvedValue({
+    vi.mocked(companionService.getSettingsStatus).mockResolvedValue({
       version: 1,
       companion_id: "native-id",
-      status: "unowned",
-      owner_origin: null,
-      backend_identity: null,
-      effective_revision: null,
-      policy: directorySettings("companion").policy,
+      status: "defaults_active",
+      authoritative_origin: null,
+      authority_generation: 0,
+      sections: {},
       challenge: null,
-      approved: false,
       message: null,
     });
   });
@@ -129,7 +127,7 @@ describe("AdvancedSettings", () => {
     expect(screen.queryByLabelText("Value")).not.toBeInTheDocument();
     expect(screen.queryByText(/exact value:/i)).not.toBeInTheDocument();
     expect(api.getDirectoryIndexSettings).not.toHaveBeenCalled();
-    expect(companionService.getDirectoryPolicyStatus).not.toHaveBeenCalled();
+    expect(companionService.getSettingsStatus).not.toHaveBeenCalled();
     expect(screen.queryByText("Companion Directory Indexes")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Conversion timeout")).toHaveAccessibleDescription(/Maximum time allowed/);
     expect(screen.getByLabelText("Maximum file size")).toHaveAccessibleDescription(/Largest input file/);

@@ -1,5 +1,6 @@
 import type { AuthToken } from "../types";
 import { authSession } from "./authSession";
+import { notifyCompanionSettingsChanged } from "./companionSettingsEvents";
 import { logger } from "./logger";
 import { PASSWORD_CHANGE_PATH } from "./passwordChange";
 
@@ -53,6 +54,7 @@ export async function completeAuthentication(response: AuthToken, fallbackReturn
   authSession.setAuthenticated(response, renewable);
   authSession.completeLoginBootstrap();
   if (renewable && previousUserId === (response.user_id ?? null)) authSession.notifyNewLogin();
+  notifyCompanionSettingsChanged(true);
   sessionStorage.removeItem(OIDC_ATTEMPT_MARKER);
   sessionStorage.removeItem(OIDC_LOGOUT_MARKER);
   const returnPath = sanitizeReturnPath(response.return_path ?? fallbackReturnPath ?? sessionStorage.getItem(OIDC_RETURN_PATH_MARKER));
