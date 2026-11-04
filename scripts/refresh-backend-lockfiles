@@ -18,13 +18,14 @@ export LC_ALL="${LOCKFILE_REFRESH_LOCALE}"
 
 usage() {
     cat <<'EOF'
-Usage: scripts/refresh-backend-lockfiles [--check]
+Usage: scripts/refresh-backend-lockfiles [--check] [--keep-existing]
 
 Regenerate backend lockfiles from the reviewed requirements sources.
 
 Options:
-  --check    Verify that committed lockfiles match regenerated output.
-  -h, --help Show this help message.
+    --check          Verify that committed lockfiles match regenerated output.
+    --keep-existing  Keep existing versions where compatible with the sources.
+    -h, --help       Show this help message.
 EOF
 }
 
@@ -65,8 +66,14 @@ create_temp_env() {
 
 compile_lockfiles() {
     local output_dir="$1"
+    local keep_existing="$2"
 
     mkdir -p "$output_dir"
+
+    if [[ "$keep_existing" == "true" ]]; then
+        cp "${BACKEND_DIR}/${REQUIREMENTS_LOCKFILE_NAME}" "${output_dir}/${REQUIREMENTS_LOCKFILE_NAME}"
+        cp "${BACKEND_DIR}/${REQUIREMENTS_DEV_LOCKFILE_NAME}" "${output_dir}/${REQUIREMENTS_DEV_LOCKFILE_NAME}"
+    fi
 
     (
         cd "${BACKEND_DIR}"
@@ -141,31 +148,36 @@ check_lockfiles() {
 
 main() {
     local mode="update"
+    local keep_existing="false"
     local python_bin
+    local argument
 
-    case "${1:-}" in
-        "")
-            ;;
-        --check)
-            mode="check"
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Error: unknown argument '${1}'." >&2
-            usage >&2
-            exit 1
-            ;;
-    esac
+    for argument in "$@"; do
+        case "$argument" in
+            --check)
+                mode="check"
+                ;;
+            --keep-existing)
+                keep_existing="true"
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "Error: unknown argument '${argument}'." >&2
+                usage >&2
+                exit 1
+                ;;
+        esac
+    done
 
     check_repo_layout
     python_bin="$(find_python)"
 
     echo "Using ${python_bin} to refresh backend lockfiles."
     create_temp_env "$python_bin"
-    compile_lockfiles "${TEMP_DIR}/generated"
+    compile_lockfiles "${TEMP_DIR}/generated" "$keep_existing"
 
     if [[ "$mode" == "check" ]]; then
         check_lockfiles "${TEMP_DIR}/generated"
