@@ -5,7 +5,7 @@
 //! keychain and used to authenticate all subsequent API requests.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use log::{info, warn};
@@ -25,6 +25,13 @@ const KEYRING_SERVICE: &str = "sambee-companion";
 
 /// Reserved keyring account used to persist the list of paired origins.
 const KEYRING_PAIRED_ORIGINS_ACCOUNT: &str = "__paired_origins__";
+const KEYRING_SETTINGS_AUTHORITY_ACCOUNT: &str = "__settings_authority__";
+
+#[derive(Default)]
+pub struct SettingsAuthority {
+    pub origin: Option<String>,
+    pub generation: u64,
+}
 
 /// Maximum age of a pending pairing before it expires.
 const PAIRING_TIMEOUT: Duration = Duration::from_secs(120);
@@ -54,6 +61,7 @@ pub struct PairingState {
     last_initiated_at: Mutex<Option<Instant>>,
     /// Origins that have completed pairing (cached from keychain).
     paired_origins: Mutex<Vec<String>>,
+    authority: Mutex<SettingsAuthority>,
     pub(crate) download_intents: Mutex<HashMap<String, DownloadIntent>>,
 
     pairing_window_cooldown: Duration,
@@ -77,15 +85,72 @@ struct PendingPairing {
 
 #[allow(dead_code)]
 impl PairingState {
+    pub fn settings_authority(&self) -> Result<MutexGuard<'_, SettingsAuthority>, String> {
+        self.authority
+            .lock()
+            .map_err(|_| "Settings authority is unavailable. Restart the Companion.".to_owned())
+    }
+
+    fn set_settings_authority(&self, origin: Option<&str>, removed_origin: Option<&str>) -> Result<(), String> {
+        let mut authority = self.settings_authority()?;
+        if removed_origin.is_some_and(|removed| authority.origin.as_deref() != Some(removed)) {
+            return Ok(());
+        }
+        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_SETTINGS_AUTHORITY_ACCOUNT)
+            .map_err(|error| format!("Settings authority storage is unavailable. Check the keychain: {error}"))?;
+        let serialized = serde_json::to_string(&origin).map_err(|error| format!("Settings authority cannot be encoded: {error}"))?;
+        entry
+            .set_password(&serialized)
+            .map_err(|error| format!("Settings authority cannot be stored. Check the keychain: {error}"))?;
+        authority.origin = origin.map(str::to_owned);
+        authority.generation = authority.generation.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn migrate_settings_authority(&self, legacy_origin: Option<&str>) -> Result<(), String> {
+        let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_SETTINGS_AUTHORITY_ACCOUNT)
+            .map_err(|error| format!("Settings authority storage is unavailable: {error}"))?;
+        match entry.get_password() {
+            Ok(value) => {
+                let origin: Option<String> = serde_json::from_str(&value)
+                    .map_err(|error| format!("Settings authority is invalid. Pair the intended server again: {error}"))?;
+                let valid = origin.filter(|origin| self.is_origin_paired(origin));
+                self.set_settings_authority(valid.as_deref(), None)
+            }
+            Err(keyring::Error::NoEntry) => {
+                let origins = self.get_paired_origins();
+                let selected = legacy_origin
+                    .filter(|origin| origins.iter().any(|paired| paired == origin))
+                    .or_else(|| if origins.len() == 1 { Some(origins[0].as_str()) } else { None });
+                self.set_settings_authority(selected, None)
+            }
+            Err(error) => Err(format!("Settings authority cannot be read. Unlock the keychain: {error}")),
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             pending: Mutex::new(HashMap::new()),
             last_initiated_at: Mutex::new(None),
             paired_origins: Mutex::new(Vec::new()),
+            authority: Mutex::new(SettingsAuthority::default()),
             download_intents: Mutex::new(HashMap::new()),
             pairing_window_cooldown: PAIRING_WINDOW_COOLDOWN,
             max_pending_pairings: MAX_PENDING_PAIRINGS,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_authority(&self, origin: Option<&str>) {
+        if let Some(origin) = origin {
+            let mut origins = self.paired_origins.lock().unwrap();
+            if !origins.iter().any(|paired| paired == origin) {
+                origins.push(origin.to_owned());
+            }
+        }
+        let mut authority = self.settings_authority().unwrap();
+        authority.origin = origin.map(str::to_owned);
+        authority.generation += 1;
     }
 
     #[cfg(test)]
@@ -94,6 +159,7 @@ impl PairingState {
             pending: Mutex::new(HashMap::new()),
             last_initiated_at: Mutex::new(None),
             paired_origins: Mutex::new(Vec::new()),
+            authority: Mutex::new(SettingsAuthority::default()),
             download_intents: Mutex::new(HashMap::new()),
             pairing_window_cooldown,
             max_pending_pairings,
@@ -291,6 +357,8 @@ impl PairingState {
         // Add to cached paired origins
         self.record_verified_origin(&pairing.origin, VerifiedOriginRecordReason::PairingCompleted);
 
+        self.set_settings_authority(Some(&pairing.origin), None)?;
+
         info!("Pairing completed: origin={}", pairing.origin);
         Ok(secret_hex)
     }
@@ -362,6 +430,7 @@ impl PairingState {
 
     /// Remove pairing for a specific origin.
     pub fn unpair(&self, origin: &str) -> Result<(), String> {
+        self.set_settings_authority(None, Some(origin))?;
         // Remove from keychain
         if let Err(e) = delete_secret_from_keychain(origin) {
             warn!("Failed to remove secret from keychain for {origin}: {e}");

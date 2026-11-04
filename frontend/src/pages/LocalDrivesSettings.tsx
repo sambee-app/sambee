@@ -526,7 +526,7 @@ export function LocalDrivesSettings({ isAdmin = false, onConnectionsChanged, sec
             </FormSurface>
           </SettingsGroup>
 
-          {viewState === "paired" && <CompanionDirectoryStatus isAdmin={isAdmin} />}
+          <CompanionDirectoryStatus isAdmin={isAdmin} />
 
           {shouldShowInstallSection && (
             <SettingsGroup title={LOCAL_DRIVES_PAGE_COPY.downloadSectionTitle}>

@@ -1,0 +1,16 @@
+{
+  "sambee-light": {
+    "id": "sambee-light",
+    "mode": "light",
+    "primary": {
+      "main": "#F4C430"
+    }
+  },
+  "sambee-dark": {
+    "id": "sambee-dark",
+    "mode": "dark",
+    "primary": {
+      "main": "#D4A020"
+    }
+  }
+}

@@ -876,11 +876,35 @@ class DirectoryIndex:
             connection = self._connection()
             with transaction(connection):
                 self._require_reconciliation_parent(connection, generation_id, None)
-                connection.execute(
-                    "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) "
-                    "ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
-                    (generation_id, parent),
-                )
+                self._queue_scan_parent(connection, generation_id, parent)
+
+    @staticmethod
+    def _queue_scan_parent(connection: sqlite3.Connection, generation_id: int, parent: str, *, defer: bool = False) -> None:
+        """Keep pending hints in place; put completed or deferred work at the tail."""
+        connection.execute(
+            "DELETE FROM scan_queue WHERE generation_id = ? AND path = ? AND (processed = 1 OR ?)",
+            (generation_id, parent, defer),
+        )
+        connection.execute(
+            "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
+            (generation_id, parent),
+        )
+
+    def defer_scan_parent(self, generation_id: int, path: str) -> None:
+        """Retain partial rows while moving a stale parent behind pending work."""
+        if path:
+            validate_directory_path(path)
+        with self._writer_lock, self.growth_guard():
+            connection = self._connection()
+            with transaction(connection):
+                active = connection.execute(
+                    "SELECT 1 FROM generations WHERE id = ? AND (state IN ('building', 'candidate') OR "
+                    "(state = 'accepted' AND id = (SELECT selected_generation FROM source_metadata WHERE id = 1)))",
+                    (generation_id,),
+                ).fetchone()
+                if active is None:
+                    raise ValueError("Directory scan generation is no longer active. Request source verification.")
+                self._queue_scan_parent(connection, generation_id, path, defer=True)
 
     def queue_observed_parent(self, parent: str) -> None:
         """Queue a source hint across active scans and the selected accepted generation."""
@@ -889,13 +913,13 @@ class DirectoryIndex:
         with self._writer_lock, self.growth_guard():
             connection = self._connection()
             with transaction(connection):
-                connection.execute(
-                    "INSERT INTO scan_queue(generation_id, path) SELECT g.id, ? FROM generations g "
+                generations = connection.execute(
+                    "SELECT g.id FROM generations g "
                     "WHERE g.state IN ('building', 'candidate') OR (g.state = 'accepted' AND g.id = "
-                    "(SELECT selected_generation FROM source_metadata WHERE id = 1)) "
-                    "ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
-                    (parent,),
-                )
+                    "(SELECT selected_generation FROM source_metadata WHERE id = 1))"
+                ).fetchall()
+                for (generation_id,) in generations:
+                    self._queue_scan_parent(connection, generation_id, parent)
 
     def finish_reconciliation_parent(self, generation_id: int, parent: str) -> None:
         with self._writer_lock, self.growth_guard():

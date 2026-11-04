@@ -31,7 +31,9 @@ vi.mock("axios", () => {
 
 import axios from "axios";
 import apiService from "../api";
+import { authSession } from "../authSession";
 import { companionSession } from "../companionSession";
+import { COMPANION_SETTINGS_CHANGED_EVENT } from "../companionSettingsEvents";
 import { logger } from "../logger";
 
 const mockedAxios = vi.mocked(axios);
@@ -138,6 +140,17 @@ describe("Companion API", () => {
   );
 
   describe("getCompanionUri()", () => {
+    it("does not send URI themes after pairing", async () => {
+      localStorage.setItem("companion_secret", "shared-secret");
+      mockAxiosInstance.post.mockResolvedValueOnce({ data: { uri_token: "paired-token", expires_in: 60 } } as AxiosResponse);
+      const uri = await apiService.getCompanionUri(
+        "conn-1",
+        "file.txt",
+        JSON.stringify({ id: "sambee-dark", mode: "dark", primary: { main: "#D4A020" } })
+      );
+      expect(uri).not.toContain("theme=");
+    });
+
     it("builds a sambee:// URI with server, token, connection, and path", async () => {
       mockAxiosInstance.defaults.baseURL = "/api";
       mockAxiosInstance.post.mockResolvedValueOnce({
@@ -217,5 +230,28 @@ describe("Companion API", () => {
       expect(uri).toContain("server=https%3A%2F%2Fapi.sambee.example.com");
       expect(uri).not.toContain("server=https%3A%2F%2Fsambee.example.com");
     });
+  });
+
+  it.each([false, true])("guards theme delivery notifications when identity changed=%s", async (changed) => {
+    const identity = vi.spyOn(authSession, "getIdentity").mockReturnValue({ epoch: 1, userId: "first-user" });
+    let complete!: (value: AxiosResponse) => void;
+    const write = vi.spyOn(mockAxiosInstance, "put").mockReturnValueOnce(
+      new Promise((resolve) => {
+        complete = resolve;
+      })
+    );
+    const notification = vi.fn();
+    window.addEventListener(COMPANION_SETTINGS_CHANGED_EVENT, notification);
+    try {
+      const pending = apiService.setSiteDefaultTheme("sambee-dark");
+      if (changed) identity.mockReturnValue({ epoch: 2, userId: "second-user" });
+      complete({ data: {} } as AxiosResponse);
+      await pending;
+      expect(notification).toHaveBeenCalledTimes(changed ? 0 : 1);
+    } finally {
+      window.removeEventListener(COMPANION_SETTINGS_CHANGED_EVENT, notification);
+      identity.mockRestore();
+      write.mockRestore();
+    }
   });
 });

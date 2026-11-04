@@ -47,7 +47,7 @@ vi.mock("../../services/companion", () => ({
     unpairCurrentOrigin: mockUnpairCurrentOrigin,
     cancelPairing: vi.fn(),
     initiatePairing: vi.fn(),
-    getDirectoryPolicyStatus: vi.fn().mockResolvedValue({ status: "unowned", effective_revision: null }),
+    getSettingsStatus: vi.fn().mockResolvedValue({ version: 1, status: "defaults_active", sections: {} }),
   },
   clearStoredSecret: vi.fn(),
   hasStoredSecret: mockHasStoredSecret,

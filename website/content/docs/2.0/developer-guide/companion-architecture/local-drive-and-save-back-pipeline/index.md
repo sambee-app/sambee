@@ -108,9 +108,9 @@ That distinction is critical. Local-drive access is not "server auth pointed at 
 
 ## Directory-Index Policy Delivery
 
-Companion accepts resource policy from one locally approved backend owner, separately from browser pairing. An administrator starts delivery through a single-use grant; Companion retrieves the policy directly from that backend without redirects and validates its identity and revision.
+Directory policy uses the shared settings protocol described in [Browser-to-Companion Trust Model](../browser-to-companion-trust-model/#shared-settings-delivery). Pairing selects authority and permits automatic delivery by any active, authenticated user. Only administrators can edit policy. Companion retrieves canonical settings directly from the authoritative backend without redirects.
 
-Updates serialize against source initialization. Failed delivery or persistence must preserve the last approved policy. Owner reset invalidates pending approvals. File APIs must protect policy and index storage from modification.
+Updates serialize against source initialization. Unchanged revisions are no-ops within the same backend identity. Failed delivery or persistence preserves the last valid policy. Authority changes invalidate pending delivery. File APIs must protect policy and index storage from modification. Policy synchronization state is separate from index health.
 
 See [Directory-Index Consistency](../../backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for shared index rules and [Manage Directory Search](../../../admin-guide/operations-and-maintenance/manage-directory-search/) for the administrator workflow.
 

@@ -101,6 +101,12 @@ async fn run_server(
     let directory_policy = directory_policy::DirectoryPolicyState::open(policy_namespace, &directory_indexes)
         .map_err(|_| std::io::Error::other("Approved directory policy storage is unavailable. Correct private configuration storage."))?;
     app.manage(Arc::clone(&directory_policy));
+    if let Err(error) = directory_policy.restore_managed(&app, &pairing, &localization) {
+        log::warn!("Managed settings could not be restored; local search remains available: {error}");
+        if let Err(record_error) = directory_policy.record_settings_error(error.to_string()) {
+            log::warn!("Settings recovery failure could not be recorded: {record_error}");
+        }
+    }
     directory_policy
         .protect_storage(directory_indexes.storage_directory())
         .map_err(|_| {
@@ -157,6 +163,12 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/pair/cancel", axum::routing::post(handlers::pair_cancel));
 
     let authenticated_routes = Router::new()
+        .route("/api/settings", axum::routing::get(handlers::companion_settings_status))
+        .route(
+            "/api/settings/challenge",
+            axum::routing::post(handlers::companion_settings_challenge),
+        )
+        .route("/api/settings/redeem", axum::routing::post(handlers::companion_settings_redeem))
         .route("/api/directory-index/policy", axum::routing::get(handlers::directory_policy_status))
         .route(
             "/api/directory-index/policy/challenge",
