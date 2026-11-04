@@ -86,11 +86,12 @@ def test_oidc_test_returns_specific_configuration_validation_error(
     assert response.json()["detail"] == "OIDC scopes must include openid"
 
 
+@pytest.mark.parametrize("issuer", ["https://idp.example.test", "https://auth.example.test/application/o/storage/"])
 def test_admin_oidc_test_requests_candidate_authentication_age_and_exact_scopes(
-    client: TestClient, admin_token: str, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, session: Session, admin_token: str, monkeypatch: pytest.MonkeyPatch, issuer: str
 ) -> None:
     metadata = OidcProviderMetadata(
-        issuer="https://idp.example.test",
+        issuer=issuer,
         authorization_endpoint="https://idp.example.test/authorize",
         token_endpoint="https://idp.example.test/token",
         jwks_uri="https://idp.example.test/jwks",
@@ -99,7 +100,8 @@ def test_admin_oidc_test_requests_candidate_authentication_age_and_exact_scopes(
         scopes_supported=("openid", "profile", "email"),
     )
 
-    async def provider_metadata(*_args: object, **_kwargs: object) -> tuple[OidcProviderMetadata, dict[str, object]]:
+    async def provider_metadata(_http_client: object, configured_issuer: str) -> tuple[OidcProviderMetadata, dict[str, object]]:
+        assert configured_issuer == issuer
         return metadata, {}
 
     monkeypatch.setattr(admin_auth_module, "load_provider_metadata", provider_metadata)
@@ -121,6 +123,10 @@ def test_admin_oidc_test_requests_candidate_authentication_age_and_exact_scopes(
     query = parse_qs(urlsplit(response.json()["authorization_url"]).query)
     assert query["max_age"] == [str(2 * 24 * 60 * 60)]
     assert query["scope"] == ["openid profile email"]
+    flow = session.exec(select(OidcFlow)).one()
+    assert flow.encrypted_candidate_configuration is not None
+    snapshot = decrypt_candidate_snapshot(flow.encrypted_candidate_configuration, get_oidc_secret_cipher())
+    assert snapshot.issuer_url == issuer
 
 
 def test_get_oidc_configuration_returns_the_admin_configuration(
@@ -261,12 +267,14 @@ def _reviewed_policy_for_flow(flow: OidcFlow) -> dict[str, object]:
     }
 
 
+@pytest.mark.parametrize("issuer", ["https://id.example.test", "https://auth.example.test/application/o/storage/"])
 def test_finalize_oidc_configuration_is_idempotent(
     client: TestClient,
     session: Session,
     admin_user: User,
     admin_token: str,
     monkeypatch: pytest.MonkeyPatch,
+    issuer: str,
 ) -> None:
     clear_cache = Mock()
     monkeypatch.setattr(admin_auth_module, "clear_oidc_provider_cache", clear_cache)
@@ -276,7 +284,7 @@ def test_finalize_oidc_configuration_is_idempotent(
     session.commit()
     candidate = NormalizedOidcCandidate(
         display_name="Example Identity",
-        issuer_url="https://id.example.test",
+        issuer_url=issuer,
         client_id="sambee",
         client_secret="secret",
         scopes=("openid", "profile", "groups", "offline_access"),
@@ -295,7 +303,7 @@ def test_finalize_oidc_configuration_is_idempotent(
         changed_fields=("initial_configuration", "sign_in_mode"),
     )
     claims = NormalizedOidcClaims(
-        issuer="https://id.example.test",
+        issuer=issuer,
         subject="admin-subject",
         username=admin_user.username,
         name="Test Admin",
@@ -333,6 +341,7 @@ def test_finalize_oidc_configuration_is_idempotent(
 
     assert tested.status_code == 200
     assert tested.json()["candidate"]["display_name"] == "Example Identity"
+    assert tested.json()["candidate"]["issuer_url"] == issuer
     assert tested.json()["candidate"]["sign_in_mode"] == "oidc_only"
     assert tested.json()["candidate"]["client_secret_configured"] is True
     assert tested.json()["expected_identity_mapping_revision"] is None
@@ -360,8 +369,12 @@ def test_finalize_oidc_configuration_is_idempotent(
     assert flow.encrypted_candidate_configuration is None
     assert flow.encrypted_tested_identity is None
     identity = session.exec(select(OidcIdentity).where(OidcIdentity.user_id == admin_user.id)).one()
+    assert identity.issuer == issuer
     assert identity.subject == "admin-subject"
     assert identity.last_groups_json == '["sambee-users", "sambee-admins"]'
+    configuration = session.get(OidcProviderConfiguration, 1)
+    assert configuration is not None
+    assert configuration.issuer_url == issuer
 
     flow.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
     session.add(flow)
