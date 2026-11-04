@@ -2901,6 +2901,15 @@ mod tests {
                 }
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
+            std::fs::create_dir(root.join("native-reports")).unwrap();
+            loop {
+                let response = search().await.unwrap();
+                if response.monitoring_state.as_deref() == Some("healthy") && response.results.contains(&"native-reports".into()) {
+                    assert_eq!(response.coverage.as_deref(), Some("uncertain"));
+                    break;
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
             while !manager.verification_stop("verification").unwrap() {
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
