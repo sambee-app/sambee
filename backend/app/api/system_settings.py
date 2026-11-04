@@ -7,9 +7,15 @@ from sqlmodel import Session
 
 from app.core.authorization import Capability
 from app.core.logging import set_user
-from app.core.security import require_capability
+from app.core.security import (
+    BrowserAuthentication,
+    get_current_browser_authentication_with_auth_check,
+    get_current_user_with_auth_check,
+    require_capability,
+)
 from app.core.system_setting_definitions import DirectoryIndexPolicyScope
 from app.db.database import get_immediate_session, get_session
+from app.models.companion_settings import SettingsGrantBinding, SettingsGrantRead, SettingsGrantRedeem, SettingsMetadata, SettingsReceipt
 from app.models.system_settings import (
     AboutSettingsRead,
     AdvancedSystemSettingsRead,
@@ -53,21 +59,48 @@ from app.services.system_settings import (
 router = APIRouter()
 
 
+@router.get("/settings/companion", response_model=SettingsMetadata)
+def get_companion_settings(
+    current_user: User = Depends(get_current_user_with_auth_check), session: Session = Depends(get_session)
+) -> SettingsMetadata:
+    from app.services.companion_settings import build_settings_metadata
+
+    return build_settings_metadata(current_user, session)
+
+
+@router.post("/settings/companion/grants", response_model=SettingsGrantRead)
+def post_companion_settings_grant(
+    payload: SettingsGrantBinding,
+    request: Request,
+    authentication: BrowserAuthentication = Depends(get_current_browser_authentication_with_auth_check),
+    session: Session = Depends(get_immediate_session),
+) -> SettingsGrantRead:
+    from app.services.directory_policy_grants import issue_directory_policy_grant
+
+    if request.headers.get("origin") != payload.origin:
+        raise HTTPException(status_code=403, detail="Settings origin does not match the browser. Retry from the paired server.")
+    result = issue_directory_policy_grant(payload, authentication.user, session, browser_session_id=authentication.oidc_browser_session_id)
+    assert isinstance(result, SettingsGrantRead)
+    return result
+
+
+@router.post("/settings/companion/grants/redeem", response_model=SettingsReceipt)
+def post_companion_settings_redemption(payload: SettingsGrantRedeem, session: Session = Depends(get_immediate_session)) -> SettingsReceipt:
+    from app.services.directory_policy_grants import redeem_directory_policy_grant
+
+    result = redeem_directory_policy_grant(payload, session)
+    assert isinstance(result, SettingsReceipt)
+    return result
+
+
 @router.post("/settings/directory-index/companion/grants", response_model=DirectoryPolicyGrantRead)
 async def post_directory_policy_grant(
     payload: DirectoryPolicyGrantBinding,
     request: Request,
     session: Session = Depends(get_immediate_session),
-    current_user: User = Depends(require_capability(Capability.ACCESS_ADMIN_SETTINGS)),
+    current_user: User = Depends(get_current_user_with_auth_check),
 ) -> DirectoryPolicyGrantRead:
-    from app.services.directory_policy_grants import issue_directory_policy_grant
-
-    if request.headers.get("origin") != payload.origin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Policy origin does not match the browser origin. Request approval from the connected backend origin.",
-        )
-    return issue_directory_policy_grant(payload, current_user, session)
+    raise HTTPException(status_code=426, detail="Separate policy approval is no longer supported. Update Sambee and Companion.")
 
 
 @router.post("/settings/directory-index/companion/grants/redeem", response_model=DirectoryPolicyGrantReceipt)
@@ -75,9 +108,7 @@ async def post_directory_policy_grant_redemption(
     payload: DirectoryPolicyGrantRedeem,
     session: Session = Depends(get_immediate_session),
 ) -> DirectoryPolicyGrantReceipt:
-    from app.services.directory_policy_grants import redeem_directory_policy_grant
-
-    return redeem_directory_policy_grant(payload, session)
+    raise HTTPException(status_code=426, detail="Separate policy delivery is no longer supported. Update Sambee and Companion.")
 
 
 @router.get("/settings/directory-index/{scope}", response_model=DirectoryIndexSettingsRead)

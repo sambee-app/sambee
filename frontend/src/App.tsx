@@ -12,7 +12,7 @@ import { useBackendRecoveryMonitor } from "./hooks/useBackendRecoveryMonitor";
 import { useDraftRecoveryCleanup } from "./hooks/useDraftRecoveryCleanup";
 import { useFocusTrap } from "./hooks/useFocusTrap";
 import { translate } from "./i18n";
-import { CompanionLocalizationSync } from "./i18n/CompanionLocalizationSync";
+import { CompanionSettingsSync } from "./i18n/CompanionSettingsSync";
 import { LocalePreferencesProvider } from "./i18n/LocalePreferencesProvider";
 import PasswordChange, { PasswordChangeGate } from "./pages/PasswordChange";
 import { startControlledReauthentication } from "./services/api";
@@ -76,7 +76,7 @@ function AppContent() {
     <ThemeProvider theme={muiTheme}>
       <CssBaseline />
       <AppUpdatePrompt />
-      <CompanionLocalizationSync />
+      <CompanionSettingsSync />
       <div ref={appRef}>
         <Suspense fallback={<div>{translate("app.loading")}</div>}>
           <Outlet context={authBootstrapComplete} />

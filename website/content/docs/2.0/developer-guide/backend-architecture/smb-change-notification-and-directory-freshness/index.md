@@ -56,9 +56,29 @@ The index watcher observes directory-name changes recursively from the share roo
 
 Full verification builds a candidate while accepted data remains searchable. Only an issue-free full pass advances `last_verified_at_ms`; incremental changes and queries do not.
 
-Read tokens and observation barriers reject stale results. Lost events or queue overflow mark coverage uncertain and request verification without deleting accepted data. Candidate selection requires a valid root and no outstanding observations or reads that could invalidate the pass.
+Read tokens and observation barriers reject stale results. Lost events or pending-observation queue overflow mark coverage uncertain and request verification without deleting accepted data. Candidate selection requires a valid root and no outstanding observations or reads that could invalidate the pass.
 
 Directory rows, FTS entries, counts, issues, queued subtree work, and revision updates must remain transactionally consistent. Queries read results and metadata from one selected-generation transaction.
+
+### SMB Watcher Startup
+
+Backend initialization waits up to 10 seconds for the first watcher attempt before it probes the source root or scans directories. Success means that the first `CHANGE_NOTIFY` request has been sent and startup invalidation has completed, not just that the thread or connection has started. The wait is asynchronous and holds no scan slot, worker, coordinator lock, or generation lock.
+
+A connection failure, notification-start failure, or timeout permits fallback verification. Watcher retries continue in the background. A failed first attempt reports unavailable monitoring, not lost observations before monitoring started. The first-attempt result is separate from current monitoring readiness. Cancellation and shutdown remove the waiter and prevent a later scan from starting.
+
+If the watcher first becomes ready during fallback verification, it changes the epoch. Pre-monitoring reads cannot commit. Verification resumes after the bounded observation retry; a valid root probe keeps retained results searchable. Normal successful startup captures its scan epoch after watcher setup and needs no startup retry.
+
+### SMB Barriers and Local Retries
+
+The backend captures an epoch for each full pass without registering a pass-wide reader. A directory read depends on that directory, its direct children, and its ancestors. A barrier on a deeper descendant does not reject the ancestor listing. A root barrier rejects all content reads. Source-root availability probes check epoch and reader ownership, not directory-content barriers.
+
+Observations update all active generations before their barriers retire. Barriers remain only while pending observations or older live parent reads need them. When retained barriers exceed their count or byte bound, they collapse to one current root barrier. Live content reads become stale, but the epoch does not change and pending hints remain available.
+
+A stale parent stays pending and moves to the queue tail in one transaction. Partial child batches remain; the next read re-enumerates the parent and checks missing children before pruning. Local stale reads, final-capture refusals, and transient parent errors do not invalidate unrelated completed work. Real epoch changes still cause bounded revalidation of retained completed parents.
+
+When accepted-parent and candidate work are both pending, the scan alternates between them. The next-work preference changes before each parent attempt and persists across turns, independently of stale-status tracking. If an accepted-parent attempt in a full-pass turn fails with a stale read, access denial, or a transport error, the turn stops accepted-parent work. Pending candidate work then continues in the same turn. After the candidate queue is empty, the turn ends with the deferred failure. Incremental accepted-parent reads also set this preference. The periodic loop checks due verification before incremental reconciliation, so a failing incremental parent cannot block entry to the fair scheduler. Stale reads use the one-second observation retry; other failures keep the existing failure backoff. Quiet branches can progress, but a full pass cannot be guaranteed to finish while relevant directories keep changing or required paths remain inaccessible.
+
+Each parent read remembers committed child paths within a fixed byte budget. Pruning skips extra existence requests for those children. Direct-child changes still reject the read before parent completion. Children outside the budget, retained children not enumerated by this read, and ancestor rows represented only by descendants keep the handle-bound absence check. The set is discarded when the read exits.
 
 ### Parent Reconciliation
 
@@ -117,6 +137,10 @@ Startup validates source identity and application consistency before exposing ro
 
 Failures use bounded retries. Requests must not bypass retry deadlines. Idle sources release resources and revalidate the root on reuse. Shutdown waits for admitted work before closing storage and root ownership, even when a request has been cancelled.
 
+For the backend, scan work waits for both the resource-failure and observation-retry gates. The scan delay is therefore the later active deadline. `retry_after_ms` reports the earlier of that scan deadline and the next watcher retry. Status requests and searches do not move these deadlines. A local stale read uses the one-second observation retry, not a new failure backoff or a new full-pass interval.
+
+Backend epoch invalidations record a diagnostic reason: `watcher_start`, `observation_loss`, `source_rebind`, `read_capacity`, `stalled_read`, or `lifecycle`. These cover first notification setup, reconnect gaps or lost observations, source rebinding, exhausted read admission, stalled workers, and start/stop/cancellation/idle release. Reasons do not admit or reject work; epoch and ownership checks do. The last reason remains until an accepted pass, and repeated invalidations with the same reason do not repeat the transition log.
+
 Index recovery does not reset a shared SMB connection or remove recent-directory history. A source binding mismatch pauses publication, re-binds source handles, and schedules verification. Source and storage failures are not evidence that a directory was deleted.
 
 SMB setup runs outside the shared pool lock. Concurrent requests share setup for the same private cache. The pool bounds admitted work, setup tasks, and retained connection generations, both per source and across the process. A retired generation keeps its own cache until its workers and cleanup finish; replacement requests use a separate cache. Capacity failures return retry information rather than enter an unbounded queue. Shutdown stops new admission. Writes are not replayed automatically.
@@ -131,7 +155,9 @@ A mutation interrupted by abort, or whose caller deadline expires after dispatch
 
 Backend and Companion watcher startup and native event failures trigger background recovery independently of index storage initialization. A successful scan does not clear an unavailable-watcher warning. Degraded verification remains active while monitoring is unavailable; recovered monitoring requires verification of the event gap.
 
-Recovery diagnostics use opaque source and lifecycle-generation IDs. Failure transitions record one sanitized cause; repeated failures use bounded summaries. Recovery logs omit private exception text and paths; third-party SMB payloads are not rendered. Scan summaries include duration even when a scan fails.
+Backend status messages come from current conditions, in priority order: unavailable source, disk budget, storage initialization, stalled read, verification failure, update failure, observation loss, unavailable watcher, incomplete coverage, search-token rebuild, and continuous changes. Resolved conditions no longer leave old error text behind. A verification failure clears after a valid source-root check or after verification recovers. A successful read of an unrelated parent does not clear it. An update failure comes from the periodic loop and clears after a successful periodic iteration. A finished full pass clears observation loss, also when the pass has coverage issues; the coverage message then shows the remaining issue. Startup waiting, isolated local retries, and late first readiness do not themselves report source changes or observation loss. Actual watcher failures and observation gaps remain visible until their causes resolve.
+
+Recovery diagnostics use opaque source and lifecycle-generation IDs. Failure transitions record one sanitized cause; repeated failures use bounded summaries. Recovery logs omit private exception text and paths; third-party SMB payloads are not rendered. Scan summaries include duration even when a scan fails. Backend `directory_scan_finished` and `directory_retry_scheduled` events also include `invalidation_reason` and `stale_turns`, the count of consecutive stale turns with no completed parent.
 
 ### Quick-Bar Status Contract
 

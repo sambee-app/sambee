@@ -77,6 +77,9 @@ def reload_config():
     app.db.database.settings = new_settings
     app.services.authentication_config.settings = new_settings
 
+    if "app.services.directory_policy_grants" in sys.modules:
+        sys.modules["app.services.directory_policy_grants"].settings = new_settings
+
     # Also patch test modules if they've been imported
     if "tests.test_security" in sys.modules:
         import tests.test_security

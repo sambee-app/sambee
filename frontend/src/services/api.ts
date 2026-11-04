@@ -33,8 +33,6 @@ import type {
   DirectoryIndexSettings,
   DirectoryIndexSettingUpdate,
   DirectoryListing,
-  DirectoryPolicyGrant,
-  DirectoryPolicyGrantBinding,
   DirectorySearchResult,
   EditLockInfo,
   EditLockStatus,
@@ -64,6 +62,7 @@ import type {
   User,
 } from "../types";
 import { FileType } from "../types";
+import type { CompanionSettingsGrant, CompanionSettingsGrantBinding, CompanionSettingsMetadata } from "../types/companionSettings";
 import { randomUuid } from "../utils/randomUuid";
 import { AuthSessionError, authSession } from "./authSession";
 import {
@@ -78,6 +77,7 @@ import { getBaseUrl, getBrowseSegment, isLocalDrive } from "./backendRouter";
 import { clearBrowserRecoverySnapshot } from "./browserRecoverySnapshot";
 import { COMPANION_BASE_URL } from "./companion";
 import { companionSession } from "./companionSession";
+import { notifyCompanionSettingsChanged } from "./companionSettingsEvents";
 import { snapshotRegisteredDrafts } from "./draftRecovery";
 import { logger } from "./logger";
 import { sanitizeReturnPath } from "./oidcAuth";
@@ -722,16 +722,22 @@ class ApiService {
   }
 
   async updateTheme(theme: StoredTheme, definition: Omit<ThemeConfig, "id">): Promise<StoredTheme> {
+    const identity = authSession.getIdentity().epoch;
     const response = await this.api.put<StoredTheme>(`/themes/${theme.id}`, { definition, scope: theme.scope, version: theme.version });
+    if (identity === authSession.getIdentity().epoch) notifyCompanionSettingsChanged(true);
     return response.data;
   }
 
   async deleteTheme(theme: StoredTheme): Promise<void> {
+    const identity = authSession.getIdentity().epoch;
     await this.api.delete(`/themes/${theme.id}`, { params: { version: theme.version } });
+    if (identity === authSession.getIdentity().epoch) notifyCompanionSettingsChanged(true);
   }
 
   async setSiteDefaultTheme(themeId: string): Promise<ThemeList> {
+    const identity = authSession.getIdentity().epoch;
     const response = await this.api.put<ThemeList>(`/themes/default/${themeId}`);
+    if (identity === authSession.getIdentity().epoch) notifyCompanionSettingsChanged(true);
     return response.data;
   }
 
@@ -963,9 +969,15 @@ class ApiService {
     return response.data;
   }
 
-  async issueDirectoryPolicyGrant(binding: DirectoryPolicyGrantBinding, options?: { signal?: AbortSignal }): Promise<DirectoryPolicyGrant> {
-    const response = await this.api.post<DirectoryPolicyGrant>("/admin/settings/directory-index/companion/grants", binding, options);
-    return response.data;
+  async getCompanionSettingsMetadata(options?: { signal?: AbortSignal }): Promise<CompanionSettingsMetadata> {
+    return (await this.api.get<CompanionSettingsMetadata>("/admin/settings/companion", options)).data;
+  }
+
+  async issueCompanionSettingsGrant(
+    binding: CompanionSettingsGrantBinding,
+    options?: { signal?: AbortSignal }
+  ): Promise<CompanionSettingsGrant> {
+    return (await this.api.post<CompanionSettingsGrant>("/admin/settings/companion/grants", binding, options)).data;
   }
 
   async updateDirectoryIndexSettings(
@@ -974,6 +986,7 @@ class ApiService {
     options?: { signal?: AbortSignal }
   ): Promise<DirectoryIndexSettingUpdate> {
     const response = await this.api.put<DirectoryIndexSettingUpdate>(`/admin/settings/directory-index/${scope}`, payload, options);
+    if (scope === "companion") notifyCompanionSettingsChanged();
     return response.data;
   }
 
@@ -2716,7 +2729,7 @@ class ApiService {
 
     let uri = `sambee://open?server=${serverUrl}&token=${uri_token}&connId=${connectionId}&path=${encodedPath}`;
 
-    if (themeJson) {
+    if (themeJson && !companionSession.hasSecret()) {
       uri += `&theme=${btoa(themeJson)}`;
     }
 

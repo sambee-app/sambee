@@ -23,6 +23,787 @@ from app.services.directory_index import MAX_QUERY_BYTES, MAX_QUERY_TERMS, Direc
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "shared" / "directory-index"
 
 
+def _lose_observations(coordinator) -> None:
+    from app.services.directory_cache import InvalidationReason
+
+    coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
+
+
+def test_deep_hint_does_not_invalidate_ancestor_listing(index):
+    from app.services.directory_cache import READ_PARENT_ACTION, DirectoryScanCoordinator, _DirectoryMutation
+
+    coordinator = DirectoryScanCoordinator(index)
+    with coordinator.read("parent") as token:
+        assert coordinator.enqueue(_DirectoryMutation(READ_PARENT_ACTION, "parent/child/grandchild"))
+        assert coordinator.is_current(token)
+
+
+def test_drained_barrier_overflow_stales_reads_without_changing_epoch(index):
+    from app.services.directory_cache import MAX_PENDING_OBSERVATIONS, READ_PARENT_ACTION, DirectoryScanCoordinator, _DirectoryMutation
+
+    coordinator = DirectoryScanCoordinator(index)
+    with coordinator.read("parent") as token:
+        epoch = coordinator.epoch
+        for number in range(MAX_PENDING_OBSERVATIONS + 1):
+            assert coordinator.enqueue(_DirectoryMutation(READ_PARENT_ACTION, f"unrelated-{number}"))
+            coordinator.apply_pending()
+        assert coordinator.epoch == epoch
+        assert len(coordinator.barriers) <= MAX_PENDING_OBSERVATIONS
+        assert not coordinator.is_current(token)
+    assert not coordinator.barriers
+
+
+def test_epoch_capture_does_not_retain_barriers(index):
+    from app.services.directory_cache import READ_PARENT_ACTION, DirectoryScanCoordinator, _DirectoryMutation
+
+    coordinator = DirectoryScanCoordinator(index)
+    epoch = coordinator.capture_epoch()
+    assert not coordinator._producers
+    for number in range(1025):
+        assert coordinator.enqueue(_DirectoryMutation(READ_PARENT_ACTION, f"parent-{number}"))
+        coordinator.apply_pending()
+        assert not coordinator.barriers
+    assert coordinator.capture_epoch() == epoch
+
+
+def test_active_full_pass_drains_many_hints_without_epoch_change(sqlite_cache, monkeypatch):
+    from app.services.directory_cache import MAX_PENDING_OBSERVATIONS
+
+    cache = sqlite_cache
+    original = cache._scan_parent
+    injected = False
+    epoch = cache.coordinator.epoch
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+
+    def scan(generation, parent, **kwargs):
+        nonlocal injected
+        original(generation, parent, **kwargs)
+        if not injected:
+            injected = True
+            assert cache._scan_running.is_set()
+            assert not cache.coordinator._producers
+            for number in range(MAX_PENDING_OBSERVATIONS + 1):
+                cache.observe_parent(f"hint-{number}")
+                cache.coordinator.apply_pending()
+                assert cache.coordinator.epoch == epoch
+                assert not cache.coordinator.barriers
+
+    monkeypatch.setattr(cache, "_scan_parent", scan)
+    cache._scan_disk_queue()
+    assert cache.coordinator.epoch == epoch
+    assert cache.index.status().coverage == "complete"
+
+
+def test_observed_completed_and_deferred_parents_move_to_queue_tail(index):
+    index.seed_scan(1)
+    index.write_scan_children(1, [("hot", True), ("quiet", True)])
+    index.finish_scan_parent(1, "")
+    index.finish_scan_parent(1, "hot")
+    index.queue_observed_parent("hot")
+    assert index.pending_scan_paths(1) == ["quiet", "hot"]
+    index.queue_observed_parent("quiet")
+    assert index.pending_scan_paths(1) == ["quiet", "hot"]
+    index.defer_scan_parent(1, "quiet")
+    assert index.pending_scan_paths(1) == ["hot", "quiet"]
+
+
+def test_failed_parent_deferral_preserves_queue_order_and_index_rows(index):
+    index.seed_scan(1)
+    index.write_scan_children(1, [("hot", True), ("quiet", True)])
+    index.finish_scan_parent(1, "")
+    before = index.status()
+    pending = index.pending_scan_paths(1)
+    index._connection().execute(
+        "CREATE TRIGGER reject_deferred_parent BEFORE INSERT ON scan_queue WHEN NEW.path = 'hot' BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        index.defer_scan_parent(1, "hot")
+    assert index.pending_scan_paths(1) == pending
+    assert index.status() == before
+    index._connection().execute("DROP TRIGGER reject_deferred_parent")
+    index.defer_scan_parent(1, "hot")
+    assert index.pending_scan_paths(1) == ["quiet", "hot"]
+
+
+@pytest.mark.parametrize("failure", ["stale", "transient"])
+def test_local_parent_retry_retains_unrelated_completed_work(sqlite_cache, monkeypatch, failure):
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    cache = sqlite_cache
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    cache.index.write_paths(["accepted"])
+    assert cache.index.finish_generation(1)
+    candidate, _selected = cache.index.prepare_scan()
+    cache.index.seed_scan(candidate)
+    cache.index.write_scan_children(candidate, [("quiet", True), ("hot", True), ("later", True)])
+    cache.index.finish_scan_parent(candidate, "")
+    cache.index.finish_scan_parent(candidate, "quiet")
+    cache._scan_epoch = (candidate, cache.coordinator.epoch)
+    epoch = cache.coordinator.epoch
+    reads = []
+    original = cache._scan_parent_read
+
+    def read(generation, parent, token, **kwargs):
+        reads.append(parent)
+        if parent == "hot":
+            if failure == "stale":
+                cache.observe_parent("hot")
+                raise ScanObservationInvalidated("Injected local stale read.")
+            raise OSError("Injected transient parent failure.")
+        original(generation, parent, token, **kwargs)
+
+    monkeypatch.setattr(cache, "_scan_parent_read", read)
+    with pytest.raises(ScanObservationInvalidated if failure == "stale" else OSError):
+        cache._scan_disk_queue()
+    assert cache.coordinator.epoch == epoch
+    assert "quiet" not in cache.index.pending_scan_paths(candidate)
+    monkeypatch.setattr(cache, "_scan_parent_read", original)
+    cache._scan_disk_queue()
+    assert "quiet" not in reads
+    assert cache.index.status().coverage == "complete"
+
+
+def test_retry_delay_reports_latest_scan_gate_and_earliest_watcher(sqlite_cache, monkeypatch):
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: 100.0)
+    sqlite_cache._resource_retry_at = 130.0
+    sqlite_cache._verification_retry_at = 101.0
+    assert sqlite_cache.retry_after_ms == 30000
+    sqlite_cache._watcher_retry_at = 105.0
+    assert sqlite_cache.retry_after_ms == 5000
+
+
+@pytest.mark.parametrize("remember_bytes", [0, 7, 1024])
+@pytest.mark.parametrize("children", [("Exact", "other"), ("Name", "name", "é", "e\u0301")])
+def test_enumerated_children_skip_extra_native_existence_queries(sqlite_cache, smb_directory_server, monkeypatch, remember_bytes, children):
+    from app.services.directory_cache import SQLiteConnectionDirectoryCache
+    from app.services.directory_traversal import SmbDirectoryRead, SmbDirectoryRoot
+
+    cache = sqlite_cache
+    cache._source_root = SmbDirectoryRoot(r"\\host\share\base")
+    cache._open_source_read = SQLiteConnectionDirectoryCache._open_source_read.__get__(cache)
+    smb_directory_server.directories["base"] = [(name, 16) for name in children]
+    queries = []
+    original = SmbDirectoryRead.has_directory_child
+    expected_queries = []
+    remembered_bytes = 0
+    tracking_full = False
+    for name in children:
+        size = len(name.encode("utf-8"))
+        if tracking_full or remembered_bytes + size > remember_bytes:
+            tracking_full = True
+            expected_queries.append(name)
+        else:
+            remembered_bytes += size
+
+    def lookup(read, name):
+        queries.append(name)
+        return original(read, name)
+
+    monkeypatch.setattr("app.services.directory_cache.SCAN_SEEN_CHILD_BYTES", remember_bytes)
+    monkeypatch.setattr(SmbDirectoryRead, "has_directory_child", lookup)
+    try:
+        cache.index.seed_scan(1)
+        cache._scan_parent(1, "")
+        assert queries == sorted(expected_queries)
+        assert cache.index.search("").directory_count == len(children)
+    finally:
+        cache._request_stop()
+        cache._finish_stop()
+
+
+def test_refilled_accepted_queue_cannot_starve_candidate(sqlite_cache, monkeypatch):
+    cache = sqlite_cache
+    cache.index.write_paths(["hot"])
+    assert cache.index.finish_generation(1)
+    cache.index.queue_reconciliation_parent(1, "hot")
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    original = cache._scan_parent
+    visited = []
+    candidate_progress = False
+
+    def scan(generation, parent, *, reconcile=False):
+        nonlocal candidate_progress
+        visited.append((parent, reconcile))
+        assert len(visited) <= 4, "Accepted parent refills must not block candidate work."
+        original(generation, parent, reconcile=reconcile)
+        if reconcile and not candidate_progress:
+            cache.index.queue_reconciliation_parent(1, "hot")
+        if not reconcile:
+            candidate_progress = True
+
+    monkeypatch.setattr(cache, "_scan_parent", scan)
+    cache._scan_disk_queue()
+    assert visited[:2] == [("hot", True), ("", False)]
+    assert cache.index.status().coverage == "complete"
+
+
+def test_stale_accepted_parent_cannot_starve_candidate_across_turns(sqlite_cache, monkeypatch):
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    cache = sqlite_cache
+    cache.index.write_paths(["hot"])
+    assert cache.index.finish_generation(1)
+    candidate, _selected = cache.index.prepare_scan()
+    cache.index.seed_scan(candidate)
+    cache.index.write_scan_children(candidate, [("quiet", True)])
+    cache.index.queue_reconciliation_parent(1, "hot")
+    cache._scan_epoch = (candidate, cache.coordinator.epoch)
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    original = cache._scan_parent_read
+    visited = []
+
+    def read(generation, parent, token, *, reconcile=False):
+        visited.append((parent, reconcile))
+        if reconcile and parent == "hot":
+            cache.observe_parent("hot")
+            raise ScanObservationInvalidated("Injected hot accepted parent.")
+        original(generation, parent, token, reconcile=reconcile)
+
+    monkeypatch.setattr(cache, "_scan_parent_read", read)
+    for _turn in range(4):
+        with pytest.raises(ScanObservationInvalidated):
+            cache._scan_disk_queue()
+    assert ("quiet", False) in visited
+    assert "quiet" not in cache.index.pending_scan_paths(candidate)
+    monkeypatch.setattr(cache, "_scan_parent_read", original)
+    cache._scan_disk_queue()
+    assert cache.index.status().coverage == "complete"
+
+
+@pytest.mark.parametrize("failure", ["stale", "denied", "transport"])
+def test_failed_accepted_parent_lets_candidate_work_finish_in_same_turn(sqlite_cache, monkeypatch, failure):
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    cache = sqlite_cache
+    cache.index.write_paths(["hot"])
+    assert cache.index.finish_generation(1)
+    candidate, _selected = cache.index.prepare_scan()
+    cache.index.seed_scan(candidate)
+    quiet_paths = [f"quiet-{number}" for number in range(3)]
+    cache.index.write_scan_children(candidate, [(path, True) for path in quiet_paths])
+    cache.index.finish_scan_parent(candidate, "")
+    cache.index.queue_reconciliation_parent(1, "hot")
+    epoch = cache.coordinator.epoch
+    cache._scan_epoch = (candidate, epoch)
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    original = cache._scan_parent_read
+    visited = []
+
+    def read(generation, parent, token, *, reconcile=False):
+        visited.append((parent, reconcile))
+        if reconcile:
+            if failure == "stale":
+                cache.observe_parent("hot")
+                raise ScanObservationInvalidated("Injected hot accepted parent.")
+            if failure == "denied":
+                raise cache._DescendantAccessDenied("Injected accepted-parent denial.")
+            raise OSError("Injected accepted-parent transport failure.")
+        original(generation, parent, token, reconcile=reconcile)
+
+    monkeypatch.setattr(cache, "_scan_parent_read", read)
+    with pytest.raises(ScanObservationInvalidated if failure == "stale" else OSError):
+        cache._scan_disk_queue()
+    assert [parent for parent, reconcile in visited if reconcile] == ["hot"]
+    assert all((path, False) in visited for path in quiet_paths)
+    assert not cache.index.pending_scan_paths(candidate)
+    assert cache.index.reconciliation_generation() == 1
+    assert cache.coordinator.epoch == epoch
+    assert cache._stale_turns == 0
+    monkeypatch.setattr(cache, "_scan_parent_read", original)
+    cache._scan_disk_queue()
+    assert cache.index.status().coverage == "complete"
+
+
+@pytest.mark.asyncio
+async def test_periodic_hot_reconciliation_cannot_block_due_candidate(sqlite_cache, monkeypatch):
+    from contextlib import asynccontextmanager
+
+    from app.services import directory_cache
+    from app.services.directory_cache import ScanObservationInvalidated
+
+    cache = sqlite_cache
+    cache.index.write_paths(["hot"])
+    assert cache.index.finish_generation(1)
+    candidate, _selected = cache.index.prepare_scan()
+    cache.index.seed_scan(candidate)
+    cache.index.write_scan_children(candidate, [("quiet", True)])
+    cache.index.queue_reconciliation_parent(1, "hot")
+    cache._scan_epoch = (candidate, cache.coordinator.epoch)
+    clock = [1000.0]
+    cache._verification_retry_at = 1001.0
+    cache._next_full_pass_at = 2000.0
+    original = cache._scan_parent_read
+    visited = []
+
+    @asynccontextmanager
+    async def connected(**kwargs):
+        yield
+
+    async def tick(_delay):
+        clock[0] += 1
+        if clock[0] > 1004:
+            raise asyncio.CancelledError
+
+    def read(generation, parent, token, *, reconcile=False):
+        visited.append((parent, reconcile))
+        if reconcile and parent == "hot":
+            cache.observe_parent("hot")
+            raise ScanObservationInvalidated("Injected periodic hot parent.")
+        original(generation, parent, token, reconcile=reconcile)
+
+    monkeypatch.setattr(cache, "_scan_parent_read", read)
+    monkeypatch.setattr(cache, "_refresh_connection_generation", AsyncMock())
+    monkeypatch.setattr(directory_cache, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": tick})))
+    monkeypatch.setattr(directory_cache.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(directory_cache, "get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connected)))
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    await cache._periodic_rescan_loop()
+    assert ("quiet", False) in visited
+    assert "quiet" not in cache.index.pending_scan_paths(candidate)
+    assert cache._next_full_pass_at == 2000.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [PermissionError, OSError])
+@pytest.mark.parametrize("start_with_reconciliation", [False, True])
+async def test_periodic_failed_reconciliation_cannot_starve_candidate(sqlite_cache, monkeypatch, failure, start_with_reconciliation):
+    from contextlib import asynccontextmanager
+
+    from app.services import directory_cache
+
+    cache = sqlite_cache
+    cache.index.write_paths(["hot"])
+    assert cache.index.finish_generation(1)
+    candidate, _selected = cache.index.prepare_scan()
+    cache.index.seed_scan(candidate)
+    quiet_paths = ["quiet-first", "quiet-second"]
+    cache.index.write_scan_children(candidate, [(path, True) for path in quiet_paths])
+    cache.index.finish_scan_parent(candidate, "")
+    cache.index.queue_reconciliation_parent(1, "hot")
+    epoch = cache.coordinator.epoch
+    cache._scan_epoch = (candidate, epoch)
+    clock = [cache._last_access]
+    if not start_with_reconciliation:
+        cache._verification_retry_at = clock[0] + directory_cache.OBSERVATION_RETRY_SECONDS
+    turns = 0
+    reads = []
+
+    @asynccontextmanager
+    async def connected(**kwargs):
+        yield
+
+    async def tick(_delay):
+        nonlocal turns
+        turns += 1
+        if turns > 4:
+            raise asyncio.CancelledError
+        clock[0] = max(clock[0], cache._resource_retry_at, cache._verification_retry_at or 0.0) + 1.0
+
+    def scan(path, **kwargs):
+        parent = path[len(cache._smb_base_path) :].lstrip("\\")
+        reads.append(parent)
+        if parent == "hot":
+            raise failure("Injected accepted-parent failure.")
+        return (entry for entry in ())
+
+    monkeypatch.setattr(cache, "_refresh_connection_generation", AsyncMock())
+    monkeypatch.setattr(directory_cache, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": tick})))
+    monkeypatch.setattr(directory_cache.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(directory_cache, "get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connected)))
+    monkeypatch.setattr("smbclient.scandir", scan)
+    await cache._periodic_rescan_loop()
+    assert reads.count("hot") == 4
+    assert all(reads.count(path) == 1 for path in quiet_paths)
+    assert not cache.index.pending_scan_paths(candidate)
+    assert cache.index.reconciliation_generation() == 1
+    assert cache._scan_epoch == (candidate, epoch)
+    assert cache.coordinator.epoch == epoch
+    assert cache._stale_turns == 0
+    assert cache._failure_retry_delay > directory_cache.FAILURE_RETRY_MIN_SECONDS
+    assert "verification failed" in cache.scan_error
+    assert cache.search_index("hot").total_matches == 1
+
+    before = list(reads)
+    retry_at = cache._resource_retry_at
+    await cache._run_rescan()
+    assert reads == before
+    assert cache._resource_retry_at == retry_at
+
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    clock[0] = retry_at
+    await cache._run_rescan()
+    assert cache.index.status().coverage == "complete"
+    assert cache._failure_retry_delay == 0
+    assert cache._verification_retry_at is None
+
+
+@pytest.mark.parametrize("stage", ["probe", "accept"])
+def test_final_hint_does_not_requeue_completed_parents(sqlite_cache, monkeypatch, stage):
+    cache = sqlite_cache
+    cache.index.write_paths(["accepted"])
+    assert cache.index.finish_generation(1)
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    visited = []
+    original_scan = cache._scan_parent
+    original_probe = cache._probe_source_root_read
+    original_accept = cache.coordinator.accept_generation
+    injected = False
+    epoch = cache.coordinator.epoch
+
+    def scan(generation, parent, **kwargs):
+        visited.append(parent)
+        original_scan(generation, parent, **kwargs)
+
+    def inject():
+        nonlocal injected
+        if not injected:
+            injected = True
+            cache.observe_parent("late")
+
+    def probe(token):
+        inject()
+        original_probe(token)
+
+    def accept(baseline, generation, **kwargs):
+        inject()
+        return original_accept(baseline, generation, **kwargs)
+
+    monkeypatch.setattr(cache, "_scan_parent", scan)
+    if stage == "probe":
+        monkeypatch.setattr(cache, "_probe_source_root_read", probe)
+        cache._scan_disk_queue()
+    else:
+        from app.services.directory_cache import ScanObservationInvalidated
+
+        monkeypatch.setattr(cache.coordinator, "accept_generation", accept)
+        with pytest.raises(ScanObservationInvalidated):
+            cache._scan_disk_queue()
+        cache._scan_disk_queue()
+    assert cache.coordinator.epoch == epoch
+    assert visited.count("") == 1
+    assert cache.index.status().coverage == "complete"
+
+
+def test_local_retry_status_has_no_sticky_source_change_message(sqlite_cache, monkeypatch):
+    cache = sqlite_cache
+    cache._watcher_ready.set()
+    cache._schedule_observation_retry()
+    assert cache.scan_error is None
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    cache.index.seed_scan(1)
+    cache._scan_parent(1, "")
+    assert cache.scan_error is None
+
+
+def test_first_watcher_readiness_invalidates_without_observation_loss_status(sqlite_cache):
+    from app.services.directory_cache import InvalidationReason
+
+    cache = sqlite_cache
+    with cache.coordinator.read("parent") as token:
+        cache._observation_started()
+        assert not cache.coordinator.is_current(token)
+    cache._watcher_ready.set()
+    assert cache.coordinator.last_reason == InvalidationReason.WATCHER_START
+    assert cache.scan_error is None
+    cache._observation_started()
+    assert cache.coordinator.last_reason == InvalidationReason.OBSERVATION_LOSS
+    assert "observations were lost" in cache.scan_error
+
+
+def test_status_priority_and_recovery_follow_current_conditions(sqlite_cache, monkeypatch):
+    cache = sqlite_cache
+    cache._watcher_ready.set()
+    cache._disk_budget_error = "Directory indexing is paused. Increase its disk budget and retry."
+    cache._verification_error = "Directory verification failed. Check source access; existing results remain available."
+    cache._source_available.clear()
+    assert "root is unavailable" in cache.scan_error
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    cache._probe_source_root()
+    assert "disk budget" in cache.scan_error
+    cache._reset_retry()
+    assert cache.scan_error is None
+
+
+@pytest.mark.parametrize("state", ["empty", "building", "accepted"])
+def test_continuous_change_status_clears_after_parent_progress(sqlite_cache, monkeypatch, state):
+    from app.services.directory_cache import CONTINUOUS_CHANGE_STALE_TURNS
+
+    cache = sqlite_cache
+    cache._watcher_ready.set()
+    if state != "empty":
+        cache.index.write_paths(["retained"])
+    if state == "accepted":
+        assert cache.index.finish_generation(1)
+        cache.index.queue_reconciliation_parent(1, "")
+    else:
+        cache.index.seed_scan(1)
+    cache._stale_turns = CONTINUOUS_CHANGE_STALE_TURNS
+    assert "keep changing" in cache.scan_error
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    cache._scan_parent(1, "", reconcile=state == "accepted")
+    assert cache._stale_turns == 0
+    assert cache.scan_error is None
+
+
+def test_finished_pass_with_coverage_issue_replaces_observation_loss_status(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    cache = sqlite_cache
+    cache._watcher_ready.set()
+    cache.index.write_paths(["accepted"])
+    assert cache.index.finish_generation(1)
+    cache._observation_lost()
+    assert "observations were lost" in cache.scan_error
+
+    def scan(path, **kwargs):
+        parent = path[len(cache._smb_base_path) :].lstrip("\\")
+        if parent == "denied":
+            raise PermissionError("Injected denied child.")
+        names = ("accepted", "denied") if not parent else ()
+        return (
+            SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY)) for name in names
+        )
+
+    monkeypatch.setattr("smbclient.scandir", scan)
+    cache._scan_disk_queue()
+    assert not cache.coordinator.observation_lost
+    assert "coverage is incomplete" in cache.scan_error
+    assert cache.search_index("accepted").total_matches == 1
+
+
+def test_update_error_survives_unrelated_parent_success(sqlite_cache, monkeypatch):
+    cache = sqlite_cache
+    cache._watcher_ready.set()
+    cache._update_error = "Directory updates failed. Check source access and private local storage, then retry."
+    cache._verification_error = "Directory verification failed. Check source access; existing results remain available."
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    cache.index.seed_scan(1)
+    cache._scan_parent(1, "")
+    assert "verification failed" in cache.scan_error
+    cache._reset_retry()
+    assert cache.scan_error is None
+
+
+@pytest.mark.asyncio
+async def test_update_error_clears_after_successful_periodic_iteration(sqlite_cache, monkeypatch):
+    from app.services import directory_cache
+
+    cache = sqlite_cache
+    cache._watcher_ready.set()
+    cache._opened.set()
+    cache._source_available.set()
+    outcomes = [OSError("Injected update failure."), None]
+    statuses = []
+    ticks = 0
+
+    async def tick(_delay):
+        nonlocal ticks
+        statuses.append(cache.scan_error)
+        ticks += 1
+        if ticks > len(outcomes):
+            raise asyncio.CancelledError
+        cache._resource_retry_at = 0.0
+
+    async def reconcile():
+        outcome = outcomes[ticks - 1]
+        if outcome is not None:
+            raise outcome
+
+    monkeypatch.setattr(cache, "_run_reconciliation", reconcile)
+    monkeypatch.setattr(cache, "_verification_due", lambda _verified_at: False)
+    monkeypatch.setattr(directory_cache, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": tick})))
+    await cache._periodic_rescan_loop()
+    assert statuses[0] is None
+    assert "updates failed" in statuses[1]
+    assert statuses[2] is None
+
+
+@pytest.mark.parametrize("cause", ["pending", "unsupported", "capacity", "binding", "stop"])
+def test_real_invalidation_causes_still_change_epoch(sqlite_cache, cause):
+    from app.services.directory_cache import (
+        READ_PARENT_ACTION,
+        DirectorySourceUnavailableError,
+        InvalidationReason,
+        ScanObservationInvalidated,
+        _DirectoryMutation,
+    )
+    from app.services.directory_index import MAX_SIGNED_INTEGER
+    from app.services.directory_traversal import DirectoryBindingChangedError
+
+    cache = sqlite_cache
+    epoch = cache.coordinator.epoch
+    expected = InvalidationReason.OBSERVATION_LOSS
+    if cause == "pending":
+        cache.coordinator.maximum_pending = 1
+        assert cache.coordinator.enqueue(_DirectoryMutation(READ_PARENT_ACTION, "first"))
+        assert not cache.coordinator.enqueue(_DirectoryMutation(READ_PARENT_ACTION, "second"))
+    elif cause == "unsupported":
+        cache.coordinator.enqueue(_DirectoryMutation(0, "first"))
+        with pytest.raises(ValueError, match="unsupported"):
+            cache.coordinator.apply_pending()
+    elif cause == "capacity":
+        expected = InvalidationReason.READ_CAPACITY
+        cache.coordinator._next_producer_id = MAX_SIGNED_INTEGER
+        with pytest.raises(ScanObservationInvalidated, match="capacity"):
+            cache.coordinator.begin_read("parent")
+    elif cause == "binding":
+        expected = InvalidationReason.SOURCE_REBIND
+
+        def replaced():
+            raise DirectoryBindingChangedError("Injected source replacement.")
+
+        with pytest.raises(DirectorySourceUnavailableError):
+            cache._source_call("parent", replaced)
+    else:
+        expected = InvalidationReason.LIFECYCLE
+        cache._request_stop()
+    assert cache.coordinator.epoch == epoch + 1
+    assert cache.coordinator.last_reason == expected
+
+
+def test_scan_and_retry_logs_include_reason_and_stale_turns(sqlite_cache, monkeypatch, caplog):
+    import logging
+
+    from app.services.directory_cache import InvalidationReason
+
+    caplog.set_level(logging.DEBUG, logger="app.services.directory_cache")
+    cache = sqlite_cache
+    cache.coordinator.invalidate(InvalidationReason.WATCHER_START)
+    cache.coordinator.invalidate(InvalidationReason.WATCHER_START)
+    cache._stale_turns = 2
+    cache._schedule_retry()
+    retry = next(record for record in caplog.records if getattr(record, "event", None) == "directory_retry_scheduled")
+    assert retry.invalidation_reason == "watcher_start"
+    assert retry.stale_turns == 2
+    assert len([record for record in caplog.records if getattr(record, "event", None) == "directory_scan_invalidated"]) == 1
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    cache._scan_disk_queue()
+    finished = next(record for record in caplog.records if getattr(record, "event", None) == "directory_scan_finished")
+    assert finished.invalidation_reason == "watcher_start"
+    assert finished.stale_turns == 0
+    assert cache.coordinator.last_reason is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retained", [False, True])
+async def test_successful_notification_start_precedes_initial_pass_without_retry(sqlite_cache, monkeypatch, retained):
+    from contextlib import asynccontextmanager
+
+    from app.services.directory_cache import InvalidationReason
+
+    cache = sqlite_cache
+    if retained:
+        cache.index.write_paths(["retained"])
+        assert cache.index.finish_generation(1)
+    release = threading.Event()
+    started = threading.Event()
+    initial_epoch = cache.coordinator.epoch
+
+    class Watcher:
+        def __init__(self, _handle):
+            pass
+
+        def start(self, **kwargs):
+            assert cache.coordinator.epoch == initial_epoch
+            assert not cache._watcher_ready.is_set()
+            started.set()
+
+        def wait(self):
+            assert cache.coordinator.last_reason == InvalidationReason.WATCHER_START
+            assert cache._watcher_ready.is_set()
+            assert cache._watcher_startup_result is True
+            assert release.wait(timeout=5)
+            return None
+
+    @asynccontextmanager
+    async def connected(**kwargs):
+        yield
+
+    def scan(path, **kwargs):
+        assert started.is_set()
+        assert cache._watcher_startup_result is True
+        if retained and path == cache._smb_base_path:
+            yield SimpleNamespace(name="retained", smb_info=SimpleNamespace(file_attributes=16))
+
+    monkeypatch.setattr(cache, "_initialize_storage", lambda: None)
+    monkeypatch.setattr(cache, "_connect_watcher", lambda: setattr(cache, "_watcher_open", SimpleNamespace(close=release.set)))
+    monkeypatch.setattr(cache, "_start_periodic_rescan", lambda: None)
+    monkeypatch.setattr(cache, "_refresh_connection_generation", AsyncMock())
+    monkeypatch.setattr("app.services.directory_cache.FileSystemWatcher", Watcher)
+    monkeypatch.setattr(
+        "app.services.directory_cache.get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connected))
+    )
+    monkeypatch.setattr("smbclient.scandir", scan)
+    try:
+        await cache._initialize()
+        assert cache.index.status().coverage == "complete"
+        assert cache.index.status().directory_count == int(retained)
+        assert cache._verification_retry_at is None
+        assert cache._resource_retry_at == 0
+        assert cache.coordinator.epoch == initial_epoch + 1
+        assert cache.scan_error is None
+        assert cache.last_scan_time is not None
+    finally:
+        cache._request_stop()
+        cache._finish_stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fallback", ["failure", "timeout"])
+async def test_late_watcher_readiness_during_fallback_rejects_old_read_and_recovers(sqlite_cache, monkeypatch, fallback):
+    from contextlib import asynccontextmanager
+
+    from app.services.directory_cache import OBSERVATION_RETRY_SECONDS
+
+    cache = sqlite_cache
+    cache.index.write_paths(["retained"])
+    assert cache.index.finish_generation(1)
+    clock = [cache._last_access]
+    root_reads = []
+
+    @asynccontextmanager
+    async def connected(**kwargs):
+        yield
+
+    def scan(path, **kwargs):
+        if path == cache._smb_base_path:
+            root_reads.append(path)
+            if len(root_reads) == 2:
+                cache._observation_started()
+                cache._watcher_ready.set()
+                cache._publish_watcher_startup(True)
+            yield SimpleNamespace(name="retained", smb_info=SimpleNamespace(file_attributes=16))
+
+    monkeypatch.setattr(cache, "_initialize_storage", lambda: None)
+    monkeypatch.setattr(cache, "_start_watcher", lambda: cache._publish_watcher_startup(False) if fallback == "failure" else None)
+    monkeypatch.setattr(cache, "_start_periodic_rescan", lambda: None)
+    monkeypatch.setattr(cache, "_refresh_connection_generation", AsyncMock())
+    monkeypatch.setattr("app.services.directory_cache.WATCHER_STARTUP_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        "app.services.directory_cache.get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connected))
+    )
+    monkeypatch.setattr("smbclient.scandir", scan)
+    await cache._initialize()
+    assert cache._verification_retry_at == clock[0] + OBSERVATION_RETRY_SECONDS
+    assert cache.search_index("retained").total_matches == 1
+    assert cache.scan_error is None
+    assert cache.monitoring_state == "recovering"
+    assert cache.index.has_resumable_scan()
+    assert not cache.coordinator._producers
+    assert cache._active_workers == 0
+    before = len(root_reads)
+    await cache._run_rescan()
+    assert len(root_reads) == before
+    clock[0] += OBSERVATION_RETRY_SECONDS
+    await cache._run_rescan()
+    assert cache.index.status().coverage == "complete"
+    assert cache.monitoring_state == "healthy"
+    assert cache.scan_error is None
+    assert cache._verification_retry_at is None
+    assert not cache._watcher_startup_waiters
+
+
 def _smb_response_error(status: int) -> SMBResponseException:
     """Build the registered SMB error subtype from an explicit response status."""
     header = SMB2HeaderResponse()
@@ -2197,7 +2978,7 @@ def test_reconnected_candidate_revalidates_completed_branches(smb_source_cache, 
     del server.directories["base\\old"]
     server.directories["base\\new"] = []
     server.tree.session.session_id += 1
-    cache.coordinator.invalidate()
+    _lose_observations(cache.coordinator)
     cache._source_root = cache._source_root.replacement()
     cache._probe_source_root()
     cache._scan_disk_queue()
@@ -2281,7 +3062,7 @@ def test_missing_smb_parent_recovery_rejects_stale_ancestor(smb_source_cache, sm
 
     def invalidate(read, name):
         result = lookup(read, name)
-        sqlite_cache.coordinator.invalidate()
+        _lose_observations(sqlite_cache.coordinator)
         return result
 
     monkeypatch.setattr(SmbDirectoryRead, "has_directory_child", invalidate)
@@ -2441,7 +3222,7 @@ def test_smb_pruning_rejects_event_after_native_absence_check(sqlite_cache, smb_
     def lookup(read, name):
         present = original(read, name)
         if not present:
-            sqlite_cache.coordinator.invalidate()
+            _lose_observations(sqlite_cache.coordinator)
         return present
 
     monkeypatch.setattr(SmbDirectoryRead, "has_directory_child", lookup)
@@ -2526,7 +3307,8 @@ def test_smb_full_worker_reconciles_through_capture_and_retains_later_events(sql
             sqlite_cache.observe_parent("")
 
     def accept(baseline, generation, **kwargs):
-        assert not sqlite_cache.coordinator.is_current(baseline)
+        assert baseline == sqlite_cache.coordinator.capture_epoch()
+        assert not sqlite_cache.coordinator._producers
         assert sqlite_cache.index.reconciliation_generation() is None
         assert not sqlite_cache.index.pending_scan_paths(generation)
         assert not sqlite_cache.coordinator.pending
@@ -2553,7 +3335,7 @@ def test_smb_full_worker_reconciles_through_capture_and_retains_later_events(sql
     assert all(not handle.connected for handle in smb_directory_server.handles)
 
 
-@pytest.mark.parametrize("refusal", ["epoch", "completed", "uncertain", "pending", "producer", "accepted_work", "candidate_work"])
+@pytest.mark.parametrize("refusal", ["epoch", "old_producer", "uncertain", "pending", "producer", "accepted_work", "candidate_work"])
 def test_backend_capture_refusal_preserves_selected_rows_and_freshness(sqlite_cache, refusal):
     from app.services.directory_cache import ScanObservationInvalidated
 
@@ -2564,11 +3346,16 @@ def test_backend_capture_refusal_preserves_selected_rows_and_freshness(sqlite_ca
     sqlite_cache.index.write_scan_children(generation, [("candidate", False)])
     sqlite_cache.index.finish_scan_parent(generation, "")
     before = sqlite_cache.index.search("accepted")
-    with sqlite_cache.coordinator.read("") as baseline:
+    baseline = sqlite_cache.coordinator.capture_epoch()
+    producer = None
+    try:
         if refusal == "epoch":
-            sqlite_cache.coordinator.invalidate()
-        elif refusal == "completed":
-            sqlite_cache.coordinator._producers.pop(baseline.producer_id)
+            _lose_observations(sqlite_cache.coordinator)
+        elif refusal == "old_producer":
+            producer = sqlite_cache.coordinator.begin_read("accepted")
+            _lose_observations(sqlite_cache.coordinator)
+            sqlite_cache.coordinator._uncertain_pending = False
+            baseline = sqlite_cache.coordinator.capture_epoch()
         elif refusal == "uncertain":
             sqlite_cache.coordinator._uncertain_pending = True
         elif refusal == "pending":
@@ -2584,6 +3371,9 @@ def test_backend_capture_refusal_preserves_selected_rows_and_freshness(sqlite_ca
         else:
             with pytest.raises(ScanObservationInvalidated):
                 sqlite_cache.coordinator.accept_generation(baseline, generation)
+    finally:
+        if producer is not None:
+            sqlite_cache.coordinator.end_read(producer)
     assert sqlite_cache.index.search("accepted") == before
     assert sqlite_cache.index.accepted_generation() == 1
     assert sqlite_cache.coordinator.verification_required
@@ -2827,7 +3617,7 @@ def test_invalidated_root_probe_cannot_restore_availability(sqlite_cache, monkey
     sqlite_cache._source_available.clear()
 
     def entries(*args, **kwargs):
-        sqlite_cache.coordinator.invalidate()
+        _lose_observations(sqlite_cache.coordinator)
         return
         yield
 
@@ -2886,13 +3676,13 @@ def test_blocked_root_read_retains_producer_and_permit_after_overflow(
         if drain_first:
             coordinator.apply_pending()
         assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "deleted")) == drain_first
-        assert coordinator.epoch == 1
-        assert not coordinator.barriers
+        assert coordinator.epoch == (0 if drain_first else 1)
+        assert list(coordinator.barriers) == ([(coordinator.sequence, "", 0)] if drain_first else [])
         assert coordinator.barrier_bytes == 0
         assert len(coordinator.pending) == 1
         assert coordinator.pending_bytes == len("deleted" if drain_first else "accepted")
         assert not coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "overflow"))
-        assert coordinator.epoch == 2
+        assert coordinator.epoch == (1 if drain_first else 2)
         assert len(coordinator.pending) == 1
         assert coordinator.pending_bytes == len("deleted" if drain_first else "accepted")
         assert len(coordinator._producers) == 1
@@ -2903,7 +3693,7 @@ def test_blocked_root_read_retains_producer_and_permit_after_overflow(
         with pytest.raises(ScanObservationInvalidated):
             coordinator.finish_parent(token, candidate)
         with pytest.raises(ScanObservationInvalidated):
-            coordinator.accept_generation(token, candidate)
+            coordinator.accept_generation(token.epoch, candidate)
         assert coordinator.apply_pending() == 1
         assert not coordinator.pending
         assert coordinator.pending_bytes == 0
@@ -2957,7 +3747,7 @@ def test_blocked_root_close_retains_producer_and_permit_without_late_availabilit
         if stop:
             sqlite_cache._stop_event.set()
         else:
-            sqlite_cache.coordinator.invalidate()
+            _lose_observations(sqlite_cache.coordinator)
         assert len(sqlite_cache.coordinator._producers) == 1
         assert sqlite_cache._scan_running.is_set()
         assert not sqlite_cache._source_available.is_set()
@@ -3093,7 +3883,7 @@ def test_watcher_startup_uncertainty_is_drained_before_initial_generation(sqlite
                 )
 
     monkeypatch.setattr("smbclient.scandir", scan)
-    sqlite_cache.coordinator.invalidate()
+    _lose_observations(sqlite_cache.coordinator)
     sqlite_cache._watcher_ready.set()
     sqlite_cache._scan_disk_queue()
     response = sqlite_cache.index.status()
@@ -3379,7 +4169,7 @@ def test_root_scan_rejects_late_availability_and_parent_completion(sqlite_cache,
         if stop:
             sqlite_cache._stop_event.set()
         else:
-            sqlite_cache.coordinator.invalidate()
+            _lose_observations(sqlite_cache.coordinator)
 
     class Entries:
         def __init__(self):
@@ -3700,7 +4490,7 @@ def test_sqlite_source_late_permission_denial_cannot_finish_stale_parent(sqlite_
     sqlite_cache.index.finish_scan_parent(1, "")
 
     def denied(*args, **kwargs):
-        sqlite_cache.coordinator.invalidate()
+        _lose_observations(sqlite_cache.coordinator)
         raise PermissionError("Injected late denial.")
 
     monkeypatch.setattr("smbclient.scandir", denied)
@@ -4181,12 +4971,15 @@ async def test_smb_hint_failure_preserves_mutation_result_and_private_error_text
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("yield_after_parent", [False, True])
 @pytest.mark.parametrize("failed", [False, True])
 @pytest.mark.parametrize(
     "operation,prefix",
     [("create", ""), ("create", "scoped"), ("archive", "scoped"), ("mixed_archive", "scoped"), ("upload", "scoped")],
 )
-async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_cache, monkeypatch, failed, prefix, operation):
+async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(
+    sqlite_cache, monkeypatch, failed, prefix, operation, yield_after_parent
+):
     from contextlib import asynccontextmanager, contextmanager
     from io import BytesIO
     from pathlib import PureWindowsPath
@@ -4196,10 +4989,12 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
 
     from app.api.archive_operations import _ensure_mixed_archive_parent_directories
     from app.models.file import FileType
+    from app.services import directory_cache
     from app.services.archive.extraction import _ensure_live_directory
     from app.storage.smb import SMBBackend
 
     index = sqlite_cache.index
+    clock = [sqlite_cache._last_access]
     index.write_paths(["parent"])
     assert index.finish_generation(1)
     before = index.search("parent")
@@ -4241,6 +5036,8 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
             parent, _, name = directory.rpartition("/")
             if parent == relative:
                 yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+        if yield_after_parent:
+            clock[0] += directory_cache.WORKER_POLL_SECONDS
 
     @contextmanager
     def open_writer(path, **kwargs):
@@ -4278,7 +5075,14 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
     sqlite_cache.coordinator.apply_pending()
     assert set(index.pending_scan_paths(1)) == {relative_path(path).rpartition("/")[0] for path in dispatched}
     assert index.search("parent") == before
-    sqlite_cache._reconcile_disk_queue()
+    monkeypatch.setattr(directory_cache, "time", SimpleNamespace(monotonic=lambda: clock[0], time=directory_cache.time.time))
+    # Reconciliation can yield after each parent; include the source root in the turn bound.
+    for reconciliation_turn in range(len(source_directories) + 1):
+        sqlite_cache._reconcile_disk_queue()
+        if index.reconciliation_generation() is None:
+            break
+    if yield_after_parent:
+        assert reconciliation_turn > 0
     after = sqlite_cache.search_index("parent new")
     assert {row.path for row in after.results} == source_directories
     assert after.total_matches == after.directory_count == len(source_directories)
@@ -4648,7 +5452,7 @@ def test_blocked_accepted_parent_worker_retains_ownership_and_rejects_late_rows(
     worker.start()
     try:
         assert entered.wait(timeout=5)
-        sqlite_cache.coordinator.invalidate()
+        _lose_observations(sqlite_cache.coordinator)
         assert len(sqlite_cache.coordinator._producers) == 1
         assert sqlite_cache._scan_running.is_set()
         assert not sqlite_cache._manager_scan_slots.acquire(blocking=False)
@@ -4924,7 +5728,7 @@ def test_scan_issue_rejects_completed_and_invalidated_reads(index, invalidate, c
     coordinator = DirectoryScanCoordinator(index)
     token = coordinator.begin_read("parent")
     if invalidate:
-        coordinator.invalidate()
+        _lose_observations(coordinator)
     else:
         coordinator.end_read(token)
     before = index.status()
@@ -5096,10 +5900,11 @@ def test_generation_acceptance_rejects_change_after_last_parent(index):
     assert index.finish_generation(1)
     generation = index.begin_verification()
     coordinator = DirectoryScanCoordinator(index)
-    baseline = coordinator.begin_read("")
+    baseline = coordinator.capture_epoch()
     index.seed_scan(generation)
-    coordinator.commit_children(baseline, generation, [("candidate", False)])
-    coordinator.finish_parent(baseline, generation)
+    with coordinator.read("") as token:
+        coordinator.commit_children(token, generation, [("candidate", False)])
+        coordinator.finish_parent(token, generation)
     coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "candidate"))
     with pytest.raises(ScanObservationInvalidated):
         coordinator.accept_generation(baseline, generation)
@@ -5111,10 +5916,11 @@ def test_generation_acceptance_clears_sticky_verification_only_on_success(index)
     from app.services.directory_cache import DirectoryScanCoordinator
 
     coordinator = DirectoryScanCoordinator(index)
-    baseline = coordinator.begin_read("")
+    baseline = coordinator.capture_epoch()
     index.seed_scan(1)
-    coordinator.commit_children(baseline, 1, [("accepted", False)])
-    coordinator.finish_parent(baseline, 1)
+    with coordinator.read("") as token:
+        coordinator.commit_children(token, 1, [("accepted", False)])
+        coordinator.finish_parent(token, 1)
     assert coordinator.accept_generation(baseline, 1)
     assert not coordinator.verification_required
     assert index.search("accepted").coverage == "complete"
@@ -5127,7 +5933,7 @@ def test_event_loss_persists_uncertain_coverage_without_losing_accepted_rows(ind
     assert index.finish_generation(1)
     verified = index.status().last_verified_at_ms
     coordinator = DirectoryScanCoordinator(index)
-    coordinator.invalidate()
+    _lose_observations(coordinator)
     coordinator.apply_pending()
     response = index.search("accepted")
     assert response.total_matches == 1
@@ -5138,7 +5944,7 @@ def test_event_loss_persists_uncertain_coverage_without_losing_accepted_rows(ind
     coordinator.apply_pending()
     assert index.status().accepted_revision == revision
     with coordinator.read("accepted") as read:
-        coordinator.invalidate()
+        _lose_observations(coordinator)
         assert not coordinator.is_current(read)
         coordinator.apply_pending()
     repeated = index.search("accepted")
@@ -5147,7 +5953,7 @@ def test_event_loss_persists_uncertain_coverage_without_losing_accepted_rows(ind
     index._connection().execute(
         "CREATE TRIGGER reject_unchanged_loss BEFORE UPDATE ON generations BEGIN SELECT RAISE(ABORT, 'injected'); END"
     )
-    coordinator.invalidate()
+    _lose_observations(coordinator)
     coordinator.apply_pending()
     assert index.search("accepted") == response
     index._connection().execute("DROP TRIGGER reject_unchanged_loss")
@@ -5160,7 +5966,7 @@ def test_failed_event_loss_persistence_retains_verification_and_retries(index):
     assert index.finish_generation(1)
     before = index.search("accepted")
     coordinator = DirectoryScanCoordinator(index)
-    coordinator.invalidate()
+    _lose_observations(coordinator)
     index._connection().execute(
         "CREATE TRIGGER reject_loss_revision BEFORE UPDATE ON source_metadata BEGIN SELECT RAISE(ABORT, 'injected'); END"
     )
@@ -5646,20 +6452,21 @@ def test_coverage_above_old_cutoff_and_bounded_results(index, count):
         assert response.directory_count == response.total_matches == count
         assert len(response.results) == 3
     assert index.search("100000").results[0].path == "directory-100000"
+    remaining_matches = sum("100000" in f"directory-{number:06d}" for number in range(count)) - 1
     assert index.finish_generation(1)
     verified = index.search("").last_verified_at_ms
     candidate = index.begin_verification()
     index.write_paths((f"directory-{number:06d}" for number in range(count)), generation_id=candidate)
     assert index.search("directory").directory_count == count
     index.mutate_path("rename", "directory-100000", "directory-updated")
-    assert index.search("100000").total_matches == 0
+    assert index.search("100000").total_matches == remaining_matches
     assert index.search("updated").results[0].path == "directory-updated"
     assert index.search("").last_verified_at_ms == verified
     assert index.finish_generation(candidate)
     index.close()
     index.open()
     assert index.search("directory").directory_count == index.search("directory").total_matches == count
-    assert index.search("100000").total_matches == 0
+    assert index.search("100000").total_matches == remaining_matches
     assert index.search("updated").results[0].path == "directory-updated"
 
 

@@ -189,7 +189,7 @@ class TestSearchDirectories:
         """Uncertainty and storage refusal are not empty or newly verified catalogues."""
         selected = mock_cache.index.search("photos")
         mock_cache.index.mark_uncertain()
-        mock_cache._scan_error = "Directory indexing is paused. Increase its disk budget and retry."
+        mock_cache._disk_budget_error = "Directory indexing is paused. Increase its disk budget and retry."
         response = client.get(f"/api/browse/{test_connection.id}/directories", headers=auth_headers_user, params={"q": "photos"})
         assert response.status_code == 200
         data = response.json()

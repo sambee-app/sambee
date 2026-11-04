@@ -13,8 +13,10 @@
  */
 
 import axios, { type AxiosInstance } from "axios";
-import { type CompanionDirectoryPolicyStatus, isApiError } from "../types";
+import { isApiError } from "../types";
+import { COMPANION_SETTINGS_VERSION, type CompanionSettingsStatus } from "../types/companionSettings";
 import { companionSession } from "./companionSession";
+import { notifyCompanionSettingsChanged } from "./companionSettingsEvents";
 import { logger } from "./logger";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -88,17 +90,6 @@ export interface PairTestResponse {
   status: string;
   message: string;
   origin: string;
-}
-
-export interface CompanionLocalizationPayload {
-  language: string;
-  regional_locale: string;
-  updated_at: string;
-}
-
-export interface CompanionLocalizationSyncResponse extends CompanionLocalizationPayload {
-  applied: boolean;
-  source_origin: string;
 }
 
 /** Drive/volume information returned by the companion. */
@@ -214,7 +205,6 @@ class CompanionService {
     this.getPairStatus = this.getPairStatus.bind(this);
     this.unpairCurrentOrigin = this.unpairCurrentOrigin.bind(this);
     this.testPairing = this.testPairing.bind(this);
-    this.syncLocalization = this.syncLocalization.bind(this);
     this.getDrives = this.getDrives.bind(this);
     this.listDirectory = this.listDirectory.bind(this);
     this.getFileInfo = this.getFileInfo.bind(this);
@@ -304,6 +294,7 @@ class CompanionService {
         });
 
         storeSecret(response.data.secret);
+        notifyCompanionSettingsChanged(true);
         logger.info("Pairing confirmed — secret stored", {}, "companion");
         return;
       } catch (error) {
@@ -345,36 +336,25 @@ class CompanionService {
     return response.data;
   }
 
-  async getDirectoryPolicyStatus(options?: { signal?: AbortSignal }): Promise<CompanionDirectoryPolicyStatus> {
-    const headers = await this.buildAuthHeaders("GET", "/directory-index/policy");
-    const response = await this.client.get<CompanionDirectoryPolicyStatus>("/directory-index/policy", { headers, ...options });
-    return response.data;
+  async getSettingsStatus(options?: { signal?: AbortSignal }): Promise<CompanionSettingsStatus> {
+    const headers = await this.buildAuthHeaders("GET", "/settings");
+    return (await this.client.get<CompanionSettingsStatus>("/settings", { headers, ...options })).data;
   }
 
-  async requestDirectoryPolicyChallenge(options?: { signal?: AbortSignal }): Promise<CompanionDirectoryPolicyStatus> {
-    const headers = await this.buildAuthHeaders("POST", "/directory-index/policy/challenge");
-    const response = await this.client.post<CompanionDirectoryPolicyStatus>("/directory-index/policy/challenge", undefined, {
-      headers,
-      ...options,
-    });
-    return response.data;
+  async requestSettingsChallenge(options?: { signal?: AbortSignal }): Promise<CompanionSettingsStatus> {
+    const headers = await this.buildAuthHeaders("POST", "/settings/challenge");
+    return (await this.client.post<CompanionSettingsStatus>("/settings/challenge", undefined, { headers, ...options })).data;
   }
 
-  async redeemDirectoryPolicyGrant(grant: string, options?: { signal?: AbortSignal }): Promise<CompanionDirectoryPolicyStatus> {
-    const headers = await this.buildAuthHeaders("POST", "/directory-index/policy/redeem");
-    const response = await this.client.post<CompanionDirectoryPolicyStatus>(
-      "/directory-index/policy/redeem",
-      { grant },
-      { headers, ...options }
-    );
-    return response.data;
-  }
-
-  /** Synchronize the current browser localization to the companion. */
-  async syncLocalization(payload: CompanionLocalizationPayload): Promise<CompanionLocalizationSyncResponse> {
-    const headers = await this.buildAuthHeaders("POST", "/localization");
-    const response = await this.client.post<CompanionLocalizationSyncResponse>("/localization", payload, { headers });
-    return response.data;
+  async redeemSettingsGrant(grant: string, options?: { signal?: AbortSignal }): Promise<CompanionSettingsStatus> {
+    const headers = await this.buildAuthHeaders("POST", "/settings/redeem");
+    return (
+      await this.client.post<CompanionSettingsStatus>(
+        "/settings/redeem",
+        { version: COMPANION_SETTINGS_VERSION, grant },
+        { headers, ...options }
+      )
+    ).data;
   }
 
   // ── Drives ───────────────────────────────────────────────────────────────

@@ -572,6 +572,7 @@ pub struct CompanionLocalizationState {
 
 /// Response after attempting to sync browser localization.
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct LocalizationSyncResponse {
     pub applied: bool,
     #[serde(flatten)]
