@@ -382,7 +382,7 @@ async def test_periodic_failed_reconciliation_cannot_starve_candidate(sqlite_cac
     cache.index.queue_reconciliation_parent(1, "hot")
     epoch = cache.coordinator.epoch
     cache._scan_epoch = (candidate, epoch)
-    clock = [1000.0]
+    clock = [cache._last_access]
     if not start_with_reconciliation:
         cache._verification_retry_at = clock[0] + directory_cache.OBSERVATION_RETRY_SECONDS
     turns = 0
@@ -758,7 +758,7 @@ async def test_late_watcher_readiness_during_fallback_rejects_old_read_and_recov
     cache = sqlite_cache
     cache.index.write_paths(["retained"])
     assert cache.index.finish_generation(1)
-    clock = [1000.0]
+    clock = [cache._last_access]
     root_reads = []
 
     @asynccontextmanager
