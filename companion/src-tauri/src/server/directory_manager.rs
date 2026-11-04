@@ -1173,7 +1173,10 @@ impl LocalSource {
                     enqueue(parent_observation(&new))?;
                 }
             }
-            EventKind::Modify(ModifyKind::Name(_)) => {
+            EventKind::Create(CreateKind::Any)
+            | EventKind::Remove(RemoveKind::Any)
+            | EventKind::Modify(ModifyKind::Any)
+            | EventKind::Modify(ModifyKind::Name(_)) => {
                 for path in &event.paths {
                     if !enqueue(parent_observation(&relative(path)?))? {
                         break;
@@ -4174,7 +4177,9 @@ mod tests {
         let mut candidate = None;
         for event in [
             Err(notify::Error::generic("Injected watcher loss during verification.")),
-            Ok(Event::new(EventKind::Modify(ModifyKind::Any)).add_path(root_path.join("accepted"))),
+            Ok(Event::new(EventKind::Modify(ModifyKind::Any))
+                .add_path(root_path.join("accepted"))
+                .set_flag(notify::event::Flag::Rescan)),
         ] {
             source.flush(&budget).unwrap();
             let baseline = source.begin_read().unwrap();
@@ -4290,6 +4295,44 @@ mod tests {
             assert_eq!(response.total_matches, 2);
             assert_eq!(response.directory_count, 2);
             assert!(!lock(&source.observations).unwrap().verification_required);
+        }
+    }
+
+    #[tokio::test]
+    async fn untyped_native_events_reconcile_directories_without_indexing_files() {
+        for kind in [
+            EventKind::Create(CreateKind::Any),
+            EventKind::Remove(RemoveKind::Any),
+            EventKind::Modify(ModifyKind::Any),
+        ] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("root");
+            std::fs::create_dir_all(root.join("old-reports/child")).unwrap();
+            let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+            let source = LocalSource::new(root.clone(), manager.storage_directory());
+            lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
+            source.scan(&manager.budget).unwrap();
+            let reader = lock(&source.reader).unwrap().as_ref().unwrap().clone();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let initial = reader.search("reports", 5, false, &cancelled, false).unwrap();
+            std::fs::remove_dir_all(root.join("old-reports")).unwrap();
+            std::fs::create_dir_all(root.join("new-reports/child")).unwrap();
+            std::fs::write(root.join("file-reports.txt"), b"fixture").unwrap();
+            source
+                .observe(Ok(Event::new(kind)
+                    .add_path(root.join("new-reports"))
+                    .add_path(root.join("old-reports"))
+                    .add_path(root.join("file-reports.txt"))))
+                .unwrap();
+            assert!(!lock(&source.observations).unwrap().pending.is_empty(), "{kind:?}");
+            source.flush(&manager.budget).unwrap();
+            source.reconcile(&manager.budget, &manager.scans).unwrap();
+            let result = reader.search("reports", 5, false, &cancelled, false).unwrap();
+            assert_eq!(result.total_matches, 2, "{kind:?}");
+            assert_eq!(result.directory_count, 2, "{kind:?}");
+            assert!(result.results.iter().all(|row| row.path.starts_with("new-reports")), "{kind:?}");
+            assert_eq!(result.coverage, "uncertain");
+            assert_eq!(result.last_verified_at_ms, initial.last_verified_at_ms);
         }
     }
 
