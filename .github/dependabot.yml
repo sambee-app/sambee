@@ -138,6 +138,9 @@ updates:
     labels:
       - dependencies
       - frontend
+    ignore:
+      # Biome upgrades must migrate shared schemas and both npm projects.
+      - dependency-name: "@biomejs/biome"
     groups:
       frontend-npm:
         patterns:
@@ -153,6 +156,9 @@ updates:
     labels:
       - dependencies
       - companion
+    ignore:
+      # Keep this pin aligned with the frontend and shared configurations.
+      - dependency-name: "@biomejs/biome"
     patterns:
       - "@tauri-apps/*"
     multi-ecosystem-group: companion-tauri

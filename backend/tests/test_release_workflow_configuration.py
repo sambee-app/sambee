@@ -81,6 +81,16 @@ def test_dependabot_requires_manual_pydantic_family_updates(package: str) -> Non
     assert {"dependency-name": package} in backend_update["ignore"]
 
 
+@pytest.mark.parametrize("directory", ["/frontend", "/companion"])
+def test_dependabot_requires_coordinated_biome_updates(directory: str) -> None:
+    configuration = yaml.safe_load((WORKSPACE / ".github/dependabot.yml").read_text(encoding="utf-8"))
+    npm_update = next(
+        update for update in configuration["updates"] if update["package-ecosystem"] == "npm" and update["directory"] == directory
+    )
+
+    assert {"dependency-name": "@biomejs/biome"} in npm_update["ignore"]
+
+
 @pytest.mark.parametrize("lockfile", ["requirements.lock.txt", "requirements-dev.lock.txt"])
 def test_backend_lockfile_workflow_checks_clean_hash_locked_resolution(lockfile: str) -> None:
     workflow = load_workflow("check-backend-lockfiles.yml")
