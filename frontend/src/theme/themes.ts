@@ -1,4 +1,4 @@
-import companionThemes from "../../../shared/companion-themes.json";
+import companionThemes from "../../../shared/companion-themes.json" with { type: "json" };
 import type { ThemeConfig } from "./types";
 
 //
