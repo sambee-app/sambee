@@ -1,6 +1,6 @@
 [package]
 name = "sambee-companion"
-version = "2.0.27"
+version = "2.0.28"
 edition = "2021"
 description = "Sambee Companion — opens files from Sambee in native desktop editors"
 authors = []
@@ -28,6 +28,7 @@ tauri-plugin-updater = "2.14.1"
 reqwest = { version = "0.12", default-features = false, features = ["multipart", "json", "stream", "http2", "system-proxy", "rustls-tls-native-roots", "cookies"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
 url = "2"
@@ -73,7 +74,6 @@ windows = { version = "0.61", features = [
     "Win32_System_LibraryLoader",
 ] }
 png = "0.17"
-base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -1,8 +1,9 @@
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use log::{info, warn};
 use tauri::{AppHandle, Manager};
 
@@ -49,38 +50,27 @@ impl LocalizationState {
         self.current.lock().ok().and_then(|current| current.clone())
     }
 
-    pub fn apply_update(
+    pub fn apply_managed_update(
         &self,
         app: &AppHandle,
         source_origin: &str,
         update: LocalizationSyncRequest,
     ) -> Result<(CompanionLocalizationState, bool), String> {
-        let updated_at = DateTime::parse_from_rfc3339(&update.updated_at)
-            .map_err(|err| format!("Invalid updated_at timestamp: {err}"))?
-            .with_timezone(&Utc);
-
         let incoming = CompanionLocalizationState {
             language: update.language,
             regional_locale: update.regional_locale,
-            updated_at,
-            source_origin: source_origin.to_string(),
+            updated_at: chrono::DateTime::parse_from_rfc3339(&update.updated_at)
+                .map_err(|error| format!("Localization timestamp is invalid. Retry delivery: {error}"))?
+                .with_timezone(&Utc),
+            source_origin: source_origin.to_owned(),
         };
-
-        let mut current = self.current.lock().map_err(|_| "Localization state lock poisoned".to_string())?;
-
-        if let Some(existing) = current.as_ref() {
-            if existing.updated_at > incoming.updated_at {
-                return Ok((existing.clone(), false));
-            }
-        }
-
+        let mut current = self
+            .current
+            .lock()
+            .map_err(|_| "Localization state is unavailable. Restart the Companion.".to_owned())?;
         persist_state(app, &incoming)?;
         *current = Some(incoming.clone());
-        info!(
-            "Applied companion localization from origin={} updated_at={}",
-            incoming.source_origin, incoming.updated_at
-        );
-
+        info!("Applied managed localization from {source_origin}");
         Ok((incoming, true))
     }
 }
@@ -98,13 +88,25 @@ fn persist_state(app: &AppHandle, state: &CompanionLocalizationState) -> Result<
     }
 
     let serialized = serde_json::to_string_pretty(state).map_err(|err| format!("Failed to serialize localization state: {err}"))?;
-    fs::write(&path, serialized).map_err(|err| format!("Failed to persist localization state: {err}"))
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Localization storage has no parent. Check application storage.".to_owned())?;
+    let mut stage =
+        tempfile::NamedTempFile::new_in(parent).map_err(|error| format!("Localization staging file cannot be created: {error}"))?;
+    stage
+        .write_all(serialized.as_bytes())
+        .and_then(|_| stage.as_file().sync_all())
+        .map_err(|error| format!("Localization cannot be written durably. Check application storage: {error}"))?;
+    stage
+        .persist(&path)
+        .map_err(|error| format!("Localization cannot be selected. Check application storage: {error}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::{DateTime, TimeZone};
 
     fn build_state(language: &str, regional_locale: &str, updated_at: DateTime<Utc>, source_origin: &str) -> CompanionLocalizationState {
         CompanionLocalizationState {

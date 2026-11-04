@@ -30,6 +30,8 @@ Select **Pair this browser**. Sambee starts a pairing request for the exact site
 
 Sambee shows the same verification code in the browser. Confirm the pairing only when both codes match and the origin shown in Companion is the Sambee site you expect.
 
+Pairing also lets that server manage Companion theme, localization, and directory-search settings. The most recently paired server is authoritative, even if other servers remain paired for file access. Pair the intended server again to change authority. No separate settings approval is required.
+
 After you approve the request in Companion and confirm it in the browser, Sambee verifies local access and shows a check mark next to **This browser is paired**.
 
 Once Sambee is paired with Companion, local drives on your computer appear in Sambee's connection list.
@@ -40,6 +42,8 @@ Pairing is specific to the current browser origin.
 
 - If you use Sambee from a different site or port, that browser origin may need its own pairing.
 - If you close the pairing dialog before finishing, the request is cancelled instead of staying pending silently.
+- Settings synchronize automatically while a signed-in Sambee tab is active. Failed delivery keeps the last valid settings; it does not disable directory search.
+- Removing the authoritative pairing keeps the last valid settings but does not select another server automatically.
 
 ## Restore Local-Drive Access
 

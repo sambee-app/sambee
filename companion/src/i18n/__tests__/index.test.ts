@@ -51,4 +51,15 @@ describe("companion i18n", () => {
     expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("en-XA");
     expect(window.localStorage.getItem(REGIONAL_LOCALE_STORAGE_KEY)).toBe("en-GB");
   });
+
+  it("resolves browser preferences using the Companion operating-system webview locale", async () => {
+    await applyCompanionLocalization({
+      language: "browser",
+      regional_locale: "browser",
+      updated_at: "2026-11-04T00:00:00Z",
+      source_origin: "https://sambee.example",
+    });
+    expect(getCurrentRegionalLocale()).toBe(Intl.getCanonicalLocales(navigator.language)[0]);
+    expect(window.localStorage.getItem(REGIONAL_LOCALE_STORAGE_KEY)).not.toBe("browser");
+  });
 });

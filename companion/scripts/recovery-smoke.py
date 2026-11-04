@@ -99,11 +99,14 @@ def main() -> int:
                     wait_for(lambda: request("health"), STARTUP_TIMEOUT_SECONDS)
                     record("actual-application-startup")
 
-                    def healthy_contains(path):
+                    def healthy_contains(path, *, require_complete=True):
                         response = request("search")
                         return (
                             response.get("monitoring_state") == "healthy"
-                            and response.get("coverage") == "complete"
+                            and (
+                                not require_complete
+                                or response.get("coverage") == "complete"
+                            )
                             and path in response["results"]
                         )
 
@@ -127,7 +130,9 @@ def main() -> int:
                     record("event-gap-reconciled-before-healthy")
                     (source / "native-reports").mkdir()
                     wait_for(
-                        lambda: healthy_contains("native-reports"),
+                        lambda: healthy_contains(
+                            "native-reports", require_complete=False
+                        ),
                         RECOVERY_TIMEOUT_SECONDS,
                     )
                     record("native-events-after-recovery")

@@ -78,7 +78,7 @@ English is the source locale, and the pseudo-locale is generated automatically f
 - Add new UI strings through the translation resources instead of hard-coding copy.
 - Keep translation keys type-safe instead of casting around the type system.
 - Preserve the distinction between UI language and regional formatting behavior.
-- Remember that the browser app can push its effective locale into the companion through the paired localhost API.
+- Companion localization uses the shared settings protocol. Deliver stored preferences, including `browser`; Companion resolves them from its own operating-system locale.
 
 ## What Contributors Must Preserve
 
@@ -91,7 +91,7 @@ English is the source locale, and the pseudo-locale is generated automatically f
 ### Localization
 
 - Typed keys should remain enforced.
-- Browser-localization behavior and companion-localization sync should keep using effective locale values rather than raw unresolved preferences.
+- Browser UI formatting uses effective locale values. Shared Companion delivery carries stored preferences, and Companion resolves its own effective locale.
 - App-owned UI text should stay translatable.
 
 For the concrete contributor workflow, continue to [Localization and Locale Behavior](../localization-and-locale-behavior/).

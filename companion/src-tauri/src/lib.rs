@@ -123,12 +123,52 @@ const PAIRING_SUCCESS_AUTO_HIDE_DELAY_MS: u64 = 2500;
 
 /// Shared state holding the current base64-encoded theme string.
 ///
-/// Updated whenever a deep-link URI contains a `theme` parameter.
-/// Emitted to every new window so it can apply the correct CSS variables.
-#[derive(Clone, Default)]
-pub struct ThemeState(pub Arc<RwLock<Option<String>>>);
+/// Managed settings update existing windows and supply each new window.
+/// URI bootstrap stays blocked until managed-settings restoration completes.
+#[derive(Clone)]
+pub struct ThemeState(pub Arc<RwLock<Option<String>>>, Arc<std::sync::atomic::AtomicBool>);
+
+impl Default for ThemeState {
+    fn default() -> Self {
+        Self(Arc::new(RwLock::new(None)), Arc::new(std::sync::atomic::AtomicBool::new(true)))
+    }
+}
+
+#[cfg(test)]
+mod managed_theme_tests {
+    use super::ThemeState;
+
+    #[test]
+    fn uri_bootstrap_is_blocked_until_persisted_managed_state_is_known() {
+        let state = ThemeState::default();
+        assert!(state.is_managed());
+        state.initialize_managed_theme(false);
+        assert!(!state.is_managed());
+        state.initialize_managed_theme(true);
+        assert!(state.is_managed());
+    }
+}
 
 impl ThemeState {
+    pub(crate) fn initialize_managed_theme(&self, managed: bool) {
+        self.1.store(managed, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn is_managed(&self) -> bool {
+        self.1.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn set_managed(&self, app: &tauri::AppHandle, theme: String) -> Result<(), String> {
+        let mut stored = self
+            .0
+            .write()
+            .map_err(|_| "Theme state is unavailable. Restart the Companion.".to_owned())?;
+        app.emit("apply-theme", &theme)
+            .map_err(|_| "Theme broadcast failed. Restart the Companion.".to_owned())?;
+        *stored = Some(theme);
+        self.1.store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
     //
     // get
     //
@@ -175,7 +215,8 @@ fn handle_deep_links(app: &tauri::AppHandle, urls: Vec<url::Url>) {
 
                 // Apply theme from the URI if present
                 if let Some(ref theme_b64) = parsed.theme {
-                    if let Some(theme_state) = app.try_state::<ThemeState>() {
+                    let managed = app.try_state::<Arc<PairingState>>().is_none_or(|pairing| pairing.has_any_pairing());
+                    if let Some(theme_state) = app.try_state::<ThemeState>().filter(|state| !managed && !state.is_managed()) {
                         theme_state.set(app, theme_b64.clone());
                     }
                 }
@@ -1046,7 +1087,6 @@ pub fn run() {
         .manage(Arc::new(LocalizationState::new()))
         .invoke_handler(tauri::generate_handler![
             server::directory_policy::get_native_directory_policy_status,
-            server::directory_policy::reset_native_directory_policy_owner,
             commands::app_picker::get_apps_for_file,
             commands::app_picker::consume_pending_app_picker,
             commands::localization::get_synced_localization,

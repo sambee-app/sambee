@@ -97,7 +97,7 @@ WORKDIR /workspace
 CMD ["sleep", "infinity"]
 
 # Build frontend on the native builder because the emitted assets are architecture-independent.
-FROM --platform=$BUILDPLATFORM node:24.22.1-alpine@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24.22.2-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS frontend-builder
 WORKDIR /app
 COPY frontend/package*.json ./
 COPY frontend/scripts ./scripts
