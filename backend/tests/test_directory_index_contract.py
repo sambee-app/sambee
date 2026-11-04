@@ -4971,12 +4971,15 @@ async def test_smb_hint_failure_preserves_mutation_result_and_private_error_text
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("yield_after_parent", [False, True])
 @pytest.mark.parametrize("failed", [False, True])
 @pytest.mark.parametrize(
     "operation,prefix",
     [("create", ""), ("create", "scoped"), ("archive", "scoped"), ("mixed_archive", "scoped"), ("upload", "scoped")],
 )
-async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_cache, monkeypatch, failed, prefix, operation):
+async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(
+    sqlite_cache, monkeypatch, failed, prefix, operation, yield_after_parent
+):
     from contextlib import asynccontextmanager, contextmanager
     from io import BytesIO
     from pathlib import PureWindowsPath
@@ -4986,10 +4989,12 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
 
     from app.api.archive_operations import _ensure_mixed_archive_parent_directories
     from app.models.file import FileType
+    from app.services import directory_cache
     from app.services.archive.extraction import _ensure_live_directory
     from app.storage.smb import SMBBackend
 
     index = sqlite_cache.index
+    clock = [sqlite_cache._last_access]
     index.write_paths(["parent"])
     assert index.finish_generation(1)
     before = index.search("parent")
@@ -5031,6 +5036,8 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
             parent, _, name = directory.rpartition("/")
             if parent == relative:
                 yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+        if yield_after_parent:
+            clock[0] += directory_cache.WORKER_POLL_SECONDS
 
     @contextmanager
     def open_writer(path, **kwargs):
@@ -5068,7 +5075,14 @@ async def test_smb_mutation_queues_parent_before_dispatch_and_after_exit(sqlite_
     sqlite_cache.coordinator.apply_pending()
     assert set(index.pending_scan_paths(1)) == {relative_path(path).rpartition("/")[0] for path in dispatched}
     assert index.search("parent") == before
-    sqlite_cache._reconcile_disk_queue()
+    monkeypatch.setattr(directory_cache, "time", SimpleNamespace(monotonic=lambda: clock[0], time=directory_cache.time.time))
+    # Reconciliation can yield after each parent; include the source root in the turn bound.
+    for reconciliation_turn in range(len(source_directories) + 1):
+        sqlite_cache._reconcile_disk_queue()
+        if index.reconciliation_generation() is None:
+            break
+    if yield_after_parent:
+        assert reconciliation_turn > 0
     after = sqlite_cache.search_index("parent new")
     assert {row.path for row in after.results} == source_directories
     assert after.total_matches == after.directory_count == len(source_directories)
