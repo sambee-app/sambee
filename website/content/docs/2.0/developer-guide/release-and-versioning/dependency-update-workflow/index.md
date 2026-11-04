@@ -71,8 +71,29 @@ For routine Dependabot backend dependency-update pull requests:
 - do not rerun the backend lockfile refresh script only to satisfy CI
 - validate with backend tests and type checking
 
-CI verifies that direct source pins match both generated lockfiles. The backend
-test image and production Docker image validate hash-enforced installations.
+CI verifies that direct source pins match both generated lockfiles. It also
+runs pip with `--dry-run --ignore-installed --require-hashes` for each lockfile.
+This checks transitive compatibility and hashes without using installed packages
+or changing committed versions. The backend test image and production Docker
+image validate actual hash-enforced installations.
+
+Dependabot doesn't update `pydantic`, `pydantic-core`, or `pydantic-settings`.
+Update this package family manually. Pydantic requires an exact core version;
+the previous core-only ignore rule still allowed Pydantic updates to leave an
+incompatible core pin in both lockfiles. Grouping packages alone doesn't ensure
+that generated locks contain compatible transitive versions.
+
+For a Pydantic update or a broken dependency-update pull request:
+
+1. Review and update the direct pins in `backend/requirements.txt` as needed.
+1. Run `scripts/refresh-backend-lockfiles --keep-existing` from the repository root.
+1. Review both generated locks. The resolver keeps existing versions where
+	compatible and changes dependencies required by the source pins.
+1. Run backend tests and type checking before merging. Don't force a core pin or
+	edit its hashes manually.
+
+Security findings for this package family need a manual update through the same
+procedure. The ignore rules don't replace dependency security audits.
 
 For manual backend dependency changes or an intentional full transitive refresh:
 
@@ -84,7 +105,9 @@ For manual backend dependency changes or an intentional full transitive refresh:
 Use `scripts/refresh-backend-lockfiles --check` when you deliberately want to
 compare the committed locks with a new clean dependency resolution. It is an
 optional maintenance check, not a required step for routine Dependabot pull
-requests.
+requests. Add `--keep-existing` to check resolution while keeping compatible
+committed versions. This command compares generated file content; it isn't a
+replacement for the CI pip resolution checks.
 
 ### Container Build Pip
 
