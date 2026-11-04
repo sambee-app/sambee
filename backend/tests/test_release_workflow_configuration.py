@@ -71,6 +71,28 @@ def step_uses(steps: list[dict], action: str) -> bool:
     return any(step.get("uses") == action for step in steps if isinstance(step, dict))
 
 
+@pytest.mark.parametrize("package", ["pydantic", "pydantic-core", "pydantic-settings"])
+def test_dependabot_requires_manual_pydantic_family_updates(package: str) -> None:
+    configuration = yaml.safe_load((WORKSPACE / ".github/dependabot.yml").read_text(encoding="utf-8"))
+    backend_update = next(
+        update for update in configuration["updates"] if update["package-ecosystem"] == "pip" and update["directory"] == "/backend"
+    )
+
+    assert {"dependency-name": package} in backend_update["ignore"]
+
+
+@pytest.mark.parametrize("lockfile", ["requirements.lock.txt", "requirements-dev.lock.txt"])
+def test_backend_lockfile_workflow_checks_clean_hash_locked_resolution(lockfile: str) -> None:
+    workflow = load_workflow("check-backend-lockfiles.yml")
+    steps = workflow["jobs"]["backend-lockfiles"]["steps"]
+    setup_index = next(index for index, step in enumerate(steps) if step.get("uses") == "./.github/actions/setup-runtime-python")
+    resolution_index = next(index for index, step in enumerate(steps) if step.get("name") == "Validate hash-locked dependency resolution")
+
+    assert setup_index < resolution_index
+    assert f"python -m pip install --dry-run --ignore-installed --require-hashes -r backend/{lockfile}" in steps[resolution_index]["run"]
+    assert not steps[resolution_index].get("continue-on-error")
+
+
 def test_companion_promotion_index_refresh_only_rewrites_the_generated_index() -> None:
     workflow = load_workflow("refresh-companion-promotion-index.yml")
     refresh_job = workflow["jobs"]["refresh"]

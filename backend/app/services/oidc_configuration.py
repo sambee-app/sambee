@@ -279,7 +279,7 @@ def normalize_candidate(
     *,
     development: bool = not IS_PRODUCTION,
 ) -> NormalizedOidcCandidate:
-    issuer_url = candidate.issuer_url.strip().rstrip("/")
+    issuer_url = candidate.issuer_url.strip()
     try:
         validate_oidc_url(issuer_url, development=development)
     except ValueError as error:

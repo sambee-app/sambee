@@ -127,7 +127,26 @@ def test_candidate_omitted_secret_preserves_existing_ciphertext_value() -> None:
     assert "existing-secret" not in repr(normalized)
 
 
-def test_candidate_normalizes_a_trailing_slash_in_the_issuer_url() -> None:
+@pytest.mark.parametrize("issuer_url", ["https://idp.example.test", "https://auth.example.test/application/o/storage/"])
+def test_candidate_preserves_issuer_and_trims_surrounding_whitespace(issuer_url: str) -> None:
+    cipher = OidcSecretCipher(Fernet.generate_key().decode("ascii"))
+    active = _active_configuration(cipher)
+    active.issuer_url = issuer_url
+    candidate = OidcConfigurationCandidate(
+        issuer_url=f"  {issuer_url}  ",
+        client_id=active.client_id,
+        sign_in_mode=SignInMode.OIDC_OR_PASSWORD,
+    )
+
+    normalized = normalize_candidate(candidate, active, cipher, development=False)
+
+    assert normalized.issuer_url == issuer_url
+    assert normalized.identity_namespace_changed is False
+    assert "issuer_url" not in normalized.changed_fields
+    assert decrypt_candidate_snapshot(encrypt_candidate_snapshot(normalized, cipher), cipher) == normalized
+
+
+def test_candidate_trailing_slash_changes_the_identity_namespace() -> None:
     cipher = OidcSecretCipher(Fernet.generate_key().decode("ascii"))
     active = _active_configuration(cipher)
     candidate = OidcConfigurationCandidate(
@@ -138,8 +157,9 @@ def test_candidate_normalizes_a_trailing_slash_in_the_issuer_url() -> None:
 
     normalized = normalize_candidate(candidate, active, cipher, development=False)
 
-    assert normalized.issuer_url == active.issuer_url
-    assert normalized.identity_namespace_changed is False
+    assert normalized.issuer_url == candidate.issuer_url
+    assert normalized.identity_namespace_changed is True
+    assert "issuer_url" in normalized.changed_fields
 
 
 def test_candidate_defaults_uniform_role_to_editor() -> None:

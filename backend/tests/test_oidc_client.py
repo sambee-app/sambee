@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import time
+from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -155,9 +156,11 @@ async def test_refresh_marks_post_grant_token_validation_failure_uncertain() -> 
 
 
 @pytest.mark.asyncio
-async def test_metadata_requires_exact_issuer_and_loads_jwks_through_injected_transport() -> None:
+@pytest.mark.parametrize("issuer", [ISSUER, f"{ISSUER}/", f"{ISSUER}/application/o/storage/"])
+async def test_metadata_requires_exact_issuer_and_loads_jwks_through_injected_transport(issuer: str) -> None:
     clear_oidc_provider_cache()
     requested_urls: list[str] = []
+    endpoint_base = issuer.rstrip("/")
 
     def handler(request: httpx.Request) -> httpx.Response:
         requested_urls.append(str(request.url))
@@ -166,11 +169,11 @@ async def test_metadata_requires_exact_issuer_and_loads_jwks_through_injected_tr
                 200,
                 headers={"content-type": "application/json"},
                 json={
-                    "issuer": ISSUER,
-                    "authorization_endpoint": f"{ISSUER}/authorize",
-                    "token_endpoint": f"{ISSUER}/token",
-                    "jwks_uri": f"{ISSUER}/jwks",
-                    "userinfo_endpoint": f"{ISSUER}/userinfo",
+                    "issuer": issuer,
+                    "authorization_endpoint": f"{endpoint_base}/authorize",
+                    "token_endpoint": f"{endpoint_base}/token",
+                    "jwks_uri": f"{endpoint_base}/jwks",
+                    "userinfo_endpoint": f"{endpoint_base}/userinfo",
                     "grant_types_supported": ["authorization_code", "refresh_token"],
                     "token_endpoint_auth_methods_supported": ["client_secret_basic"],
                     "id_token_signing_alg_values_supported": ["RS256"],
@@ -179,22 +182,26 @@ async def test_metadata_requires_exact_issuer_and_loads_jwks_through_injected_tr
         return httpx.Response(200, headers={"content-type": "application/jwk-set+json"}, json={"keys": [{"kty": "RSA"}]})
 
     async with ValidatedOidcHttpClient(transport=httpx.MockTransport(handler), development=False) as client:
-        metadata, jwks = await load_provider_metadata(client, ISSUER, development=False)
+        metadata, jwks = await load_provider_metadata(client, issuer, development=False)
 
-    assert metadata.issuer == ISSUER
+    assert metadata.issuer == issuer
     assert jwks["keys"] == [{"kty": "RSA"}]
-    assert requested_urls == [f"{ISSUER}/.well-known/openid-configuration", f"{ISSUER}/jwks"]
+    assert requested_urls == [f"{endpoint_base}/.well-known/openid-configuration", f"{endpoint_base}/jwks"]
 
 
 @pytest.mark.asyncio
-async def test_metadata_rejects_issuer_mismatch() -> None:
+@pytest.mark.parametrize(
+    ("issuer", "discovered_issuer"),
+    [(ISSUER, f"{ISSUER}/different"), (ISSUER, f"{ISSUER}/"), (f"{ISSUER}/", ISSUER)],
+)
+async def test_metadata_rejects_issuer_mismatch(issuer: str, discovered_issuer: str) -> None:
     clear_oidc_provider_cache()
     transport = httpx.MockTransport(
         lambda request: httpx.Response(
             200,
             headers={"content-type": "application/json"},
             json={
-                "issuer": f"{ISSUER}/different",
+                "issuer": discovered_issuer,
                 "authorization_endpoint": f"{ISSUER}/authorize",
                 "token_endpoint": f"{ISSUER}/token",
                 "jwks_uri": f"{ISSUER}/jwks",
@@ -205,15 +212,15 @@ async def test_metadata_rejects_issuer_mismatch() -> None:
     async with ValidatedOidcHttpClient(transport=transport, development=False) as client:
         with patch("app.services.oidc_client.logger.warning") as log_warning:
             with pytest.raises(OidcClientError) as error:
-                await load_provider_metadata(client, ISSUER, development=False)
+                await load_provider_metadata(client, issuer, development=False)
     assert error.value.code == OidcClientErrorCode.INVALID_ISSUER
     assert str(error.value) == (
-        f"OIDC discovery issuer does not exactly match the configured issuer: configured {ISSUER!r}, discovered {f'{ISSUER}/different'!r}"
+        f"OIDC discovery issuer does not exactly match the configured issuer: configured {issuer!r}, discovered {discovered_issuer!r}"
     )
     log_warning.assert_called_once_with(
         "OIDC discovery issuer does not match configured issuer: configured %r, discovered %r",
-        ISSUER,
-        f"{ISSUER}/different",
+        issuer,
+        discovered_issuer,
     )
 
 
@@ -375,6 +382,31 @@ async def test_userinfo_is_called_once_and_must_match_id_token_subject() -> None
 
     assert error.value.code == OidcClientErrorCode.USERINFO_SUBJECT_MISMATCH
     assert userinfo_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("issuer", "token_issuer"),
+    [(ISSUER, ISSUER), (f"{ISSUER}/", f"{ISSUER}/"), (ISSUER, f"{ISSUER}/"), (f"{ISSUER}/", ISSUER)],
+)
+async def test_callback_requires_exact_issuer_including_trailing_slash(issuer: str, token_issuer: str) -> None:
+    now = int(time.time())
+    private_key, jwks = _key_material("current-key")
+    encoded_token = _id_token(private_key, "current-key", nonce="nonce-value", now=now, claims={"iss": token_issuer})
+
+    async def refresh_jwks() -> dict[str, Any]:
+        raise AssertionError("known key must not refresh")
+
+    callback = _exchange_callback(
+        {"id_token": encoded_token}, jwks=jwks, refresh_jwks=refresh_jwks, metadata=replace(_metadata(), issuer=issuer)
+    )
+    if token_issuer == issuer:
+        claims = await callback
+        assert claims.issuer == issuer
+    else:
+        with pytest.raises(OidcClientError) as error:
+            await callback
+        assert error.value.code == OidcClientErrorCode.INVALID_ID_TOKEN
 
 
 @pytest.mark.asyncio

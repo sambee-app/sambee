@@ -67,11 +67,11 @@ updates:
       - dependencies
       - python
     ignore:
-      # pydantic-core is a transitive dependency pinned exactly by the direct
-      # pydantic requirement. Dependabot lockfile-only bumps here can become
-      # impossible to install under --require-hashes until a newer pydantic
-      # release adopts that core version.
+      # Update the Pydantic family manually with pip-compile. Dependabot can
+      # update pydantic without updating its exact pydantic-core dependency.
+      - dependency-name: "pydantic"
       - dependency-name: "pydantic-core"
+      - dependency-name: "pydantic-settings"
       # SQLModel 0.0.47 requires SQLAlchemy<2.1. Revisit when SQLModel
       # supports the newer series.
       - dependency-name: "sqlalchemy"

@@ -85,6 +85,7 @@ When an OIDC login is necessary, all Sambee browser tabs switch to the login pag
 ### Bugfixes
 
 - OIDC login failures after password reset: OIDC login now completes reliably after an administrator resets the account’s password. Sambee ignores responses from the previous browser session while the new login finishes, reloads the user’s themes and settings, and returns to the file browser instead of the login page.
+- Sambee always removed a trailing slash from the issuer URL, which could cause errors with providers like Authentik. Trailing slashes are now left in place.
 
 ## Text and Markdown Editors
 
