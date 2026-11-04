@@ -10,14 +10,16 @@ const DEPENDENCY_INPUTS = ["package.json", "package-lock.json"];
 const RECOVERY_MESSAGE = `Run cd ${project} && npm ci from the repository root to restore ${project} dependencies.`;
 const BIOME_PACKAGE = "@biomejs/biome";
 const BIOME_PACKAGE_PATH = `node_modules/${BIOME_PACKAGE}`;
-const BIOME_CONFIGS = project === "companion" ? ["../biome.json", "../frontend/biome.json", "biome.json"] : ["../biome.json", "biome.json"];
+const PEER_PROJECT = project === "companion" ? "frontend" : "companion";
+const BIOME_CONFIGS = ["../biome.json", `../${PEER_PROJECT}/biome.json`, "biome.json"];
 const VALID_MODES = new Set(["--clear", "--write", "--check", "--check-biome"]);
 
 async function readJson(filename) {
   try {
     return JSON.parse(await readFile(new URL(filename, PROJECT_ROOT), "utf8"));
   } catch (error) {
-    throw new Error(`Cannot read ${filename}. Restore a valid JSON file before running lint.`, { cause: error });
+    const recovery = filename.startsWith("node_modules/") ? RECOVERY_MESSAGE : "Restore a valid JSON file before running lint.";
+    throw new Error(`Cannot read ${filename}. ${recovery}`, { cause: error });
   }
 }
 
@@ -33,9 +35,19 @@ async function checkBiome() {
       `Pin ${BIOME_PACKAGE} in package.json to the locked version ${version}, or update the dependency and lockfile together.`
     );
   }
+  const peerManifestPath = `../${PEER_PROJECT}/package.json`;
+  const peerLockfilePath = `../${PEER_PROJECT}/package-lock.json`;
+  const peerManifest = await readJson(peerManifestPath);
+  const peerLockfile = await readJson(peerLockfilePath);
+  if (peerManifest?.devDependencies?.[BIOME_PACKAGE] !== version || peerLockfile?.packages?.[BIOME_PACKAGE_PATH]?.version !== version) {
+    throw new Error(
+      `${peerManifestPath} and ${peerLockfilePath} must pin ${BIOME_PACKAGE} to ${version}. ` +
+        "Update both projects and migrate all shared Biome configurations together."
+    );
+  }
   const installed = await readJson(`${BIOME_PACKAGE_PATH}/package.json`);
   if (installed?.version !== version) {
-    throw new Error(`Installed Biome version ${installed?.version} does not match locked version ${version}.`);
+    throw new Error(`Installed Biome version ${installed?.version} does not match locked version ${version}. ${RECOVERY_MESSAGE}`);
   }
   const expectedSchema = `https://biomejs.dev/schemas/${version}/schema.json`;
   for (const filename of BIOME_CONFIGS) {
@@ -43,7 +55,8 @@ async function checkBiome() {
     if (config?.$schema !== expectedSchema) {
       throw new Error(
         `${filename} must use schema ${expectedSchema}; found ${JSON.stringify(config?.$schema)}. ` +
-          "Run biome migrate --write with the locked Biome version for this configuration and commit the configuration changes."
+          "Run biome migrate --write from the repository root with the locked Biome version, " +
+          "update the shared configuration schemas, and commit all configuration changes."
       );
     }
   }
@@ -103,6 +116,8 @@ try {
   await main();
 } catch (error) {
   console.error(`${project === "companion" ? "Companion" : "Frontend"} dependency validation failed: ${error instanceof Error ? error.message : String(error)}`);
-  console.error(RECOVERY_MESSAGE);
+  if (mode !== "--check-biome") {
+    console.error(RECOVERY_MESSAGE);
+  }
   process.exitCode = 1;
 }

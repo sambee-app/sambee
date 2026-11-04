@@ -93,7 +93,8 @@ describe("frontend dependency freshness", () => {
     const version = "2.6.2";
     const schema = `https://biomejs.dev/schemas/${version}/schema.json`;
     const installedPackage = "node_modules/@biomejs/biome/package.json";
-    const configs = project === "companion" ? ["../biome.json", "../frontend/biome.json", "biome.json"] : ["../biome.json", "biome.json"];
+    const peerProject = project === "companion" ? "frontend" : "companion";
+    const configs = ["../biome.json", `../${peerProject}/biome.json`, "biome.json"];
 
     function run(mode: string) {
       const arguments_ = mode === "--check-biome" ? [project] : [];
@@ -101,10 +102,13 @@ describe("frontend dependency freshness", () => {
     }
 
     beforeEach(() => {
+      for (const name of ["frontend", "companion"]) {
+        const projectRoot = join(workspace, name);
+        mkdirSync(projectRoot, { recursive: true });
+        writeFileSync(join(projectRoot, "package.json"), JSON.stringify({ devDependencies: { "@biomejs/biome": version } }));
+        writeFileSync(join(projectRoot, "package-lock.json"), JSON.stringify({ packages: { "node_modules/@biomejs/biome": { version } } }));
+      }
       root = join(workspace, project);
-      mkdirSync(root, { recursive: true });
-      writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { "@biomejs/biome": version } }));
-      writeFileSync(join(root, "package-lock.json"), JSON.stringify({ packages: { "node_modules/@biomejs/biome": { version } } }));
       mkdirSync(join(root, "node_modules/@biomejs/biome"), { recursive: true });
       writeFileSync(join(root, installedPackage), JSON.stringify({ version }));
       for (const filename of configs) {
@@ -122,6 +126,27 @@ describe("frontend dependency freshness", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(`${filename} must use schema ${schema}`);
       expect(result.stderr).toContain("biome migrate --write");
+      expect(result.stderr).not.toContain("npm ci");
+    });
+
+    it.each(["package.json", "package-lock.json"])("rejects a version mismatch in the other project's %s", (filename) => {
+      const content =
+        filename === "package.json"
+          ? { devDependencies: { "@biomejs/biome": "2.5.15" } }
+          : { packages: { "node_modules/@biomejs/biome": { version: "2.5.15" } } };
+      writeFileSync(join(workspace, peerProject, filename), JSON.stringify(content));
+      const result = run("--check-biome");
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        `../${peerProject}/package.json and ../${peerProject}/package-lock.json must pin @biomejs/biome to ${version}`
+      );
+      expect(result.stderr).toContain("Update both projects");
+      expect(result.stderr).not.toContain("npm ci");
+    });
+
+    it("does not require the other project's installed Biome package", () => {
+      rmSync(join(workspace, peerProject, "node_modules"), { recursive: true, force: true });
+      expect(run("--check-biome").status).toBe(0);
     });
 
     it("rejects an installed version mismatch even with a current stamp", () => {

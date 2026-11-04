@@ -48,8 +48,10 @@ run `npm ci` again.
 
 `npm run lint` in `frontend/` and `companion/` checks the Biome version before
 linting source files. Each check requires an exact `@biomejs/biome` pin that
-matches the lockfile, installed package, and configuration schemas. The companion
-check also validates the shared frontend and repository-root schemas.
+matches the lockfile and installed package. Both checks also require matching
+pins and lockfile versions in both projects, and matching schemas in the
+repository-root, frontend, and companion configurations. They don't require the
+other project's installed dependencies.
 
 To run the checks separately from the repository root:
 
@@ -59,9 +61,37 @@ npm --prefix companion run check:biome
 ```
 
 Keep both projects on the same Biome version because they share configuration.
-Update both package pins, regenerate their lockfiles with npm, and migrate the
-configuration schemas together. If only the installed version is stale, run
-`npm ci` in the affected project. These checks do not install dependencies.
+Dependabot doesn't update `@biomejs/biome` in either project. Separate npm updates
+can change a package version without migrating shared configurations. Update
+Biome manually, including security fixes, through this procedure:
+
+1. Set the same exact Biome version in both projects with
+
+	```bash
+	npm --prefix frontend install --save-dev --save-exact @biomejs/biome@<version>
+	npm --prefix companion install --save-dev --save-exact @biomejs/biome@<version>
+	```
+
+1. From the repository root, run the installed frontend binary:
+
+	```bash
+	frontend/node_modules/.bin/biome migrate --write
+	```
+
+1. Review migration requirements for `frontend/biome.json` and
+	`companion/biome.json`. Apply required setting changes and update their
+	schemas to the same version. Biome migrates the root configuration but
+	doesn't rewrite these non-root configurations. An explicit non-root
+	`--config-path` is rejected.
+1. Run both `check:biome` commands above and both projects' `npm run lint`.
+1. Include both package manifests, both lockfiles, and all three configurations
+	in the same change.
+
+If only the installed version is stale, run `npm ci` in the affected project.
+If committed pins, locks, or schemas differ, repair them through the coordinated
+procedure; `npm ci` cannot fix that mismatch. The checks don't install
+dependencies or change configuration files. Dependency security audits still
+apply to manually maintained Biome versions.
 
 ### Backend Dependency Updates
 
