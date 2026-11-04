@@ -3,6 +3,7 @@ import type { CurrentUserSettings, CurrentUserSettingsUpdate } from "../types";
 import api from "./api";
 import { isAuthRequired } from "./authConfig";
 import { authSession } from "./authSession";
+import { notifyCompanionSettingsChanged } from "./companionSettingsEvents";
 import { SETTING_SUCCESS_DISPLAY_MS } from "./settingSaveFeedback";
 
 export { SETTING_SUCCESS_DISPLAY_MS } from "./settingSaveFeedback";
@@ -261,6 +262,7 @@ class UserSettingsStore {
       this.setSaved(update.field);
       this.notify();
       this.channel?.postMessage({ type: INVALIDATE_MESSAGE });
+      if (result.field === "appearance.theme_id" || result.field.startsWith("localization.")) notifyCompanionSettingsChanged(true);
     } catch (error) {
       if (!this.ownsRequest(update.field, token, identity.epoch)) {
         return;

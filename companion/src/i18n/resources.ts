@@ -19,7 +19,7 @@ export const EN_TRANSLATIONS = {
     eyebrow: "Approve Browser Origin",
     title: "Confirm this browser origin",
     closeTitle: "Close",
-    body: "Sambee in the browser wants this origin to access local drives through this companion.",
+    body: "This server will access local drives and manage Companion theme, localization, and directory-search policy. Pairing replaces the current settings authority.",
     labels: {
       requestingOrigin: "Requesting origin",
       verificationCode: "Verification code",
@@ -37,7 +37,7 @@ export const EN_TRANSLATIONS = {
     },
     success: {
       title: "Origin approved",
-      body: "This browser origin is now trusted by Sambee Companion and can access local drives.",
+      body: "This server can access local drives and is now the Companion settings authority.",
       hint: "This window will close automatically in a moment.",
     },
   },
@@ -158,21 +158,15 @@ export const EN_TRANSLATIONS = {
       "These trusted browser origins can access local drives through this companion. Removing one forces that origin to request approval again.",
     pairedBrowsersEmpty: "No browser origins are currently trusted by this companion.",
     directoryPolicy: {
-      title: "Directory-Index Policy",
+      title: "Managed Settings",
       loading: "Directory policy status is loading.",
       unavailable: "Directory policy is unavailable. Wait briefly and refresh its status, or restart the companion.",
-      resetFailed: "Policy owner could not be reset. Check private configuration storage and retry.",
-      active: "Approved backend policy is active.",
-      defaults: "Local default policy is active. No backend owner is approved.",
-      owner: "Approved Owner",
+      active: "The paired server manages Companion settings. Pair another server to change authority.",
+      defaults:
+        "No settings authority is selected. Defaults or the last valid settings remain active. Pair the intended server to select it.",
+      owner: "Settings Authority",
       revision: "Effective Revision",
       refresh: "Refresh Policy Status",
-      reset: "Reset Policy Owner",
-      resetTitle: "Reset Directory-Index Policy Owner?",
-      resetBody:
-        "Remove the approved backend owner and restore local policy defaults? Existing directory indexes are retained. Another backend will need local approval.",
-      resetting: "Resetting Policy Owner",
-      confirmReset: "Reset Owner",
     },
     localizationStatusHint: "Shows the last localization synchronized from a trusted Sambee browser origin.",
     localizationStatus: {

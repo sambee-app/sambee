@@ -20,7 +20,7 @@ Sambee has two built-in themes (`sambee-light` and `sambee-dark`), user-owned th
 | `frontend/src/components/Settings/ThemeEditorDialog.tsx` | Responsive theme editor |
 | `backend/app/api/themes.py` | Validated theme operations and site default |
 
-Each editable theme has its own server row with a globally unique ID, scope, owner (for user themes), and version. Built-in definitions remain in frontend code. A new theme ID is assigned by the server; an ID in an imported file does not claim or replace a stored theme.
+Each editable theme has its own server row with a globally unique ID, scope, owner (for user themes), and version. Full built-in palettes remain in frontend code. The built-in `id`, `mode`, and `primary.main` fields live in `shared/companion-themes.json` and are reused by the backend and frontend. A new theme ID is assigned by the server; an ID in an imported file does not claim or replace a stored theme.
 
 Colors use `#RRGGBB` or `#RRGGBBAA`; the server normalizes valid hex to uppercase. The role catalog includes primary, backgrounds, text, selection, links, viewer surfaces, Markdown document surfaces, syntax, search highlights, and alerts. File-type icons aren't theme roles. Derived colors such as scrollbar shades, focus rings, and `background.paper` compatibility aren't editor fields. Keyboard focus rings follow the theme's primary text color: 57% opacity in light mode and 94% in dark mode. Changing that text color changes the focus color too, including in copied themes; legacy saved focus colors are ignored. Choose primary text that remains readable against the theme's surfaces.
 
@@ -33,6 +33,10 @@ Every existing editable role remains required. The additive `components.syntax` 
 A user without an override follows the site default (initially `sambee-light`). A user who explicitly chooses `sambee-light` keeps that ID even if an administrator changes the site default. The selected ID points at a theme definition, never at a frozen copy of a built-in. The provider refreshes shared themes, the default, and user settings on initial load, tab focus, visibility return, and local writes. It discards out-of-date responses when the account changes.
 
 Appearance settings display Your themes, Site themes, then Built-in themes. Clicking a tile or selecting its radio applies the theme and creates an explicit user override, even when it already matches the site default. Moving focus between radios doesn't change the applied theme or the target of Copy, Edit, Delete, and Set as default. The Default chip is distinct from the selected radio. Copy keeps writable themes in their group and copies read-only themes into Your themes without applying the copy. Editing read-only themes permits inspection and Save copy, but not Save. Only an administrator can save or delete site themes or make a built-in or site theme the default.
+
+## Companion Theme Delivery
+
+Companion follows the active user's resolved theme on the authoritative paired server through [Shared Settings Delivery](../../companion-architecture/browser-to-companion-trust-model/#shared-settings-delivery). The backend resolves built-in and stored themes and the site default. It hashes the small Companion payload independently of directory policy. Persisted theme changes trigger synchronization; unchanged digests are no-ops. Native `ThemeState` broadcasts to existing windows and supplies the current theme to new windows. Routine paired delivery must not use a theme in a deep-link URI; that path is only a bootstrap fallback and cannot replace managed settings.
 
 ## Editing And Persistence
 

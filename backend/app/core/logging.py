@@ -128,6 +128,8 @@ class RecoveryLogFormatter(logging.Formatter):
         "duration_ms",
         "retry_seconds",
         "retry_after_ms",
+        "invalidation_reason",
+        "stale_turns",
         "retained_worker_count",
         "error_type",
         "errno",

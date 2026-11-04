@@ -24,8 +24,8 @@ vi.mock("../components/AppUpdatePrompt", () => ({
   default: () => null,
 }));
 
-vi.mock("../i18n/CompanionLocalizationSync", () => ({
-  CompanionLocalizationSync: () => null,
+vi.mock("../i18n/CompanionSettingsSync", () => ({
+  CompanionSettingsSync: () => null,
 }));
 
 vi.mock("../pages/Login", () => ({

@@ -172,8 +172,9 @@ export async function setLocale(language: string): Promise<void> {
 }
 
 export async function applyCompanionLocalization(state: CompanionLocalizationState): Promise<void> {
-  updateRegionalLocale(state.regional_locale);
-  await setLocale(state.language);
+  const systemLocale = typeof navigator === "undefined" ? DEFAULT_LANGUAGE : navigator.language;
+  updateRegionalLocale(state.regional_locale === "browser" ? systemLocale : state.regional_locale);
+  await setLocale(state.language === "browser" ? systemLocale : state.language);
 }
 
 export default i18n;

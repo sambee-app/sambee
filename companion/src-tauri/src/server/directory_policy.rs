@@ -10,13 +10,16 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use super::directory_manager::{DirectoryPolicy, LocalDirectoryManager, MAX_WIRE_INTEGER};
 use super::errors::ApiError;
 
+mod settings;
+pub use settings::{CompanionSettingsStatus, SettingsGrantDelivery};
+
 const POLICY_VERSION: u32 = 1;
 const CHALLENGE_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(test)]
 const APPROVAL_COOLDOWN: Duration = Duration::from_secs(5);
 const REDEMPTION_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE_BYTES: usize = 16_384;
@@ -122,6 +125,8 @@ struct PersistedPolicy {
     version: u32,
     companion_id: uuid::Uuid,
     approved: Option<PolicyReceipt>,
+    #[serde(default)]
+    managed: settings::ManagedSettings,
 }
 
 struct PendingChallenge {
@@ -134,11 +139,14 @@ struct PendingChallenge {
 struct PolicyState {
     stored: PersistedPolicy,
     pending: Option<PendingChallenge>,
+    #[cfg(test)]
     last_requested: Option<Instant>,
+    #[cfg(test)]
     prompt_active: bool,
     status: &'static str,
     message: Option<String>,
     blocked: bool,
+    failed_sections: std::collections::BTreeMap<&'static str, String>,
 }
 
 #[derive(Serialize)]
@@ -157,6 +165,7 @@ pub struct DirectoryPolicyStatus {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg(test)]
 pub struct PolicyGrantDelivery {
     pub grant: String,
 }
@@ -166,13 +175,17 @@ pub struct DirectoryPolicyState {
     _lease: std::fs::File,
     state: Mutex<PolicyState>,
     manager: Weak<LocalDirectoryManager>,
+    redemption: tokio::sync::Mutex<()>,
+    settings_pending: Mutex<Option<(String, String, u64, Instant)>>,
 }
 
+#[cfg(test)]
 struct PolicyRedemptionOwnership {
     policy: Arc<DirectoryPolicyState>,
     challenge: String,
 }
 
+#[cfg(test)]
 impl Drop for PolicyRedemptionOwnership {
     fn drop(&mut self) {
         if let Ok(mut state) = self.policy.state.lock() {
@@ -337,14 +350,14 @@ fn load(path: &Path) -> Result<PersistedPolicy, ApiError> {
         .map_err(|_| failure("Approved policy cannot be read."))?;
     if bytes.len() as u64 > MAX_POLICY_FILE_BYTES {
         return Err(failure(
-            "Approved policy storage exceeds its limit. Reset the owner in native preferences.",
+            "Settings storage exceeds its limit. Restore private settings storage and restart Companion.",
         ));
     }
     let stored: PersistedPolicy = serde_json::from_slice(&bytes)
-        .map_err(|_| failure("Approved policy storage is invalid. Reset the owner in native preferences."))?;
+        .map_err(|_| failure("Settings storage is invalid. Restore private settings storage and restart Companion."))?;
     if stored.version != POLICY_VERSION {
         return Err(failure(
-            "Approved policy storage version is unsupported. Reset the owner in native preferences.",
+            "Settings storage version is unsupported. Update Companion or restore a compatible settings file.",
         ));
     }
     if let Some(receipt) = &stored.approved {
@@ -358,14 +371,15 @@ fn load(path: &Path) -> Result<PersistedPolicy, ApiError> {
             || !receipt.challenge.bytes().all(|byte| byte.is_ascii_hexdigit())
         {
             return Err(failure(
-                "Approved policy binding is invalid. Reset the owner in native preferences.",
+                "Saved policy binding is invalid. Restore private settings storage and restart Companion.",
             ));
         }
         receipt
             .policy
             .validate()
-            .map_err(|_| failure("Approved policy values are invalid. Reset the owner in native preferences."))?;
+            .map_err(|_| failure("Saved policy values are invalid. Restore private settings storage and restart Companion."))?;
     }
+    stored.managed.validate()?;
     Ok(stored)
 }
 
@@ -406,6 +420,7 @@ impl DirectoryPolicyState {
             version: POLICY_VERSION,
             companion_id: uuid::Uuid::new_v4(),
             approved: None,
+            managed: settings::ManagedSettings::default(),
         };
         let (stored, blocked) = if path.try_exists().map_err(|_| failure("Approved policy cannot be checked."))? {
             match load(&path) {
@@ -417,17 +432,30 @@ impl DirectoryPolicyState {
             save(&directory, &stored)?;
             (stored, false)
         };
-        if let Some(receipt) = &stored.approved {
-            manager
-                .apply_policy(receipt.policy.clone())
-                .map_err(|_| failure("Approved policy cannot be applied. Restart the companion."))?;
+        let effective = stored
+            .managed
+            .directory_index
+            .as_ref()
+            .map(|section| &section.section.payload)
+            .or_else(|| stored.approved.as_ref().map(|receipt| &receipt.policy));
+        let policy_error = effective.and_then(|policy| manager.apply_policy(policy.clone()).err());
+        let mut failed_sections = std::collections::BTreeMap::new();
+        if policy_error.is_some() {
+            failed_sections.insert(
+                "directory_index",
+                "Saved directory settings could not be applied. Check local storage and restart Companion.".to_owned(),
+            );
         }
         Ok(Arc::new(Self {
             directory,
             _lease: lease,
             manager: Arc::downgrade(manager),
+            redemption: tokio::sync::Mutex::new(()),
+            settings_pending: Mutex::new(None),
             state: Mutex::new(PolicyState {
-                status: if blocked {
+                status: if policy_error.is_some() {
+                    "settings_failed"
+                } else if blocked {
                     "failed"
                 } else if stored.approved.is_some() {
                     "applied"
@@ -436,12 +464,17 @@ impl DirectoryPolicyState {
                 },
                 stored,
                 pending: None,
+                #[cfg(test)]
                 last_requested: None,
+                #[cfg(test)]
                 prompt_active: false,
-                message: blocked.then(|| {
-                    "Approved policy storage is invalid. Reset the owner in native preferences before accepting another policy.".to_owned()
-                }),
+                message: if blocked {
+                    Some("Settings storage is invalid. Restore private settings storage and restart Companion.".to_owned())
+                } else {
+                    failed_sections.get("directory_index").cloned()
+                },
                 blocked,
+                failed_sections,
             }),
         }))
     }
@@ -476,6 +509,7 @@ impl DirectoryPolicyState {
         })
     }
 
+    #[cfg(test)]
     fn create_challenge(&self, origin: &str) -> Result<bool, ApiError> {
         validate_origin(origin)?;
         let mut state = self.available_state()?;
@@ -518,45 +552,7 @@ impl DirectoryPolicyState {
         Ok(!approved)
     }
 
-    pub fn challenge(self: &Arc<Self>, origin: &str, app: &AppHandle) -> Result<DirectoryPolicyStatus, ApiError> {
-        if self.create_challenge(origin)? {
-            let weak = Arc::downgrade(self);
-            let challenge = self
-                .status(Some(origin))?
-                .challenge
-                .ok_or_else(|| failure("Policy challenge is unavailable."))?;
-            self.state
-                .lock()
-                .map_err(|_| failure("Policy owner state is unavailable."))?
-                .prompt_active = true;
-            app.dialog()
-                .message(format!(
-                    "Allow {origin} to manage directory-index resource settings on this computer? Choose No to keep the current policy."
-                ))
-                .title("Directory-Index Policy Owner")
-                .buttons(MessageDialogButtons::YesNo)
-                .show(move |approved| {
-                    if let Some(policy) = weak.upgrade() {
-                        if let Ok(mut state) = policy.state.lock() {
-                            state.prompt_active = false;
-                            if let Some(pending) = state.pending.as_mut() {
-                                if pending.value == challenge && pending.created.elapsed() < CHALLENGE_TIMEOUT {
-                                    if approved {
-                                        pending.approved = true;
-                                        state.status = "pending_delivery";
-                                    } else {
-                                        state.pending = None;
-                                        state.status = "denied";
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
-        }
-        self.status(Some(origin))
-    }
-
+    #[cfg(test)]
     async fn fetch_receipt(origin: &str, companion_id: uuid::Uuid, challenge: &str, grant: &str) -> Result<PolicyReceipt, ApiError> {
         let parsed = validate_origin(origin)?;
         let mut builder = reqwest::Client::builder()
@@ -609,10 +605,8 @@ impl DirectoryPolicyState {
             if save(&self.directory, &state.stored).is_err() {
                 state.blocked = true;
                 state.status = "failed";
-                state.message = Some(
-                    "Policy storage could not be restored. Correct configuration storage, then reset the owner in native preferences."
-                        .to_owned(),
-                );
+                state.message =
+                    Some("Settings storage could not be restored. Restore private settings storage and restart Companion.".to_owned());
             }
             return Err(super::directory_index::IndexError::Invalid(
                 "Approved directory policy cannot be stored durably. Correct configuration storage and retry.",
@@ -621,6 +615,7 @@ impl DirectoryPolicyState {
         Ok(())
     }
 
+    #[cfg(test)]
     fn select_receipt(&self, receipt: PolicyReceipt) -> Result<(), ApiError> {
         let mut state = self.state.lock().map_err(|_| failure("Policy owner state is unavailable."))?;
         let pending = state
@@ -661,6 +656,7 @@ impl DirectoryPolicyState {
             version: POLICY_VERSION,
             companion_id: state.stored.companion_id,
             approved: Some(receipt.clone()),
+            managed: state.stored.managed.clone(),
         };
         let manager = self
             .manager
@@ -676,6 +672,7 @@ impl DirectoryPolicyState {
         Ok(())
     }
 
+    #[cfg(test)]
     pub async fn redeem(self: &Arc<Self>, origin: &str, delivery: PolicyGrantDelivery) -> Result<DirectoryPolicyStatus, ApiError> {
         if delivery.grant.is_empty() || delivery.grant.len() > MAX_GRANT_BYTES {
             return Err(failure("Policy grant size is invalid. Request a new grant."));
@@ -732,6 +729,7 @@ impl DirectoryPolicyState {
         .map_err(|_| failure("Policy redemption worker failed. Restart the companion."))?
     }
 
+    #[cfg(test)]
     fn reset(&self) -> Result<(), ApiError> {
         let mut state = self.state.lock().map_err(|_| failure("Policy owner state is unavailable."))?;
         let manager = self
@@ -743,6 +741,7 @@ impl DirectoryPolicyState {
             version: POLICY_VERSION,
             companion_id: state.stored.companion_id,
             approved: None,
+            managed: settings::ManagedSettings::default(),
         };
         manager
             .apply_policy_with_persistence(defaults, || self.persist_with_recovery(&mut state, &stored))
@@ -757,26 +756,12 @@ impl DirectoryPolicyState {
 }
 
 #[tauri::command]
-pub fn get_native_directory_policy_status(app: AppHandle) -> Result<DirectoryPolicyStatus, String> {
+pub fn get_native_directory_policy_status(app: AppHandle) -> Result<CompanionSettingsStatus, String> {
+    let pairing = app.state::<Arc<super::pairing::PairingState>>();
     app.try_state::<Arc<DirectoryPolicyState>>()
         .ok_or_else(|| "Directory policy is not ready. Wait briefly and retry.".to_owned())?
-        .status(None)
+        .settings_status(None, &pairing)
         .map_err(|_| "Directory policy state is unavailable. Restart the companion.".to_owned())
-}
-
-#[tauri::command]
-pub async fn reset_native_directory_policy_owner(window: tauri::WebviewWindow, app: AppHandle) -> Result<(), String> {
-    if window.label() != crate::MAIN_WINDOW_LABEL {
-        return Err("Policy owner reset is available only in native preferences.".to_owned());
-    }
-    let managed = app
-        .try_state::<Arc<DirectoryPolicyState>>()
-        .ok_or_else(|| "Directory policy is not ready. Wait briefly and retry.".to_owned())?;
-    let policy = Arc::clone(managed.inner());
-    tokio::task::spawn_blocking(move || policy.reset())
-        .await
-        .map_err(|_| "Policy owner reset worker failed. Restart the companion.".to_owned())?
-        .map_err(|_| "Policy owner could not be reset. Check private configuration storage.".to_owned())
 }
 
 #[cfg(test)]
@@ -815,7 +800,7 @@ mod tests {
         let state = policy.state.lock().unwrap();
         assert!(state.blocked);
         assert!(state.stored.approved.is_none());
-        assert!(state.message.as_deref().unwrap().contains("Correct configuration storage"));
+        assert!(state.message.as_deref().unwrap().contains("Restore private settings storage"));
     }
 
     #[tokio::test]
@@ -827,6 +812,7 @@ mod tests {
         let stored = PersistedPolicy {
             version: POLICY_VERSION,
             companion_id: policy.status(None).unwrap().companion_id,
+            managed: settings::ManagedSettings::default(),
             approved: Some(PolicyReceipt {
                 version: POLICY_VERSION,
                 companion_id: policy.status(None).unwrap().companion_id,
@@ -1035,6 +1021,7 @@ mod tests {
                 version: POLICY_VERSION,
                 companion_id,
                 approved: Some(receipt),
+                managed: settings::ManagedSettings::default(),
             },
         )
         .unwrap();

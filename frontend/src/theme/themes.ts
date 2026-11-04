@@ -1,3 +1,4 @@
+import companionThemes from "../../../shared/companion-themes.json";
 import type { ThemeConfig } from "./types";
 
 //
@@ -10,12 +11,12 @@ import type { ThemeConfig } from "./types";
 export const builtInThemes: ThemeConfig[] = [
   // Sambee default light theme
   {
-    id: "sambee-light",
+    id: companionThemes["sambee-light"].id,
     name: "Sambee light",
     description: "Application default light theme",
-    mode: "light",
+    mode: companionThemes["sambee-light"].mode as "light",
     primary: {
-      main: "#F4C430", // Golden yellow
+      main: companionThemes["sambee-light"].primary.main,
       light: "#F6E58D",
       dark: "#D4A020",
       contrastText: "#1F262B", // Dark text for contrast
@@ -110,12 +111,12 @@ export const builtInThemes: ThemeConfig[] = [
   },
   // Sambee default dark theme
   {
-    id: "sambee-dark",
+    id: companionThemes["sambee-dark"].id,
     name: "Sambee dark",
     description: "Application default dark theme",
-    mode: "dark",
+    mode: companionThemes["sambee-dark"].mode as "dark",
     primary: {
-      main: "#D4A020", // Muted golden yellow for default dark-mode controls
+      main: companionThemes["sambee-dark"].primary.main,
       light: "#F4C430", // Brighter hover and high-emphasis shade
       dark: "#B8860B", // Pressed and low-emphasis shade
       contrastText: "#1F262B",
