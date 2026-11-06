@@ -208,6 +208,7 @@ export const EN_TRANSLATIONS = {
         synchronizing: "Synchronizing",
         update_required: "Update required",
         authority_conflict: "Different settings authority",
+        pairing_required: "Pairing required",
         delivery_failed: "Delivery failed; last valid settings active",
       },
       defaults_active: "Built-in defaults are active until settings arrive from a paired server.",
@@ -215,6 +216,8 @@ export const EN_TRANSLATIONS = {
       synchronizing: "Settings are synchronizing. The last valid settings remain active.",
       update_required: "Update Sambee and Companion to use shared settings delivery.",
       authority_conflict: "This server does not manage Companion settings. Pair the intended server again to change authority.",
+      pairing_required:
+        "Companion could not authenticate this browser. Pair this browser in Settings > Local Drives, or pair it again to repair the connection. Settings checks are paused until you retry or pair successfully.",
       delivery_failed:
         "Settings delivery failed. Check the connection and retry. The last valid settings and directory search remain available.",
       authority: "Settings authority: {{origin}}",

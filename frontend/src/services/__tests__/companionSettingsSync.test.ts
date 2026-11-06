@@ -11,9 +11,11 @@ const mocks = vi.hoisted(() => ({
   identity: null as null | (() => void),
   clear: null as null | (() => void),
   authenticated: true,
+  hasSecret: true,
 }));
 vi.mock("../api", () => ({ default: { getCompanionSettingsMetadata: mocks.metadata, issueCompanionSettingsGrant: mocks.grant } }));
-vi.mock("../companion", () => ({
+vi.mock("../companion", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../companion")>()),
   default: { getSettingsStatus: mocks.status, requestSettingsChallenge: mocks.challenge, redeemSettingsGrant: mocks.redeem },
 }));
 vi.mock("../authConfig", () => ({ isAuthRequired: async () => true }));
@@ -36,7 +38,7 @@ vi.mock("../authSession", () => ({
     subscribeToBootstrap: () => vi.fn(),
   },
 }));
-vi.mock("../companionSession", () => ({ companionSession: { hasSecret: () => true, subscribe: () => vi.fn() } }));
+vi.mock("../companionSession", () => ({ companionSession: { hasSecret: () => mocks.hasSecret, subscribe: () => vi.fn() } }));
 vi.mock("../logger", () => ({ logger: { initializeBackendTracing: vi.fn().mockResolvedValue(undefined) } }));
 
 import { emitBackendRecoveryConfirmed } from "../backendRecoveryEvents";
@@ -85,6 +87,7 @@ describe("shared Companion settings lifecycle", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     mocks.authenticated = true;
+    mocks.hasSecret = true;
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     mocks.metadata.mockResolvedValue(metadata());
     mocks.status.mockResolvedValue(status());
@@ -104,6 +107,45 @@ describe("shared Companion settings lifecycle", () => {
     await settle();
     expect(mocks.metadata).toHaveBeenCalledOnce();
     expect(mocks.grant).not.toHaveBeenCalled();
+    expect(companionSettingsSync.getSnapshot().phase).toBe("synchronized");
+  });
+
+  it("does not request settings without a stored pairing secret", async () => {
+    mocks.hasSecret = false;
+    companionSettingsSync.start();
+    await settle();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mocks.status).not.toHaveBeenCalled();
+    expect(mocks.metadata).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { code: "companion_auth_signature_mismatch", detail: "Invalid authentication" },
+    { code: "companion_pairing_not_found", detail: "Not paired with this origin" },
+    { detail: "Invalid authentication" },
+    { detail: "Not paired with this origin" },
+  ])("blocks automatic retries after pairing failure: $detail ($code)", async (data) => {
+    mocks.status.mockRejectedValue({ response: { status: 403, data } });
+    companionSettingsSync.start();
+    await settle();
+
+    expect(companionSettingsSync.getSnapshot()).toMatchObject({ phase: "pairing_required", message: null });
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    emitBackendRecoveryConfirmed("pairing-retry-test");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(mocks.status).toHaveBeenCalledOnce();
+    expect(mocks.grant).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+
+    companionSettingsSync.request(false, true);
+    await settle();
+    expect(mocks.status).toHaveBeenCalledTimes(2);
+
+    mocks.status.mockResolvedValue(status());
+    notifyCompanionSettingsChanged(true);
+    await settle();
+    expect(mocks.status).toHaveBeenCalledTimes(3);
     expect(companionSettingsSync.getSnapshot().phase).toBe("synchronized");
   });
 

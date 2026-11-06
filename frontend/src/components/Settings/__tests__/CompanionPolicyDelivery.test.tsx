@@ -36,6 +36,16 @@ describe("Companion shared synchronization status", () => {
     expect(request).toHaveBeenCalledExactlyOnceWith(false, true);
   });
 
+  it("shows pairing recovery instructions instead of a delivery failure", async () => {
+    snapshot.phase = "pairing_required";
+    render(<CompanionDirectoryStatus isAdmin={false} />);
+    expect(screen.getByText("Theme: Pairing required")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Pair this browser in Settings > Local Drives");
+    expect(screen.queryByText(/Delivery failed/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(request).toHaveBeenCalledExactlyOnceWith(false, true);
+  });
+
   it("disables refresh during delivery and keeps notices inside the surface", () => {
     snapshot.phase = "synchronizing";
     render(<CompanionDirectoryStatus isAdmin={false} />);
@@ -43,16 +53,21 @@ describe("Companion shared synchronization status", () => {
     expect(screen.getByTestId("companion-settings-surface")).toContainElement(screen.getByRole("status"));
   });
 
-  it.each(["defaults_active", "synchronized", "synchronizing", "update_required", "authority_conflict", "delivery_failed"] as const)(
-    "keeps every %s state inside the shared surface",
-    (phase) => {
-      snapshot.phase = phase;
-      snapshot.sections = { theme: phase, localization: "synchronized", directory_index: "defaults_active" };
-      render(<CompanionDirectoryStatus isAdmin={false} />);
-      const surface = screen.getByTestId("companion-settings-surface");
-      expect(surface).toContainElement(screen.getByRole("status"));
-      expect(surface).toHaveTextContent("Localization: Synchronized");
-      expect(surface).toHaveTextContent("Directory search policy: Built-in defaults");
-    }
-  );
+  it.each([
+    "defaults_active",
+    "synchronized",
+    "synchronizing",
+    "update_required",
+    "authority_conflict",
+    "pairing_required",
+    "delivery_failed",
+  ] as const)("keeps every %s state inside the shared surface", (phase) => {
+    snapshot.phase = phase;
+    snapshot.sections = { theme: phase, localization: "synchronized", directory_index: "defaults_active" };
+    render(<CompanionDirectoryStatus isAdmin={false} />);
+    const surface = screen.getByTestId("companion-settings-surface");
+    expect(surface).toContainElement(screen.getByRole("status"));
+    expect(surface).toHaveTextContent("Localization: Synchronized");
+    expect(surface).toHaveTextContent("Directory search policy: Built-in defaults");
+  });
 });
