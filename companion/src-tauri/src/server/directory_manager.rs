@@ -4845,19 +4845,22 @@ mod tests {
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
             manager.verification_watcher_loss("verification", false).unwrap();
+            let source = lock(&manager.sources).unwrap().get("verification").unwrap().clone();
+            source.flush(&manager.budget).unwrap();
             let retained = search().await.unwrap();
             assert_eq!(retained.monitoring_state.as_deref(), Some("unavailable"));
+            assert_eq!(retained.coverage.as_deref(), Some("uncertain"));
             assert!(retained.results.contains(&"retained-reports".into()));
             std::fs::create_dir(root.join("gap-reports")).unwrap();
             manager.verification_watcher_loss("verification", true).unwrap();
             {
-                let source = lock(&manager.sources).unwrap().get("verification").unwrap().clone();
                 *lock(&source.next_full_pass).unwrap() = Some(Instant::now());
             }
             loop {
                 let response = search().await.unwrap();
                 if response.monitoring_state.as_deref() == Some("healthy") && response.coverage.as_deref() == Some("complete") {
                     assert!(response.results.contains(&"gap-reports".into()));
+                    assert!(response.results.contains(&"retained-reports".into()));
                     break;
                 }
                 tokio::time::sleep(POLL_INTERVAL).await;
@@ -4866,7 +4869,7 @@ mod tests {
             loop {
                 let response = search().await.unwrap();
                 if response.monitoring_state.as_deref() == Some("healthy") && response.results.contains(&"native-reports".into()) {
-                    assert_eq!(response.coverage.as_deref(), Some("uncertain"));
+                    assert_eq!(response.coverage.as_deref(), Some("complete"));
                     break;
                 }
                 tokio::time::sleep(POLL_INTERVAL).await;
