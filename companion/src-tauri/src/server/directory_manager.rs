@@ -5442,8 +5442,9 @@ mod tests {
             std::fs::create_dir_all(root.join("target")).unwrap();
             let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
             let source = LocalSource::new(root.clone(), manager.storage_directory());
+            lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
             source.scan(&manager.budget).unwrap();
-            lock(&source.watcher).unwrap().take();
+            assert!(lock(&source.watcher).unwrap().is_none());
             lock(&source.status).unwrap().retry_at = Instant::now() + FAILURE_RETRY_MAX;
             lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
             let task_manager = Arc::clone(&manager);
