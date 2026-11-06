@@ -41,7 +41,7 @@ import {
 } from "@mui/material";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type React from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { usePillButtonMenu } from "../../hooks/usePillButtonMenu";
@@ -1069,14 +1069,17 @@ export function UnifiedSearchBar({
     }
   }, [disableDropdown, executeSearch, getEffectiveMinQueryLength, query, refreshToken, suppressDropdown]);
 
+  const resumeFocusedSearch = useEffectEvent(() => {
+    if (document.activeElement === effectiveInputRef.current && query.length >= getEffectiveMinQueryLength(query)) {
+      void executeSearch(query);
+    }
+  });
+
   useEffect(() => {
-    if (disableDropdown || suppressDropdown) {
-      return;
+    if (!disableDropdown && !suppressDropdown && provider.minQueryLength === 0) {
+      resumeFocusedSearch();
     }
-    if (document.activeElement === effectiveInputRef.current && provider.minQueryLength === 0) {
-      void executeSearch("");
-    }
-  }, [disableDropdown, effectiveInputRef, executeSearch, provider.minQueryLength, suppressDropdown]);
+  }, [disableDropdown, provider.minQueryLength, suppressDropdown]);
 
   useEffect(() => {
     if (isModeMenuOpen && isDropdownOpen) {

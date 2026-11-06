@@ -1024,6 +1024,44 @@ describe("UnifiedSearchBar", () => {
     expect(fetchResults.mock.calls[0]?.[1]?.aborted).toBe(false);
   });
 
+  it.each(["suppressDropdown", "disableDropdown"] as const)("preserves the query when %s is cleared", async (prop) => {
+    const user = userEvent.setup();
+    const fetchResults = vi.fn<SearchProvider["fetchResults"]>(async (query) => [
+      {
+        kind: "result",
+        id: query || "all-commands",
+        value: query || "all-commands",
+        icon: "command",
+        primaryText: query || "All commands",
+      },
+    ]);
+    const provider = { ...commandsProvider, fetchResults };
+    const { rerender } = renderWithProvider(<UnifiedSearchBar provider={provider} />);
+
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "rename");
+    expect(await screen.findByRole("option", { name: "rename" })).toBeInTheDocument();
+
+    rerender(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={provider} {...{ [prop]: true }} />
+      </SambeeThemeProvider>
+    );
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    fetchResults.mockClear();
+
+    rerender(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={provider} {...{ [prop]: false }} />
+      </SambeeThemeProvider>
+    );
+
+    expect(await screen.findByRole("option", { name: "rename" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("rename");
+    expect(fetchResults).toHaveBeenCalledTimes(1);
+    expect(fetchResults.mock.calls[0]?.[0]).toBe("rename");
+  });
+
   it("reopens the commands dropdown when the same mode is reactivated from outside the quick bar", async () => {
     const user = userEvent.setup();
 
