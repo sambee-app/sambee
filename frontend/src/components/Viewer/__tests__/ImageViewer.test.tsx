@@ -249,7 +249,9 @@ describe("ImageViewer", () => {
       const { rerender } = await render(viewer);
       fireEvent.click(screen.getByRole("button", { name: "Share" }));
       await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
-      expect(await readBlobAsText(share.mock.calls[0]?.[0]?.files[0])).toBe("displayed original JPEG");
+      await act(async () => {
+        expect(await readBlobAsText(share.mock.calls[0]?.[0]?.files[0])).toBe("displayed original JPEG");
+      });
       for (const phase of ["fetching", "error"] as const) {
         gallery.currentImageLoadPhase = phase;
         rerender(
@@ -274,7 +276,9 @@ describe("ImageViewer", () => {
       const details = await screen.findByRole("button", { name: "Details" });
       const attachment = share.mock.calls[1]?.[0]?.files[0];
       expect(attachment).toMatchObject({ name: "photo.png", type: "image/png" });
-      expect(await readBlobAsText(attachment)).toBe("replacement resized PNG");
+      await act(async () => {
+        expect(await readBlobAsText(attachment)).toBe("replacement resized PNG");
+      });
       fireEvent.click(details);
       await screen.findByText(/"reason": "NotAllowedError"/);
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
