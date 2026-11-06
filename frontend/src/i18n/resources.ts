@@ -1012,8 +1012,6 @@ export const EN_TRANSLATIONS = {
       deleteItem: "Delete file or directory",
       extractArchive: "Extract ZIP archive",
       fileSearch: "Search recent and current-directory files",
-      focusLeftPane: "Focus left pane",
-      focusRightPane: "Focus right pane",
       moveToOtherPane: "Move to other pane",
       moveToOtherPaneInDualPane: "Move to other pane (two-pane mode)",
       navigateDown: "Navigate down",

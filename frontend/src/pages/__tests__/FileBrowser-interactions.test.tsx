@@ -950,6 +950,31 @@ describe("Browser Component - Interactions", () => {
   });
 
   describe("Refresh", () => {
+    it.each([
+      ["single", "left", "/browse/smb/test-server-1"],
+      ["dual", "left", "/browse/smb/test-server-1?p2=smb/test-server-2/Documents"],
+      ["dual", "right", "/browse/smb/test-server-1?p2=smb/test-server-2/Documents"],
+    ] as const)("leaves browser tab shortcuts unchanged in %s mode with %s focus", async (mode, paneId, route) => {
+      const { container } = await renderBrowserAndFlush(route);
+      const list = requireTestValue(container.querySelector<HTMLElement>(`[data-pane-id="${paneId}"] [data-testid="file-list-container"]`));
+      await act(async () => list.focus());
+      const activePane = localStorage.getItem("active-pane");
+      const settingsCalls = vi.mocked(api.updateCurrentUserSettings).mock.calls.length;
+
+      for (const modifier of ["ctrlKey", "metaKey"] as const) {
+        for (const key of ["1", "2"]) {
+          const event = createEvent.keyDown(list, { key, [modifier]: true, bubbles: true, cancelable: true });
+          fireEvent(list, event);
+
+          expect(event.defaultPrevented).toBe(false);
+          expect(list).toHaveFocus();
+          expect(localStorage.getItem("active-pane")).toBe(activePane);
+          expect(screen.getAllByTestId("file-list-container")).toHaveLength(mode === "dual" ? 2 : 1);
+        }
+      }
+      expect(api.updateCurrentUserSettings).toHaveBeenCalledTimes(settingsCalls);
+    });
+
     it("refreshes file list when Ctrl+R pressed", async () => {
       const user = userEvent.setup();
       await renderBrowserAndFlush("/browse/smb/test-server-1");
@@ -3291,11 +3316,10 @@ describe("Browser Component - Interactions", () => {
       // Press ? to open shortcuts dialog
       await user.keyboard("?");
 
-      // The shortcuts dialog should appear
-      await waitFor(() => {
-        // Dialog may or may not be implemented, so we just verify no crash
-        expect(true).toBe(true);
-      });
+      const dialog = await screen.findByRole("dialog", { name: "File browser shortcuts" });
+      expect(within(dialog).queryByText("Ctrl+1")).not.toBeInTheDocument();
+      expect(within(dialog).queryByText("Ctrl+2")).not.toBeInTheDocument();
+      expect(within(dialog).getByText("Ctrl+B")).toBeInTheDocument();
     });
 
     it("closes the commands dropdown after selecting Show Keyboard Shortcuts", async () => {

@@ -112,6 +112,21 @@ describe("browserCommands", () => {
     expect(context[handler]).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["browser.focusLeftPane", "focusLeftPane"],
+    ["browser.focusRightPane", "focusRightPane"],
+  ] as const)("keeps %s available without a keyboard shortcut", (id, handler) => {
+    const context = createContext();
+    context[handler] = vi.fn();
+    const command = getEnabledBrowserCommands(context).find((candidate) => candidate.id === id);
+
+    expect(command).toBeDefined();
+    expect(command?.defaultShortcutIds).toBeUndefined();
+    expect(command?.shortcutLabel).toBeUndefined();
+    command?.run(context);
+    expect(context[handler]).toHaveBeenCalledOnce();
+  });
+
   it("omits location commands when their location is unavailable", () => {
     const context = createContext();
     context.canOpenLocationInNewTab = false;

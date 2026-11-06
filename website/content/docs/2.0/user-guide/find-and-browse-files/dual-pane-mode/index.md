@@ -10,11 +10,7 @@ To switch between single-pane and dual-pane mode:
 
 - Press <kbd>Ctrl</kbd> + <kbd>B</kbd> to switch from single-pane to dual-pane mode and back.
 
-To move focus between the left and right panes:
-
-- Use <kbd>Tab</kbd> to move the input focus between the left and right pane.
-- Press <kbd>Ctrl</kbd> + <kbd>1</kbd> to focus the left pane.
-- Press <kbd>Ctrl</kbd> + <kbd>2</kbd> to focus the right pane.
+Use <kbd>Tab</kbd> to move focus between the panes. To focus a specific pane, use **Focus Left Pane** or **Focus Right Pane** in command search (<kbd>Ctrl</kbd> + <kbd>P</kbd>). **Focus Right Pane** also opens dual-pane mode if only one pane is visible.
 
 ## Match Pane Locations
 

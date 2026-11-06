@@ -43,7 +43,6 @@ These shortcuts matter most when you are working keyboard-first across one or tw
 | <kbd>Shift</kbd> + <kbd>Up</kbd> / <kbd>Shift</kbd> + <kbd>Down</kbd> | Extend selection upward or downward |
 | <kbd>Ctrl</kbd> + <kbd>A</kbd> | Select all items in the current list |
 | <kbd>Ctrl</kbd> + <kbd>B</kbd> | Toggle dual-pane mode |
-| <kbd>Ctrl</kbd> + <kbd>1</kbd> / <kbd>Ctrl</kbd> + <kbd>2</kbd> | Focus the left or right pane |
 | <kbd>Tab</kbd> | Move focus to the other pane |
 | <kbd>Ctrl</kbd> + <kbd>Left</kbd> | Set the left pane to the right pane's connection and directory |
 | <kbd>Ctrl</kbd> + <kbd>Right</kbd> | Set the right pane to the left pane's connection and directory |
