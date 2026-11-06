@@ -170,8 +170,7 @@ export function useFileSearchProvider({
         );
       };
       const availableResponse: RecentFileSearchResponse = { results: [], result_limit: resultLimit };
-      const availableResults = mergeResults(availableResponse);
-      onUpdate?.(availableResults);
+      if (terms.length > 0) onUpdate?.(mergeResults(availableResponse));
       try {
         const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
         if (!isCurrent()) return [];
@@ -179,7 +178,7 @@ export function useFileSearchProvider({
       } catch {
         if (!isCurrent()) return [];
         setHistoryUnavailable(true);
-        return availableResults;
+        return mergeResults(availableResponse);
       }
     },
     [connectionId, connectionName, currentPath, files, getConnectionName, history, resultLimit, t]

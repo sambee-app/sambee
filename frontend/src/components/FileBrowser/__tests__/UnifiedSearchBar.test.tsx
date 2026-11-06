@@ -1040,6 +1040,38 @@ describe("UnifiedSearchBar", () => {
     expect(searchRecentFiles).toHaveBeenCalledTimes(1);
   });
 
+  it("waits for file history before opening the initial file-search menu", async () => {
+    const user = userEvent.setup();
+    let releaseHistory = () => {};
+    vi.spyOn(browserHistoryService, "searchRecentFiles").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseHistory = () => resolve({ results: [], result_limit: 50 });
+        })
+    );
+    const files = [{ name: "report.txt", type: FileType.FILE }] as FileEntry[];
+    function SearchHarness() {
+      const provider = useFileSearchProvider({
+        connectionId: "connection-1",
+        currentPath: "",
+        files,
+        connectionName: "Demo",
+        resultLimit: 50,
+        getConnectionName: () => "Demo",
+        onOpenCurrentFile: vi.fn(),
+        onOpenRecentFile: vi.fn(),
+      });
+      return <UnifiedSearchBar provider={provider} />;
+    }
+    renderWithProvider(<SearchHarness />);
+
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+    await act(async () => releaseHistory());
+    expect(await screen.findByRole("option", { name: /report.txt/ })).toBeInTheDocument();
+  });
+
   it("starts one search when shortcut activation is followed by input focus", async () => {
     const fetchResults = vi.fn<SearchProvider["fetchResults"]>(() => new Promise<[]>(() => {}));
     const onActivate = vi.fn();
