@@ -2331,7 +2331,7 @@ const Browser: React.FC = () => {
     setTimeout(() => nextPane.listContainerEl?.focus(), 0);
   }, [isDualMode, leftPane, replaceActivePaneInRoute, rightPane]);
 
-  /** Focus the left pane (Ctrl+1). Opens dual mode from single if Ctrl+2 is used. */
+  /** Focus the left pane. */
   const handleFocusLeftPane = useCallback(() => {
     if (paneMode === "dual") {
       replaceActivePaneInRoute("left");
@@ -2339,7 +2339,7 @@ const Browser: React.FC = () => {
     setTimeout(() => leftPane.listContainerEl?.focus(), 0);
   }, [leftPane, paneMode, replaceActivePaneInRoute]);
 
-  /** Focus the right pane (Ctrl+2). Opens dual mode if currently in single. */
+  /** Focus the right pane. Opens dual mode if currently in single. */
   const handleFocusRightPane = useCallback(() => {
     const leftTarget = getCurrentLeftTarget();
     if (!leftTarget) {
@@ -3639,7 +3639,7 @@ const Browser: React.FC = () => {
    *
    * Defines all browser shortcuts with handlers and enabled conditions.
    * Routes navigation/action shortcuts to the active pane.
-   * Includes dual-pane shortcuts (Ctrl+B, Tab, Ctrl+1, Ctrl+2).
+   * Includes dual-pane shortcuts (Ctrl+B, Tab).
    */
   const browserShortcuts = useMemo<KeyboardShortcut[]>(() => {
     // Common condition building blocks to avoid repetition
@@ -3914,16 +3914,6 @@ const Browser: React.FC = () => {
         enabled: noSettings && !useCompactLayout,
       },
       {
-        ...PANE_SHORTCUTS.FOCUS_LEFT_PANE,
-        handler: handleFocusLeftPane,
-        enabled: noSettings && noDialogOrCopyMove,
-      },
-      {
-        ...PANE_SHORTCUTS.FOCUS_RIGHT_PANE,
-        handler: handleFocusRightPane,
-        enabled: noSettings && noDialogOrCopyMove,
-      },
-      {
         ...PANE_SHORTCUTS.SWITCH_PANE,
         handler: handleSwitchPane,
         enabled: noSettings && isDualMode && noDialogOrCopyMove,
@@ -3957,8 +3947,6 @@ const Browser: React.FC = () => {
     openQuickBarMode,
     handleToggleDualPane,
     handleSwitchPane,
-    handleFocusLeftPane,
-    handleFocusRightPane,
     handleCopyToOtherPane,
     handleMoveToOtherPane,
     handleCreateArchiveRequest,

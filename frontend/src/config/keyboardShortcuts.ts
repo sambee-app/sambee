@@ -802,26 +802,6 @@ export const PANE_SHORTCUTS = {
     ctrl: true,
     allowInInput: true,
   },
-  FOCUS_LEFT_PANE: {
-    id: "focus-left-pane",
-    keys: "1",
-    get description() {
-      return translate("fileBrowser.shortcuts.focusLeftPane");
-    },
-    label: "Ctrl+1",
-    helpGroup: "panes",
-    ctrl: true,
-  },
-  FOCUS_RIGHT_PANE: {
-    id: "focus-right-pane",
-    keys: "2",
-    get description() {
-      return translate("fileBrowser.shortcuts.focusRightPane");
-    },
-    label: "Ctrl+2",
-    helpGroup: "panes",
-    ctrl: true,
-  },
   SWITCH_PANE: {
     id: "switch-pane",
     keys: "Tab",

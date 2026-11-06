@@ -28,6 +28,7 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 
 ### Other Changes
 
+- Sambee no longer uses <kbd>Ctrl+1</kbd> and <kbd>Ctrl+2</kbd> for pane focus so as not to block these shortcuts for browser tab selection.
 - Native mobile sharing is now available for single or multiple files from the file list.
 - Single-file downloads are now streamed directly without buffering in memory. This speeds up downloads and effectively removes limits imposed by file size.
 
