@@ -1,5 +1,5 @@
 pytest==9.2.0
-pytest-asyncio==1.4.1
+pytest-asyncio==1.4.1.post1
 pytest-cov==7.1.0
 pytest-xdist==3.8.0
 jsonschema==4.26.0
