@@ -24,10 +24,19 @@ vi.mock("../../services/api", async (importOriginal) => {
   return { ...actual, exchangeOidcGrant: vi.fn(), setOidcExchangePending: vi.fn(actual.setOidcExchangePending) };
 });
 
+import { clearCurrentBrowserSession } from "../../services/accountSession";
 import api, { exchangeOidcGrant, setOidcExchangePending } from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { logger } from "../../services/logger";
-import { loginPath, loginReturnPath, OIDC_LOGIN_CHANNEL, sanitizeReturnPath } from "../../services/oidcAuth";
+import {
+  loginPath,
+  loginReturnPath,
+  OIDC_ATTEMPT_MARKER,
+  OIDC_LOGIN_CHANNEL,
+  OIDC_LOGOUT_MARKER,
+  OIDC_RETURN_PATH_MARKER,
+  sanitizeReturnPath,
+} from "../../services/oidcAuth";
 import { getConfirmedCurrentUserSetting, resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
 
 describe("OIDC callback", () => {
@@ -271,6 +280,9 @@ describe("OIDC callback", () => {
   });
 
   it.each([
+    "/login",
+    "/login/",
+    "/login?return_path=%2Fbrowse%2Fsmb%2Fdemo",
     "/login/oidc/callback",
     "/login/oidc/callback?grant=expired",
     "https://outside.example/path",
@@ -285,5 +297,18 @@ describe("OIDC callback", () => {
   it("preserves internal return paths and queries", () => {
     expect(sanitizeReturnPath("/browse/folder?view=grid")).toBe("/browse/folder?view=grid");
     expect(loginReturnPath("?return_path=%2Flogin%2Foidc%2Fcallback")).toBe("/browse");
+  });
+
+  it("discards saved destinations on explicit logout and ignores stale login queries", () => {
+    sessionStorage.setItem(OIDC_RETURN_PATH_MARKER, "/settings/account");
+    sessionStorage.setItem(OIDC_ATTEMPT_MARKER, "1");
+
+    clearCurrentBrowserSession();
+
+    expect(sessionStorage.getItem(OIDC_RETURN_PATH_MARKER)).toBeNull();
+    expect(sessionStorage.getItem(OIDC_ATTEMPT_MARKER)).toBeNull();
+    expect(sessionStorage.getItem(OIDC_LOGOUT_MARKER)).toBe("1");
+    expect(loginReturnPath("?return_path=%2Fsettings%2Faccount")).toBe("/browse");
+    expect(loginReturnPath("")).toBe("/browse");
   });
 });

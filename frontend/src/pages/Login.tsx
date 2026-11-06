@@ -57,10 +57,26 @@ const Login: React.FC = () => {
   const signInMode = useRef<AuthConfig["sign_in_mode"] | null>(null);
   const recoveryPromise = useRef<Promise<void> | null>(null);
   const recoveredInAnotherTab = useRef(false);
+  const passwordLoginPending = useRef(false);
   const [passwordChanged] = useState(() => {
     const changed = sessionStorage.getItem(PASSWORD_CHANGED_MARKER) === "1";
     sessionStorage.removeItem(PASSWORD_CHANGED_MARKER);
     return changed;
+  });
+
+  const restoreAuthenticatedSession = useEffectEvent(() => {
+    if (
+      recoveredInAnotherTab.current ||
+      passwordLoginPending.current ||
+      sessionStorage.getItem(OIDC_LOGOUT_MARKER) ||
+      !authSession.hasUsableAccessToken()
+    )
+      return false;
+    recoveredInAnotherTab.current = true;
+    sessionStorage.removeItem(OIDC_ATTEMPT_MARKER);
+    sessionStorage.removeItem(OIDC_RETURN_PATH_MARKER);
+    navigate(returnPath, { replace: true });
+    return true;
   });
 
   useEffect(() => {
@@ -84,11 +100,13 @@ const Login: React.FC = () => {
     const recoverSession = (fromLoginHint: boolean) => {
       if (
         recoveredInAnotherTab.current ||
+        passwordLoginPending.current ||
         signInMode.current === "none" ||
         signInMode.current === "password_only" ||
         sessionStorage.getItem(OIDC_LOGOUT_MARKER)
       )
         return;
+      if (!fromLoginHint && restoreAuthenticatedSession()) return;
       if (recoveryPromise.current && (!fromLoginHint || pendingIsLoginHint)) return;
       pendingIsLoginHint = fromLoginHint;
       const pending = authSession
@@ -115,25 +133,40 @@ const Login: React.FC = () => {
     };
     channel?.addEventListener("message", onMessage);
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const unsubscribe = authSession.subscribeToBootstrap(() => {
+      if (active && signInMode.current !== null && !recoveryPromise.current) restoreAuthenticatedSession();
+    });
     return () => {
       active = false;
+      unsubscribe();
       channel?.removeEventListener("message", onMessage);
       channel?.close();
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
   }, [navigate, returnPath]);
 
   // Check if authentication is required
   useEffect(() => {
+    let active = true;
     const checkAuthConfig = async () => {
       const attempt = configurationAttempt;
       setIsLoading(true);
       setConfigurationUnavailable(false);
       try {
         const config = await getAuthConfig();
+        if (!active) return;
         signInMode.current = config.sign_in_mode;
+        if (
+          (config.sign_in_mode === "oidc_only" || config.sign_in_mode === "oidc_or_password") &&
+          !sessionStorage.getItem(OIDC_LOGOUT_MARKER)
+        )
+          await authSession.bootstrap();
         while (recoveryPromise.current) await recoveryPromise.current;
+        if (!active) return;
         if (recoveredInAnotherTab.current) return;
+        if (restoreAuthenticatedSession()) return;
         if (config.sign_in_mode === "none") {
           logger.info("Auth method is 'none' - redirecting to requested page", { returnPath }, "auth");
           await logger.initializeBackendTracing();
@@ -154,20 +187,25 @@ const Login: React.FC = () => {
           }
         }
       } catch (error) {
+        if (!active) return;
         logger.error("Failed to check auth config", { error, attempt }, "auth");
         setError((current) => current || "Authentication is temporarily unavailable.");
         setConfigurationUnavailable(true);
       } finally {
-        setIsLoading(false);
+        if (active) setIsLoading(false);
       }
     };
 
     checkAuthConfig();
+    return () => {
+      active = false;
+    };
   }, [configurationAttempt, navigate, returnPath]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    passwordLoginPending.current = true;
 
     try {
       const response = await login(username, password);
@@ -175,6 +213,8 @@ const Login: React.FC = () => {
       navigate(authenticatedReturnPath);
     } catch (_err) {
       setError(t("auth.login.invalidCredentials"));
+    } finally {
+      passwordLoginPending.current = false;
     }
   };
 

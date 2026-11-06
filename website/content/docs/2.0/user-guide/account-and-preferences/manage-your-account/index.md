@@ -14,6 +14,10 @@ If an older installation already contains accounts whose usernames differ only b
 
 Select **Sign out** next to **This browser** in **Sessions** to return to the sign-in page. For OIDC, this also revokes the current OIDC browser session. For a password sign-in, Sambee clears the current browser's local access token; password sessions are not stored as server-side browser sessions.
 
+After you sign out, your next sign-in in that tab opens the main file browser. Sambee does not save that tab's previous page for the next sign-in.
+
+If an OIDC session expires or is revoked, signing in again returns affected tabs to their previous pages. Other open tabs recover automatically, or when you bring them into view.
+
 ## Change a Local Password
 
 The **Password** section appears when local password sign-in is configured and your account has a local password. Sambee signs out this browser after a successful password change; sign in again with the new password.
