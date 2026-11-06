@@ -1,6 +1,7 @@
 """SQLite directory catalogues with shared SMB observation and verification workers."""
 
 import asyncio
+import errno
 import hashlib
 import json
 import logging
@@ -9,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Optional, TypeVar
@@ -23,7 +24,7 @@ from smbprotocol.change_notify import (
     FileSystemWatcher,
 )
 from smbprotocol.connection import Connection
-from smbprotocol.exceptions import NotifyEnumDir, SMBOSError, SMBResponseException
+from smbprotocol.exceptions import NotifyEnumDir, SMBException, SMBOSError, SMBResponseException
 from smbprotocol.header import NtStatus
 from smbprotocol.open import (
     CreateDisposition,
@@ -40,19 +41,34 @@ from smbprotocol.session import Session
 from smbprotocol.tree import TreeConnect
 
 from app.core.config import settings, static
-from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, ScanProgress
 from app.models.system_settings import DirectoryIndexPolicy
 from app.services.directory_index import (
+    ITEM_ISSUE_CODES,
     MAX_SIGNED_INTEGER,
     QUERY_WORKERS,
     ROW_BATCH_SIZE,
+    SCAN_BOOKKEEPING_COMMIT_INTERVAL_SECONDS,
+    SCAN_BOOKKEEPING_COMMIT_MAX_PARENTS,
+    SCAN_COMMIT_INTERVAL_SECONDS,
+    SCAN_COMMIT_MAX_PARENTS,
     SQL_BUSY_TIMEOUT_MS,
     DirectoryIndex,
     DirectoryIndexSearch,
     validate_directory_path,
 )
 from app.services.directory_index_resources import DirectoryDiskBudgetError, DirectoryIndexResources
-from app.services.directory_traversal import DirectoryBindingChangedError, DirectoryTraversalError, SmbDirectoryRead, SmbDirectoryRoot
+from app.services.directory_traversal import (
+    SCAN_CREDIT_RESERVE,
+    SCAN_PIPELINE_DEPTH,
+    DirectoryBindingChangedError,
+    DirectoryPipelineTimeout,
+    DirectoryPipelineTransportError,
+    DirectoryTraversalError,
+    SmbCompoundDirectoryReader,
+    SmbDirectoryRead,
+    SmbDirectoryRoot,
+)
 from app.services.system_settings import get_directory_index_policy, get_smbclient_policy_kwargs
 from app.storage.smb_pool import SMBConnectionPool, get_connection_pool, get_smb_connection_cache
 from app.utils.worker_wait import wait_for_worker
@@ -76,7 +92,7 @@ class CacheState(str, Enum):
 
 
 class InvalidationReason(str, Enum):
-    """Diagnostic cause of an epoch change; never used to admit scan work."""
+    """Cause of an epoch change and loss of trustworthy observation."""
 
     WATCHER_START = "watcher_start"
     OBSERVATION_LOSS = "observation_loss"
@@ -84,6 +100,11 @@ class InvalidationReason(str, Enum):
     READ_CAPACITY = "read_capacity"
     STALLED_READ = "stalled_read"
     LIFECYCLE = "lifecycle"
+
+    @property
+    def loses_observations(self) -> bool:
+        """A stalled read loses no watcher events, so it does not make coverage uncertain."""
+        return self is not InvalidationReason.STALLED_READ
 
 
 # Scan configuration
@@ -106,6 +127,43 @@ PATH_SEPARATOR = "/"
 CACHE_PERSIST_SUBDIR = "directory_cache"  # Default subdirectory under data_dir
 MAX_PENDING_OBSERVATIONS = DIRECTORY_INDEX_CONTRACT.limits["max_pending_observations"]
 MAX_OBSERVATION_BYTES = DIRECTORY_INDEX_CONTRACT.limits["max_observation_bytes"]
+MAX_LOGGED_SCAN_ISSUES_PER_PASS = DIRECTORY_INDEX_CONTRACT.limits["max_logged_scan_issues_per_pass"]
+SOURCE_RESOURCE_ERRNOS = frozenset(
+    {
+        errno.EMFILE,
+        errno.ENFILE,
+        errno.ENOMEM,
+        errno.ENOSPC,
+        errno.ENETDOWN,
+        errno.ENETUNREACH,
+        errno.EHOSTUNREACH,
+        errno.ECONNRESET,
+        errno.ECONNABORTED,
+        errno.ENOTCONN,
+        errno.ETIMEDOUT,
+        errno.EPIPE,
+    }
+)
+SOURCE_TRANSPORT_STATUSES = frozenset(
+    getattr(NtStatus, name)
+    for name in (
+        "STATUS_NETWORK_NAME_DELETED",
+        "STATUS_USER_SESSION_DELETED",
+        "STATUS_LOGON_FAILURE",
+        "STATUS_ACCOUNT_DISABLED",
+        "STATUS_ACCOUNT_RESTRICTION",
+        "STATUS_PASSWORD_EXPIRED",
+        "STATUS_LOGON_TYPE_NOT_GRANTED",
+        "STATUS_WRONG_PASSWORD",
+        "STATUS_NETWORK_SESSION_EXPIRED",
+        "STATUS_IO_TIMEOUT",
+        "STATUS_CONNECTION_DISCONNECTED",
+        "STATUS_INSUFFICIENT_RESOURCES",
+        "STATUS_NO_MEMORY",
+        "STATUS_DISK_FULL",
+    )
+    if hasattr(NtStatus, name)
+)
 SCAN_SEEN_CHILD_BYTES = MAX_OBSERVATION_BYTES
 SQLITE_CACHE_SUBDIR = "sqlite"
 SQLITE_CACHE_EXTENSION = ".sqlite3"
@@ -137,10 +195,28 @@ class ScanReadToken:
     path: str
     producer_id: int
     availability_only: bool = False
+    observed: bool = False
 
 
 class ScanObservationInvalidated(RuntimeError):
     """A filesystem observation can no longer be safely committed."""
+
+
+@dataclass
+class _PendingScanParent:
+    token: ScanReadToken
+    generation: int
+    children: list[tuple[str, bool]]
+    complete: bool = False
+    preserve_children: bool = False
+    file_ids: dict[str, bytes] = field(default_factory=dict)
+
+
+@dataclass
+class _PendingSourceRead:
+    token: ScanReadToken
+    reader: SmbCompoundDirectoryReader | None = None
+    error: Exception | None = None
 
 
 class DirectoryScanCoordinator:
@@ -166,23 +242,206 @@ class DirectoryScanCoordinator:
         self._next_producer_id = 0
         self._producers: dict[int, ScanReadToken] = {}
         self.last_reason: InvalidationReason | None = None
+        self.invalidation_count = 0
         self.observation_lost = False
+        self.observed_reads_blocked = False
+        self.observed_ready: Callable[[], bool] = lambda: False
+        self._scan_group: dict[int, _PendingScanParent] | None = None
+        self._scan_group_reconcile = False
+        self._scan_group_bytes = 0
+        self._scan_group_started: float | None = None
+        self._scan_group_has_changes = False
+        self._streamed_parent_reads: set[int] = set()
+        self._completed_scan_reads: set[int] = set()
+        self._pending_scan_issues: dict[int, dict[str, int]] = {}
+        self.scan_commits = 0
+        self.on_scan_commit: Callable[[int], None] | None = None
+
+    def start_scan_groups(self, *, reconcile: bool = False) -> None:
+        with self.lock:
+            self._scan_group = {}
+            self._scan_group_reconcile = reconcile
+            self._scan_group_started = None
+            self._scan_group_has_changes = False
+            self._scan_group_bytes = 0
+            self._streamed_parent_reads.clear()
+            self._completed_scan_reads.clear()
+            self.scan_commits = 0
+
+    def cancel_scan_groups(self) -> None:
+        with self.lock:
+            pending = self._scan_group or {}
+            self._scan_group = None
+            for entry in pending.values():
+                self.end_read(entry.token)
+            self._scan_group_bytes = 0
+            self._scan_group_reconcile = False
+            self._scan_group_started = None
+            self._scan_group_has_changes = False
+
+    def flush_scan_group(self) -> None:
+        with self.lock:
+            if not self._scan_group:
+                return
+            self.apply_pending()
+            pending = self._scan_group
+            self._scan_group = {}
+            self._scan_group_bytes = 0
+            stale_epoch = False
+            try:
+                complete: dict[int, list[tuple[str, list[tuple[str, bool]]]]] = {}
+                file_ids: dict[int, dict[str, bytes]] = {}
+                partial_parents: dict[int, set[str]] = {}
+                streamed_parents: dict[int, set[str]] = {}
+                changed: set[int] = set()
+                for entry in pending.values():
+                    if not self.is_current(entry.token):
+                        self.index.defer_scan_parent(entry.generation, entry.token.path)
+                        stale_epoch |= entry.token.epoch != self.epoch
+                    elif entry.complete:
+                        complete.setdefault(entry.generation, []).append((entry.token.path, entry.children))
+                        file_ids.setdefault(entry.generation, {}).update(entry.file_ids)
+                        if entry.token.producer_id in self._streamed_parent_reads:
+                            streamed_parents.setdefault(entry.generation, set()).add(entry.token.path)
+                        if entry.preserve_children:
+                            partial_parents.setdefault(entry.generation, set()).add(entry.token.path)
+                        changed.add(entry.generation)
+                    else:
+                        reset = entry.token.producer_id not in self._streamed_parent_reads
+                        for offset in range(0, len(entry.children), ROW_BATCH_SIZE):
+                            batch = entry.children[offset : offset + ROW_BATCH_SIZE]
+                            self.index.write_scan_parent_batch(
+                                entry.generation,
+                                entry.token.path,
+                                batch,
+                                reset_snapshot=reset and offset == 0,
+                                file_ids=entry.file_ids,
+                                **({"reconcile": True} if self._scan_group_reconcile else {}),
+                            )
+                            self._streamed_parent_reads.add(entry.token.producer_id)
+                            changed.add(entry.generation)
+                for generation, results in complete.items():
+                    options: dict[str, Any] = {}
+                    if self._scan_group_reconcile:
+                        options["reconcile"] = True
+                    issues = {
+                        entry.token.path: self._pending_scan_issues[entry.token.producer_id]
+                        for entry in pending.values()
+                        if entry.complete
+                        and entry.generation == generation
+                        and self.is_current(entry.token)
+                        and entry.token.producer_id in self._pending_scan_issues
+                    }
+                    if issues:
+                        options["issues"] = issues
+                    if partial_parents.get(generation):
+                        options["partial_parents"] = partial_parents[generation]
+                    if streamed_parents.get(generation):
+                        options["streamed_parents"] = streamed_parents[generation]
+                    if file_ids[generation]:
+                        options["file_ids"] = file_ids[generation]
+                    self.index.commit_scan_parents(generation, results, **options)
+                    self.scan_commits += 1
+                if self.on_scan_commit is not None:
+                    for generation in changed:
+                        self.on_scan_commit(generation)
+            finally:
+                for entry in pending.values():
+                    if entry.complete:
+                        self.end_read(entry.token)
+                self._scan_group_started = None
+                self._scan_group_has_changes = False
+            if stale_epoch:
+                raise ScanObservationInvalidated("Directory scan observations became stale. Retry the affected parents.")
+
+    def flush_scan_group_if_due(self) -> None:
+        with self.lock:
+            cap = SCAN_COMMIT_MAX_PARENTS if self._scan_group_has_changes else SCAN_BOOKKEEPING_COMMIT_MAX_PARENTS
+            interval = SCAN_COMMIT_INTERVAL_SECONDS if self._scan_group_has_changes else SCAN_BOOKKEEPING_COMMIT_INTERVAL_SECONDS
+            if self._scan_group and (
+                len(self._completed_scan_reads) >= cap
+                or self._scan_group_bytes >= MAX_OBSERVATION_BYTES
+                or (self._scan_group_started is not None and time.monotonic() - self._scan_group_started >= interval)
+            ):
+                self.flush_scan_group()
+
+    def buffered_scan_parents(self, generation: int) -> list[str]:
+        with self.lock:
+            return [entry.token.path for entry in (self._scan_group or {}).values() if entry.generation == generation and entry.complete]
+
+    def has_complete_scan_snapshot(self, token: ScanReadToken) -> bool:
+        with self.lock:
+            return self._scan_group is not None
+
+    def has_buffered_ancestor(self, generation: int, parents: list[str]) -> bool:
+        ancestors = {""}
+        for parent in parents:
+            while parent:
+                parent = parent.rpartition(PATH_SEPARATOR)[0]
+                ancestors.add(parent)
+        with self.lock:
+            return any(
+                entry.complete and entry.generation == generation and entry.token.path in ancestors
+                for entry in (self._scan_group or {}).values()
+            )
+
+    def _stage_scan_parent(self, token: ScanReadToken, generation: int, *, has_changes: bool, size: int = 0) -> _PendingScanParent:
+        group = self._scan_group
+        if group is None:
+            raise RuntimeError("Scan grouping is not active. Start scan groups before buffering a parent.")
+        entry = group.get(token.producer_id)
+        parent_bytes = len(token.path.encode("utf-8")) + self._scan_issue_bytes(token) if entry is None else 0
+        promote = has_changes and not self._scan_group_has_changes and len(group) >= SCAN_COMMIT_MAX_PARENTS
+        carried = None
+        if promote and entry is not None:
+            carried = group.pop(token.producer_id)
+            self._scan_group_bytes -= len(token.path.encode("utf-8")) + sum(len(path.encode("utf-8")) for path, _ in carried.children)
+            self._scan_group_bytes -= sum(len(value) for value in carried.file_ids.values())
+            self._scan_group_bytes -= self._scan_issue_bytes(token)
+        if self._scan_group_bytes + size + parent_bytes > MAX_OBSERVATION_BYTES or promote:
+            self.flush_scan_group()
+            group = self._scan_group
+            assert group is not None
+            entry = group.get(token.producer_id)
+            parent_bytes = len(token.path.encode("utf-8")) + self._scan_issue_bytes(token) if entry is None else 0
+        if not group and self._scan_group_started is None:
+            self._scan_group_started = time.monotonic()
+        if entry is None:
+            entry = carried or _PendingScanParent(token, generation, [])
+            group[token.producer_id] = entry
+            if carried is not None:
+                self._scan_group_bytes += sum(len(path.encode("utf-8")) for path, _ in carried.children) + sum(
+                    len(value) for value in carried.file_ids.values()
+                )
+        self._scan_group_bytes += parent_bytes + size
+        self._scan_group_has_changes |= has_changes
+        return entry
+
+    def _scan_issue_bytes(self, token: ScanReadToken) -> int:
+        return sum(
+            len(code.encode("utf-8")) + len(str(count)) for code, count in self._pending_scan_issues.get(token.producer_id, {}).items()
+        )
 
     def invalidate(self, reason: InvalidationReason) -> None:
         with self.lock:
-            if reason != self.last_reason:
-                logger.debug(
-                    "Directory scan invalidated.",
-                    extra={"event": "directory_scan_invalidated", "invalidation_reason": reason.value},
-                )
+            self.invalidation_count += 1
+            logger.info(
+                "Directory scan invalidated.",
+                extra={
+                    "event": "directory_scan_invalidated",
+                    "invalidation_reason": reason.value,
+                    "invalidation_count": self.invalidation_count,
+                },
+            )
             self.last_reason = reason
-            if reason == InvalidationReason.OBSERVATION_LOSS:
+            self.observed_reads_blocked = reason in (InvalidationReason.OBSERVATION_LOSS, InvalidationReason.READ_CAPACITY)
+            if reason in (InvalidationReason.OBSERVATION_LOSS, InvalidationReason.READ_CAPACITY):
                 self.observation_lost = True
             self.epoch += 1
             self.barriers.clear()
             self.barrier_bytes = 0
             self.verification_required = True
-            self._uncertain_pending = True
+            self._uncertain_pending |= reason.loses_observations
 
     def enqueue(self, mutation: _DirectoryMutation) -> bool:
         if mutation.path or mutation.action != READ_PARENT_ACTION:
@@ -230,28 +489,45 @@ class DirectoryScanCoordinator:
         with self.lock:
             return self.epoch
 
-    def begin_read(self, path: str, *, availability_only: bool = False) -> ScanReadToken:
+    def begin_read(self, path: str, *, availability_only: bool = False, observed: bool = False) -> ScanReadToken:
         if path:
             validate_directory_path(path)
         with self.lock:
-            if len(self._producers) >= MAX_PENDING_OBSERVATIONS or self._next_producer_id >= MAX_SIGNED_INTEGER:
+            if (
+                len(self._producers) - len(self._completed_scan_reads) >= MAX_PENDING_OBSERVATIONS
+                or self._next_producer_id >= MAX_SIGNED_INTEGER
+            ):
                 self.invalidate(InvalidationReason.READ_CAPACITY)
                 raise ScanObservationInvalidated("Directory read capacity is exhausted. Wait for active source reads to finish.")
             self._next_producer_id += 1
-            token = ScanReadToken(self.epoch, self.sequence, path, self._next_producer_id, availability_only)
+            if self._scan_group is not None and not self._scan_group and self._scan_group_started is None and not availability_only:
+                self._scan_group_started = time.monotonic()
+            token = ScanReadToken(self.epoch, self.sequence, path, self._next_producer_id, availability_only, observed)
             self._producers[token.producer_id] = token
             return token
 
     def end_read(self, token: ScanReadToken) -> None:
         """Release a producer only after its reads and synchronous batches have exited."""
         with self.lock:
+            if self._scan_group is not None:
+                entry = self._scan_group.get(token.producer_id)
+                if entry is not None:
+                    if entry.complete:
+                        return
+                    del self._scan_group[token.producer_id]
+                    self._scan_group_bytes -= sum(len(path.encode("utf-8")) for path, _descend in entry.children)
+                    self._scan_group_bytes -= len(entry.token.path.encode("utf-8")) + sum(len(value) for value in entry.file_ids.values())
+                    self._scan_group_bytes -= self._scan_issue_bytes(token)
             if self._producers.get(token.producer_id) == token:
+                self._streamed_parent_reads.discard(token.producer_id)
+                self._completed_scan_reads.discard(token.producer_id)
+                self._pending_scan_issues.pop(token.producer_id, None)
                 del self._producers[token.producer_id]
                 self._retire_barriers()
 
     @contextmanager
-    def read(self, path: str, *, availability_only: bool = False) -> Iterator[ScanReadToken]:
-        token = self.begin_read(path, availability_only=availability_only)
+    def read(self, path: str, *, availability_only: bool = False, observed: bool = False) -> Iterator[ScanReadToken]:
+        token = self.begin_read(path, availability_only=availability_only, observed=observed)
         try:
             yield token
         finally:
@@ -259,6 +535,8 @@ class DirectoryScanCoordinator:
 
     def _retire_barriers(self) -> None:
         """Pending mutations and older live reads retain their rejection fences."""
+        if not self.barriers:
+            return
         oldest = min(
             (token.sequence for token in self._producers.values() if token.epoch == self.epoch),
             default=self.sequence,
@@ -274,6 +552,8 @@ class DirectoryScanCoordinator:
 
     def is_current(self, token: ScanReadToken) -> bool:
         with self.lock:
+            if token.observed and (self.observed_reads_blocked or not self.observed_ready()):
+                return False
             return self.is_epoch_current(token) and not any(
                 sequence > token.sequence
                 and (
@@ -311,23 +591,71 @@ class DirectoryScanCoordinator:
             return applied
 
     def commit_children(
-        self, token: ScanReadToken, generation_id: int, children: Iterable[tuple[str, bool]], *, reconcile: bool = False
+        self,
+        token: ScanReadToken,
+        generation_id: int,
+        children: Iterable[tuple[str, bool]],
+        *,
+        reconcile: bool = False,
+        file_ids: dict[str, bytes] | None = None,
     ) -> None:
         with self.lock:
             if not self.is_current(token):
                 self.verification_required = True
                 raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
             self.apply_pending()
-            if reconcile:
-                self.index.write_reconciliation_children(generation_id, token.path, children)
+            if reconcile and not self._scan_group_reconcile:
+                self.index.write_scan_parent_batch(
+                    generation_id,
+                    token.path,
+                    children,
+                    reset_snapshot=token.producer_id not in self._streamed_parent_reads,
+                    file_ids=file_ids,
+                    reconcile=True,
+                )
+                self._streamed_parent_reads.add(token.producer_id)
+            elif self._scan_group is not None:
+                batch = list(children)
+                size = sum(len(path.encode("utf-8")) for path, _descend in batch)
+                size += sum(len(value) for value in (file_ids or {}).values())
+                has_changes = self.index.scan_parents_have_changes(generation_id, [(token.path, batch)], partial_parents={token.path})
+                entry = self._stage_scan_parent(token, generation_id, has_changes=has_changes, size=size)
+                entry.children.extend(batch)
+                entry.file_ids.update(file_ids or {})
+                self.flush_scan_group_if_due()
             else:
-                self.index.write_scan_children(generation_id, children)
+                if file_ids:
+                    self.index.write_scan_children(generation_id, children, file_ids=file_ids)
+                else:
+                    self.index.write_scan_children(generation_id, children)
 
     def record_unsafe_traversal(self, token: ScanReadToken, generation_id: int) -> None:
         self._record_scan_issue(token, generation_id, self.index.record_unsafe_traversal)
 
     def record_access_denied(self, token: ScanReadToken, generation_id: int) -> None:
         self._record_scan_issue(token, generation_id, self.index.record_access_denied)
+
+    def record_issue(self, token: ScanReadToken, generation_id: int, code: str, *, reconcile: bool = False) -> None:
+        if code not in ITEM_ISSUE_CODES:
+            raise ValueError("Unsupported directory coverage issue. Use a contract issue code.")
+        with self.lock:
+            if not self.is_current(token):
+                self.verification_required = True
+                raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
+            self.apply_pending()
+            if self._scan_group is not None or reconcile:
+                counts = self._pending_scan_issues.get(token.producer_id, {})
+                previous = counts.get(code, 0)
+                if previous >= MAX_SIGNED_INTEGER:
+                    raise OverflowError("Directory coverage issue count is exhausted. Restart source verification.")
+                if self._scan_group is not None:
+                    size = len(str(previous + 1)) - len(str(previous)) if previous else len(code.encode("utf-8")) + 1
+                    self._stage_scan_parent(token, generation_id, has_changes=False, size=size)
+                self._pending_scan_issues.setdefault(token.producer_id, {})[code] = previous + 1
+                if self._scan_group is not None:
+                    self.flush_scan_group_if_due()
+            else:
+                self.index.record_issue(generation_id, code, reconcile=reconcile)
 
     def _record_scan_issue(self, token: ScanReadToken, generation_id: int, record: Callable[[int], None]) -> None:
         with self.lock:
@@ -337,14 +665,43 @@ class DirectoryScanCoordinator:
             self.apply_pending()
             record(generation_id)
 
-    def finish_parent(self, token: ScanReadToken, generation_id: int, *, reconcile: bool = False) -> None:
+    def finish_parent(self, token: ScanReadToken, generation_id: int, *, reconcile: bool = False, skip_children: bool = False) -> None:
         with self.lock:
             if not self.is_current(token):
                 self.verification_required = True
                 raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
             self.apply_pending()
-            if reconcile:
-                self.index.finish_reconciliation_parent(generation_id, token.path)
+            if skip_children:
+                entry = self._scan_group.get(token.producer_id) if self._scan_group is not None else None
+                if entry is not None:
+                    self._scan_group_bytes -= sum(len(path.encode("utf-8")) for path, _descend in entry.children)
+                    self._scan_group_bytes -= sum(len(value) for value in entry.file_ids.values())
+                    entry.children.clear()
+                    entry.file_ids.clear()
+            if reconcile and not self._scan_group_reconcile:
+                self.index.commit_scan_parents(
+                    generation_id,
+                    [(token.path, [])],
+                    streamed_parents={token.path} if token.producer_id in self._streamed_parent_reads else None,
+                    partial_parents={token.path} if skip_children else None,
+                    reconcile=True,
+                    issues={token.path: self._pending_scan_issues[token.producer_id]}
+                    if token.producer_id in self._pending_scan_issues
+                    else None,
+                )
+            elif self._scan_group is not None:
+                existing = self._scan_group.get(token.producer_id)
+                snapshot_children = existing.children if existing is not None else []
+                partial = {token.path} if skip_children else None
+                streamed = {token.path} if token.producer_id in self._streamed_parent_reads else None
+                has_changes = self.index.scan_parents_have_changes(
+                    generation_id, [(token.path, snapshot_children)], partial_parents=partial, streamed_parents=streamed
+                )
+                entry = self._stage_scan_parent(token, generation_id, has_changes=has_changes)
+                entry.complete = True
+                entry.preserve_children = skip_children
+                self._completed_scan_reads.add(token.producer_id)
+                self.flush_scan_group_if_due()
             else:
                 self.index.finish_scan_parent(generation_id, token.path)
 
@@ -972,8 +1329,6 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             return "Directory observations were lost. Background verification is required."
         if not self._watcher_ready.is_set() and (self._watcher_retry_at or self._last_scan_time is not None):
             return "Directory monitoring is unavailable. Background verification remains active."
-        if self._coverage_incomplete:
-            return "Directory coverage is incomplete. Some paths cannot be indexed safely."
         if self._opened.is_set() and self.index.needs_fts_repair:
             return "Directory search index is being rebuilt. Existing directory rows remain searchable."
         if self._stale_turns >= CONTINUOUS_CHANGE_STALE_TURNS:
@@ -1040,7 +1395,6 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._owning_loop: asyncio.AbstractEventLoop | None = None
         self._last_access = time.monotonic()
         self._last_access_at_ms = int(time.time() * 1000)
-        self._cleanup_pending = True
         self._reclamation_pending = False
         self._source_available = threading.Event()
         self._source_probe_completed = threading.Event()
@@ -1051,17 +1405,25 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._verification_error: str | None = None
         self._update_error: str | None = None
         self._coverage_incomplete = False
+        self._scan_issue_counts: dict[str, int] = {}
         self._stalled_read = threading.Event()
         self._watcher_ever_ready = False
+        self.scan_progress: ScanProgress | None = None
+        self._progress_generation: int | None = None
+        self._scan_job_file_ids: dict[tuple[int, str], bytes | None] = {}
+
+    def _publish_scan_progress(self, generation: int) -> None:
+        progress = self.scan_progress
+        if progress is None or generation != self._progress_generation:
+            return
+        done, queued, found = self.index.scan_counts(generation)
+        self.scan_progress = ScanProgress(progress.phase, done, queued, found, progress.started_at_ms)
+        if progress.phase == "building":
+            self._directory_count = found
 
     def touch(self) -> None:
-        now = time.monotonic()
         with self.coordinator.lock:
-            if now - self._last_access >= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] and self._source_available.is_set():
-                self.coordinator.invalidate(InvalidationReason.LIFECYCLE)
-                self._source_available.clear()
-                self._source_probe_completed.set()
-            self._last_access = now
+            self._last_access = time.monotonic()
         self._last_access_at_ms = int(time.time() * 1000)
 
     def can_release_idle(self) -> bool:
@@ -1071,6 +1433,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 and not self._active_workers
                 and not self._scan_running.is_set()
                 and not self.index.has_active_queries
+                and not self.index.has_pending_scan()
+                and not self.coordinator.pending
             )
 
     def _maintenance_blocked(self) -> bool:
@@ -1081,14 +1445,6 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             or self._scan_running.is_set()
             or self.index.reconciliation_generation() is not None
         )
-
-    def _cleanup_retired_work(self) -> None:
-        deadline = time.monotonic() + WORKER_POLL_SECONDS
-        while self._cleanup_pending and not self._stop_event.is_set() and time.monotonic() < deadline:
-            with self.coordinator.lock:
-                if self._maintenance_blocked():
-                    return
-                self._cleanup_pending = self.index.cleanup_retired_batch()
 
     def _reclaim_disk_work(self) -> None:
         with self.coordinator.lock:
@@ -1166,6 +1522,14 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                         future.add_done_callback(report_abandoned)
                         await pool.retain_connection_until_future_complete(self._connection_cache, future)
                         raise TimeoutError("Directory read has stalled. Scan capacity stays reserved until the worker exits.") from None
+        except DirectoryPipelineTimeout:
+            if pool is not None:
+                await pool.invalidate_connection_cache(self._connection_cache, reason="directory_pipeline_timeout", abort=True)
+            raise
+        except DirectoryPipelineTransportError:
+            if pool is not None:
+                await pool.invalidate_connection_cache(self._connection_cache, reason="directory_pipeline_send_failed", abort=True)
+            raise
         except asyncio.CancelledError:
             self.coordinator.invalidate(InvalidationReason.LIFECYCLE)
             future.add_done_callback(report_abandoned)
@@ -1251,6 +1615,10 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             raise DirectorySourceUnavailableError(
                 "Directory source root is unavailable. Restore source access and retry the search after verification."
             )
+        if not query.strip():
+            if cancelled is not None and cancelled.is_set():
+                raise InterruptedError("Directory search was cancelled. Retry the search.")
+            return self.index.cached_status()
         if not self._manager_query_slots.acquire(timeout=WORKER_POLL_SECONDS):
             raise TimeoutError("Directory query workers are busy. Wait briefly and retry the search.")
         try:
@@ -1308,12 +1676,52 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     class _DescendantMissing(FileNotFoundError):
         """A source directory disappeared, not a local index file."""
 
+    class _DescendantScanIssue(Exception):
+        """An item error from a source operation, never from index storage."""
+
+        def __init__(self, code: str) -> None:
+            super().__init__("Directory item could not be read. Check the folder and retry the next verification pass.")
+            self.code = code
+
+    @staticmethod
+    def _classify_source_error(error: Exception) -> str | None:
+        """Keep connection and resource failures outside best-effort item handling."""
+        status = error.ntstatus if isinstance(error, SMBOSError) else error.status if isinstance(error, SMBResponseException) else None
+        if (
+            isinstance(
+                error, (InterruptedError, TimeoutError, ConnectionError, DirectoryBindingChangedError, DirectoryPipelineTransportError)
+            )
+            or isinstance(error, SMBException)
+            and not isinstance(error, (SMBOSError, SMBResponseException))
+            or isinstance(error, OSError)
+            and error.errno in SOURCE_RESOURCE_ERRNOS
+            or status in SOURCE_TRANSPORT_STATUSES
+        ):
+            return None
+        if isinstance(error, PermissionError) or status == NtStatus.STATUS_ACCESS_DENIED:
+            return "access_denied"
+        if isinstance(error, DirectoryTraversalError):
+            return "unsafe_traversal"
+        if isinstance(error, (UnicodeError, ValueError)):
+            return "unsupported_encoding"
+        return "scan_failed"
+
+    def _record_item_issue(self, token: ScanReadToken, generation: int, code: str, *, reconcile: bool, path: str | None = None) -> None:
+        self.coordinator.record_issue(token, generation, code, reconcile=reconcile)
+        self._scan_issue_counts[code] = self._scan_issue_counts.get(code, 0) + 1
+        if sum(self._scan_issue_counts.values()) <= MAX_LOGGED_SCAN_ISSUES_PER_PASS:
+            self._logger.info(
+                "Directory item skipped (path=%r). Check the folder name and permissions before the next verification pass.",
+                token.path if path is None else path,
+                extra={"event": "directory_scan_item_issue", "issue_code": code, "path": token.path if path is None else path},
+            )
+
     def _source_call(self, parent: str, operation: Callable[[], WorkerResult]) -> WorkerResult:
         if not parent:
             self._root_reading.set()
         try:
             return operation()
-        except ScanObservationInvalidated:
+        except (ScanObservationInvalidated, self._DescendantScanIssue):
             raise
         except DirectoryBindingChangedError as error:
             self._source_available.clear()
@@ -1324,6 +1732,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 "Directory source is temporarily unavailable. Background verification will bind the root again."
             ) from error
         except Exception as error:
+            self._source_root.require_verification()
             if parent:
                 if (
                     isinstance(error, (FileNotFoundError, NotADirectoryError))
@@ -1345,6 +1754,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     raise self._DescendantAccessDenied(
                         "Directory descendant access was denied. Restore source permissions and retry verification."
                     ) from error
+                code = self._classify_source_error(error)
+                if code is not None:
+                    raise self._DescendantScanIssue(code) from error
                 raise
             self._source_available.clear()
             self._source_probe_completed.set()
@@ -1394,7 +1806,13 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             self._source_probe_completed.set()
             self._verification_error = None
 
-    def _open_source_read(self, parent: str, token: ScanReadToken) -> SmbDirectoryRead:
+    def _expected_scan_file_id(self, generation: int, parent: str) -> bytes | None:
+        key = (generation, parent)
+        if key in self._scan_job_file_ids:
+            return self._scan_job_file_ids[key]
+        return self.index.scan_parent_file_id(generation, parent)
+
+    def _open_source_read(self, parent: str, token: ScanReadToken, *, deferred: bool = False) -> SmbDirectoryRead:
         def check() -> None:
             if self._stop_event.is_set():
                 raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
@@ -1403,37 +1821,82 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 raise ScanObservationInvalidated("Directory scan observation became stale. Restart source verification.")
             self._scan_progress = time.monotonic()
 
-        return self._source_root.read(
-            parent,
-            check,
-            username=self.username,
-            password=self.password,
-            port=self.port,
-            connection_cache=self._connection_cache,
+        session: dict[str, Any] = {
+            "username": self.username,
+            "password": self.password,
+            "port": self.port,
+            "connection_cache": self._connection_cache,
             **get_smbclient_policy_kwargs(),
+        }
+        if token.observed:
+            generation = self._progress_generation
+            expected_id = self._expected_scan_file_id(generation, parent) if generation is not None else None
+            if expected_id is None:
+                raise ScanObservationInvalidated("Directory identity is not queued. Retry the parent through safe traversal.")
+            if deferred:
+                return self._source_root.read_observed(
+                    parent,
+                    expected_id,
+                    check,
+                    deferred=True,
+                    credit_reserve=SCAN_CREDIT_RESERVE,
+                    timeout=SCAN_TIMEOUT_SECONDS,
+                    **session,
+                )
+            return self._source_root.read_observed(parent, expected_id, check, **session)
+        return self._source_root.read(
+            parent, check, full_root_check=token.availability_only or self._progress_generation is None, **session
         )
 
-    def _scan_parent(self, generation: int, parent: str, *, reconcile: bool = False) -> None:
+    def _scan_parent(
+        self,
+        generation: int,
+        parent: str,
+        *,
+        reconcile: bool = False,
+        prepared: _PendingSourceRead | None = None,
+    ) -> None:
         try:
-            with self.coordinator.read(parent) as token:
+            self.coordinator.observed_ready = self._watcher_ready.is_set
+            observed = (
+                bool(parent)
+                and not reconcile
+                and self._watcher_ready.is_set()
+                and not self.coordinator.observed_reads_blocked
+                and self._expected_scan_file_id(generation, parent) is not None
+                and self._progress_generation == generation
+            )
+            token = prepared.token if prepared is not None else self.coordinator.begin_read(parent, observed=observed)
+            try:
                 try:
-                    self._scan_parent_read(generation, parent, token, reconcile=reconcile)
+                    if prepared is None:
+                        self._scan_parent_read(generation, parent, token, reconcile=reconcile)
+                    else:
+                        if prepared.error is not None:
+                            error = prepared.error
+
+                            def failed_read() -> SmbDirectoryRead:
+                                raise error
+
+                            self._source_call(parent, failed_read)
+                        if prepared.reader is None:
+                            raise RuntimeError("Directory pipeline has no reader. Retry source verification.")
+                        entries = self._source_call(parent, prepared.reader.result)
+                        self._scan_parent_read(generation, parent, token, reconcile=reconcile, entries=entries)
                 except self._DescendantMissing as error:
                     self._recover_missing_parent(generation, parent, token, error, reconcile=reconcile)
-                except self._DescendantAccessDenied:
+                except (self._DescendantAccessDenied, self._DescendantScanIssue, DirectoryTraversalError) as error:
                     if self._stop_event.is_set():
                         raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.") from None
-                    if reconcile:
+                    if not parent:
                         raise
-                    self.coordinator.record_access_denied(token, generation)
-                    self.coordinator.finish_parent(token, generation)
-                except DirectoryTraversalError:
-                    if self._stop_event.is_set():
-                        raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.") from None
-                    if reconcile:
+                    code = error.code if isinstance(error, self._DescendantScanIssue) else self._classify_source_error(error)
+                    if code is None:
                         raise
-                    self.coordinator.record_unsafe_traversal(token, generation)
-                    self.coordinator.finish_parent(token, generation)
+                    self._record_item_issue(token, generation, code, reconcile=reconcile)
+                    self.coordinator.finish_parent(token, generation, reconcile=reconcile, skip_children=True)
+            finally:
+                self.coordinator.end_read(token)
             self._stale_turns = 0
         except ScanObservationInvalidated:
             with self.coordinator.lock:
@@ -1466,9 +1929,19 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     self.coordinator.finish_parent(token, generation, reconcile=reconcile)
                 return
 
-    def _scan_parent_read(self, generation: int, parent: str, token: ScanReadToken, *, reconcile: bool = False) -> None:
-        entries = self._source_call(parent, lambda: self._open_source_read(parent, token))
+    def _scan_parent_read(
+        self,
+        generation: int,
+        parent: str,
+        token: ScanReadToken,
+        *,
+        reconcile: bool = False,
+        entries: SmbDirectoryRead | None = None,
+    ) -> None:
+        if entries is None:
+            entries = self._source_call(parent, lambda: self._open_source_read(parent, token))
         batch: list[tuple[str, bool]] = []
+        batch_file_ids: dict[str, bytes] = {}
         batch_bytes = 0
         seen_children: set[str] = set()
         seen_bytes = 0
@@ -1477,7 +1950,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         def commit_batch() -> None:
             nonlocal batch_bytes, seen_bytes, seen_full
             self._source_call(parent, entries.verify)
-            self.coordinator.commit_children(token, generation, batch, reconcile=reconcile)
+            self.coordinator.commit_children(token, generation, batch, reconcile=reconcile, file_ids=batch_file_ids)
             for path, _is_directory in batch:
                 if seen_full or path in seen_children:
                     continue
@@ -1488,9 +1961,13 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 seen_children.add(path)
                 seen_bytes += size
             batch.clear()
+            batch_file_ids.clear()
             batch_bytes = 0
 
         with self._source_read(parent, entries.close):
+            expected_id = self._expected_scan_file_id(generation, parent)
+            if expected_id is not None:
+                self._source_call(parent, lambda: entries.verify_file_id(expected_id))
             while True:
                 if self._stop_event.is_set():
                     raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
@@ -1506,39 +1983,43 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     break
                 self._scan_progress = time.monotonic()
                 if entry.name is None:
-                    if reconcile:
-                        raise DirectoryTraversalError(
-                            "Directory reconciliation found an unsupported name. Complete source verification is required."
-                        )
-                    self.coordinator.record_unsafe_traversal(token, generation)
+                    self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
                     continue
                 if entry.name in (".", ".."):
                     continue
                 if PATH_SEPARATOR in entry.name or "\\" in entry.name:
-                    raise ValueError("Directory entry has an unsupported separator. Source coverage is incomplete.")
+                    self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
+                    continue
                 attributes = entry.smb_info.file_attributes
                 if not attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
                     continue
                 if attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT:
-                    if reconcile:
-                        raise OSError("Directory reconciliation found a redirected directory. Complete source verification is required.")
-                    self.coordinator.record_unsafe_traversal(token, generation)
+                    self._record_item_issue(token, generation, "unsafe_traversal", reconcile=reconcile)
                     continue
                 path = parent + PATH_SEPARATOR + entry.name if parent else entry.name
-                validate_directory_path(path)
-                path_bytes = len(path.encode("utf-8"))
+                try:
+                    validate_directory_path(path)
+                    path_bytes = len(path.encode("utf-8"))
+                except (ValueError, UnicodeError):
+                    self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
+                    continue
                 if path_bytes > MAX_OBSERVATION_BYTES:
-                    raise ValueError("Directory path exceeds the scan-batch byte limit. Source coverage is incomplete.")
+                    self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
+                    continue
                 if batch and batch_bytes + path_bytes > MAX_OBSERVATION_BYTES:
                     commit_batch()
                 batch.append((path, True))
+                file_id = getattr(entry, "file_id", None)
+                if file_id is not None:
+                    batch_file_ids[path] = file_id
                 batch_bytes += path_bytes
                 if len(batch) == ROW_BATCH_SIZE:
                     commit_batch()
             if batch:
                 commit_batch()
             self._source_call(parent, entries.verify)
-            self._prune_missing_children(generation, parent, token, entries, seen_children, reconcile=reconcile)
+            if not reconcile and not self.coordinator.has_complete_scan_snapshot(token):
+                self._prune_missing_children(generation, parent, token, entries, seen_children, reconcile=reconcile)
         with self.coordinator.lock:
             if self._stop_event.is_set():
                 raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
@@ -1574,6 +2055,125 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                         more = self.index.prune_subtree_batch(generation, path)
             cursor = page[-1]
 
+    def _scan_parent_page(self, generation: int, parents: list[str], *, reconcile: bool) -> None:
+        """Keep bounded observed reads in flight and publish in queue order."""
+        jobs = dict(self.index.pending_scan_jobs(generation, paths=parents))
+        self._scan_job_file_ids = {(generation, parent): identity for parent, identity in jobs.items()}
+        remaining = deque(parents)
+        pending: deque[_PendingSourceRead] = deque()
+        stale = False
+        grew_credits = False
+        active: _PendingSourceRead | None = None
+        self.coordinator.observed_ready = self._watcher_ready.is_set
+        try:
+            while remaining or pending:
+                while remaining and len(pending) < SCAN_PIPELINE_DEPTH:
+                    parent = remaining[0]
+                    if parent not in jobs:
+                        remaining.popleft()
+                        continue
+                    observed = (
+                        bool(parent)
+                        and not reconcile
+                        and self._watcher_ready.is_set()
+                        and not self.coordinator.observed_reads_blocked
+                        and self._progress_generation == generation
+                        and self._expected_scan_file_id(generation, parent) is not None
+                    )
+                    if not observed:
+                        if pending:
+                            break
+                        remaining.popleft()
+                        self._scan_parent(generation, parent, reconcile=reconcile)
+                        self.coordinator.flush_scan_group_if_due()
+                        continue
+                    prepared = _PendingSourceRead(self.coordinator.begin_read(parent, observed=True))
+                    try:
+                        reader = self._source_call(parent, lambda: self._open_source_read(parent, prepared.token, deferred=True))
+                        if not isinstance(reader, SmbCompoundDirectoryReader):
+                            reader.close()
+                            raise RuntimeError("Directory pipeline requires a compound reader. Retry source verification.")
+                        prepared.reader = reader
+                        if not reader.sent and not pending and not grew_credits:
+                            if not self.coordinator.is_current(prepared.token):
+                                raise ScanObservationInvalidated("Directory observation changed before credit admission. Retry the parent.")
+                            grew_credits = True
+                            compound_reader = reader
+                            self._source_call(parent, lambda: compound_reader.grow_credits(SCAN_TIMEOUT_SECONDS))
+                            reader.close()
+                            replacement = self._source_call(parent, lambda: self._open_source_read(parent, prepared.token, deferred=True))
+                            if not isinstance(replacement, SmbCompoundDirectoryReader):
+                                replacement.close()
+                                raise RuntimeError("Directory pipeline requires a compound reader. Retry source verification.")
+                            prepared.reader = replacement
+                    except Exception as error:
+                        prepared.error = error
+                    admitted_reader = prepared.reader
+                    if admitted_reader is not None and not admitted_reader.sent and pending and prepared.error is None:
+                        admitted_reader.close()
+                        self.coordinator.end_read(prepared.token)
+                        break
+                    pending.append(prepared)
+                    remaining.popleft()
+                    if prepared.error is not None or admitted_reader is None or not admitted_reader.sent:
+                        break
+                if not pending:
+                    continue
+                active = pending.popleft()
+                try:
+                    self._scan_parent(generation, active.token.path, reconcile=reconcile, prepared=active)
+                except ScanObservationInvalidated:
+                    if (
+                        active.token.epoch != self.coordinator.epoch
+                        or not self._watcher_ready.is_set()
+                        or self.coordinator.observed_reads_blocked
+                    ):
+                        raise
+                    stale = True
+                finally:
+                    if active.reader is not None:
+                        try:
+                            active.reader.close()
+                        except ScanObservationInvalidated:
+                            pass
+                        except Exception as error:
+                            logger.warning("Directory pipeline read cleanup failed (%s).", type(error).__name__)
+                active = None
+                self.coordinator.flush_scan_group_if_due()
+            if stale:
+                self.coordinator.flush_scan_group()
+                raise ScanObservationInvalidated("Directory pipeline parent changed. Retry the affected parents.")
+        except DirectoryPipelineTransportError:
+            self.coordinator.invalidate(InvalidationReason.READ_CAPACITY)
+            if active is not None:
+                self.index.defer_scan_parent(generation, active.token.path)
+            raise
+        except TimeoutError as error:
+            self.coordinator.invalidate(InvalidationReason.STALLED_READ)
+            if active is not None:
+                self.index.defer_scan_parent(generation, active.token.path)
+            raise DirectoryPipelineTimeout("Directory pipeline stalled. Retry verification after the connection recovers.") from error
+        finally:
+            cleanup_timeout: TimeoutError | None = None
+            for entry in pending:
+                self.index.defer_scan_parent(generation, entry.token.path)
+                try:
+                    if entry.reader is not None:
+                        entry.reader.close()
+                except ScanObservationInvalidated:
+                    pass
+                except TimeoutError as error:
+                    cleanup_timeout = error
+                except Exception as error:
+                    logger.warning("Directory pipeline read cleanup failed (%s).", type(error).__name__)
+                finally:
+                    self.coordinator.end_read(entry.token)
+            if cleanup_timeout is not None:
+                self.coordinator.invalidate(InvalidationReason.STALLED_READ)
+                raise DirectoryPipelineTimeout(
+                    "Directory pipeline cleanup stalled. Retry after the connection recovers."
+                ) from cleanup_timeout
+
     def _reconcile_disk_queue(self) -> None:
         """Read bounded accepted-parent work without advancing full-pass clocks."""
         now = time.monotonic()
@@ -1593,22 +2193,45 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 deadline = time.monotonic() + WORKER_POLL_SECONDS
                 generation = self.index.reconciliation_generation()
                 finished_parent = False
+                self.coordinator.on_scan_commit = self._publish_scan_progress
+                self.coordinator.start_scan_groups(reconcile=True)
                 while generation is not None and time.monotonic() < deadline:
                     if self._stop_event.is_set():
                         raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
                     if self.index.reconciliation_generation() != generation:
                         return
-                    parents = self.index.pending_scan_paths(generation, limit=1)
+                    jobs = dict(self.index.pending_scan_jobs(generation, exclude=self.coordinator.buffered_scan_parents(generation)))
+                    parents = list(jobs)
+                    if parents and self.coordinator.has_buffered_ancestor(generation, parents):
+                        self.coordinator.flush_scan_group()
+                        continue
                     if not parents:
+                        self.coordinator.flush_scan_group()
+                        if self.index.pending_scan_paths(generation, limit=1):
+                            continue
                         return
-                    self._reconcile_next = False
-                    self._scan_parent(generation, parents[0], reconcile=True)
-                    finished_parent = True
+                    ready = [
+                        parent
+                        for parent in parents
+                        if not any(other != parent and (not other or parent.startswith(other + PATH_SEPARATOR)) for other in parents)
+                    ]
+                    self._scan_job_file_ids = {(generation, parent): jobs[parent] for parent in ready}
+                    for parent in ready:
+                        if time.monotonic() >= deadline:
+                            break
+                        if parent not in jobs:
+                            continue
+                        self._reconcile_next = False
+                        self._scan_parent(generation, parent, reconcile=True)
+                        finished_parent = True
+                self.coordinator.flush_scan_group()
             except ScanObservationInvalidated:
                 if not finished_parent:
                     self._stale_turns += 1
                 raise
             finally:
+                self.coordinator.cancel_scan_groups()
+                self._scan_job_file_ids.clear()
                 self._scan_running.clear()
                 self._manager_scan_slots.release()
         finally:
@@ -1651,13 +2274,17 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             if self._stop_event.is_set():
                 raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
         started = time.monotonic()
+        source_io = self._source_root.io
+        round_trips_before = source_io.round_trips
         success = False
         finished_parent = False
         reconcile_error: Exception | None = None
+        generation: int | None = None
+        abort_reason: str | None = None
         invalidation_reason = self.coordinator.last_reason
+        self._scan_issue_counts = {}
         try:
             self._scan_running.set()
-            self._logger.debug("Directory scan started.", extra={"event": "directory_scan_started", "stage": "scan"})
             self._scan_progress = time.monotonic()
             with self._generation_lock:
                 baseline = self.coordinator.capture_epoch()
@@ -1667,33 +2294,75 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     generation, _selected = self.index.prepare_scan()
                     if not resuming:
                         self._scan_epoch = (generation, baseline)
-                    self._cleanup_pending = True
+                    if self.coordinator.observation_lost:
+                        while self.index.requeue_completed_scan_batch(generation):
+                            if self._stop_event.is_set():
+                                raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                        self.coordinator.observation_lost = False
                     self.index.seed_scan(generation)
+                    self.coordinator.on_scan_commit = self._publish_scan_progress
+                    self.coordinator.start_scan_groups()
+                    done, queued, found = self.index.scan_counts(generation)
+                    self.scan_progress = ScanProgress("building" if _selected else "updating", done, queued, found, int(time.time() * 1000))
+                    self._progress_generation = generation
+                    self._logger.info(
+                        "Directory scan started.",
+                        extra={
+                            "event": "directory_scan_started",
+                            "stage": "scan",
+                            "scan_generation": generation,
+                            "scan_phase": self.scan_progress.phase,
+                            "parents_done": done,
+                            "parents_queued": queued,
+                            "directories_found": found,
+                            "smb_round_trips": source_io.round_trips - round_trips_before,
+                            "group_commits": 0,
+                            "duration_ms": (time.monotonic() - started) * 1000,
+                            "abort_reason": None,
+                        },
+                    )
+                with self.coordinator.read("", availability_only=True) as root_token:
+                    self._probe_source_root_read(root_token)
+
+                def resume_safe_reads() -> int:
+                    with self.coordinator.lock:
+                        try:
+                            self.coordinator.flush_scan_group()
+                        except ScanObservationInvalidated:
+                            pass
+                        if self.coordinator.observation_lost:
+                            while self.index.requeue_completed_scan_batch(generation):
+                                if self._stop_event.is_set():
+                                    raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
+                            self.coordinator.observation_lost = False
+                        return self.coordinator.capture_epoch()
+
                 while not self._stop_event.is_set():
                     with self.coordinator.lock:
                         if baseline != self.coordinator.epoch:
-                            raise ScanObservationInvalidated("Directory scan epoch changed. Retry source verification.")
+                            if self.coordinator.observed_reads_blocked:
+                                baseline = resume_safe_reads()
+                            else:
+                                raise ScanObservationInvalidated("Directory scan epoch changed. Retry source verification.")
                         self.coordinator.apply_pending()
                         if self.coordinator.pending:
                             continue
                     reconciliation = None if reconcile_error is not None else self.index.reconciliation_generation()
-                    parents = self.index.pending_scan_paths(generation, limit=1)
+                    parents = self.index.pending_scan_paths(generation, exclude=self.coordinator.buffered_scan_parents(generation))
+                    if parents and self.coordinator.has_buffered_ancestor(generation, parents):
+                        self.coordinator.flush_scan_group()
+                        continue
                     if not parents and reconcile_error is not None:
+                        self.coordinator.flush_scan_group()
                         raise reconcile_error
                     reconcile = reconciliation is not None and (not parents or self._reconcile_next)
                     current = reconciliation if reconcile and reconciliation is not None else generation
                     if reconcile:
+                        self.coordinator.flush_scan_group()
                         parents = self.index.pending_scan_paths(current, limit=1)
                     if not parents:
-                        if self._scan_epoch != (generation, baseline):
-                            while True:
-                                with self.coordinator.lock:
-                                    if self._stop_event.is_set() or baseline != self.coordinator.epoch:
-                                        raise ScanObservationInvalidated("Directory scan epoch changed. Retry source verification.")
-                                    more = self.index.requeue_completed_scan_batch(generation)
-                                    if not more:
-                                        self._scan_epoch = (generation, baseline)
-                                        break
+                        self.coordinator.flush_scan_group()
+                        if self.index.pending_scan_paths(generation, limit=1) or self.index.reconciliation_generation() is not None:
                             continue
                         with self.coordinator.read("", availability_only=True) as root_token:
                             self._probe_source_root_read(root_token)
@@ -1709,7 +2378,6 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                                 continue
                             invalidation_reason = self.coordinator.last_reason
                             complete = self.coordinator.accept_generation(baseline, generation)
-                        self._cleanup_pending = True
                         self._state = CacheState.READY
                         self._coverage_incomplete = not complete
                         if complete:
@@ -1718,30 +2386,56 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                         success = complete
                         break
                     self._reconcile_next = not reconcile
+                    watcher_was_ready = self._watcher_ready.is_set()
                     try:
-                        self._scan_parent(current, parents[0], reconcile=reconcile)
+                        self._scan_parent_page(current, parents, reconcile=reconcile)
+                        self.coordinator.flush_scan_group_if_due()
                     except (InterruptedError, DirectoryDiskBudgetError):
                         raise
                     except Exception as error:
+                        if (
+                            isinstance(error, ScanObservationInvalidated)
+                            and not reconcile
+                            and (
+                                (baseline != self.coordinator.epoch and self.coordinator.observed_reads_blocked)
+                                or (watcher_was_ready and not self._watcher_ready.is_set())
+                            )
+                        ):
+                            baseline = resume_safe_reads()
+                            continue
                         if not reconcile or self._stop_event.is_set():
                             raise
                         # Finish candidate work first; the accepted-parent failure ends the turn afterwards.
                         reconcile_error = error
                         continue
                     finished_parent = True
-                    status = self.index.status()
-                    self._directory_count = status.directory_count
                 else:
                     raise InterruptedError("Directory source stopped. Reopen the connection to initialize it.")
         except ScanObservationInvalidated:
+            abort_reason = "observation_invalidated"
             if not finished_parent:
                 self._stale_turns += 1
             raise
+        except Exception as error:
+            abort_reason = type(error).__name__
+            raise
         finally:
+            self.coordinator.cancel_scan_groups()
+            self._progress_generation = None
+            self._scan_job_file_ids.clear()
+            last_progress = self.scan_progress
+            if last_progress is not None:
+                self.scan_progress = ScanProgress(
+                    "idle",
+                    last_progress.parents_done,
+                    last_progress.parents_queued,
+                    last_progress.directories_found,
+                    last_progress.started_at_ms,
+                )
             self._scan_running.clear()
             self._manager_scan_slots.release()
             reason = self.coordinator.last_reason or invalidation_reason
-            self._logger.debug(
+            self._logger.info(
                 "Directory scan finished (success=%s).",
                 success,
                 extra={
@@ -1750,6 +2444,18 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     "duration_ms": (time.monotonic() - started) * 1000,
                     "invalidation_reason": reason.value if reason is not None else None,
                     "stale_turns": self._stale_turns,
+                    "scan_generation": generation,
+                    "scan_phase": last_progress.phase if last_progress is not None else None,
+                    "parents_done": last_progress.parents_done if last_progress is not None else 0,
+                    "parents_queued": last_progress.parents_queued if last_progress is not None else 0,
+                    "directories_found": last_progress.directories_found if last_progress is not None else 0,
+                    "group_commits": self.coordinator.scan_commits,
+                    "smb_round_trips": source_io.round_trips - round_trips_before,
+                    "abort_reason": abort_reason,
+                    "access_denied_count": self._scan_issue_counts.get("access_denied", 0),
+                    "unsupported_encoding_count": self._scan_issue_counts.get("unsupported_encoding", 0),
+                    "unsafe_traversal_count": self._scan_issue_counts.get("unsafe_traversal", 0),
+                    "scan_failed_count": self._scan_issue_counts.get("scan_failed", 0),
                 },
             )
 
@@ -1919,8 +2625,6 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     await self._run_reconciliation()
                     response = await self._blocking(self.index.status)
                     self._directory_count = response.directory_count
-                    if self._cleanup_pending:
-                        await self._blocking(self._cleanup_retired_work)
                     if self._reclamation_pending:
                         await self._blocking(self._reclaim_disk_work)
                     if not self._scan_running.is_set():

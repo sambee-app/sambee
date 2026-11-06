@@ -773,29 +773,83 @@ describe("MarkdownViewer", () => {
     return renderViewerWithProps();
   }
 
-  function renderViewerWithProps({ onClose = () => {}, isReadOnly = false }: { onClose?: () => void; isReadOnly?: boolean } = {}) {
+  function renderViewerWithProps({
+    onClose = () => {},
+    isReadOnly = false,
+    path = "/docs/readme.md",
+  }: {
+    onClose?: () => void;
+    isReadOnly?: boolean;
+    path?: string;
+  } = {}) {
     return render(
       <SambeeThemeProvider>
-        <MarkdownViewer connectionId="conn1" path="/docs/readme.md" onClose={onClose} isReadOnly={isReadOnly} />
+        <MarkdownViewer connectionId="conn1" path={path} onClose={onClose} isReadOnly={isReadOnly} />
       </SambeeThemeProvider>
     );
   }
+
+  it.each([
+    { path: "/docs/x-note-2.md", title: "x-note-2" },
+    { path: "/docs/report.v2.MD", title: "report.v2" },
+    { path: "/docs/.notes.md", title: ".notes" },
+    { path: "/docs/README", title: "README" },
+  ])("uses $title as the print title for $path and restores the previous page title", async ({ path, title }) => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Printable preview");
+    const previousTitle = document.title;
+    try {
+      document.title = "Sambee";
+      const { unmount } = renderViewerWithProps({ path });
+      await screen.findByRole("heading", { name: "Printable preview" });
+      const filename = path.split("/").pop();
+      expect(document.title).toBe(filename);
+      act(() => window.dispatchEvent(new Event("beforeprint")));
+      expect(document.title).toBe(title);
+      act(() => window.dispatchEvent(new Event("afterprint")));
+      expect(document.title).toBe(filename);
+      unmount();
+      expect(document.title).toBe("Sambee");
+    } finally {
+      document.title = previousTitle;
+    }
+  });
+
+  it("does not replace a page title set by another owner when the viewer closes", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Printable preview");
+    const previousTitle = document.title;
+    try {
+      const { unmount } = renderViewer();
+      await screen.findByRole("heading", { name: "Printable preview" });
+      document.title = "Another page";
+      unmount();
+      expect(document.title).toBe("Another page");
+    } finally {
+      document.title = previousTitle;
+    }
+  });
 
   it("prints read-only previews and reports native dialog failures without changing content", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Printable preview");
     const print = vi
       .spyOn(window, "print")
       .mockImplementationOnce(() => {
+        expect(document.title).toBe("readme");
         throw new Error("Printing blocked");
       })
-      .mockImplementation(() => {});
+      .mockImplementation(() => {
+        expect(document.title).toBe("readme");
+        window.dispatchEvent(new Event("beforeprint"));
+        window.dispatchEvent(new Event("afterprint"));
+      });
     renderViewerWithProps({ isReadOnly: true });
     await screen.findByRole("heading", { name: "Printable preview" });
     const button = screen.getByRole("button", { name: "Print" });
     await userEvent.click(button);
     expect(await screen.findByText("The print dialog couldn't open. Try Print from your browser menu.")).toBeInTheDocument();
+    expect(document.title).toBe("readme.md");
     await userEvent.click(button);
     expect(print).toHaveBeenCalledTimes(2);
+    expect(document.title).toBe("readme.md");
     expect(screen.queryByText("The print dialog couldn't open. Try Print from your browser menu.")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Printable preview" })).toBeInTheDocument();
   });

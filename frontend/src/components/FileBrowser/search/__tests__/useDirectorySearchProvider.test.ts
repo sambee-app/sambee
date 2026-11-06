@@ -20,6 +20,28 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("getDirectoryResultPresentation", () => {
+  it.each([
+    { phase: "building", label: "Indexing... (123 directories found)" },
+    { phase: "updating", label: "Updating index... (12 of ~42 directories checked)" },
+  ] as const)("shows $phase progress before uncertain coverage", async ({ phase, label }) => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: [],
+      total_matches: 0,
+      cache_state: "ready",
+      directory_count: 7,
+      coverage: "uncertain",
+      search_contract_version: SEARCH_CONTRACT_VERSION,
+      scan_progress: { phase, parents_done: 12, parents_queued: 30, directories_found: 123, started_at_ms: 1 },
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getStatusInfo()).toEqual({ label, showSpinner: true });
+    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+  });
+
   it.each(["connection-1", "local-C"])("fences old generation responses and retry errors for %s", async (connectionId) => {
     type Response = Awaited<ReturnType<typeof api.searchDirectories>>;
     const services = createBrowserContentServices([], new CompanionSession());

@@ -1,5 +1,53 @@
 {
   "version": 1,
+  "scan_trees": [
+    {
+      "name": "shallow",
+      "passes": [
+        [
+          "tree-alpha",
+          "tree-beta",
+          "tree-gone"
+        ],
+        [
+          "tree-alpha",
+          "tree-beta",
+          "tree-new"
+        ]
+      ]
+    },
+    {
+      "name": "deep",
+      "passes": [
+        [
+          "tree-deep",
+          "tree-deep/tree-middle",
+          "tree-deep/tree-middle/tree-leaf"
+        ],
+        [
+          "tree-deep",
+          "tree-deep/tree-new",
+          "tree-deep/tree-new/tree-leaf"
+        ],
+        []
+      ]
+    },
+    {
+      "name": "original-names",
+      "passes": [
+        [
+          "tree-%_",
+          "tree-space name",
+          "tree-é"
+        ],
+        [
+          "tree-%_",
+          "tree-%_/tree-child",
+          "tree-space name"
+        ]
+      ]
+    }
+  ],
   "normalization": [
     {
       "input": "Straße",

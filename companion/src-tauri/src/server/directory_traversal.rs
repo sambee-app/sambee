@@ -1,11 +1,55 @@
 //! Descriptor-based traversal; unsupported platforms fail closed without a lossy walker.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::directory_index::IndexError;
 
 pub(super) const MOUNT_BOUNDARY_CAPABILITY_ERROR: &str =
     "The kernel cannot check directory mount boundaries. Restart the companion after enabling statx mount IDs or /proc/self/fdinfo.";
+
+#[derive(Default)]
+pub struct NativeIo {
+    opens: AtomicU64,
+    #[cfg(test)]
+    pub(super) read_gate: std::sync::Mutex<Option<std::sync::Arc<std::sync::Barrier>>>,
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) parent_read_gate: std::sync::Mutex<Option<std::sync::Arc<std::sync::Barrier>>>,
+    #[cfg(all(test, target_os = "linux"))]
+    force_unknown_entry_types: std::sync::atomic::AtomicBool,
+    #[cfg(all(test, target_os = "linux"))]
+    unknown_entry_checks: AtomicU64,
+}
+
+impl NativeIo {
+    pub fn opens(&self) -> u64 {
+        self.opens.load(Ordering::Relaxed)
+    }
+
+    fn record_open(&self) {
+        self.opens.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Default)]
+struct RootProbeState {
+    requested: AtomicU64,
+    verified: AtomicU64,
+}
+
+impl RootProbeState {
+    fn require(&self) -> u64 {
+        self.requested.fetch_add(1, Ordering::AcqRel).wrapping_add(1)
+    }
+
+    fn needed(&self) -> bool {
+        self.requested.load(Ordering::Acquire) != self.verified.load(Ordering::Acquire)
+    }
+
+    fn complete(&self, version: u64) {
+        self.verified.store(version, Ordering::Release);
+    }
+}
 
 fn validate_traversal_path(path: &Path) -> Result<(), IndexError> {
     let maximum_bytes = super::directory_manager::limit("max_source_path_bytes")?;
@@ -43,12 +87,134 @@ impl TraversalIssue {
     }
 }
 
+pub(super) fn source_error(error: IndexError) -> IndexError {
+    match error {
+        IndexError::Io(error) => {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::Interrupted
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::NetworkDown
+                    | std::io::ErrorKind::NetworkUnreachable
+                    | std::io::ErrorKind::HostUnreachable
+                    | std::io::ErrorKind::OutOfMemory
+                    | std::io::ErrorKind::StorageFull
+            ) || source_resource_error(&error)
+            {
+                return IndexError::Io(error);
+            }
+            IndexError::SourceItem(match error.kind() {
+                std::io::ErrorKind::PermissionDenied => TraversalIssue::AccessDenied.code(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory => TraversalIssue::UnsafeTraversal.code(),
+                _ => TraversalIssue::ScanFailed.code(),
+            })
+        }
+        IndexError::Invalid(message) if message != MOUNT_BOUNDARY_CAPABILITY_ERROR => {
+            IndexError::SourceItem(TraversalIssue::UnsafeTraversal.code())
+        }
+        _ => error,
+    }
+}
+
+fn source_resource_error(error: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    {
+        matches!(
+            error.raw_os_error(),
+            Some(libc::EMFILE | libc::ENFILE | libc::ENOMEM | libc::ENOSPC)
+        )
+    }
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::{
+            ERROR_BAD_NETPATH, ERROR_DISK_FULL, ERROR_LOGON_FAILURE, ERROR_NETNAME_DELETED, ERROR_NOT_ENOUGH_MEMORY,
+            ERROR_NO_SYSTEM_RESOURCES, ERROR_TOO_MANY_OPEN_FILES,
+        };
+        error.raw_os_error().is_some_and(|code| {
+            [
+                ERROR_BAD_NETPATH,
+                ERROR_DISK_FULL,
+                ERROR_LOGON_FAILURE,
+                ERROR_NETNAME_DELETED,
+                ERROR_NO_SYSTEM_RESOURCES,
+                ERROR_NOT_ENOUGH_MEMORY,
+                ERROR_TOO_MANY_OPEN_FILES,
+            ]
+            .iter()
+            .any(|value| code == value.0 as i32)
+        })
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = error;
+        false
+    }
+}
+
+#[cfg(test)]
+mod source_error_tests {
+    use super::*;
+
+    #[test]
+    fn source_classifier_preserves_connection_resource_and_storage_errors() {
+        for kind in [
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::NotConnected,
+            std::io::ErrorKind::OutOfMemory,
+            std::io::ErrorKind::StorageFull,
+        ] {
+            assert!(matches!(
+                source_error(IndexError::Io(std::io::Error::from(kind))),
+                IndexError::Io(_)
+            ));
+        }
+        assert!(matches!(source_error(IndexError::Interrupted), IndexError::Interrupted));
+        assert!(matches!(
+            source_error(IndexError::StoragePaused("fixture")),
+            IndexError::StoragePaused(_)
+        ));
+        for (kind, expected) in [
+            (std::io::ErrorKind::PermissionDenied, "access_denied"),
+            (std::io::ErrorKind::Other, "scan_failed"),
+            (std::io::ErrorKind::NotFound, "unsafe_traversal"),
+        ] {
+            assert!(matches!(source_error(IndexError::Io(std::io::Error::from(kind))), IndexError::SourceItem(code) if code == expected));
+        }
+        #[cfg(unix)]
+        for code in [libc::EMFILE, libc::ENFILE, libc::ENOMEM, libc::ENOSPC] {
+            assert!(
+                matches!(source_error(IndexError::Io(std::io::Error::from_raw_os_error(code))), IndexError::Io(error) if error.raw_os_error() == Some(code))
+            );
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct NativeIdentity {
     device: u64,
     inode: u64,
     mount: u64,
 }
+
+impl NativeIdentity {
+    pub fn file_id(self) -> Vec<u8> {
+        #[cfg(windows)]
+        {
+            [self.inode.to_le_bytes(), self.mount.to_le_bytes()].concat()
+        }
+        #[cfg(not(windows))]
+        {
+            self.inode.to_le_bytes().to_vec()
+        }
+    }
+}
+
+pub type NativeChild = (String, bool, Option<Vec<u8>>);
 
 #[cfg(any(windows, test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -227,8 +393,20 @@ mod platform {
     use std::os::unix::fs::MetadataExt;
     use std::path::{Component, PathBuf};
     use std::ptr::NonNull;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     const DIRECTORY_FLAGS: libc::c_int = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+    static OPENAT2_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+    fn open_at2(descriptor: libc::c_int, name: &CStr) -> io::Result<File> {
+        let mut how: libc::open_how = unsafe { std::mem::zeroed() };
+        how.flags = DIRECTORY_FLAGS as u64;
+        how.resolve = libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_XDEV | libc::RESOLVE_BENEATH;
+        let descriptor = unsafe { libc::syscall(libc::SYS_openat2, descriptor, name.as_ptr(), &how, size_of::<libc::open_how>()) };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { File::from_raw_fd(descriptor as libc::c_int) })
+    }
     const EMPTY_NAME: &[u8] = b"\0";
     const CURRENT_NAME: &[u8] = b".\0";
     const ROOT_NAME: &[u8] = b"/\0";
@@ -254,7 +432,7 @@ mod platform {
     }
 
     /// Classify the held filesystem so root aliases cannot bypass kernel-tree exclusions.
-    fn validate_filesystem(file: &File, source: NativeIdentity) -> Result<(), IndexError> {
+    fn validate_filesystem(file: &File, source: NativeIdentity, io: &super::NativeIo) -> Result<(), IndexError> {
         let mut filesystem = std::mem::MaybeUninit::<libc::statfs>::zeroed();
         if unsafe { libc::fstatfs(file.as_raw_fd(), filesystem.as_mut_ptr()) } != 0 {
             return Err(io::Error::last_os_error().into());
@@ -266,7 +444,7 @@ mod platform {
             ));
         }
         let device_name = CStr::from_bytes_with_nul(DEVICE_ROOT_NAME).map_err(|_| IndexError::Invalid("Invalid device root name."))?;
-        match open_at(libc::AT_FDCWD, device_name) {
+        match open_at(libc::AT_FDCWD, device_name, io) {
             Ok(device_root) if device_root.metadata()?.dev() == source.device => {
                 return Err(IndexError::Invalid(
                     "Kernel device directories cannot be indexed. Select a regular data directory or use recent directories.",
@@ -279,16 +457,18 @@ mod platform {
         Ok(())
     }
 
-    fn io_issue(error: &io::Error) -> TraversalIssue {
-        match error.kind() {
-            io::ErrorKind::PermissionDenied => TraversalIssue::AccessDenied,
-            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => TraversalIssue::UnsafeTraversal,
-            _ => TraversalIssue::ScanFailed,
+    fn io_issue(error: io::Error) -> Result<TraversalIssue, IndexError> {
+        match super::source_error(IndexError::Io(error)) {
+            IndexError::SourceItem("access_denied") => Ok(TraversalIssue::AccessDenied),
+            IndexError::SourceItem("unsafe_traversal") => Ok(TraversalIssue::UnsafeTraversal),
+            IndexError::SourceItem(_) => Ok(TraversalIssue::ScanFailed),
+            error => Err(error),
         }
     }
 
     /// The returned file owns the successful descriptor. Every component is opened without following links.
-    fn open_at(parent: libc::c_int, name: &CStr) -> io::Result<File> {
+    fn open_at(parent: libc::c_int, name: &CStr, io: &super::NativeIo) -> io::Result<File> {
+        io.record_open();
         let descriptor = unsafe { libc::openat(parent, name.as_ptr(), DIRECTORY_FLAGS) };
         if descriptor < 0 {
             return Err(io::Error::last_os_error());
@@ -333,20 +513,223 @@ mod platform {
     }
 
     #[test]
+    fn parent_capability_cache_only_remembers_enosys() {
+        thread_local! {
+            static PROBE: std::cell::Cell<(usize, i32)> = const { std::cell::Cell::new((0, 0)) };
+        }
+        for errno in [libc::ENOSYS, libc::EACCES, libc::ELOOP, libc::EXDEV] {
+            let temporary = tempfile::tempdir().unwrap();
+            std::fs::create_dir(temporary.path().join("parent")).unwrap();
+            let root = NativeRoot::open(temporary.path()).unwrap();
+            let unavailable = AtomicBool::new(false);
+            PROBE.with(|probe| probe.set((0, errno)));
+            for _attempt in 0..2 {
+                let result = root.parent_with_openat2("parent", false, &unavailable, |_descriptor, _name| {
+                    Err(PROBE.with(|probe| {
+                        let (count, errno) = probe.get();
+                        probe.set((count + 1, errno));
+                        io::Error::from_raw_os_error(errno)
+                    }))
+                });
+                assert_eq!(result.is_ok(), errno == libc::ENOSYS);
+            }
+            assert_eq!(unavailable.load(Ordering::Relaxed), errno == libc::ENOSYS);
+            assert_eq!(PROBE.with(|probe| probe.get().0), if errno == libc::ENOSYS { 1 } else { 2 });
+        }
+    }
+
+    #[test]
+    fn fallback_parent_opens_reject_leaf_and_ancestor_links() {
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temporary.path().join("real/child")).unwrap();
+        std::os::unix::fs::symlink("real", temporary.path().join("alias")).unwrap();
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        let unavailable = AtomicBool::new(true);
+        assert!(root.parent_with_openat2("real/child", false, &unavailable, open_at2).is_ok());
+        for relative in ["alias", "alias/child"] {
+            assert!(root.parent_with_openat2(relative, false, &unavailable, open_at2).is_err());
+        }
+    }
+
+    #[test]
+    fn unknown_entry_types_use_nofollow_metadata() {
+        const EXPECTED_ENTRY_CHECKS: u64 = 3;
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temporary.path().join("directory")).unwrap();
+        std::fs::write(temporary.path().join("file"), b"file").unwrap();
+        std::os::unix::fs::symlink("directory", temporary.path().join("link")).unwrap();
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        root.io.force_unknown_entry_types.store(true, Ordering::Relaxed);
+        let parent = root.open_parent_for_scan("").unwrap();
+        let mut children = Vec::new();
+        let mut issues = Vec::new();
+        parent
+            .children_with_ids(|entry| {
+                match entry {
+                    Ok(Some(child)) => children.push(child),
+                    Err(issue) => issues.push(issue),
+                    Ok(None) => {}
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(root.io.unknown_entry_checks.load(Ordering::Relaxed), EXPECTED_ENTRY_CHECKS);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].0, "directory");
+        assert!(children[0].1);
+        assert!(children[0].2.is_some());
+        assert_eq!(issues, vec![TraversalIssue::UnsafeTraversal]);
+    }
+
+    #[test]
     fn descriptor_mount_fallback_requires_the_kernel_mount_id() {
         assert_eq!(descriptor_mount_id("pos:\t0\nmnt_id:\t42\nino:\t1\n").unwrap(), 42);
         assert!(descriptor_mount_id("ino:\t42\n").is_err());
         assert!(descriptor_mount_id("mnt_id:\tinvalid\n").is_err());
     }
 
+    #[test]
+    fn enumeration_does_not_open_child_directories_or_regular_files() {
+        const CHILD_COUNT: usize = 64;
+        let temporary = tempfile::tempdir().unwrap();
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        let mut metadata = std::mem::MaybeUninit::<libc::statx>::zeroed();
+        let mask = libc::STATX_TYPE | libc::STATX_INO | libc::STATX_MNT_ID;
+        let result = unsafe {
+            libc::statx(
+                root.file.as_raw_fd(),
+                EMPTY_NAME.as_ptr().cast(),
+                libc::AT_EMPTY_PATH,
+                mask,
+                metadata.as_mut_ptr(),
+            )
+        };
+        if result != 0 || unsafe { metadata.assume_init() }.stx_mask & mask != mask {
+            return;
+        }
+        let before = root.io.opens();
+        root.children("", |_| Ok(())).unwrap();
+        let baseline = root.io.opens() - before;
+        for number in 0..CHILD_COUNT {
+            std::fs::create_dir(temporary.path().join(format!("directory-{number}"))).unwrap();
+            std::fs::write(temporary.path().join(format!("file-{number}")), b"file").unwrap();
+        }
+        let before = root.io.opens();
+        let mut found = 0;
+        root.children("", |entry| {
+            if let Some((_, descend)) = entry.expect("ordinary entries") {
+                assert!(descend);
+                found += 1;
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(found, CHILD_COUNT);
+        assert_eq!(root.io.opens() - before, baseline);
+    }
+
     pub struct NativeRoot {
         path: PathBuf,
+        file: File,
+        io: std::sync::Arc<super::NativeIo>,
+        probes: super::RootProbeState,
+        pub identity: NativeIdentity,
+    }
+
+    pub struct NativeParent<'root> {
+        root: &'root NativeRoot,
+        relative: String,
         file: File,
         pub identity: NativeIdentity,
     }
 
+    impl NativeParent<'_> {
+        pub fn verify(&self) -> Result<(), IndexError> {
+            if self.file.metadata()?.nlink() == 0 || identity(&self.file)? != self.identity {
+                return Err(IndexError::Invalid(
+                    "Directory parent changed during scanning. Retry source verification.",
+                ));
+            }
+            Ok(())
+        }
+
+        pub fn children_with_ids(
+            &self,
+            receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+        ) -> Result<(), IndexError> {
+            self.verify().map_err(super::source_error)?;
+            #[cfg(test)]
+            {
+                let gate = self
+                    .root
+                    .io
+                    .parent_read_gate
+                    .lock()
+                    .map_err(|_| IndexError::Invalid("Directory read gate is unavailable."))?
+                    .clone();
+                if let Some(gate) = gate {
+                    gate.wait();
+                    gate.wait();
+                }
+            }
+            self.root.children_from_handle(&self.relative, &self.file, receive)
+        }
+
+        #[cfg(test)]
+        pub fn has_directory_child_with_check(
+            &self,
+            name: &str,
+            check: impl FnMut() -> Result<(), IndexError>,
+        ) -> Result<bool, IndexError> {
+            self.verify().map_err(super::source_error)?;
+            let found = self
+                .root
+                .has_directory_child_from_handle(&self.relative, self.identity, &self.file, name, check)?;
+            self.verify().map_err(super::source_error)?;
+            Ok(found)
+        }
+    }
+
     impl NativeRoot {
+        pub fn open_parent(&self, relative: &str) -> Result<NativeParent<'_>, IndexError> {
+            self.open_parent_with_check(relative, true)
+        }
+
+        pub fn open_parent_for_scan(&self, relative: &str) -> Result<NativeParent<'_>, IndexError> {
+            self.open_parent_with_check(relative, false)
+        }
+
+        pub fn open_parent_for_scan_with_id(&self, relative: &str, _expected_id: &[u8]) -> Result<NativeParent<'_>, IndexError> {
+            self.open_parent_for_scan(relative)
+        }
+
+        pub fn require_verification(&self) {
+            self.probes.require();
+        }
+
+        fn open_parent_with_check(&self, relative: &str, full_root_check: bool) -> Result<NativeParent<'_>, IndexError> {
+            let result = (|| {
+                let file = self.parent(relative, full_root_check)?;
+                let identity = identity(&file)?;
+                Ok(NativeParent {
+                    root: self,
+                    relative: relative.to_owned(),
+                    file,
+                    identity,
+                })
+            })();
+            if result.is_err() {
+                self.require_verification();
+            }
+            result
+        }
+
+        #[cfg(test)]
         pub fn open(path: &Path) -> Result<Self, IndexError> {
+            Self::open_with_io(path, std::sync::Arc::default())
+        }
+
+        pub fn open_with_io(path: &Path, io: std::sync::Arc<super::NativeIo>) -> Result<Self, IndexError> {
             if !path.is_absolute() {
                 return Err(IndexError::Invalid("Directory source root must be an absolute directory."));
             }
@@ -354,6 +737,7 @@ mod platform {
             let mut file = open_at(
                 libc::AT_FDCWD,
                 CStr::from_bytes_with_nul(ROOT_NAME).map_err(|_| IndexError::Invalid("Invalid root name."))?,
+                &io,
             )?;
             for component in path.components() {
                 match component {
@@ -361,7 +745,7 @@ mod platform {
                     Component::Normal(name) => {
                         let name = CString::new(name.as_bytes())
                             .map_err(|_| IndexError::Invalid("Directory source root contains an unsupported name."))?;
-                        file = open_at(file.as_raw_fd(), &name)?;
+                        file = open_at(file.as_raw_fd(), &name, &io)?;
                     }
                     _ => {
                         return Err(IndexError::Invalid(
@@ -371,37 +755,84 @@ mod platform {
                 }
             }
             let identity = identity(&file)?;
-            validate_filesystem(&file, identity)?;
+            validate_filesystem(&file, identity, &io)?;
             Ok(Self {
                 path: path.to_owned(),
                 file,
+                io,
+                probes: super::RootProbeState::default(),
                 identity,
             })
         }
 
         pub fn verify(&self) -> Result<(), IndexError> {
-            if Self::open(&self.path)?.identity != self.identity {
+            let version = self.probes.require();
+            if Self::open_with_io(&self.path, self.io.clone())?.identity != self.identity {
                 return Err(io::Error::new(
                     io::ErrorKind::NotConnected,
                     "Directory root binding changed. Background verification will bind the root again.",
                 )
                 .into());
             }
+            self.probes.complete(version);
             Ok(())
         }
 
-        fn parent(&self, relative: &str) -> Result<File, IndexError> {
+        fn parent(&self, relative: &str, full_root_check: bool) -> Result<File, IndexError> {
+            self.parent_with_openat2(relative, full_root_check, &OPENAT2_UNAVAILABLE, open_at2)
+        }
+
+        fn parent_with_openat2(
+            &self,
+            relative: &str,
+            full_root_check: bool,
+            unavailable: &AtomicBool,
+            opener: fn(libc::c_int, &CStr) -> io::Result<File>,
+        ) -> Result<File, IndexError> {
             super::validate_traversal_path(&self.path.join(relative))?;
-            self.verify()?;
+            if full_root_check || self.probes.needed() {
+                self.verify()?;
+            } else if self.file.metadata()?.nlink() == 0 || identity(&self.file)? != self.identity {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "Directory root binding changed. Background verification will bind the root again.",
+                )
+                .into());
+            }
+            if !relative.is_empty() {
+                super::super::directory_index::validate_directory_path(relative)?;
+            }
+            if !unavailable.load(Ordering::Relaxed) {
+                let name = CString::new(if relative.is_empty() { "." } else { relative })
+                    .map_err(|_| IndexError::Invalid("Directory name contains NUL."))?;
+                self.io.record_open();
+                let error = match opener(self.file.as_raw_fd(), &name) {
+                    Ok(file) => {
+                        let current = identity(&file)?;
+                        if current.device != self.identity.device || current.mount != self.identity.mount {
+                            return Err(IndexError::Invalid(
+                                "Directory traversal would cross a mount. Index the mounted drive separately.",
+                            ));
+                        }
+                        return Ok(file);
+                    }
+                    Err(error) => error,
+                };
+                if error.raw_os_error() != Some(libc::ENOSYS) {
+                    return Err(error.into());
+                }
+                unavailable.store(true, Ordering::Relaxed);
+            }
             let mut file = open_at(
                 self.file.as_raw_fd(),
                 CStr::from_bytes_with_nul(CURRENT_NAME).map_err(|_| IndexError::Invalid("Invalid current directory name."))?,
+                &self.io,
             )?;
             if !relative.is_empty() {
                 super::super::directory_index::validate_directory_path(relative)?;
                 for component in relative.split('/') {
                     let name = CString::new(component).map_err(|_| IndexError::Invalid("Directory name contains NUL."))?;
-                    file = open_at(file.as_raw_fd(), &name)?;
+                    file = open_at(file.as_raw_fd(), &name, &self.io)?;
                     let current = identity(&file)?;
                     if current.device != self.identity.device || current.mount != self.identity.mount {
                         return Err(IndexError::Invalid(
@@ -414,7 +845,7 @@ mod platform {
         }
 
         pub fn verify_parent(&self, parent: &str, expected: NativeIdentity) -> Result<(), IndexError> {
-            if identity(&self.parent(parent)?)? != expected {
+            if identity(&self.parent(parent, true)?)? != expected {
                 return Err(IndexError::Invalid(
                     "Directory parent changed during scanning. Retry source verification.",
                 ));
@@ -422,8 +853,9 @@ mod platform {
             Ok(())
         }
 
+        #[cfg(test)]
         pub fn parent_identity(&self, parent: &str) -> Result<NativeIdentity, IndexError> {
-            identity(&self.parent(parent)?)
+            identity(&self.parent(parent, true)?)
         }
 
         /// Check one exact child through the held parent; errors are not evidence of absence.
@@ -440,13 +872,27 @@ mod platform {
             mut check: impl FnMut() -> Result<(), IndexError>,
         ) -> Result<bool, IndexError> {
             check()?;
+            let file = self.parent(parent, true)?;
+            let found = self.has_directory_child_from_handle(parent, expected, &file, name, check)?;
+            self.verify_parent(parent, expected)?;
+            Ok(found)
+        }
+
+        fn has_directory_child_from_handle(
+            &self,
+            parent: &str,
+            expected: NativeIdentity,
+            file: &File,
+            name: &str,
+            mut check: impl FnMut() -> Result<(), IndexError>,
+        ) -> Result<bool, IndexError> {
+            check()?;
             super::super::directory_index::validate_directory_path(name)?;
             if name.contains('/') {
                 return Err(IndexError::Invalid("Directory child check requires one native name."));
             }
             super::validate_traversal_path(&self.path.join(parent).join(name))?;
-            let file = self.parent(parent)?;
-            if identity(&file)? != expected {
+            if identity(file)? != expected {
                 return Err(IndexError::Invalid(
                     "Directory parent changed during reconciliation. Retry source verification.",
                 ));
@@ -473,7 +919,7 @@ mod platform {
                     return Ok(false);
                 }
                 check()?;
-                let child = match open_at(file.as_raw_fd(), &name) {
+                let child = match open_at(file.as_raw_fd(), &name, &self.io) {
                     Ok(child) => child,
                     Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
                     Err(error) => return Err(error.into()),
@@ -488,24 +934,46 @@ mod platform {
             })();
             let found = outcome?;
             check()?;
-            self.verify_parent(parent, expected)?;
             Ok(found)
         }
 
         /// fdopendir owns its descriptor; copied names remain valid after the next readdir call.
+        #[cfg(test)]
         pub fn children(
             &self,
             parent: &str,
             mut receive: impl FnMut(Result<Option<(String, bool)>, TraversalIssue>) -> Result<(), IndexError>,
         ) -> Result<(), IndexError> {
-            let file = self.parent(parent)?;
-            let parent_identity = identity(&file)?;
-            let descriptor = file.into_raw_fd();
+            self.children_with_ids(parent, |entry| {
+                receive(entry.map(|entry| entry.map(|(name, descend, _)| (name, descend))))
+            })
+        }
+
+        #[cfg(test)]
+        pub fn children_with_ids(
+            &self,
+            parent: &str,
+            receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+        ) -> Result<(), IndexError> {
+            self.open_parent(parent)?.children_with_ids(receive)
+        }
+
+        fn children_from_handle(
+            &self,
+            parent: &str,
+            file: &File,
+            mut receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+        ) -> Result<(), IndexError> {
+            let parent_identity = identity(file).map_err(super::source_error)?;
+            let descriptor = file
+                .try_clone()
+                .map_err(|error| super::source_error(IndexError::Io(error)))?
+                .into_raw_fd();
             let pointer = unsafe { libc::fdopendir(descriptor) };
             let Some(pointer) = NonNull::new(pointer) else {
                 let error = io::Error::last_os_error();
                 drop(unsafe { File::from_raw_fd(descriptor) });
-                return Err(error.into());
+                return Err(super::source_error(IndexError::Io(error)));
             };
             let directory = NativeDirectory(pointer);
             loop {
@@ -517,7 +985,7 @@ mod platform {
                 if entry.is_null() {
                     let error = io::Error::last_os_error();
                     if error.raw_os_error() != Some(0) {
-                        return Err(error.into());
+                        return Err(super::source_error(IndexError::Io(error)));
                     }
                     return Ok(());
                 }
@@ -525,42 +993,104 @@ mod platform {
                 if matches!(name.to_bytes(), b"." | b"..") {
                     continue;
                 }
+                let entry_type = unsafe { (*entry).d_type };
+                #[cfg(test)]
+                let entry_type = if self.io.force_unknown_entry_types.load(Ordering::Relaxed) {
+                    libc::DT_UNKNOWN
+                } else {
+                    entry_type
+                };
+                match entry_type {
+                    libc::DT_LNK => {
+                        receive(Err(TraversalIssue::UnsafeTraversal))?;
+                        continue;
+                    }
+                    libc::DT_DIR | libc::DT_UNKNOWN => {}
+                    _ => continue,
+                }
                 let Ok(text) = name.to_str() else {
                     receive(Err(TraversalIssue::UnsupportedEncoding))?;
                     continue;
                 };
-                let mut metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
-                let result = unsafe { libc::fstatat(descriptor, name.as_ptr(), metadata.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) };
-                if result != 0 {
-                    let error = io::Error::last_os_error();
-                    if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
-                        if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
-                            return Err(IndexError::Interrupted);
+                if entry_type == libc::DT_UNKNOWN {
+                    #[cfg(test)]
+                    self.io.unknown_entry_checks.fetch_add(1, Ordering::Relaxed);
+                    let mut metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
+                    let result = unsafe { libc::fstatat(descriptor, name.as_ptr(), metadata.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) };
+                    if result != 0 {
+                        let error = io::Error::last_os_error();
+                        if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
+                            if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
+                                return Err(IndexError::Interrupted);
+                            }
+                        } else {
+                            receive(Err(io_issue(error)?))?;
                         }
-                    } else {
-                        receive(Err(io_issue(&error)))?;
+                        continue;
                     }
-                    continue;
-                }
-                let metadata = unsafe { metadata.assume_init() };
-                let kind = metadata.st_mode & libc::S_IFMT;
-                if kind == libc::S_IFLNK {
-                    receive(Err(TraversalIssue::UnsafeTraversal))?;
-                    continue;
-                }
-                if kind != libc::S_IFDIR {
-                    continue;
+                    let kind = unsafe { metadata.assume_init() }.st_mode & libc::S_IFMT;
+                    if kind == libc::S_IFLNK {
+                        receive(Err(TraversalIssue::UnsafeTraversal))?;
+                        continue;
+                    }
+                    if kind != libc::S_IFDIR {
+                        continue;
+                    }
                 }
                 if super::validate_traversal_path(&self.path.join(parent).join(text)).is_err() {
                     receive(Err(TraversalIssue::UnsafeTraversal))?;
                     continue;
                 }
-                match open_at(descriptor, name).and_then(|child| identity(&child).map_err(io::Error::other)) {
+                let mut extended = std::mem::MaybeUninit::<libc::statx>::zeroed();
+                let mask = libc::STATX_TYPE | libc::STATX_INO | libc::STATX_MNT_ID;
+                let result = unsafe {
+                    libc::statx(
+                        descriptor,
+                        name.as_ptr(),
+                        libc::AT_SYMLINK_NOFOLLOW | libc::AT_NO_AUTOMOUNT,
+                        mask,
+                        extended.as_mut_ptr(),
+                    )
+                };
+                if result == 0 {
+                    let metadata = unsafe { extended.assume_init() };
+                    if metadata.stx_mask & mask == mask {
+                        let kind = u32::from(metadata.stx_mode) & libc::S_IFMT;
+                        if kind == libc::S_IFLNK {
+                            receive(Err(TraversalIssue::UnsafeTraversal))?;
+                        } else if kind == libc::S_IFDIR {
+                            let same_mount = libc::makedev(metadata.stx_dev_major, metadata.stx_dev_minor) == self.identity.device
+                                && metadata.stx_mnt_id == self.identity.mount;
+                            receive(Ok(Some((
+                                text.to_owned(),
+                                same_mount,
+                                Some(metadata.stx_ino.to_le_bytes().to_vec()),
+                            ))))?;
+                            if !same_mount {
+                                receive(Err(TraversalIssue::UnsafeTraversal))?;
+                            }
+                        }
+                        continue;
+                    }
+                } else {
+                    let error = io::Error::last_os_error();
+                    if !matches!(error.raw_os_error(), Some(libc::ENOSYS | libc::EINVAL | libc::EOPNOTSUPP)) {
+                        if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
+                            if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
+                                return Err(IndexError::Interrupted);
+                            }
+                        } else {
+                            receive(Err(io_issue(error)?))?;
+                        }
+                        continue;
+                    }
+                }
+                match open_at(descriptor, name, &self.io).and_then(|child| identity(&child).map_err(io::Error::other)) {
                     Ok(child) if child.device == self.identity.device && child.mount == self.identity.mount => {
-                        receive(Ok(Some((text.to_owned(), true))))?
+                        receive(Ok(Some((text.to_owned(), true, Some(child.file_id())))))?
                     }
                     Ok(_) => {
-                        receive(Ok(Some((text.to_owned(), false))))?;
+                        receive(Ok(Some((text.to_owned(), false, None))))?;
                         receive(Err(TraversalIssue::UnsafeTraversal))?;
                     }
                     Err(error) => {
@@ -570,8 +1100,8 @@ mod platform {
                             }
                             continue;
                         }
-                        receive(Ok(Some((text.to_owned(), false))))?;
-                        receive(Err(io_issue(&error)))?;
+                        receive(Ok(Some((text.to_owned(), false, None))))?;
+                        receive(Err(io_issue(error)?))?;
                     }
                 }
             }
@@ -590,22 +1120,71 @@ mod platform {
 }
 
 #[cfg(target_os = "linux")]
-pub use platform::NativeRoot;
+pub use platform::{NativeParent, NativeRoot};
 
 #[cfg(windows)]
 #[path = "directory_traversal_windows.rs"]
 mod windows_platform;
 
 #[cfg(windows)]
-pub use windows_platform::NativeRoot;
+pub use windows_platform::{NativeParent, NativeRoot};
 
 #[cfg(not(any(target_os = "linux", windows)))]
 pub struct NativeRoot {
     pub identity: NativeIdentity,
+    probes: RootProbeState,
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+pub struct NativeParent<'root> {
+    root: &'root NativeRoot,
+    pub identity: NativeIdentity,
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+impl NativeParent<'_> {
+    pub fn verify(&self) -> Result<(), IndexError> {
+        self.root.verify()
+    }
+
+    pub fn children_with_ids(
+        &self,
+        _: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        self.verify()
+    }
+
+    pub fn has_directory_child_with_check(&self, _: &str, mut check: impl FnMut() -> Result<(), IndexError>) -> Result<bool, IndexError> {
+        check()?;
+        self.verify().map(|()| false)
+    }
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
 impl NativeRoot {
+    pub fn open_parent_for_scan(&self, relative: &str) -> Result<NativeParent<'_>, IndexError> {
+        self.open_parent(relative)
+    }
+
+    pub fn open_parent_for_scan_with_id(&self, relative: &str, _expected_id: &[u8]) -> Result<NativeParent<'_>, IndexError> {
+        self.open_parent_for_scan(relative)
+    }
+
+    pub fn require_verification(&self) {
+        self.probes.require();
+    }
+
+    pub fn open_parent(&self, _: &str) -> Result<NativeParent<'_>, IndexError> {
+        self.verify()?;
+        Err(IndexError::Invalid(
+            "Safe directory indexing is not available on this platform. Use recent directories.",
+        ))
+    }
+
+    pub fn open_with_io(path: &Path, _: std::sync::Arc<NativeIo>) -> Result<Self, IndexError> {
+        Self::open(path)
+    }
+
     pub fn open(_: &Path) -> Result<Self, IndexError> {
         Err(IndexError::Invalid("Safe directory indexing is not available on this platform. Use recent directories until a verified traversal adapter is available."))
     }
@@ -633,10 +1212,19 @@ impl NativeRoot {
         check()?;
         self.has_directory_child(parent, expected, name)
     }
+    #[cfg(test)]
     pub fn children(
         &self,
         _: &str,
         _: impl FnMut(Result<Option<(String, bool)>, TraversalIssue>) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        self.verify()
+    }
+
+    pub fn children_with_ids(
+        &self,
+        _: &str,
+        _: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
         self.verify()
     }
@@ -647,6 +1235,140 @@ mod tests {
     use super::*;
     use std::os::unix::ffi::OsStringExt;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn scan_parent_opens_skip_full_root_probes_until_requested() {
+        const TWO_PARENT_OPEN_BUDGET: u64 = 5;
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temporary.path().join("parent")).unwrap();
+        let io = std::sync::Arc::<NativeIo>::default();
+        let root = NativeRoot::open_with_io(temporary.path(), io.clone()).unwrap();
+        let root_probe_opens = io.opens();
+        let before = io.opens();
+        root.open_parent_for_scan("parent").unwrap();
+        root.open_parent_for_scan("parent").unwrap();
+        assert!(io.opens() - before <= TWO_PARENT_OPEN_BUDGET);
+        root.require_verification();
+        let before = io.opens();
+        root.open_parent_for_scan("parent").unwrap();
+        assert!(io.opens() - before > root_probe_opens);
+    }
+
+    #[test]
+    fn root_probe_completion_preserves_newer_verification_requests() {
+        let probes = RootProbeState::default();
+        let earlier = probes.require();
+        let later = probes.require();
+        probes.complete(earlier);
+        assert!(probes.needed());
+        probes.complete(later);
+        assert!(!probes.needed());
+    }
+
+    #[test]
+    fn scan_open_error_requires_a_fresh_root_probe() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("source");
+        std::fs::create_dir_all(path.join("parent")).unwrap();
+        let root = NativeRoot::open(&path).unwrap();
+        assert!(root.open_parent_for_scan("missing").is_err());
+        std::fs::rename(&path, temporary.path().join("previous")).unwrap();
+        std::fs::create_dir_all(path.join("parent")).unwrap();
+        assert!(root.open_parent_for_scan("parent").is_err());
+    }
+
+    #[test]
+    fn boundary_probe_rejects_root_replaced_during_local_scan_reads() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("source");
+        std::fs::create_dir_all(path.join("parent")).unwrap();
+        let root = NativeRoot::open(&path).unwrap();
+        std::fs::rename(&path, temporary.path().join("previous")).unwrap();
+        std::fs::create_dir_all(path.join("parent")).unwrap();
+        root.open_parent_for_scan("parent").unwrap();
+        assert!(root.verify().is_err());
+        assert!(root.open_parent("parent").is_err());
+    }
+
+    #[test]
+    fn held_parent_enumeration_and_verification_do_not_reopen_directories() {
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temporary.path().join("parent")).unwrap();
+        let io = std::sync::Arc::<NativeIo>::default();
+        let root = NativeRoot::open_with_io(temporary.path(), io.clone()).unwrap();
+        let read = root.open_parent("parent").unwrap();
+        let before = io.opens();
+        for _ in 0..3 {
+            read.verify().unwrap();
+        }
+        read.children_with_ids(|entry| {
+            assert!(entry.unwrap().is_none());
+            Ok(())
+        })
+        .unwrap();
+        assert!(!read.has_directory_child_with_check("missing", || Ok(())).unwrap());
+        assert_eq!(io.opens(), before);
+    }
+
+    #[test]
+    fn held_parent_does_not_follow_a_replacement_link() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        let outside = temporary.path().join("outside");
+        std::fs::create_dir_all(path.join("parent/original")).unwrap();
+        std::fs::create_dir_all(outside.join("external")).unwrap();
+        let root = NativeRoot::open(&path).unwrap();
+        let read = root.open_parent("parent").unwrap();
+        std::fs::rename(path.join("parent"), path.join("previous")).unwrap();
+        symlink(&outside, path.join("parent")).unwrap();
+        let mut children = Vec::new();
+        read.children_with_ids(|entry| {
+            if let Some((name, _, _)) = entry.unwrap() {
+                children.push(name);
+            }
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(children, ["original"]);
+        assert!(!read.has_directory_child_with_check("external", || Ok(())).unwrap());
+        assert!(root.open_parent("parent").is_err());
+    }
+
+    #[test]
+    fn held_parent_rejects_a_deleted_directory() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("parent");
+        std::fs::create_dir(&path).unwrap();
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        let read = root.open_parent("parent").unwrap();
+        std::fs::remove_dir(&path).unwrap();
+        assert!(read.verify().is_err());
+        assert!(read.children_with_ids(|_| Ok(())).is_err());
+    }
+
+    #[test]
+    fn native_open_counter_is_source_scoped_and_includes_failed_opens() {
+        const ROOT_AND_DEVICE_OPENS: u64 = 2;
+        let temporary = tempfile::tempdir().unwrap();
+        let io = std::sync::Arc::<NativeIo>::default();
+        let root = NativeRoot::open_with_io(temporary.path(), io.clone()).unwrap();
+        let root_opens = temporary
+            .path()
+            .components()
+            .filter(|part| matches!(part, std::path::Component::Normal(_)))
+            .count() as u64
+            + ROOT_AND_DEVICE_OPENS;
+        assert_eq!(io.opens(), root_opens);
+        root.verify().unwrap();
+        assert_eq!(io.opens(), root_opens * 2);
+        NativeRoot::open(temporary.path()).unwrap().verify().unwrap();
+        assert_eq!(io.opens(), root_opens * 2);
+        assert!(root.parent_identity("missing").is_err());
+        assert!(io.opens() > root_opens * 3);
+        let before = io.opens();
+        assert!(NativeRoot::open_with_io(&temporary.path().join("missing"), io.clone()).is_err());
+        assert_eq!(io.opens() - before, root_opens);
+    }
 
     #[test]
     fn kernel_and_device_roots_are_rejected() {

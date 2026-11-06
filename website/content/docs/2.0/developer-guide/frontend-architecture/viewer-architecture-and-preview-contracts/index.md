@@ -37,6 +37,8 @@ Dedicated formats such as images require backend and frontend agreement. Text-fi
 
 Explicit image, PDF, and Markdown viewers take precedence over extension-based text recognition. A recognized, non-generic MIME type with a viewer mapping takes precedence over the filename; empty MIME types, `application/octet-stream`, and `text/plain` fall back to filename recognition. Saved viewer preferences override the default selection. Unknown files still use the viewer picker unless a MIME mapping or saved preference selects a viewer.
 
+All file viewers and editors use `useViewerDocumentTitle` to set the browser tab title to the active filename, including its extension. Image navigation updates the title to the active image. Native print events temporarily remove the final extension so browsers can suggest a clean PDF filename. The Markdown Print action uses the hook's print callback to prepare the title before opening the dialog and restore it after a print failure. Successful calls retain the short title until `afterprint`; `window.print()` can return before the print dialog closes. Closing the workspace restores the previous title unless another owner has changed it.
+
 ## Unified Text Editor
 
 `TextEditor.tsx` owns the text destination and reuses `TextCodeEditor` for writable and read-only content. There isn't a separate text-viewer component or an Edit action. The public `viewer=text` identifier, viewer preferences, settings, and recovery-draft keys remain compatible. Text routes accept absent, `view`, and `edit` modes as the same destination; canonical URLs omit `mode` without adding a history entry or dropping fragments. Markdown still uses its existing preview/edit route modes.

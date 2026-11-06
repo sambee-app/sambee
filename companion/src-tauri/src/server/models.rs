@@ -629,6 +629,15 @@ pub struct ConflictInfo {
 
 /// Response for directory search (quick navigate).
 /// Matches the backend `DirectorySearchResult` Pydantic model.
+#[derive(Clone, Debug, Serialize)]
+pub struct ScanProgress {
+    pub phase: &'static str,
+    pub parents_done: usize,
+    pub parents_queued: usize,
+    pub directories_found: usize,
+    pub started_at_ms: i64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct DirectorySearchResult {
     pub results: Vec<String>,
@@ -645,4 +654,5 @@ pub struct DirectorySearchResult {
     pub status_message: Option<String>,
     pub monitoring_state: Option<String>,
     pub retry_after_ms: Option<u64>,
+    pub scan_progress: Option<ScanProgress>,
 }

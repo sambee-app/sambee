@@ -23,7 +23,7 @@ from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, MAX_SQL_
 
 APPLICATION_ID = 1396853073
 SCHEMA_VERSION = DIRECTORY_INDEX_CONTRACT.limits["schema_version"]
-REQUIRED_DIRECTORY_TABLES = ("source_metadata", "generations", "directories", "scan_queue", "coverage_issues")
+REQUIRED_DIRECTORY_TABLES = ("source_metadata", "generations", "directories", "scan_queue", "coverage_issues", "scan_snapshot_children")
 NORMALIZATION_VERSION = DIRECTORY_INDEX_CONTRACT.limits["normalization_version"]
 TRAVERSAL_VERSION = DIRECTORY_INDEX_CONTRACT.limits["traversal_version"]
 MAX_QUERY_BYTES = DIRECTORY_INDEX_CONTRACT.limits["max_query_bytes"]
@@ -38,10 +38,21 @@ QUARANTINE_FILE_NAME = ".rejected-directory-index"
 INCREMENTAL_VACUUM_MODE = 2
 PAGE_CACHE_KIB = DIRECTORY_INDEX_CONTRACT.policy["page_cache_kib"].default
 SQL_BUSY_TIMEOUT_MS = DIRECTORY_INDEX_CONTRACT.limits["busy_timeout_ms"]
+SCAN_COMMIT_INTERVAL_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["scan_commit_interval_ms"] / 1000
+SCAN_COMMIT_MAX_PARENTS = DIRECTORY_INDEX_CONTRACT.limits["scan_commit_max_parents"]
+SCAN_BOOKKEEPING_COMMIT_INTERVAL_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["scan_bookkeeping_commit_interval_ms"] / 1000
+SCAN_BOOKKEEPING_COMMIT_MAX_PARENTS = DIRECTORY_INDEX_CONTRACT.limits["scan_bookkeeping_commit_max_parents"]
+SQLITE_CACHE_SYNCHRONOUS = "NORMAL"
+SCAN_FILE_ID_UPDATE_SQL = (
+    "file_id = :file_id, processed = CASE WHEN scan_queue.file_id IS NOT NULL "
+    "AND scan_queue.file_id <> :file_id THEN 0 ELSE scan_queue.processed END "
+    "WHERE :file_id IS NOT NULL AND scan_queue.file_id IS NOT :file_id"
+)
 QUERY_WORKERS = DIRECTORY_INDEX_CONTRACT.limits["query_workers"]
 SQL_PROGRESS_STEPS = DIRECTORY_INDEX_CONTRACT.limits["progress_steps"]
 QUERY_TIMEOUT_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["query_timeout_seconds"]
 MAX_SIGNED_INTEGER = MAX_SQL_INTEGER
+ITEM_ISSUE_CODES = frozenset({"unsafe_traversal", "access_denied", "unsupported_encoding", "scan_failed"})
 SCHEMA_PATH_CANDIDATES = tuple(Path(__file__).resolve().parents[level] / "shared" / "directory-index" / "schema.sql" for level in (3, 2))
 SCHEMA_PATH = next((path for path in SCHEMA_PATH_CANDIDATES if path.is_file()), SCHEMA_PATH_CANDIDATES[0])
 PRIVATE_DIRECTORY_MODE = 0o700
@@ -85,6 +96,10 @@ def validate_storage_ancestors(directory: Path) -> None:
                 )
 
 
+class DirectoryDatabaseConnection(sqlite3.Connection):
+    on_commit: Callable[[], None] | None = None
+
+
 def connect_directory_database(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
     """Open existing private storage without creating a file or accepting a link."""
     path = path.absolute()
@@ -100,6 +115,7 @@ def connect_directory_database(path: Path, *, readonly: bool = False) -> sqlite3
         timeout=SQL_BUSY_TIMEOUT_MS / 1000,
         isolation_level=None,
         check_same_thread=False,
+        factory=DirectoryDatabaseConnection,
     )
     try:
         after = path.lstat()
@@ -139,6 +155,17 @@ def validate_storage_binding(directory: Path, descriptor: int | None) -> None:
 @contextmanager
 def transaction(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """Include initial reads and all changes in one explicitly started transaction."""
+    if connection.in_transaction:
+        connection.execute("SAVEPOINT directory_write")
+        try:
+            yield connection
+        except BaseException:
+            connection.execute("ROLLBACK TO directory_write")
+            connection.execute("RELEASE directory_write")
+            raise
+        else:
+            connection.execute("RELEASE directory_write")
+        return
     started = time.monotonic()
     try:
         with connection:
@@ -153,6 +180,8 @@ def transaction(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
             },
         )
         raise
+    if isinstance(connection, DirectoryDatabaseConnection) and connection.on_commit is not None:
+        connection.on_commit()
     duration = time.monotonic() - started
     if duration >= SLOW_TRANSACTION_SECONDS:
         logger.warning(
@@ -280,6 +309,8 @@ class DirectoryIndex:
         self._active_queries = 0
         self._closing = False
         self._writer: sqlite3.Connection | None = None
+        self._readers: list[tuple[sqlite3.Connection, tuple[int, int]]] = []
+        self._status_snapshot: DirectoryIndexSearch | None = None
         self._lease_fd: int | None = None
         self._fts_ready = False
         self._fts_repair_cursor: int | None = None
@@ -493,7 +524,7 @@ class DirectoryIndex:
             connection.execute(f"PRAGMA cache_size = -{self.page_cache_kib}")
             connection.execute("PRAGMA mmap_size = 0")
             connection.execute("PRAGMA temp_store = FILE")
-            connection.execute("PRAGMA synchronous = FULL")
+            connection.execute(f"PRAGMA synchronous = {SQLITE_CACHE_SYNCHRONOUS}")
             return connection
         except BaseException:
             connection.close()
@@ -567,6 +598,16 @@ class DirectoryIndex:
                 )[0]
                 if table_count != len(REQUIRED_DIRECTORY_TABLES):
                     raise DirectoryIndexRebuildRequired("Directory database tables are missing. Rebuild this source index.")
+                if connection.execute(
+                    "SELECT type, \"notnull\" FROM pragma_table_info('scan_queue') WHERE name = 'file_id'"
+                ).fetchone() != ("BLOB", 0):
+                    raise DirectoryIndexRebuildRequired("Directory scan FileId storage is invalid. Rebuild this source index.")
+                if connection.execute(
+                    "SELECT type, \"notnull\" FROM pragma_table_info('directories') WHERE name = 'parent_id'"
+                ).fetchone() != ("INTEGER", 0) or connection.execute(
+                    "SELECT group_concat(name, ',') FROM pragma_index_info('directories_parent')"
+                ).fetchone() != ("generation_id,parent_id",):
+                    raise DirectoryIndexRebuildRequired("Directory parent storage is invalid. Rebuild this source index.")
                 metadata = connection.execute(
                     "SELECT source_kind, source_identity, normalization_version, traversal_version FROM source_metadata WHERE id = 1"
                 ).fetchone()
@@ -576,7 +617,12 @@ class DirectoryIndex:
                     raise ValueError("Directory database source or policy does not match. Rebuild this source index.")
                 if metadata[2:] != (NORMALIZATION_VERSION, TRAVERSAL_VERSION):
                     raise DirectoryIndexRebuildRequired("Directory database source or policy does not match. Rebuild this source index.")
-                if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                if connection.execute(
+                    "SELECT type, \"notnull\" FROM pragma_table_info('source_metadata') WHERE name = 'clean_shutdown'"
+                ).fetchone() != ("INTEGER", 1):
+                    raise DirectoryIndexRebuildRequired("Directory shutdown metadata is invalid. Rebuild this source index.")
+                clean_shutdown = bool(required_row(connection.execute("SELECT clean_shutdown FROM source_metadata WHERE id = 1"))[0])
+                if not clean_shutdown and connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
                     raise DirectoryIndexRebuildRequired("Directory database integrity check failed. Rebuild this source index.")
                 if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
                     raise DirectoryIndexRebuildRequired("Directory database references are invalid. Rebuild this source index.")
@@ -587,7 +633,7 @@ class DirectoryIndex:
                 self._fts_ready = False
                 self._fts_repair_cursor = None
                 try:
-                    self._prepare_fts(connection)
+                    self._prepare_fts(connection, clean_shutdown=clean_shutdown)
                 except sqlite3.DatabaseError as error:
                     if getattr(error, "sqlite_errorcode", 0) & SQLITE_PRIMARY_ERROR_MASK not in {
                         sqlite3.SQLITE_CORRUPT,
@@ -599,20 +645,32 @@ class DirectoryIndex:
                         "Restore private storage and retry the source."
                     ) from error
                 with transaction(connection):
-                    connection.execute("UPDATE source_metadata SET last_access_at_ms = ? WHERE id = 1", (epoch_milliseconds(),))
                     connection.execute(
-                        "UPDATE generations SET state = 'retired' WHERE state = 'candidate' AND id <> "
-                        "(SELECT selected_generation FROM source_metadata WHERE id = 1)"
+                        "UPDATE source_metadata SET last_access_at_ms = ?, clean_shutdown = 0 WHERE id = 1", (epoch_milliseconds(),)
                     )
                 self._writer = connection
                 self._closing = False
+                self._refresh_status_snapshot()
+                if isinstance(connection, DirectoryDatabaseConnection):
+                    connection.on_commit = self._refresh_status_snapshot
                 logger.debug("Directory storage initialized.", extra={"event": "directory_storage_initialized"})
             except BaseException:
                 connection.close()
                 raise
 
-    def _prepare_fts(self, connection: sqlite3.Connection) -> None:
+    def _prepare_fts(self, connection: sqlite3.Connection, *, clean_shutdown: bool = False) -> None:
+        existing_fts = (
+            required_row(
+                connection.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE name IN ('directory_fts', 'directory_fts_data', 'directory_fts_idx', 'directory_fts_docsize', 'directory_fts_config')"
+                )
+            )[0]
+            == 5
+        )
         connection.executescript(SCHEMA_PATH.with_name("fts.sql").read_text(encoding="utf-8"))
+        if clean_shutdown and existing_fts:
+            self._fts_ready = True
+            return
         try:
             with transaction(connection):
                 connection.execute("INSERT INTO directory_fts(directory_fts, rank) VALUES ('integrity-check', 1)")
@@ -668,9 +726,18 @@ class DirectoryIndex:
         with self._reader_condition:
             self._closing = True
             self._reader_condition.wait_for(lambda: self._active_queries == 0)
+            for reader, _identity in self._readers:
+                reader.close()
+            self._readers.clear()
             if self._writer is not None:
-                self._writer.close()
-                self._writer = None
+                try:
+                    if not self._writer.in_transaction and self._fts_ready:
+                        self._writer.execute("UPDATE source_metadata SET clean_shutdown = 1 WHERE id = 1")
+                except sqlite3.Error:
+                    logger.warning("Directory storage could not record a clean close. Integrity checks will run on the next open.")
+                finally:
+                    self._writer.close()
+                    self._writer = None
             self._release_storage()
 
     def _revision(self, connection: sqlite3.Connection) -> None:
@@ -720,80 +787,122 @@ class DirectoryIndex:
                     selected = required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0]
                     target = selected if generation_id is None else generation_id
                     if generation_id is not None:
-                        state = connection.execute("SELECT state FROM generations WHERE id = ?", (target,)).fetchone()
-                        if state is None or state[0] not in {"building", "candidate"}:
+                        state = connection.execute("SELECT state, scan_active FROM generations WHERE id = ?", (target,)).fetchone()
+                        if state is None or (state[0] != "building" and not state[1]):
                             raise ValueError("Scan generation is no longer active. Discard this batch and request verification.")
                     connection.executemany(
-                        "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) "
-                        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
-                        ((target, *row) for row in batch),
+                        "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory, parent_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, (SELECT id FROM directories WHERE generation_id = ? AND path = ?)) "
+                        "ON CONFLICT(generation_id, path) DO NOTHING",
+                        ((target, *row, target, row[0].rpartition("/")[0]) for row in batch),
                     )
                     if target == selected:
                         self._revision(connection)
 
-    def begin_verification(self) -> int:
-        with self._writer_lock, self.growth_guard():
-            connection = self._connection()
-            with transaction(connection):
-                row = connection.execute("INSERT INTO generations(state, coverage) VALUES ('candidate', 'partial') RETURNING id").fetchone()
-                if row is None:
-                    raise RuntimeError("SQLite did not allocate a verification generation. Retry verification.")
-                return int(row[0])
-            raise RuntimeError("Verification generation allocation did not complete. Retry verification.")
-
     def status(self) -> DirectoryIndexSearch:
-        return self.search("")
+        with self._writer_lock:
+            count, revision, coverage, verified, issues = required_row(
+                self._connection().execute(
+                    "SELECT g.indexed_count, m.accepted_revision, g.coverage, m.last_verified_at_ms, g.issue_count "
+                    "FROM source_metadata m JOIN generations g ON g.id = m.selected_generation WHERE m.id = 1"
+                )
+            )
+            return DirectoryIndexSearch((), 0, count, revision, coverage, verified, "empty", issues)
 
-    def has_resumable_scan(self) -> bool:
-        """Return whether an issue-free candidate has completed work to retain."""
+    def _refresh_status_snapshot(self) -> None:
+        self._status_snapshot = self.status()
+
+    def cached_status(self) -> DirectoryIndexSearch:
+        snapshot = self._status_snapshot
+        if snapshot is None:
+            raise RuntimeError("Directory index is not initialized. Wait for source initialization and retry.")
+        return snapshot
+
+    def scan_counts(self, generation_id: int) -> tuple[int, int, int]:
+        """Read counters through the owned writer without opening a poll connection."""
+        with self._writer_lock:
+            done, queued, found = required_row(
+                self._connection().execute(
+                    "SELECT (SELECT count(*) FROM scan_queue WHERE generation_id = g.id AND processed = 1), "
+                    "(SELECT count(*) FROM scan_queue WHERE generation_id = g.id AND processed = 0), indexed_count "
+                    "FROM generations g WHERE id = ?",
+                    (generation_id,),
+                )
+            )
+            return done, queued, found
+
+    def generation_directory_count(self, generation_id: int) -> int:
+        with self._writer_lock:
+            return int(required_row(self._connection().execute("SELECT indexed_count FROM generations WHERE id = ?", (generation_id,)))[0])
+
+    def scan_parent_pending(self, generation_id: int, parent: str) -> bool:
         with self._writer_lock:
             return bool(
                 required_row(
-                    self._connection().execute("SELECT EXISTS(SELECT 1 FROM generations WHERE state = 'candidate' AND issue_count = 0)")
+                    self._connection().execute(
+                        "SELECT EXISTS(SELECT 1 FROM scan_queue WHERE generation_id = ? AND path = ? AND processed = 0)",
+                        (generation_id, parent),
+                    )
+                )[0]
+            )
+
+    def has_resumable_scan(self) -> bool:
+        """Return whether the selected build or verification pass can continue."""
+        with self._writer_lock:
+            return bool(
+                required_row(
+                    self._connection().execute("SELECT EXISTS(SELECT 1 FROM generations WHERE scan_active = 1 OR state = 'building')")
+                )[0]
+            )
+
+    def has_pending_scan(self) -> bool:
+        """Keep source ownership while persisted scan work remains."""
+        with self._writer_lock:
+            if self._writer is None:
+                return False
+            return bool(
+                required_row(
+                    self._connection().execute(
+                        "SELECT EXISTS(SELECT 1 FROM scan_queue q JOIN generations g ON g.id = q.generation_id "
+                        "WHERE q.processed = 0 AND g.state IN ('building', 'accepted'))"
+                    )
                 )[0]
             )
 
     def prepare_scan(self) -> tuple[int, bool]:
-        """Resume issue-free verification work without trusting the selected rows."""
+        """Resume best-effort verification work without trusting the selected rows."""
         with self._writer_lock, self.growth_guard():
             connection = self._connection()
             self._require_fts()
             with transaction(connection):
-                retained = connection.execute(
-                    "SELECT id FROM generations WHERE state = 'candidate' AND issue_count = 0 ORDER BY id DESC LIMIT 1"
-                ).fetchone()
-                if retained is not None:
-                    return int(retained[0]), False
-                connection.execute("UPDATE generations SET state = 'retired' WHERE state = 'candidate'")
-                generation, state, count, queued, issues = required_row(
+                generation, state, count, queued, issues, active = required_row(
                     connection.execute(
-                        "SELECT g.id, g.state, g.indexed_count, EXISTS(SELECT 1 FROM scan_queue q WHERE q.generation_id = g.id), g.issue_count "
+                        "SELECT g.id, g.state, g.indexed_count, EXISTS(SELECT 1 FROM scan_queue q WHERE q.generation_id = g.id), g.issue_count, g.scan_active "
                         "FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE m.id = 1"
                     )
                 )
-                if (
-                    state == "building"
-                    and not count
-                    and not queued
-                    and (
-                        not issues
-                        or not required_row(
-                            connection.execute(
-                                "SELECT EXISTS(SELECT 1 FROM coverage_issues WHERE generation_id = ? AND code <> 'event_loss')",
-                                (generation,),
-                            )
-                        )[0]
-                    )
-                ):
+                if active or state == "building":
+                    if not active:
+                        connection.execute(
+                            "UPDATE generations SET scan_active = 1, scan_pass_id = scan_pass_id + 1 WHERE id = ?", (generation,)
+                        )
                     if issues:
                         connection.execute("DELETE FROM coverage_issues WHERE generation_id = ? AND code = 'event_loss'", (generation,))
-                        connection.execute("UPDATE generations SET coverage = 'partial', issue_count = 0 WHERE id = ?", (generation,))
+                        connection.execute(
+                            "UPDATE generations SET coverage = 'partial', issue_count = "
+                            "(SELECT coalesce(sum(count), 0) FROM coverage_issues WHERE generation_id = ?) WHERE id = ?",
+                            (generation, generation),
+                        )
                         self._revision(connection)
-                    return int(generation), True
-                candidate = required_row(
-                    connection.execute("INSERT INTO generations(state, coverage) VALUES ('candidate', 'partial') RETURNING id")
+                    return int(generation), state == "building"
+                connection.execute("UPDATE scan_queue SET processed = 0 WHERE generation_id = ?", (generation,))
+                connection.execute("DELETE FROM coverage_issues WHERE generation_id = ?", (generation,))
+                connection.execute(
+                    "UPDATE generations SET scan_active = 1, scan_pass_id = scan_pass_id + 1, coverage = 'partial', issue_count = 0 WHERE id = ?",
+                    (generation,),
                 )
-                return int(candidate[0]), False
+                self._revision(connection)
+                return int(generation), False
         raise RuntimeError("Directory scan allocation did not complete. Retry source verification.")
 
     def seed_scan(self, generation_id: int) -> None:
@@ -802,19 +911,211 @@ class DirectoryIndex:
             with transaction(connection):
                 connection.execute("INSERT INTO scan_queue(generation_id, path) VALUES (?, '') ON CONFLICT DO NOTHING", (generation_id,))
 
-    def pending_scan_paths(self, generation_id: int, limit: int = ROW_BATCH_SIZE) -> list[str]:
+    def pending_scan_paths(self, generation_id: int, limit: int = ROW_BATCH_SIZE, *, exclude: list[str] | None = None) -> list[str]:
+        return [path for path, _identity in self.pending_scan_jobs(generation_id, limit=limit, exclude=exclude)]
+
+    def pending_scan_jobs(
+        self, generation_id: int, *, limit: int = ROW_BATCH_SIZE, paths: list[str] | None = None, exclude: list[str] | None = None
+    ) -> list[tuple[str, bytes | None]]:
         if not 1 <= limit <= ROW_BATCH_SIZE:
             raise ValueError("Scan work batch limit is outside the supported range.")
+        if paths is not None and (len(paths) > ROW_BATCH_SIZE or sum(len(path.encode("utf-8")) for path in paths) > SCAN_BATCH_BYTES):
+            raise ValueError("Scan work page exceeds its count or byte limit. Split the page.")
+        selected_paths = None if paths is None else json.dumps(paths)
+        if exclude is not None and (
+            len(exclude) > SCAN_BOOKKEEPING_COMMIT_MAX_PARENTS or sum(len(path.encode("utf-8")) for path in exclude) > SCAN_BATCH_BYTES
+        ):
+            raise ValueError("Buffered scan parents exceed the group limit. Commit the buffered group.")
+        excluded_paths = json.dumps(exclude or [])
         with self._writer_lock:
-            return [
-                row[0]
-                for row in self._connection().execute(
-                    "SELECT path FROM scan_queue WHERE generation_id = ? AND processed = 0 ORDER BY rowid LIMIT ?", (generation_id, limit)
-                )
-            ]
+            jobs: list[tuple[str, bytes | None]] = []
+            size = 0
+            for path, file_id in self._connection().execute(
+                "SELECT path, file_id FROM scan_queue WHERE generation_id = ? AND processed = 0 "
+                "AND (? IS NULL OR path IN (SELECT value FROM json_each(?))) "
+                "AND path NOT IN (SELECT value FROM json_each(?)) ORDER BY rowid LIMIT ?",
+                (generation_id, selected_paths, selected_paths, excluded_paths, limit),
+            ):
+                amount = len(path.encode("utf-8")) + (len(file_id) if file_id is not None else 0)
+                if amount > SCAN_BATCH_BYTES:
+                    raise ValueError("Queued directory exceeds the scan-page byte limit. Request source verification.")
+                if size + amount > SCAN_BATCH_BYTES:
+                    break
+                jobs.append((path, None if file_id is None else bytes(file_id)))
+                size += amount
+            return jobs
 
-    def write_scan_children(self, generation_id: int, children: Iterable[tuple[str, bool]]) -> None:
-        self._write_children(generation_id, children)
+    def scan_parent_file_id(self, generation_id: int, parent: str) -> bytes | None:
+        with self._writer_lock:
+            row = (
+                self._connection()
+                .execute("SELECT file_id FROM scan_queue WHERE generation_id = ? AND path = ?", (generation_id, parent))
+                .fetchone()
+            )
+            return None if row is None or row[0] is None else bytes(row[0])
+
+    def write_scan_children(
+        self, generation_id: int, children: Iterable[tuple[str, bool]], *, file_ids: dict[str, bytes] | None = None
+    ) -> None:
+        self._write_children(generation_id, children, file_ids=file_ids)
+
+    def scan_parents_have_changes(
+        self,
+        generation_id: int,
+        parents: list[tuple[str, list[tuple[str, bool]]]],
+        *,
+        partial_parents: set[str] | None = None,
+        streamed_parents: set[str] | None = None,
+    ) -> bool:
+        payload = json.dumps(
+            [
+                {
+                    "parent": parent,
+                    "paths": [path for path, _descend in children],
+                    "complete": partial_parents is None or parent not in partial_parents,
+                    "streamed": streamed_parents is not None and parent in streamed_parents,
+                }
+                for parent, children in parents
+            ]
+        )
+        with self._writer_lock:
+            return bool(
+                required_row(
+                    self._connection().execute(
+                        "WITH snapshots AS MATERIALIZED (SELECT json_extract(value, '$.parent') AS parent, json_extract(value, '$.complete') AS complete, json_extract(value, '$.streamed') AS streamed, value AS data FROM json_each(?1)), "
+                        "snapshot_paths AS MATERIALIZED (SELECT snapshots.parent, path.value AS path FROM snapshots CROSS JOIN json_each(snapshots.data, '$.paths') AS path) "
+                        "SELECT EXISTS(SELECT 1 FROM snapshot_paths LEFT JOIN directories AS stored ON stored.generation_id = ?2 AND stored.path = snapshot_paths.path WHERE stored.id IS NULL) "
+                        "OR EXISTS(SELECT 1 FROM snapshots CROSS JOIN directories AS child INDEXED BY directories_parent ON child.generation_id = ?2 "
+                        "AND child.parent_id IS (SELECT id FROM directories WHERE generation_id = ?2 AND path = snapshots.parent) "
+                        "AND ((snapshots.parent = '' AND child.depth = 0) OR child.parent_id IS NOT NULL) "
+                        "LEFT JOIN snapshot_paths AS seen ON seen.parent = snapshots.parent AND seen.path = child.path "
+                        "LEFT JOIN scan_snapshot_children AS staged ON snapshots.streamed = 1 AND staged.generation_id = ?2 AND staged.parent_path = snapshots.parent AND staged.path = child.path "
+                        "WHERE snapshots.complete = 1 AND seen.path IS NULL AND staged.path IS NULL)",
+                        (payload, generation_id),
+                    )
+                )[0]
+            )
+
+    def write_scan_parent_batch(
+        self,
+        generation_id: int,
+        parent: str,
+        children: Iterable[tuple[str, bool]],
+        *,
+        reset_snapshot: bool,
+        file_ids: dict[str, bytes] | None = None,
+        reconcile: bool = False,
+    ) -> None:
+        """Publish a bounded batch and retain its names for the final parent diff."""
+        batch = list(islice(children, ROW_BATCH_SIZE + 1))
+        if (
+            len(batch) > ROW_BATCH_SIZE
+            or sum(len(path.encode("utf-8")) for path, _ in batch) + sum(len(value) for value in (file_ids or {}).values())
+            > SCAN_BATCH_BYTES
+        ):
+            raise ValueError("Scan snapshot batch exceeds its count or byte limit. Split it into bounded batches.")
+        for path, _ in batch:
+            validate_directory_path(path)
+            if path.rpartition("/")[0] != parent:
+                raise ValueError("Scan child is outside its immediate parent. Request source verification.")
+        with self._writer_lock, self.growth_guard():
+            connection = self._connection()
+            with transaction(connection):
+                if not required_row(
+                    connection.execute(
+                        "SELECT EXISTS(SELECT 1 FROM scan_queue WHERE generation_id = ? AND path = ? AND processed = 0)",
+                        (generation_id, parent),
+                    )
+                )[0]:
+                    raise ValueError("Scan snapshot parent is not pending. Request source verification.")
+                if reset_snapshot:
+                    connection.execute(
+                        "DELETE FROM scan_snapshot_children WHERE generation_id = ? AND parent_path = ?", (generation_id, parent)
+                    )
+                self._write_children(generation_id, batch, parent=parent if reconcile else None, reserved=True, file_ids=file_ids)
+                connection.executemany(
+                    "INSERT INTO scan_snapshot_children(generation_id, parent_path, path) VALUES (?, ?, ?) ON CONFLICT DO NOTHING",
+                    [(generation_id, parent, path) for path, _ in batch],
+                )
+
+    def commit_scan_parents(
+        self,
+        generation_id: int,
+        results: Iterable[tuple[str, list[tuple[str, bool]]]],
+        *,
+        file_ids: dict[str, bytes] | None = None,
+        partial_parents: set[str] | None = None,
+        streamed_parents: set[str] | None = None,
+        reconcile: bool = False,
+        issues: dict[str, dict[str, int]] | None = None,
+    ) -> None:
+        """Diff complete parent snapshots and finish their queue work atomically."""
+        parents = list(islice(results, SCAN_BOOKKEEPING_COMMIT_MAX_PARENTS + 1))
+        if len(parents) > SCAN_BOOKKEEPING_COMMIT_MAX_PARENTS:
+            raise ValueError("Scan commit exceeds the parent limit. Split it into bounded groups.")
+        parent_paths = {parent for parent, _ in parents}
+        counts: dict[str, int] = {}
+        for parent, parent_counts in (issues or {}).items():
+            if parent not in parent_paths:
+                raise ValueError("Scan issues belong to a parent outside this commit. Include its completed snapshot.")
+            for code, count in parent_counts.items():
+                if type(count) is not int or not 0 < count <= MAX_SIGNED_INTEGER:
+                    raise ValueError("Directory coverage issue count is invalid. Use a positive supported integer.")
+                counts[code] = counts.get(code, 0) + count
+        with self._writer_lock, self.growth_guard():
+            with transaction(self._connection()):
+                if len(parents) > SCAN_COMMIT_MAX_PARENTS and self.scan_parents_have_changes(
+                    generation_id, parents, partial_parents=partial_parents, streamed_parents=streamed_parents
+                ):
+                    raise ValueError("Content scan commit exceeds the parent limit. Split it into bounded groups.")
+                if counts:
+                    self._record_issue_counts(self._connection(), generation_id, counts, reconcile=reconcile)
+                for parent, children in parents:
+                    if parent:
+                        validate_directory_path(parent)
+                    if reconcile:
+                        self._require_reconciliation_parent(self._connection(), generation_id, parent)
+                    for path, _descend in children:
+                        if path.rpartition("/")[0] != parent:
+                            raise ValueError("Scan child is outside its immediate parent. Request source verification.")
+                    for offset in range(0, len(children), ROW_BATCH_SIZE):
+                        self._write_children(
+                            generation_id,
+                            children[offset : offset + ROW_BATCH_SIZE],
+                            parent=parent if reconcile else None,
+                            reserved=True,
+                            file_ids=file_ids,
+                        )
+                    if partial_parents is None or parent not in partial_parents:
+                        connection = self._connection()
+                        parent_row = connection.execute(
+                            "SELECT id FROM directories WHERE generation_id = ? AND path = ?", (generation_id, parent)
+                        ).fetchone()
+                        if not parent or parent_row is not None:
+                            removed = connection.execute(
+                                "DELETE FROM directories WHERE generation_id = ? AND parent_id IS ? "
+                                "AND (? <> '' OR depth = 0) AND path NOT IN (SELECT value FROM json_each(?)) "
+                                "AND (? = 0 OR path NOT IN (SELECT path FROM scan_snapshot_children WHERE generation_id = ? AND parent_path = ?))",
+                                (
+                                    generation_id,
+                                    None if parent_row is None else parent_row[0],
+                                    parent,
+                                    json.dumps([path for path, _ in children]),
+                                    streamed_parents is not None and parent in streamed_parents,
+                                    generation_id,
+                                    parent,
+                                ),
+                            ).rowcount
+                            if (
+                                removed
+                                and required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0]
+                                == generation_id
+                            ):
+                                self._revision(connection)
+                    self._connection().execute(
+                        "DELETE FROM scan_snapshot_children WHERE generation_id = ? AND parent_path = ?", (generation_id, parent)
+                    )
+                    self.finish_scan_parent(generation_id, parent)
 
     def requeue_completed_scan_batch(self, generation_id: int) -> bool:
         """Revalidate retained work after an observation gap without discarding rows."""
@@ -822,7 +1123,10 @@ class DirectoryIndex:
             connection = self._connection()
             with transaction(connection):
                 state = required_row(connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)))[0]
-                if state not in ("building", "candidate"):
+                if (
+                    state not in ("building",)
+                    and not required_row(connection.execute("SELECT scan_active FROM generations WHERE id = ?", (generation_id,)))[0]
+                ):
                     raise ValueError("Scan generation is no longer active. Request source verification.")
                 changed = connection.execute(
                     "UPDATE scan_queue SET processed = 0 WHERE rowid IN "
@@ -836,10 +1140,23 @@ class DirectoryIndex:
         with self._writer_lock:
             row = (
                 self._connection()
-                .execute("SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted'")
+                .execute(
+                    "SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted' AND g.scan_active = 0"
+                )
                 .fetchone()
             )
             return None if row is None else int(row[0])
+
+    def scan_is_initial(self, generation_id: int) -> bool:
+        with self._writer_lock:
+            return not bool(
+                required_row(
+                    self._connection().execute(
+                        "SELECT EXISTS(SELECT 1 FROM source_metadata WHERE selected_generation = ? AND last_verified_at_ms IS NOT NULL)",
+                        (generation_id,),
+                    )
+                )[0]
+            )
 
     def reconciliation_generation(self) -> int | None:
         with self._writer_lock:
@@ -847,6 +1164,7 @@ class DirectoryIndex:
                 self._connection()
                 .execute(
                     "SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted' "
+                    "AND g.scan_active = 0 "
                     "AND EXISTS(SELECT 1 FROM scan_queue q WHERE q.generation_id = g.id AND q.processed = 0)"
                 )
                 .fetchone()
@@ -858,7 +1176,7 @@ class DirectoryIndex:
         accepted = required_row(
             connection.execute(
                 "SELECT EXISTS(SELECT 1 FROM generations g JOIN source_metadata m ON m.selected_generation = g.id "
-                "WHERE g.id = ? AND g.state = 'accepted' AND (? IS NULL OR EXISTS(SELECT 1 FROM scan_queue q "
+                "WHERE g.id = ? AND g.state = 'accepted' AND g.scan_active = 0 AND (? IS NULL OR EXISTS(SELECT 1 FROM scan_queue q "
                 "WHERE q.generation_id = g.id AND q.path = ? AND q.processed = 0)))",
                 (generation_id, parent, parent),
             )
@@ -881,13 +1199,13 @@ class DirectoryIndex:
     @staticmethod
     def _queue_scan_parent(connection: sqlite3.Connection, generation_id: int, parent: str, *, defer: bool = False) -> None:
         """Keep pending hints in place; put completed or deferred work at the tail."""
-        connection.execute(
-            "DELETE FROM scan_queue WHERE generation_id = ? AND path = ? AND (processed = 1 OR ?)",
+        removed = connection.execute(
+            "DELETE FROM scan_queue WHERE generation_id = ? AND path = ? AND (processed = 1 OR ?) RETURNING file_id",
             (generation_id, parent, defer),
-        )
+        ).fetchone()
         connection.execute(
-            "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
-            (generation_id, parent),
+            "INSERT INTO scan_queue(generation_id, path, file_id) VALUES (?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
+            (generation_id, parent, removed[0] if removed is not None and defer else None),
         )
 
     def defer_scan_parent(self, generation_id: int, path: str) -> None:
@@ -898,7 +1216,7 @@ class DirectoryIndex:
             connection = self._connection()
             with transaction(connection):
                 active = connection.execute(
-                    "SELECT 1 FROM generations WHERE id = ? AND (state IN ('building', 'candidate') OR "
+                    "SELECT 1 FROM generations WHERE id = ? AND (state IN ('building') OR "
                     "(state = 'accepted' AND id = (SELECT selected_generation FROM source_metadata WHERE id = 1)))",
                     (generation_id,),
                 ).fetchone()
@@ -915,7 +1233,7 @@ class DirectoryIndex:
             with transaction(connection):
                 generations = connection.execute(
                     "SELECT g.id FROM generations g "
-                    "WHERE g.state IN ('building', 'candidate') OR (g.state = 'accepted' AND g.id = "
+                    "WHERE g.state IN ('building') OR (g.state = 'accepted' AND g.id = "
                     "(SELECT selected_generation FROM source_metadata WHERE id = 1))"
                 ).fetchall()
                 for (generation_id,) in generations:
@@ -934,7 +1252,15 @@ class DirectoryIndex:
             validate_directory_path(parent)
         self._write_children(generation_id, children, parent=parent)
 
-    def _write_children(self, generation_id: int, children: Iterable[tuple[str, bool]], *, parent: str | None = None) -> None:
+    def _write_children(
+        self,
+        generation_id: int,
+        children: Iterable[tuple[str, bool]],
+        *,
+        parent: str | None = None,
+        reserved: bool = False,
+        file_ids: dict[str, bytes] | None = None,
+    ) -> None:
         batch: list[tuple[str, bool]] = []
         batch_bytes = 0
         for path, descend in islice(children, ROW_BATCH_SIZE + 1):
@@ -950,21 +1276,22 @@ class DirectoryIndex:
             validate_directory_path(path)
             if parent is not None and path.rpartition("/")[0] != parent:
                 raise ValueError("Reconciliation child is outside its immediate parent. Request source verification.")
-        with self._writer_lock, self.growth_guard():
+        with self._writer_lock, nullcontext() if reserved else self.growth_guard():
             connection = self._connection()
             self._require_fts()
             with transaction(connection):
                 if parent is None:
-                    state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
-                    if state is None or state[0] not in {"building", "candidate"}:
+                    state = connection.execute("SELECT state, scan_active FROM generations WHERE id = ?", (generation_id,)).fetchone()
+                    if state is None or (state[0] not in {"building"} and not state[1]):
                         raise ValueError("Scan generation is no longer active. Discard this batch and request verification.")
                 else:
                     self._require_reconciliation_parent(connection, generation_id, parent)
                 changed = False
                 for path, descend in batch:
                     inserted = connection.execute(
-                        "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) "
-                        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
+                        "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory, parent_id) "
+                        "VALUES (?, ?, ?, ?, ?, ?, (SELECT id FROM directories WHERE generation_id = ? AND path = ?)) "
+                        "ON CONFLICT(generation_id, path) DO NOTHING",
                         (
                             generation_id,
                             path,
@@ -972,17 +1299,35 @@ class DirectoryIndex:
                             normalize_search_text(path.rsplit("/", 1)[-1]),
                             path.count("/"),
                             any(part.startswith(".") for part in path.split("/")),
+                            generation_id,
+                            path.rpartition("/")[0],
                         ),
                     ).rowcount
                     changed |= bool(inserted)
-                    if descend and (parent is None or inserted):
+                    if inserted:
                         connection.execute(
-                            "INSERT INTO scan_queue(generation_id, path) VALUES (?, ?) ON CONFLICT DO NOTHING",
-                            (generation_id, path),
+                            "UPDATE directories SET parent_id = (SELECT id FROM directories WHERE generation_id = ? AND path = ?) "
+                            "WHERE generation_id = ? AND parent_id IS NULL AND depth = ? AND path >= ? AND path < ?",
+                            (generation_id, path, generation_id, path.count("/") + 1, path + "/", path + "0"),
                         )
-                if (parent is None or changed) and required_row(
-                    connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1")
-                )[0] == generation_id:
+                    if descend:
+                        file_id = None if file_ids is None else file_ids.get(path)
+                        if file_id is not None and (not isinstance(file_id, bytes) or len(file_id) not in (8, 16)):
+                            raise ValueError("Directory FileId must contain 8 or 16 bytes. Retry source verification.")
+                        sql = (
+                            "INSERT INTO scan_queue(generation_id, path, file_id) VALUES (:generation, :path, :file_id) "
+                            "ON CONFLICT(generation_id, path) DO UPDATE SET " + SCAN_FILE_ID_UPDATE_SQL
+                            if parent is None or inserted
+                            else "UPDATE scan_queue SET " + SCAN_FILE_ID_UPDATE_SQL + " AND generation_id = :generation AND path = :path"
+                        )
+                        connection.execute(
+                            sql,
+                            {"generation": generation_id, "path": path, "file_id": file_id},
+                        )
+                if (
+                    changed
+                    and required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0] == generation_id
+                ):
                     self._revision(connection)
 
     def direct_child_paths(
@@ -1043,11 +1388,11 @@ class DirectoryIndex:
             self._require_fts()
             with transaction(connection):
                 state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
-                if state is None or state[0] not in {"building", "candidate", "accepted"}:
+                if state is None or state[0] not in {"building", "accepted"}:
                     raise ValueError("Reconciliation generation is no longer active. Discard this observation and request verification.")
                 removed = connection.execute(
                     "DELETE FROM directories WHERE id IN (SELECT id FROM directories WHERE generation_id = ? "
-                    "AND (path = ? OR substr(path, 1, length(?)) = ?) ORDER BY id LIMIT ?)",
+                    "AND (path = ? OR substr(path, 1, length(?)) = ?) ORDER BY path DESC LIMIT ?)",
                     (generation_id, path, prefix, prefix, ROW_BATCH_SIZE),
                 ).rowcount
                 queued = connection.execute(
@@ -1079,40 +1424,47 @@ class DirectoryIndex:
         """Record an unreadable descendant without discarding readable siblings."""
         self._record_scan_issue(generation_id, "access_denied")
 
-    def _record_scan_issue(self, generation_id: int, code: Literal["unsafe_traversal", "access_denied"]) -> None:
+    def record_issue(self, generation_id: int, code: str, *, reconcile: bool = False) -> None:
+        """Record an item issue only on active work or the selected reconciliation generation."""
         with self._writer_lock, self.growth_guard():
             connection = self._connection()
             with transaction(connection):
-                state = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
-                if state is None or state[0] not in {"building", "candidate"}:
-                    raise ValueError("Traversal issue belongs to an inactive scan. Restart source verification.")
-                connection.execute(
-                    "INSERT INTO coverage_issues(generation_id, code, count) VALUES (?, ?, 1) "
-                    "ON CONFLICT(generation_id, code) DO UPDATE SET count = count + 1",
-                    (generation_id, code),
-                )
-                connection.execute(
-                    "UPDATE generations SET issue_count = (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?), "
-                    "coverage = CASE WHEN coverage = 'uncertain' THEN 'uncertain' ELSE 'partial' END WHERE id = ?",
-                    (generation_id, generation_id),
-                )
-                if required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0] == generation_id:
-                    self._revision(connection)
+                self._record_issue_counts(connection, generation_id, {code: 1}, reconcile=reconcile)
+
+    def _record_issue_counts(self, connection: sqlite3.Connection, generation_id: int, counts: dict[str, int], *, reconcile: bool) -> None:
+        """Write grouped issue counts within the caller's parent transaction."""
+        for code, count in counts.items():
+            if code not in ITEM_ISSUE_CODES:
+                raise ValueError("Unsupported directory coverage issue. Use a contract issue code.")
+            if type(count) is not int or not 0 < count <= MAX_SIGNED_INTEGER:
+                raise ValueError("Directory coverage issue count is invalid. Use a positive supported integer.")
+        state = connection.execute("SELECT state, scan_active FROM generations WHERE id = ?", (generation_id,)).fetchone()
+        selected = required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0]
+        if state is None or not (
+            state[0] == "building" or (reconcile or state[1]) and state[0] == "accepted" and selected == generation_id
+        ):
+            raise ValueError("Traversal issue belongs to an inactive scan. Restart source verification.")
+        connection.executemany(
+            "INSERT INTO coverage_issues(generation_id, code, count) VALUES (?, ?, ?) "
+            "ON CONFLICT(generation_id, code) DO UPDATE SET count = count + excluded.count",
+            ((generation_id, code, count) for code, count in counts.items()),
+        )
+        connection.execute(
+            "UPDATE generations SET issue_count = (SELECT sum(count) FROM coverage_issues WHERE generation_id = ?), "
+            "coverage = CASE WHEN coverage = 'uncertain' THEN 'uncertain' ELSE 'partial' END WHERE id = ?",
+            (generation_id, generation_id),
+        )
+        if selected == generation_id:
+            self._revision(connection)
+
+    def _record_scan_issue(self, generation_id: int, code: Literal["unsafe_traversal", "access_denied"]) -> None:
+        self.record_issue(generation_id, code)
 
     def finish_scan_parent(self, generation_id: int, path: str) -> None:
         with self._writer_lock:
             connection = self._connection()
             with transaction(connection):
                 connection.execute("UPDATE scan_queue SET processed = 1 WHERE generation_id = ? AND path = ?", (generation_id, path))
-
-    def discard_generation(self, generation_id: int) -> None:
-        with self._writer_lock:
-            connection = self._connection()
-            with transaction(connection):
-                connection.execute(
-                    "UPDATE generations SET state = 'retired' WHERE id = ? AND id <> (SELECT selected_generation FROM source_metadata WHERE id = 1)",
-                    (generation_id,),
-                )
 
     def checkpoint(self) -> None:
         with self._writer_lock:
@@ -1165,39 +1517,6 @@ class DirectoryIndex:
             busy, total, completed = required_row(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)"))
             return not busy and total == completed
 
-    def cleanup_retired_batch(self) -> bool:
-        """Remove bounded retired rows; return whether logical cleanup remains."""
-        with self._writer_lock, self.growth_guard():
-            self._require_fts()
-            connection = self._connection()
-            if self._active_queries:
-                return True
-            with transaction(connection):
-                retired = connection.execute(
-                    "SELECT id FROM generations WHERE state = 'retired' AND id <> "
-                    "(SELECT selected_generation FROM source_metadata WHERE id = 1) ORDER BY id LIMIT 1"
-                ).fetchone()
-                if retired is None:
-                    return False
-                generation = retired[0]
-                connection.execute(
-                    "DELETE FROM directories WHERE id IN (SELECT id FROM directories WHERE generation_id = ? ORDER BY id LIMIT ?)",
-                    (generation, ROW_BATCH_SIZE),
-                )
-                connection.execute(
-                    "DELETE FROM scan_queue WHERE generation_id = ? AND path IN "
-                    "(SELECT path FROM scan_queue WHERE generation_id = ? ORDER BY path LIMIT ?)",
-                    (generation, generation, ROW_BATCH_SIZE),
-                )
-                connection.execute(
-                    "DELETE FROM generations WHERE id = ? AND NOT EXISTS "
-                    "(SELECT 1 FROM directories WHERE generation_id = ?) AND NOT EXISTS "
-                    "(SELECT 1 FROM scan_queue WHERE generation_id = ?)",
-                    (generation, generation, generation),
-                )
-                return connection.execute("SELECT 1 FROM generations WHERE state = 'retired' LIMIT 1").fetchone() is not None
-        raise RuntimeError("Directory cleanup did not complete. Retry background cleanup.")
-
     def mark_uncertain(self) -> None:
         """Persist event loss without removing rows or advancing verification time."""
         with self._writer_lock:
@@ -1243,14 +1562,13 @@ class DirectoryIndex:
             connection.create_function("directory_basename_key", 1, sql_basename_key, deterministic=True)
             connection.create_function("directory_dot_path", 1, sql_dot_path, deterministic=True)
             with transaction(connection):
-                generations = connection.execute(
-                    "SELECT id FROM generations WHERE state IN ('building', 'accepted', 'candidate')"
-                ).fetchall()
+                generations = connection.execute("SELECT id FROM generations WHERE state IN ('building', 'accepted')").fetchall()
                 for (generation_id,) in generations:
                     if action == "add":
                         connection.execute(
-                            "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory) "
-                            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(generation_id, path) DO NOTHING",
+                            "INSERT INTO directories(generation_id, path, path_key, basename_key, depth, has_dot_directory, parent_id) "
+                            "VALUES (?, ?, ?, ?, ?, ?, (SELECT id FROM directories WHERE generation_id = ? AND path = ?)) "
+                            "ON CONFLICT(generation_id, path) DO NOTHING",
                             (
                                 generation_id,
                                 path,
@@ -1258,11 +1576,13 @@ class DirectoryIndex:
                                 normalize_search_text(path.rsplit("/", 1)[-1]),
                                 path.count("/"),
                                 any(part.startswith(".") for part in path.split("/")),
+                                generation_id,
+                                path.rpartition("/")[0],
                             ),
                         )
                         connection.execute(
                             "INSERT INTO scan_queue(generation_id, path) SELECT id, ? FROM generations "
-                            "WHERE id = ? AND state IN ('building', 'candidate') "
+                            "WHERE id = ? AND (state = 'building' OR scan_active = 1) "
                             "ON CONFLICT(generation_id, path) DO UPDATE SET processed = 0",
                             (path, generation_id),
                         )
@@ -1280,7 +1600,8 @@ class DirectoryIndex:
                         connection.execute(
                             f"UPDATE directories SET path = {expression}, path_key = normalize_directory_key({expression}), "
                             f"basename_key = directory_basename_key({expression}), has_dot_directory = directory_dot_path({expression}), "
-                            "depth = depth + ? WHERE generation_id = ? AND (path = ? OR substr(path, 1, ?) = ?)",
+                            "parent_id = CASE WHEN path = ? THEN (SELECT id FROM directories WHERE generation_id = ? AND path = ?) "
+                            "ELSE parent_id END, depth = depth + ? WHERE generation_id = ? AND (path = ? OR substr(path, 1, ?) = ?)",
                             (
                                 new_path,
                                 len(path) + 1,
@@ -1290,6 +1611,9 @@ class DirectoryIndex:
                                 len(path) + 1,
                                 new_path,
                                 len(path) + 1,
+                                path,
+                                generation_id,
+                                new_path.rpartition("/")[0],
                                 new_path.count("/") - path.count("/"),
                                 generation_id,
                                 path,
@@ -1329,15 +1653,15 @@ class DirectoryIndex:
                 self._revision(connection)
 
     def finish_generation(self, generation_id: int, *, issue_count: int = 0) -> bool:
-        """Only issue-free full passes select candidates and advance verification time."""
+        """Accept best-effort passes unless an observation gap remains unresolved."""
         if not 0 <= issue_count <= MAX_SIGNED_INTEGER:
             raise ValueError("Coverage issue count is outside the supported range.")
         with self._writer_lock:
             connection = self._connection()
             with transaction(connection):
-                row = connection.execute("SELECT state FROM generations WHERE id = ?", (generation_id,)).fetchone()
-                if row is None or row[0] not in {"candidate", "building"}:
-                    raise ValueError("Generation is not an active build or verification candidate.")
+                row = connection.execute("SELECT state, scan_active FROM generations WHERE id = ?", (generation_id,)).fetchone()
+                if row is None or (row[0] not in {"building"} and not row[1]):
+                    raise ValueError("Generation is not an active build or verification pass.")
                 stored_issues = required_row(
                     connection.execute("SELECT coalesce(sum(count), 0) FROM coverage_issues WHERE generation_id = ?", (generation_id,))
                 )[0]
@@ -1349,7 +1673,13 @@ class DirectoryIndex:
                         (generation_id, additional_issues),
                     )
                 unresolved = max(issue_count, stored_issues)
-                if unresolved:
+                observation_loss = (
+                    connection.execute(
+                        "SELECT 1 FROM coverage_issues WHERE generation_id = ? AND code = 'event_loss' LIMIT 1", (generation_id,)
+                    ).fetchone()
+                    is not None
+                )
+                if observation_loss:
                     connection.execute(
                         "UPDATE generations SET issue_count = ?, coverage = CASE WHEN coverage = 'uncertain' THEN 'uncertain' ELSE 'partial' END WHERE id = ?",
                         (unresolved, generation_id),
@@ -1363,10 +1693,9 @@ class DirectoryIndex:
                     "SELECT 1 FROM scan_queue WHERE generation_id = ? AND processed = 0 LIMIT 1", (generation_id,)
                 ).fetchone():
                     raise ValueError("Scan work remains queued. Complete the scan before selecting this generation.")
-                previous = required_row(connection.execute("SELECT selected_generation FROM source_metadata WHERE id = 1"))[0]
-                connection.execute("UPDATE generations SET state = 'retired' WHERE id = ? AND id <> ?", (previous, generation_id))
                 connection.execute(
-                    "UPDATE generations SET state = 'accepted', coverage = 'complete', issue_count = 0 WHERE id = ?", (generation_id,)
+                    "UPDATE generations SET state = 'accepted', scan_active = 0, coverage = ?, issue_count = ? WHERE id = ?",
+                    ("partial" if unresolved else "complete", unresolved, generation_id),
                 )
                 connection.execute(
                     "UPDATE source_metadata SET selected_generation = ?, last_verified_at_ms = ? WHERE id = 1",
@@ -1407,6 +1736,27 @@ class DirectoryIndex:
                     self._reader_condition.notify_all()
             self._query_slots.release()
 
+    @contextmanager
+    def _query_connection(self) -> Iterator[sqlite3.Connection]:
+        validate_storage_ancestors(self.path.parent)
+        self._validate_storage_files(self.path)
+        metadata = self.path.lstat()
+        identity = (metadata.st_dev, metadata.st_ino)
+        with self._writer_lock:
+            if self._readers:
+                connection, held_identity = self._readers.pop()
+                if identity != held_identity:
+                    connection.close()
+                    raise PermissionError("Directory-index database changed. Stop the source and restore its private storage.")
+            else:
+                connection = self._connect(readonly=True)
+        try:
+            yield connection
+        finally:
+            connection.set_progress_handler(None, 0)
+            with self._writer_lock:
+                self._readers.append((connection, identity))
+
     def _search(
         self,
         query: str,
@@ -1427,7 +1777,7 @@ class DirectoryIndex:
         if interrupted():
             raise InterruptedError("Directory search was cancelled or timed out. Retry the search.")
         fts_ready = self._fts_ready
-        with closing(self._connect(readonly=True)) as connection:
+        with self._query_connection() as connection:
             connection.set_progress_handler(interrupted, SQL_PROGRESS_STEPS)
             with transaction(connection):
                 metadata = required_row(

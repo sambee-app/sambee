@@ -27,6 +27,7 @@ import {
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts, withShortcut } from "../../hooks/useKeyboardShortcuts";
 import { useRoutedViewerEditing } from "../../hooks/useRoutedViewerEditing";
+import { useViewerDocumentTitle } from "../../hooks/useViewerDocumentTitle";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   beginViewerTextEdit,
@@ -458,6 +459,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   // Extract filename from path
   const filename = path.split("/").pop() || path;
+  const printDocument = useViewerDocumentTitle(filename);
 
   const focusViewerContent = useCallback(() => {
     if (isEditing) {
@@ -2083,7 +2085,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
               onClick: () => {
                 setPrintError(null);
                 try {
-                  window.print();
+                  printDocument();
                 } catch (error) {
                   logError("Unable to open Markdown print dialog", { error });
                   setPrintError(t("viewer.printError"));
@@ -2117,6 +2119,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       isSaving,
       loading,
       previewReady,
+      printDocument,
       readOnlyReason,
       setPrintError,
       t,
