@@ -4,10 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { browserHistoryService } from "../../../services/browserHistoryService";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
+import { type FileEntry, FileType } from "../../../types";
 import { getQuickBarResultRowHeight, QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT, QUICK_BAR_RESULT_ITEM_HEIGHT } from "../QuickBarResultRow";
 import { SEARCH_CONTRACT_VERSION } from "../search/recentHistory";
 import type { SearchProvider, SearchResultsUpdate } from "../search/types";
 import { useDirectorySearchProvider } from "../search/useDirectorySearchProvider";
+import { useFileSearchProvider } from "../search/useFileSearchProvider";
 import { UnifiedSearchBar } from "../UnifiedSearchBar";
 
 const virtualizerSizeCache = new Map<string | number, number>();
@@ -1003,6 +1005,36 @@ describe("UnifiedSearchBar", () => {
     await waitFor(() => {
       expect(screen.getByRole("listbox")).toBeInTheDocument();
     });
+  });
+
+  it("fetches file history when the source updates during first activation", async () => {
+    const searchRecentFiles = vi.spyOn(browserHistoryService, "searchRecentFiles").mockResolvedValue({ results: [], result_limit: 50 });
+    const initialFiles: FileEntry[] = [];
+    const loadedFiles = [{ name: "report.txt", type: FileType.FILE }] as FileEntry[];
+    function SearchHarness({ active }: { active: boolean }) {
+      const fileProvider = useFileSearchProvider({
+        connectionId: "connection-1",
+        currentPath: "",
+        files: active ? loadedFiles : initialFiles,
+        connectionName: "Demo",
+        resultLimit: 50,
+        getConnectionName: () => "Demo",
+        onOpenCurrentFile: vi.fn(),
+        onOpenRecentFile: vi.fn(),
+      });
+      return <UnifiedSearchBar provider={active ? fileProvider : resultsProvider} activationToken={active ? 1 : 0} />;
+    }
+    const { rerender } = renderWithProvider(<SearchHarness active={false} />);
+
+    rerender(
+      <SambeeThemeProvider>
+        <SearchHarness active />
+      </SambeeThemeProvider>
+    );
+    await act(async () => screen.getByRole("textbox").focus());
+
+    expect(await screen.findByRole("option", { name: /report.txt/ })).toBeInTheDocument();
+    expect(searchRecentFiles).toHaveBeenCalledTimes(1);
   });
 
   it("starts one search when shortcut activation is followed by input focus", async () => {

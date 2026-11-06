@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BrowserOpenMode } from "../../../pages/FileBrowser/types";
 import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
@@ -63,7 +63,7 @@ export function useFileSearchProvider({
   const sourceBindingRef = useRef({ connectionId, currentPath, files, history, resultLimit });
   const [historyUnavailable, setHistoryUnavailable] = useState(false);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     sourceBindingRef.current = { connectionId, currentPath, files, history, resultLimit };
     return () => {
       requestGenerationRef.current += 1;
