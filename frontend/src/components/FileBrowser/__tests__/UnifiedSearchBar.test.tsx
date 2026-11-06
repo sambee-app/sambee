@@ -13,6 +13,7 @@ import { useFileSearchProvider } from "../search/useFileSearchProvider";
 import { UnifiedSearchBar } from "../UnifiedSearchBar";
 
 const virtualizerSizeCache = new Map<string | number, number>();
+const virtualizerScrollToOffset = vi.fn();
 const INPUT_DEBOUNCE_MS = 160;
 const QUIET_REFRESH_INTERVAL_MS = 500;
 const MOCK_HISTORY_RESPONSE_MS = 40;
@@ -50,6 +51,7 @@ vi.mock("@tanstack/react-virtual", () => ({
           return virtualItem;
         });
       },
+      scrollToOffset: virtualizerScrollToOffset,
       scrollToIndex: vi.fn(),
     };
   },
@@ -636,6 +638,7 @@ describe("UnifiedSearchBar", () => {
   afterEach(async () => {
     cleanup();
     virtualizerSizeCache.clear();
+    virtualizerScrollToOffset.mockClear();
     await setLocale("en");
   });
 
@@ -1092,6 +1095,49 @@ describe("UnifiedSearchBar", () => {
     expect(screen.getByRole("textbox")).toHaveValue("rename");
     expect(fetchResults).toHaveBeenCalledTimes(1);
     expect(fetchResults.mock.calls[0]?.[0]).toBe("rename");
+  });
+
+  it.each([
+    { grouped: false, shortcut: true, close: true },
+    { grouped: true, shortcut: true, close: true },
+    { grouped: false, shortcut: false, close: true },
+    { grouped: true, shortcut: false, close: true },
+    { grouped: false, shortcut: true, close: false },
+    { grouped: true, shortcut: true, close: false },
+  ])("resets results on activation (grouped: $grouped, shortcut: $shortcut, close: $close)", async ({ grouped, shortcut, close }) => {
+    const user = userEvent.setup();
+    const groupedProvider = createGroupedProvider(vi.fn());
+    const provider = {
+      ...groupedProvider,
+      fetchResults: async (query: string, signal: AbortSignal) =>
+        (await groupedProvider.fetchResults(query, signal)).filter((result) => grouped || result.kind === "result"),
+    };
+    const { rerender } = renderWithProvider(<UnifiedSearchBar provider={provider} activationToken={0} />);
+    const searchInput = screen.getByRole("textbox");
+
+    await user.click(searchInput);
+    expect(await screen.findByRole("option", { name: /Quarterly report/ })).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /Annual report/ })).toHaveAttribute("aria-selected", "true");
+    if (close) {
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    }
+    virtualizerScrollToOffset.mockClear();
+
+    if (shortcut) {
+      rerender(
+        <SambeeThemeProvider>
+          <UnifiedSearchBar provider={provider} activationToken={1} />
+        </SambeeThemeProvider>
+      );
+    } else {
+      fireEvent.blur(searchInput);
+      fireEvent.focus(searchInput);
+    }
+
+    expect(await screen.findByRole("option", { name: /Quarterly report/ })).toHaveAttribute("aria-selected", "true");
+    expect(virtualizerScrollToOffset).toHaveBeenCalledWith(0);
   });
 
   it("reopens the commands dropdown when the same mode is reactivated from outside the quick bar", async () => {

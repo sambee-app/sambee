@@ -851,12 +851,28 @@ export function UnifiedSearchBar({
     return height;
   }, [results]);
 
+  const resetOpenResults = useEffectEvent(() => {
+    const firstIndex = Math.max(
+      results.findIndex((result) => result.kind === "result"),
+      0
+    );
+    selectedValueRef.current = results[firstIndex]?.value;
+    setSelectedIndex(firstIndex);
+    rowVirtualizer.scrollToOffset(0);
+  });
+
+  useLayoutEffect(() => {
+    if (listContainer) {
+      resetOpenResults();
+    }
+  }, [listContainer]);
+
   // ── Scroll selected item into view ─────────────────────────────────────
   useEffect(() => {
-    if (results.length > 0) {
+    if (listContainer && results.length > 0) {
       rowVirtualizer.scrollToIndex(selectedIndex, { align: "auto" });
     }
-  }, [selectedIndex, results.length, rowVirtualizer]);
+  }, [listContainer, selectedIndex, results.length, rowVirtualizer]);
 
   // ── Focus activation ───────────────────────────────────────────────────
 
@@ -993,7 +1009,9 @@ export function UnifiedSearchBar({
     const shouldOpenOnActivation = shouldSearchOnActivation || shouldShowBelowMinimumOnActivation;
     const shouldPreserveSearchStateOnActivation = shouldSearchOnActivation && !providerChanged;
 
-    if (!shouldPreserveSearchStateOnActivation) {
+    if (shouldPreserveSearchStateOnActivation) {
+      resetOpenResults();
+    } else {
       setResults([]);
       setSelectedIndex(0);
       setHasSearched(false);
