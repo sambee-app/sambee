@@ -902,8 +902,8 @@ export function UnifiedSearchBar({
     }
 
     if (
-      (!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) ||
-      (newlyActivated && hasSearched && query.length >= effectiveMinQueryLength)
+      newlyActivated &&
+      ((!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) || (hasSearched && query.length >= effectiveMinQueryLength))
     ) {
       void executeSearch(query);
     }
@@ -1012,14 +1012,14 @@ export function UnifiedSearchBar({
     lastResetProviderRef.current = provider;
     lastActivationTokenRef.current = activationToken;
 
-    activatedRef.current = isInputFocused;
+    activatedRef.current = isInputFocused || shouldSearchOnActivation;
+
+    if (activatedRef.current) {
+      providerRef.current.onActivate?.();
+    }
 
     if (shouldSearchOnActivation) {
       void executeSearch(nextQuery);
-    }
-
-    if (isInputFocused) {
-      providerRef.current.onActivate?.();
     }
   }, [
     activationToken,

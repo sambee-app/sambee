@@ -1005,6 +1005,25 @@ describe("UnifiedSearchBar", () => {
     });
   });
 
+  it("starts one search when shortcut activation is followed by input focus", async () => {
+    const fetchResults = vi.fn<SearchProvider["fetchResults"]>(() => new Promise<[]>(() => {}));
+    const onActivate = vi.fn();
+    const provider = { ...resultsProvider, fetchResults, onActivate };
+    const { rerender } = renderWithProvider(<UnifiedSearchBar provider={provider} activationToken={0} />);
+
+    rerender(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={provider} activationToken={1} />
+      </SambeeThemeProvider>
+    );
+    await act(async () => screen.getByRole("textbox").focus());
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(fetchResults).toHaveBeenCalledTimes(1);
+    expect(onActivate.mock.invocationCallOrder[0]).toBeLessThan(fetchResults.mock.invocationCallOrder[0] ?? 0);
+    expect(fetchResults.mock.calls[0]?.[1]?.aborted).toBe(false);
+  });
+
   it("reopens the commands dropdown when the same mode is reactivated from outside the quick bar", async () => {
     const user = userEvent.setup();
 
