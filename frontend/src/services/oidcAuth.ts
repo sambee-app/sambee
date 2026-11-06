@@ -8,7 +8,7 @@ export const OIDC_ATTEMPT_MARKER = "sambee_oidc_attempted";
 export const OIDC_LOGOUT_MARKER = "sambee_oidc_logout";
 export const OIDC_RETURN_PATH_MARKER = "sambee_oidc_return_path";
 export const OIDC_LOGIN_CHANNEL = "sambee-oidc-login";
-const OIDC_CALLBACK_PATH = "/login/oidc/callback";
+const LOGIN_PATH = "/login";
 
 export function notifyOidcLogin(): void {
   if (typeof BroadcastChannel === "undefined") return;
@@ -25,7 +25,8 @@ export function sanitizeReturnPath(returnPath: string | null | undefined): strin
   if (!returnPath?.startsWith("/") || returnPath.startsWith("//") || returnPath.includes("\\")) return "/browse";
   try {
     const resolved = new URL(returnPath, window.location.origin);
-    if (resolved.origin !== window.location.origin || resolved.pathname === OIDC_CALLBACK_PATH) return "/browse";
+    if (resolved.origin !== window.location.origin || resolved.pathname === LOGIN_PATH || resolved.pathname.startsWith(`${LOGIN_PATH}/`))
+      return "/browse";
     return resolved.pathname + resolved.search;
   } catch {
     return "/browse";
@@ -33,6 +34,7 @@ export function sanitizeReturnPath(returnPath: string | null | undefined): strin
 }
 
 export function loginReturnPath(search: string): string {
+  if (sessionStorage.getItem(OIDC_LOGOUT_MARKER)) return "/browse";
   const requestedPath = new URLSearchParams(search).get("return_path");
   return sanitizeReturnPath(requestedPath ?? sessionStorage.getItem(OIDC_RETURN_PATH_MARKER));
 }

@@ -16,6 +16,7 @@ from app.services.oidc_configuration import OidcSecretCipher
 from app.services.oidc_http import LOGIN_GRANT_LIFETIME_SECONDS, PRE_CALLBACK_FLOW_LIFETIME_SECONDS, VALIDATED_TEST_FLOW_LIFETIME_SECONDS
 
 _FLOW_TABLE = SQLModel.metadata.tables["oidcflow"]
+_LOGIN_PATH = "/login"
 
 
 class OidcFlowError(ValueError):
@@ -83,7 +84,8 @@ def safe_return_path(value: str | None) -> str:
         or parsed.netloc
         or not parsed.path.startswith("/")
         or parsed.path.startswith("//")
-        or parsed.path == "/login/oidc/callback"
+        or parsed.path == _LOGIN_PATH
+        or parsed.path.startswith(f"{_LOGIN_PATH}/")
     ):
         return "/browse"
     return parsed.path + (f"?{parsed.query}" if parsed.query else "")

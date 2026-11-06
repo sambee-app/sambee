@@ -1,9 +1,9 @@
 import { act, render as renderWithMemoryRouter, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, Route, RouterProvider, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authSession } from "../../services/authSession";
-import { OIDC_ATTEMPT_MARKER, OIDC_LOGIN_CHANNEL, OIDC_LOGOUT_MARKER } from "../../services/oidcAuth";
+import { OIDC_ATTEMPT_MARKER, OIDC_LOGIN_CHANNEL, OIDC_LOGOUT_MARKER, OIDC_RETURN_PATH_MARKER } from "../../services/oidcAuth";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { render } from "../../test/utils/test-utils";
 import type { AuthToken } from "../../types";
@@ -28,6 +28,18 @@ import { getAuthConfig as mockGetAuthConfig } from "../../services/authConfig";
 function CurrentPath() {
   const location = useLocation();
   return <output>{location.pathname}</output>;
+}
+
+function renderLoginRoute() {
+  const router = createMemoryRouter(
+    [
+      { path: "/login", element: <Login /> },
+      { path: "*", element: <CurrentPath /> },
+    ],
+    { initialEntries: [`/login${window.location.search}`] }
+  );
+  renderWithMemoryRouter(<RouterProvider router={router} />);
+  return router;
 }
 
 class LoginChannel {
@@ -72,6 +84,8 @@ describe("Login Component", () => {
 
   beforeEach(() => {
     authSession.clear();
+    vi.spyOn(authSession, "bootstrap").mockResolvedValue("idle");
+    vi.spyOn(authSession, "hasUsableAccessToken").mockReturnValue(false);
     LoginChannel.channels = [];
     // Clear localStorage before each test
     localStorage.clear();
@@ -188,6 +202,97 @@ describe("Login Component", () => {
     window.dispatchEvent(new Event("focus"));
 
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it.each(["oidc_or_password", "oidc_only"] as const)("leaves login after startup restores a session in %s mode", async (signInMode) => {
+    vi.mocked(mockGetAuthConfig).mockResolvedValue({
+      sign_in_mode: signInMode,
+      oidc: { display_name: "Example Identity", authorization_path: "/api/auth/oidc/authorize" },
+    });
+    const usable = vi.spyOn(authSession, "hasUsableAccessToken").mockReturnValue(false);
+    vi.mocked(authSession.bootstrap).mockImplementation(async () => {
+      usable.mockReturnValue(true);
+      return "active";
+    });
+    const refresh = vi.spyOn(authSession, "requestRefresh");
+    window.location.search = "?return_path=%2Fsettings%2Fappearance";
+
+    renderLoginRoute();
+
+    expect(await screen.findByText("/settings/appearance")).toBeInTheDocument();
+    expect(refresh).not.toHaveBeenCalled();
+    expect(window.location.assign).not.toHaveBeenCalled();
+  });
+
+  it("uses an already restored session when the tab becomes visible", async () => {
+    vi.mocked(mockGetAuthConfig).mockResolvedValue({
+      sign_in_mode: "oidc_or_password",
+      oidc: { display_name: "Example Identity", authorization_path: "/api/auth/oidc/authorize" },
+    });
+    const refresh = vi.spyOn(authSession, "requestRefresh");
+    const usable = vi.spyOn(authSession, "hasUsableAccessToken").mockReturnValue(false);
+    const router = renderLoginRoute();
+    await screen.findByLabelText(/username/i);
+
+    await act(async () => {
+      usable.mockReturnValue(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/browse"));
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("leaves login when session startup completes after the login form loads", async () => {
+    vi.mocked(mockGetAuthConfig).mockResolvedValue({
+      sign_in_mode: "oidc_or_password",
+      oidc: { display_name: "Example Identity", authorization_path: "/api/auth/oidc/authorize" },
+    });
+    renderLoginRoute();
+    await screen.findByLabelText(/username/i);
+
+    await act(async () => {
+      vi.mocked(authSession.hasUsableAccessToken).mockReturnValue(true);
+      authSession.completeLoginBootstrap();
+    });
+
+    expect(await screen.findByText("/browse")).toBeInTheDocument();
+  });
+
+  it("opens the main page after an explicit logout and password login", async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem(OIDC_LOGOUT_MARKER, "1");
+    sessionStorage.setItem(OIDC_RETURN_PATH_MARKER, "/settings/account");
+    window.location.search = "?return_path=%2Fsettings%2Faccount";
+    vi.mocked(mockLogin).mockResolvedValueOnce(createMockAuthToken());
+    const router = renderLoginRoute();
+
+    await user.type(await screen.findByLabelText(/username/i), "alice");
+    await user.type(screen.getByLabelText(/^password/i), "test-password");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/browse"));
+    expect(sessionStorage.getItem(OIDC_LOGOUT_MARKER)).toBeNull();
+    expect(sessionStorage.getItem(OIDC_RETURN_PATH_MARKER)).toBeNull();
+  });
+
+  it("requests the main page after an explicit logout and OIDC login", async () => {
+    const user = userEvent.setup();
+    vi.mocked(mockGetAuthConfig).mockResolvedValue({
+      sign_in_mode: "oidc_or_password",
+      oidc: { display_name: "Example Identity", authorization_path: "/api/auth/oidc/authorize" },
+    });
+    sessionStorage.setItem(OIDC_LOGOUT_MARKER, "1");
+    sessionStorage.setItem(OIDC_RETURN_PATH_MARKER, "/settings/account");
+    window.location.search = "?return_path=%2Fsettings%2Faccount";
+    renderLoginRoute();
+
+    await user.click(await screen.findByRole("button", { name: /sign in with sso/i }));
+
+    expect(window.location.assign).toHaveBeenCalledWith("/api/auth/oidc/authorize?return_path=%2Fbrowse");
+    expect(sessionStorage.getItem(OIDC_RETURN_PATH_MARKER)).toBe("/browse");
+    expect(sessionStorage.getItem(OIDC_LOGOUT_MARKER)).toBeNull();
+    expect(authSession.bootstrap).not.toHaveBeenCalled();
   });
 
   it("coalesces duplicate login hints while verifying", async () => {
