@@ -93,7 +93,7 @@ def test_directory_search_http_latency_measurement(client, mock_cache_manager, a
     count = int(os.environ.get("DIRECTORY_INDEX_HTTP_MEASURE_COUNT", str(HTTP_MEASUREMENT_ROWS)))
     assert count > 0
     index = mock_cache.index
-    generation = index.begin_verification()
+    generation = index.prepare_scan()[0]
     index.write_paths((f"directory-{number:06d}" for number in range(count)), generation_id=generation)
     assert index.finish_generation(generation)
     mock_cache._directory_count = count

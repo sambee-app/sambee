@@ -14,7 +14,7 @@ The quick bar has multiple modes:
 
 Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to search directory paths across the current connection and your recent locations. For example, `annual reports` finds paths containing either term, with matches for both terms ranked first.
 
-Results can be incomplete while Sambee scans folders. If a folder is missing from search, browse to it directly.
+Results can be incomplete while Sambee scans folders. During a scan, the status shows directories found or directories checked. An interrupted scan keeps committed progress for its next attempt. If a folder is missing from search, browse to it directly.
 
 If directory search is temporarily unavailable, the quick bar keeps recent history and results already shown for the same search. It checks for recovery while open. A paused status does not mean that a scan is still running. Restore source access if the message reports a connection problem; direct browsing can remain available while search recovers.
 

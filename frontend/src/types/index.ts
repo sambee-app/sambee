@@ -601,6 +601,14 @@ export interface LocalLinkTargetListing {
   items: LocalLinkTargetResolution[];
 }
 
+export interface ScanProgress {
+  phase: "building" | "updating" | "idle";
+  parents_done: number;
+  parents_queued: number;
+  directories_found: number;
+  started_at_ms: number;
+}
+
 export interface DirectorySearchResult {
   search_contract_version?: number | null;
   results: string[];
@@ -616,6 +624,7 @@ export interface DirectorySearchResult {
   status_message?: string | null;
   monitoring_state?: "starting" | "healthy" | "recovering" | "unavailable" | null;
   retry_after_ms?: number | null;
+  scan_progress?: ScanProgress | null;
 }
 
 export interface EditLockInfo {

@@ -1,13 +1,36 @@
 {
   "version": 1,
+  "scan_progress": {
+    "fields": [
+      "phase",
+      "parents_done",
+      "parents_queued",
+      "directories_found",
+      "started_at_ms"
+    ],
+    "phases": [
+      "building",
+      "updating",
+      "idle"
+    ]
+  },
   "limits": {
-    "schema_version": 1,
+    "schema_version": 5,
     "normalization_version": 1,
     "traversal_version": 1,
     "max_query_bytes": 4096,
     "max_query_terms": 32,
     "max_result_limit": 200,
     "row_batch_size": 256,
+    "scan_commit_interval_ms": 250,
+    "scan_commit_max_parents": 1000,
+    "scan_bookkeeping_commit_interval_ms": 1000,
+    "scan_bookkeeping_commit_max_parents": 20000,
+    "max_logged_scan_issues_per_pass": 20,
+    "scan_query_buffer_max_bytes": 1048576,
+    "scan_pipeline_depth": 8,
+    "scan_read_parallelism": 4,
+    "scan_credit_reserve": 16,
     "query_workers": 2,
     "scan_workers": 1,
     "busy_timeout_ms": 250,

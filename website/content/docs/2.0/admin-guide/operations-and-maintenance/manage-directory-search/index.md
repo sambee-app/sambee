@@ -38,6 +38,8 @@ Retained results become searchable after a valid source-root check, even while f
 
 Directory changes normally retry only affected parents. Completed quiet branches remain available, and background work gives both existing results and full verification time to progress. A parent that changes during its read is deferred for at least one second. A full pass may remain incomplete while directories keep changing. To confirm complete coverage, allow a quiet period and check the verification time.
 
+A denied folder, unsafe directory, or unsupported name does not stop verification of readable folders. A completed pass can have partial coverage and a verification time. It does not mean that every folder was read. Failed folders are checked at the next regular verification. Restore their permissions or correct unsupported names to improve coverage. A failed incremental read keeps stored descendants until a later check can confirm a change.
+
 Status messages show active conditions. A local retry alone does not mean that the source is unavailable. Follow a displayed storage, access, or monitoring recovery action. Retry delays account for both scan gates and watcher retries; a longer failure backoff can delay scan work beyond the one-second change retry. Repeated searches and status checks do not shorten that delay.
 
 ### Source Boundaries

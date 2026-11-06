@@ -10,6 +10,7 @@ import "./ImageViewer.css";
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { useCachedImageGallery } from "../../hooks/useCachedImageGallery";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useViewerDocumentTitle } from "../../hooks/useViewerDocumentTitle";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   readViewerContent,
@@ -156,6 +157,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     preloadRange: PRELOAD_COUNT,
     cacheRange: CACHE_COUNT,
   });
+  useViewerDocumentTitle(filename);
   const viewerSessionMetaRef = useRef({
     filename,
     gallerySize: images.length,

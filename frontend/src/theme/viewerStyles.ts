@@ -126,11 +126,20 @@ export const VIEWER_SCROLL_END_PADDING = {
   xs: "clamp(64px, 18dvh, 192px)",
   sm: "clamp(64px, 18dvh, 192px)",
 } as const;
+export const MARKDOWN_PRINT_TYPOGRAPHY = {
+  body: "10pt",
+  lineHeight: 1.4,
+  h1: "18pt",
+  h2: "14pt",
+  h3: "12pt",
+  lowerHeadings: "11pt",
+  codeAndTables: "9pt",
+} as const;
 export const MARKDOWN_VIEWER_PRINT_STYLES = {
   "@media print": {
     "body:has([data-markdown-print-viewer])": { height: "auto !important", overflow: "visible !important" },
     "body:has([data-markdown-print-viewer]) > :not([data-markdown-print-viewer])": { display: "none !important" },
-    "[data-markdown-print-viewer]": { position: "static !important", overflow: "visible" },
+    "[data-markdown-print-viewer].MuiDialog-root": { position: "static !important", overflow: "visible" },
     "[data-markdown-print-viewer] .MuiBackdrop-root, [data-markdown-print-frame] > :not([data-testid='markdown-viewer-content'])": {
       display: "none !important",
     },
@@ -139,6 +148,9 @@ export const MARKDOWN_VIEWER_PRINT_STYLES = {
       backgroundColor: "#fff !important",
     },
     "[data-markdown-print-viewer] [data-markdown-search-root]": {
+      padding: 0,
+      fontSize: MARKDOWN_PRINT_TYPOGRAPHY.body,
+      lineHeight: MARKDOWN_PRINT_TYPOGRAPHY.lineHeight,
       "--sambee-syntax-foreground": "#000 !important",
       "--sambee-syntax-keyword": "#000 !important",
       "--sambee-syntax-string": "#000 !important",
@@ -152,13 +164,29 @@ export const MARKDOWN_VIEWER_PRINT_STYLES = {
       "--sambee-search-other": "transparent !important",
       "--sambee-search-current": "transparent !important",
     },
+    // Select only blocks without an earlier sibling, without Emotion's SSR-unsafe pseudo-classes.
+    "[data-markdown-print-viewer] [data-markdown-search-root] > :not(* + *), [data-markdown-print-viewer] [data-markdown-publication] > :not(* + *)":
+      {
+        marginTop: 0,
+      },
+    "[data-markdown-print-viewer] [data-markdown-search-root] h1": { fontSize: MARKDOWN_PRINT_TYPOGRAPHY.h1 },
+    "[data-markdown-print-viewer] [data-markdown-search-root] h2": { fontSize: MARKDOWN_PRINT_TYPOGRAPHY.h2 },
+    "[data-markdown-print-viewer] [data-markdown-search-root] h3": { fontSize: MARKDOWN_PRINT_TYPOGRAPHY.h3 },
+    "[data-markdown-print-viewer] [data-markdown-search-root] h4, [data-markdown-print-viewer] [data-markdown-search-root] h5, [data-markdown-print-viewer] [data-markdown-search-root] h6":
+      {
+        fontSize: MARKDOWN_PRINT_TYPOGRAPHY.lowerHeadings,
+      },
+    "[data-markdown-print-viewer] [data-markdown-search-root] pre, [data-markdown-print-viewer] [data-markdown-search-root] code:not(pre code)":
+      {
+        fontSize: MARKDOWN_PRINT_TYPOGRAPHY.codeAndTables,
+      },
     "[data-markdown-print-viewer] [data-markdown-search-root] *": {
       color: "#000 !important",
       backgroundColor: "transparent !important",
       boxShadow: "none !important",
       textShadow: "none !important",
     },
-    "[data-markdown-print-viewer] .MuiDialog-container, [data-markdown-print-viewer] .MuiDialog-paper, [data-markdown-print-frame], [data-markdown-print-viewer] [data-testid='markdown-viewer-content']":
+    "[data-markdown-print-viewer] .MuiDialog-container, [data-markdown-print-viewer] .MuiDialog-paper, [data-markdown-print-viewer] [data-markdown-print-frame], [data-markdown-print-viewer] [data-testid='markdown-viewer-content']":
       {
         position: "static",
         display: "block",
@@ -179,11 +207,13 @@ export const MARKDOWN_VIEWER_PRINT_STYLES = {
       overflow: "visible",
     },
     "[data-markdown-print-viewer] [data-markdown-search-root] table": {
+      fontSize: MARKDOWN_PRINT_TYPOGRAPHY.codeAndTables,
       display: "table",
       width: "100%",
       tableLayout: "fixed",
       overflowWrap: "anywhere",
     },
+    "[data-markdown-print-viewer] [data-markdown-search-root] table th": { fontSize: MARKDOWN_PRINT_TYPOGRAPHY.codeAndTables },
     "[data-markdown-print-viewer] thead": { display: "table-header-group" },
     "[data-markdown-print-viewer] tr, [data-markdown-print-viewer] img": { breakInside: "avoid" },
     "[data-markdown-print-viewer] h1, [data-markdown-print-viewer] h2, [data-markdown-print-viewer] h3": { breakAfter: "avoid" },

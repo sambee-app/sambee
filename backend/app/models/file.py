@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.core.directory_index_contract import ScanProgress
+
 
 class FileType(StrEnum):
     FILE = "file"
@@ -159,3 +161,4 @@ class DirectorySearchResult(BaseModel):
     status_message: str | None = None
     monitoring_state: Literal["starting", "healthy", "recovering", "unavailable"] | None = None
     retry_after_ms: int | None = Field(default=None, ge=0)
+    scan_progress: ScanProgress | None = None

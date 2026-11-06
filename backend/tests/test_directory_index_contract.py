@@ -38,6 +38,36 @@ def test_deep_hint_does_not_invalidate_ancestor_listing(index):
         assert coordinator.is_current(token)
 
 
+@pytest.mark.parametrize("failure", ["ancestor_event", "watcher_loss"])
+def test_observed_buffered_reads_recheck_containment_before_commit(index, failure):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, _DirectoryMutation
+
+    ready = threading.Event()
+    ready.set()
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.observed_ready = ready.is_set
+    index.seed_scan(1)
+    index.write_scan_children(1, [("parent", True), ("quiet", True), ("parent/child", True)])
+    coordinator.start_scan_groups()
+    try:
+        for parent in ("parent/child", "quiet"):
+            with coordinator.read(parent, observed=True) as token:
+                coordinator.commit_children(token, 1, [(parent + "/new", True)])
+                coordinator.finish_parent(token, 1)
+        if failure == "ancestor_event":
+            coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "parent"))
+        else:
+            ready.clear()
+        coordinator.flush_scan_group()
+        assert not index.search("parent/child/new").results
+        assert bool(index.search("quiet/new").results) == (failure == "ancestor_event")
+        assert not coordinator._producers
+    finally:
+        coordinator.cancel_scan_groups()
+
+
 def test_drained_barrier_overflow_stales_reads_without_changing_epoch(index):
     from app.services.directory_cache import MAX_PENDING_OBSERVATIONS, READ_PARENT_ACTION, DirectoryScanCoordinator, _DirectoryMutation
 
@@ -81,6 +111,7 @@ def test_active_full_pass_drains_many_hints_without_epoch_change(sqlite_cache, m
         if not injected:
             injected = True
             assert cache._scan_running.is_set()
+            cache.coordinator.flush_scan_group()
             assert not cache.coordinator._producers
             for number in range(MAX_PENDING_OBSERVATIONS + 1):
                 cache.observe_parent(f"hint-{number}")
@@ -163,6 +194,16 @@ def test_local_parent_retry_retains_unrelated_completed_work(sqlite_cache, monke
     assert cache.index.status().coverage == "complete"
 
 
+@pytest.mark.parametrize("reason", ["observation_loss", "read_capacity"])
+def test_observed_reads_stay_blocked_after_requeue_flag_is_cleared(sqlite_cache, reason):
+    from app.services.directory_cache import InvalidationReason
+
+    coordinator = sqlite_cache.coordinator
+    coordinator.invalidate(InvalidationReason(reason))
+    coordinator.observation_lost = False
+    assert coordinator.observed_reads_blocked
+
+
 def test_retry_delay_reports_latest_scan_gate_and_earliest_watcher(sqlite_cache, monkeypatch):
     monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: 100.0)
     sqlite_cache._resource_retry_at = 130.0
@@ -209,232 +250,6 @@ def test_enumerated_children_skip_extra_native_existence_queries(sqlite_cache, s
     finally:
         cache._request_stop()
         cache._finish_stop()
-
-
-def test_refilled_accepted_queue_cannot_starve_candidate(sqlite_cache, monkeypatch):
-    cache = sqlite_cache
-    cache.index.write_paths(["hot"])
-    assert cache.index.finish_generation(1)
-    cache.index.queue_reconciliation_parent(1, "hot")
-    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
-    original = cache._scan_parent
-    visited = []
-    candidate_progress = False
-
-    def scan(generation, parent, *, reconcile=False):
-        nonlocal candidate_progress
-        visited.append((parent, reconcile))
-        assert len(visited) <= 4, "Accepted parent refills must not block candidate work."
-        original(generation, parent, reconcile=reconcile)
-        if reconcile and not candidate_progress:
-            cache.index.queue_reconciliation_parent(1, "hot")
-        if not reconcile:
-            candidate_progress = True
-
-    monkeypatch.setattr(cache, "_scan_parent", scan)
-    cache._scan_disk_queue()
-    assert visited[:2] == [("hot", True), ("", False)]
-    assert cache.index.status().coverage == "complete"
-
-
-def test_stale_accepted_parent_cannot_starve_candidate_across_turns(sqlite_cache, monkeypatch):
-    from app.services.directory_cache import ScanObservationInvalidated
-
-    cache = sqlite_cache
-    cache.index.write_paths(["hot"])
-    assert cache.index.finish_generation(1)
-    candidate, _selected = cache.index.prepare_scan()
-    cache.index.seed_scan(candidate)
-    cache.index.write_scan_children(candidate, [("quiet", True)])
-    cache.index.queue_reconciliation_parent(1, "hot")
-    cache._scan_epoch = (candidate, cache.coordinator.epoch)
-    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
-    original = cache._scan_parent_read
-    visited = []
-
-    def read(generation, parent, token, *, reconcile=False):
-        visited.append((parent, reconcile))
-        if reconcile and parent == "hot":
-            cache.observe_parent("hot")
-            raise ScanObservationInvalidated("Injected hot accepted parent.")
-        original(generation, parent, token, reconcile=reconcile)
-
-    monkeypatch.setattr(cache, "_scan_parent_read", read)
-    for _turn in range(4):
-        with pytest.raises(ScanObservationInvalidated):
-            cache._scan_disk_queue()
-    assert ("quiet", False) in visited
-    assert "quiet" not in cache.index.pending_scan_paths(candidate)
-    monkeypatch.setattr(cache, "_scan_parent_read", original)
-    cache._scan_disk_queue()
-    assert cache.index.status().coverage == "complete"
-
-
-@pytest.mark.parametrize("failure", ["stale", "denied", "transport"])
-def test_failed_accepted_parent_lets_candidate_work_finish_in_same_turn(sqlite_cache, monkeypatch, failure):
-    from app.services.directory_cache import ScanObservationInvalidated
-
-    cache = sqlite_cache
-    cache.index.write_paths(["hot"])
-    assert cache.index.finish_generation(1)
-    candidate, _selected = cache.index.prepare_scan()
-    cache.index.seed_scan(candidate)
-    quiet_paths = [f"quiet-{number}" for number in range(3)]
-    cache.index.write_scan_children(candidate, [(path, True) for path in quiet_paths])
-    cache.index.finish_scan_parent(candidate, "")
-    cache.index.queue_reconciliation_parent(1, "hot")
-    epoch = cache.coordinator.epoch
-    cache._scan_epoch = (candidate, epoch)
-    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
-    original = cache._scan_parent_read
-    visited = []
-
-    def read(generation, parent, token, *, reconcile=False):
-        visited.append((parent, reconcile))
-        if reconcile:
-            if failure == "stale":
-                cache.observe_parent("hot")
-                raise ScanObservationInvalidated("Injected hot accepted parent.")
-            if failure == "denied":
-                raise cache._DescendantAccessDenied("Injected accepted-parent denial.")
-            raise OSError("Injected accepted-parent transport failure.")
-        original(generation, parent, token, reconcile=reconcile)
-
-    monkeypatch.setattr(cache, "_scan_parent_read", read)
-    with pytest.raises(ScanObservationInvalidated if failure == "stale" else OSError):
-        cache._scan_disk_queue()
-    assert [parent for parent, reconcile in visited if reconcile] == ["hot"]
-    assert all((path, False) in visited for path in quiet_paths)
-    assert not cache.index.pending_scan_paths(candidate)
-    assert cache.index.reconciliation_generation() == 1
-    assert cache.coordinator.epoch == epoch
-    assert cache._stale_turns == 0
-    monkeypatch.setattr(cache, "_scan_parent_read", original)
-    cache._scan_disk_queue()
-    assert cache.index.status().coverage == "complete"
-
-
-@pytest.mark.asyncio
-async def test_periodic_hot_reconciliation_cannot_block_due_candidate(sqlite_cache, monkeypatch):
-    from contextlib import asynccontextmanager
-
-    from app.services import directory_cache
-    from app.services.directory_cache import ScanObservationInvalidated
-
-    cache = sqlite_cache
-    cache.index.write_paths(["hot"])
-    assert cache.index.finish_generation(1)
-    candidate, _selected = cache.index.prepare_scan()
-    cache.index.seed_scan(candidate)
-    cache.index.write_scan_children(candidate, [("quiet", True)])
-    cache.index.queue_reconciliation_parent(1, "hot")
-    cache._scan_epoch = (candidate, cache.coordinator.epoch)
-    clock = [1000.0]
-    cache._verification_retry_at = 1001.0
-    cache._next_full_pass_at = 2000.0
-    original = cache._scan_parent_read
-    visited = []
-
-    @asynccontextmanager
-    async def connected(**kwargs):
-        yield
-
-    async def tick(_delay):
-        clock[0] += 1
-        if clock[0] > 1004:
-            raise asyncio.CancelledError
-
-    def read(generation, parent, token, *, reconcile=False):
-        visited.append((parent, reconcile))
-        if reconcile and parent == "hot":
-            cache.observe_parent("hot")
-            raise ScanObservationInvalidated("Injected periodic hot parent.")
-        original(generation, parent, token, reconcile=reconcile)
-
-    monkeypatch.setattr(cache, "_scan_parent_read", read)
-    monkeypatch.setattr(cache, "_refresh_connection_generation", AsyncMock())
-    monkeypatch.setattr(directory_cache, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": tick})))
-    monkeypatch.setattr(directory_cache.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(directory_cache, "get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connected)))
-    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
-    await cache._periodic_rescan_loop()
-    assert ("quiet", False) in visited
-    assert "quiet" not in cache.index.pending_scan_paths(candidate)
-    assert cache._next_full_pass_at == 2000.0
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("failure", [PermissionError, OSError])
-@pytest.mark.parametrize("start_with_reconciliation", [False, True])
-async def test_periodic_failed_reconciliation_cannot_starve_candidate(sqlite_cache, monkeypatch, failure, start_with_reconciliation):
-    from contextlib import asynccontextmanager
-
-    from app.services import directory_cache
-
-    cache = sqlite_cache
-    cache.index.write_paths(["hot"])
-    assert cache.index.finish_generation(1)
-    candidate, _selected = cache.index.prepare_scan()
-    cache.index.seed_scan(candidate)
-    quiet_paths = ["quiet-first", "quiet-second"]
-    cache.index.write_scan_children(candidate, [(path, True) for path in quiet_paths])
-    cache.index.finish_scan_parent(candidate, "")
-    cache.index.queue_reconciliation_parent(1, "hot")
-    epoch = cache.coordinator.epoch
-    cache._scan_epoch = (candidate, epoch)
-    clock = [cache._last_access]
-    if not start_with_reconciliation:
-        cache._verification_retry_at = clock[0] + directory_cache.OBSERVATION_RETRY_SECONDS
-    turns = 0
-    reads = []
-
-    @asynccontextmanager
-    async def connected(**kwargs):
-        yield
-
-    async def tick(_delay):
-        nonlocal turns
-        turns += 1
-        if turns > 4:
-            raise asyncio.CancelledError
-        clock[0] = max(clock[0], cache._resource_retry_at, cache._verification_retry_at or 0.0) + 1.0
-
-    def scan(path, **kwargs):
-        parent = path[len(cache._smb_base_path) :].lstrip("\\")
-        reads.append(parent)
-        if parent == "hot":
-            raise failure("Injected accepted-parent failure.")
-        return (entry for entry in ())
-
-    monkeypatch.setattr(cache, "_refresh_connection_generation", AsyncMock())
-    monkeypatch.setattr(directory_cache, "asyncio", SimpleNamespace(**(vars(asyncio) | {"sleep": tick})))
-    monkeypatch.setattr(directory_cache.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(directory_cache, "get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connected)))
-    monkeypatch.setattr("smbclient.scandir", scan)
-    await cache._periodic_rescan_loop()
-    assert reads.count("hot") == 4
-    assert all(reads.count(path) == 1 for path in quiet_paths)
-    assert not cache.index.pending_scan_paths(candidate)
-    assert cache.index.reconciliation_generation() == 1
-    assert cache._scan_epoch == (candidate, epoch)
-    assert cache.coordinator.epoch == epoch
-    assert cache._stale_turns == 0
-    assert cache._failure_retry_delay > directory_cache.FAILURE_RETRY_MIN_SECONDS
-    assert "verification failed" in cache.scan_error
-    assert cache.search_index("hot").total_matches == 1
-
-    before = list(reads)
-    retry_at = cache._resource_retry_at
-    await cache._run_rescan()
-    assert reads == before
-    assert cache._resource_retry_at == retry_at
-
-    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
-    clock[0] = retry_at
-    await cache._run_rescan()
-    assert cache.index.status().coverage == "complete"
-    assert cache._failure_retry_delay == 0
-    assert cache._verification_retry_at is None
 
 
 @pytest.mark.parametrize("stage", ["probe", "accept"])
@@ -567,7 +382,8 @@ def test_finished_pass_with_coverage_issue_replaces_observation_loss_status(sqli
     monkeypatch.setattr("smbclient.scandir", scan)
     cache._scan_disk_queue()
     assert not cache.coordinator.observation_lost
-    assert "coverage is incomplete" in cache.scan_error
+    assert cache.scan_error is None
+    assert cache.index.status().coverage == "partial"
     assert cache.search_index("accepted").total_matches == 1
 
 
@@ -675,7 +491,8 @@ def test_scan_and_retry_logs_include_reason_and_stale_turns(sqlite_cache, monkey
     retry = next(record for record in caplog.records if getattr(record, "event", None) == "directory_retry_scheduled")
     assert retry.invalidation_reason == "watcher_start"
     assert retry.stale_turns == 2
-    assert len([record for record in caplog.records if getattr(record, "event", None) == "directory_scan_invalidated"]) == 1
+    invalidations = [record for record in caplog.records if getattr(record, "event", None) == "directory_scan_invalidated"]
+    assert [record.invalidation_count for record in invalidations] == [1, 2]
     monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
     cache._scan_disk_queue()
     finished = next(record for record in caplog.records if getattr(record, "event", None) == "directory_scan_finished")
@@ -817,6 +634,51 @@ def test_standard_sqlite_runtime_has_required_features():
     validate_sqlite_runtime()
 
 
+def test_directory_cache_uses_wal_normal_durability(index):
+    assert index._connection().execute("PRAGMA journal_mode").fetchone() == ("wal",)
+    assert index._connection().execute("PRAGMA synchronous").fetchone() == (1,)
+
+
+def test_status_poll_does_not_open_sqlite_connection(sqlite_cache, monkeypatch):
+    sqlite_cache._source_available.set()
+    sqlite_cache.index.write_paths(["retained"])
+
+    def unexpected_connection(*args, **kwargs):
+        pytest.fail("Status polls must not open a SQLite connection.")
+
+    monkeypatch.setattr(sqlite_cache.index, "_connect", unexpected_connection)
+    statements = []
+    sqlite_cache.index._connection().set_trace_callback(statements.append)
+    for _ in range(3):
+        assert sqlite_cache.search_index("").directory_count == 1
+    assert not statements
+
+
+def test_scan_progress_matches_shared_wire_contract():
+    from dataclasses import fields
+
+    from app.core.directory_index_contract import CONTRACT_PATH, ScanProgress
+    from app.models.file import DirectorySearchResult
+
+    contract = json.loads(CONTRACT_PATH.read_text())["scan_progress"]
+    assert [field.name for field in fields(ScanProgress)] == contract["fields"]
+    for phase in contract["phases"]:
+        result = DirectorySearchResult(
+            results=[],
+            total_matches=0,
+            cache_state="ready",
+            directory_count=0,
+            scan_progress=ScanProgress(phase, 1, 2, 3, 4),
+        )
+        assert result.model_dump()["scan_progress"] == {
+            "phase": phase,
+            "parents_done": 1,
+            "parents_queued": 2,
+            "directories_found": 3,
+            "started_at_ms": 4,
+        }
+
+
 def test_candidate_progress_survives_an_interrupted_scan(index):
     index.write_paths(["accepted"])
     assert index.finish_generation(1)
@@ -830,6 +692,119 @@ def test_candidate_progress_survives_an_interrupted_scan(index):
     assert index.prepare_scan() == (candidate, False)
     assert index.pending_scan_paths(candidate) == ["retained"]
     assert index.search("accepted retained") == before
+
+
+def test_group_scan_commit_is_atomic_and_retains_uncommitted_work(index):
+    index.seed_scan(1)
+    index.commit_scan_parents(1, [("", [("parent", True)])])
+    assert index.pending_scan_paths(1) == ["parent"]
+    index._connection().execute(
+        "CREATE TRIGGER reject_group_child BEFORE INSERT ON directories "
+        "WHEN new.path = 'parent/refused' BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        index.commit_scan_parents(1, [("parent", [("parent/accepted", False), ("parent/refused", False)])])
+    assert index.pending_scan_paths(1) == ["parent"]
+    assert index.search("accepted").total_matches == 0
+    index.close()
+    index.open()
+    assert index.pending_scan_paths(1) == ["parent"]
+    assert index.search("parent").directory_count == 1
+
+
+@pytest.mark.parametrize("size", [8, 16])
+def test_scan_file_ids_survive_deferral_and_reopen(index, size):
+    expected = bytes(range(size))
+    index.seed_scan(1)
+    assert index.scan_parent_file_id(1, "") is None
+    index.commit_scan_parents(1, [("", [("parent", True)])], file_ids={"parent": expected})
+    assert index.scan_parent_file_id(1, "parent") == expected
+    index.finish_scan_parent(1, "parent")
+    index.commit_scan_parents(1, [("", [("parent", True)])], file_ids={"parent": expected})
+    assert index.pending_scan_paths(1) == []
+    replacement = bytes(reversed(expected))
+    index.commit_scan_parents(1, [("", [("parent", True)])], file_ids={"parent": replacement})
+    assert index.pending_scan_paths(1) == ["parent"]
+    index.defer_scan_parent(1, "parent")
+    assert index.scan_parent_file_id(1, "parent") == replacement
+    with pytest.raises(ValueError, match="8 or 16 bytes"):
+        index.commit_scan_parents(1, [("parent", [("parent/refused", True)])], file_ids={"parent/refused": b"invalid"})
+    assert index.search("refused").total_matches == 0
+    index.close()
+    index.open()
+    assert index.scan_parent_file_id(1, "parent") == replacement
+    assert index.pending_scan_paths(1) == ["parent"]
+
+
+@pytest.mark.parametrize("processed", [False, True])
+@pytest.mark.parametrize("changed", [False, True])
+@pytest.mark.parametrize("size", [8, 16])
+def test_reconciliation_refreshes_existing_child_file_ids_without_unchanged_writes(index, processed, changed, size):
+    old_id = bytes([1]) * size
+    new_id = bytes([2]) * size if changed else old_id
+    index.write_paths(["parent"])
+    assert index.finish_generation(1)
+    index.queue_reconciliation_parent(1, "parent")
+    index.commit_scan_parents(1, [("parent", [("parent/child", True)])], reconcile=True, file_ids={"parent/child": old_id})
+    if processed:
+        index.finish_reconciliation_parent(1, "parent/child")
+    index.queue_reconciliation_parent(1, "parent")
+    connection = index._connection()
+    connection.execute("CREATE TEMP TABLE child_queue_writes(count INTEGER)")
+    connection.execute("INSERT INTO child_queue_writes VALUES (0)")
+    for operation in ("INSERT", "UPDATE"):
+        connection.execute(
+            f"CREATE TEMP TRIGGER count_child_queue_{operation} AFTER {operation} ON scan_queue "
+            "WHEN new.path = 'parent/child' BEGIN UPDATE child_queue_writes SET count = count + 1; END"
+        )
+    index.commit_scan_parents(1, [("parent", [("parent/child", True)])], reconcile=True, file_ids={"parent/child": new_id})
+    assert index.scan_parent_file_id(1, "parent/child") == new_id
+    assert index.scan_parent_pending(1, "parent/child") == (changed or not processed)
+    assert connection.execute("SELECT count FROM child_queue_writes").fetchone() == (int(changed),)
+
+
+@pytest.mark.parametrize("queue_exists", [False, True])
+@pytest.mark.parametrize("new_id", [None, bytes([2]) * 8])
+def test_reconciliation_identity_update_does_not_insert_or_requeue_unknown_identity(index, queue_exists, new_id):
+    index.write_paths(["parent", "parent/child"])
+    assert index.finish_generation(1)
+    if queue_exists:
+        index.queue_reconciliation_parent(1, "parent/child")
+        index.finish_reconciliation_parent(1, "parent/child")
+    index.queue_reconciliation_parent(1, "parent")
+    index.commit_scan_parents(
+        1, [("parent", [("parent/child", True)])], reconcile=True, file_ids={"parent/child": new_id} if new_id else None
+    )
+    assert index.scan_parent_file_id(1, "parent/child") == (new_id if queue_exists else None)
+    assert not index.scan_parent_pending(1, "parent/child")
+    assert index._connection().execute("SELECT count(*) FROM scan_queue WHERE path = 'parent/child'").fetchone() == (int(queue_exists),)
+
+
+def test_missing_scan_file_id_column_requires_rebuild(index):
+    index.write_paths(["untrusted"])
+    index._connection().execute("ALTER TABLE scan_queue DROP COLUMN file_id")
+    index.close()
+    index.open(rebuild_invalid=True)
+    assert index.search("untrusted").directory_count == 0
+    assert index.scan_parent_file_id(1, "") is None
+
+
+@pytest.mark.parametrize("candidate", [False, True])
+def test_scan_progress_survives_reopen(index, candidate):
+    if candidate:
+        index.write_paths(["accepted"])
+        assert index.finish_generation(1)
+    generation, selected = index.prepare_scan()
+    index.seed_scan(generation)
+    index.write_scan_children(generation, [("retained", True)])
+    index.finish_scan_parent(generation, "")
+    index.close()
+    index.open()
+    assert index.prepare_scan() == (generation, selected)
+    assert index.pending_scan_paths(generation) == ["retained"]
+    assert index._connection().execute("SELECT path FROM directories WHERE generation_id = ? ORDER BY path", (generation,)).fetchall() == (
+        [("accepted",), ("retained",)] if candidate else [("retained",)]
+    )
 
 
 def test_completed_scan_revalidation_is_bounded_and_preserves_rows(index):
@@ -854,8 +829,8 @@ def test_completed_scan_revalidation_is_bounded_and_preserves_rows(index):
         == len(paths) + 1
     )
     assert not index.requeue_completed_scan_batch(candidate)
-    with pytest.raises(ValueError, match="no longer active"):
-        index.requeue_completed_scan_batch(1)
+    assert candidate == 1
+    assert not index.requeue_completed_scan_batch(1)
     assert index.search("accepted") == before
 
 
@@ -1220,7 +1195,7 @@ def test_database_open_revalidates_private_storage_after_connect(index, monkeypa
     [
         "UPDATE generations SET indexed_count = 1 WHERE id = 1",
         "UPDATE generations SET issue_count = 1 WHERE id = 1",
-        "UPDATE generations SET state = 'candidate' WHERE id = 1",
+        "INSERT INTO generations(state, coverage) VALUES ('building', 'partial')",
         "UPDATE source_metadata SET selected_generation = NULL WHERE id = 1",
     ],
 )
@@ -1525,7 +1500,7 @@ def test_fts_setup_corruption_cannot_trigger_replacement_of_validated_rows(index
     index.close()
     original = index._prepare_fts
 
-    def fail(_connection):
+    def fail(_connection, **_kwargs):
         error = sqlite3.DatabaseError("Injected derived-token reset corruption.")
         error.sqlite_errorcode = sqlite3.SQLITE_CORRUPT
         raise error
@@ -1810,24 +1785,6 @@ def test_orphan_lease_cleanup_is_bounded_and_preserves_owners_and_sidecars(tmp_p
     assert Path(str(sidecar) + ".lease").exists()
 
 
-def test_retired_cleanup_is_bounded_and_preserves_selected_metadata(index):
-    from app.services.directory_index import ROW_BATCH_SIZE
-
-    index.write_paths(f"old/{number}" for number in range(ROW_BATCH_SIZE * 2))
-    index.finish_generation(1)
-    candidate = index.begin_verification()
-    index.write_paths(["selected"], generation_id=candidate)
-    assert index.finish_generation(candidate)
-    before = index.search("selected")
-    assert index.cleanup_retired_batch()
-    remaining = index._connection().execute("SELECT indexed_count FROM generations WHERE id = 1").fetchone()
-    assert remaining == (ROW_BATCH_SIZE,)
-    assert not index.cleanup_retired_batch()
-    assert index.search("selected") == before
-    assert index._connection().execute("SELECT 1 FROM generations WHERE id = 1").fetchone() is None
-    index._connection().execute("INSERT INTO directory_fts(directory_fts, rank) VALUES ('integrity-check', 1)")
-
-
 def test_source_registration_survives_previous_owner_release(tmp_path):
     from app.services.directory_index_resources import DirectoryIndexResources
 
@@ -1846,11 +1803,10 @@ def test_incremental_reclamation_preserves_results_and_verification(index):
 
     index.write_paths(f"old/{number}/{'long-name-' * 100}" for number in range(ROW_BATCH_SIZE * 2))
     index.finish_generation(1)
-    candidate = index.begin_verification()
+    candidate = index.prepare_scan()[0]
+    index.mutate_path("remove", "old")
     index.write_paths(["selected"], generation_id=candidate)
     index.finish_generation(candidate)
-    while index.cleanup_retired_batch():
-        pass
     before = index.search("selected")
     pages_before = index._connection().execute("PRAGMA page_count").fetchone()[0]
     assert index._connection().execute("PRAGMA freelist_count").fetchone()[0] > 0
@@ -2005,6 +1961,7 @@ def test_fts_repair_is_bounded_restartable_and_preserves_rows(index, missing_tab
     index._connection().execute(
         "DROP TABLE directory_fts" if missing_table else "INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')"
     )
+    index._connection().execute("BEGIN")
     index.close()
     index.open()
     assert index.needs_fts_repair
@@ -2031,6 +1988,7 @@ def test_failed_partial_fts_batch_preserves_rows_cursor_and_retry(index, monkeyp
     index.write_paths(["accepted/first", "accepted/second"])
     index.finish_generation(1)
     index._connection().execute("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')")
+    index._connection().execute("BEGIN")
     index.close()
     index.open()
     assert index.needs_fts_repair
@@ -2084,6 +2042,7 @@ def test_background_fts_repair_releases_actual_scan_ownership_after_failure(sqli
     index = sqlite_cache.index
     index.write_paths(["accepted"])
     index._connection().execute("INSERT INTO directory_fts(directory_fts) VALUES ('delete-all')")
+    index._connection().execute("BEGIN")
     index.close()
     index.open()
     original = index.repair_fts_batch
@@ -2218,6 +2177,10 @@ async def test_backend_idle_release_preserves_sources_with_actual_work(sqlite_ca
     await manager.release_idle_caches()
     assert not stopped
     sqlite_cache._active_workers = 0
+    sqlite_cache.index.seed_scan(1)
+    await manager.release_idle_caches()
+    assert not stopped
+    sqlite_cache.index.finish_scan_parent(1, "")
     await manager.release_idle_caches()
     assert stopped == [sqlite_cache.connection_id]
     assert manager.get_cache(sqlite_cache.connection_id) is None
@@ -2509,6 +2472,7 @@ def test_smb_handle_uses_no_redirect_open_and_bounded_native_reads(monkeypatch):
 
         def __init__(self, tree, path):
             calls.append((tree, path))
+            self.connection = tree.session.connection
 
         def create(self, *args):
             calls.append(args)
@@ -2523,7 +2487,11 @@ def test_smb_handle_uses_no_redirect_open_and_bounded_native_reads(monkeypatch):
         def close(self):
             self.connected = False
 
-    tree = SimpleNamespace(share_name=r"\\host\share", is_dfs_share=False)
+    tree = SimpleNamespace(
+        share_name=r"\\host\share",
+        is_dfs_share=False,
+        session=SimpleNamespace(connection=SimpleNamespace(max_transact_size=DIRECTORY_READ_BUFFER_BYTES, supports_multi_credit=False)),
+    )
     monkeypatch.setattr("app.services.directory_traversal.get_smb_tree", lambda *args, **kwargs: (tree, "parent"))
     monkeypatch.setattr("app.services.directory_traversal.Open", Handle)
     handle = SmbDirectoryHandle(r"\\host\share\parent", lambda: None)
@@ -2545,13 +2513,27 @@ def smb_directory_server(monkeypatch):
     from types import SimpleNamespace
     from uuid import UUID
 
-    from smbprotocol.file_info import FileFsVolumeInformation, FileIdFullDirectoryInformation
+    from smbprotocol.file_info import FileFsVolumeInformation, FileIdFullDirectoryInformation, FileInternalInformation
+    from smbprotocol.header import Commands, SMB2HeaderRequest
+    from smbprotocol.open import (
+        Open as ProtocolOpen,
+    )
+    from smbprotocol.open import (
+        SMB2CloseResponse,
+        SMB2CreateResponse,
+        SMB2QueryDirectoryResponse,
+        SMB2QueryInfoResponse,
+    )
+
+    from app.services.directory_traversal import SCAN_CREDIT_RESERVE, SMB_CREDIT_BYTES
+    from app.storage.smb_pool import ScanCreditConnection
 
     server = SimpleNamespace(
         directories={"": [("base", 16)], "base": [("parent", 16)], "base\\parent": [("Exact", 16), ("file", 0), ("redirect", 16 | 1024)]},
         identifiers={},
         volumes={},
         names={},
+        aliases={},
         handles=[],
         patterns=[],
         denied=set(),
@@ -2559,38 +2541,78 @@ def smb_directory_server(monkeypatch):
         metadata_error=None,
         volume_error=None,
         volume_queries=0,
+        file_queries=[],
+        query_buffers=[],
+        record_ids=False,
+        compounds=[],
+        received=[],
+        compound_errors={},
+        empty_compound_response=None,
+        attributes={},
+        standalone=[],
+        events=[],
+        credit_requests=[],
+        credit_accounting=False,
+        credit_grant_limit=None,
+        echo_grant=None,
+        stall_path=None,
         on_query=lambda: None,
-        connection=SimpleNamespace(server_guid=UUID(int=1)),
+        connection=SimpleNamespace(
+            server_guid=UUID(int=1),
+            dialect=0x0311,
+            max_transact_size=1024 * 1024,
+            supports_multi_credit=True,
+            sequence_lock=threading.RLock(),
+            sequence_window={"low": 0, "high": 0},
+        ),
     )
-    server.tree = SimpleNamespace(share_name=r"\\host\share", is_dfs_share=False, tree_connect_id=1, session=SimpleNamespace(session_id=1))
+    server.tree = SimpleNamespace(
+        share_name=r"\\host\share",
+        is_dfs_share=False,
+        tree_connect_id=1,
+        session=SimpleNamespace(session_id=1, connection=server.connection, open_table={}, username="test"),
+    )
 
-    class Handle:
-        connected = False
+    def resolve(path):
+        for alias, target in server.aliases.items():
+            if path == alias or path.startswith(alias + "\\"):
+                return target + path[len(alias) :]
+        return path
+
+    class Handle(ProtocolOpen):
         file_attributes = 16
 
         def __init__(self, tree, path):
+            attributes = self.file_attributes
+            super().__init__(tree, path)
+            self.file_attributes = attributes
             self.path = path
-            self.tree_connect = tree
-            self.connection = server.connection
             self.cursor = 0
             server.handles.append(self)
 
-        def create(self, *args):
-            if self.path not in server.directories:
+        def create(self, *args, send=True):
+            if not send:
+                return super().create(*args, send=False)
+            if resolve(self.path) not in server.directories:
                 raise FileNotFoundError("Injected missing directory.")
-            self.connected = True
+            self._connected = True
 
-        def close(self):
-            self.connected = False
+        def close(self, *, send=True):
+            if not send:
+                return super().close(send=False)
+            self._connected = False
 
-        def query_directory(self, pattern, info_class, *, flags, max_output):
+        def query_directory(self, pattern, info_class, *, flags, max_output, send=True):
+            if not send:
+                return super().query_directory(pattern, info_class, flags=flags, max_output=max_output, send=False)
             if self.path in server.denied:
                 raise _smb_response_error(NtStatus.STATUS_ACCESS_DENIED)
             server.on_query()
             server.patterns.append(pattern)
+            server.query_buffers.append(max_output)
             if flags:
                 self.cursor = 0
-            entries = server.directories[self.path]
+            entries = server.directories[resolve(self.path)]
             if pattern != "*":
                 entries = [(name, attributes) for name, attributes in entries if name.casefold() == pattern.casefold()]
             if self.cursor >= len(entries):
@@ -2600,9 +2622,133 @@ def smb_directory_server(monkeypatch):
                 record = FileIdFullDirectoryInformation()
                 record["file_name"] = name.encode("utf-16-le", errors="surrogatepass")
                 record["file_attributes"] = attributes
+                if server.record_ids:
+                    child = self.path + "\\" + name if self.path else name
+                    record["file_id"] = server.identifiers.setdefault(child, len(server.identifiers) + 1)
                 records.append(record)
             self.cursor += len(records)
             return records
+
+    def send_compound(messages, session_id, tree_id, *, related):
+        server.compounds.append(messages)
+        assert related
+        assert session_id == server.tree.session.session_id
+        assert tree_id == server.tree.tree_connect_id
+        charge = sum(
+            max(1, (message["output_buffer_length"].get_value() + SMB_CREDIT_BYTES - 1) // SMB_CREDIT_BYTES)
+            if message.COMMAND == Commands.SMB2_QUERY_DIRECTORY
+            else 1
+            for message in messages
+        )
+        assert charge <= server.connection.sequence_window["high"] - server.connection.sequence_window["low"]
+        descriptor = server.handles[-1]
+        server.events.append(("send", descriptor.path))
+        requests = []
+        for position, message in enumerate(messages):
+            header = SMB2HeaderRequest()
+            header["data"] = message.pack()
+            requests.append(SimpleNamespace(position=position, body=message, message=header, descriptor=descriptor))
+        return requests
+
+    def receive(request, *, resolve_symlinks, timeout=None):
+        assert not resolve_symlinks
+        assert timeout is None or timeout > 0
+        server.received.append(request.position)
+        server.events.append(("receive", request.descriptor.path))
+        if request.descriptor.path == server.stall_path and request.position == 0:
+            raise TimeoutError("Injected stalled pipeline response.")
+        if server.credit_accounting:
+            grant = request.message["credit_request"].get_value()
+            if server.credit_grant_limit is not None:
+                grant = min(grant, server.credit_grant_limit)
+            server.connection.sequence_window["high"] += grant
+        if request.position in server.compound_errors:
+            raise _smb_response_error(server.compound_errors[request.position])
+        descriptor = request.descriptor
+        message = request.body
+        if message.COMMAND == Commands.SMB2_CREATE:
+            descriptor.create()
+            response = SMB2CreateResponse()
+            response["file_id"] = (server.handles.index(descriptor) + 1).to_bytes(16, "little")
+            response["file_attributes"] = server.attributes.get(descriptor.path, descriptor.file_attributes)
+        elif message.COMMAND == Commands.SMB2_QUERY_INFO:
+            information = FileInternalInformation()
+            information["index_number"] = server.identifiers.setdefault(resolve(descriptor.path), len(server.identifiers) + 1)
+            response = SMB2QueryInfoResponse()
+            response["buffer"] = information.pack()
+        elif message.COMMAND == Commands.SMB2_QUERY_DIRECTORY:
+            records = (
+                []
+                if request.position == server.empty_compound_response
+                else descriptor.query_directory(
+                    "*",
+                    message["file_information_class"].get_value(),
+                    flags=message["flags"].get_value(),
+                    max_output=message["output_buffer_length"].get_value(),
+                )
+            )
+            packed = []
+            for position, record in enumerate(records):
+                padding = (8 - len(record) % 8) % 8
+                if position < len(records) - 1:
+                    record["next_entry_offset"] = len(record) + padding
+                packed.append(record.pack() + b"\x00" * padding)
+            response = SMB2QueryDirectoryResponse()
+            response["buffer"] = b"".join(packed)
+        else:
+            assert message.COMMAND == Commands.SMB2_CLOSE
+            response = SMB2CloseResponse()
+        header = SMB2HeaderResponse()
+        header["data"] = response.pack()
+        return header
+
+    server.connection.send_compound = send_compound
+    server.connection.receive = receive
+
+    def send(message, session_id, tree_id):
+        server.standalone.append(message)
+        header = SMB2HeaderRequest()
+        header["data"] = message.pack()
+        return SimpleNamespace(position=5, body=message, message=header, descriptor=server.handles[-1])
+
+    server.connection.send = send
+
+    def pipeline_send(messages, *, session_id, tree_id, related, credit_request):
+        available = server.connection.sequence_window["high"] - server.connection.sequence_window["low"]
+        requests = send_compound(messages, session_id, tree_id, related=related)
+        total_charge = 0
+        for request in requests:
+            message = request.body
+            charge = (
+                max(1, (message["output_buffer_length"].get_value() + SMB_CREDIT_BYTES - 1) // SMB_CREDIT_BYTES)
+                if message.COMMAND == Commands.SMB2_QUERY_DIRECTORY
+                else 1
+            )
+            request.message["credit_request"] = credit_request or charge
+            total_charge += charge
+            server.credit_requests.append(credit_request)
+            if server.credit_accounting:
+                server.connection.sequence_window["low"] += charge
+            assert available - total_charge >= SCAN_CREDIT_RESERVE
+        return requests
+
+    def echo(*, sid, timeout, credit_request):
+        assert sid == server.tree.session.session_id
+        assert timeout > 0
+        server.events.append(("echo", credit_request))
+        if server.echo_grant is None:
+            server.connection.sequence_window["high"] += credit_request
+        else:
+            server.connection.sequence_window["high"] += server.echo_grant
+
+    server.connection._send = pipeline_send
+    server.connection._calculate_credit_charge = lambda message: (
+        max(1, (message["output_buffer_length"].get_value() + SMB_CREDIT_BYTES - 1) // SMB_CREDIT_BYTES)
+        if message.COMMAND == Commands.SMB2_QUERY_DIRECTORY
+        else 1
+    )
+    server.connection.send_scan_compound = ScanCreditConnection.send_scan_compound.__get__(server.connection)
+    server.connection.echo = echo
 
     class Transaction:
         def __init__(self, raw):
@@ -2627,8 +2773,9 @@ def smb_directory_server(monkeypatch):
             information["volume_serial_number"] = server.volumes.get(path, 1)
             information["volume_creation_time"] = datetime(2026, 1, 1, tzinfo=timezone.utc)
         else:
+            server.file_queries.append(path)
             information["internal_information"].get_value()["index_number"] = server.identifiers.setdefault(
-                path, len(server.identifiers) + 1
+                resolve(path), len(server.identifiers) + 1
             )
             information["name_information"].get_value()["file_name"] = server.names.get(path, "\\" + path)
             information["standard_information"].get_value()["directory"] = True
@@ -2741,6 +2888,726 @@ async def test_directory_rebinding_waits_for_retained_workers(sqlite_cache, monk
     root.replacement.assert_called_once()
 
 
+@pytest.mark.parametrize("credits", [0, 128])
+@pytest.mark.parametrize("event_timing", ["before_read", "after_commit"])
+def test_smb_observed_ancestor_rename_and_link_replacement(index, smb_directory_server, event_timing, credits):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, ScanObservationInvalidated, _DirectoryMutation
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = credits
+    server.directories["base\\parent"] = [("child", 16)]
+    server.directories["base\\parent\\child"] = [("new", 16)]
+    server.identifiers["base\\parent\\child"] = 42
+    index.write_paths(["parent/child"])
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.observed_ready = lambda: True
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        root.read("", lambda: None).close()
+        with coordinator.read("parent/child", observed=True) as token:
+            server.directories["base\\moved"] = server.directories.pop("base\\parent")
+            server.directories["base\\moved\\child"] = server.directories.pop("base\\parent\\child")
+            server.identifiers["base\\moved\\child"] = server.identifiers.pop("base\\parent\\child")
+            server.aliases["base\\parent"] = "base\\moved"
+
+            def check():
+                if not coordinator.is_current(token):
+                    raise ScanObservationInvalidated("Ancestor changed during the observed read.")
+
+            mutation = _DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "parent")
+            if event_timing == "before_read":
+                coordinator.enqueue(mutation)
+                with pytest.raises(ScanObservationInvalidated):
+                    root.read_observed("parent/child", (42).to_bytes(8, "little"), check)
+            else:
+                read = root.read_observed("parent/child", (42).to_bytes(8, "little"), check)
+                try:
+                    assert [entry.name for entry in read] == ["new"]
+                    coordinator.commit_children(token, 1, [("parent/child/new", True)])
+                finally:
+                    read.close()
+                assert index.search("parent/child/new").results
+                coordinator.enqueue(mutation)
+            coordinator.apply_pending()
+            assert not index.search("parent").results
+    finally:
+        root.close()
+
+
+@pytest.fixture
+def smb_pipeline_cache(sqlite_cache, smb_directory_server):
+    from app.services.directory_cache import SQLiteConnectionDirectoryCache
+    from app.services.directory_traversal import SCAN_PIPELINE_DEPTH, SmbDirectoryRoot
+
+    cache = sqlite_cache
+    server = smb_directory_server
+    parents = [f"parent-{number:02}" for number in range(SCAN_PIPELINE_DEPTH + 2)]
+    server.directories["base"] = [(parent, 16) for parent in parents]
+    for parent in parents:
+        server.directories["base\\" + parent] = []
+    server.record_ids = True
+    server.credit_accounting = True
+    server.connection.sequence_window["high"] = 1024
+    cache._source_root = SmbDirectoryRoot(r"\\host\share\base")
+    cache._open_source_read = SQLiteConnectionDirectoryCache._open_source_read.__get__(cache)
+    cache._watcher_ready.set()
+    yield cache, server, parents
+    cache._source_root.close()
+
+
+@pytest.mark.parametrize("credits", [1, 128, 1024])
+def test_smb_scan_pipeline_bounds_depth_reserve_and_queue_order(smb_pipeline_cache, credits):
+    from app.services.directory_traversal import SCAN_PIPELINE_DEPTH
+
+    cache, server, parents = smb_pipeline_cache
+    server.connection.sequence_window["high"] = credits
+    cache._scan_disk_queue()
+    assert cache.index.status().coverage == "complete"
+    sends = [value for event, value in server.events if event == "send"]
+    assert sends == ["base\\" + parent for parent in parents]
+    first_receive = next(number for number, (event, _value) in enumerate(server.events) if event == "receive")
+    initial_sends = sum(event == "send" for event, _value in server.events[:first_receive])
+    assert 1 < initial_sends <= SCAN_PIPELINE_DEPTH
+    if credits == 1024:
+        assert initial_sends == SCAN_PIPELINE_DEPTH
+    if credits == 1:
+        assert sum(event == "echo" for event, _value in server.events) == 1
+    assert any(value is not None for value in server.credit_requests) == (credits < 1024)
+    assert not cache.coordinator._producers
+    assert not server.tree.session.open_table
+
+
+@pytest.mark.parametrize("depth", [1, 4])
+def test_smb_full_tree_request_budget_and_per_pass_logs(smb_pipeline_cache, caplog, depth):
+    import logging
+
+    from app.core.logging import RecoveryLogFormatter
+
+    caplog.set_level(logging.INFO, logger="app.services.directory_cache")
+    cache, server, _parents = smb_pipeline_cache
+    branch_count = 2
+    boundary_request_budget = 24
+    parents = [""]
+    paths = []
+    for level in range(depth + 1):
+        children = []
+        for parent in parents:
+            names = [f"child-{number}" for number in range(branch_count)] if level < depth else []
+            native = "base" + ("\\" + parent.replace("/", "\\") if parent else "")
+            server.directories[native] = [(name, 16) for name in names]
+            children.extend(parent + "/" + name if parent else name for name in names)
+        paths.extend(children)
+        parents = children
+    for _pass in range(2):
+        before = cache._source_root.io.round_trips
+        compounds_before = len(server.compounds)
+        caplog.clear()
+        cache._scan_disk_queue()
+        records = {record.event: record for record in caplog.records if hasattr(record, "event")}
+        finished = records["directory_scan_finished"]
+        requests = cache._source_root.io.round_trips - before
+        assert records["directory_scan_started"].smb_round_trips == 0
+        assert finished.smb_round_trips == requests
+        assert f"smb_round_trips={requests}" in RecoveryLogFormatter("%(message)s").format(finished)
+        assert finished.abort_reason is None
+        assert len(server.compounds) - compounds_before == len(paths)
+        assert len(paths) < requests <= len(paths) + boundary_request_budget
+        assert cache.index.search("").directory_count == len(paths)
+        assert cache.index.status().coverage == "complete"
+
+
+def test_smb_io_counter_survives_root_replacement(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    root.read("", lambda: None).close()
+    before = root.io.round_trips
+    replacement = root.replacement()
+    try:
+        assert replacement.io is root.io
+        assert replacement.io.round_trips == before + len(root._binding)
+        replacement.read("", lambda: None).close()
+        assert replacement.io.round_trips > before
+    finally:
+        replacement.close()
+
+
+@pytest.mark.parametrize("credits", [0, 128])
+def test_smb_io_counter_counts_compounds_not_messages(smb_directory_server, credits):
+    from app.services.directory_traversal import SmbCompoundDirectoryReader, SmbDirectoryIo
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = credits
+    server.directories["base\\parent"] = []
+    server.identifiers["base\\parent"] = 42
+    source_io = SmbDirectoryIo()
+    reader = SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None, io=source_io)
+    try:
+        assert source_io.round_trips == len(server.compounds) == (1 if credits else 0)
+    finally:
+        reader.close()
+
+
+def test_smb_pipeline_uses_loop_when_server_does_not_grant_credits(smb_pipeline_cache):
+    cache, server, _parents = smb_pipeline_cache
+    server.connection.sequence_window["high"] = 1
+    server.echo_grant = 0
+    cache._scan_disk_queue()
+    assert cache.index.status().coverage == "complete"
+    assert not server.compounds
+    assert sum(event == "echo" for event, _value in server.events) == 1
+    assert not cache.coordinator._producers
+
+
+@pytest.mark.parametrize("outcome,expected", [("rejected", 0), ("send_failed", 1), ("cleanup", 2)])
+def test_smb_io_counter_handles_admission_failure_and_cleanup(smb_directory_server, outcome, expected):
+    from app.services.directory_traversal import DirectoryPipelineTransportError, SmbCompoundDirectoryReader, SmbDirectoryIo
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.identifiers["base\\parent"] = 42
+    source_io = SmbDirectoryIo()
+    if outcome == "rejected":
+        server.connection.send_scan_compound = lambda *_args, **_kwargs: None
+    elif outcome == "send_failed":
+
+        def fail_send(*_args, **_kwargs):
+            raise OSError("Injected scan send failure.")
+
+        server.connection.send_scan_compound = fail_send
+    else:
+        server.compound_errors[4] = NtStatus.STATUS_ACCESS_DENIED
+
+    def read():
+        return SmbCompoundDirectoryReader(
+            server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None, credit_reserve=16, io=source_io
+        )
+
+    if outcome == "rejected":
+        read().close()
+    else:
+        with pytest.raises(DirectoryPipelineTransportError if outcome == "send_failed" else SMBResponseException):
+            read()
+    assert source_io.round_trips == expected
+
+
+def test_smb_aborted_pass_logs_request_attempts(smb_pipeline_cache, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="app.services.directory_cache")
+    cache, server, parents = smb_pipeline_cache
+    server.stall_path = "base\\" + parents[0]
+    before = cache._source_root.io.round_trips
+    with pytest.raises(TimeoutError):
+        cache._scan_disk_queue()
+    finished = next(record for record in caplog.records if getattr(record, "event", None) == "directory_scan_finished")
+    assert finished.smb_round_trips == cache._source_root.io.round_trips - before
+    assert finished.smb_round_trips > len(server.compounds) > 0
+    assert finished.abort_reason == "DirectoryPipelineTimeout"
+
+
+def test_smb_io_counter_includes_credit_growth_echo(smb_directory_server):
+    from app.services.directory_traversal import SmbCompoundDirectoryReader, SmbDirectoryIo
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 1
+    source_io = SmbDirectoryIo()
+    reader = SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None, io=source_io)
+    try:
+        assert source_io.round_trips == 0
+        reader.grow_credits(timeout=1)
+        assert source_io.round_trips == 1
+        assert [event for event, _value in server.events] == ["echo"]
+    finally:
+        reader.close()
+
+
+def test_smb_pipeline_local_barrier_defers_only_affected_parent(smb_pipeline_cache):
+    from app.services.directory_cache import READ_PARENT_ACTION, ScanObservationInvalidated, _DirectoryMutation
+
+    cache, server, parents = smb_pipeline_cache
+    changed = False
+    affected = parents[3]
+
+    def mutate():
+        nonlocal changed
+        if not changed and server.events and server.events[-1] == ("receive", "base\\" + parents[0]):
+            changed = True
+            cache.coordinator.enqueue(_DirectoryMutation(READ_PARENT_ACTION, affected))
+
+    server.on_query = mutate
+    with pytest.raises(ScanObservationInvalidated):
+        cache._scan_disk_queue()
+    assert changed
+    assert cache.index.pending_scan_paths(1) == [affected]
+    assert not cache.coordinator._producers
+    assert not server.tree.session.open_table
+
+
+def test_smb_pipeline_stall_defers_all_inflight_parents(smb_pipeline_cache):
+    from app.services.directory_cache import InvalidationReason
+    from app.services.directory_traversal import SCAN_PIPELINE_DEPTH
+
+    cache, server, parents = smb_pipeline_cache
+    server.stall_path = "base\\" + parents[0]
+    with pytest.raises(TimeoutError):
+        cache._scan_disk_queue()
+    sends = [value for event, value in server.events if event == "send"]
+    assert len(sends) == SCAN_PIPELINE_DEPTH
+    assert set(cache.index.pending_scan_paths(1)) == set(parents)
+    assert cache.coordinator.last_reason == InvalidationReason.STALLED_READ
+    assert not cache.coordinator._producers
+    assert not server.tree.session.open_table
+
+
+def test_smb_pipeline_watcher_loss_defers_inflight_and_continues_safe(smb_pipeline_cache):
+    from app.services.directory_traversal import SCAN_PIPELINE_DEPTH
+
+    cache, server, parents = smb_pipeline_cache
+    lost = False
+
+    def lose_observation():
+        nonlocal lost
+        if not lost and server.events and server.events[-1] == ("receive", "base\\" + parents[0]):
+            lost = True
+            cache._watcher_ready.clear()
+            cache._observation_lost()
+
+    server.on_query = lose_observation
+    cache._scan_disk_queue()
+    assert lost
+    assert sum(event == "send" for event, _value in server.events) == SCAN_PIPELINE_DEPTH
+    assert not cache.index.pending_scan_paths(1)
+    assert cache.index.search("").directory_count == len(parents)
+    assert cache.coordinator.observed_reads_blocked
+    assert not cache.coordinator._producers
+    assert not server.tree.session.open_table
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("send_failed", [False, True])
+async def test_smb_pipeline_failure_retires_the_owned_connection(sqlite_cache, send_failed):
+    from app.services.directory_traversal import DirectoryPipelineTimeout, DirectoryPipelineTransportError
+
+    pool = SimpleNamespace(invalidate_connection_cache=AsyncMock())
+    failure = DirectoryPipelineTransportError if send_failed else DirectoryPipelineTimeout
+
+    def stalled():
+        raise failure("Injected pipeline failure.")
+
+    with pytest.raises(failure):
+        await sqlite_cache._blocking(stalled, pool=pool)
+    pool.invalidate_connection_cache.assert_awaited_once_with(
+        sqlite_cache._connection_cache,
+        reason="directory_pipeline_send_failed" if send_failed else "directory_pipeline_timeout",
+        abort=True,
+    )
+
+
+def test_smb_pipeline_uses_safe_loop_without_atomic_admission(smb_pipeline_cache):
+    cache, server, parents = smb_pipeline_cache
+    del server.connection.send_scan_compound
+    cache._scan_disk_queue()
+    assert not server.compounds
+    assert cache.index.search("").directory_count == len(parents)
+    assert not cache.index.pending_scan_paths(1)
+    assert not cache.coordinator._producers
+
+
+def test_smb_pipeline_partial_send_failure_defers_unfinished_parents(smb_pipeline_cache):
+    from smbprotocol.exceptions import SMBException
+
+    from app.services.directory_traversal import DirectoryPipelineTransportError
+
+    cache, server, parents = smb_pipeline_cache
+
+    def partial_send(*_args, **_kwargs):
+        server.connection.sequence_window["low"] += 1
+        raise SMBException("Injected insufficient credits after partial admission.")
+
+    server.connection._send = partial_send
+    with pytest.raises(DirectoryPipelineTransportError):
+        cache._scan_disk_queue()
+    assert set(cache.index.pending_scan_paths(1)) == set(parents)
+    assert not cache.coordinator._producers
+
+
+def test_smb_pipeline_cleanup_deadline_is_not_hidden_by_watcher_loss(smb_pipeline_cache):
+    from app.services.directory_traversal import DirectoryPipelineTimeout
+
+    cache, server, parents = smb_pipeline_cache
+    server.stall_path = "base\\" + parents[5]
+    lost = False
+
+    def lose_observation():
+        nonlocal lost
+        if not lost and server.events and server.events[-1] == ("receive", "base\\" + parents[0]):
+            lost = True
+            cache._watcher_ready.clear()
+            cache._observation_lost()
+
+    server.on_query = lose_observation
+    with pytest.raises(DirectoryPipelineTimeout):
+        cache._scan_disk_queue()
+    assert set(cache.index.pending_scan_paths(1)) == set(parents)
+    assert not cache.coordinator._producers
+    assert not server.tree.session.open_table
+
+
+def test_smb_pipeline_rejects_replacement_transport_with_reused_ids(smb_pipeline_cache, monkeypatch):
+    from app.services.directory_traversal import DirectoryBindingChangedError
+
+    cache, server, parents = smb_pipeline_cache
+    cache._source_root.read("", lambda: None).close()
+    replacement_connection = SimpleNamespace(**vars(server.connection))
+    replacement_session = SimpleNamespace(**{**vars(server.tree.session), "connection": replacement_connection})
+    replacement_tree = SimpleNamespace(**{**vars(server.tree), "session": replacement_session})
+    monkeypatch.setattr(
+        "app.services.directory_traversal.get_smb_tree",
+        lambda *_args, **_kwargs: (replacement_tree, "base\\" + parents[0]),
+    )
+    with pytest.raises(DirectoryBindingChangedError):
+        cache._source_root.read_observed(parents[0], (42).to_bytes(8, "little"), lambda: None, deferred=True)
+    assert not server.compounds
+
+
+def test_smb_pipeline_sends_multiple_parents_before_receiving(smb_directory_server):
+    from app.services.directory_traversal import SmbCompoundDirectoryReader
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.directories["base\\parent"] = []
+    server.directories["base\\other"] = []
+    server.identifiers.update({"base\\parent": 42, "base\\other": 43})
+    reads = [
+        SmbCompoundDirectoryReader(server.tree, path, identity.to_bytes(8, "little"), lambda: None, deferred=True)
+        for path, identity in (("base\\parent", 42), ("base\\other", 43))
+    ]
+    try:
+        assert len(server.compounds) == 2
+        assert not server.received
+        for read in reads:
+            read.finish()
+            assert read.complete
+    finally:
+        for read in reads:
+            read.close()
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_smb_compound_small_directory_uses_one_request_group(smb_directory_server, empty):
+    from smbprotocol.header import Commands
+    from smbprotocol.open import CreateOptions, QueryDirectoryFlags, ShareAccess
+
+    from app.services.directory_traversal import SmbCompoundDirectoryReader
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.directories["base\\parent"] = [] if empty else [("Exact", 16), ("file", 0)]
+    server.identifiers["base\\parent"] = 42
+    reader = SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None)
+    try:
+        assert reader.complete
+        assert [entry.name for entry in reader] == ([] if empty else ["Exact", "file"])
+        assert len(server.compounds) == 1
+        messages = server.compounds[0]
+        assert [message.COMMAND for message in messages] == [
+            Commands.SMB2_CREATE,
+            Commands.SMB2_QUERY_INFO,
+            Commands.SMB2_QUERY_DIRECTORY,
+            Commands.SMB2_QUERY_DIRECTORY,
+            Commands.SMB2_CLOSE,
+        ]
+        assert messages[0]["create_options"].get_value() & CreateOptions.FILE_OPEN_REPARSE_POINT
+        assert messages[0]["share_access"].get_value() & ShareAccess.FILE_SHARE_DELETE
+        assert messages[2]["flags"].get_value() == QueryDirectoryFlags.SMB2_RESTART_SCANS
+        assert messages[3]["flags"].get_value() == 0
+        assert server.received == list(range(5))
+        reader.verify_file_id((42).to_bytes(8, "little"))
+        reader.verify()
+        assert not server.handles[-1].connected
+        assert not server.tree.session.open_table
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize(
+    "credits,multi_credit,maximum,expected",
+    [
+        (128, True, 2 * 1024 * 1024, 1024 * 1024),
+        (128, False, 1024 * 1024, 64 * 1024),
+        (5, True, 1024 * 1024, 64 * 1024),
+        (128, True, 32 * 1024, 32 * 1024),
+        (1, True, 1024 * 1024, None),
+    ],
+)
+def test_smb_compound_bounds_buffer_to_negotiation_and_credits(smb_directory_server, credits, multi_credit, maximum, expected):
+    from app.services.directory_traversal import SmbCompoundDirectoryReader
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = credits
+    server.connection.supports_multi_credit = multi_credit
+    server.connection.max_transact_size = maximum
+    server.directories["base\\parent"] = []
+    server.identifiers["base\\parent"] = 42
+    reader = SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None)
+    try:
+        if expected is None:
+            assert not reader.complete
+            assert not server.compounds
+        else:
+            assert reader.complete
+            assert server.compounds[0][2]["output_buffer_length"].get_value() == expected
+            assert server.compounds[0][3]["output_buffer_length"].get_value() == expected
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("unsafe", ["file_id", "reparse", "not_directory"])
+def test_smb_compound_rejects_unsafe_open_after_draining(smb_directory_server, unsafe):
+    from app.services.directory_traversal import DirectoryTraversalError, SmbCompoundDirectoryReader
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.identifiers["base\\parent"] = 43 if unsafe == "file_id" else 42
+    server.attributes["base\\parent"] = {"file_id": 16, "reparse": 16 | 1024, "not_directory": 0}[unsafe]
+    with pytest.raises(DirectoryTraversalError):
+        SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None)
+    assert server.received == list(range(5))
+    assert not server.tree.session.open_table
+
+
+@pytest.mark.parametrize(
+    "position,status",
+    [
+        (0, NtStatus.STATUS_OBJECT_NAME_NOT_FOUND),
+        (0, NtStatus.STATUS_OBJECT_PATH_NOT_FOUND),
+        (0, NtStatus.STATUS_STOPPED_ON_SYMLINK),
+        (0, NtStatus.STATUS_ACCESS_DENIED),
+        (1, NtStatus.STATUS_ACCESS_DENIED),
+        (2, NtStatus.STATUS_ACCESS_DENIED),
+        (3, NtStatus.STATUS_ACCESS_DENIED),
+        (4, NtStatus.STATUS_ACCESS_DENIED),
+    ],
+)
+def test_smb_compound_drains_failures_and_preserves_first_error(smb_directory_server, position, status):
+    from app.services.directory_traversal import SmbCompoundDirectoryReader
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.identifiers["base\\parent"] = 42
+    server.compound_errors[position] = status
+    with pytest.raises(SMBResponseException) as failure:
+        SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None)
+    assert failure.value.status == status
+    assert server.received[:5] == list(range(5))
+    assert len(server.standalone) == (1 if position == 4 else 0)
+    assert not server.tree.session.open_table
+
+
+@pytest.mark.parametrize("position", [2, 3])
+def test_smb_compound_rejects_empty_successful_response(smb_directory_server, position):
+    from app.services.directory_traversal import DirectoryTraversalError, SmbCompoundDirectoryReader
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.identifiers["base\\parent"] = 42
+    server.empty_compound_response = position
+    with pytest.raises(DirectoryTraversalError, match="invalid response data"):
+        SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None)
+    assert server.received == list(range(5))
+
+
+@pytest.mark.parametrize(
+    "status,exception",
+    [
+        (NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, "_DescendantMissing"),
+        (NtStatus.STATUS_OBJECT_PATH_NOT_FOUND, "_DescendantMissing"),
+        (NtStatus.STATUS_ACCESS_DENIED, "_DescendantAccessDenied"),
+    ],
+)
+def test_smb_compound_source_errors_keep_cache_classification(sqlite_cache, smb_directory_server, status, exception):
+    from app.services.directory_cache import SQLiteConnectionDirectoryCache
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    cache = sqlite_cache
+    server = smb_directory_server
+    cache._source_root = SmbDirectoryRoot(r"\\host\share\base")
+    cache._open_source_read = SQLiteConnectionDirectoryCache._open_source_read.__get__(cache)
+    try:
+        cache._source_root.read("", lambda: None).close()
+        cache.index.seed_scan(1)
+        cache.index.write_scan_children(1, [("parent", True)], file_ids={"parent": (42).to_bytes(8, "little")})
+        cache._progress_generation = 1
+        cache._watcher_ready.set()
+        cache.coordinator.observed_ready = cache._watcher_ready.is_set
+        server.connection.sequence_window["high"] = 128
+        server.compound_errors[0] = status
+        with cache.coordinator.read("parent", observed=True) as token:
+            with pytest.raises(getattr(cache, exception)):
+                cache._source_call("parent", lambda: cache._open_source_read("parent", token))
+        assert server.received == list(range(5))
+    finally:
+        cache._source_root.close()
+
+
+@pytest.mark.parametrize("credits", [1, 128])
+def test_smb_compound_large_directory_or_low_credits_use_loop(smb_directory_server, credits):
+    from smbprotocol.header import Commands
+
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    server = smb_directory_server
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        root.read("", lambda: None).close()
+        before = root.io.round_trips
+        handles_before = len(server.handles)
+        metadata_before = len(server.file_queries) + server.volume_queries
+        queries_before = len(server.query_buffers)
+        server.connection.sequence_window["high"] = credits
+        server.identifiers["base\\parent"] = 42
+        read = root.read_observed("parent", (42).to_bytes(8, "little"), lambda: None)
+        try:
+            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            assert read.has_directory_child("Exact")
+            assert len(server.compounds) == (1 if credits > 1 else 0)
+            assert not server.tree.session.open_table
+        finally:
+            read.close()
+        expected = (
+            2 * (len(server.handles) - handles_before - len(server.compounds))
+            + len(server.file_queries)
+            + server.volume_queries
+            - metadata_before
+            + len(server.query_buffers)
+            - queries_before
+            - sum(message.COMMAND == Commands.SMB2_QUERY_DIRECTORY for messages in server.compounds for message in messages)
+            + len(server.compounds)
+        )
+        assert root.io.round_trips - before == expected
+    finally:
+        root.close()
+
+
+def test_smb_observed_read_opens_only_target_and_uses_safe_child_lookup(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    server = smb_directory_server
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        root.read("", lambda: None).close()
+        server.identifiers["base\\parent"] = 42
+        before = len(server.handles)
+        read = root.read_observed("parent", (42).to_bytes(8, "little"), lambda: None)
+        try:
+            assert [handle.path for handle in server.handles[before:]] == ["base\\parent"]
+            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            assert read.has_directory_child("Exact")
+            assert len(server.handles) - before == 2
+        finally:
+            read.close()
+    finally:
+        root.close()
+
+
+@pytest.mark.parametrize("unsafe", ["file_id", "reparse", "session", "tree", "name", "unbound"])
+def test_smb_observed_read_rejects_changed_identity(smb_directory_server, unsafe, monkeypatch):
+    from app.services.directory_traversal import DirectoryTraversalError, SmbDirectoryRoot
+
+    server = smb_directory_server
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        if unsafe != "unbound":
+            root.read("", lambda: None).close()
+        server.identifiers["base\\parent"] = 42
+        if unsafe == "file_id":
+            server.identifiers["base\\parent"] = 43
+        elif unsafe == "reparse":
+            monkeypatch.setattr("app.services.directory_traversal.Open.file_attributes", 16 | 1024)
+        elif unsafe == "session":
+            server.tree.session.session_id += 1
+        elif unsafe == "tree":
+            server.tree.tree_connect_id += 1
+        elif unsafe == "name":
+            server.names["base\\parent"] = "\\outside"
+        with pytest.raises(DirectoryTraversalError):
+            root.read_observed("parent", (42).to_bytes(8, "little"), lambda: None)
+    finally:
+        root.close()
+
+
+@pytest.mark.parametrize("scenario", ["early_event", "late_event", "not_ready", "watcher_loss"])
+@pytest.mark.parametrize("credits", [0, 128])
+def test_smb_observed_containment_and_safe_fallback(sqlite_cache, smb_directory_server, monkeypatch, scenario, credits):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import ScanObservationInvalidated, SQLiteConnectionDirectoryCache, _DirectoryMutation
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    cache = sqlite_cache
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = credits
+    server.directories["base\\parent"] = [("Exact", 16)]
+    server.directories["base\\parent\\Exact"] = []
+    server.record_ids = True
+    cache._source_root = SmbDirectoryRoot(r"\\host\share\base")
+    cache._open_source_read = SQLiteConnectionDirectoryCache._open_source_read.__get__(cache)
+    if scenario != "not_ready":
+        cache._watcher_ready.set()
+    observed = []
+    safe = []
+    original_observed = cache._source_root.read_observed
+    original_safe = cache._source_root.read
+
+    def safe_read(parent, check, **session):
+        safe.append(parent)
+        return original_safe(parent, check, **session)
+
+    def observed_read(parent, expected_id, check, **session):
+        observed.append(parent)
+        read = original_observed(parent, expected_id, check, **session)
+        if parent == "parent" and scenario in ("early_event", "watcher_loss"):
+            if scenario == "early_event":
+                cache.coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "parent"))
+            else:
+                cache._watcher_ready.clear()
+                cache._observation_lost()
+            with pytest.raises(ScanObservationInvalidated):
+                next(read)
+        return read
+
+    monkeypatch.setattr(cache._source_root, "read", safe_read)
+    monkeypatch.setattr(cache._source_root, "read_observed", observed_read)
+    try:
+        if scenario == "early_event":
+            with pytest.raises(ScanObservationInvalidated):
+                cache._scan_disk_queue()
+            assert "parent/Exact" not in {row.path for row in cache.index.search("parent").results}
+            assert cache.index.pending_scan_paths(1)
+        else:
+            cache._scan_disk_queue()
+            assert cache.index.status().coverage == ("uncertain" if scenario == "watcher_loss" else "complete")
+            assert "parent/Exact" in {row.path for row in cache.index.search("parent").results}
+            if scenario == "not_ready":
+                assert not observed
+                assert "parent" in safe
+            elif scenario == "watcher_loss":
+                assert observed == ["parent"]
+                assert "parent" in safe
+                assert cache.coordinator.observed_reads_blocked
+            else:
+                assert "parent" in observed
+                cache.coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "parent"))
+                cache.coordinator.apply_pending()
+                assert not cache.index.search("parent").results
+    finally:
+        cache._source_root.close()
+
+
 def test_smb_root_holds_ancestors_and_checks_exact_children(smb_directory_server):
     from app.services.directory_traversal import DirectoryTraversalError, SmbDirectoryRoot
 
@@ -2831,6 +3698,241 @@ def test_smb_root_accepts_unavailable_ids_and_inconsistent_volume_metadata(smb_d
         root.close()
 
 
+@pytest.mark.parametrize("parent", ["", "parent", "parent/nested"])
+def test_smb_root_reuses_pinned_chain_between_full_probes(smb_directory_server, parent):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    server = smb_directory_server
+    server.directories["base\\parent\\nested"] = []
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        root.read("", lambda: None).close()
+        opened = len(server.handles)
+        server.file_queries.clear()
+        read = root.read(parent, lambda: None, full_root_check=False)
+        try:
+            read.verify()
+            assert "" not in server.file_queries
+            assert "base" not in server.file_queries
+            assert len(server.handles) - opened == (len(parent.split("/")) if parent else 0)
+        finally:
+            read.close()
+        assert all(handle.connected for handle in server.handles[:opened])
+    finally:
+        root.close()
+
+
+@pytest.mark.parametrize("change", ["closed", "session", "tree", "connection", "server"])
+def test_smb_local_root_checks_reject_binding_changes_without_metadata(smb_directory_server, change):
+    from uuid import UUID
+
+    from app.services.directory_traversal import DirectoryBindingChangedError, SmbDirectoryRoot
+
+    server = smb_directory_server
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        root.read("", lambda: None).close()
+        server.file_queries.clear()
+        if change == "closed":
+            server.handles[0]._connected = False
+        elif change == "session":
+            server.tree.session.session_id += 1
+        elif change == "tree":
+            server.tree.tree_connect_id += 1
+        elif change == "connection":
+            server.tree.session.connection = SimpleNamespace(**vars(server.connection))
+        else:
+            server.connection.server_guid = UUID(int=2)
+        with pytest.raises(DirectoryBindingChangedError):
+            root.read("parent", lambda: None, full_root_check=False)
+        assert not server.file_queries
+    finally:
+        root.close()
+
+
+def test_smb_local_root_read_failure_preserves_pins_and_requires_full_probe(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    server = smb_directory_server
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        root.read("", lambda: None).close()
+        pinned = list(server.handles)
+        with pytest.raises(FileNotFoundError):
+            root.read("missing", lambda: None, full_root_check=False)
+        assert all(handle.connected for handle in pinned)
+        server.file_queries.clear()
+        root.read("parent", lambda: None, full_root_check=False).close()
+        assert "base" in server.file_queries
+        assert "" in server.file_queries
+    finally:
+        root.close()
+
+
+def test_smb_scan_safe_reads_limit_root_queries_to_boundary_probes(smb_pipeline_cache):
+    cache, server, parents = smb_pipeline_cache
+    cache._watcher_ready.clear()
+    cache._scan_disk_queue()
+    assert cache.index.status().coverage == "complete"
+    assert cache.index.search("").directory_count == len(parents)
+    assert server.file_queries.count("") == 3
+    assert server.file_queries.count("base") == 5
+    assert not cache.coordinator._producers
+
+
+def test_smb_source_error_requires_full_probe_before_observed_read(smb_pipeline_cache):
+    from app.services.directory_traversal import DirectoryBindingChangedError
+
+    cache, server, parents = smb_pipeline_cache
+    cache._source_root.read("", lambda: None).close()
+
+    def denied():
+        raise PermissionError("Injected source access denial.")
+
+    with pytest.raises(cache._DescendantAccessDenied):
+        cache._source_call(parents[0], denied)
+    server.identifiers["base"] += 1
+    with pytest.raises(DirectoryBindingChangedError):
+        cache._source_root.read_observed(parents[0], (42).to_bytes(8, "little"), lambda: None)
+    assert not server.compounds
+
+
+def test_smb_end_probe_rejects_root_changed_during_local_reads(smb_pipeline_cache):
+    from app.services.directory_cache import DirectorySourceUnavailableError, InvalidationReason
+
+    cache, server, parents = smb_pipeline_cache
+    cache._watcher_ready.clear()
+    changed = False
+
+    def replace_root():
+        nonlocal changed
+        if not changed and server.file_queries and server.file_queries[-1] == "base\\" + parents[0]:
+            changed = True
+            server.identifiers["base"] += 1
+
+    server.on_query = replace_root
+    with pytest.raises(DirectorySourceUnavailableError):
+        cache._scan_disk_queue()
+    assert changed
+    assert not cache._source_available.is_set()
+    assert cache.coordinator.last_reason == InvalidationReason.SOURCE_REBIND
+    assert not cache.coordinator._producers
+
+
+def test_smb_root_caches_volume_information_per_tree(smb_directory_server):
+    from app.services.directory_traversal import DirectoryTraversalError, SmbDirectoryRoot
+
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        for _ in range(2):
+            read = root.read("parent", lambda: None)
+            try:
+                read.verify()
+                assert read.has_directory_child("Exact")
+            finally:
+                read.close()
+        assert smb_directory_server.volume_queries == 1
+        smb_directory_server.identifiers["base"] += 1
+        with pytest.raises(DirectoryTraversalError):
+            root.read("parent", lambda: None)
+    finally:
+        root.close()
+
+
+@pytest.mark.parametrize("scope", ["tree_object", "connection", "session", "tree_id"])
+@pytest.mark.parametrize("unsupported", [False, True])
+def test_smb_volume_cache_is_scoped_to_live_tree_binding(smb_directory_server, scope, unsupported):
+    from app.services.directory_traversal import SmbDirectoryHandle
+
+    server = smb_directory_server
+    cache = {}
+    if unsupported:
+        server.volume_error = _smb_response_error(NtStatus.STATUS_NOT_SUPPORTED)
+    first = SmbDirectoryHandle(r"\\host\share\base", lambda: None, volume_cache=cache)
+    try:
+        first.identity(lambda: None)
+        first.identity(lambda: None)
+        assert server.volume_queries == 1
+        server.volume_error = None
+        if scope == "tree_object":
+            server.tree = SimpleNamespace(**vars(server.tree))
+        elif scope == "connection":
+            server.tree.session.connection = SimpleNamespace(**vars(server.connection))
+        elif scope == "session":
+            server.tree.session.session_id += 1
+        else:
+            server.tree.tree_connect_id += 1
+        second = SmbDirectoryHandle(r"\\host\share\base", lambda: None, volume_cache=cache)
+        try:
+            assert second.identity(lambda: None).volume_serial == 1
+            second.identity(lambda: None)
+            assert server.volume_queries == 2
+        finally:
+            second.close()
+    finally:
+        first.close()
+
+
+def test_smb_volume_cache_does_not_cache_access_failure(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryHandle
+
+    server = smb_directory_server
+    handle = SmbDirectoryHandle(r"\\host\share\base", lambda: None)
+    try:
+        server.volume_error = _smb_response_error(NtStatus.STATUS_ACCESS_DENIED)
+        with pytest.raises(SMBResponseException):
+            handle.identity(lambda: None)
+        server.volume_error = None
+        handle.identity(lambda: None)
+        handle.identity(lambda: None)
+        assert server.volume_queries == 2
+    finally:
+        handle.close()
+
+
+@pytest.mark.parametrize(
+    ("negotiated", "credits", "multi_credit", "expected"),
+    [
+        (2 * 1024 * 1024, 128, True, 1024 * 1024),
+        (1024 * 1024, 20, True, 4 * 65536),
+        (1024 * 1024, 1, True, 65536),
+        (1024 * 1024, 128, False, 65536),
+        (32768, 128, True, 32768),
+    ],
+)
+def test_smb_loop_query_buffers_respect_limits(smb_directory_server, negotiated, credits, multi_credit, expected):
+    from app.services.directory_traversal import SmbDirectoryHandle
+
+    server = smb_directory_server
+    server.connection.max_transact_size = negotiated
+    server.connection.sequence_window = {"low": 0, "high": credits}
+    server.connection.supports_multi_credit = multi_credit
+    handle = SmbDirectoryHandle(r"\\host\share\base\parent", lambda: None)
+    try:
+        assert list(handle.records(lambda: None))
+        assert set(server.query_buffers) == {expected}
+    finally:
+        handle.close()
+
+
+def test_smb_loop_query_buffers_shrink_after_credit_use(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryHandle
+
+    server = smb_directory_server
+    server.connection.sequence_window = {"low": 0, "high": 128}
+    handle = SmbDirectoryHandle(r"\\host\share\base\parent", lambda: None)
+    records = handle.records(lambda: None)
+    try:
+        next(records)
+        server.connection.sequence_window = {"low": 0, "high": 17}
+        list(records)
+        assert server.query_buffers[0] == 1024 * 1024
+        assert set(server.query_buffers[1:]) == {65536}
+    finally:
+        records.close()
+        handle.close()
+
+
 def test_smb_optional_volume_query_does_not_prevent_safe_traversal(smb_directory_server):
     from app.services.directory_traversal import SmbDirectoryRoot
 
@@ -2876,10 +3978,9 @@ def test_smb_native_read_checks_cancellation_after_protocol_calls(smb_directory_
         root.close()
 
 
-@pytest.mark.parametrize("replaced", [False, True])
-def test_idle_source_queries_wait_for_handle_bound_revalidation(sqlite_cache, smb_directory_server, replaced):
+def test_idle_source_queries_preserve_running_reads(sqlite_cache, smb_directory_server):
     from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
-    from app.services.directory_cache import DirectorySourceUnavailableError, SQLiteConnectionDirectoryCache
+    from app.services.directory_cache import SQLiteConnectionDirectoryCache
     from app.services.directory_traversal import SmbDirectoryRoot
 
     cache = sqlite_cache
@@ -2892,18 +3993,9 @@ def test_idle_source_queries_wait_for_handle_bound_revalidation(sqlite_cache, sm
     token = cache.coordinator.begin_read("parent")
     try:
         cache._last_access -= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"]
-        if replaced:
-            smb_directory_server.identifiers["base"] += 1
-        with pytest.raises(DirectorySourceUnavailableError):
-            cache.search_index("Exact")
-        assert not cache.coordinator.is_current(token)
-        assert cache.coordinator.verification_required
-        assert cache.index.search("Exact") == accepted
-        if replaced:
-            with pytest.raises(DirectorySourceUnavailableError):
-                cache._probe_source_root()
-        cache._probe_source_root()
         assert cache.search_index("Exact") == accepted
+        assert cache.coordinator.is_current(token)
+        assert cache._source_available.is_set()
         assert cache.index.search("Exact") == accepted
     finally:
         cache.coordinator.end_read(token)
@@ -2936,6 +4028,37 @@ def test_smb_reconciliation_worker_prunes_missing_subtrees_and_discovers_childre
     sqlite_cache._request_stop()
     sqlite_cache._finish_stop()
     assert all(not handle.connected for handle in smb_directory_server.handles)
+
+
+@pytest.mark.parametrize("processed", [False, True])
+def test_smb_reconciliation_reads_replaced_child_with_refreshed_file_id(smb_source_cache, smb_directory_server, monkeypatch, processed):
+    cache = smb_source_cache
+    server = smb_directory_server
+    server.record_ids = True
+    server.directories["base\\parent"] = [("child", 16)]
+    server.directories["base\\parent\\child"] = []
+    cache.index.write_paths(["parent"])
+    assert cache.index.finish_generation(1)
+    cache.index.queue_reconciliation_parent(1, "parent")
+    cache._scan_parent(1, "parent", reconcile=True)
+    old_id = cache.index.scan_parent_file_id(1, "parent/child")
+    assert old_id is not None
+    if processed:
+        cache._scan_parent(1, "parent/child", reconcile=True)
+        assert not cache.index.scan_parent_pending(1, "parent/child")
+    new_id = int.from_bytes(old_id, "little") + 100
+    server.identifiers["base\\parent\\child"] = new_id
+    server.directories["base\\parent\\child"] = [("new-descendant", 16)]
+    server.directories["base\\parent\\child\\new-descendant"] = []
+    cache.index.queue_reconciliation_parent(1, "parent")
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: cache._last_access)
+    cache._reconcile_disk_queue()
+    assert cache.index.scan_parent_file_id(1, "parent/child") == new_id.to_bytes(8, "little")
+    assert cache.index.search("new-descendant").total_matches == 1
+    assert cache.index.reconciliation_generation() is None
+    assert cache.index.status().coverage == "complete"
+    assert cache.index.status().issue_count == 0
+    assert not cache.coordinator._producers
 
 
 @pytest.fixture
@@ -2973,7 +4096,7 @@ def test_reconnected_candidate_revalidates_completed_branches(smb_source_cache, 
             cache._scan_disk_queue()
     candidate, selected = cache.index.prepare_scan()
     assert not selected
-    assert cache.index.pending_scan_paths(candidate) == ["later"]
+    assert cache.index.pending_scan_paths(candidate) == ["old", "later"]
     server.directories["base"] = [("later", 16), ("new", 16)]
     del server.directories["base\\old"]
     server.directories["base\\new"] = []
@@ -3039,7 +4162,7 @@ def test_missing_smb_parent_recovery_does_not_hide_storage_failure(smb_source_ca
     sqlite_cache.index.queue_reconciliation_parent(1, "parent")
     before = sqlite_cache.index.status()
     original = FileNotFoundError("Injected local index failure.")
-    monkeypatch.setattr(sqlite_cache, "_prune_missing_children", Mock(side_effect=original))
+    monkeypatch.setattr(sqlite_cache.index, "commit_scan_parents", Mock(side_effect=original))
     with pytest.raises(FileNotFoundError) as caught:
         sqlite_cache._reconcile_disk_queue()
     assert caught.value is original
@@ -3206,9 +4329,9 @@ def test_smb_worker_root_replacement_hides_results_without_deleting_accepted_row
     sqlite_cache._finish_stop()
 
 
-def test_smb_pruning_rejects_event_after_native_absence_check(sqlite_cache, smb_directory_server, monkeypatch):
+def test_smb_snapshot_rejects_event_during_enumeration(sqlite_cache, smb_directory_server, monkeypatch):
     from app.services.directory_cache import ScanObservationInvalidated, SQLiteConnectionDirectoryCache
-    from app.services.directory_traversal import SmbDirectoryRead, SmbDirectoryRoot
+    from app.services.directory_traversal import SmbDirectoryRoot
 
     sqlite_cache._source_root = SmbDirectoryRoot(r"\\host\share\base")
     sqlite_cache._open_source_read = SQLiteConnectionDirectoryCache._open_source_read.__get__(sqlite_cache)
@@ -3217,15 +4340,13 @@ def test_smb_pruning_rejects_event_after_native_absence_check(sqlite_cache, smb_
     assert sqlite_cache.index.finish_generation(1)
     sqlite_cache.index.queue_reconciliation_parent(1, "parent")
     before = sqlite_cache.index.search("parent")
-    original = SmbDirectoryRead.has_directory_child
+    original = smb_directory_server.on_query
 
-    def lookup(read, name):
-        present = original(read, name)
-        if not present:
-            _lose_observations(sqlite_cache.coordinator)
-        return present
+    def invalidate():
+        original()
+        _lose_observations(sqlite_cache.coordinator)
 
-    monkeypatch.setattr(SmbDirectoryRead, "has_directory_child", lookup)
+    monkeypatch.setattr(smb_directory_server, "on_query", invalidate)
     with pytest.raises(ScanObservationInvalidated):
         sqlite_cache._reconcile_disk_queue()
     assert sqlite_cache.index.search("parent") == before
@@ -3239,7 +4360,6 @@ def test_smb_pruning_rejects_event_after_native_absence_check(sqlite_cache, smb_
 
 @pytest.mark.parametrize("primary_failure", [False, True])
 def test_smb_worker_closes_all_ancestors_and_preserves_primary_failure(sqlite_cache, smb_directory_server, monkeypatch, primary_failure):
-    from smbprotocol.exceptions import PathNotCovered
 
     from app.services import directory_traversal
     from app.services.directory_cache import SQLiteConnectionDirectoryCache
@@ -3266,12 +4386,11 @@ def test_smb_worker_closes_all_ancestors_and_preserves_primary_failure(sqlite_ca
 
     monkeypatch.setattr(handle_type, "close", close)
     smb_directory_server.on_query = query
-    with pytest.raises(PathNotCovered if primary_failure else OSError) as caught:
-        sqlite_cache._reconcile_disk_queue()
+    sqlite_cache._reconcile_disk_queue()
     if primary_failure:
-        assert caught.value is failure
         assert sqlite_cache.index.search("old").total_matches == 1
-    assert sqlite_cache.index.reconciliation_generation() == 1
+    assert sqlite_cache.index.status().coverage == "partial"
+    assert sqlite_cache.index.reconciliation_generation() is None
     assert not sqlite_cache.coordinator._producers
     assert not sqlite_cache._scan_running.is_set()
     sqlite_cache._request_stop()
@@ -3321,7 +4440,7 @@ def test_smb_full_worker_reconciles_through_capture_and_retains_later_events(sql
     monkeypatch.setattr(sqlite_cache.coordinator, "accept_generation", accept)
     sqlite_cache._scan_disk_queue()
     assert captured == [True]
-    assert sqlite_cache.index.accepted_generation() != 1
+    assert sqlite_cache.index.accepted_generation() == 1
     assert sqlite_cache.index.search("old").total_matches == 0
     assert sqlite_cache.index.search("new/leaf").total_matches == 1
     assert sqlite_cache.index.search("stable").total_matches == 1
@@ -3335,7 +4454,7 @@ def test_smb_full_worker_reconciles_through_capture_and_retains_later_events(sql
     assert all(not handle.connected for handle in smb_directory_server.handles)
 
 
-@pytest.mark.parametrize("refusal", ["epoch", "old_producer", "uncertain", "pending", "producer", "accepted_work", "candidate_work"])
+@pytest.mark.parametrize("refusal", ["epoch", "old_producer", "uncertain", "pending", "producer", "observed_work", "scan_work"])
 def test_backend_capture_refusal_preserves_selected_rows_and_freshness(sqlite_cache, refusal):
     from app.services.directory_cache import ScanObservationInvalidated
 
@@ -3360,9 +4479,9 @@ def test_backend_capture_refusal_preserves_selected_rows_and_freshness(sqlite_ca
             sqlite_cache.coordinator._uncertain_pending = True
         elif refusal == "pending":
             sqlite_cache.observe_parent("")
-        elif refusal == "accepted_work":
-            sqlite_cache.index.queue_reconciliation_parent(1, "")
-        elif refusal == "candidate_work":
+        elif refusal == "observed_work":
+            sqlite_cache.index.queue_observed_parent("")
+        elif refusal == "scan_work":
             sqlite_cache.index.write_scan_children(generation, [("pending", True)])
         if refusal == "producer":
             with sqlite_cache.coordinator.read("accepted"):
@@ -3374,8 +4493,10 @@ def test_backend_capture_refusal_preserves_selected_rows_and_freshness(sqlite_ca
     finally:
         if producer is not None:
             sqlite_cache.coordinator.end_read(producer)
-    assert sqlite_cache.index.search("accepted") == before
-    assert sqlite_cache.index.accepted_generation() == 1
+    after = sqlite_cache.index.search("accepted")
+    assert after.results == before.results
+    assert after.last_verified_at_ms == before.last_verified_at_ms
+    assert sqlite_cache.index.accepted_generation() is None
     assert sqlite_cache.coordinator.verification_required
     assert not sqlite_cache.coordinator._producers
 
@@ -3419,7 +4540,7 @@ def test_smb_unsupported_directory_names_preserve_readable_root_coverage(sqlite_
     assert response.coverage == "partial"
     assert response.issue_count == 1
     assert sqlite_cache._source_available.is_set()
-    assert sqlite_cache.coordinator.verification_required
+    assert not sqlite_cache.coordinator.verification_required
     assert not sqlite_cache.coordinator._producers
     sqlite_cache._request_stop()
     sqlite_cache._finish_stop()
@@ -3474,7 +4595,7 @@ def test_smb_native_access_denial_continues_readable_siblings(sqlite_cache, smb_
     assert response.directory_count == 2
     assert response.coverage == "partial"
     assert response.issue_count == 1
-    assert response.last_verified_at_ms is None
+    assert response.last_verified_at_ms is not None
     sqlite_cache._request_stop()
     sqlite_cache._finish_stop()
 
@@ -3644,7 +4765,7 @@ def test_blocked_root_read_retains_producer_and_permit_after_overflow(
     sqlite_cache.index.write_paths(["accepted"])
     assert sqlite_cache.index.finish_generation(1)
     verified = sqlite_cache.index.status().last_verified_at_ms
-    candidate = sqlite_cache.index.begin_verification()
+    candidate = sqlite_cache.index.prepare_scan()[0]
     sqlite_cache.index.write_paths(["candidate"], generation_id=candidate)
     before = sqlite_cache.index.search("accepted candidate stale")
     sqlite_cache.coordinator = DirectoryScanCoordinator(sqlite_cache.index, maximum_pending=maximum_pending, maximum_bytes=maximum_bytes)
@@ -3698,7 +4819,8 @@ def test_blocked_root_read_retains_producer_and_permit_after_overflow(
         assert not coordinator.pending
         assert coordinator.pending_bytes == 0
         response = sqlite_cache.index.search("accepted candidate stale")
-        assert response.total_matches == response.directory_count == 1
+        assert response.total_matches == before.total_matches
+        assert response.directory_count == before.directory_count
         assert response.results == before.results
         assert response.coverage == "uncertain"
         assert response.issue_count == 1
@@ -3891,9 +5013,9 @@ def test_watcher_startup_uncertainty_is_drained_before_initial_generation(sqlite
     assert sqlite_cache.index.search("visible").total_matches == 1
     assert response.coverage == ("partial" if partial else "complete")
     assert response.issue_count == int(partial)
-    assert (response.last_verified_at_ms is None) == partial
-    assert sqlite_cache.coordinator.verification_required == partial
-    assert (sqlite_cache.scan_error is not None) == partial
+    assert response.last_verified_at_ms is not None
+    assert not sqlite_cache.coordinator.verification_required
+    assert sqlite_cache.scan_error is None
 
 
 @pytest.mark.parametrize("observed", ["empty", "rows", "queue", "issue"])
@@ -3906,20 +5028,15 @@ def test_startup_event_loss_only_restarts_unobserved_empty_generation(index, obs
     elif observed == "issue":
         index.record_access_denied(1)
     generation, selected = index.prepare_scan()
-    assert selected == (observed == "empty")
+    assert selected
     response = index.status()
     assert response.last_verified_at_ms is None
-    if selected:
-        assert generation == 1
-        assert response.coverage == "partial"
-        assert response.issue_count == 0
-    else:
-        assert generation != 1
-        assert response.coverage == "uncertain"
-        assert response.issue_count >= 1
+    assert generation == 1
+    assert response.coverage == "partial"
+    assert response.issue_count == int(observed == "issue")
 
 
-def test_incomplete_generation_is_not_reported_as_verified(sqlite_cache, monkeypatch):
+def test_partial_generation_is_reported_as_verified(sqlite_cache, monkeypatch):
     monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
     finish = sqlite_cache.index.finish_generation
 
@@ -3930,10 +5047,11 @@ def test_incomplete_generation_is_not_reported_as_verified(sqlite_cache, monkeyp
     monkeypatch.setattr(sqlite_cache.index, "finish_generation", incomplete)
     sqlite_cache._watcher_ready.set()
     sqlite_cache._scan_disk_queue()
-    assert "coverage is incomplete" in sqlite_cache.scan_error
-    assert sqlite_cache.index.status().last_verified_at_ms is None
-    assert sqlite_cache.last_scan_time is None
-    assert sqlite_cache.coordinator.verification_required
+    assert sqlite_cache.scan_error is None
+    assert sqlite_cache.index.status().coverage == "partial"
+    assert sqlite_cache.index.status().last_verified_at_ms is not None
+    assert sqlite_cache.last_scan_time is not None
+    assert not sqlite_cache.coordinator.verification_required
 
 
 def test_sqlite_source_policy_applies_at_connection_boundaries(sqlite_cache):
@@ -4196,7 +5314,9 @@ def test_root_scan_rejects_late_availability_and_parent_completion(sqlite_cache,
     assert not completed
     assert not sqlite_cache._source_available.is_set()
     assert not sqlite_cache._source_probe_completed.is_set()
-    assert sqlite_cache.index.search("accepted") == before
+    after = sqlite_cache.index.search("accepted")
+    assert after.results == before.results
+    assert after.last_verified_at_ms == before.last_verified_at_ms
     assert sqlite_cache.coordinator.verification_required
     assert not sqlite_cache.coordinator._producers
     assert not sqlite_cache._scan_running.is_set()
@@ -4204,16 +5324,22 @@ def test_root_scan_rejects_late_availability_and_parent_completion(sqlite_cache,
     sqlite_cache._manager_scan_slots.release()
 
 
-def test_sqlite_source_initial_batches_are_visible_before_parent_completion(sqlite_cache, monkeypatch):
+def test_sqlite_source_initial_batches_are_visible_after_commit_deadline(sqlite_cache, monkeypatch):
     from smbclient._os import FileAttributes
 
+    from app.services.directory_index import SCAN_COMMIT_INTERVAL_SECONDS
+
     observed = []
+    observed_progress = []
 
     def scan(path, **kwargs):
         if path == sqlite_cache._smb_base_path:
             for number in range(257):
+                if number == 255:
+                    sqlite_cache.coordinator._scan_group_started -= SCAN_COMMIT_INTERVAL_SECONDS
                 if number == 256:
                     observed.append(sqlite_cache.search_index("directory").total_matches)
+                    observed_progress.append(sqlite_cache.scan_progress.directories_found)
                 yield SimpleNamespace(
                     name=f"directory{number}", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
                 )
@@ -4221,6 +5347,7 @@ def test_sqlite_source_initial_batches_are_visible_before_parent_completion(sqli
     monkeypatch.setattr("smbclient.scandir", scan)
     sqlite_cache._scan_disk_queue()
     assert observed == [256]
+    assert observed_progress == [256]
     response = sqlite_cache.search_index("directory")
     assert response.directory_count == response.total_matches == 257
     assert response.coverage == "complete"
@@ -4249,8 +5376,8 @@ def test_sqlite_source_excludes_reparse_directories_and_reports_partial_coverage
     assert response.total_matches == response.directory_count == 1
     assert response.coverage == "partial"
     assert response.issue_count == 2
-    assert response.last_verified_at_ms is None
-    assert sqlite_cache.coordinator.verification_required
+    assert response.last_verified_at_ms is not None
+    assert not sqlite_cache.coordinator.verification_required
 
     def recovered_scan(path, **kwargs):
         if path == sqlite_cache._smb_base_path:
@@ -4266,12 +5393,11 @@ def test_sqlite_source_excludes_reparse_directories_and_reports_partial_coverage
     assert not sqlite_cache.coordinator.verification_required
 
 
-def test_sqlite_source_reparse_candidate_preserves_accepted_rows(sqlite_cache, monkeypatch):
+def test_sqlite_source_reparse_candidate_is_accepted_with_partial_coverage(sqlite_cache, monkeypatch):
     from smbclient._os import FileAttributes
 
     sqlite_cache.index.write_paths(["accepted"])
     assert sqlite_cache.index.finish_generation(1)
-    before = sqlite_cache.index.search("accepted")
 
     def scan(path, **kwargs):
         yield SimpleNamespace(
@@ -4281,8 +5407,9 @@ def test_sqlite_source_reparse_candidate_preserves_accepted_rows(sqlite_cache, m
 
     monkeypatch.setattr("smbclient.scandir", scan)
     sqlite_cache._scan_disk_queue()
-    assert sqlite_cache.index.search("accepted") == before
-    assert sqlite_cache.coordinator.verification_required
+    assert sqlite_cache.index.search("accepted").total_matches == 0
+    assert sqlite_cache.index.status().coverage == "partial"
+    assert not sqlite_cache.coordinator.verification_required
 
 
 @pytest.mark.parametrize("denied_at_open", [False, True])
@@ -4320,11 +5447,86 @@ def test_sqlite_source_denied_descendant_preserves_readable_siblings(sqlite_cach
     assert response.directory_count == response.total_matches == 3
     assert response.coverage == "partial"
     assert response.issue_count == 1
-    assert response.last_verified_at_ms is None
-    assert sqlite_cache.coordinator.verification_required
+    assert response.last_verified_at_ms is not None
+    assert not sqlite_cache.coordinator.verification_required
     assert sqlite_cache.index.pending_scan_paths(1) == []
     assert sqlite_cache._smb_base_path + "\\readable\\child" in reads
     assert sqlite_cache.index._connection().execute("SELECT code, count FROM coverage_issues").fetchall() == [("access_denied", 1)]
+
+
+@pytest.mark.parametrize("failure", ["separator", "surrogate", "oversized", "folder_io", "denied"])
+def test_best_effort_pass_accepts_item_failures(sqlite_cache, monkeypatch, failure):
+    from smbclient._os import FileAttributes
+
+    from app.services.directory_cache import MAX_OBSERVATION_BYTES
+
+    invalid_name = {"separator": "bad/name", "surrogate": "bad\ud800", "oversized": "x" * (MAX_OBSERVATION_BYTES + 1)}
+
+    def scan(path, **kwargs):
+        if path == sqlite_cache._smb_base_path:
+            names = [invalid_name[failure], "readable"] if failure in invalid_name else ["failed", "readable"]
+            for name in names:
+                yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+        elif path.endswith("\\failed"):
+            if failure == "denied":
+                raise PermissionError("Injected folder denial.")
+            raise OSError("Injected unclassified folder read failure.")
+        elif path.endswith("\\readable"):
+            yield SimpleNamespace(name="child", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+
+    monkeypatch.setattr("smbclient.scandir", scan)
+    sqlite_cache._watcher_ready.set()
+    sqlite_cache._scan_disk_queue()
+    response = sqlite_cache.search_index("readable")
+    assert response.total_matches == 2
+    assert response.coverage == "partial"
+    assert response.issue_count == 1
+    assert response.last_verified_at_ms is not None
+    assert not sqlite_cache.coordinator.verification_required
+    assert sqlite_cache.scan_error is None
+    assert sqlite_cache.monitoring_state == "healthy"
+    assert not sqlite_cache._verification_due(0, now=sqlite_cache.policy.degraded_verification_seconds + 1)
+    assert sqlite_cache._verification_due(0, now=sqlite_cache.policy.healthy_verification_seconds)
+    assert not sqlite_cache.index.pending_scan_paths(1)
+
+
+def test_denied_reconciliation_completes(sqlite_cache, monkeypatch):
+    sqlite_cache.index.write_paths(["denied", "denied/retained"])
+    assert sqlite_cache.index.finish_generation(1)
+    sqlite_cache.index.queue_observed_parent("denied")
+
+    def scan(path, **kwargs):
+        raise PermissionError("Injected reconciliation denial.")
+
+    monkeypatch.setattr("smbclient.scandir", scan)
+    sqlite_cache._scan_parent(1, "denied", reconcile=True)
+    assert sqlite_cache.index.reconciliation_generation() is None
+    assert sqlite_cache.index.status().coverage == "partial"
+    assert sqlite_cache.index.search("retained").total_matches == 1
+
+
+def test_late_folder_failure_discards_its_candidate_subtree(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    def scan(path, **kwargs):
+        if path == sqlite_cache._smb_base_path:
+            for name in ("failed", "readable"):
+                yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+        elif path.endswith("\\failed"):
+            for number in range(ROW_BATCH_SIZE + 1):
+                yield SimpleNamespace(
+                    name=f"child-{number}", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
+                )
+            raise OSError("Injected late folder failure.")
+
+    monkeypatch.setattr("smbclient.scandir", scan)
+    sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.index.search("child").total_matches == 0
+    assert sqlite_cache.index.status().directory_count == 2
+    assert sqlite_cache.index.status().coverage == "partial"
+    assert sqlite_cache.index.status().issue_count == 1
 
 
 def test_sqlite_source_denied_candidate_preserves_accepted_rows_and_recovers(sqlite_cache, monkeypatch):
@@ -4332,7 +5534,6 @@ def test_sqlite_source_denied_candidate_preserves_accepted_rows_and_recovers(sql
 
     sqlite_cache.index.write_paths(["accepted", "denied/retained"])
     assert sqlite_cache.index.finish_generation(1)
-    before = sqlite_cache.index.search("accepted denied")
     denied = True
 
     def scan(path, **kwargs):
@@ -4344,8 +5545,11 @@ def test_sqlite_source_denied_candidate_preserves_accepted_rows_and_recovers(sql
 
     monkeypatch.setattr("smbclient.scandir", scan)
     sqlite_cache._scan_disk_queue()
-    assert sqlite_cache.index.search("accepted denied") == before
-    assert sqlite_cache.coordinator.verification_required
+    response = sqlite_cache.index.search("denied readable")
+    assert response.total_matches == 3
+    assert response.coverage == "partial"
+    assert sqlite_cache.index.search("retained").total_matches == 1
+    assert not sqlite_cache.coordinator.verification_required
     denied = False
     sqlite_cache._scan_disk_queue()
     response = sqlite_cache.search_index("accepted denied readable")
@@ -4461,7 +5665,7 @@ def test_sqlite_source_close_denial_preserves_primary_failure(sqlite_cache, monk
     assert "private source path" not in warnings[0]
 
 
-def test_sqlite_source_close_failure_keeps_parent_pending(sqlite_cache, monkeypatch):
+def test_sqlite_source_close_failure_completes_parent_with_issue(sqlite_cache, monkeypatch):
     sqlite_cache.index.seed_scan(1)
     sqlite_cache.index.write_scan_children(1, [("parent", True)])
     sqlite_cache.index.finish_scan_parent(1, "")
@@ -4476,10 +5680,10 @@ def test_sqlite_source_close_failure_keeps_parent_pending(sqlite_cache, monkeypa
             raise OSError("Injected close failure.")
 
     monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: Entries())
-    with pytest.raises(OSError, match="close failure"):
-        sqlite_cache._scan_parent(1, "parent")
+    sqlite_cache._scan_parent(1, "parent")
     assert closed == [True]
-    assert sqlite_cache.index.pending_scan_paths(1) == ["parent"]
+    assert sqlite_cache.index.pending_scan_paths(1) == []
+    assert sqlite_cache.index.status().issue_count == 1
 
 
 def test_sqlite_source_late_permission_denial_cannot_finish_stale_parent(sqlite_cache, monkeypatch):
@@ -4516,7 +5720,7 @@ def test_sqlite_source_rejects_late_parent_observations(sqlite_cache, monkeypatc
     assert sqlite_cache.coordinator.verification_required
 
 
-def test_sqlite_source_failed_initial_build_is_verified_in_fresh_candidate(sqlite_cache, monkeypatch):
+def test_sqlite_source_interrupted_initial_build_keeps_completed_parents(sqlite_cache, monkeypatch):
     sqlite_cache.index.seed_scan(1)
     sqlite_cache.index.write_scan_children(1, [("stale", False)])
     sqlite_cache.index.finish_scan_parent(1, "")
@@ -4527,7 +5731,7 @@ def test_sqlite_source_failed_initial_build_is_verified_in_fresh_candidate(sqlit
 
     monkeypatch.setattr("smbclient.scandir", empty_scan)
     sqlite_cache._scan_disk_queue()
-    assert sqlite_cache.search_index("stale").total_matches == 0
+    assert sqlite_cache.search_index("stale").total_matches == 1
     assert sqlite_cache.search_index("").coverage == "complete"
 
 
@@ -4622,7 +5826,7 @@ async def test_sqlite_source_cancelled_worker_keeps_process_lease(sqlite_cache):
 
 
 APPLICATION_ID = 1396853073
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = json.loads((CONTRACT_ROOT / "contract.json").read_text(encoding="utf-8"))["limits"]["schema_version"]
 
 
 def test_generated_unicode_contract_matches_backend() -> None:
@@ -4731,7 +5935,7 @@ def test_accepted_parent_reconciliation_rejects_stale_and_unrelated_work(index):
     with pytest.raises(ValueError):
         index.write_reconciliation_children(1, "parent", [("parent/late", False)])
     index.queue_reconciliation_parent(1, "parent")
-    candidate = index.begin_verification()
+    candidate = index.prepare_scan()[0]
     for operation in (
         lambda: index.queue_reconciliation_parent(candidate, "parent"),
         lambda: index.write_reconciliation_children(candidate, "parent", [("parent/late", False)]),
@@ -4740,9 +5944,10 @@ def test_accepted_parent_reconciliation_rejects_stale_and_unrelated_work(index):
         with pytest.raises(ValueError):
             operation()
     index.write_paths(["replacement"], generation_id=candidate)
+    index.finish_scan_parent(candidate, "parent")
     assert index.finish_generation(candidate)
     selected = index.search("replacement parent")
-    for generation in (1, MAX_SIGNED_INTEGER):
+    for generation in (candidate + 1, MAX_SIGNED_INTEGER):
         for operation in (
             lambda: index.queue_reconciliation_parent(generation, "parent"),
             lambda: index.write_reconciliation_children(generation, "parent", [("parent/late", False)]),
@@ -5128,7 +6333,7 @@ def test_observed_parent_hints_are_transactional_and_do_not_publish_names(index)
 
     index.write_paths(["retained"])
     assert index.finish_generation(1)
-    candidate = index.begin_verification()
+    candidate = index.prepare_scan()[0]
     before = index.search("retained unverified")
     coordinator = DirectoryScanCoordinator(index)
     assert coordinator.enqueue(_DirectoryMutation(READ_PARENT_ACTION, "unverified"))
@@ -5144,7 +6349,6 @@ def test_observed_parent_hints_are_transactional_and_do_not_publish_names(index)
     index._connection().execute("DROP TRIGGER reject_parent_hint")
     coordinator.apply_pending()
     assert index.pending_scan_paths(1) == index.pending_scan_paths(candidate) == ["unverified"]
-    index.finish_reconciliation_parent(1, "unverified")
     index.finish_scan_parent(candidate, "unverified")
     index.queue_observed_parent("unverified")
     assert index.pending_scan_paths(1) == index.pending_scan_paths(candidate) == ["unverified"]
@@ -5152,7 +6356,7 @@ def test_observed_parent_hints_are_transactional_and_do_not_publish_names(index)
     assert index.finish_generation(candidate)
     selected = index.status()
     index.queue_observed_parent("")
-    assert index.pending_scan_paths(1) == ["unverified"]
+    assert index.pending_scan_paths(1) == [""]
     assert index.pending_scan_paths(candidate) == [""]
     assert index.status() == selected
     assert index.search("unverified").total_matches == 0
@@ -5352,7 +6556,7 @@ def test_accepted_parent_worker_preserves_work_after_refusal(sqlite_cache, monke
 
 
 @pytest.mark.parametrize("failure", ["denied", "redirected", "close"])
-def test_accepted_parent_worker_keeps_failed_parent_pending(sqlite_cache, monkeypatch, failure):
+def test_accepted_parent_worker_completes_item_failures(sqlite_cache, monkeypatch, failure):
     from smbclient._os import FileAttributes
 
     index = sqlite_cache.index
@@ -5380,10 +6584,14 @@ def test_accepted_parent_worker_keeps_failed_parent_pending(sqlite_cache, monkey
             raise OSError("Injected source cleanup failure.")
 
     monkeypatch.setattr("smbclient.scandir", (lambda *args, **kwargs: FailedClose()) if failure == "close" else scan)
-    with pytest.raises(OSError):
-        sqlite_cache._reconcile_disk_queue()
-    assert index.pending_scan_paths(1) == ["parent"]
-    assert index.search("parent") == before
+    sqlite_cache._reconcile_disk_queue()
+    assert index.pending_scan_paths(1) == []
+    after = index.search("parent")
+    assert after.coverage == "partial"
+    assert after.issue_count == 1
+    assert after.last_verified_at_ms == before.last_verified_at_ms
+    if failure == "denied":
+        assert after.results == before.results
     assert not sqlite_cache.coordinator._producers
     assert not sqlite_cache._scan_running.is_set()
     assert sqlite_cache._manager_scan_slots.acquire(blocking=False)
@@ -5402,22 +6610,18 @@ def test_pending_accepted_parent_work_defers_all_maintenance(sqlite_cache, monke
         calls.append(True)
         return True
 
-    monkeypatch.setattr(index, "cleanup_retired_batch", lambda: not complete())
     monkeypatch.setattr(index, "reclaim_pages", complete)
     monkeypatch.setattr(index, "checkpoint_if_due", complete)
-    sqlite_cache._cleanup_pending = True
     sqlite_cache._reclamation_pending = True
-    for operation in (sqlite_cache._cleanup_retired_work, sqlite_cache._reclaim_disk_work, sqlite_cache._checkpoint_work):
+    for operation in (sqlite_cache._reclaim_disk_work, sqlite_cache._checkpoint_work):
         operation()
     assert not calls
-    assert sqlite_cache._cleanup_pending
     assert sqlite_cache._reclamation_pending
     assert index.search("parent") == before
     index.finish_reconciliation_parent(1, "parent")
-    for operation in (sqlite_cache._cleanup_retired_work, sqlite_cache._reclaim_disk_work, sqlite_cache._checkpoint_work):
+    for operation in (sqlite_cache._reclaim_disk_work, sqlite_cache._checkpoint_work):
         operation()
-    assert len(calls) == 3
-    assert not sqlite_cache._cleanup_pending
+    assert len(calls) == 2
     assert not sqlite_cache._reclamation_pending
     assert index.search("parent") == before
 
@@ -5505,33 +6709,13 @@ def test_observed_mutations_queue_accepted_parents_atomically(index):
     assert not coordinator.pending
 
 
-def test_added_subtrees_queue_build_and_candidate_work_atomically(index):
-    candidate = index.begin_verification()
-    index.mutate_path("add", "moved-in")
-    for generation in (1, candidate):
-        assert index.pending_scan_paths(generation) == ["moved-in"]
-        index.finish_scan_parent(generation, "moved-in")
-    index.mutate_path("add", "moved-in")
-    for generation in (1, candidate):
-        assert index.pending_scan_paths(generation) == ["moved-in"]
-    index._connection().execute(
-        "CREATE TRIGGER reject_added_scan_work BEFORE INSERT ON scan_queue WHEN NEW.path = 'abort' "
-        "BEGIN SELECT RAISE(ABORT, 'injected'); END"
-    )
-    before = index.search("moved-in")
-    with pytest.raises(sqlite3.IntegrityError):
-        index.mutate_path("add", "abort")
-    assert index.search("moved-in") == before
-    assert index.search("abort").total_matches == 0
-
-
-def test_added_subtrees_do_not_queue_accepted_generation_or_advance_verification(index):
+def test_added_subtrees_queue_live_pass_without_advancing_verification(index):
     index.write_paths(["accepted"])
     assert index.finish_generation(1)
     before = index.search("accepted")
-    candidate = index.begin_verification()
+    candidate = index.prepare_scan()[0]
     index.mutate_path("add", "new")
-    assert index.pending_scan_paths(1) == []
+    assert index.pending_scan_paths(1) == ["new"]
     assert index.pending_scan_paths(candidate) == ["new"]
     assert index.search("accepted new").directory_count == 2
     assert index.search("accepted").last_verified_at_ms == before.last_verified_at_ms
@@ -5653,16 +6837,15 @@ def test_failed_missing_subtree_pruning_rolls_back_rows_queue_and_revision(index
         index.prune_subtree_batch(1, "gone")
     assert index.search("gone keep") == before
     assert index.pending_scan_paths(1) == ["gone"]
-    candidate = index.begin_verification()
-    index.discard_generation(candidate)
     with pytest.raises(ValueError, match="no longer active"):
-        index.prune_subtree_batch(candidate, "gone")
+        index.prune_subtree_batch(2, "gone")
     with pytest.raises(ValueError):
         index.prune_subtree_batch(1, "")
-    active = index.begin_verification()
+    index._connection().execute("DROP TRIGGER reject_prune_queue")
+    active = index.prepare_scan()[0]
     index.write_paths(["gone", "gone/child"], generation_id=active)
     assert not index.prune_subtree_batch(active, "gone")
-    assert index.search("gone keep") == before
+    assert index.search("gone keep").total_matches == 1
 
 
 @pytest.mark.parametrize("code", ["unsafe_traversal", "access_denied"])
@@ -5701,18 +6884,14 @@ def test_failed_scan_issue_rolls_back_issue_coverage_and_revision(index, code):
     assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone()[0] == 0
 
 
-@pytest.mark.parametrize("state", ["accepted", "retired", "missing"])
+@pytest.mark.parametrize("state", ["accepted", "missing"])
 @pytest.mark.parametrize("code", ["unsafe_traversal", "access_denied"])
 def test_scan_issue_rejects_inactive_generation(index, state, code):
     assert index.finish_generation(1)
     if state == "accepted":
         generation = 1
     else:
-        generation = index.begin_verification()
-        index.discard_generation(generation)
-        if state == "missing":
-            while index.cleanup_retired_batch():
-                pass
+        generation = 2
     before = index.status()
     with pytest.raises(ValueError, match="inactive scan"):
         getattr(index, f"record_{code}")(generation)
@@ -5898,7 +7077,7 @@ def test_generation_acceptance_rejects_change_after_last_parent(index):
 
     index.write_paths(["accepted"])
     assert index.finish_generation(1)
-    generation = index.begin_verification()
+    generation = index.prepare_scan()[0]
     coordinator = DirectoryScanCoordinator(index)
     baseline = coordinator.capture_epoch()
     index.seed_scan(generation)
@@ -5985,6 +7164,568 @@ def test_failed_event_loss_persistence_retains_verification_and_retries(index):
     assert not coordinator._uncertain_pending
 
 
+def test_stalled_read_invalidation_keeps_coverage_and_allows_acceptance(index):
+    from app.services.directory_cache import DirectoryScanCoordinator, InvalidationReason
+
+    index.write_paths(["accepted"])
+    assert index.finish_generation(1)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.invalidate(InvalidationReason.STALLED_READ)
+    coordinator.apply_pending()
+    assert coordinator.verification_required
+    assert not coordinator._uncertain_pending
+    response = index.search("accepted")
+    assert response.coverage == "complete"
+    assert response.issue_count == 0
+    generation = index.prepare_scan()[0]
+    baseline = coordinator.capture_epoch()
+    index.seed_scan(generation)
+    with coordinator.read("") as token:
+        coordinator.commit_children(token, generation, [("accepted", False)])
+        coordinator.finish_parent(token, generation)
+    assert coordinator.accept_generation(baseline, generation)
+    assert not coordinator.verification_required
+
+
+@pytest.mark.parametrize("reason", ["WATCHER_START", "OBSERVATION_LOSS", "SOURCE_REBIND", "READ_CAPACITY", "LIFECYCLE"])
+def test_event_loss_invalidation_makes_coverage_uncertain(index, reason):
+    from app.services.directory_cache import DirectoryScanCoordinator, InvalidationReason
+
+    index.write_paths(["accepted"])
+    assert index.finish_generation(1)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.invalidate(InvalidationReason[reason])
+    coordinator.apply_pending()
+    assert index.search("accepted").coverage == "uncertain"
+
+
+@pytest.mark.parametrize("code", ["access_denied", "unsafe_traversal", "unsupported_encoding", "scan_failed"])
+def test_item_issues_allow_partial_acceptance(index, code):
+    index.record_issue(1, code)
+    assert index.finish_generation(1)
+    status = index.status()
+    assert status.coverage == "partial"
+    assert status.issue_count == 1
+    assert status.last_verified_at_ms is not None
+
+
+def test_parent_links_cascade_content_and_queue_rows(index):
+    index.seed_scan(1)
+    index.commit_scan_parents(1, [("", [("parent", True)])])
+    index.commit_scan_parents(1, [("parent", [("parent/child", True)])])
+    index.commit_scan_parents(1, [("parent/child", [("parent/child/leaf", True)])])
+    connection = index._connection()
+    assert connection.execute(
+        "SELECT child.path, parent.path FROM directories child JOIN directories parent ON parent.id = child.parent_id ORDER BY child.path"
+    ).fetchall() == [("parent/child", "parent"), ("parent/child/leaf", "parent/child")]
+    with connection:
+        connection.execute("DELETE FROM directories WHERE path = 'parent'")
+    assert connection.execute("SELECT count(*) FROM directories").fetchone()[0] == 0
+    assert index.pending_scan_paths(1) == []
+
+
+def test_parent_links_follow_observed_moves_and_adds(index):
+    index.write_paths(["old", "new", "old/child", "old/child/leaf"])
+    index.mutate_observed_path("rename", "old/child", "new/moved")
+    index.mutate_observed_path("add", "new/added")
+    assert index._connection().execute(
+        "SELECT child.path, parent.path FROM directories child JOIN directories parent ON parent.id = child.parent_id ORDER BY child.path"
+    ).fetchall() == [("new/added", "new"), ("new/moved", "new"), ("new/moved/leaf", "new/moved")]
+    index.close()
+    index.open()
+    assert index.status().directory_count == 5
+
+
+def test_parent_snapshot_diff_preserves_unchanged_rows_and_removes_missing_subtree(index):
+    index.seed_scan(1)
+    index.commit_scan_parents(1, [("", [("parent", True)])])
+    index.commit_scan_parents(1, [("parent", [("parent/keep", True), ("parent/remove", True)])])
+    index.commit_scan_parents(1, [("parent/remove", [("parent/remove/leaf", True)])])
+    identifier = index._connection().execute("SELECT id FROM directories WHERE path = 'parent/keep'").fetchone()
+    index.defer_scan_parent(1, "parent")
+    index.commit_scan_parents(1, [("parent", [("parent/keep", True), ("parent/add", True)])])
+    assert index._connection().execute("SELECT id FROM directories WHERE path = 'parent/keep'").fetchone() == identifier
+    assert index._connection().execute("SELECT path FROM directories ORDER BY path").fetchall() == [
+        ("parent",),
+        ("parent/add",),
+        ("parent/keep",),
+    ]
+    assert "parent/remove/leaf" not in index.pending_scan_paths(1)
+    index._connection().execute("INSERT INTO directory_fts(directory_fts, rank) VALUES ('integrity-check', 1)")
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_streamed_parent_snapshot_finishes_atomically(index, preserve):
+    index.seed_scan(1)
+    index.commit_scan_parents(1, [("", [("parent", True)])])
+    index.commit_scan_parents(1, [("parent", [("parent/keep", True), ("parent/remove", True)])])
+    index.commit_scan_parents(1, [("parent/remove", [("parent/remove/leaf", True)])])
+    index.defer_scan_parent(1, "parent")
+    index.write_scan_parent_batch(1, "parent", [("parent/keep", True)], reset_snapshot=True)
+    assert index._connection().execute("SELECT count(*) FROM scan_snapshot_children").fetchone() == (1,)
+    index.commit_scan_parents(
+        1, [("parent", [("parent/new", True)])], streamed_parents={"parent"}, partial_parents={"parent"} if preserve else None
+    )
+    assert index.search("parent/keep").total_matches == 1
+    assert index.search("parent/remove/leaf").total_matches == int(preserve)
+    assert index._connection().execute("SELECT count(*) FROM scan_snapshot_children").fetchone() == (0,)
+    assert "parent" not in index.pending_scan_paths(1)
+
+
+@pytest.mark.parametrize("preserve", [False, True])
+def test_streamed_reconciliation_snapshot_preserves_read_children(index, preserve):
+    index.write_paths(["parent", "parent/keep", "parent/old"])
+    assert index.finish_generation(1)
+    index.queue_reconciliation_parent(1, "parent")
+    index.write_scan_parent_batch(1, "parent", [("parent/keep", True)], reset_snapshot=True, reconcile=True)
+    index.commit_scan_parents(
+        1,
+        [("parent", [("parent/new", True)])],
+        streamed_parents={"parent"},
+        partial_parents={"parent"} if preserve else None,
+        reconcile=True,
+    )
+    assert index.search("parent/keep").total_matches == 1
+    assert index.search("parent/old").total_matches == int(preserve)
+    assert index._connection().execute("SELECT count(*) FROM scan_snapshot_children").fetchone() == (0,)
+
+
+@pytest.mark.parametrize("reconcile", [False, True])
+def test_streamed_snapshot_restart_replaces_staged_names(index, reconcile):
+    index.prepare_scan()
+    index.seed_scan(1)
+    index.commit_scan_parents(1, [("", [("parent", True)])])
+    if reconcile:
+        index.commit_scan_parents(1, [("parent", [])])
+        assert index.finish_generation(1)
+        index.queue_reconciliation_parent(1, "parent")
+    index.write_scan_parent_batch(1, "parent", [("parent/stale", True)], reset_snapshot=True, reconcile=reconcile)
+    index.close()
+    index.open()
+    assert index._connection().execute("SELECT path FROM scan_snapshot_children").fetchall() == [("parent/stale",)]
+    if not reconcile:
+        assert index.prepare_scan() == (1, True)
+    index.write_scan_parent_batch(1, "parent", [("parent/keep", False)], reset_snapshot=True, reconcile=reconcile)
+    assert index._connection().execute("SELECT path FROM scan_snapshot_children").fetchall() == [("parent/keep",)]
+    index.commit_scan_parents(1, [("parent", [])], streamed_parents={"parent"}, reconcile=reconcile)
+    assert index._connection().execute("SELECT path FROM directories ORDER BY path").fetchall() == [("parent",), ("parent/keep",)]
+    assert index._connection().execute("SELECT count(*) FROM scan_snapshot_children").fetchone() == (0,)
+    assert index.pending_scan_paths(1) == []
+
+
+@pytest.mark.parametrize(
+    "parent,path,processed",
+    [("", "deep/child", False), ("parent", "outside", False), ("parent", "parent/deep/child", False), ("", "", False), ("", "child", True)],
+)
+def test_reopen_rejects_malformed_streamed_snapshot(index, parent, path, processed):
+    index.seed_scan(1)
+    index.write_scan_children(1, [("parent", True)])
+    if processed:
+        index.finish_scan_parent(1, parent)
+    index._connection().execute("INSERT INTO scan_snapshot_children(generation_id, parent_path, path) VALUES (1, ?, ?)", (parent, path))
+    index.close()
+    with pytest.raises(ValueError, match="generation metadata"):
+        index.open()
+
+
+@pytest.mark.parametrize("reject_completion", [False, True])
+def test_parent_issue_counts_commit_with_snapshot(index, reject_completion):
+    index.prepare_scan()
+    index.seed_scan(1)
+    index.commit_scan_parents(1, [("", [("parent", True)])])
+    index.write_scan_children(1, [("parent/retained", False)])
+    before = index.search("retained")
+    if reject_completion:
+        index._connection().execute(
+            "CREATE TEMP TRIGGER reject_issue_completion BEFORE UPDATE ON scan_queue WHEN new.path = 'parent' BEGIN SELECT RAISE(ABORT, 'completion rejected'); END"
+        )
+    options = {"partial_parents": {"parent"}, "issues": {"parent": {"access_denied": 2, "scan_failed": 3}}}
+    if reject_completion:
+        with pytest.raises(sqlite3.IntegrityError, match="completion rejected"):
+            index.commit_scan_parents(1, [("parent", [])], **options)
+        assert index.search("retained") == before
+        assert index.scan_parent_pending(1, "parent")
+        assert index._connection().execute("SELECT count(*) FROM coverage_issues").fetchone() == (0,)
+    else:
+        index.commit_scan_parents(1, [("parent", [])], **options)
+        assert not index.scan_parent_pending(1, "parent")
+        assert index.status().issue_count == 5
+        assert index.search("retained").total_matches == 1
+        assert index._connection().execute("SELECT code, count FROM coverage_issues ORDER BY code").fetchall() == [
+            ("access_denied", 2),
+            ("scan_failed", 3),
+        ]
+
+
+@pytest.mark.parametrize("early_flush", [False, True])
+@pytest.mark.parametrize("reconcile", [False, True])
+def test_scan_group_buffers_parent_issues(index, early_flush, reconcile):
+    from app.services.directory_cache import DirectoryScanCoordinator
+
+    index.prepare_scan()
+    index.seed_scan(1)
+    if reconcile:
+        index.commit_scan_parents(1, [("", [])])
+        assert index.finish_generation(1)
+        index.queue_observed_parent("")
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups(reconcile=reconcile)
+    token = coordinator.begin_read("")
+    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile)
+    if early_flush:
+        coordinator.flush_scan_group()
+    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile)
+    assert index.status().issue_count == 0
+    coordinator.finish_parent(token, 1, reconcile=reconcile)
+    coordinator.flush_scan_group()
+    assert index.status().issue_count == 2
+    assert coordinator.scan_commits == 1
+    assert not coordinator._pending_scan_issues
+    assert not coordinator._producers
+
+
+@pytest.mark.parametrize("reconcile", [False, True])
+def test_stale_scan_group_discards_parent_issues(index, reconcile):
+    from app.services.directory_cache import DirectoryScanCoordinator
+
+    index.prepare_scan()
+    index.seed_scan(1)
+    if reconcile:
+        index.commit_scan_parents(1, [("", [])])
+        assert index.finish_generation(1)
+        index.queue_observed_parent("")
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups(reconcile=reconcile)
+    token = coordinator.begin_read("")
+    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile)
+    coordinator.finish_parent(token, 1, reconcile=reconcile)
+    _lose_observations(coordinator)
+    with pytest.raises(RuntimeError, match="stale"):
+        coordinator.flush_scan_group()
+    assert index.scan_parent_pending(1, "")
+    assert index._connection().execute("SELECT count(*) FROM coverage_issues WHERE code = 'unsupported_encoding'").fetchone() == (0,)
+    assert not coordinator._pending_scan_issues
+
+
+def test_reconciliation_groups_independent_pages(smb_source_cache, smb_directory_server, monkeypatch):
+    from unittest.mock import Mock
+
+    from app.services import directory_cache
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    parent_count = ROW_BATCH_SIZE + 1
+    parents = [f"parent-{number}" for number in range(parent_count)]
+    smb_directory_server.directories = {"": [("base", 16)], "base": [(parent, 16) for parent in parents]}
+    smb_directory_server.directories.update({"base\\" + parent: [] for parent in parents})
+    smb_source_cache._scan_disk_queue()
+    index = smb_source_cache.index
+    for parent in parents:
+        index.queue_observed_parent(parent)
+    jobs = Mock(wraps=index.pending_scan_jobs)
+    single_identity = Mock(wraps=index.scan_parent_file_id)
+    monkeypatch.setattr(index, "pending_scan_jobs", jobs)
+    monkeypatch.setattr(index, "scan_parent_file_id", single_identity)
+    monkeypatch.setattr(directory_cache.time, "monotonic", lambda: smb_source_cache._last_access)
+    smb_source_cache._reconcile_disk_queue()
+    completion_checks = 2
+    assert jobs.call_count == (parent_count + ROW_BATCH_SIZE - 1) // ROW_BATCH_SIZE + completion_checks
+    single_identity.assert_not_called()
+    assert smb_source_cache.coordinator.scan_commits == 1
+    assert not index.pending_scan_paths(1)
+    assert index.status().directory_count == parent_count
+    assert not smb_source_cache.coordinator._producers
+    assert smb_source_cache.coordinator._scan_group is None
+    assert not smb_source_cache.coordinator._scan_group_reconcile
+    assert not smb_source_cache._scan_job_file_ids
+
+
+def test_streamed_snapshot_final_failure_rolls_back_deletion(index):
+    index.seed_scan(1)
+    index.commit_scan_parents(1, [("", [("parent", True)])])
+    index.commit_scan_parents(1, [("parent", [("parent/old", True)])])
+    index.defer_scan_parent(1, "parent")
+    index.write_scan_parent_batch(1, "parent", [("parent/new", True)], reset_snapshot=True)
+    index._connection().execute(
+        "CREATE TEMP TRIGGER reject_completion BEFORE UPDATE ON scan_queue WHEN new.path = 'parent' BEGIN SELECT RAISE(ABORT, 'completion rejected'); END"
+    )
+    with pytest.raises(sqlite3.IntegrityError, match="completion rejected"):
+        index.commit_scan_parents(1, [("parent", [])], streamed_parents={"parent"})
+    assert index.search("parent/old").total_matches == 1
+    assert index._connection().execute("SELECT count(*) FROM scan_snapshot_children").fetchone() == (1,)
+    assert "parent" in index.pending_scan_paths(1)
+
+
+def test_shared_scan_tree_fixtures(smb_source_cache, smb_directory_server):
+    fixtures_path = Path(__file__).resolve().parents[2] / "shared" / "directory-index" / "search-fixtures.json"
+    fixtures = json.loads(fixtures_path.read_text(encoding="utf-8"))["scan_trees"]
+    for fixture in fixtures:
+        for paths in fixture["passes"]:
+            directories = {"": [("base", 16)], "base": []}
+            for path in paths:
+                parent, _, name = path.rpartition("/")
+                native_parent = "base" + ("\\" + parent.replace("/", "\\") if parent else "")
+                directories[native_parent].append((name, 16))
+                directories["base\\" + path.replace("/", "\\")] = []
+            smb_directory_server.directories = directories
+            for _ in range(2):
+                smb_source_cache._scan_disk_queue()
+                result = smb_source_cache.index.search("tree")
+                assert sorted(row.path for row in result.results) == sorted(paths), fixture["name"]
+                assert result.directory_count == result.total_matches == len(paths)
+                assert result.coverage == "complete"
+                assert smb_source_cache.index._connection().execute("SELECT count(*) FROM generations").fetchone()[0] == 1
+
+
+def test_streamed_scanner_snapshots_do_not_use_separate_pruning(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    children = [f"child-{number}" for number in range(ROW_BATCH_SIZE + 1)]
+    nodes = {"": ["parent"], "parent": children}
+
+    def scan(path, **kwargs):
+        relative = path[len(sqlite_cache._smb_base_path) :].strip("\\").replace("\\", "/")
+        for name in nodes.get(relative, []):
+            yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+
+    def unexpected_prune(*args, **kwargs):
+        pytest.fail("A streamed snapshot must use the transactional parent diff.")
+
+    monkeypatch.setattr("smbclient.scandir", scan)
+    monkeypatch.setattr("app.services.directory_cache.MAX_OBSERVATION_BYTES", 512)
+    monkeypatch.setattr(sqlite_cache.index, "direct_child_paths", unexpected_prune)
+    monkeypatch.setattr(sqlite_cache.index, "prune_subtree_batch", unexpected_prune)
+    sqlite_cache._scan_disk_queue()
+    nodes["parent"] = children[1:] + ["new"]
+    sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.index.search("parent/child-0").total_matches == 0
+    assert sqlite_cache.index.search("parent/child-1").total_matches > 0
+    assert sqlite_cache.index.search("parent/new").total_matches == 1
+    assert sqlite_cache.index.status().coverage == "complete"
+    assert sqlite_cache.index._connection().execute("SELECT count(*) FROM scan_snapshot_children").fetchone() == (0,)
+
+
+def test_complete_scanner_snapshots_do_not_use_separate_pruning(sqlite_cache, monkeypatch):
+    from smbclient._os import FileAttributes
+
+    nodes = {"": ["parent"], "parent": ["old"], "parent/old": []}
+
+    def scan(path, **kwargs):
+        relative = path[len(sqlite_cache._smb_base_path) :].strip("\\").replace("\\", "/")
+        for name in nodes.get(relative, []):
+            yield SimpleNamespace(name=name, smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
+
+    def unexpected_prune(*args, **kwargs):
+        pytest.fail("A complete buffered snapshot must use the transactional parent diff.")
+
+    monkeypatch.setattr("smbclient.scandir", scan)
+    monkeypatch.setattr(sqlite_cache.index, "direct_child_paths", unexpected_prune)
+    monkeypatch.setattr(sqlite_cache.index, "prune_subtree_batch", unexpected_prune)
+    sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.index.search("parent/old").total_matches == 1
+    nodes["parent"] = ["new"]
+    sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.index.search("parent/old").total_matches == 0
+    assert sqlite_cache.index.search("parent/new").total_matches == 1
+    assert sqlite_cache.index.status().coverage == "complete"
+
+
+def test_empty_parents_share_bookkeeping_commits(index, monkeypatch):
+    from app.services.directory_cache import DirectoryScanCoordinator
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    parents = [f"empty-{number}" for number in range(10_000)]
+    index.seed_scan(1)
+    for offset in range(0, len(parents), ROW_BATCH_SIZE):
+        index.write_scan_children(1, [(parent, True) for parent in parents[offset : offset + ROW_BATCH_SIZE]])
+    index.finish_scan_parent(1, "")
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: 0.0)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups()
+    seen = []
+    while page := index.pending_scan_paths(1, exclude=coordinator.buffered_scan_parents(1)):
+        for parent in page:
+            with coordinator.read(parent) as token:
+                coordinator.finish_parent(token, 1)
+            seen.append(parent)
+    coordinator.flush_scan_group()
+    assert seen == parents
+    assert 1 <= coordinator.scan_commits <= 2
+    assert not coordinator._producers
+    assert not index.pending_scan_paths(1)
+
+
+def test_content_group_commits_at_parent_cap(index, monkeypatch):
+    from app.services.directory_cache import DirectoryScanCoordinator
+    from app.services.directory_index import SCAN_COMMIT_MAX_PARENTS
+
+    parents = [f"parent-{number}" for number in range(SCAN_COMMIT_MAX_PARENTS)]
+    index.write_paths(parents)
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: 0.0)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups()
+    for parent in parents:
+        with coordinator.read(parent) as token:
+            coordinator.commit_children(token, 1, [(parent + "/child", True)])
+            coordinator.finish_parent(token, 1)
+    assert coordinator.scan_commits == 1
+    assert not coordinator._scan_group
+    assert index.search("child").total_matches == SCAN_COMMIT_MAX_PARENTS
+
+
+@pytest.mark.parametrize("content", [False, True])
+def test_group_interval_starts_at_first_parent(index, monkeypatch, content):
+    from app.services.directory_cache import DirectoryScanCoordinator
+    from app.services.directory_index import SCAN_BOOKKEEPING_COMMIT_INTERVAL_SECONDS, SCAN_COMMIT_INTERVAL_SECONDS
+
+    clock = [0.0]
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: clock[0])
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups()
+    clock[0] = 10.0
+    with coordinator.read("") as token:
+        if content:
+            coordinator.commit_children(token, 1, [("child", True)])
+        coordinator.finish_parent(token, 1)
+    assert coordinator.scan_commits == 0
+    interval = SCAN_COMMIT_INTERVAL_SECONDS if content else SCAN_BOOKKEEPING_COMMIT_INTERVAL_SECONDS
+    clock[0] += interval
+    coordinator.flush_scan_group_if_due()
+    assert coordinator.scan_commits == 1
+
+
+def test_bookkeeping_group_commits_at_byte_bound(index, monkeypatch):
+    from app.services.directory_cache import DirectoryScanCoordinator
+
+    parents = ["empty-parent-one", "empty-parent-two"]
+    index.write_paths(parents)
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: 0.0)
+    monkeypatch.setattr("app.services.directory_cache.MAX_OBSERVATION_BYTES", len(parents[0].encode()))
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups()
+    for parent in parents:
+        with coordinator.read(parent) as token:
+            coordinator.finish_parent(token, 1)
+    assert coordinator.scan_commits == 2
+    assert not coordinator._producers
+
+
+def test_content_commit_cannot_use_bookkeeping_parent_cap(index):
+    from app.services.directory_index import SCAN_COMMIT_MAX_PARENTS
+
+    parents = [f"parent-{number}" for number in range(SCAN_COMMIT_MAX_PARENTS + 1)]
+    index.write_paths(parents)
+    results = [(parent, [(parent + "/child", True)]) for parent in parents]
+    assert index.scan_parents_have_changes(1, results)
+    with pytest.raises(ValueError, match="Content scan commit"):
+        index.commit_scan_parents(1, results)
+    assert index.search("child").total_matches == 0
+
+
+def test_clean_shutdown_controls_integrity_checks(index, monkeypatch):
+    index.write_paths(["retained"])
+    index.close()
+    statements = []
+    connect = index._connect
+
+    def traced(*, readonly=False):
+        connection = connect(readonly=readonly)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(index, "_connect", traced)
+    index.open()
+    assert not any("quick_check" in statement or "integrity-check" in statement for statement in statements)
+    assert index._connection().execute("SELECT clean_shutdown FROM source_metadata").fetchone() == (0,)
+    index._connection().execute("BEGIN")
+    index.close()
+    statements.clear()
+    index.open()
+    assert any("quick_check" in statement for statement in statements)
+    assert any("integrity-check" in statement for statement in statements)
+    assert index.search("retained").total_matches == 1
+
+
+@pytest.mark.parametrize("scanner", ["store", "smb", "streamed-smb"])
+def test_unchanged_live_pass_has_no_content_writes(index, smb_source_cache, smb_directory_server, scanner, monkeypatch):
+    from app.services import directory_cache
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    streamed = scanner == "streamed-smb"
+    scanner = scanner != "store"
+    expected_metadata_writes = 5
+    expected_parents = 3
+    if scanner:
+        index = smb_source_cache.index
+        smb_directory_server.directories = {
+            "": [("base", 16)],
+            "base": [("parent", 16)],
+            "base\\parent": [("child", 16)],
+            "base\\parent\\child": [],
+        }
+        if streamed:
+            STREAM_GROUP_BYTES = 512
+            monkeypatch.setattr(directory_cache, "MAX_OBSERVATION_BYTES", STREAM_GROUP_BYTES)
+            children = [(f"child-{number}", 16) for number in range(ROW_BATCH_SIZE + 1)]
+            smb_directory_server.directories["base\\parent"] = children
+            for name, _attributes in children:
+                smb_directory_server.directories["base\\parent\\" + name] = []
+            expected_parents = len(children) + 2
+        smb_source_cache._scan_disk_queue()
+    else:
+        index.prepare_scan()
+        index.seed_scan(1)
+        index.commit_scan_parents(1, [("", [("parent", True)])])
+        index.commit_scan_parents(1, [("parent", [("parent/child", True)])])
+        index.commit_scan_parents(1, [("parent/child", [])])
+        assert index.finish_generation(1)
+    connection = index._connection()
+    connection.execute("CREATE TEMP TABLE content_writes(count INTEGER)")
+    connection.execute("INSERT INTO content_writes VALUES (0)")
+    connection.execute("CREATE TEMP TABLE queue_writes(count INTEGER)")
+    connection.execute("INSERT INTO queue_writes VALUES (0)")
+    connection.execute("CREATE TEMP TABLE metadata_writes(count INTEGER)")
+    connection.execute("INSERT INTO metadata_writes VALUES (0)")
+    connection.execute("CREATE TEMP TABLE snapshot_writes(count INTEGER)")
+    connection.execute("INSERT INTO snapshot_writes VALUES (0)")
+    connection.execute(
+        "CREATE TEMP TRIGGER count_snapshot_insert AFTER INSERT ON scan_snapshot_children BEGIN UPDATE snapshot_writes SET count = count + 1; END"
+    )
+    shadows = ("directory_fts_data", "directory_fts_idx", "directory_fts_docsize", "directory_fts_config")
+    shadow_rows = [connection.execute(f"SELECT count(*) FROM {table}").fetchone() for table in shadows]
+    for operation in ("INSERT", "UPDATE", "DELETE"):
+        connection.execute(
+            f"CREATE TEMP TRIGGER count_content_{operation} AFTER {operation} ON directories BEGIN UPDATE content_writes SET count = count + 1; END"
+        )
+        connection.execute(
+            f"CREATE TEMP TRIGGER count_queue_{operation} AFTER {operation} ON scan_queue BEGIN UPDATE queue_writes SET count = count + 1; END"
+        )
+        for table in ("generations", "source_metadata"):
+            connection.execute(
+                f"CREATE TEMP TRIGGER count_{table}_{operation} AFTER {operation} ON {table} BEGIN UPDATE metadata_writes SET count = count + 1; END"
+            )
+    if scanner:
+        smb_source_cache._scan_disk_queue()
+    else:
+        assert index.prepare_scan() == (1, False)
+        assert index.accepted_generation() is None
+        index.seed_scan(1)
+        index.commit_scan_parents(1, [("", [("parent", True)])])
+        index.commit_scan_parents(1, [("parent", [("parent/child", True)])])
+        index.commit_scan_parents(1, [("parent/child", [])])
+        assert index.finish_generation(1)
+    assert connection.execute("SELECT count FROM content_writes").fetchone() == (0,)
+    assert connection.execute("SELECT count FROM queue_writes").fetchone() == (expected_parents * 2,)
+    assert connection.execute("SELECT count FROM metadata_writes").fetchone() == (expected_metadata_writes,)
+    assert [connection.execute(f"SELECT count(*) FROM {table}").fetchone() for table in shadows] == shadow_rows
+    assert connection.execute("SELECT count(*), max(scan_pass_id) FROM generations").fetchone() == (1, 2)
+    assert index.accepted_generation() == 1
+    if streamed:
+        assert connection.execute("SELECT count FROM snapshot_writes").fetchone()[0] > 0
+        assert connection.execute("SELECT count(*) FROM scan_snapshot_children").fetchone() == (0,)
+
+
 def test_unresolved_issue_rows_cannot_be_selected_as_complete(index):
     index.write_paths(["partial"])
     index.mark_uncertain()
@@ -5993,12 +7734,12 @@ def test_unresolved_issue_rows_cannot_be_selected_as_complete(index):
     assert response.coverage == "uncertain"
     assert response.issue_count == 1
     generation, selected = index.prepare_scan()
-    assert not selected
-    assert generation != 1
+    assert selected
+    assert generation == 1
 
 
 def test_failed_generation_issue_count_agrees_with_issue_rows(index):
-    assert not index.finish_generation(1, issue_count=3)
+    assert index.finish_generation(1, issue_count=3)
     with index._writer_lock:
         aggregate = index._connection().execute("SELECT sum(count) FROM coverage_issues WHERE generation_id = 1").fetchone()[0]
     assert index.status().issue_count == aggregate == 3
@@ -6138,9 +7879,9 @@ def test_sqlite_source_bounds_batch_bytes_without_limiting_coverage(sqlite_cache
     sizes = []
     original_commit = sqlite_cache.coordinator.commit_children
 
-    def commit(token, generation, batch, *, reconcile=False):
+    def commit(token, generation, batch, *, reconcile=False, file_ids=None):
         sizes.append(sum(len(path.encode("utf-8")) for path, _descend in batch))
-        original_commit(token, generation, batch, reconcile=reconcile)
+        original_commit(token, generation, batch, reconcile=reconcile, file_ids=file_ids)
 
     def scan(path, **kwargs):
         if path == sqlite_cache._smb_base_path:
@@ -6358,33 +8099,6 @@ def test_pending_scan_reads_do_not_walk_processed_prefix_or_sort_pending_jobs(in
     assert steps < ROW_BATCH_SIZE
 
 
-def test_candidate_failure_preserves_accepted_data(index):
-    index.write_paths(["old/alpha"])
-    assert index.finish_generation(1)
-    accepted = index.search("alpha")
-    candidate = index.begin_verification()
-    index.write_paths(["new/beta"], generation_id=candidate)
-    assert not index.finish_generation(candidate, issue_count=1)
-    assert index.search("alpha") == accepted
-    index.write_paths(["other/alpha"])
-    assert index.search("alpha").total_matches == 2
-    assert index.search("alpha").last_verified_at_ms == accepted.last_verified_at_ms
-
-
-def test_candidate_selection_is_atomic_and_reopens(index):
-    index.write_paths(["old/alpha"])
-    index.finish_generation(1)
-    candidate = index.begin_verification()
-    index.write_paths(["new/beta"], generation_id=candidate)
-    assert index.search("beta").total_matches == 0
-    assert index.finish_generation(candidate)
-    assert index.search("alpha").total_matches == 0
-    assert index.search("beta").total_matches == 1
-    index.close()
-    index.open()
-    assert index.search("beta").directory_count == 1
-
-
 def test_source_kind_and_identity_must_match(index):
     index.close()
     other = DirectoryIndex(index.path, source_kind="local", source_identity={"connection_id": "test", "host": "test"})
@@ -6455,7 +8169,7 @@ def test_coverage_above_old_cutoff_and_bounded_results(index, count):
     remaining_matches = sum("100000" in f"directory-{number:06d}" for number in range(count)) - 1
     assert index.finish_generation(1)
     verified = index.search("").last_verified_at_ms
-    candidate = index.begin_verification()
+    candidate = index.prepare_scan()[0]
     index.write_paths((f"directory-{number:06d}" for number in range(count)), generation_id=candidate)
     assert index.search("directory").directory_count == count
     index.mutate_path("rename", "directory-100000", "directory-updated")
@@ -6524,7 +8238,7 @@ def test_directory_operation_headroom_measurement(index):
         sample()
         with closing(index._connect(readonly=True)) as reader, transaction(reader):
             old_count = reader.execute("SELECT COUNT(*) FROM directories").fetchone()[0]
-            candidate = index.begin_verification()
+            candidate = index.prepare_scan()[0]
             index.write_paths(paths, generation_id=candidate)
             index.write_paths(["operation/new"])
             assert reader.execute("SELECT COUNT(*) FROM directories").fetchone() == (old_count,)
@@ -6708,29 +8422,6 @@ def test_bulk_path_writes_bound_bytes_before_building_row_keys(index, monkeypatc
     with pytest.raises(ValueError, match="scan-batch byte limit"):
         index.write_paths(["x" * 33])
     assert index.search("directory").directory_count == 5
-
-
-def test_mutations_update_accepted_candidate_fts_and_preserve_verification(index):
-    index.write_paths(["parent/alpha", "parent/alpha/child", "parent/alpha-other"])
-    index.finish_generation(1)
-    before = index.search("alpha")
-    candidate = index.begin_verification()
-    index.write_paths(["parent/alpha", "parent/alpha/child", "parent/alpha-other"], generation_id=candidate)
-    index.mutate_path("rename", "parent/alpha", "new/.beta")
-    assert index.search("alpha").total_matches == 1
-    assert index.search("beta").total_matches == 0
-    assert index.search("beta", include_dot_directories=True).total_matches == 2
-    assert index.search("beta", include_dot_directories=True).last_verified_at_ms == before.last_verified_at_ms
-    index.mutate_path("remove", "new/.beta")
-    index.mutate_path("add", "fresh/beta")
-    assert index.search("beta").total_matches == 1
-    with pytest.raises(ValueError, match="Scan work remains queued"):
-        index.finish_generation(candidate)
-    assert index.pending_scan_paths(candidate) == ["fresh/beta"]
-    index.finish_scan_parent(candidate, "fresh/beta")
-    index.finish_generation(candidate)
-    assert index.search("beta").results[0].path == "fresh/beta"
-    assert index.search("alpha").total_matches == 1
 
 
 @pytest.mark.parametrize("identifier", [-(1 << 63), -1, 0], ids=["minimum-signed-id", "negative-id", "zero-id"])

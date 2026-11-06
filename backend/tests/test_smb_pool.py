@@ -10,19 +10,158 @@ import subprocess
 import sys
 import textwrap
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from threading import Event
 from unittest.mock import Mock, patch
 
 import pytest
 from smbprotocol.connection import Connection as ProtocolConnection
+from smbprotocol.connection import SMB2Echo
 from smbprotocol.transport import Tcp
 
 from app.api._smb_helpers import build_smb_backend, file_target_http_error
 from app.models.connection import Connection
 from app.storage.smb import SMBBackend
 from app.storage.smb_errors import SMBConnectionCapacityError, SMBConnectionRetired, SMBMutationUncertain, SMBOperationTimeout
-from app.storage.smb_pool import SMBConnectionPool, get_connection_pool, get_smb_connection_cache
+from app.storage.smb_pool import ScanCreditConnection, SMBConnectionPool, get_connection_pool, get_smb_connection_cache
+
+
+@pytest.fixture(autouse=True)
+def scan_connection_setup(monkeypatch):
+    def connect(connection, *, timeout):
+        connection.transport = Mock(connected=True)
+
+    setup = Mock(side_effect=connect)
+    monkeypatch.setattr(ScanCreditConnection, "connect", lambda connection, **kwargs: setup(connection, **kwargs))
+    return setup
+
+
+@pytest.mark.asyncio
+async def test_pool_registers_atomic_connection_through_smbclient(scan_connection_setup):
+    from app.services.system_settings import get_smbclient_policy_kwargs
+
+    pool = SMBConnectionPool()
+    cache = {}
+    policy = get_smbclient_policy_kwargs()
+    with patch("smbclient._pool.Session") as session:
+        try:
+            async with pool.get_connection("SERVER", 445, "user", "pass", "share", connection_cache=cache):
+                connection = cache["server:445"]
+                assert isinstance(connection, ScanCreditConnection)
+                scan_connection_setup.assert_called_once_with(connection, timeout=policy["connection_timeout"])
+                session.assert_called_once_with(
+                    connection,
+                    username="user",
+                    password="pass",
+                    require_encryption=policy["encrypt"],
+                    auth_protocol=policy["auth_protocol"],
+                )
+                session.return_value.connect.assert_called_once_with()
+        finally:
+            await pool.close_all()
+
+
+def test_scan_credit_admission_rejects_whole_compound_without_mutation():
+    connection = ScanCreditConnection(uuid.uuid4(), "server")
+    connection.transport = Mock()
+    connection.sequence_window["high"] = 20
+    before = connection.sequence_window.copy()
+    assert connection.send_scan_compound([SMB2Echo() for _ in range(5)], 0, 0, reserve=16, credit_target=64) is None
+    assert connection.sequence_window == before
+    assert not connection.outstanding_requests
+    connection.transport.send.assert_not_called()
+
+
+def test_scan_credit_admission_uses_negotiated_multi_credit_charges():
+    from smbprotocol.open import SMB2QueryDirectoryRequest
+
+    connection = ScanCreditConnection(uuid.uuid4(), "server")
+    connection.transport = Mock()
+    connection.supports_multi_credit = True
+    messages = [SMB2Echo(), SMB2Echo()]
+    for _ in range(2):
+        query = SMB2QueryDirectoryRequest()
+        query["file_id"] = b"\xff" * 16
+        query["output_buffer_length"] = 1024 * 1024
+        messages.append(query)
+    messages.append(SMB2Echo())
+    connection.sequence_window["high"] = 51
+    requests = connection.send_scan_compound(messages, 0, 0, reserve=16, credit_target=296)
+    assert requests is not None
+    assert [request.message["credit_charge"].get_value() for request in requests] == [1, 1, 16, 16, 1]
+    assert all(request.message["credit_request"].get_value() == 36 for request in requests)
+    assert connection.sequence_window["high"] - connection.sequence_window["low"] == 16
+
+
+@pytest.mark.asyncio
+async def test_pool_transport_setup_failure_releases_capacity(scan_connection_setup):
+    pool = SMBConnectionPool()
+    cache = {}
+
+    def fail_setup(connection, *, timeout):
+        connection.transport = Mock(connected=False)
+        raise TimeoutError("Injected transport setup timeout.")
+
+    scan_connection_setup.side_effect = fail_setup
+    with patch("smbclient.register_session") as register, patch("smbclient.reset_connection_cache"):
+        try:
+            with pytest.raises(TimeoutError):
+                async with pool.get_connection("server", 445, "user", "pass", "share", connection_cache=cache):
+                    pytest.fail("Failed transport setup must not admit a pool lease.")
+            register.assert_not_called()
+            assert isinstance(cache["server:445"], ScanCreditConnection)
+            async with asyncio.timeout(3):
+                while pool._background_tasks:
+                    await asyncio.gather(*tuple(pool._background_tasks), return_exceptions=True)
+            assert pool.get_stats()["total_references"] == 0
+        finally:
+            await pool.close_all()
+            cache.clear()
+
+
+def test_scan_credit_admission_blocks_concurrent_browse_until_whole_compound():
+    connection = ScanCreditConnection(uuid.uuid4(), "server")
+    connection.transport = Mock()
+    connection.sequence_window["high"] = 21
+    entered = Event()
+    release = Event()
+    browsing = Event()
+    messages = [SMB2Echo() for _ in range(5)]
+    calculate = connection._calculate_credit_charge
+    calls = 0
+
+    def charge(message):
+        nonlocal calls
+        calls += 1
+        if calls == len(messages) + 1:
+            entered.set()
+            assert release.wait(3)
+        return calculate(message)
+
+    def browse():
+        browsing.set()
+        return connection.send(SMB2Echo(), sid=0)
+
+    with patch.object(connection, "_calculate_credit_charge", side_effect=charge), ThreadPoolExecutor(max_workers=2) as workers:
+        scan = workers.submit(connection.send_scan_compound, messages, 0, 0, reserve=16, credit_target=64)
+        try:
+            assert entered.wait(3)
+            browser = workers.submit(browse)
+            assert browsing.wait(3)
+            acquired = connection.sequence_lock.acquire(blocking=False)
+            if acquired:
+                connection.sequence_lock.release()
+            assert not acquired
+            assert not browser.done()
+        finally:
+            release.set()
+        requests = scan.result(timeout=3)
+        assert requests is not None
+        assert [request.message["message_id"].get_value() for request in requests] == list(range(5))
+        assert browser.result(timeout=3).message["message_id"].get_value() == 5
+    assert connection.sequence_window["high"] - connection.sequence_window["low"] == 15
+    assert connection.transport.send.call_count == 2
 
 
 @pytest.mark.asyncio

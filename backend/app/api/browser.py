@@ -1137,6 +1137,7 @@ async def search_directories(
                 status_message=cache.scan_error,
                 monitoring_state=cache.monitoring_state,
                 retry_after_ms=cache.retry_after_ms,
+                scan_progress=cache.scan_progress,
             )
 
         results, total_matches = await asyncio.to_thread(cache.search, q, include_dot_directories=include_dot_directories) if q else ([], 0)

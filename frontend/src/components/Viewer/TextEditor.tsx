@@ -7,6 +7,7 @@ import { BROWSER_SHORTCUTS, CODEMIRROR_EDITOR_SHORTCUTS, COMMON_SHORTCUTS, VIEWE
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts, withShortcut } from "../../hooks/useKeyboardShortcuts";
 import { useRoutedViewerEditing } from "../../hooks/useRoutedViewerEditing";
+import { useViewerDocumentTitle } from "../../hooks/useViewerDocumentTitle";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   beginViewerTextEdit,
@@ -200,6 +201,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
   const { viewerBg, toolbarBg, toolbarText, viewerText, linkColor } = getViewerColors(currentTheme, "markdown");
   const searchHighlightColors = useMemo(() => getSearchHighlightColors(muiTheme, currentTheme), [currentTheme, muiTheme]);
   const filename = path.split("/").pop() || path;
+  useViewerDocumentTitle(filename);
   const [maxFileSizeBytes] = useTextEditorMaxFileSizeBytesPreference();
   const [wordWrapEnabled, setWordWrapEnabled] = useTextEditorWordWrapPreference(false);
   const contentSizeBytes = useMemo(() => new Blob([content]).size, [content]);
