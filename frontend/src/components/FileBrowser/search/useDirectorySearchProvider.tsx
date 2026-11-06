@@ -237,7 +237,7 @@ export function useDirectorySearchProvider(
   const [totalMatches, setTotalMatches] = useState(0);
   const [coverageStatus, setCoverageStatus] = useState<Pick<
     DirectorySearchResult,
-    "coverage" | "coverage_issue_count" | "last_verified_at_ms" | "status_message" | "monitoring_state" | "retry_after_ms"
+    "coverage" | "coverage_issue_count" | "last_verified_at_ms" | "status_message" | "monitoring_state" | "retry_after_ms" | "scan_progress"
   > | null>(null);
   const [sourceFailure, setSourceFailure] = useState<"history" | "index" | null>(null);
   const [legacyIndex, setLegacyIndex] = useState(false);
@@ -267,7 +267,12 @@ export function useDirectorySearchProvider(
       previous?.last_verified_at_ms === response.last_verified_at_ms &&
       previous?.status_message === response.status_message &&
       previous?.monitoring_state === response.monitoring_state &&
-      previous?.retry_after_ms === response.retry_after_ms
+      previous?.retry_after_ms === response.retry_after_ms &&
+      previous?.scan_progress?.phase === response.scan_progress?.phase &&
+      previous?.scan_progress?.parents_done === response.scan_progress?.parents_done &&
+      previous?.scan_progress?.parents_queued === response.scan_progress?.parents_queued &&
+      previous?.scan_progress?.directories_found === response.scan_progress?.directories_found &&
+      previous?.scan_progress?.started_at_ms === response.scan_progress?.started_at_ms
         ? previous
         : {
             coverage: response.coverage,
@@ -276,6 +281,7 @@ export function useDirectorySearchProvider(
             status_message: response.status_message,
             monitoring_state: response.monitoring_state,
             retry_after_ms: response.retry_after_ms,
+            scan_progress: response.scan_progress,
           }
     );
   }, []);
@@ -502,6 +508,19 @@ export function useDirectorySearchProvider(
       };
     }
     if (coverageStatus?.status_message) return { label: coverageStatus.status_message, showSpinner: !!working };
+    const progress = coverageStatus?.scan_progress;
+    if (progress && progress.phase !== "idle") {
+      return {
+        label:
+          progress.phase === "building"
+            ? t("fileBrowser.search.status.indexing", { count: progress.directories_found })
+            : t("fileBrowser.search.status.updatingProgress", {
+                done: progress.parents_done,
+                total: progress.parents_done + progress.parents_queued,
+              }),
+        showSpinner: true,
+      };
+    }
     if (coverageStatus?.coverage === "uncertain")
       return {
         label: t("fileBrowser.search.status.indexCoverageUncertain"),
@@ -536,6 +555,7 @@ export function useDirectorySearchProvider(
     if (indexFailureRef.current) return retryDelayRef.current;
     if (!response || response.search_contract_version !== SEARCH_CONTRACT_VERSION) return null;
     if (response.retry_after_ms != null && response.retry_after_ms > 0) return directoryRetryDelay(response.retry_after_ms);
+    if (response.scan_progress && response.scan_progress.phase !== "idle") return DIRECTORY_REFRESH_INTERVAL_MS;
     if (response.cache_state === "building" || response.cache_state === "updating") return DIRECTORY_REFRESH_INTERVAL_MS;
     return response.cache_state === "empty" ||
       response.status_message ||

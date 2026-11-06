@@ -26,6 +26,7 @@ from time import monotonic
 from typing import Any, Optional
 
 import smbclient
+from smbprotocol.connection import Connection as ProtocolConnection
 
 from app.services.system_settings import get_smbclient_policy_kwargs
 from app.storage.smb_errors import SMBConnectionCapacityError, SMBConnectionRetired, SMBOperationTimeout
@@ -42,6 +43,33 @@ CONNECTION_SETUP_TIMEOUT_SECONDS = 30.0
 
 _connection_context_caches: dict[str, dict[str, Any]] = {}
 _connection_context_lock = threading.RLock()
+
+
+class ScanCreditConnection(ProtocolConnection):  # type: ignore[misc]
+    """Keep whole scan compounds inside the same credit lock as ordinary sends."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.sequence_lock = threading.RLock()
+
+    def send_scan_compound(
+        self, messages: list[Any], session_id: int, tree_id: int, *, reserve: int, credit_target: int
+    ) -> list[Any] | None:
+        if not messages or reserve < 1 or credit_target < 1:
+            raise ValueError("Scan credit admission requires messages and positive credit limits.")
+        with self.sequence_lock:
+            charge = sum(max(1, self._calculate_credit_charge(message)) for message in messages)
+            available = self.sequence_window["high"] - self.sequence_window["low"]
+            if available < charge + reserve:
+                return None
+            requests: list[Any] = self._send(
+                messages,
+                session_id=session_id,
+                tree_id=tree_id,
+                related=True,
+                credit_request=charge + 1 if available < credit_target else None,
+            )
+            return requests
 
 
 def get_smb_connection_cache(connection_context_key: str) -> dict[str, Any]:
@@ -120,18 +148,27 @@ class SMBConnectionPool:
         task.add_done_callback(completed)
 
     async def _register(self, pool_key: int, conn: PooledConnection, password: str) -> None:
-        try:
-            await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: smbclient.register_session(
-                    conn.host,
-                    username=conn.username,
-                    password=password,
-                    port=conn.port,
-                    connection_cache=conn.connection_cache,
-                    **get_smbclient_policy_kwargs(),
-                ),
+        def register() -> None:
+            policy = get_smbclient_policy_kwargs()
+            connection_key = f"{conn.host.lower()}:{conn.port}"
+            connection = conn.connection_cache.get(connection_key)
+            if connection is None or connection.transport is None or not connection.transport.connected:
+                connection = ScanCreditConnection(
+                    smbclient.ClientConfig().client_guid, conn.host, conn.port, require_signing=policy["require_signing"]
+                )
+                conn.connection_cache[connection_key] = connection
+                connection.connect(timeout=policy["connection_timeout"])
+            smbclient.register_session(
+                conn.host,
+                username=conn.username,
+                password=password,
+                port=conn.port,
+                connection_cache=conn.connection_cache,
+                **policy,
             )
+
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, register)
         except BaseException:
             conn.retire_when_idle = True
             raise

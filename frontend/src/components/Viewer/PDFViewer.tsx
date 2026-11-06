@@ -26,6 +26,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { checkIsTransientError, getTransientErrorMessage, useApiRetry } from "../../hooks/useApiRetry";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { useViewerDocumentTitle } from "../../hooks/useViewerDocumentTitle";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
   type ContentProviderRegistry,
@@ -241,6 +242,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
 
   // Extract filename from path
   const filename = path.split("/").pop() || path;
+  useViewerDocumentTitle(filename);
 
   const isPdfLoading = pdfLoadPhase !== "ready" && pdfLoadPhase !== "error";
 

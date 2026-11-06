@@ -116,7 +116,11 @@ When you print or save as PDF from the browser, the Markdown viewer reformats th
 
 ## Quick Bar: Directory Navigation v2
 
-Directory search and navigation in the quick bar was put on a new foundation. The backend's directory index was upgraded from JSONL to an SQLite database. The local drive directory index was missing entirely in earlier versions. That has been rectified so that almost instantaneous nagivation works on local drives as well as SMB connections.
+Directory search and navigation in the quick bar was put on a new foundation:
+
+- Local drives are now indexed, too.
+- The indexing process is now faster and more resilient.
+- The directory index storage was upgraded from JSONL to SQLite databases.
 
 ## Miscellaneous
 

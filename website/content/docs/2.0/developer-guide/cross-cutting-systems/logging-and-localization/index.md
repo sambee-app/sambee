@@ -55,7 +55,15 @@ For local environment diagnosis, the repo also provides supported log and servic
 
 ### Directory-Search Diagnostics
 
-Use fixed event names and route templates with status, duration, and counts. Do not log search terms, paths, request payloads, pairing codes, or credentials. Log committed changes only after commit; use numeric error codes instead of exception text that can expose private data.
+Use fixed event names and route templates with status, duration, and counts. Do not log search terms, request payloads, pairing codes, or credentials. Omit paths except for the bounded directory-scan item diagnostics below. Log committed changes only after commit; use numeric error codes instead of exception text that can expose private data.
+
+Directory scans emit `directory_scan_started`, `directory_scan_finished`, and `directory_scan_invalidated` at INFO. Finish events report committed progress, group commits, duration, and a fixed abort reason. Invalidation events include the reason and a counter, even when the reason repeats. Use these events to distinguish a resumed pass from repeated observation loss. A lifecycle change alone does not require completed parents to be read again.
+
+Item diagnostics use the fixed codes `access_denied`, `unsafe_traversal`, `unsupported_encoding`, and `scan_failed`. The shared `max_logged_scan_issues_per_pass` limit permits at most 20 individual INFO messages in total per pass, with a quoted source path and no private exception text. Restrict access to logs because these messages contain directory names. Pass totals retain all issue counts, including suppressed messages. Backend finish events carry numeric totals; Companion emits `directory_scan_issue_totals` before its finish event. Partial coverage is not a scan abort.
+
+Backend pass logs include `smb_round_trips`, the number of directory-index request groups attempted during the pass. One compound counts once, not once for each message. Root and metadata probes, loop queries, cleanup requests, and credit-growth echoes count separately. Credit admission that rejects a compound without sending it counts zero. Failed send attempts count, so this is not a measurement of completed network exchanges or latency. Ordinary file browsing is not included.
+
+Companion pass logs include `native_opens`, the number of directory-open attempts made by the source traversal during the pass. The count includes root verification, Linux mount-policy directory checks, fallback traversal, and failed opens. It excludes metadata queries, closes, and index-file I/O. Both counters use per-pass differences from a source-owned total, which survives root rebinding. Start events include the prepared generation, phase, queue counts, and I/O performed during setup. Use the counters to identify repeated opens and probes, and the duration to measure elapsed scan time.
 
 See [Directory-Index Consistency](../../backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for lifecycle and storage rules. See [Companion Support Reference](../../../admin-guide/reference/companion-support-reference/#logging-controls) for operational logging controls.
 

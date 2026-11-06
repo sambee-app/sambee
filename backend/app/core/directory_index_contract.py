@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from types import MappingProxyType
-from typing import Final, Literal, Mapping
+from typing import Final, Literal, Mapping, get_args
 
 CONTRACT_VERSION: Final[Literal[1]] = 1
 MAX_SQL_INTEGER: Final = (1 << 63) - 1
@@ -42,6 +42,15 @@ LIMIT_FIELDS = frozenset(
         "max_query_terms",
         "max_result_limit",
         "row_batch_size",
+        "scan_commit_interval_ms",
+        "scan_commit_max_parents",
+        "scan_bookkeeping_commit_interval_ms",
+        "scan_bookkeeping_commit_max_parents",
+        "max_logged_scan_issues_per_pass",
+        "scan_query_buffer_max_bytes",
+        "scan_pipeline_depth",
+        "scan_read_parallelism",
+        "scan_credit_reserve",
         "query_workers",
         "scan_workers",
         "busy_timeout_ms",
@@ -62,6 +71,18 @@ LIMIT_FIELDS = frozenset(
         "lease_cleanup_batch",
     }
 )
+
+
+ScanPhase = Literal["building", "updating", "idle"]
+
+
+@dataclass(frozen=True)
+class ScanProgress:
+    phase: ScanPhase
+    parents_done: int
+    parents_queued: int
+    directories_found: int
+    started_at_ms: int
 
 
 @dataclass(frozen=True)
@@ -91,6 +112,11 @@ def load_directory_index_contract(path: Path = CONTRACT_PATH) -> DirectoryIndexC
         raise ValueError("Directory-index contract version is unsupported. Restore the shared contract file.")
     limits = document.get("limits")
     policy = document.get("policy")
+    if document.get("scan_progress") != {
+        "fields": [field.name for field in fields(ScanProgress)],
+        "phases": list(get_args(ScanPhase)),
+    }:
+        raise ValueError("Directory-index progress fields are invalid. Restore the shared contract file.")
     if not isinstance(limits, dict) or set(limits) != LIMIT_FIELDS or any(type(value) is not int or value < 1 for value in limits.values()):
         raise ValueError("Directory-index limits are invalid. Restore the shared contract file.")
     if not isinstance(policy, dict) or set(policy) != set(POLICY_FIELDS):

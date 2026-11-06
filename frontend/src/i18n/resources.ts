@@ -774,6 +774,7 @@ export const EN_TRANSLATIONS = {
       status: {
         indexing: "Indexing... ({{count}} directories found)",
         updating: "Updating index... ({{count}} directories)",
+        updatingProgress: "Updating index... ({{done}} of ~{{total}} directories checked)",
         startingIndex: "Starting index...",
         indexCoveragePartial: "Directory index has incomplete coverage.",
         indexCoverageUncertain: "Directory index is not verified. A new check is pending.",

@@ -4,6 +4,8 @@ import {
   getMarkdownCodeSurfaceColors,
   getMarkdownContentStyles,
   getViewerToolbarForegroundColors,
+  MARKDOWN_PRINT_TYPOGRAPHY,
+  MARKDOWN_VIEWER_PRINT_STYLES,
   VIEWER_SCROLL_END_PADDING,
 } from "../viewerStyles";
 
@@ -20,6 +22,56 @@ function resolveThemeValue<T>(value: T | ((theme: Theme) => T), theme: Theme): T
 }
 
 describe("viewerStyles markdown regressions", () => {
+  it("uses compact physical font sizes and removes preview padding from print output", () => {
+    const printStyles = MARKDOWN_VIEWER_PRINT_STYLES["@media print"];
+
+    expect(MARKDOWN_PRINT_TYPOGRAPHY).toEqual({
+      body: "10pt",
+      lineHeight: 1.4,
+      h1: "18pt",
+      h2: "14pt",
+      h3: "12pt",
+      lowerHeadings: "11pt",
+      codeAndTables: "9pt",
+    });
+    expect(printStyles["[data-markdown-print-viewer] [data-markdown-search-root]"]).toMatchObject({
+      padding: 0,
+      fontSize: MARKDOWN_PRINT_TYPOGRAPHY.body,
+      lineHeight: MARKDOWN_PRINT_TYPOGRAPHY.lineHeight,
+    });
+    for (const heading of ["h1", "h2", "h3"] as const) {
+      expect(printStyles[`[data-markdown-print-viewer] [data-markdown-search-root] ${heading}`]).toEqual({
+        fontSize: MARKDOWN_PRINT_TYPOGRAPHY[heading],
+      });
+    }
+    expect(printStyles["[data-markdown-print-viewer] [data-markdown-search-root] table"]).toMatchObject({
+      fontSize: MARKDOWN_PRINT_TYPOGRAPHY.codeAndTables,
+    });
+    const firstBlockRule = Object.entries(printStyles).find(([selector]) => selector.includes("> :not(* + *)"));
+    expect(firstBlockRule?.[0]).toContain("[data-markdown-publication] > :not(* + *)");
+    expect(firstBlockRule?.[1]).toEqual({ marginTop: 0 });
+  });
+
+  it("gives print layout selectors priority over MUI dialog and frame screen styles", () => {
+    const printStyles = MARKDOWN_VIEWER_PRINT_STYLES["@media print"];
+
+    expect(printStyles["[data-markdown-print-viewer].MuiDialog-root"]).toEqual({
+      position: "static !important",
+      overflow: "visible",
+    });
+    const containerRule = Object.entries(printStyles).find(([selector]) => selector.includes(".MuiDialog-container"));
+    expect(containerRule).toBeDefined();
+    expect(containerRule?.[0].split(", ")).toContain("[data-markdown-print-viewer] [data-markdown-print-frame]");
+    expect(containerRule?.[1]).toMatchObject({
+      position: "static",
+      display: "block",
+      height: "auto",
+      maxHeight: "none",
+      overflow: "visible",
+      flex: "none",
+    });
+  });
+
   it("derives toolbar foreground variants from the configured toolbar text", () => {
     expect(getViewerToolbarForegroundColors("#ffffff")).toEqual({
       border: "rgba(255, 255, 255, 0.3)",
