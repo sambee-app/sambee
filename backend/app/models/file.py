@@ -144,6 +144,13 @@ class ContentTransferResult(BaseModel):
         return self
 
 
+class DirectoryIssueDetail(BaseModel):
+    """A directory that could not be fully read during verification."""
+
+    path: str
+    code: Literal["access_denied", "unsupported_encoding", "unsafe_traversal", "scan_failed"]
+
+
 class DirectorySearchResult(BaseModel):
     """Response model for directory search (quick navigate)."""
 
@@ -157,6 +164,9 @@ class DirectorySearchResult(BaseModel):
     accepted_revision: int | None = Field(default=None, ge=0)
     coverage: str | None = None
     coverage_issue_count: int = Field(default=0, ge=0)
+    issue_details_available: bool = False
+    issue_details: list[DirectoryIssueDetail] | None = None
+    issue_details_incomplete: bool = False
     last_verified_at_ms: int | None = Field(default=None, ge=0)
     status_message: str | None = None
     monitoring_state: Literal["starting", "healthy", "recovering", "unavailable"] | None = None

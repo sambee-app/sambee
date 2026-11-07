@@ -96,6 +96,8 @@ Publish usable history and loaded-file results without waiting for index request
 
 Treat incomplete coverage separately from request failure. Background refresh requires `search_contract_version: 1` and must stop when the query, source, visibility, or search session changes, or on terminal failure. See [Directory-Index Consistency](../../backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for storage and freshness rules.
 
+Status messages include the connection name. A status becomes a mouse/touch-only link only when it has additional information; do not add an icon or a keyboard tab stop. `SearchStatusDialog` uses `ResponsiveDialogShell`, retains the query and selected result, and returns focus to the quick bar when closed. Source changes close the dialog and cancel its details request. Directory details load on demand through `include_issue_details`; specific request errors use the already received message. Messages without extra information remain plain text.
+
 ## URL-Driven Workspace Navigation
 
 The URL selects the directory, pane layout, viewer, editing intent, and settings view. The file browser stays mounted under overlays. Loaded content, drafts, locks, selection, scroll, search panels, and zoom remain runtime state.

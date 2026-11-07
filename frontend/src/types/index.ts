@@ -609,6 +609,11 @@ export interface ScanProgress {
   started_at_ms: number;
 }
 
+export interface DirectoryIssueDetail {
+  path: string;
+  code: "access_denied" | "unsupported_encoding" | "unsafe_traversal" | "scan_failed";
+}
+
 export interface DirectorySearchResult {
   search_contract_version?: number | null;
   results: string[];
@@ -620,6 +625,9 @@ export interface DirectorySearchResult {
   accepted_revision?: number | null;
   coverage?: "partial" | "complete" | "uncertain" | null;
   coverage_issue_count?: number;
+  issue_details_available?: boolean;
+  issue_details?: DirectoryIssueDetail[] | null;
+  issue_details_incomplete?: boolean;
   last_verified_at_ms?: number | null;
   status_message?: string | null;
   monitoring_state?: "starting" | "healthy" | "recovering" | "unavailable" | null;

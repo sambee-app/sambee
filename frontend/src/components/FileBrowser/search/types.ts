@@ -74,11 +74,19 @@ export type SearchResult = SearchResultItem | SearchResultGroupHeader;
 export type SearchResultsUpdate = (results: SearchResult[]) => void;
 
 /** Status information from the provider (e.g., indexing progress) */
+export interface SearchStatusDetails {
+  source: string;
+  message?: string;
+  issues?: import("../../../types").DirectoryIssueDetail[];
+  incomplete?: boolean;
+}
+
 export interface SearchStatusInfo {
   /** Short text label describing current status */
   label: string;
   /** Whether an activity spinner should be shown */
   showSpinner: boolean;
+  loadDetails?: (signal: AbortSignal) => Promise<SearchStatusDetails>;
 }
 
 export type SearchSelectionFocusTarget = "file-list" | "quick-bar" | "none";

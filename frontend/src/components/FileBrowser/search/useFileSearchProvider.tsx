@@ -8,6 +8,7 @@ import {
   bestSearchRelevance,
   compareText,
   findTextHighlight,
+  getSearchErrorMessage,
   getSearchRelevance,
   normalizeSearchText,
   rankHistorySearchResults,
@@ -62,6 +63,7 @@ export function useFileSearchProvider({
   const requestGenerationRef = useRef(0);
   const sourceBindingRef = useRef({ connectionId, currentPath, files, history, resultLimit });
   const [historyUnavailable, setHistoryUnavailable] = useState(false);
+  const [failureDetail, setFailureDetail] = useState<string | undefined>();
 
   useLayoutEffect(() => {
     sourceBindingRef.current = { connectionId, currentPath, files, history, resultLimit };
@@ -85,6 +87,7 @@ export function useFileSearchProvider({
         sourceBindingRef.current.resultLimit === resultLimit;
       if (!isCurrent()) return [];
       setHistoryUnavailable(false);
+      setFailureDetail(undefined);
       const terms = searchTerms(query);
       const currentCandidates = files
         .filter((file) => file.type === "file" && (!terms.length || getSearchRelevance(file.name, terms).matchedTermCount > 0))
@@ -175,9 +178,10 @@ export function useFileSearchProvider({
         const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
         if (!isCurrent()) return [];
         return mergeResults(recentResponse);
-      } catch {
+      } catch (error: unknown) {
         if (!isCurrent()) return [];
         setHistoryUnavailable(true);
+        setFailureDetail(getSearchErrorMessage(error));
         return mergeResults(availableResponse);
       }
     },
@@ -200,8 +204,21 @@ export function useFileSearchProvider({
 
   const getStatusInfo = useCallback(
     (): SearchStatusInfo | null =>
-      historyUnavailable ? { label: t("fileBrowser.search.status.fileHistoryUnavailable"), showSpinner: false } : null,
-    [historyUnavailable, t]
+      historyUnavailable
+        ? {
+            label: t("fileBrowser.search.status.connectionStatus", {
+              connection: connectionName,
+              message: t("fileBrowser.search.status.fileHistoryUnavailable"),
+            }),
+            showSpinner: false,
+            ...(failureDetail && failureDetail !== t("fileBrowser.search.status.fileHistoryUnavailable")
+              ? {
+                  loadDetails: async () => ({ source: connectionName, message: failureDetail }),
+                }
+              : {}),
+          }
+        : null,
+    [connectionName, failureDetail, historyUnavailable, t]
   );
 
   const onRemoveSelected = useCallback(

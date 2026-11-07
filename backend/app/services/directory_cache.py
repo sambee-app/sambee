@@ -254,8 +254,19 @@ class DirectoryScanCoordinator:
         self._streamed_parent_reads: set[int] = set()
         self._completed_scan_reads: set[int] = set()
         self._pending_scan_issues: dict[int, dict[str, int]] = {}
+        self.issue_details: set[tuple[str, str]] = set()
+        self.issue_details_incomplete = False
         self.scan_commits = 0
         self.on_scan_commit: Callable[[int], None] | None = None
+
+    def _publish_issue_details(self, parent: str, counts: dict[str, int]) -> None:
+        """Publish diagnostics only after the owning parent transaction succeeds."""
+        self.issue_details = {detail for detail in self.issue_details if detail[0] != parent}
+        for code in counts:
+            if len(self.issue_details) < MAX_LOGGED_SCAN_ISSUES_PER_PASS:
+                self.issue_details.add((parent, code))
+            else:
+                self.issue_details_incomplete = True
 
     def start_scan_groups(self, *, reconcile: bool = False) -> None:
         with self.lock:
@@ -341,6 +352,8 @@ class DirectoryScanCoordinator:
                     if file_ids[generation]:
                         options["file_ids"] = file_ids[generation]
                     self.index.commit_scan_parents(generation, results, **options)
+                    for parent, _children in results:
+                        self._publish_issue_details(parent, issues.get(parent, {}))
                     self.scan_commits += 1
                 if self.on_scan_commit is not None:
                     for generation in changed:
@@ -656,6 +669,9 @@ class DirectoryScanCoordinator:
                     self.flush_scan_group_if_due()
             else:
                 self.index.record_issue(generation_id, code, reconcile=reconcile)
+                counts = {previous_code: 1 for parent, previous_code in self.issue_details if parent == token.path}
+                counts[code] = 1
+                self._publish_issue_details(token.path, counts)
 
     def _record_scan_issue(self, token: ScanReadToken, generation_id: int, record: Callable[[int], None]) -> None:
         with self.lock:
@@ -689,6 +705,7 @@ class DirectoryScanCoordinator:
                     if token.producer_id in self._pending_scan_issues
                     else None,
                 )
+                self._publish_issue_details(token.path, self._pending_scan_issues.get(token.producer_id, {}))
             elif self._scan_group is not None:
                 existing = self._scan_group.get(token.producer_id)
                 snapshot_children = existing.children if existing is not None else []
@@ -1706,6 +1723,12 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             return "unsupported_encoding"
         return "scan_failed"
 
+    def directory_issue_details(self) -> tuple[list[dict[str, str]], bool]:
+        """Return bounded, source-local diagnostics, never a persistent error history."""
+        with self.coordinator.lock:
+            details = [{"path": parent or "/", "code": code} for parent, code in sorted(self.coordinator.issue_details)]
+            return details, self.coordinator.issue_details_incomplete
+
     def _record_item_issue(self, token: ScanReadToken, generation: int, code: str, *, reconcile: bool, path: str | None = None) -> None:
         self.coordinator.record_issue(token, generation, code, reconcile=reconcile)
         self._scan_issue_counts[code] = self._scan_issue_counts.get(code, 0) + 1
@@ -2293,6 +2316,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     resuming = self.index.has_resumable_scan()
                     generation, _selected = self.index.prepare_scan()
                     if not resuming:
+                        self.coordinator.issue_details.clear()
+                        self.coordinator.issue_details_incomplete = False
                         self._scan_epoch = (generation, baseline)
                     if self.coordinator.observation_lost:
                         while self.index.requeue_completed_scan_batch(generation):

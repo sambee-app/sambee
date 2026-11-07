@@ -699,6 +699,74 @@ describe("UnifiedSearchBar", () => {
     expect(screen.queryByText("Loading history")).not.toBeInTheDocument();
   });
 
+  it("opens status details by pointer without changing the query or list selection", async () => {
+    const user = userEvent.setup();
+    const loadDetails = vi.fn(async () => ({
+      source: "FS1",
+      issues: [{ path: "private", code: "access_denied" as const }],
+      incomplete: true,
+    }));
+    const status = { label: "FS1: not all directories could be indexed.", showSpinner: false, loadDetails };
+    renderWithProvider(<UnifiedSearchBar provider={{ ...footerProvider, getStatusInfo: () => status }} />);
+    const input = screen.getByRole("textbox");
+    await user.click(input);
+    await user.type(input, "reports");
+    const link = await screen.findByRole("link", { name: status.label });
+    expect(link).toHaveAttribute("tabindex", "-1");
+    expect(link.querySelector("svg")).toBeNull();
+    expect(loadDetails).not.toHaveBeenCalled();
+    const selection = input.getAttribute("aria-activedescendant");
+    await user.click(link);
+    expect(await screen.findByRole("dialog", { name: "Directory Search Status" })).toBeInTheDocument();
+    expect(await screen.findByText("private")).toBeInTheDocument();
+    expect(screen.getByText("Access denied")).toBeInTheDocument();
+    expect(screen.getByText("Only some affected directories are listed.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input).toHaveValue("reports");
+    expect(input.getAttribute("aria-activedescendant")).toBe(selection);
+    expect(screen.getByRole("option", { name: "Documents" })).toBeInTheDocument();
+  });
+
+  it.each(["stale", "failed"])("shows %s details without losing the quick-bar query", async (outcome) => {
+    const user = userEvent.setup();
+    const status = {
+      label: "FS1: not all directories could be indexed.",
+      showSpinner: false,
+      loadDetails:
+        outcome === "stale"
+          ? async () => ({ source: "FS1", issues: [] })
+          : async () => {
+              throw new Error("Disconnected");
+            },
+    };
+    renderWithProvider(<UnifiedSearchBar provider={{ ...footerProvider, getStatusInfo: () => status }} />);
+    const input = screen.getByRole("textbox");
+    await user.click(input);
+    await user.type(input, "reports");
+    await user.click(await screen.findByRole("link", { name: status.label }));
+    const message =
+      outcome === "stale"
+        ? "These details are no longer available. Refresh the status."
+        : "Could not load status details. Check the source connection and reopen this dialog.";
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input).toHaveValue("reports");
+  });
+
+  it("leaves statuses without additional information as plain text", async () => {
+    const user = userEvent.setup();
+    const status = { label: "FS1: not all directories could be indexed.", showSpinner: false };
+    renderWithProvider(<UnifiedSearchBar provider={{ ...footerProvider, getStatusInfo: () => status }} />);
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "reports");
+    expect(await screen.findByText(status.label)).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    await user.click(screen.getByText(status.label));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("publishes selectable rows before the final response and rejects old-query updates", async () => {
     const user = userEvent.setup();
     const updates = new Map<string, SearchResultsUpdate>();

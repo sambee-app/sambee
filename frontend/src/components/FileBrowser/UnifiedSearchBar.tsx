@@ -54,7 +54,8 @@ import {
   QuickBarResultGroupHeader,
   QuickBarResultRow,
 } from "./QuickBarResultRow";
-import type { SearchProvider, SearchResult, SearchSelectionAction, SearchSelectionBehavior } from "./search/types";
+import { SearchStatusDialog } from "./SearchStatusDialog";
+import type { SearchProvider, SearchResult, SearchSelectionAction, SearchSelectionBehavior, SearchStatusInfo } from "./search/types";
 
 // ============================================================================
 // Constants
@@ -196,6 +197,7 @@ export function UnifiedSearchBar({
   const [removeError, setRemoveError] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isSearchPending, setIsSearchPending] = useState(false);
+  const [statusDialog, setStatusDialog] = useState<SearchStatusInfo | null>(null);
 
   const theme = useTheme();
   const { t } = useTranslation();
@@ -892,8 +894,9 @@ export function UnifiedSearchBar({
   // handleClickAway
   //
   const handleClickAway = useCallback(() => {
+    if (statusDialog) return;
     dismissSearch();
-  }, [dismissSearch]);
+  }, [dismissSearch, statusDialog]);
 
   // ── Re-open on typing after click-away ─────────────────────────────────
   //
@@ -1009,6 +1012,7 @@ export function UnifiedSearchBar({
     const shouldOpenOnActivation = shouldSearchOnActivation || shouldShowBelowMinimumOnActivation;
     const shouldPreserveSearchStateOnActivation = shouldSearchOnActivation && !providerChanged;
 
+    setStatusDialog(null);
     if (shouldPreserveSearchStateOnActivation) {
       resetOpenResults();
     } else {
@@ -1253,6 +1257,10 @@ export function UnifiedSearchBar({
             {/* Status indicator */}
             {statusInfo && (
               <Box
+                role={statusInfo.loadDetails ? "link" : undefined}
+                tabIndex={statusInfo.loadDetails ? -1 : undefined}
+                onPointerDown={statusInfo.loadDetails ? (event) => event.preventDefault() : undefined}
+                onClick={statusInfo.loadDetails ? () => setStatusDialog(statusInfo) : undefined}
                 sx={{
                   px: 2,
                   py: 0.5,
@@ -1261,10 +1269,16 @@ export function UnifiedSearchBar({
                   gap: 1,
                   borderBottom: results.length > 0 || showNoResults || showSearchError || showRemoveError ? 1 : 0,
                   borderColor: "divider",
+                  cursor: statusInfo.loadDetails ? "pointer" : undefined,
+                  textDecoration: statusInfo.loadDetails ? "underline" : undefined,
+                  "&:hover": statusInfo.loadDetails ? { color: "primary.main" } : {},
                 }}
               >
                 {statusInfo.showSpinner && <CircularProgress size={14} />}
-                <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                <Typography
+                  variant="caption"
+                  sx={{ color: statusInfo.loadDetails ? "inherit" : "text.secondary", overflowWrap: "anywhere" }}
+                >
                   {statusInfo.label}
                 </Typography>
               </Box>
@@ -1429,6 +1443,7 @@ export function UnifiedSearchBar({
             )}
           </Paper>
         </Popper>
+        {statusDialog && <SearchStatusDialog status={statusDialog} onClose={() => setStatusDialog(null)} />}
       </Box>
     </ClickAwayListener>
   );

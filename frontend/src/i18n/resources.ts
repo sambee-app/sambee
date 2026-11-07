@@ -775,17 +775,32 @@ export const EN_TRANSLATIONS = {
         directoriesIndexed_other: "{{count}} directories indexed",
       },
       status: {
+        connectionStatus: "{{connection}}: {{message}}",
         indexing: "Indexing... ({{count}} directories found)",
         updating: "Updating index... ({{count}} directories)",
         updatingProgress: "Updating index... ({{done}} of ~{{total}} directories checked)",
         startingIndex: "Starting index...",
-        indexCoveragePartial: "Directory index has incomplete coverage.",
+        indexCoveragePartial: "not all directories could be indexed.",
         indexCoverageUncertain: "Directory index is not verified. A new check is pending.",
         legacyDirectorySearch:
           "Multi-term directory search is not confirmed for this source. Search one directory term or check backend and companion support.",
         historyUnavailable: "Recent directories are unavailable. Check the backend connection and retry.",
         fileHistoryUnavailable: "Recent files are unavailable. Check the backend connection and retry.",
         indexUnavailable: "Directory search is unavailable. Check the source connection and retry.",
+      },
+      statusDetails: {
+        title: "Directory Search Status",
+        source: "Source",
+        impact: "Search results may not include directories within these locations.",
+        incomplete: "Only some affected directories are listed.",
+        unavailable: "These details are no longer available. Refresh the status.",
+        failed: "Could not load status details. Check the source connection and reopen this dialog.",
+        reasons: {
+          access_denied: "Access denied",
+          unsupported_encoding: "A directory name could not be read",
+          unsafe_traversal: "A directory could not be traversed safely",
+          scan_failed: "A directory could not be read",
+        },
       },
       groups: {
         recentFiles: "Recent files",

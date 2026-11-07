@@ -28,6 +28,7 @@ import {
   bestSearchRelevance,
   findSearchHighlights,
   findTextHighlight,
+  getSearchErrorMessage,
   getSearchRelevance,
   rankHistorySearchResults,
   removeRecentHistoryResult,
@@ -237,9 +238,17 @@ export function useDirectorySearchProvider(
   const [totalMatches, setTotalMatches] = useState(0);
   const [coverageStatus, setCoverageStatus] = useState<Pick<
     DirectorySearchResult,
-    "coverage" | "coverage_issue_count" | "last_verified_at_ms" | "status_message" | "monitoring_state" | "retry_after_ms" | "scan_progress"
+    | "coverage"
+    | "coverage_issue_count"
+    | "last_verified_at_ms"
+    | "status_message"
+    | "monitoring_state"
+    | "retry_after_ms"
+    | "scan_progress"
+    | "issue_details_available"
   > | null>(null);
   const [sourceFailure, setSourceFailure] = useState<"history" | "index" | null>(null);
+  const [failureDetail, setFailureDetail] = useState<string | undefined>();
   const [legacyIndex, setLegacyIndex] = useState(false);
   const indexFailureRef = useRef(false);
   const indexResponseRef = useRef<DirectorySearchResult | null>(null);
@@ -264,6 +273,7 @@ export function useDirectorySearchProvider(
     setCoverageStatus((previous) =>
       previous?.coverage === response.coverage &&
       previous?.coverage_issue_count === response.coverage_issue_count &&
+      previous?.issue_details_available === response.issue_details_available &&
       previous?.last_verified_at_ms === response.last_verified_at_ms &&
       previous?.status_message === response.status_message &&
       previous?.monitoring_state === response.monitoring_state &&
@@ -277,6 +287,7 @@ export function useDirectorySearchProvider(
         : {
             coverage: response.coverage,
             coverage_issue_count: response.coverage_issue_count,
+            issue_details_available: response.issue_details_available,
             last_verified_at_ms: response.last_verified_at_ms,
             status_message: response.status_message,
             monitoring_state: response.monitoring_state,
@@ -297,6 +308,7 @@ export function useDirectorySearchProvider(
     terminalIndexRef.current = false;
     indexFailureRef.current = false;
     setSourceFailure(null);
+    setFailureDetail(undefined);
     setCacheState("empty");
     setCoverageStatus(null);
     return () => {
@@ -447,6 +459,15 @@ export function useDirectorySearchProvider(
         retryDelayRef.current = failure.delay;
       }
       setSourceFailure(indexFailureRef.current ? "index" : recentOutcome.status === "rejected" ? "history" : null);
+      setFailureDetail((previous) =>
+        indexOutcome.status === "rejected"
+          ? getSearchErrorMessage(indexOutcome.reason)
+          : indexFailureRef.current
+            ? previous
+            : recentOutcome.status === "rejected"
+              ? getSearchErrorMessage(recentOutcome.reason)
+              : undefined
+      );
       return mergeResults();
     },
     [
@@ -586,6 +607,7 @@ export function useDirectorySearchProvider(
           indexResponseRef.current = result;
           indexFailureRef.current = false;
           setSourceFailure(null);
+          setFailureDetail(undefined);
           terminalIndexRef.current = result.search_contract_version != null && result.search_contract_version !== SEARCH_CONTRACT_VERSION;
           updateIndexStatus(result);
         }
@@ -597,6 +619,7 @@ export function useDirectorySearchProvider(
           retryDelayRef.current = failure.delay;
           indexFailureRef.current = true;
           setSourceFailure("index");
+          setFailureDetail(getSearchErrorMessage(error));
           logger.warn("Directory cache activation is unavailable", {}, "directory-search-provider");
         }
       });
@@ -641,7 +664,36 @@ export function useDirectorySearchProvider(
     fetchResults,
     onSelect,
     onRemoveSelected,
-    getStatusInfo,
+    getStatusInfo: () => {
+      const status = getStatusInfo();
+      if (!status) return null;
+      const source = options.getConnectionName?.(connectionId) ?? connectionId;
+      const partial = coverageStatus?.coverage === "partial" && cacheState === "ready" && !sourceFailure && !coverageStatus.status_message;
+      return {
+        ...status,
+        label: t("fileBrowser.search.status.connectionStatus", {
+          connection: source,
+          message: partial ? t("fileBrowser.search.status.indexCoveragePartial") : status.label,
+        }),
+        ...(partial && coverageStatus.issue_details_available
+          ? {
+              loadDetails: async (signal: AbortSignal) => {
+                const response = await history.searchDirectories(connectionId, "", {
+                  includeDotDirectories,
+                  includeIssueDetails: true,
+                  signal,
+                });
+                return { source, issues: response.issue_details ?? [], incomplete: response.issue_details_incomplete };
+              },
+            }
+          : {}),
+        ...(sourceFailure && failureDetail && failureDetail !== status.label
+          ? {
+              loadDetails: async () => ({ source, message: failureDetail }),
+            }
+          : {}),
+      };
+    },
     getRefreshIntervalMs,
     invalidateResults: () => {
       recentResponseRef.current = null;

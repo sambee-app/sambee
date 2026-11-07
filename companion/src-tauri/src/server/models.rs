@@ -639,6 +639,12 @@ pub struct ScanProgress {
 }
 
 #[derive(Debug, Serialize)]
+pub struct DirectoryIssueDetail {
+    pub path: String,
+    pub code: &'static str,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DirectorySearchResult {
     pub results: Vec<String>,
     pub total_matches: usize,
@@ -650,6 +656,9 @@ pub struct DirectorySearchResult {
     pub accepted_revision: Option<i64>,
     pub coverage: Option<String>,
     pub coverage_issue_count: usize,
+    pub issue_details_available: bool,
+    pub issue_details: Option<Vec<DirectoryIssueDetail>>,
+    pub issue_details_incomplete: bool,
     pub last_verified_at_ms: Option<i64>,
     pub status_message: Option<String>,
     pub monitoring_state: Option<String>,
