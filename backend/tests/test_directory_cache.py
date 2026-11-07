@@ -350,6 +350,7 @@ class TestCacheState:
         """Verify all expected cache states exist with correct values."""
 
         assert CacheState.EMPTY.value == "empty"
+        assert CacheState.OPENING.value == "opening"
         assert CacheState.BUILDING.value == "building"
         assert CacheState.READY.value == "ready"
         assert CacheState.UPDATING.value == "updating"
@@ -363,7 +364,14 @@ class TestCacheState:
     def test_enum_member_count(self):
         """Ensure no unexpected states were added."""
 
-        assert len(CacheState) == 4
+        expected_states = (
+            CacheState.EMPTY,
+            CacheState.OPENING,
+            CacheState.BUILDING,
+            CacheState.READY,
+            CacheState.UPDATING,
+        )
+        assert len(CacheState) == len(expected_states)
 
 
 # ============================================================================
