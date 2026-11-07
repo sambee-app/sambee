@@ -95,7 +95,6 @@ By default, the service is available at:
 
 - Frontend: `http://localhost:8000`
 - Backend API: `http://localhost:8000/api`
-- API docs: `http://localhost:8000/docs`
 
 ## Verify the Deployment
 

@@ -116,18 +116,6 @@ For a new or changed endpoint, usually verify:
 - error responses degrade in a controlled way
 - derived frontend behavior still works once the typed response is consumed
 
-#### OpenAPI as a Future Option
-
-Sambee exposes and tests the backend OpenAPI schema, including `/openapi.json`, but TypeScript type generation from that schema is not part of the checked-in frontend workflow today.
-
-If API surface area grows enough to justify generation, OpenAPI-driven types are a reasonable future option because the backend is already able to publish the schema. Treat that as an explicit workflow addition, not as something the repository already guarantees.
-
-Possible future additions include:
-
-- generating TypeScript types from the FastAPI schema in a reviewed frontend workflow
-- adding CI checks that detect generated-type drift
-- widening contract-style coverage for endpoints that still rely mostly on broader unit tests or integration tests
-
 ### Localization
 
 Localization is treated as typed product behavior, not just string replacement. If you touch translation wiring or browser-to-companion localization sync, validate the relevant frontend and companion checks.
