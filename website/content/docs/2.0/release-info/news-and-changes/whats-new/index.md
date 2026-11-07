@@ -48,22 +48,6 @@ Previous versions of Sambee introduced multi-selection for mobile users and keyb
 - SMB file metadata timezones and ZIP creation now consistently use UTC.
 - SMB connection idle cleanup and failed-request duration logs now use a monotonic clock, so daylight saving time and system clock changes do not affect elapsed-time calculations.
 
-#### SMB Change Monitoring Fixes
-
-File list:
-
-- File-list monitoring now watches only immediate children, so changes deeper in a folder don't trigger unnecessary refreshes.
-- When changes happen, the file list is now refreshed in the background.
-- File list refreshes are now coalesced and rate-limited.
-
-Directory cache for instant navigation:
-
-- Quick directory navigation keeps its existing index when a background scan times out or fails.
-- Background scans keep the live directory index when a removal or rename overlaps a read, including when its notification arrives late. This prevents changes from being applied twice when a folder's name is reused.
-- Changing a connection's target or sign-in details no longer reuses directory suggestions from its old configuration.
-- Directory indexing excludes junctions, other reparse descendants, and DFS shares to prevent unsafe traversal.
-- Startup verification and scheduled directory scans now stop cleanly when their cache is removed.
-
 #### Other Fixes
 
 - Invalid file browser URLs no longer break the page or prevent the other pane from loading.
@@ -115,13 +99,14 @@ When you print or save as PDF from the browser, the Markdown viewer reformats th
 - Closing the editor by clicking the X now works in the same way as pressing <kbd>Esc</kbd>: it returns to the viewer. From there, another click returns to the file list.
 - When reloading a browser tab with an editor, Sambee now recovers the file lock. This prevents the error `Unable to enter edit mode. File is locked for editing by <username>`.
 
-## Quick Bar: Directory Navigation v2
+## Directory Navigation v2
 
 Directory search and navigation in the quick bar was put on a new foundation:
 
 - Local drives are now indexed, too.
 - The indexing process is now faster and more resilient.
-- The directory index storage was upgraded from JSONL to SQLite databases.
+- Indexing warnings or errors are surfaced in the UI.
+- The index storage was upgraded from JSONL to SQLite databases.
 
 ## Miscellaneous
 
