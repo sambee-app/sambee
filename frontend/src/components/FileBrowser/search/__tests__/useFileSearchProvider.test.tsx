@@ -56,9 +56,10 @@ describe("useFileSearchProvider", () => {
       await pending;
     });
     expect(await pending).toEqual(onUpdate.mock.calls[0]?.[0]);
-    expect(result.current.getStatusInfo()).toEqual({
-      label: "Recent files are unavailable. Check the backend connection and retry.",
+    expect(result.current.getStatusInfo()).toMatchObject({
+      label: "Reports server: Recent files are unavailable. Check the backend connection and retry.",
       showSpinner: false,
+      loadDetails: expect.any(Function),
     });
   });
 

@@ -20,8 +20,8 @@ export function CompanionPolicyDelivery() {
   const { t } = useTranslation();
   const snapshot = useCompanionSettingsSync();
   const busy = snapshot.phase === "synchronizing";
-  const failed = snapshot.phase === "delivery_failed";
-  const warning = failed || snapshot.phase === "authority_conflict" || snapshot.phase === "update_required";
+  const needsRetry = snapshot.phase === "delivery_failed" || snapshot.phase === "pairing_required";
+  const warning = needsRetry || snapshot.phase === "authority_conflict" || snapshot.phase === "update_required";
   const phaseLabel = (phase: SettingsSyncPhase) => t(`settings.companionSync.${phase}`);
   return (
     <FormSurface testId="companion-settings-surface">
@@ -47,7 +47,7 @@ export function CompanionPolicyDelivery() {
             disabled={busy}
             onClick={() => companionSettingsSync.request(false, true)}
           >
-            {t(failed ? "common.actions.retry" : "settings.directorySearch.refresh")}
+            {t(needsRetry ? "common.actions.retry" : "settings.directorySearch.refresh")}
           </Button>
         </Box>
       </FormRow>

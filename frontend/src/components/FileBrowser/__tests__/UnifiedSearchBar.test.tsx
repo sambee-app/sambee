@@ -4,13 +4,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { browserHistoryService } from "../../../services/browserHistoryService";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
+import { type FileEntry, FileType } from "../../../types";
 import { getQuickBarResultRowHeight, QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT, QUICK_BAR_RESULT_ITEM_HEIGHT } from "../QuickBarResultRow";
 import { SEARCH_CONTRACT_VERSION } from "../search/recentHistory";
 import type { SearchProvider, SearchResultsUpdate } from "../search/types";
 import { useDirectorySearchProvider } from "../search/useDirectorySearchProvider";
+import { useFileSearchProvider } from "../search/useFileSearchProvider";
 import { UnifiedSearchBar } from "../UnifiedSearchBar";
 
 const virtualizerSizeCache = new Map<string | number, number>();
+const virtualizerScrollToOffset = vi.fn();
 const INPUT_DEBOUNCE_MS = 160;
 const QUIET_REFRESH_INTERVAL_MS = 500;
 const MOCK_HISTORY_RESPONSE_MS = 40;
@@ -48,6 +51,7 @@ vi.mock("@tanstack/react-virtual", () => ({
           return virtualItem;
         });
       },
+      scrollToOffset: virtualizerScrollToOffset,
       scrollToIndex: vi.fn(),
     };
   },
@@ -634,6 +638,7 @@ describe("UnifiedSearchBar", () => {
   afterEach(async () => {
     cleanup();
     virtualizerSizeCache.clear();
+    virtualizerScrollToOffset.mockClear();
     await setLocale("en");
   });
 
@@ -692,6 +697,74 @@ describe("UnifiedSearchBar", () => {
       expect(fetchResults).toHaveBeenCalledWith("", expect.any(AbortSignal), expect.any(Function));
     });
     expect(screen.queryByText("Loading history")).not.toBeInTheDocument();
+  });
+
+  it("opens status details by pointer without changing the query or list selection", async () => {
+    const user = userEvent.setup();
+    const loadDetails = vi.fn(async () => ({
+      source: "FS1",
+      issues: [{ path: "private", code: "access_denied" as const }],
+      incomplete: true,
+    }));
+    const status = { label: "FS1: not all directories could be indexed.", showSpinner: false, loadDetails };
+    renderWithProvider(<UnifiedSearchBar provider={{ ...footerProvider, getStatusInfo: () => status }} />);
+    const input = screen.getByRole("textbox");
+    await user.click(input);
+    await user.type(input, "reports");
+    const link = await screen.findByRole("link", { name: status.label });
+    expect(link).toHaveAttribute("tabindex", "-1");
+    expect(link.querySelector("svg")).toBeNull();
+    expect(loadDetails).not.toHaveBeenCalled();
+    const selection = input.getAttribute("aria-activedescendant");
+    await user.click(link);
+    expect(await screen.findByRole("dialog", { name: "Directory Search Status" })).toBeInTheDocument();
+    expect(await screen.findByText("private")).toBeInTheDocument();
+    expect(screen.getByText("Access denied")).toBeInTheDocument();
+    expect(screen.getByText("Only some affected directories are listed.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input).toHaveValue("reports");
+    expect(input.getAttribute("aria-activedescendant")).toBe(selection);
+    expect(screen.getByRole("option", { name: "Documents" })).toBeInTheDocument();
+  });
+
+  it.each(["stale", "failed"])("shows %s details without losing the quick-bar query", async (outcome) => {
+    const user = userEvent.setup();
+    const status = {
+      label: "FS1: not all directories could be indexed.",
+      showSpinner: false,
+      loadDetails:
+        outcome === "stale"
+          ? async () => ({ source: "FS1", issues: [] })
+          : async () => {
+              throw new Error("Disconnected");
+            },
+    };
+    renderWithProvider(<UnifiedSearchBar provider={{ ...footerProvider, getStatusInfo: () => status }} />);
+    const input = screen.getByRole("textbox");
+    await user.click(input);
+    await user.type(input, "reports");
+    await user.click(await screen.findByRole("link", { name: status.label }));
+    const message =
+      outcome === "stale"
+        ? "These details are no longer available. Refresh the status."
+        : "Could not load status details. Check the source connection and reopen this dialog.";
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input).toHaveValue("reports");
+  });
+
+  it("leaves statuses without additional information as plain text", async () => {
+    const user = userEvent.setup();
+    const status = { label: "FS1: not all directories could be indexed.", showSpinner: false };
+    renderWithProvider(<UnifiedSearchBar provider={{ ...footerProvider, getStatusInfo: () => status }} />);
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "reports");
+    expect(await screen.findByText(status.label)).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    await user.click(screen.getByText(status.label));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("publishes selectable rows before the final response and rejects old-query updates", async () => {
@@ -1003,6 +1076,168 @@ describe("UnifiedSearchBar", () => {
     await waitFor(() => {
       expect(screen.getByRole("listbox")).toBeInTheDocument();
     });
+  });
+
+  it("fetches file history when the source updates during first activation", async () => {
+    const searchRecentFiles = vi.spyOn(browserHistoryService, "searchRecentFiles").mockResolvedValue({ results: [], result_limit: 50 });
+    const initialFiles: FileEntry[] = [];
+    const loadedFiles = [{ name: "report.txt", type: FileType.FILE }] as FileEntry[];
+    function SearchHarness({ active }: { active: boolean }) {
+      const fileProvider = useFileSearchProvider({
+        connectionId: "connection-1",
+        currentPath: "",
+        files: active ? loadedFiles : initialFiles,
+        connectionName: "Demo",
+        resultLimit: 50,
+        getConnectionName: () => "Demo",
+        onOpenCurrentFile: vi.fn(),
+        onOpenRecentFile: vi.fn(),
+      });
+      return <UnifiedSearchBar provider={active ? fileProvider : resultsProvider} activationToken={active ? 1 : 0} />;
+    }
+    const { rerender } = renderWithProvider(<SearchHarness active={false} />);
+
+    rerender(
+      <SambeeThemeProvider>
+        <SearchHarness active />
+      </SambeeThemeProvider>
+    );
+    await act(async () => screen.getByRole("textbox").focus());
+
+    expect(await screen.findByRole("option", { name: /report.txt/ })).toBeInTheDocument();
+    expect(searchRecentFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for file history before opening the initial file-search menu", async () => {
+    const user = userEvent.setup();
+    let releaseHistory = () => {};
+    vi.spyOn(browserHistoryService, "searchRecentFiles").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseHistory = () => resolve({ results: [], result_limit: 50 });
+        })
+    );
+    const files = [{ name: "report.txt", type: FileType.FILE }] as FileEntry[];
+    function SearchHarness() {
+      const provider = useFileSearchProvider({
+        connectionId: "connection-1",
+        currentPath: "",
+        files,
+        connectionName: "Demo",
+        resultLimit: 50,
+        getConnectionName: () => "Demo",
+        onOpenCurrentFile: vi.fn(),
+        onOpenRecentFile: vi.fn(),
+      });
+      return <UnifiedSearchBar provider={provider} />;
+    }
+    renderWithProvider(<SearchHarness />);
+
+    await user.click(screen.getByRole("textbox"));
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+
+    await act(async () => releaseHistory());
+    expect(await screen.findByRole("option", { name: /report.txt/ })).toBeInTheDocument();
+  });
+
+  it("starts one search when shortcut activation is followed by input focus", async () => {
+    const fetchResults = vi.fn<SearchProvider["fetchResults"]>(() => new Promise<[]>(() => {}));
+    const onActivate = vi.fn();
+    const provider = { ...resultsProvider, fetchResults, onActivate };
+    const { rerender } = renderWithProvider(<UnifiedSearchBar provider={provider} activationToken={0} />);
+
+    rerender(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={provider} activationToken={1} />
+      </SambeeThemeProvider>
+    );
+    await act(async () => screen.getByRole("textbox").focus());
+
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    expect(fetchResults).toHaveBeenCalledTimes(1);
+    expect(onActivate.mock.invocationCallOrder[0]).toBeLessThan(fetchResults.mock.invocationCallOrder[0] ?? 0);
+    expect(fetchResults.mock.calls[0]?.[1]?.aborted).toBe(false);
+  });
+
+  it.each(["suppressDropdown", "disableDropdown"] as const)("preserves the query when %s is cleared", async (prop) => {
+    const user = userEvent.setup();
+    const fetchResults = vi.fn<SearchProvider["fetchResults"]>(async (query) => [
+      {
+        kind: "result",
+        id: query || "all-commands",
+        value: query || "all-commands",
+        icon: "command",
+        primaryText: query || "All commands",
+      },
+    ]);
+    const provider = { ...commandsProvider, fetchResults };
+    const { rerender } = renderWithProvider(<UnifiedSearchBar provider={provider} />);
+
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "rename");
+    expect(await screen.findByRole("option", { name: "rename" })).toBeInTheDocument();
+
+    rerender(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={provider} {...{ [prop]: true }} />
+      </SambeeThemeProvider>
+    );
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    fetchResults.mockClear();
+
+    rerender(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={provider} {...{ [prop]: false }} />
+      </SambeeThemeProvider>
+    );
+
+    expect(await screen.findByRole("option", { name: "rename" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox")).toHaveValue("rename");
+    expect(fetchResults).toHaveBeenCalledTimes(1);
+    expect(fetchResults.mock.calls[0]?.[0]).toBe("rename");
+  });
+
+  it.each([
+    { grouped: false, shortcut: true, close: true },
+    { grouped: true, shortcut: true, close: true },
+    { grouped: false, shortcut: false, close: true },
+    { grouped: true, shortcut: false, close: true },
+    { grouped: false, shortcut: true, close: false },
+    { grouped: true, shortcut: true, close: false },
+  ])("resets results on activation (grouped: $grouped, shortcut: $shortcut, close: $close)", async ({ grouped, shortcut, close }) => {
+    const user = userEvent.setup();
+    const groupedProvider = createGroupedProvider(vi.fn());
+    const provider = {
+      ...groupedProvider,
+      fetchResults: async (query: string, signal: AbortSignal) =>
+        (await groupedProvider.fetchResults(query, signal)).filter((result) => grouped || result.kind === "result"),
+    };
+    const { rerender } = renderWithProvider(<UnifiedSearchBar provider={provider} activationToken={0} />);
+    const searchInput = screen.getByRole("textbox");
+
+    await user.click(searchInput);
+    expect(await screen.findByRole("option", { name: /Quarterly report/ })).toHaveAttribute("aria-selected", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /Annual report/ })).toHaveAttribute("aria-selected", "true");
+    if (close) {
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    }
+    virtualizerScrollToOffset.mockClear();
+
+    if (shortcut) {
+      rerender(
+        <SambeeThemeProvider>
+          <UnifiedSearchBar provider={provider} activationToken={1} />
+        </SambeeThemeProvider>
+      );
+    } else {
+      fireEvent.blur(searchInput);
+      fireEvent.focus(searchInput);
+    }
+
+    expect(await screen.findByRole("option", { name: /Quarterly report/ })).toHaveAttribute("aria-selected", "true");
+    expect(virtualizerScrollToOffset).toHaveBeenCalledWith(0);
   });
 
   it("reopens the commands dropdown when the same mode is reactivated from outside the quick bar", async () => {

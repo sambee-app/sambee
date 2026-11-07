@@ -29,7 +29,7 @@ use super::directory_index::{
 use super::directory_traversal::NativeIdentity;
 use super::directory_traversal::{source_error, NativeIo, NativeParent, NativeRoot, TraversalIssue, MOUNT_BOUNDARY_CAPABILITY_ERROR};
 use super::drives::{volume_evidence, VolumeChange, VolumeEvidence};
-use super::models::{DirectorySearchResult, ScanProgress};
+use super::models::{DirectoryIssueDetail, DirectorySearchResult, ScanProgress};
 
 const CONTRACT_JSON: &str = include_str!("../../../../shared/directory-index/contract.json");
 const STALLED_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -524,6 +524,8 @@ struct Observations {
     streamed_parent_reads: HashSet<u64>,
     scan_commits: usize,
     scan_issue_counts: HashMap<&'static str, usize>,
+    issue_details: HashSet<(String, &'static str)>,
+    issue_details_incomplete: bool,
     pending_scan_issues: HashMap<u64, HashMap<&'static str, usize>>,
 }
 
@@ -598,6 +600,30 @@ impl InvalidationReason {
 }
 
 impl Observations {
+    fn publish_issue_details(&mut self, parent: &str, counts: &HashMap<&'static str, usize>) -> Result<(), IndexError> {
+        self.issue_details.retain(|(path, _code)| path != parent);
+        let maximum = limit("max_logged_scan_issues_per_pass")?;
+        for code in counts.keys() {
+            if self.issue_details.len() < maximum {
+                self.issue_details.insert((parent.to_owned(), code));
+            } else {
+                self.issue_details_incomplete = true;
+            }
+        }
+        Ok(())
+    }
+
+    fn discard_missing_issue_details(&mut self, index: &DirectoryIndex, generation: i64) -> Result<(), IndexError> {
+        let mut missing = HashSet::new();
+        for (path, _code) in &self.issue_details {
+            if !path.is_empty() && !index.contains_directory(generation, path)? {
+                missing.insert(path.clone());
+            }
+        }
+        self.issue_details.retain(|(path, _code)| !missing.contains(path));
+        Ok(())
+    }
+
     fn scan_issue_bytes(&self, producer: u64) -> usize {
         self.pending_scan_issues.get(&producer).map_or(0, |counts| {
             counts.iter().map(|(code, count)| code.len() + count.to_string().len()).sum()
@@ -871,6 +897,8 @@ impl Drop for MutationObservation {
     }
 }
 
+const INDEX_OPENING_STATE: &str = "opening";
+
 struct SourceStatus {
     state: &'static str,
     message: Option<String>,
@@ -1047,7 +1075,7 @@ impl LocalSource {
             watcher_reconciling: AtomicBool::new(true),
             observations: Mutex::new(Observations::default()),
             status: Mutex::new(SourceStatus {
-                state: "building",
+                state: INDEX_OPENING_STATE,
                 message: None,
                 progress: now,
                 verified: now,
@@ -1462,7 +1490,15 @@ impl LocalSource {
                 break;
             };
             writer.mutate_observed_path(mutation)?;
-            observations.bytes -= *bytes;
+            let bytes = *bytes;
+            if let DirectoryMutation::Remove { path } = mutation {
+                let prefix = format!("{path}/");
+                let path = path.clone();
+                observations
+                    .issue_details
+                    .retain(|(parent, _code)| parent != &path && !parent.starts_with(&prefix));
+            }
+            observations.bytes -= bytes;
             observations.pending.pop_front();
         }
         observations.retire_barriers();
@@ -1771,6 +1807,16 @@ impl LocalSource {
                         issues: issues.get(&generation),
                     },
                 )?;
+                for (parent, _children) in &results {
+                    observations.publish_issue_details(
+                        parent,
+                        issues
+                            .get(&generation)
+                            .and_then(|parents| parents.get(parent))
+                            .unwrap_or(&HashMap::new()),
+                    )?;
+                }
+                observations.discard_missing_issue_details(writer, generation)?;
                 observations.scan_commits += 1;
             }
             let mut status = lock(&self.status)?;
@@ -2029,6 +2075,13 @@ impl LocalSource {
         } else {
             writer.finish_scan_parent(generation, parent)?;
         }
+        let counts = observations
+            .pending_scan_issues
+            .get(&read.token.producer)
+            .cloned()
+            .unwrap_or_default();
+        observations.publish_issue_details(parent, &counts)?;
+        observations.discard_missing_issue_details(writer, generation)?;
         lock(&self.status)?.index_status = Some(writer.status()?);
         Ok(())
     }
@@ -2099,6 +2152,14 @@ impl LocalSource {
             let writer = writer.as_mut().ok_or(IndexError::Invalid("Directory writer is unavailable."))?;
             writer.record_issue(generation, code)?;
             lock(&self.status)?.index_status = Some(writer.status()?);
+            let mut counts: HashMap<_, _> = observations
+                .issue_details
+                .iter()
+                .filter(|(path, _code)| path == parent)
+                .map(|(_path, code)| (*code, 1))
+                .collect();
+            counts.insert(code, 1);
+            observations.publish_issue_details(parent, &counts)?;
         }
         *observations.scan_issue_counts.entry(code).or_default() += 1;
         if observations.scan_issue_counts.values().sum::<usize>() <= limit("max_logged_scan_issues_per_pass")? {
@@ -2337,6 +2398,13 @@ impl LocalSource {
         } else {
             writer.finish_scan_parent(generation, parent)?;
         }
+        let counts = observations
+            .pending_scan_issues
+            .get(&read.token.producer)
+            .cloned()
+            .unwrap_or_default();
+        observations.publish_issue_details(parent, &counts)?;
+        observations.discard_missing_issue_details(writer, generation)?;
         lock(&self.status)?.index_status = Some(writer.status()?);
         Ok(())
     }
@@ -2945,6 +3013,8 @@ impl LocalSource {
             let resuming = index.has_resumable_scan()?;
             let (generation, selected) = index.prepare_scan()?;
             if !resuming {
+                observations.issue_details.clear();
+                observations.issue_details_incomplete = false;
                 observations.scan_epoch = Some((generation, baseline.token.epoch));
             }
             if observations.observation_lost {
@@ -2964,14 +3034,17 @@ impl LocalSource {
             observations.scan_commits = 0;
             observations.scan_issue_counts.clear();
             let (done, queued, found) = index.scan_counts(generation)?;
-            lock(&self.status)?.scan_progress = Some(ScanProgress {
+            let mut status = lock(&self.status)?;
+            status.state = if selected { "building" } else { "updating" };
+            status.scan_progress = Some(ScanProgress {
                 phase: if selected { "building" } else { "updating" },
                 parents_done: done,
                 parents_queued: queued,
                 directories_found: found,
                 started_at_ms: epoch_milliseconds()?,
             });
-            lock(&self.status)?.scan_generation = Some(generation);
+            status.scan_generation = Some(generation);
+            drop(status);
             log::info!(
                 "event=directory_scan_started operation=directory_index stage=scan source_id={} generation_id={} scan_generation={} scan_phase={} parents_done={} parents_queued={} directories_found={} native_opens={} group_commits=0 duration_ms={} abort_reason=none",
                 self.source_id,
@@ -3315,7 +3388,11 @@ impl LocalDirectoryManager {
         };
         {
             let mut status = lock(&source.status)?;
-            status.state = if lock(&source.reader)?.is_some() { "updating" } else { "building" };
+            status.state = if lock(&source.reader)?.is_some() {
+                "updating"
+            } else {
+                INDEX_OPENING_STATE
+            };
             status.stalled = false;
         }
         source.progress()?;
@@ -3485,6 +3562,23 @@ impl LocalDirectoryManager {
         Ok(())
     }
 
+    pub fn issue_details(&self, drive: &str) -> Result<(Vec<DirectoryIssueDetail>, bool), IndexError> {
+        let sources = lock(&self.sources)?;
+        let source = sources.get(drive).ok_or(IndexError::Interrupted)?;
+        source.ensure_available()?;
+        let observations = lock(&source.observations)?;
+        let mut details: Vec<_> = observations
+            .issue_details
+            .iter()
+            .map(|(parent, code)| DirectoryIssueDetail {
+                path: if parent.is_empty() { "/".to_owned() } else { parent.clone() },
+                code,
+            })
+            .collect();
+        details.sort_by(|left, right| (&left.path, left.code).cmp(&(&right.path, right.code)));
+        Ok((details, observations.issue_details_incomplete))
+    }
+
     pub async fn search(
         self: &Arc<Self>,
         drive: String,
@@ -3565,6 +3659,9 @@ impl LocalDirectoryManager {
                 accepted_revision: Some(0),
                 coverage: Some("partial".into()),
                 coverage_issue_count: 0,
+                issue_details_available: false,
+                issue_details: None,
+                issue_details_incomplete: false,
                 last_verified_at_ms: None,
                 status_message: status.message.clone(),
                 monitoring_state: Some(
@@ -3622,6 +3719,10 @@ impl LocalDirectoryManager {
             result?
         };
         source.ensure_available()?;
+        let observations = lock(&source.observations)?;
+        let has_details = result.coverage == "partial" && result.issue_count > 0 && !observations.issue_details.is_empty();
+        let details_incomplete = observations.issue_details_incomplete;
+        drop(observations);
         let status = lock(&source.status)?;
         let wire_count = |value: i64| -> Result<usize, IndexError> {
             if !(0..=MAX_WIRE_INTEGER).contains(&value) {
@@ -3648,6 +3749,9 @@ impl LocalDirectoryManager {
             accepted_revision: Some(result.accepted_revision),
             coverage: Some(result.coverage),
             coverage_issue_count: wire_count(result.issue_count)?,
+            issue_details_available: has_details,
+            issue_details: None,
+            issue_details_incomplete: details_incomplete,
             last_verified_at_ms: result.last_verified_at_ms,
             status_message: status.message.clone(),
             monitoring_state: Some(
@@ -3685,6 +3789,110 @@ impl Drop for LocalDirectoryManager {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn issue_details_remove_deleted_subtree_after_reconciliation() {
+        for parent_hint in [false, true] {
+            issue_details_remove_deleted_subtree(parent_hint);
+        }
+    }
+
+    fn issue_details_remove_deleted_subtree(parent_hint: bool) {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        std::fs::create_dir_all(path.join("private/child")).unwrap();
+        std::fs::create_dir(path.join("private-backup")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let source = LocalSource::new(path.clone(), manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        {
+            let mut observations = lock(&source.observations).unwrap();
+            for parent in ["", "private", "private/child", "private-backup"] {
+                observations
+                    .publish_issue_details(parent, &HashMap::from([("access_denied", 1)]))
+                    .unwrap();
+            }
+            observations
+                .enqueue(
+                    if parent_hint {
+                        DirectoryMutation::ReadParent { path: String::new() }
+                    } else {
+                        DirectoryMutation::Remove { path: "private".into() }
+                    },
+                    limit("max_pending_observations").unwrap(),
+                    limit("max_observation_bytes").unwrap(),
+                )
+                .unwrap();
+        }
+        std::fs::remove_dir_all(path.join("private")).unwrap();
+        source.flush(&manager.budget).unwrap();
+        source.reconcile(&manager.budget, &manager.scans).unwrap();
+        assert_eq!(
+            lock(&source.observations).unwrap().issue_details,
+            HashSet::from([("private-backup".to_owned(), "access_denied")])
+        );
+    }
+
+    #[test]
+    fn issue_details_preserved_when_subtree_deletion_rolls_back() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        std::fs::create_dir_all(path.join("private/child")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let source = LocalSource::new(path, manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        let samples = HashSet::from([
+            ("private".to_owned(), "access_denied"),
+            ("private/child".to_owned(), "access_denied"),
+        ]);
+        {
+            let mut observations = lock(&source.observations).unwrap();
+            observations.issue_details = samples.clone();
+            observations
+                .enqueue(
+                    DirectoryMutation::Remove { path: "private".into() },
+                    limit("max_pending_observations").unwrap(),
+                    limit("max_observation_bytes").unwrap(),
+                )
+                .unwrap();
+        }
+        let connection = open_directory_database(&source.index_path, OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
+        connection.execute_batch(
+            "CREATE TRIGGER reject_sample_deletion BEFORE DELETE ON directories WHEN OLD.path = 'private' BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END",
+        ).unwrap();
+        assert!(matches!(source.flush(&manager.budget), Err(IndexError::Sql(_))));
+        assert_eq!(lock(&source.observations).unwrap().issue_details, samples);
+        assert!(!lock(&source.observations).unwrap().pending.is_empty());
+        assert!(lock(&source.writer)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .contains_directory(1, "private/child")
+            .unwrap());
+        connection.execute_batch("DROP TRIGGER reject_sample_deletion").unwrap();
+        source.flush(&manager.budget).unwrap();
+        assert!(lock(&source.observations).unwrap().issue_details.is_empty());
+    }
+
+    #[test]
+    fn issue_detail_samples_are_bounded_and_replaced_by_clean_reads() {
+        let mut observations = Observations::default();
+        let maximum = limit("max_logged_scan_issues_per_pass").unwrap();
+        for number in 0..=maximum {
+            observations
+                .publish_issue_details(&format!("parent-{number}"), &HashMap::from([("access_denied", 1)]))
+                .unwrap();
+        }
+        assert_eq!(observations.issue_details.len(), maximum);
+        assert!(observations.issue_details_incomplete);
+        observations.publish_issue_details("parent-0", &HashMap::new()).unwrap();
+        assert!(!observations.issue_details.iter().any(|(parent, _code)| parent == "parent-0"));
+        observations
+            .publish_issue_details("parent-1", &HashMap::from([("scan_failed", 1)]))
+            .unwrap();
+        assert!(observations.issue_details.contains(&("parent-1".to_owned(), "scan_failed")));
+        assert!(!observations.issue_details.contains(&("parent-1".to_owned(), "access_denied")));
+    }
+
     #[test]
     fn scan_group_buffers_parent_issues() {
         for (early_flush, stale, reconcile) in [
@@ -3728,6 +3936,7 @@ mod tests {
                 .record_item_issue(1, "", read.token, "unsupported_encoding", &manager.budget)
                 .unwrap();
             assert_eq!(lock(&source.writer).unwrap().as_ref().unwrap().status().unwrap().issue_count, 0);
+            assert!(lock(&source.observations).unwrap().issue_details.is_empty());
             let mut observations = lock(&source.observations).unwrap();
             source
                 .complete_scan_parent_locked(&mut observations, ScanGeneration { id: 1, read: read.token }, "", &manager.budget)
@@ -3744,6 +3953,7 @@ mod tests {
             assert_eq!(observations.scan_commits, usize::from(!stale));
             assert!(observations.pending_scan_issues.is_empty());
             assert!(observations.producers.is_empty());
+            assert_eq!(observations.issue_details.len(), usize::from(!stale));
             assert_eq!(
                 lock(&source.writer).unwrap().as_ref().unwrap().status().unwrap().issue_count,
                 if stale { 0 } else { 2 }
@@ -4287,6 +4497,25 @@ mod tests {
             assert_eq!(serialized["phase"], phase);
             assert_eq!(serialized["directories_found"], 3);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cold_source_reports_opening_before_scan_progress() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        std::fs::create_dir(&path).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(path, manager.storage_directory());
+        {
+            let status = lock(&source.status).unwrap();
+            assert_eq!(status.state, INDEX_OPENING_STATE);
+            assert!(status.scan_progress.is_none());
+        }
+        source.scan(&manager.budget).unwrap();
+        let status = lock(&source.status).unwrap();
+        assert_eq!(status.state, "ready");
+        assert_eq!(status.scan_progress.as_ref().unwrap().phase, "idle");
     }
 
     #[cfg(target_os = "linux")]

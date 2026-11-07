@@ -2205,6 +2205,31 @@ async def test_failed_initialization_keeps_bounded_retry_eligibility(sqlite_cach
     assert "Wait for active workers" in sqlite_cache.scan_error
     assert started == [True]
     assert not sqlite_cache._opened.is_set()
+    assert sqlite_cache.state.value == "empty"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("next_state", ["building", "updating", "ready"])
+async def test_cold_scan_reports_opening_until_initialization_finishes(sqlite_cache, monkeypatch, next_state):
+    from app.services.directory_cache import CacheState
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def initialize():
+        entered.set()
+        await release.wait()
+        sqlite_cache._state = CacheState(next_state)
+
+    monkeypatch.setattr(sqlite_cache, "_initialize", initialize)
+    await sqlite_cache.start_scan()
+    try:
+        await entered.wait()
+        assert sqlite_cache.state is CacheState.OPENING
+    finally:
+        release.set()
+        await sqlite_cache._scan_task
+    assert sqlite_cache.state.value == next_state
 
 
 @pytest.mark.asyncio
@@ -5253,6 +5278,32 @@ def test_sqlite_api_empty_query_returns_coverage_without_matches(sqlite_cache, m
     assert response.json()["coverage"] == "partial"
 
 
+@pytest.mark.parametrize("include_details", [False, True])
+def test_directory_api_returns_issue_details_only_on_request(
+    sqlite_cache, monkeypatch, client, auth_headers_user, test_connection, include_details
+):
+    async def get_source(**kwargs):
+        return sqlite_cache
+
+    sqlite_cache.index.seed_scan(1)
+    sqlite_cache.coordinator.start_scan_groups()
+    token = sqlite_cache.coordinator.begin_read("")
+    sqlite_cache.coordinator.record_issue(token, 1, "unsupported_encoding")
+    sqlite_cache.coordinator.finish_parent(token, 1)
+    sqlite_cache.coordinator.flush_scan_group()
+    assert sqlite_cache.index.finish_generation(1)
+    monkeypatch.setattr("app.services.directory_cache.get_directory_cache_manager", lambda: SimpleNamespace(get_or_create_cache=get_source))
+    response = client.get(
+        f"/api/browse/{test_connection.id}/directories",
+        headers=auth_headers_user,
+        params={"q": "", "include_issue_details": str(include_details).lower()},
+    )
+    assert response.status_code == 200
+    assert response.json()["issue_details_available"] is True
+    assert response.json()["issue_details"] == ([{"path": "/", "code": "unsupported_encoding"}] if include_details else None)
+    assert response.json()["issue_details_incomplete"] is False
+
+
 def test_directory_api_rejects_excess_terms_before_source_creation(monkeypatch, client, auth_headers_user, test_connection):
     def unexpected_manager():
         raise AssertionError("Invalid queries must not initialize a directory source.")
@@ -5452,6 +5503,14 @@ def test_sqlite_source_denied_descendant_preserves_readable_siblings(sqlite_cach
     assert sqlite_cache.index.pending_scan_paths(1) == []
     assert sqlite_cache._smb_base_path + "\\readable\\child" in reads
     assert sqlite_cache.index._connection().execute("SELECT code, count FROM coverage_issues").fetchall() == [("access_denied", 1)]
+    assert sqlite_cache.directory_issue_details() == ([{"path": "denied", "code": "access_denied"}], False)
+
+    def empty_scan(*_args, **_kwargs):
+        yield from ()
+
+    monkeypatch.setattr("smbclient.scandir", empty_scan)
+    sqlite_cache._scan_disk_queue()
+    assert sqlite_cache.directory_issue_details() == ([], False)
 
 
 @pytest.mark.parametrize("failure", ["separator", "surrogate", "oversized", "folder_io", "denied"])
@@ -7376,12 +7435,14 @@ def test_scan_group_buffers_parent_issues(index, early_flush, reconcile):
         coordinator.flush_scan_group()
     coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile)
     assert index.status().issue_count == 0
+    assert not coordinator.issue_details
     coordinator.finish_parent(token, 1, reconcile=reconcile)
     coordinator.flush_scan_group()
     assert index.status().issue_count == 2
     assert coordinator.scan_commits == 1
     assert not coordinator._pending_scan_issues
     assert not coordinator._producers
+    assert coordinator.issue_details == {("", "unsupported_encoding")}
 
 
 @pytest.mark.parametrize("reconcile", [False, True])
@@ -7405,6 +7466,86 @@ def test_stale_scan_group_discards_parent_issues(index, reconcile):
     assert index.scan_parent_pending(1, "")
     assert index._connection().execute("SELECT count(*) FROM coverage_issues WHERE code = 'unsupported_encoding'").fetchone() == (0,)
     assert not coordinator._pending_scan_issues
+    assert not coordinator.issue_details
+
+
+@pytest.mark.parametrize("parent_hint", [False, True])
+def test_issue_details_remove_deleted_subtree_after_reconciliation(index, parent_hint):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import READ_PARENT_ACTION, DirectoryScanCoordinator, _DirectoryMutation
+
+    index.seed_scan(1)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups()
+    for parent, children in [
+        ("", [("private", True), ("private-backup", True)]),
+        ("private", [("private/child", True)]),
+        ("private/child", []),
+        ("private-backup", []),
+    ]:
+        with coordinator.read(parent) as token:
+            coordinator.commit_children(token, 1, children)
+            coordinator.record_issue(token, 1, "access_denied")
+            coordinator.finish_parent(token, 1)
+        coordinator.flush_scan_group()
+    coordinator.cancel_scan_groups()
+    assert index.finish_generation(1)
+
+    mutation = _DirectoryMutation(READ_PARENT_ACTION, "") if parent_hint else _DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "private")
+    assert coordinator.enqueue(mutation)
+    coordinator.apply_pending()
+    coordinator.start_scan_groups(reconcile=True)
+    with coordinator.read("") as token:
+        coordinator.commit_children(token, 1, [("private-backup", True)], reconcile=True)
+        coordinator.record_issue(token, 1, "access_denied", reconcile=True)
+        coordinator.finish_parent(token, 1, reconcile=True)
+    coordinator.flush_scan_group()
+    coordinator.cancel_scan_groups()
+
+    assert not index.search("private/child").results
+    assert coordinator.issue_details == {("", "access_denied"), ("private-backup", "access_denied")}
+
+
+def test_issue_details_preserved_when_subtree_deletion_rolls_back(index):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, _DirectoryMutation
+
+    index.write_paths(["private", "private/child"])
+    assert index.finish_generation(1)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator._publish_issue_details("private", {"access_denied": 1})
+    coordinator._publish_issue_details("private/child", {"access_denied": 1})
+    samples = coordinator.issue_details.copy()
+    index._connection().execute(
+        "CREATE TRIGGER reject_sample_deletion BEFORE DELETE ON directories "
+        "WHEN OLD.path = 'private' BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END"
+    )
+    assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "private"))
+    with pytest.raises(sqlite3.IntegrityError, match="injected deletion failure"):
+        coordinator.apply_pending()
+    assert coordinator.issue_details == samples
+    assert index.contains_directory(1, "private/child")
+    assert coordinator.pending
+    index._connection().execute("DROP TRIGGER reject_sample_deletion")
+    coordinator.apply_pending()
+    assert not coordinator.issue_details
+
+
+def test_issue_detail_samples_are_bounded_and_replaced_by_clean_reads(index):
+    from app.services.directory_cache import MAX_LOGGED_SCAN_ISSUES_PER_PASS, DirectoryScanCoordinator
+
+    coordinator = DirectoryScanCoordinator(index)
+    for number in range(MAX_LOGGED_SCAN_ISSUES_PER_PASS + 1):
+        coordinator._publish_issue_details(f"parent-{number}", {"access_denied": 1})
+    assert len(coordinator.issue_details) == MAX_LOGGED_SCAN_ISSUES_PER_PASS
+    assert coordinator.issue_details_incomplete
+    coordinator._publish_issue_details("parent-0", {})
+    assert not any(parent == "parent-0" for parent, _code in coordinator.issue_details)
+    coordinator._publish_issue_details("parent-1", {"scan_failed": 1})
+    assert ("parent-1", "scan_failed") in coordinator.issue_details
+    assert ("parent-1", "access_denied") not in coordinator.issue_details
 
 
 def test_reconciliation_groups_independent_pages(smb_source_cache, smb_directory_server, monkeypatch):

@@ -16,6 +16,10 @@ Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to search directory paths across the curren
 
 Results can be incomplete while Sambee scans folders. During a scan, the status shows directories found or directories checked. An interrupted scan keeps committed progress for its next attempt. If a folder is missing from search, browse to it directly.
 
+Status messages identify the connection. **Not all directories could be indexed** means some folders were skipped; available results remain usable. When a message has additional details, it appears as a link that you can click or tap. The status dialog lists affected locations and reasons, or specific request-error details. These links are outside keyboard navigation so focus stays in the quick bar.
+
+Directory details are a limited sample from the current running source, not a full error history. They can be unavailable after a restart until another scan collects them. Check the listed folder permissions or names when applicable. Some locations are deliberately excluded for safe traversal and do not require a repair.
+
 If directory search is temporarily unavailable, the quick bar keeps recent history and results already shown for the same search. It checks for recovery while open. A paused status does not mean that a scan is still running. Restore source access if the message reports a connection problem; direct browsing can remain available while search recovers.
 
 Directory indexes are reused after a restart. Results can remain unverified while background checks run. Missing removable media keeps its saved index; insert or mount the volume again to resume search. SMB search includes ordinary folders inside the configured share and folder, including server-mounted storage. Local search does not cross into other mounts. Redirects and reparse points are excluded.

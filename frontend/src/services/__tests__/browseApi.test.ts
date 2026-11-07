@@ -688,7 +688,7 @@ describe("Browse API Contract Tests", () => {
     });
 
     it("should accept all valid cache states", async () => {
-      const cacheStates = ["empty", "building", "ready", "updating"] as const;
+      const cacheStates = ["empty", "opening", "building", "ready", "updating"] as const;
 
       for (const state of cacheStates) {
         const backendResponse: DirectorySearchResult = {

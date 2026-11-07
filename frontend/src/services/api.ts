@@ -91,6 +91,7 @@ const COMPANION_TIMING_OTHER_ROUTE = "/{route}";
 
 export interface DirectorySearchOptions {
   includeDotDirectories?: boolean;
+  includeIssueDetails?: boolean;
   signal?: AbortSignal;
 }
 
@@ -1592,6 +1593,7 @@ class ApiService {
       params: {
         q: query,
         include_dot_directories: options?.includeDotDirectories ?? false,
+        ...(options?.includeIssueDetails ? { include_issue_details: true } : {}),
       },
       signal: options?.signal,
     });

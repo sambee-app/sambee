@@ -45,6 +45,7 @@ from app.models.file import (
     ContentTransferResult,
     CopyMoveRequest,
     CreateItemRequest,
+    DirectoryIssueDetail,
     DirectoryListing,
     DirectorySearchResult,
     FileInfo,
@@ -1075,6 +1076,7 @@ async def search_directories(
     connection_id: uuid.UUID,
     q: str = Query("", max_length=MAX_QUERY_BYTES, description="Directory search text; shared UTF-8 byte and term limits apply"),
     include_dot_directories: bool = Query(False, description="Whether to include directories whose path contains dot-prefixed segments"),
+    include_issue_details: bool = Query(False, description="Include bounded directory issue details for the status dialog"),
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
 ) -> DirectorySearchResult:
@@ -1122,6 +1124,9 @@ async def search_directories(
             except asyncio.CancelledError:
                 cancelled.set()
                 raise
+            details, incomplete = (
+                cache.directory_issue_details() if response.issue_count and response.coverage == "partial" else ([], False)
+            )
             return DirectorySearchResult(
                 results=[row.path for row in response.results],
                 match_ranks={row.path: row.match_rank for row in response.results},
@@ -1133,6 +1138,9 @@ async def search_directories(
                 accepted_revision=response.accepted_revision,
                 coverage=response.coverage,
                 coverage_issue_count=response.issue_count,
+                issue_details_available=bool(details),
+                issue_details=[DirectoryIssueDetail.model_validate(detail) for detail in details] if include_issue_details else None,
+                issue_details_incomplete=incomplete,
                 last_verified_at_ms=response.last_verified_at_ms,
                 status_message=cache.scan_error,
                 monitoring_state=cache.monitoring_state,

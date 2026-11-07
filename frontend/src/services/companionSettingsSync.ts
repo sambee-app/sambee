@@ -12,7 +12,7 @@ import api from "./api";
 import { isAuthRequired } from "./authConfig";
 import { authSession } from "./authSession";
 import { subscribeBackendRecoveryConfirmed } from "./backendRecoveryEvents";
-import companionService from "./companion";
+import companionService, { isCompanionAuthSignatureMismatch, isCompanionPairingMissing } from "./companion";
 import { companionSession } from "./companionSession";
 import { COMPANION_SETTINGS_CHANGED_EVENT } from "./companionSettingsEvents";
 
@@ -25,6 +25,7 @@ export type SettingsSyncPhase =
   | "synchronizing"
   | "update_required"
   | "authority_conflict"
+  | "pairing_required"
   | "delivery_failed";
 export interface SettingsSyncSnapshot {
   phase: SettingsSyncPhase;
@@ -278,19 +279,21 @@ class CompanionSettingsSynchronizer {
       const status = isApiError(error) ? error.response?.status : undefined;
       const code = isApiError(error) ? error.response?.data?.code : undefined;
       const phase =
-        status === 404 || status === 426 || code === "settings_update_required"
+        status === 404 || status === 426 || code === "settings_update_required" || code === "companion_browser_update_required"
           ? "update_required"
           : code === "settings_authority_conflict"
             ? "authority_conflict"
-            : "delivery_failed";
-      this.blocked = phase === "authority_conflict" || phase === "update_required";
+            : isCompanionAuthSignatureMismatch(error) || isCompanionPairingMissing(error)
+              ? "pairing_required"
+              : "delivery_failed";
+      this.blocked = phase === "authority_conflict" || phase === "update_required" || phase === "pairing_required";
       this.publish({
         ...this.snapshot,
         phase,
-        message: getApiErrorMessage(
-          error,
-          "Settings delivery failed. Check the connection and retry. The last valid settings remain active."
-        ),
+        message:
+          phase === "pairing_required"
+            ? null
+            : getApiErrorMessage(error, "Settings delivery failed. Check the connection and retry. The last valid settings remain active."),
         sections: Object.fromEntries(Object.keys(this.snapshot.sections).map((name) => [name, phase])),
       });
       delay = RETRY_DELAYS_MS[this.retries++] ?? CHECK_INTERVAL_MS;

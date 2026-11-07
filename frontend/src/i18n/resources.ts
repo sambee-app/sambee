@@ -208,6 +208,7 @@ export const EN_TRANSLATIONS = {
         synchronizing: "Synchronizing",
         update_required: "Update required",
         authority_conflict: "Different settings authority",
+        pairing_required: "Pairing required",
         delivery_failed: "Delivery failed; last valid settings active",
       },
       defaults_active: "Built-in defaults are active until settings arrive from a paired server.",
@@ -215,6 +216,8 @@ export const EN_TRANSLATIONS = {
       synchronizing: "Settings are synchronizing. The last valid settings remain active.",
       update_required: "Update Sambee and Companion to use shared settings delivery.",
       authority_conflict: "This server does not manage Companion settings. Pair the intended server again to change authority.",
+      pairing_required:
+        "Companion could not authenticate this browser. Pair this browser in Settings > Local Drives, or pair it again to repair the connection. Settings checks are paused until you retry or pair successfully.",
       delivery_failed:
         "Settings delivery failed. Check the connection and retry. The last valid settings and directory search remain available.",
       authority: "Settings authority: {{origin}}",
@@ -772,17 +775,33 @@ export const EN_TRANSLATIONS = {
         directoriesIndexed_other: "{{count}} directories indexed",
       },
       status: {
+        connectionStatus: "{{connection}}: {{message}}",
+        indexingPending: "Indexing...",
         indexing: "Indexing... ({{count}} directories found)",
         updating: "Updating index... ({{count}} directories)",
         updatingProgress: "Updating index... ({{done}} of ~{{total}} directories checked)",
         startingIndex: "Starting index...",
-        indexCoveragePartial: "Directory index has incomplete coverage.",
+        indexCoveragePartial: "not all directories could be indexed.",
         indexCoverageUncertain: "Directory index is not verified. A new check is pending.",
         legacyDirectorySearch:
           "Multi-term directory search is not confirmed for this source. Search one directory term or check backend and companion support.",
         historyUnavailable: "Recent directories are unavailable. Check the backend connection and retry.",
         fileHistoryUnavailable: "Recent files are unavailable. Check the backend connection and retry.",
         indexUnavailable: "Directory search is unavailable. Check the source connection and retry.",
+      },
+      statusDetails: {
+        title: "Directory Search Status",
+        source: "Source",
+        impact: "Search results may not include directories within these locations.",
+        incomplete: "Only some affected directories are listed.",
+        unavailable: "These details are no longer available. Refresh the status.",
+        failed: "Could not load status details. Check the source connection and reopen this dialog.",
+        reasons: {
+          access_denied: "Access denied",
+          unsupported_encoding: "A directory name could not be read",
+          unsafe_traversal: "A directory could not be traversed safely",
+          scan_failed: "A directory could not be read",
+        },
       },
       groups: {
         recentFiles: "Recent files",

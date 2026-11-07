@@ -609,17 +609,25 @@ export interface ScanProgress {
   started_at_ms: number;
 }
 
+export interface DirectoryIssueDetail {
+  path: string;
+  code: "access_denied" | "unsupported_encoding" | "unsafe_traversal" | "scan_failed";
+}
+
 export interface DirectorySearchResult {
   search_contract_version?: number | null;
   results: string[];
   match_ranks?: Record<string, number>;
   total_matches: number;
-  cache_state: "empty" | "building" | "ready" | "updating";
+  cache_state: "empty" | "opening" | "building" | "ready" | "updating";
   directory_count: number;
   matched_term_counts?: Record<string, number>;
   accepted_revision?: number | null;
   coverage?: "partial" | "complete" | "uncertain" | null;
   coverage_issue_count?: number;
+  issue_details_available?: boolean;
+  issue_details?: DirectoryIssueDetail[] | null;
+  issue_details_incomplete?: boolean;
   last_verified_at_ms?: number | null;
   status_message?: string | null;
   monitoring_state?: "starting" | "healthy" | "recovering" | "unavailable" | null;

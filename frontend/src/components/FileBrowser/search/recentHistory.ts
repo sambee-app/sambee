@@ -7,6 +7,22 @@ export const SEARCH_CONTRACT_VERSION = 1;
 const NORMALIZATION_KEYS = new Map(unicode.normalization.map(([source, key]) => [source ?? "", key ?? ""]));
 const QUERY_WHITESPACE = new Set(unicode.whitespace);
 
+export function getSearchErrorMessage(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const response = "response" in error ? error.response : undefined;
+  const data = response && typeof response === "object" && "data" in response ? response.data : undefined;
+  const detail = data && typeof data === "object" && "detail" in data ? data.detail : undefined;
+  const message =
+    typeof detail === "string"
+      ? detail
+      : detail && typeof detail === "object" && "message" in detail
+        ? detail.message
+        : error instanceof Error
+          ? error.message
+          : undefined;
+  return typeof message === "string" && message.trim() ? message.trim() : undefined;
+}
+
 function isWordCharacter(character: string): boolean {
   const codepoint = character.codePointAt(0) ?? -1;
   let low = 0;

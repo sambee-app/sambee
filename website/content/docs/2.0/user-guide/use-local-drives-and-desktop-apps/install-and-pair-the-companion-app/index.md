@@ -56,3 +56,5 @@ If a local drive reports a pairing error, open **Settings** > **Local Drives** f
 1. Run **Test Current Pairing**. If it still fails with a signature error after reloading, use **Pair This Browser** and approve the new code in Companion.
 
 If Sambee cannot check the pairing status, select **Retry**. Wait for a confirmed status before starting a new pairing. Companion pairing secrets do not expire on a 30-day timer. An unavailable Companion or a temporary failed check does not mean you need to re-pair.
+
+If settings show **Pairing required**, Companion could not authenticate this browser. Automatic settings checks pause to avoid repeated failed requests. Follow the pairing recovery steps above. Successful pairing restarts settings synchronization; **Retry** starts a new check without removing the stored pairing or settings.

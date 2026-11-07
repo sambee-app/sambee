@@ -13,7 +13,7 @@ export interface BrowserHistoryService {
   searchDirectories(
     connectionId: string,
     query: string,
-    options: { includeDotDirectories: boolean; signal: AbortSignal }
+    options: { includeDotDirectories: boolean; includeIssueDetails?: boolean; signal: AbortSignal }
   ): Promise<DirectorySearchResult>;
 }
 

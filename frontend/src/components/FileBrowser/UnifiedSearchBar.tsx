@@ -41,7 +41,7 @@ import {
 } from "@mui/material";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type React from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { usePillButtonMenu } from "../../hooks/usePillButtonMenu";
@@ -54,7 +54,8 @@ import {
   QuickBarResultGroupHeader,
   QuickBarResultRow,
 } from "./QuickBarResultRow";
-import type { SearchProvider, SearchResult, SearchSelectionAction, SearchSelectionBehavior } from "./search/types";
+import { SearchStatusDialog } from "./SearchStatusDialog";
+import type { SearchProvider, SearchResult, SearchSelectionAction, SearchSelectionBehavior, SearchStatusInfo } from "./search/types";
 
 // ============================================================================
 // Constants
@@ -196,6 +197,7 @@ export function UnifiedSearchBar({
   const [removeError, setRemoveError] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isSearchPending, setIsSearchPending] = useState(false);
+  const [statusDialog, setStatusDialog] = useState<SearchStatusInfo | null>(null);
 
   const theme = useTheme();
   const { t } = useTranslation();
@@ -851,12 +853,28 @@ export function UnifiedSearchBar({
     return height;
   }, [results]);
 
+  const resetOpenResults = useEffectEvent(() => {
+    const firstIndex = Math.max(
+      results.findIndex((result) => result.kind === "result"),
+      0
+    );
+    selectedValueRef.current = results[firstIndex]?.value;
+    setSelectedIndex(firstIndex);
+    rowVirtualizer.scrollToOffset(0);
+  });
+
+  useLayoutEffect(() => {
+    if (listContainer) {
+      resetOpenResults();
+    }
+  }, [listContainer]);
+
   // ── Scroll selected item into view ─────────────────────────────────────
   useEffect(() => {
-    if (results.length > 0) {
+    if (listContainer && results.length > 0) {
       rowVirtualizer.scrollToIndex(selectedIndex, { align: "auto" });
     }
-  }, [selectedIndex, results.length, rowVirtualizer]);
+  }, [listContainer, selectedIndex, results.length, rowVirtualizer]);
 
   // ── Focus activation ───────────────────────────────────────────────────
 
@@ -876,8 +894,9 @@ export function UnifiedSearchBar({
   // handleClickAway
   //
   const handleClickAway = useCallback(() => {
+    if (statusDialog) return;
     dismissSearch();
-  }, [dismissSearch]);
+  }, [dismissSearch, statusDialog]);
 
   // ── Re-open on typing after click-away ─────────────────────────────────
   //
@@ -902,8 +921,8 @@ export function UnifiedSearchBar({
     }
 
     if (
-      (!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) ||
-      (newlyActivated && hasSearched && query.length >= effectiveMinQueryLength)
+      newlyActivated &&
+      ((!hasSearched && query.length === 0 && effectiveMinQueryLength === 0) || (hasSearched && query.length >= effectiveMinQueryLength))
     ) {
       void executeSearch(query);
     }
@@ -993,7 +1012,10 @@ export function UnifiedSearchBar({
     const shouldOpenOnActivation = shouldSearchOnActivation || shouldShowBelowMinimumOnActivation;
     const shouldPreserveSearchStateOnActivation = shouldSearchOnActivation && !providerChanged;
 
-    if (!shouldPreserveSearchStateOnActivation) {
+    setStatusDialog(null);
+    if (shouldPreserveSearchStateOnActivation) {
+      resetOpenResults();
+    } else {
       setResults([]);
       setSelectedIndex(0);
       setHasSearched(false);
@@ -1012,14 +1034,14 @@ export function UnifiedSearchBar({
     lastResetProviderRef.current = provider;
     lastActivationTokenRef.current = activationToken;
 
-    activatedRef.current = isInputFocused;
+    activatedRef.current = isInputFocused || shouldSearchOnActivation;
+
+    if (activatedRef.current) {
+      providerRef.current.onActivate?.();
+    }
 
     if (shouldSearchOnActivation) {
       void executeSearch(nextQuery);
-    }
-
-    if (isInputFocused) {
-      providerRef.current.onActivate?.();
     }
   }, [
     activationToken,
@@ -1069,14 +1091,17 @@ export function UnifiedSearchBar({
     }
   }, [disableDropdown, executeSearch, getEffectiveMinQueryLength, query, refreshToken, suppressDropdown]);
 
+  const resumeFocusedSearch = useEffectEvent(() => {
+    if (document.activeElement === effectiveInputRef.current && query.length >= getEffectiveMinQueryLength(query)) {
+      void executeSearch(query);
+    }
+  });
+
   useEffect(() => {
-    if (disableDropdown || suppressDropdown) {
-      return;
+    if (!disableDropdown && !suppressDropdown && provider.minQueryLength === 0) {
+      resumeFocusedSearch();
     }
-    if (document.activeElement === effectiveInputRef.current && provider.minQueryLength === 0) {
-      void executeSearch("");
-    }
-  }, [disableDropdown, effectiveInputRef, executeSearch, provider.minQueryLength, suppressDropdown]);
+  }, [disableDropdown, provider.minQueryLength, suppressDropdown]);
 
   useEffect(() => {
     if (isModeMenuOpen && isDropdownOpen) {
@@ -1232,6 +1257,10 @@ export function UnifiedSearchBar({
             {/* Status indicator */}
             {statusInfo && (
               <Box
+                role={statusInfo.loadDetails ? "link" : undefined}
+                tabIndex={statusInfo.loadDetails ? -1 : undefined}
+                onPointerDown={statusInfo.loadDetails ? (event) => event.preventDefault() : undefined}
+                onClick={statusInfo.loadDetails ? () => setStatusDialog(statusInfo) : undefined}
                 sx={{
                   px: 2,
                   py: 0.5,
@@ -1240,10 +1269,16 @@ export function UnifiedSearchBar({
                   gap: 1,
                   borderBottom: results.length > 0 || showNoResults || showSearchError || showRemoveError ? 1 : 0,
                   borderColor: "divider",
+                  cursor: statusInfo.loadDetails ? "pointer" : undefined,
+                  textDecoration: statusInfo.loadDetails ? "underline" : undefined,
+                  "&:hover": statusInfo.loadDetails ? { color: "primary.main" } : {},
                 }}
               >
                 {statusInfo.showSpinner && <CircularProgress size={14} />}
-                <Typography variant="caption" sx={{ color: "text.secondary" }}>
+                <Typography
+                  variant="caption"
+                  sx={{ color: statusInfo.loadDetails ? "inherit" : "text.secondary", overflowWrap: "anywhere" }}
+                >
                   {statusInfo.label}
                 </Typography>
               </Box>
@@ -1408,6 +1443,7 @@ export function UnifiedSearchBar({
             )}
           </Paper>
         </Popper>
+        {statusDialog && <SearchStatusDialog status={statusDialog} onClose={() => setStatusDialog(null)} />}
       </Box>
     </ClickAwayListener>
   );

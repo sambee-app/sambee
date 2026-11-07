@@ -20,10 +20,68 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("getDirectoryResultPresentation", () => {
+  it.each([false, true])("links named partial coverage only when details exist (%s)", async (available) => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    const response = {
+      results: ["readable"],
+      total_matches: 1,
+      directory_count: 2,
+      cache_state: "ready" as const,
+      coverage: "partial" as const,
+      coverage_issue_count: 1,
+      issue_details_available: available,
+      search_contract_version: SEARCH_CONTRACT_VERSION,
+    };
+    vi.mocked(api.searchDirectories).mockResolvedValue(response);
+    const { result } = renderHook(() => useDirectorySearchProvider("local-C", vi.fn(), { getConnectionName: () => "FS1" }), { wrapper });
+    await act(async () => {
+      await result.current.fetchResults("readable", new AbortController().signal);
+    });
+    const status = result.current.getStatusInfo();
+    expect(status).toMatchObject({ label: "FS1: not all directories could be indexed.", showSpinner: false });
+    expect(!!status?.loadDetails).toBe(available);
+    if (available) {
+      vi.mocked(api.searchDirectories).mockResolvedValue({
+        ...response,
+        issue_details: [{ path: "private", code: "access_denied" }],
+        issue_details_incomplete: true,
+      });
+      const signal = new AbortController().signal;
+      await expect(status?.loadDetails?.(signal)).resolves.toEqual({
+        source: "FS1",
+        issues: [{ path: "private", code: "access_denied" }],
+        incomplete: true,
+      });
+      expect(api.searchDirectories).toHaveBeenLastCalledWith("local-C", "", {
+        includeDotDirectories: false,
+        includeIssueDetails: true,
+        signal,
+      });
+    }
+  });
+
+  it("does not attach history error details to an index failure", async () => {
+    vi.mocked(api.searchRecentDirectories).mockRejectedValue(new Error("History storage is offline."));
+    vi.mocked(api.searchDirectories).mockRejectedValue({
+      response: { status: 403, data: { detail: { message: "This source is not permitted." } } },
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn(), { getConnectionName: () => "FS1" }), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    await expect(result.current.getStatusInfo()?.loadDetails?.(new AbortController().signal)).resolves.toEqual({
+      source: "FS1",
+      message: "This source is not permitted.",
+    });
+  });
+
   it.each([
-    { phase: "building", label: "Indexing... (123 directories found)" },
-    { phase: "updating", label: "Updating index... (12 of ~42 directories checked)" },
-  ] as const)("shows $phase progress before uncertain coverage", async ({ phase, label }) => {
+    { phase: "building", found: 0, label: "Indexing..." },
+    { phase: "building", found: 123, label: "Indexing... (123 directories found)" },
+    { phase: "updating", found: 123, label: "Updating index... (12 of ~42 directories checked)" },
+  ] as const)("shows $phase progress before uncertain coverage", async ({ phase, found, label }) => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
     vi.mocked(api.searchDirectories).mockResolvedValue({
       results: [],
@@ -32,14 +90,78 @@ describe("getDirectoryResultPresentation", () => {
       directory_count: 7,
       coverage: "uncertain",
       search_contract_version: SEARCH_CONTRACT_VERSION,
-      scan_progress: { phase, parents_done: 12, parents_queued: 30, directories_found: 123, started_at_ms: 1 },
+      scan_progress: { phase, parents_done: 12, parents_queued: 30, directories_found: found, started_at_ms: 1 },
     });
     const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
     await act(async () => {
       await result.current.fetchResults("reports", new AbortController().signal);
     });
-    expect(result.current.getStatusInfo()).toEqual({ label, showSpinner: true });
+    expect(result.current.getStatusInfo()).toEqual({ label: `connection-1: ${label}`, showSpinner: true });
     expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+  });
+
+  it.each([
+    { cache_state: "building", directory_count: 0, label: "Indexing...", spinner: true },
+    { cache_state: "building", directory_count: 3, label: "Indexing... (3 directories found)", spinner: true },
+    { cache_state: "updating", directory_count: 3, label: "Updating index... (3 directories)", spinner: true },
+    { cache_state: "ready", directory_count: 3, label: null, spinner: false },
+  ] as const)(
+    "keeps opening silent before $cache_state with $directory_count directories",
+    async ({ cache_state, directory_count, label, spinner }) => {
+      vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+      vi.mocked(api.searchDirectories).mockResolvedValue({
+        results: [],
+        total_matches: 0,
+        cache_state: "opening",
+        directory_count: 0,
+        coverage: "partial",
+        search_contract_version: SEARCH_CONTRACT_VERSION,
+      });
+      const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+      expect(result.current.getStatusInfo()).toBeNull();
+      await act(async () => {
+        await result.current.fetchResults("reports", new AbortController().signal);
+      });
+      expect(result.current.getStatusInfo()).toBeNull();
+      expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+      vi.mocked(api.searchDirectories).mockResolvedValue({
+        results: [],
+        total_matches: 0,
+        cache_state,
+        directory_count,
+        coverage: "complete",
+        search_contract_version: SEARCH_CONTRACT_VERSION,
+      });
+      await act(async () => {
+        await result.current.fetchResults("reports", new AbortController().signal);
+      });
+      expect(result.current.getStatusInfo()).toEqual(label ? { label: `connection-1: ${label}`, showSpinner: spinner } : null);
+    }
+  );
+
+  it("shows a recovery message even while opening", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    const message = "Directory index storage is in use. Wait for active workers to finish, then retry.";
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: [],
+      total_matches: 0,
+      cache_state: "opening",
+      directory_count: 0,
+      status_message: message,
+      retry_after_ms: 2000,
+      search_contract_version: SEARCH_CONTRACT_VERSION,
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getStatusInfo()).toEqual({ label: `connection-1: ${message}`, showSpinner: false });
+    expect(result.current.getRefreshIntervalMs?.()).toBe(2000);
+    vi.mocked(api.searchDirectories).mockRejectedValue(new Error("Source is offline."));
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getStatusInfo()?.label).toContain("Directory search is unavailable");
   });
 
   it.each(["connection-1", "local-C"])("fences old generation responses and retry errors for %s", async (connectionId) => {
@@ -168,10 +290,11 @@ describe("getDirectoryResultPresentation", () => {
       await result.current.fetchResults("reports", new AbortController().signal);
     });
     expect(commits).toBeGreaterThan(settledCommits);
-    expect(result.current.getStatusInfo?.()).toEqual({ label: statusMessage, showSpinner: false });
+    expect(result.current.getStatusInfo?.()).toEqual({ label: `connection-1: ${statusMessage}`, showSpinner: false });
   });
 
   it.each([
+    { cache_state: "opening", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
     { cache_state: "building", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
     { cache_state: "updating", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
     { cache_state: "ready", search_contract_version: SEARCH_CONTRACT_VERSION, expected: null },
@@ -245,8 +368,7 @@ describe("getDirectoryResultPresentation", () => {
     expect(api.searchDirectories).toHaveBeenCalledWith(connectionId, "alpha beta", expect.objectContaining({ signal: expect.anything() }));
     expect(rows.some((row) => row.kind === "result" && row.value === "directory:alpha/beta")).toBe(true);
     expect(result.current.getStatusInfo?.()).toEqual({
-      label:
-        "Multi-term directory search is not confirmed for this source. Search one directory term or check backend and companion support.",
+      label: `${connectionId}: Multi-term directory search is not confirmed for this source. Search one directory term or check backend and companion support.`,
       showSpinner: false,
     });
     vi.mocked(api.searchDirectories).mockResolvedValue({ ...response, search_contract_version: SEARCH_CONTRACT_VERSION });
@@ -352,7 +474,7 @@ describe("getDirectoryResultPresentation", () => {
     });
     expect(rows.some((row) => row.kind === "result" && row.value === "directory:Reports")).toBe(true);
     expect(result.current.getStatusInfo?.()).toEqual({
-      label: "Directory indexing is paused. Increase its disk budget and retry.",
+      label: "connection-1: Directory indexing is paused. Increase its disk budget and retry.",
       showSpinner: false,
     });
   });

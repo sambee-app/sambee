@@ -5652,6 +5652,7 @@ pub struct DirectorySearchQuery {
     pub q: Option<String>,
     /// Whether to include directories with dot-prefixed path segments.
     pub include_dot_directories: Option<bool>,
+    pub include_issue_details: Option<bool>,
 }
 
 /// `GET /api/browse/{drive}/directories` — search for directories on a local drive.
@@ -5667,11 +5668,11 @@ pub async fn browse_search_directories(
     let q = query.q.unwrap_or_default();
     let include_dot_directories = query.include_dot_directories.unwrap_or(false);
     super::directory_index::search_terms(&q).map_err(|error| ApiError::BadRequest(error.to_string()))?;
-    state
+    let details_drive = drive.clone();
+    let mut response = state
         .0
         .search(drive, base_path, q, include_dot_directories)
         .await
-        .map(Json)
         .map_err(|error| match error {
             super::directory_index::IndexError::QueryBusy => ApiError::TooManyRequests(error.to_string()),
             super::directory_index::IndexError::Invalid(message) => ApiError::BadRequest(message.to_owned()),
@@ -5679,7 +5680,20 @@ pub async fn browse_search_directories(
                 ApiError::TooManyRequests("Directory query was cancelled or timed out. Retry the search.".to_owned())
             }
             _ => ApiError::Internal("Directory search failed. Check drive access and private local storage, then retry.".to_owned()),
-        })
+        })?;
+    if query.include_issue_details.unwrap_or(false) {
+        let (details, incomplete) = if response.issue_details_available {
+            state
+                .0
+                .issue_details(&details_drive)
+                .map_err(|error| ApiError::Internal(error.to_string()))?
+        } else {
+            (Vec::new(), false)
+        };
+        response.issue_details = Some(details);
+        response.issue_details_incomplete = incomplete;
+    }
+    Ok(Json(response))
 }
 
 // ─── Upload ──────────────────────────────────────────────────────────────────

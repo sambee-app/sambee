@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BrowserOpenMode } from "../../../pages/FileBrowser/types";
 import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
@@ -8,6 +8,7 @@ import {
   bestSearchRelevance,
   compareText,
   findTextHighlight,
+  getSearchErrorMessage,
   getSearchRelevance,
   normalizeSearchText,
   rankHistorySearchResults,
@@ -62,8 +63,9 @@ export function useFileSearchProvider({
   const requestGenerationRef = useRef(0);
   const sourceBindingRef = useRef({ connectionId, currentPath, files, history, resultLimit });
   const [historyUnavailable, setHistoryUnavailable] = useState(false);
+  const [failureDetail, setFailureDetail] = useState<string | undefined>();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     sourceBindingRef.current = { connectionId, currentPath, files, history, resultLimit };
     return () => {
       requestGenerationRef.current += 1;
@@ -85,6 +87,7 @@ export function useFileSearchProvider({
         sourceBindingRef.current.resultLimit === resultLimit;
       if (!isCurrent()) return [];
       setHistoryUnavailable(false);
+      setFailureDetail(undefined);
       const terms = searchTerms(query);
       const currentCandidates = files
         .filter((file) => file.type === "file" && (!terms.length || getSearchRelevance(file.name, terms).matchedTermCount > 0))
@@ -170,16 +173,16 @@ export function useFileSearchProvider({
         );
       };
       const availableResponse: RecentFileSearchResponse = { results: [], result_limit: resultLimit };
-      const availableResults = mergeResults(availableResponse);
-      onUpdate?.(availableResults);
+      if (terms.length > 0) onUpdate?.(mergeResults(availableResponse));
       try {
         const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
         if (!isCurrent()) return [];
         return mergeResults(recentResponse);
-      } catch {
+      } catch (error: unknown) {
         if (!isCurrent()) return [];
         setHistoryUnavailable(true);
-        return availableResults;
+        setFailureDetail(getSearchErrorMessage(error));
+        return mergeResults(availableResponse);
       }
     },
     [connectionId, connectionName, currentPath, files, getConnectionName, history, resultLimit, t]
@@ -201,8 +204,21 @@ export function useFileSearchProvider({
 
   const getStatusInfo = useCallback(
     (): SearchStatusInfo | null =>
-      historyUnavailable ? { label: t("fileBrowser.search.status.fileHistoryUnavailable"), showSpinner: false } : null,
-    [historyUnavailable, t]
+      historyUnavailable
+        ? {
+            label: t("fileBrowser.search.status.connectionStatus", {
+              connection: connectionName,
+              message: t("fileBrowser.search.status.fileHistoryUnavailable"),
+            }),
+            showSpinner: false,
+            ...(failureDetail && failureDetail !== t("fileBrowser.search.status.fileHistoryUnavailable")
+              ? {
+                  loadDetails: async () => ({ source: connectionName, message: failureDetail }),
+                }
+              : {}),
+          }
+        : null,
+    [connectionName, failureDetail, historyUnavailable, t]
   );
 
   const onRemoveSelected = useCallback(
