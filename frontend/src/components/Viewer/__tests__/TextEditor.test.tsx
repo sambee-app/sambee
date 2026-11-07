@@ -492,70 +492,96 @@ describe("TextEditor", () => {
   });
 
   it("shares current unsaved editor text separately from the saved attachment", async () => {
-    const share = vi.fn().mockResolvedValue(undefined);
-    vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
-    vi.stubGlobal("navigator", { share, canShare: () => true });
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn((query: string) => ({
-        matches: query.includes("max-width"),
-        media: query,
-        onchange: null,
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        dispatchEvent: vi.fn(),
-      }))
-    );
-    const raw = vi
-      .spyOn(apiService, "getOriginalFileBlob")
-      .mockResolvedValue(new Blob(["saved bytes"], { type: "application/octet-stream" }));
-    renderViewer();
-    const editor = await enterEditMode();
-    fireEvent.change(editor, { target: { value: "unsaved text" } });
-    fireEvent.click(screen.getByRole("button", { name: "Share" }));
-    await act(async () => {
-      fireEvent.click(screen.getByRole("menuitem", { name: "Share as text" }));
-    });
-    expect(share).toHaveBeenCalledExactlyOnceWith({ text: "unsaved text" });
-    expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Share" }));
-    const fileChoice = screen.getByRole("menuitem", { name: "Share as file" });
-    await waitFor(() => expect(fileChoice).not.toHaveAttribute("aria-disabled", "true"));
-    await act(async () => {
-      fireEvent.click(fileChoice);
-    });
-    expect(share).toHaveBeenLastCalledWith({
-      files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 11 })],
-      title: "readme.txt",
-    });
-    expect(raw).toHaveBeenCalledTimes(1);
-    expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
-    const previousAttachment = share.mock.calls[1]?.[0]?.files[0];
-    expect(await readBlobAsText(previousAttachment)).toBe("saved bytes");
-    raw.mockResolvedValueOnce(new Blob(["unsaved text"], { type: "application/octet-stream" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(raw).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole("button", { name: "Share" }));
-    const savedChoice = screen.getByRole("menuitem", { name: "Share as file" });
-    await waitFor(() => expect(savedChoice).not.toHaveAttribute("aria-disabled", "true"));
-    await act(async () => {
-      fireEvent.click(savedChoice);
-    });
-    expect(share).toHaveBeenLastCalledWith({
-      files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 12 })],
-      title: "readme.txt",
-    });
-    expect(share.mock.calls[2]?.[0]?.files[0]).not.toBe(previousAttachment);
-    await waitFor(() => expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument());
-    expect(await readBlobAsText(share.mock.calls[2]?.[0]?.files[0])).toBe("unsaved text");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const share = vi.fn().mockResolvedValue(undefined);
+      vi.spyOn(apiService, "getThemes").mockResolvedValue({ themes: [], site_default_id: "sambee-light" });
+      vi.stubGlobal("navigator", { share, canShare: () => true });
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => ({
+          matches: query.includes("max-width"),
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }))
+      );
+      const raw = vi
+        .spyOn(apiService, "getOriginalFileBlob")
+        .mockResolvedValue(new Blob(["saved bytes"], { type: "application/octet-stream" }));
+      await act(async () => {
+        renderViewer();
+      });
+      await act(() => vi.runAllTimersAsync());
+      expect(apiService.acquireEditLock).toHaveBeenCalledWith("conn1", "/docs/readme.txt");
+      const editor = screen.getByRole("textbox", { name: "Text editor" });
+      expect(editor).not.toHaveAttribute("readonly");
+      fireEvent.change(editor, { target: { value: "unsaved text" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("menuitem", { name: "Share as text" }));
+      });
+      await act(() => vi.runAllTimersAsync());
+      expect(share).toHaveBeenCalledExactlyOnceWith({ text: "unsaved text" });
+      expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+      expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Share" })).toBeEnabled();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      });
+      const fileChoice = screen.getByRole("menuitem", { name: "Share as file" });
+      expect(fileChoice).not.toHaveAttribute("aria-disabled", "true");
+      await act(async () => {
+        fireEvent.click(fileChoice);
+      });
+      await act(() => vi.runAllTimersAsync());
+      expect(share).toHaveBeenLastCalledWith({
+        files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 11 })],
+        title: "readme.txt",
+      });
+      expect(raw).toHaveBeenCalledTimes(1);
+      expect(apiService.writeTextWithEditLock).not.toHaveBeenCalled();
+      expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Share" })).toBeEnabled();
+      const previousAttachment = share.mock.calls[1]?.[0]?.files[0];
+      expect(await readBlobAsText(previousAttachment)).toBe("saved bytes");
+      raw.mockResolvedValueOnce(new Blob(["unsaved text"], { type: "application/octet-stream" }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      });
+      expect(apiService.writeTextWithEditLock).toHaveBeenCalledTimes(1);
+      expect(raw).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      });
+      const savedChoice = screen.getByRole("menuitem", { name: "Share as file" });
+      expect(savedChoice).not.toHaveAttribute("aria-disabled", "true");
+      await act(async () => {
+        fireEvent.click(savedChoice);
+      });
+      await act(() => vi.runAllTimersAsync());
+      expect(share).toHaveBeenLastCalledWith({
+        files: [expect.objectContaining({ name: "readme.txt", type: "text/plain", size: 12 })],
+        title: "readme.txt",
+      });
+      expect(share.mock.calls[2]?.[0]?.files[0]).not.toBe(previousAttachment);
+      expect(screen.queryByRole("menu", { hidden: true })).not.toBeInTheDocument();
+      expect(await readBlobAsText(share.mock.calls[2]?.[0]?.files[0])).toBe("unsaved text");
+      expect(screen.getByRole("button", { name: "Share" })).toBeEnabled();
+    } finally {
+      try {
+        cleanup();
+        await act(() => vi.runOnlyPendingTimersAsync());
+      } finally {
+        vi.useRealTimers();
+      }
+    }
   });
 
   it.each(["file", "text"])("closes only sharing Details on Escape after a %s failure", async (mode) => {

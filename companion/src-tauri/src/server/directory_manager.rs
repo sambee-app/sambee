@@ -4175,7 +4175,9 @@ mod tests {
         }
         let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(path.clone(), manager.storage_directory());
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
         source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
         let before = source.io.opens();
         source.scan(&manager.budget).unwrap();
         let directory_only_opens = source.io.opens() - before;
@@ -4186,6 +4188,7 @@ mod tests {
         }
         let before = source.io.opens();
         source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
         assert_eq!(source.io.opens() - before, directory_only_opens);
         let writer = lock(&source.writer).unwrap();
         let status = writer.as_ref().unwrap().status().unwrap();
@@ -4233,6 +4236,7 @@ mod tests {
             std::fs::create_dir(&path).unwrap();
             let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
             let source = LocalSource::new(path.clone(), manager.storage_directory());
+            lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
             let mut previous: Vec<String> = Vec::new();
             for pass in fixture["passes"].as_array().unwrap() {
                 let mut expected: Vec<String> = pass
@@ -4276,6 +4280,7 @@ mod tests {
                             .collect()
                     });
                     source.scan(&manager.budget).unwrap();
+                    assert!(lock(&source.watcher).unwrap().is_none());
                     let writer = lock(&source.writer).unwrap();
                     let result = writer
                         .as_ref()
@@ -4371,12 +4376,15 @@ mod tests {
         }
         let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(path.clone(), manager.storage_directory());
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
         lock(&source.observations).unwrap().scan_group_test_elapsed =
             Some(Duration::from_millis(limit("scan_commit_interval_ms").unwrap() as u64));
         source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
         std::fs::remove_dir(path.join("parent/child-0")).unwrap();
         std::fs::create_dir(path.join("parent/new")).unwrap();
         source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
         let writer = lock(&source.writer).unwrap();
         let index = writer.as_ref().unwrap();
         assert_eq!(index.status().unwrap().directory_count, i64::try_from(CHILD_COUNT + 1).unwrap());
@@ -4425,10 +4433,13 @@ mod tests {
         std::fs::create_dir_all(path.join("parent/old")).unwrap();
         let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(path.clone(), manager.storage_directory());
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
         source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
         std::fs::remove_dir(path.join("parent/old")).unwrap();
         std::fs::create_dir(path.join("parent/new")).unwrap();
         source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
         let writer = lock(&source.writer).unwrap();
         let index = writer.as_ref().unwrap();
         assert_eq!(index.status().unwrap().directory_count, 2);
