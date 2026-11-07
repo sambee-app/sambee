@@ -45,8 +45,8 @@ from app.models.file import (
     ContentTransferResult,
     CopyMoveRequest,
     CreateItemRequest,
-    DirectoryListing,
     DirectoryIssueDetail,
+    DirectoryListing,
     DirectorySearchResult,
     FileInfo,
     FileType,
@@ -1124,7 +1124,9 @@ async def search_directories(
             except asyncio.CancelledError:
                 cancelled.set()
                 raise
-            details, incomplete = cache.directory_issue_details() if response.issue_count and response.coverage == "partial" else ([], False)
+            details, incomplete = (
+                cache.directory_issue_details() if response.issue_count and response.coverage == "partial" else ([], False)
+            )
             return DirectorySearchResult(
                 results=[row.path for row in response.results],
                 match_ranks={row.path: row.match_rank for row in response.results},

@@ -5254,7 +5254,9 @@ def test_sqlite_api_empty_query_returns_coverage_without_matches(sqlite_cache, m
 
 
 @pytest.mark.parametrize("include_details", [False, True])
-def test_directory_api_returns_issue_details_only_on_request(sqlite_cache, monkeypatch, client, auth_headers_user, test_connection, include_details):
+def test_directory_api_returns_issue_details_only_on_request(
+    sqlite_cache, monkeypatch, client, auth_headers_user, test_connection, include_details
+):
     async def get_source(**kwargs):
         return sqlite_cache
 
@@ -5267,7 +5269,8 @@ def test_directory_api_returns_issue_details_only_on_request(sqlite_cache, monke
     assert sqlite_cache.index.finish_generation(1)
     monkeypatch.setattr("app.services.directory_cache.get_directory_cache_manager", lambda: SimpleNamespace(get_or_create_cache=get_source))
     response = client.get(
-        f"/api/browse/{test_connection.id}/directories", headers=auth_headers_user,
+        f"/api/browse/{test_connection.id}/directories",
+        headers=auth_headers_user,
         params={"q": "", "include_issue_details": str(include_details).lower()},
     )
     assert response.status_code == 200
@@ -7442,7 +7445,7 @@ def test_stale_scan_group_discards_parent_issues(index, reconcile):
 
 
 def test_issue_detail_samples_are_bounded_and_replaced_by_clean_reads(index):
-    from app.services.directory_cache import DirectoryScanCoordinator, MAX_LOGGED_SCAN_ISSUES_PER_PASS
+    from app.services.directory_cache import MAX_LOGGED_SCAN_ISSUES_PER_PASS, DirectoryScanCoordinator
 
     coordinator = DirectoryScanCoordinator(index)
     for number in range(MAX_LOGGED_SCAN_ISSUES_PER_PASS + 1):
