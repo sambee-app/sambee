@@ -2205,6 +2205,31 @@ async def test_failed_initialization_keeps_bounded_retry_eligibility(sqlite_cach
     assert "Wait for active workers" in sqlite_cache.scan_error
     assert started == [True]
     assert not sqlite_cache._opened.is_set()
+    assert sqlite_cache.state.value == "empty"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("next_state", ["building", "updating", "ready"])
+async def test_cold_scan_reports_opening_until_initialization_finishes(sqlite_cache, monkeypatch, next_state):
+    from app.services.directory_cache import CacheState
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def initialize():
+        entered.set()
+        await release.wait()
+        sqlite_cache._state = CacheState(next_state)
+
+    monkeypatch.setattr(sqlite_cache, "_initialize", initialize)
+    await sqlite_cache.start_scan()
+    try:
+        await entered.wait()
+        assert sqlite_cache.state is CacheState.OPENING
+    finally:
+        release.set()
+        await sqlite_cache._scan_task
+    assert sqlite_cache.state.value == next_state
 
 
 @pytest.mark.asyncio

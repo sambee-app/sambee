@@ -86,6 +86,7 @@ class CacheState(str, Enum):
     """State of a connection's directory cache."""
 
     EMPTY = "empty"  # No scan started yet
+    OPENING = "opening"
     BUILDING = "building"  # Initial scan in progress
     READY = "ready"  # Scan complete, cache is usable
     UPDATING = "updating"  # Rescan in progress, stale data served
@@ -1572,7 +1573,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         if self._scan_task is not None and not self._scan_task.done():
             return
         self._owning_loop = asyncio.get_running_loop()
-        self._state = CacheState.BUILDING
+        self._state = CacheState.OPENING
         self._scan_task = asyncio.create_task(self._initialize())
 
     async def _initialize(self) -> None:

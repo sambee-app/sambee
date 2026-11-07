@@ -233,7 +233,7 @@ export function useDirectorySearchProvider(
   options: DirectorySearchProviderOptions = {}
 ): SearchProvider {
   const { t } = useTranslation();
-  const [cacheState, setCacheState] = useState<string>("empty");
+  const [cacheState, setCacheState] = useState<string>("opening");
   const [directoryCount, setDirectoryCount] = useState(0);
   const [totalMatches, setTotalMatches] = useState(0);
   const [coverageStatus, setCoverageStatus] = useState<Pick<
@@ -309,7 +309,7 @@ export function useDirectorySearchProvider(
     indexFailureRef.current = false;
     setSourceFailure(null);
     setFailureDetail(undefined);
-    setCacheState("empty");
+    setCacheState("opening");
     setCoverageStatus(null);
     return () => {
       requestGenerationRef.current += 1;
@@ -529,12 +529,15 @@ export function useDirectorySearchProvider(
       };
     }
     if (coverageStatus?.status_message) return { label: coverageStatus.status_message, showSpinner: !!working };
+    if (cacheState === "opening") return null;
     const progress = coverageStatus?.scan_progress;
     if (progress && progress.phase !== "idle") {
       return {
         label:
           progress.phase === "building"
-            ? t("fileBrowser.search.status.indexing", { count: progress.directories_found })
+            ? progress.directories_found > 0
+              ? t("fileBrowser.search.status.indexing", { count: progress.directories_found })
+              : t("fileBrowser.search.status.indexingPending")
             : t("fileBrowser.search.status.updatingProgress", {
                 done: progress.parents_done,
                 total: progress.parents_done + progress.parents_queued,
@@ -553,7 +556,10 @@ export function useDirectorySearchProvider(
     switch (cacheState) {
       case "building":
         return {
-          label: t("fileBrowser.search.status.indexing", { count: directoryCount }),
+          label:
+            directoryCount > 0
+              ? t("fileBrowser.search.status.indexing", { count: directoryCount })
+              : t("fileBrowser.search.status.indexingPending"),
           showSpinner: !!working,
         };
       case "updating":
@@ -577,7 +583,8 @@ export function useDirectorySearchProvider(
     if (!response || response.search_contract_version !== SEARCH_CONTRACT_VERSION) return null;
     if (response.retry_after_ms != null && response.retry_after_ms > 0) return directoryRetryDelay(response.retry_after_ms);
     if (response.scan_progress && response.scan_progress.phase !== "idle") return DIRECTORY_REFRESH_INTERVAL_MS;
-    if (response.cache_state === "building" || response.cache_state === "updating") return DIRECTORY_REFRESH_INTERVAL_MS;
+    if (response.cache_state === "opening" || response.cache_state === "building" || response.cache_state === "updating")
+      return DIRECTORY_REFRESH_INTERVAL_MS;
     return response.cache_state === "empty" ||
       response.status_message ||
       response.coverage === "uncertain" ||

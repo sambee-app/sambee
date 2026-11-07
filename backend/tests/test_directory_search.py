@@ -666,7 +666,7 @@ class TestDirectorySearchResultModel:
     def test_model_all_cache_states(self):
         """Model should accept all valid cache states."""
 
-        for state_value in ["empty", "building", "ready", "updating"]:
+        for state_value in ["empty", "opening", "building", "ready", "updating"]:
             result = DirectorySearchResult(
                 results=[],
                 total_matches=0,

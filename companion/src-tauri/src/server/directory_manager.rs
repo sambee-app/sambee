@@ -897,6 +897,8 @@ impl Drop for MutationObservation {
     }
 }
 
+const INDEX_OPENING_STATE: &str = "opening";
+
 struct SourceStatus {
     state: &'static str,
     message: Option<String>,
@@ -1073,7 +1075,7 @@ impl LocalSource {
             watcher_reconciling: AtomicBool::new(true),
             observations: Mutex::new(Observations::default()),
             status: Mutex::new(SourceStatus {
-                state: "building",
+                state: INDEX_OPENING_STATE,
                 message: None,
                 progress: now,
                 verified: now,
@@ -3032,14 +3034,17 @@ impl LocalSource {
             observations.scan_commits = 0;
             observations.scan_issue_counts.clear();
             let (done, queued, found) = index.scan_counts(generation)?;
-            lock(&self.status)?.scan_progress = Some(ScanProgress {
+            let mut status = lock(&self.status)?;
+            status.state = if selected { "building" } else { "updating" };
+            status.scan_progress = Some(ScanProgress {
                 phase: if selected { "building" } else { "updating" },
                 parents_done: done,
                 parents_queued: queued,
                 directories_found: found,
                 started_at_ms: epoch_milliseconds()?,
             });
-            lock(&self.status)?.scan_generation = Some(generation);
+            status.scan_generation = Some(generation);
+            drop(status);
             log::info!(
                 "event=directory_scan_started operation=directory_index stage=scan source_id={} generation_id={} scan_generation={} scan_phase={} parents_done={} parents_queued={} directories_found={} native_opens={} group_commits=0 duration_ms={} abort_reason=none",
                 self.source_id,
@@ -3383,7 +3388,11 @@ impl LocalDirectoryManager {
         };
         {
             let mut status = lock(&source.status)?;
-            status.state = if lock(&source.reader)?.is_some() { "updating" } else { "building" };
+            status.state = if lock(&source.reader)?.is_some() {
+                "updating"
+            } else {
+                INDEX_OPENING_STATE
+            };
             status.stalled = false;
         }
         source.progress()?;
@@ -4488,6 +4497,25 @@ mod tests {
             assert_eq!(serialized["phase"], phase);
             assert_eq!(serialized["directories_found"], 3);
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cold_source_reports_opening_before_scan_progress() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        std::fs::create_dir(&path).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(path, manager.storage_directory());
+        {
+            let status = lock(&source.status).unwrap();
+            assert_eq!(status.state, INDEX_OPENING_STATE);
+            assert!(status.scan_progress.is_none());
+        }
+        source.scan(&manager.budget).unwrap();
+        let status = lock(&source.status).unwrap();
+        assert_eq!(status.state, "ready");
+        assert_eq!(status.scan_progress.as_ref().unwrap().phase, "idle");
     }
 
     #[cfg(target_os = "linux")]

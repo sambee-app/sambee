@@ -169,6 +169,8 @@ Reconciliation uses the same adaptive groups as full passes without advancing th
 
 Empty-query status uses committed metadata snapshots in memory. It does not open SQLite connections or run a directory query. The optional `scan_progress` response contains the phase, completed and queued parent counts, directory count, and start timestamp. Each group commit refreshes progress. The frontend shows active build or update progress before uncertain coverage.
 
+The `cache_state` value `opening` identifies index initialization before scanning. The quick bar hides this status but continues polling. Errors and recovery messages remain visible. Once scanning starts, build or update progress replaces the opening state. A build shows `Indexing...` until its directory count is positive; zero is not shown as a directory result.
+
 Storage must be private and local. Opens and cleanup validate directory ownership, file identity, and aliases. Do not write to managed databases externally or weaken these checks to permit a path-only fallback.
 
 ### Resource Controls

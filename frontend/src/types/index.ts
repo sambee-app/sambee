@@ -619,7 +619,7 @@ export interface DirectorySearchResult {
   results: string[];
   match_ranks?: Record<string, number>;
   total_matches: number;
-  cache_state: "empty" | "building" | "ready" | "updating";
+  cache_state: "empty" | "opening" | "building" | "ready" | "updating";
   directory_count: number;
   matched_term_counts?: Record<string, number>;
   accepted_revision?: number | null;

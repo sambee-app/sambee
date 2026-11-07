@@ -776,6 +776,7 @@ export const EN_TRANSLATIONS = {
       },
       status: {
         connectionStatus: "{{connection}}: {{message}}",
+        indexingPending: "Indexing...",
         indexing: "Indexing... ({{count}} directories found)",
         updating: "Updating index... ({{count}} directories)",
         updatingProgress: "Updating index... ({{done}} of ~{{total}} directories checked)",
