@@ -772,25 +772,25 @@ impl NativeRoot {
             if native_name == [b'.' as u16] || native_name == [b'.' as u16, b'.' as u16] {
                 return Ok(true);
             }
+            if record.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0
+                || record.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+                || windows_reparse_kind(record.ReparsePointTag) != WindowsReparseKind::Ordinary
+            {
+                return Ok(true);
+            }
             let name = match windows_entry_name(native_name) {
                 Ok(name) => name,
                 Err(issue) => {
-                    receive(Err(issue))?;
+                    receive(Err(match String::from_utf16(native_name) {
+                        Ok(name) => TraversalIssue::UnsupportedDirectoryName(name),
+                        Err(_) => issue,
+                    }))?;
                     return Ok(true);
                 }
             };
-            if record.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
-                || windows_reparse_kind(record.ReparsePointTag) != WindowsReparseKind::Ordinary
-            {
-                receive(Err(TraversalIssue::UnsafeTraversal))?;
-                return Ok(true);
-            }
-            if record.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
-                return Ok(true);
-            }
             let path = self.path.join(parent.replace('/', "\\")).join(&name);
             if super::validate_traversal_path(&path).is_err() {
-                receive(Err(TraversalIssue::UnsafeTraversal))?;
+                receive(Err(TraversalIssue::UnsafeDirectory(name)))?;
                 return Ok(true);
             }
             receive(Ok(Some((name, true, Some(record.FileId.Identifier.to_vec())))))?;
@@ -1104,7 +1104,7 @@ mod tests {
     }
 
     #[test]
-    fn junction_ancestors_and_children_are_rejected() {
+    fn junction_ancestors_are_rejected_and_children_are_silently_excluded() {
         let temporary = tempfile::tempdir().unwrap();
         let target = temporary.path().join("target");
         let junction = temporary.path().join("redirected");
@@ -1131,7 +1131,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert_eq!(issues, vec![TraversalIssue::UnsafeTraversal]);
+        assert!(issues.is_empty());
         assert!(root.has_directory_child("", root.identity, "redirected").is_err());
     }
 

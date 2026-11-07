@@ -255,17 +255,22 @@ class DirectoryScanCoordinator:
         self._streamed_parent_reads: set[int] = set()
         self._completed_scan_reads: set[int] = set()
         self._pending_scan_issues: dict[int, dict[str, int]] = {}
+        self._pending_issue_paths: dict[int, dict[str, str]] = {}
+        self.issue_paths: dict[tuple[str, str], str] = {}
         self.issue_details: set[tuple[str, str]] = set()
         self.issue_details_incomplete = False
         self.scan_commits = 0
         self.on_scan_commit: Callable[[int], None] | None = None
 
-    def _publish_issue_details(self, parent: str, counts: dict[str, int]) -> None:
+    def _publish_issue_details(self, parent: str, counts: dict[str, int], paths: dict[str, str] | None = None) -> None:
         """Publish diagnostics only after the owning parent transaction succeeds."""
         self.issue_details = {detail for detail in self.issue_details if detail[0] != parent}
+        self.issue_paths = {detail: path for detail, path in self.issue_paths.items() if detail in self.issue_details}
         for code in counts:
             if len(self.issue_details) < MAX_LOGGED_SCAN_ISSUES_PER_PASS:
                 self.issue_details.add((parent, code))
+                if paths is not None and code in paths:
+                    self.issue_paths[(parent, code)] = paths[code]
             else:
                 self.issue_details_incomplete = True
 
@@ -274,6 +279,7 @@ class DirectoryScanCoordinator:
         self.issue_details = {
             detail for detail in self.issue_details if not detail[0] or self.index.contains_directory(generation_id, detail[0])
         }
+        self.issue_paths = {detail: path for detail, path in self.issue_paths.items() if detail in self.issue_details}
 
     def start_scan_groups(self, *, reconcile: bool = False) -> None:
         with self.lock:
@@ -358,9 +364,14 @@ class DirectoryScanCoordinator:
                         options["streamed_parents"] = streamed_parents[generation]
                     if file_ids[generation]:
                         options["file_ids"] = file_ids[generation]
+                    issue_paths = {
+                        entry.token.path: self._pending_issue_paths.get(entry.token.producer_id)
+                        for entry in pending.values()
+                        if entry.generation == generation
+                    }
                     self.index.commit_scan_parents(generation, results, **options)
                     for parent, _children in results:
-                        self._publish_issue_details(parent, issues.get(parent, {}))
+                        self._publish_issue_details(parent, issues.get(parent, {}), issue_paths.get(parent))
                     self._discard_missing_issue_details(generation)
                     self.scan_commits += 1
                 if self.on_scan_commit is not None:
@@ -441,7 +452,7 @@ class DirectoryScanCoordinator:
     def _scan_issue_bytes(self, token: ScanReadToken) -> int:
         return sum(
             len(code.encode("utf-8")) + len(str(count)) for code, count in self._pending_scan_issues.get(token.producer_id, {}).items()
-        )
+        ) + sum(len(path.encode("utf-8")) for path in self._pending_issue_paths.get(token.producer_id, {}).values())
 
     def invalidate(self, reason: InvalidationReason) -> None:
         with self.lock:
@@ -543,6 +554,7 @@ class DirectoryScanCoordinator:
                 self._streamed_parent_reads.discard(token.producer_id)
                 self._completed_scan_reads.discard(token.producer_id)
                 self._pending_scan_issues.pop(token.producer_id, None)
+                self._pending_issue_paths.pop(token.producer_id, None)
                 del self._producers[token.producer_id]
                 self._retire_barriers()
 
@@ -660,9 +672,13 @@ class DirectoryScanCoordinator:
     def record_access_denied(self, token: ScanReadToken, generation_id: int) -> None:
         self._record_scan_issue(token, generation_id, self.index.record_access_denied)
 
-    def record_issue(self, token: ScanReadToken, generation_id: int, code: str, *, reconcile: bool = False) -> None:
+    def record_issue(
+        self, token: ScanReadToken, generation_id: int, code: str, *, reconcile: bool = False, path: str | None = None
+    ) -> None:
         if code not in ITEM_ISSUE_CODES:
             raise ValueError("Unsupported directory coverage issue. Use a contract issue code.")
+        if path is not None and len(path.encode("utf-8")) > MAX_OBSERVATION_BYTES:
+            path = None
         with self.lock:
             if not self.is_current(token):
                 self.verification_required = True
@@ -675,15 +691,22 @@ class DirectoryScanCoordinator:
                     raise OverflowError("Directory coverage issue count is exhausted. Restart source verification.")
                 if self._scan_group is not None:
                     size = len(str(previous + 1)) - len(str(previous)) if previous else len(code.encode("utf-8")) + 1
+                    if path is not None and code not in self._pending_issue_paths.get(token.producer_id, {}):
+                        size += len(path.encode("utf-8"))
                     self._stage_scan_parent(token, generation_id, has_changes=False, size=size)
                 self._pending_scan_issues.setdefault(token.producer_id, {})[code] = previous + 1
+                if path is not None:
+                    self._pending_issue_paths.setdefault(token.producer_id, {}).setdefault(code, path)
                 if self._scan_group is not None:
                     self.flush_scan_group_if_due()
             else:
                 self.index.record_issue(generation_id, code, reconcile=reconcile)
                 counts = {previous_code: 1 for parent, previous_code in self.issue_details if parent == token.path}
                 counts[code] = 1
-                self._publish_issue_details(token.path, counts)
+                paths = {previous_code: value for (parent, previous_code), value in self.issue_paths.items() if parent == token.path}
+                if path is not None:
+                    paths.setdefault(code, path)
+                self._publish_issue_details(token.path, counts, paths)
 
     def _record_scan_issue(self, token: ScanReadToken, generation_id: int, record: Callable[[int], None]) -> None:
         with self.lock:
@@ -717,7 +740,9 @@ class DirectoryScanCoordinator:
                     if token.producer_id in self._pending_scan_issues
                     else None,
                 )
-                self._publish_issue_details(token.path, self._pending_scan_issues.get(token.producer_id, {}))
+                self._publish_issue_details(
+                    token.path, self._pending_scan_issues.get(token.producer_id, {}), self._pending_issue_paths.get(token.producer_id)
+                )
                 self._discard_missing_issue_details(generation_id)
             elif self._scan_group is not None:
                 existing = self._scan_group.get(token.producer_id)
@@ -1739,11 +1764,18 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     def directory_issue_details(self) -> tuple[list[dict[str, str]], bool]:
         """Return bounded, source-local diagnostics, never a persistent error history."""
         with self.coordinator.lock:
-            details = [{"path": parent or "/", "code": code} for parent, code in sorted(self.coordinator.issue_details)]
+            details = [
+                {
+                    "path": self.coordinator.issue_paths.get((parent, code), parent) or "/",
+                    "code": code,
+                    "scope": "directory" if (parent, code) in self.coordinator.issue_paths else "contents",
+                }
+                for parent, code in sorted(self.coordinator.issue_details)
+            ]
             return details, self.coordinator.issue_details_incomplete
 
     def _record_item_issue(self, token: ScanReadToken, generation: int, code: str, *, reconcile: bool, path: str | None = None) -> None:
-        self.coordinator.record_issue(token, generation, code, reconcile=reconcile)
+        self.coordinator.record_issue(token, generation, code, reconcile=reconcile, path=path)
         self._scan_issue_counts[code] = self._scan_issue_counts.get(code, 0) + 1
         if sum(self._scan_issue_counts.values()) <= MAX_LOGGED_SCAN_ISSUES_PER_PASS:
             self._logger.info(
@@ -1929,7 +1961,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     code = error.code if isinstance(error, self._DescendantScanIssue) else self._classify_source_error(error)
                     if code is None:
                         raise
-                    self._record_item_issue(token, generation, code, reconcile=reconcile)
+                    self._record_item_issue(token, generation, code, reconcile=reconcile, path=token.path)
                     self.coordinator.finish_parent(token, generation, reconcile=reconcile, skip_children=True)
             finally:
                 self.coordinator.end_read(token)
@@ -2018,6 +2050,9 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 if entry is None:
                     break
                 self._scan_progress = time.monotonic()
+                attributes = entry.smb_info.file_attributes
+                if attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT:
+                    continue
                 if entry.name is None:
                     self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
                     continue
@@ -2026,21 +2061,21 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 if PATH_SEPARATOR in entry.name or "\\" in entry.name:
                     self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
                     continue
-                attributes = entry.smb_info.file_attributes
                 if not attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
-                    continue
-                if attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT:
-                    self._record_item_issue(token, generation, "unsafe_traversal", reconcile=reconcile)
                     continue
                 path = parent + PATH_SEPARATOR + entry.name if parent else entry.name
                 try:
-                    validate_directory_path(path)
                     path_bytes = len(path.encode("utf-8"))
-                except (ValueError, UnicodeError):
+                except UnicodeError:
                     self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
                     continue
+                try:
+                    validate_directory_path(path)
+                except ValueError:
+                    self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile, path=path)
+                    continue
                 if path_bytes > MAX_OBSERVATION_BYTES:
-                    self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile)
+                    self._record_item_issue(token, generation, "unsupported_encoding", reconcile=reconcile, path=path)
                     continue
                 if batch and batch_bytes + path_bytes > MAX_OBSERVATION_BYTES:
                     commit_batch()
@@ -2330,6 +2365,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     generation, _selected = self.index.prepare_scan()
                     if not resuming:
                         self.coordinator.issue_details.clear()
+                        self.coordinator.issue_paths.clear()
                         self.coordinator.issue_details_incomplete = False
                         self._scan_epoch = (generation, baseline)
                     if self.coordinator.observation_lost:

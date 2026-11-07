@@ -612,6 +612,7 @@ export interface ScanProgress {
 export interface DirectoryIssueDetail {
   path: string;
   code: "access_denied" | "unsupported_encoding" | "unsafe_traversal" | "scan_failed";
+  scope?: "directory" | "contents";
 }
 
 export interface DirectorySearchResult {

@@ -68,21 +68,30 @@ fn validate_traversal_path(path: &Path) -> Result<(), IndexError> {
     Ok(())
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TraversalIssue {
     AccessDenied,
     UnsupportedEncoding,
     UnsafeTraversal,
     ScanFailed,
+    UnsafeDirectory(String),
+    UnsupportedDirectoryName(String),
 }
 
 impl TraversalIssue {
-    pub fn code(self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
             Self::AccessDenied => "access_denied",
-            Self::UnsupportedEncoding => "unsupported_encoding",
-            Self::UnsafeTraversal => "unsafe_traversal",
+            Self::UnsupportedEncoding | Self::UnsupportedDirectoryName(_) => "unsupported_encoding",
+            Self::UnsafeTraversal | Self::UnsafeDirectory(_) => "unsafe_traversal",
             Self::ScanFailed => "scan_failed",
+        }
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Self::UnsafeDirectory(name) | Self::UnsupportedDirectoryName(name) => Some(name),
+            _ => None,
         }
     }
 }
@@ -109,7 +118,7 @@ pub(super) fn source_error(error: IndexError) -> IndexError {
             }
             IndexError::SourceItem(match error.kind() {
                 std::io::ErrorKind::PermissionDenied => TraversalIssue::AccessDenied.code(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory => TraversalIssue::UnsafeTraversal.code(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory => TraversalIssue::ScanFailed.code(),
                 _ => TraversalIssue::ScanFailed.code(),
             })
         }
@@ -181,7 +190,8 @@ mod source_error_tests {
         for (kind, expected) in [
             (std::io::ErrorKind::PermissionDenied, "access_denied"),
             (std::io::ErrorKind::Other, "scan_failed"),
-            (std::io::ErrorKind::NotFound, "unsafe_traversal"),
+            (std::io::ErrorKind::NotFound, "scan_failed"),
+            (std::io::ErrorKind::NotADirectory, "scan_failed"),
         ] {
             assert!(matches!(source_error(IndexError::Io(std::io::Error::from(kind))), IndexError::SourceItem(code) if code == expected));
         }
@@ -578,7 +588,7 @@ mod platform {
         assert_eq!(children[0].0, "directory");
         assert!(children[0].1);
         assert!(children[0].2.is_some());
-        assert_eq!(issues, vec![TraversalIssue::UnsafeTraversal]);
+        assert!(issues.is_empty());
     }
 
     #[test]
@@ -1001,10 +1011,7 @@ mod platform {
                     entry_type
                 };
                 match entry_type {
-                    libc::DT_LNK => {
-                        receive(Err(TraversalIssue::UnsafeTraversal))?;
-                        continue;
-                    }
+                    libc::DT_LNK => continue,
                     libc::DT_DIR | libc::DT_UNKNOWN => {}
                     _ => continue,
                 }
@@ -1030,7 +1037,6 @@ mod platform {
                     }
                     let kind = unsafe { metadata.assume_init() }.st_mode & libc::S_IFMT;
                     if kind == libc::S_IFLNK {
-                        receive(Err(TraversalIssue::UnsafeTraversal))?;
                         continue;
                     }
                     if kind != libc::S_IFDIR {
@@ -1038,7 +1044,7 @@ mod platform {
                     }
                 }
                 if super::validate_traversal_path(&self.path.join(parent).join(text)).is_err() {
-                    receive(Err(TraversalIssue::UnsafeTraversal))?;
+                    receive(Err(TraversalIssue::UnsafeDirectory(text.to_owned())))?;
                     continue;
                 }
                 let mut extended = std::mem::MaybeUninit::<libc::statx>::zeroed();
@@ -1056,9 +1062,7 @@ mod platform {
                     let metadata = unsafe { extended.assume_init() };
                     if metadata.stx_mask & mask == mask {
                         let kind = u32::from(metadata.stx_mode) & libc::S_IFMT;
-                        if kind == libc::S_IFLNK {
-                            receive(Err(TraversalIssue::UnsafeTraversal))?;
-                        } else if kind == libc::S_IFDIR {
+                        if kind == libc::S_IFDIR {
                             let same_mount = libc::makedev(metadata.stx_dev_major, metadata.stx_dev_minor) == self.identity.device
                                 && metadata.stx_mnt_id == self.identity.mount;
                             receive(Ok(Some((
@@ -1067,7 +1071,7 @@ mod platform {
                                 Some(metadata.stx_ino.to_le_bytes().to_vec()),
                             ))))?;
                             if !same_mount {
-                                receive(Err(TraversalIssue::UnsafeTraversal))?;
+                                receive(Err(TraversalIssue::UnsafeDirectory(text.to_owned())))?;
                             }
                         }
                         continue;
@@ -1091,7 +1095,7 @@ mod platform {
                     }
                     Ok(_) => {
                         receive(Ok(Some((text.to_owned(), false, None))))?;
-                        receive(Err(TraversalIssue::UnsafeTraversal))?;
+                        receive(Err(TraversalIssue::UnsafeDirectory(text.to_owned())))?;
                     }
                     Err(error) => {
                         if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
@@ -1425,8 +1429,7 @@ mod tests {
             .unwrap();
         rows.sort();
         assert_eq!(rows, vec![(".hidden".to_owned(), true), ("visible".to_owned(), true)]);
-        assert!(issues.contains(&TraversalIssue::UnsafeTraversal));
-        assert!(issues.contains(&TraversalIssue::UnsupportedEncoding));
+        assert_eq!(issues, vec![TraversalIssue::UnsupportedEncoding]);
     }
 
     #[test]
@@ -1495,7 +1498,7 @@ mod tests {
         })
         .unwrap();
         assert!(entries.is_empty());
-        assert_eq!(issues, [TraversalIssue::UnsafeTraversal]);
+        assert_eq!(issues, [TraversalIssue::UnsafeDirectory("excluded".to_owned())]);
         root.children("", |entry| {
             if let Ok(Some(entry)) = entry {
                 entries.push(entry);

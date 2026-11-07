@@ -642,6 +642,7 @@ pub struct ScanProgress {
 pub struct DirectoryIssueDetail {
     pub path: String,
     pub code: &'static str,
+    pub scope: &'static str,
 }
 
 #[derive(Debug, Serialize)]

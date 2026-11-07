@@ -149,6 +149,7 @@ class DirectoryIssueDetail(BaseModel):
 
     path: str
     code: Literal["access_denied", "unsupported_encoding", "unsafe_traversal", "scan_failed"]
+    scope: Literal["directory", "contents"] = "contents"
 
 
 class DirectorySearchResult(BaseModel):

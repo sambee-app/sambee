@@ -38,13 +38,15 @@ Retained results become searchable after a valid source-root check, even while f
 
 Directory changes normally retry only affected parents. Completed quiet branches remain available, and background work gives both existing results and full verification time to progress. A parent that changes during its read is deferred for at least one second. A full pass may remain incomplete while directories keep changing. To confirm complete coverage, allow a quiet period and check the verification time.
 
-A denied folder, unsafe directory, or unsupported name does not stop verification of readable folders. A completed pass can have partial coverage and a verification time. It does not mean that every folder was read. Failed folders are checked at the next regular verification. Restore their permissions or correct unsupported names to improve coverage. A failed incremental read keeps stored descendants until a later check can confirm a change.
+A denied folder, failed directory safety check, or unsupported name does not stop verification of readable folders. A completed pass can have partial coverage and a verification time. It does not mean that every eligible folder was read. Failed folders are checked at the next regular verification. Restore their permissions or correct unsupported names to improve coverage. A failed incremental read keeps stored descendants until a later check can confirm a change.
 
 Status messages show active conditions. A local retry alone does not mean that the source is unavailable. Follow a displayed storage, access, or monitoring recovery action. Retry delays account for both scan gates and watcher retries; a longer failure backoff can delay scan work beyond the one-second change retry. Repeated searches and status checks do not shorten that delay.
 
 ### Source Boundaries
 
 SMB indexing stays within the configured share and folder. Storage mounted inside that share is included unless it is exposed through a redirect or reparse point. Local indexing does not cross mount boundaries.
+
+Junctions, symbolic links, and other redirected descendants are not followed. They are intentional exclusions, not indexing failures: they do not reduce coverage or appear in status details. Source-root and opened-parent safety checks remain strict. A directory that changes into a redirect during a read cannot publish children.
 
 Local fixed drives use a separate index when the volume serial or file-system UUID changes. Removable and unknown drives also start a new generation when the volume label, file-system type, or total capacity changes. Each volume at the same path can reuse its own retained index. Missing media pauses search without deleting the index. On Linux, mount the volume again; the empty mount-point folder is not a replacement source.
 

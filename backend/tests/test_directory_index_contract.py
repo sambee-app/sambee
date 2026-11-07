@@ -5023,10 +5023,8 @@ def test_watcher_startup_uncertainty_is_drained_before_initial_generation(sqlite
             yield SimpleNamespace(name="visible", smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY))
             if partial:
                 yield SimpleNamespace(
-                    name="redirect",
-                    smb_info=SimpleNamespace(
-                        file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY | FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT
-                    ),
+                    name=None,
+                    smb_info=SimpleNamespace(file_attributes=FileAttributes.FILE_ATTRIBUTE_DIRECTORY),
                 )
 
     monkeypatch.setattr("smbclient.scandir", scan)
@@ -5300,7 +5298,9 @@ def test_directory_api_returns_issue_details_only_on_request(
     )
     assert response.status_code == 200
     assert response.json()["issue_details_available"] is True
-    assert response.json()["issue_details"] == ([{"path": "/", "code": "unsupported_encoding"}] if include_details else None)
+    assert response.json()["issue_details"] == (
+        [{"path": "/", "code": "unsupported_encoding", "scope": "contents"}] if include_details else None
+    )
     assert response.json()["issue_details_incomplete"] is False
 
 
@@ -5405,7 +5405,7 @@ def test_sqlite_source_initial_batches_are_visible_after_commit_deadline(sqlite_
     assert not hasattr(sqlite_cache, "_directories")
 
 
-def test_sqlite_source_excludes_reparse_directories_and_reports_partial_coverage(sqlite_cache, monkeypatch):
+def test_sqlite_source_excludes_reparse_directories_without_coverage_issues(sqlite_cache, monkeypatch):
     from smbclient._os import FileAttributes
 
     def scan(path, **kwargs):
@@ -5425,8 +5425,9 @@ def test_sqlite_source_excludes_reparse_directories_and_reports_partial_coverage
     sqlite_cache._scan_disk_queue()
     response = sqlite_cache.search_index("regular redirected placeholder")
     assert response.total_matches == response.directory_count == 1
-    assert response.coverage == "partial"
-    assert response.issue_count == 2
+    assert response.coverage == "complete"
+    assert response.issue_count == 0
+    assert sqlite_cache.directory_issue_details() == ([], False)
     assert response.last_verified_at_ms is not None
     assert not sqlite_cache.coordinator.verification_required
 
@@ -5444,11 +5445,14 @@ def test_sqlite_source_excludes_reparse_directories_and_reports_partial_coverage
     assert not sqlite_cache.coordinator.verification_required
 
 
-def test_sqlite_source_reparse_candidate_is_accepted_with_partial_coverage(sqlite_cache, monkeypatch):
+def test_sqlite_source_reparse_candidate_clears_previous_coverage_issues(sqlite_cache, monkeypatch):
     from smbclient._os import FileAttributes
 
     sqlite_cache.index.write_paths(["accepted"])
+    sqlite_cache.index.record_unsafe_traversal(1)
+    sqlite_cache.coordinator._publish_issue_details("", {"unsafe_traversal": 1})
     assert sqlite_cache.index.finish_generation(1)
+    assert sqlite_cache.index.status().coverage == "partial"
 
     def scan(path, **kwargs):
         yield SimpleNamespace(
@@ -5459,7 +5463,9 @@ def test_sqlite_source_reparse_candidate_is_accepted_with_partial_coverage(sqlit
     monkeypatch.setattr("smbclient.scandir", scan)
     sqlite_cache._scan_disk_queue()
     assert sqlite_cache.index.search("accepted").total_matches == 0
-    assert sqlite_cache.index.status().coverage == "partial"
+    assert sqlite_cache.index.status().coverage == "complete"
+    assert sqlite_cache.index.status().issue_count == 0
+    assert sqlite_cache.directory_issue_details() == ([], False)
     assert not sqlite_cache.coordinator.verification_required
 
 
@@ -5503,7 +5509,7 @@ def test_sqlite_source_denied_descendant_preserves_readable_siblings(sqlite_cach
     assert sqlite_cache.index.pending_scan_paths(1) == []
     assert sqlite_cache._smb_base_path + "\\readable\\child" in reads
     assert sqlite_cache.index._connection().execute("SELECT code, count FROM coverage_issues").fetchall() == [("access_denied", 1)]
-    assert sqlite_cache.directory_issue_details() == ([{"path": "denied", "code": "access_denied"}], False)
+    assert sqlite_cache.directory_issue_details() == ([{"path": "denied", "code": "access_denied", "scope": "directory"}], False)
 
     def empty_scan(*_args, **_kwargs):
         yield from ()
@@ -6615,7 +6621,7 @@ def test_accepted_parent_worker_preserves_work_after_refusal(sqlite_cache, monke
 
 
 @pytest.mark.parametrize("failure", ["denied", "redirected", "close"])
-def test_accepted_parent_worker_completes_item_failures(sqlite_cache, monkeypatch, failure):
+def test_accepted_parent_worker_completes_item_failures_and_exclusions(sqlite_cache, monkeypatch, failure):
     from smbclient._os import FileAttributes
 
     index = sqlite_cache.index
@@ -6646,8 +6652,10 @@ def test_accepted_parent_worker_completes_item_failures(sqlite_cache, monkeypatc
     sqlite_cache._reconcile_disk_queue()
     assert index.pending_scan_paths(1) == []
     after = index.search("parent")
-    assert after.coverage == "partial"
-    assert after.issue_count == 1
+    assert after.coverage == ("complete" if failure == "redirected" else "partial")
+    assert after.issue_count == (0 if failure == "redirected" else 1)
+    if failure == "redirected":
+        assert sqlite_cache.directory_issue_details() == ([], False)
     assert after.last_verified_at_ms == before.last_verified_at_ms
     if failure == "denied":
         assert after.results == before.results
@@ -7430,10 +7438,10 @@ def test_scan_group_buffers_parent_issues(index, early_flush, reconcile):
     coordinator = DirectoryScanCoordinator(index)
     coordinator.start_scan_groups(reconcile=reconcile)
     token = coordinator.begin_read("")
-    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile)
+    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile, path="child-too-long")
     if early_flush:
         coordinator.flush_scan_group()
-    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile)
+    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile, path="another-child")
     assert index.status().issue_count == 0
     assert not coordinator.issue_details
     coordinator.finish_parent(token, 1, reconcile=reconcile)
@@ -7441,8 +7449,10 @@ def test_scan_group_buffers_parent_issues(index, early_flush, reconcile):
     assert index.status().issue_count == 2
     assert coordinator.scan_commits == 1
     assert not coordinator._pending_scan_issues
+    assert not coordinator._pending_issue_paths
     assert not coordinator._producers
     assert coordinator.issue_details == {("", "unsupported_encoding")}
+    assert coordinator.issue_paths == {("", "unsupported_encoding"): "child-too-long"}
 
 
 @pytest.mark.parametrize("reconcile", [False, True])
@@ -7458,7 +7468,7 @@ def test_stale_scan_group_discards_parent_issues(index, reconcile):
     coordinator = DirectoryScanCoordinator(index)
     coordinator.start_scan_groups(reconcile=reconcile)
     token = coordinator.begin_read("")
-    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile)
+    coordinator.record_issue(token, 1, "unsupported_encoding", reconcile=reconcile, path="child-too-long")
     coordinator.finish_parent(token, 1, reconcile=reconcile)
     _lose_observations(coordinator)
     with pytest.raises(RuntimeError, match="stale"):
@@ -7466,7 +7476,9 @@ def test_stale_scan_group_discards_parent_issues(index, reconcile):
     assert index.scan_parent_pending(1, "")
     assert index._connection().execute("SELECT count(*) FROM coverage_issues WHERE code = 'unsupported_encoding'").fetchone() == (0,)
     assert not coordinator._pending_scan_issues
+    assert not coordinator._pending_issue_paths
     assert not coordinator.issue_details
+    assert not coordinator.issue_paths
 
 
 @pytest.mark.parametrize("parent_hint", [False, True])

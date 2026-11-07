@@ -16,9 +16,9 @@ Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to search directory paths across the curren
 
 Results can be incomplete while Sambee scans folders. During a scan, the status shows directories found or directories checked. An interrupted scan keeps committed progress for its next attempt. If a folder is missing from search, browse to it directly.
 
-Status messages identify the connection. **Not all directories could be indexed** means some folders were skipped; available results remain usable. When a message has additional details, it appears as a link that you can click or tap. The status dialog lists affected locations and reasons, or specific request-error details. These links are outside keyboard navigation so focus stays in the quick bar.
+Status messages identify the connection. **Not all directories could be indexed** means some eligible folders could not be read or validated; available results remain usable. When additional information is available, the message ends with a **details** link. The dialog shows affected locations, reasons, and corrective actions, or specific request-error details. The link is outside keyboard navigation so focus stays in the quick bar.
 
-Directory details are a limited sample from the current running source, not a full error history. They can be unavailable after a restart until another scan collects them. Check the listed folder permissions or names when applicable. Some locations are deliberately excluded for safe traversal and do not require a repair.
+Directory details are a limited sample from the current running source, not a full error history. They can be unavailable after a restart until another scan collects them. A location marked **Containing directory** has an affected entry whose name is unavailable. Check the listed permissions or names when applicable. Junctions, symbolic links, and other redirected descendants are ignored: they do not appear in the dialog or cause an incomplete-index warning.
 
 If directory search is temporarily unavailable, the quick bar keeps recent history and results already shown for the same search. It checks for recovery while open. A paused status does not mean that a scan is still running. Restore source access if the message reports a connection problem; direct browsing can remain available while search recovers.
 
