@@ -563,11 +563,27 @@ mod platform {
 
     #[test]
     fn unknown_entry_types_use_nofollow_metadata() {
-        const EXPECTED_ENTRY_CHECKS: u64 = 3;
+        use std::os::unix::ffi::OsStringExt;
+
+        const EXPECTED_ENTRY_CHECKS: u64 = 6;
+        const INVALID_LINK_NAME: &[u8] = b"\xff-link";
+        const INVALID_FILE_NAME: &[u8] = b"\xff-file";
+        const INVALID_DIRECTORY_NAME: &[u8] = b"\xff-directory";
         let temporary = tempfile::tempdir().unwrap();
         std::fs::create_dir(temporary.path().join("directory")).unwrap();
         std::fs::write(temporary.path().join("file"), b"file").unwrap();
         std::os::unix::fs::symlink("directory", temporary.path().join("link")).unwrap();
+        std::os::unix::fs::symlink(
+            "directory",
+            temporary.path().join(std::ffi::OsString::from_vec(INVALID_LINK_NAME.to_vec())),
+        )
+        .unwrap();
+        std::fs::write(
+            temporary.path().join(std::ffi::OsString::from_vec(INVALID_FILE_NAME.to_vec())),
+            b"file",
+        )
+        .unwrap();
+        std::fs::create_dir(temporary.path().join(std::ffi::OsString::from_vec(INVALID_DIRECTORY_NAME.to_vec()))).unwrap();
         let root = NativeRoot::open(temporary.path()).unwrap();
         root.io.force_unknown_entry_types.store(true, Ordering::Relaxed);
         let parent = root.open_parent_for_scan("").unwrap();
@@ -588,7 +604,7 @@ mod platform {
         assert_eq!(children[0].0, "directory");
         assert!(children[0].1);
         assert!(children[0].2.is_some());
-        assert!(issues.is_empty());
+        assert_eq!(issues, vec![TraversalIssue::UnsupportedEncoding]);
     }
 
     #[test]
@@ -1015,10 +1031,6 @@ mod platform {
                     libc::DT_DIR | libc::DT_UNKNOWN => {}
                     _ => continue,
                 }
-                let Ok(text) = name.to_str() else {
-                    receive(Err(TraversalIssue::UnsupportedEncoding))?;
-                    continue;
-                };
                 if entry_type == libc::DT_UNKNOWN {
                     #[cfg(test)]
                     self.io.unknown_entry_checks.fetch_add(1, Ordering::Relaxed);
@@ -1027,6 +1039,10 @@ mod platform {
                     if result != 0 {
                         let error = io::Error::last_os_error();
                         if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
+                            let Ok(text) = name.to_str() else {
+                                receive(Err(TraversalIssue::UnsupportedEncoding))?;
+                                continue;
+                            };
                             if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
                                 return Err(IndexError::Interrupted);
                             }
@@ -1043,6 +1059,10 @@ mod platform {
                         continue;
                     }
                 }
+                let Ok(text) = name.to_str() else {
+                    receive(Err(TraversalIssue::UnsupportedEncoding))?;
+                    continue;
+                };
                 if super::validate_traversal_path(&self.path.join(parent).join(text)).is_err() {
                     receive(Err(TraversalIssue::UnsafeDirectory(text.to_owned())))?;
                     continue;
