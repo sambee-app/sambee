@@ -7444,6 +7444,70 @@ def test_stale_scan_group_discards_parent_issues(index, reconcile):
     assert not coordinator.issue_details
 
 
+@pytest.mark.parametrize("parent_hint", [False, True])
+def test_issue_details_remove_deleted_subtree_after_reconciliation(index, parent_hint):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import READ_PARENT_ACTION, DirectoryScanCoordinator, _DirectoryMutation
+
+    index.seed_scan(1)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator.start_scan_groups()
+    for parent, children in [
+        ("", [("private", True), ("private-backup", True)]),
+        ("private", [("private/child", True)]),
+        ("private/child", []),
+        ("private-backup", []),
+    ]:
+        with coordinator.read(parent) as token:
+            coordinator.commit_children(token, 1, children)
+            coordinator.record_issue(token, 1, "access_denied")
+            coordinator.finish_parent(token, 1)
+        coordinator.flush_scan_group()
+    coordinator.cancel_scan_groups()
+    assert index.finish_generation(1)
+
+    mutation = _DirectoryMutation(READ_PARENT_ACTION, "") if parent_hint else _DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "private")
+    assert coordinator.enqueue(mutation)
+    coordinator.apply_pending()
+    coordinator.start_scan_groups(reconcile=True)
+    with coordinator.read("") as token:
+        coordinator.commit_children(token, 1, [("private-backup", True)], reconcile=True)
+        coordinator.record_issue(token, 1, "access_denied", reconcile=True)
+        coordinator.finish_parent(token, 1, reconcile=True)
+    coordinator.flush_scan_group()
+    coordinator.cancel_scan_groups()
+
+    assert not index.search("private/child").results
+    assert coordinator.issue_details == {("", "access_denied"), ("private-backup", "access_denied")}
+
+
+def test_issue_details_preserved_when_subtree_deletion_rolls_back(index):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import DirectoryScanCoordinator, _DirectoryMutation
+
+    index.write_paths(["private", "private/child"])
+    assert index.finish_generation(1)
+    coordinator = DirectoryScanCoordinator(index)
+    coordinator._publish_issue_details("private", {"access_denied": 1})
+    coordinator._publish_issue_details("private/child", {"access_denied": 1})
+    samples = coordinator.issue_details.copy()
+    index._connection().execute(
+        "CREATE TRIGGER reject_sample_deletion BEFORE DELETE ON directories "
+        "WHEN OLD.path = 'private' BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END"
+    )
+    assert coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_REMOVED, "private"))
+    with pytest.raises(sqlite3.IntegrityError, match="injected deletion failure"):
+        coordinator.apply_pending()
+    assert coordinator.issue_details == samples
+    assert index.contains_directory(1, "private/child")
+    assert coordinator.pending
+    index._connection().execute("DROP TRIGGER reject_sample_deletion")
+    coordinator.apply_pending()
+    assert not coordinator.issue_details
+
+
 def test_issue_detail_samples_are_bounded_and_replaced_by_clean_reads(index):
     from app.services.directory_cache import MAX_LOGGED_SCAN_ISSUES_PER_PASS, DirectoryScanCoordinator
 

@@ -613,6 +613,17 @@ impl Observations {
         Ok(())
     }
 
+    fn discard_missing_issue_details(&mut self, index: &DirectoryIndex, generation: i64) -> Result<(), IndexError> {
+        let mut missing = HashSet::new();
+        for (path, _code) in &self.issue_details {
+            if !path.is_empty() && !index.contains_directory(generation, path)? {
+                missing.insert(path.clone());
+            }
+        }
+        self.issue_details.retain(|(path, _code)| !missing.contains(path));
+        Ok(())
+    }
+
     fn scan_issue_bytes(&self, producer: u64) -> usize {
         self.pending_scan_issues.get(&producer).map_or(0, |counts| {
             counts.iter().map(|(code, count)| code.len() + count.to_string().len()).sum()
@@ -1477,7 +1488,15 @@ impl LocalSource {
                 break;
             };
             writer.mutate_observed_path(mutation)?;
-            observations.bytes -= *bytes;
+            let bytes = *bytes;
+            if let DirectoryMutation::Remove { path } = mutation {
+                let prefix = format!("{path}/");
+                let path = path.clone();
+                observations
+                    .issue_details
+                    .retain(|(parent, _code)| parent != &path && !parent.starts_with(&prefix));
+            }
+            observations.bytes -= bytes;
             observations.pending.pop_front();
         }
         observations.retire_barriers();
@@ -1795,6 +1814,7 @@ impl LocalSource {
                             .unwrap_or(&HashMap::new()),
                     )?;
                 }
+                observations.discard_missing_issue_details(writer, generation)?;
                 observations.scan_commits += 1;
             }
             let mut status = lock(&self.status)?;
@@ -2059,6 +2079,7 @@ impl LocalSource {
             .cloned()
             .unwrap_or_default();
         observations.publish_issue_details(parent, &counts)?;
+        observations.discard_missing_issue_details(writer, generation)?;
         lock(&self.status)?.index_status = Some(writer.status()?);
         Ok(())
     }
@@ -2381,6 +2402,7 @@ impl LocalSource {
             .cloned()
             .unwrap_or_default();
         observations.publish_issue_details(parent, &counts)?;
+        observations.discard_missing_issue_details(writer, generation)?;
         lock(&self.status)?.index_status = Some(writer.status()?);
         Ok(())
     }
@@ -3758,6 +3780,90 @@ impl Drop for LocalDirectoryManager {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn issue_details_remove_deleted_subtree_after_reconciliation() {
+        for parent_hint in [false, true] {
+            issue_details_remove_deleted_subtree(parent_hint);
+        }
+    }
+
+    fn issue_details_remove_deleted_subtree(parent_hint: bool) {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        std::fs::create_dir_all(path.join("private/child")).unwrap();
+        std::fs::create_dir(path.join("private-backup")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let source = LocalSource::new(path.clone(), manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        {
+            let mut observations = lock(&source.observations).unwrap();
+            for parent in ["", "private", "private/child", "private-backup"] {
+                observations
+                    .publish_issue_details(parent, &HashMap::from([("access_denied", 1)]))
+                    .unwrap();
+            }
+            observations
+                .enqueue(
+                    if parent_hint {
+                        DirectoryMutation::ReadParent { path: String::new() }
+                    } else {
+                        DirectoryMutation::Remove { path: "private".into() }
+                    },
+                    limit("max_pending_observations").unwrap(),
+                    limit("max_observation_bytes").unwrap(),
+                )
+                .unwrap();
+        }
+        std::fs::remove_dir_all(path.join("private")).unwrap();
+        source.flush(&manager.budget).unwrap();
+        source.reconcile(&manager.budget, &manager.scans).unwrap();
+        assert_eq!(
+            lock(&source.observations).unwrap().issue_details,
+            HashSet::from([("private-backup".to_owned(), "access_denied")])
+        );
+    }
+
+    #[test]
+    fn issue_details_preserved_when_subtree_deletion_rolls_back() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("root");
+        std::fs::create_dir_all(path.join("private/child")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let source = LocalSource::new(path, manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        let samples = HashSet::from([
+            ("private".to_owned(), "access_denied"),
+            ("private/child".to_owned(), "access_denied"),
+        ]);
+        {
+            let mut observations = lock(&source.observations).unwrap();
+            observations.issue_details = samples.clone();
+            observations
+                .enqueue(
+                    DirectoryMutation::Remove { path: "private".into() },
+                    limit("max_pending_observations").unwrap(),
+                    limit("max_observation_bytes").unwrap(),
+                )
+                .unwrap();
+        }
+        let connection = open_directory_database(&source.index_path, OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
+        connection.execute_batch(
+            "CREATE TRIGGER reject_sample_deletion BEFORE DELETE ON directories WHEN OLD.path = 'private' BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END",
+        ).unwrap();
+        assert!(matches!(source.flush(&manager.budget), Err(IndexError::Sql(_))));
+        assert_eq!(lock(&source.observations).unwrap().issue_details, samples);
+        assert!(!lock(&source.observations).unwrap().pending.is_empty());
+        assert!(lock(&source.writer)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .contains_directory(1, "private/child")
+            .unwrap());
+        connection.execute_batch("DROP TRIGGER reject_sample_deletion").unwrap();
+        source.flush(&manager.budget).unwrap();
+        assert!(lock(&source.observations).unwrap().issue_details.is_empty());
+    }
+
     #[test]
     fn issue_detail_samples_are_bounded_and_replaced_by_clean_reads() {
         let mut observations = Observations::default();

@@ -268,6 +268,12 @@ class DirectoryScanCoordinator:
             else:
                 self.issue_details_incomplete = True
 
+    def _discard_missing_issue_details(self, generation_id: int) -> None:
+        """Remove samples for subtrees pruned by committed parent snapshots."""
+        self.issue_details = {
+            detail for detail in self.issue_details if not detail[0] or self.index.contains_directory(generation_id, detail[0])
+        }
+
     def start_scan_groups(self, *, reconcile: bool = False) -> None:
         with self.lock:
             self._scan_group = {}
@@ -354,6 +360,7 @@ class DirectoryScanCoordinator:
                     self.index.commit_scan_parents(generation, results, **options)
                     for parent, _children in results:
                         self._publish_issue_details(parent, issues.get(parent, {}))
+                    self._discard_missing_issue_details(generation)
                     self.scan_commits += 1
                 if self.on_scan_commit is not None:
                     for generation in changed:
@@ -592,6 +599,10 @@ class DirectoryScanCoordinator:
                     self.index.mutate_observed_path("add", mutation.path)
                 elif mutation.action == FileAction.FILE_ACTION_REMOVED:
                     self.index.mutate_observed_path("remove", mutation.path)
+                    prefix = mutation.path + "/"
+                    self.issue_details = {
+                        detail for detail in self.issue_details if detail[0] != mutation.path and not detail[0].startswith(prefix)
+                    }
                 elif mutation.action == FileAction.FILE_ACTION_RENAMED_NEW_NAME:
                     self.index.mutate_observed_path("rename", mutation.path, mutation.new_path)
                 else:
@@ -706,6 +717,7 @@ class DirectoryScanCoordinator:
                     else None,
                 )
                 self._publish_issue_details(token.path, self._pending_scan_issues.get(token.producer_id, {}))
+                self._discard_missing_issue_details(generation_id)
             elif self._scan_group is not None:
                 existing = self._scan_group.get(token.producer_id)
                 snapshot_children = existing.children if existing is not None else []

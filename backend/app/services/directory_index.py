@@ -954,6 +954,17 @@ class DirectoryIndex:
             )
             return None if row is None or row[0] is None else bytes(row[0])
 
+    def contains_directory(self, generation_id: int, path: str) -> bool:
+        """Check whether a sampled directory remains in the committed generation."""
+        validate_directory_path(path)
+        with self._writer_lock:
+            return (
+                self._connection()
+                .execute("SELECT 1 FROM directories WHERE generation_id = ? AND path = ?", (generation_id, path))
+                .fetchone()
+                is not None
+            )
+
     def write_scan_children(
         self, generation_id: int, children: Iterable[tuple[str, bool]], *, file_ids: dict[str, bytes] | None = None
     ) -> None:

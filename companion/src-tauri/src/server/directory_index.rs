@@ -1277,6 +1277,15 @@ impl DirectoryIndex {
             .flatten())
     }
 
+    pub fn contains_directory(&self, generation_id: i64, path: &str) -> Result<bool, IndexError> {
+        validate_directory_path(path)?;
+        Ok(self.writer.query_row(
+            "SELECT EXISTS(SELECT 1 FROM directories WHERE generation_id = ? AND path = ?)",
+            params![generation_id, path],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn commit_scan_parents(&mut self, generation_id: i64, results: &[ScanParentResult]) -> Result<(), IndexError> {
         self.commit_scan_parents_with_ids(generation_id, results, &HashMap::new())
     }
