@@ -58,11 +58,11 @@ identity_providers:
       custom:
         sambee:
           # Maximum useful length: Sambee's interactive sign-in interval + 1 day
-          refresh_token: '31d'
+          refresh_token: "31d"
     clients:
       - client_id: sambee
         client_name: Sambee
-        client_secret: '$pbkdf2-sha512$replace-with-a-hashed-random-secret'
+        client_secret: "$pbkdf2-sha512$replace-with-a-hashed-random-secret"
         redirect_uris:
           - https://files.example.com/api/auth/oidc/callback
         grant_types:

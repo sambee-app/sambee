@@ -40,15 +40,15 @@ Create `docker-compose.yml` with this content:
 
 ```yaml
 services:
-	sambee:
-		image: ghcr.io/sambee-app/sambee:stable
-		restart: unless-stopped
-		volumes:
-			- ./data:/app/data
-			# Optional: uncomment when you create config.toml locally.
-			# - ./config.toml:/app/config.toml:ro
-		ports:
-			- 8000:8000
+  sambee:
+    image: ghcr.io/sambee-app/sambee:stable
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      # Optional: uncomment when you create config.toml locally.
+      # - ./config.toml:/app/config.toml:ro
+    ports:
+      - 8000:8000
 ```
 
 #### Select a Release Channel
