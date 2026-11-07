@@ -525,8 +525,10 @@ struct Observations {
     scan_commits: usize,
     scan_issue_counts: HashMap<&'static str, usize>,
     issue_details: HashSet<(String, &'static str)>,
+    issue_paths: HashMap<(String, &'static str), String>,
     issue_details_incomplete: bool,
     pending_scan_issues: HashMap<u64, HashMap<&'static str, usize>>,
+    pending_issue_paths: HashMap<u64, HashMap<&'static str, String>>,
 }
 
 struct PendingScanParent {
@@ -600,12 +602,26 @@ impl InvalidationReason {
 }
 
 impl Observations {
+    #[cfg(test)]
     fn publish_issue_details(&mut self, parent: &str, counts: &HashMap<&'static str, usize>) -> Result<(), IndexError> {
+        self.publish_issue_details_with_paths(parent, counts, &HashMap::new())
+    }
+
+    fn publish_issue_details_with_paths(
+        &mut self,
+        parent: &str,
+        counts: &HashMap<&'static str, usize>,
+        paths: &HashMap<&'static str, String>,
+    ) -> Result<(), IndexError> {
         self.issue_details.retain(|(path, _code)| path != parent);
+        self.issue_paths.retain(|key, _| self.issue_details.contains(key));
         let maximum = limit("max_logged_scan_issues_per_pass")?;
         for code in counts.keys() {
             if self.issue_details.len() < maximum {
                 self.issue_details.insert((parent.to_owned(), code));
+                if let Some(path) = paths.get(code) {
+                    self.issue_paths.insert((parent.to_owned(), code), path.clone());
+                }
             } else {
                 self.issue_details_incomplete = true;
             }
@@ -621,13 +637,17 @@ impl Observations {
             }
         }
         self.issue_details.retain(|(path, _code)| !missing.contains(path));
+        self.issue_paths.retain(|key, _| self.issue_details.contains(key));
         Ok(())
     }
 
     fn scan_issue_bytes(&self, producer: u64) -> usize {
         self.pending_scan_issues.get(&producer).map_or(0, |counts| {
             counts.iter().map(|(code, count)| code.len() + count.to_string().len()).sum()
-        })
+        }) + self
+            .pending_issue_paths
+            .get(&producer)
+            .map_or(0, |paths| paths.values().map(String::len).sum::<usize>())
     }
 
     fn scan_group_elapsed(&self) -> Option<Duration> {
@@ -715,6 +735,7 @@ impl Observations {
             self.streamed_parent_reads.remove(&token.producer);
             self.completed_scan_reads.remove(&token.producer);
             self.pending_scan_issues.remove(&token.producer);
+            self.pending_issue_paths.remove(&token.producer);
             self.producers.remove(&token.producer);
             self.retire_barriers();
         }
@@ -1751,6 +1772,7 @@ impl LocalSource {
             let mut partial_parents: HashMap<i64, HashSet<String>> = HashMap::new();
             let mut streamed_parents: HashMap<i64, HashSet<String>> = HashMap::new();
             let mut issues: HashMap<i64, super::directory_index::ScanParentIssues> = HashMap::new();
+            let mut issue_paths = HashMap::<_, HashMap<_, _>>::new();
             let mut stale_epoch = false;
             let mut ordered: Vec<_> = pending.values().collect();
             ordered.sort_unstable_by_key(|entry| entry.token.producer);
@@ -1768,6 +1790,12 @@ impl LocalSource {
                             .entry(entry.generation)
                             .or_default()
                             .insert(entry.parent.clone(), counts.clone());
+                    }
+                    if let Some(paths) = observations.pending_issue_paths.get(&entry.token.producer) {
+                        issue_paths
+                            .entry(entry.generation)
+                            .or_default()
+                            .insert(entry.parent.clone(), paths.clone());
                     }
                     if observations.streamed_parent_reads.contains(&entry.token.producer) {
                         streamed_parents.entry(entry.generation).or_default().insert(entry.parent.clone());
@@ -1808,9 +1836,13 @@ impl LocalSource {
                     },
                 )?;
                 for (parent, _children) in &results {
-                    observations.publish_issue_details(
+                    observations.publish_issue_details_with_paths(
                         parent,
                         issues
+                            .get(&generation)
+                            .and_then(|parents| parents.get(parent))
+                            .unwrap_or(&HashMap::new()),
+                        issue_paths
                             .get(&generation)
                             .and_then(|parents| parents.get(parent))
                             .unwrap_or(&HashMap::new()),
@@ -2080,7 +2112,12 @@ impl LocalSource {
             .get(&read.token.producer)
             .cloned()
             .unwrap_or_default();
-        observations.publish_issue_details(parent, &counts)?;
+        let paths = observations
+            .pending_issue_paths
+            .get(&read.token.producer)
+            .cloned()
+            .unwrap_or_default();
+        observations.publish_issue_details_with_paths(parent, &counts, &paths)?;
         observations.discard_missing_issue_details(writer, generation)?;
         lock(&self.status)?.index_status = Some(writer.status()?);
         Ok(())
@@ -2094,9 +2131,23 @@ impl LocalSource {
         code: &'static str,
         budget: &Arc<DiskBudget>,
     ) -> Result<(), IndexError> {
+        self.record_item_issue_with_path(generation, parent, token, code, Some(parent), budget)
+    }
+
+    fn record_item_issue_with_path(
+        &self,
+        generation: i64,
+        parent: &str,
+        token: ObservationToken,
+        code: &'static str,
+        path: Option<&str>,
+        budget: &Arc<DiskBudget>,
+    ) -> Result<(), IndexError> {
         if !super::directory_index::ITEM_ISSUE_CODES.contains(&code) {
             return Err(IndexError::Invalid("Unsupported directory coverage issue. Use an item issue code."));
         }
+        let maximum_bytes = limit("max_observation_bytes")?;
+        let path = path.filter(|path| path.len() <= maximum_bytes);
         let mut observations = lock(&self.observations)?;
         if !observations.is_current(token, parent) || self.stopped.load(Ordering::Acquire) {
             return Err(IndexError::Interrupted);
@@ -2121,11 +2172,19 @@ impl LocalSource {
                     "Directory coverage issue count is exhausted. Restart verification.",
                 ))?;
             if observations.scan_group.is_some() {
-                let bytes = if previous == 0 {
+                let mut bytes = if previous == 0 {
                     code.len() + count.to_string().len()
                 } else {
                     count.to_string().len() - previous.to_string().len()
                 };
+                if let Some(path) = path.filter(|_| {
+                    !observations
+                        .pending_issue_paths
+                        .get(&token.producer)
+                        .is_some_and(|paths| paths.contains_key(code))
+                }) {
+                    bytes += path.len();
+                }
                 self.stage_scan_parent_locked(
                     &mut observations,
                     ScanGeneration {
@@ -2143,6 +2202,14 @@ impl LocalSource {
                 .entry(token.producer)
                 .or_default()
                 .insert(code, count);
+            if let Some(path) = path {
+                observations
+                    .pending_issue_paths
+                    .entry(token.producer)
+                    .or_default()
+                    .entry(code)
+                    .or_insert_with(|| path.to_owned());
+            }
             if observations.scan_group.is_some() {
                 self.flush_scan_group_if_due_locked(&mut observations, budget)?;
             }
@@ -2159,7 +2226,16 @@ impl LocalSource {
                 .map(|(_path, code)| (*code, 1))
                 .collect();
             counts.insert(code, 1);
-            observations.publish_issue_details(parent, &counts)?;
+            let mut paths: HashMap<_, _> = observations
+                .issue_paths
+                .iter()
+                .filter(|((owner, _), _)| owner == parent)
+                .map(|((_, code), path)| (*code, path.clone()))
+                .collect();
+            if let Some(path) = path {
+                paths.entry(code).or_insert_with(|| path.to_owned());
+            }
+            observations.publish_issue_details_with_paths(parent, &counts, &paths)?;
         }
         *observations.scan_issue_counts.entry(code).or_default() += 1;
         if observations.scan_issue_counts.values().sum::<usize>() <= limit("max_logged_scan_issues_per_pass")? {
@@ -2257,9 +2333,20 @@ impl LocalSource {
             }
             match entry {
                 Ok(Some((name, descend, file_id))) => {
-                    let path = if parent.is_empty() { name } else { format!("{parent}/{name}") };
+                    let path = if parent.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{parent}/{name}")
+                    };
                     if validate_directory_path(&path).is_err() || path.len() > limit("max_observation_bytes")? {
-                        self.record_item_issue(generation, parent, read.token, TraversalIssue::UnsupportedEncoding.code(), budget)?;
+                        self.record_item_issue_with_path(
+                            generation,
+                            parent,
+                            read.token,
+                            TraversalIssue::UnsupportedEncoding.code(),
+                            Some(&path),
+                            budget,
+                        )?;
                         return Ok(());
                     }
                     if !batch.is_empty() && (batch.len() == ROW_BATCH_SIZE || bytes + path.len() > limit("max_observation_bytes")?) {
@@ -2291,7 +2378,14 @@ impl LocalSource {
                 Err(issue) => {
                     root.require_verification();
                     source_read.verify().map_err(source_error)?;
-                    self.record_item_issue(generation, parent, read.token, issue.code(), budget)?;
+                    let path = issue.name().map(|name| {
+                        if parent.is_empty() {
+                            name.to_owned()
+                        } else {
+                            format!("{parent}/{name}")
+                        }
+                    });
+                    self.record_item_issue_with_path(generation, parent, read.token, issue.code(), path.as_deref(), budget)?;
                 }
             }
             Ok(())
@@ -2403,7 +2497,12 @@ impl LocalSource {
             .get(&read.token.producer)
             .cloned()
             .unwrap_or_default();
-        observations.publish_issue_details(parent, &counts)?;
+        let paths = observations
+            .pending_issue_paths
+            .get(&read.token.producer)
+            .cloned()
+            .unwrap_or_default();
+        observations.publish_issue_details_with_paths(parent, &counts, &paths)?;
         observations.discard_missing_issue_details(writer, generation)?;
         lock(&self.status)?.index_status = Some(writer.status()?);
         Ok(())
@@ -2468,12 +2567,12 @@ impl LocalSource {
             match entry {
                 Ok(Some((name, descend, file_id))) => {
                     let path = if job.parent.is_empty() {
-                        name
+                        name.clone()
                     } else {
                         format!("{}/{name}", job.parent)
                     };
                     if validate_directory_path(&path).is_err() || path.len() > maximum_bytes {
-                        return send(NativeScanResult::Issue(TraversalIssue::UnsupportedEncoding));
+                        return send(NativeScanResult::Issue(TraversalIssue::UnsupportedDirectoryName(name)));
                     }
                     let entry_bytes = path.len() + file_id.as_ref().map_or(0, Vec::len);
                     if !children.is_empty() && (children.len() == ROW_BATCH_SIZE || bytes + entry_bytes > maximum_bytes) {
@@ -2600,7 +2699,21 @@ impl LocalSource {
                     ),
                     NativeScanResult::Issue(issue) => {
                         root.require_verification();
-                        self.record_item_issue(generation, &event.job.parent, event.read.token, issue.code(), budget)
+                        let path = issue.name().map(|name| {
+                            if event.job.parent.is_empty() {
+                                name.to_owned()
+                            } else {
+                                format!("{}/{name}", event.job.parent)
+                            }
+                        });
+                        self.record_item_issue_with_path(
+                            generation,
+                            &event.job.parent,
+                            event.read.token,
+                            issue.code(),
+                            path.as_deref(),
+                            budget,
+                        )
                     }
                     NativeScanResult::Complete(source_read) => {
                         self.finish_native_parent(root, &source_read, generation, &event.job.parent, &event.read, budget)
@@ -3014,6 +3127,7 @@ impl LocalSource {
             let (generation, selected) = index.prepare_scan()?;
             if !resuming {
                 observations.issue_details.clear();
+                observations.issue_paths.clear();
                 observations.issue_details_incomplete = false;
                 observations.scan_epoch = Some((generation, baseline.token.epoch));
             }
@@ -3570,9 +3684,18 @@ impl LocalDirectoryManager {
         let mut details: Vec<_> = observations
             .issue_details
             .iter()
-            .map(|(parent, code)| DirectoryIssueDetail {
-                path: if parent.is_empty() { "/".to_owned() } else { parent.clone() },
-                code,
+            .map(|(parent, code)| {
+                let path = observations.issue_paths.get(&(parent.clone(), *code));
+                let displayed = path.map(String::as_str).unwrap_or(parent);
+                DirectoryIssueDetail {
+                    path: if displayed.is_empty() {
+                        "/".to_owned()
+                    } else {
+                        displayed.to_owned()
+                    },
+                    code,
+                    scope: if path.is_some() { "directory" } else { "contents" },
+                }
             })
             .collect();
         details.sort_by(|left, right| (&left.path, left.code).cmp(&(&right.path, right.code)));
@@ -3926,14 +4049,14 @@ mod tests {
             }
             let read = source.begin_read().unwrap();
             source
-                .record_item_issue(1, "", read.token, "unsupported_encoding", &manager.budget)
+                .record_item_issue_with_path(1, "", read.token, "unsupported_encoding", Some("child-too-long"), &manager.budget)
                 .unwrap();
             if early_flush {
                 let mut observations = lock(&source.observations).unwrap();
                 source.flush_scan_group_locked(&mut observations, &manager.budget).unwrap();
             }
             source
-                .record_item_issue(1, "", read.token, "unsupported_encoding", &manager.budget)
+                .record_item_issue_with_path(1, "", read.token, "unsupported_encoding", Some("another-child"), &manager.budget)
                 .unwrap();
             assert_eq!(lock(&source.writer).unwrap().as_ref().unwrap().status().unwrap().issue_count, 0);
             assert!(lock(&source.observations).unwrap().issue_details.is_empty());
@@ -3952,8 +4075,16 @@ mod tests {
             }
             assert_eq!(observations.scan_commits, usize::from(!stale));
             assert!(observations.pending_scan_issues.is_empty());
+            assert!(observations.pending_issue_paths.is_empty());
             assert!(observations.producers.is_empty());
             assert_eq!(observations.issue_details.len(), usize::from(!stale));
+            assert_eq!(
+                observations
+                    .issue_paths
+                    .get(&(String::new(), "unsupported_encoding"))
+                    .map(String::as_str),
+                if stale { None } else { Some("child-too-long") }
+            );
             assert_eq!(
                 lock(&source.writer).unwrap().as_ref().unwrap().status().unwrap().issue_count,
                 if stale { 0 } else { 2 }
@@ -6363,6 +6494,7 @@ mod tests {
         let root_path = temporary.path().join("root");
         std::fs::create_dir_all(root_path.join("readable/child")).unwrap();
         std::fs::create_dir(root_path.join(std::ffi::OsString::from_vec(vec![0xff]))).unwrap();
+        std::os::unix::fs::symlink(temporary.path(), root_path.join("excluded-link")).unwrap();
         let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(root_path, manager.storage_directory());
         source.scan(&manager.budget).unwrap();
@@ -6374,6 +6506,53 @@ mod tests {
         assert!(index.last_verified_at_ms.is_some());
         assert!(status.message.is_none());
         assert!(!lock(&source.observations).unwrap().verification_required);
+    }
+
+    #[test]
+    fn redirected_descendants_keep_complete_coverage_and_clear_old_issues() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root_path = temporary.path().join("root");
+        let target = temporary.path().join("outside");
+        std::fs::create_dir(&root_path).unwrap();
+        std::fs::create_dir_all(target.join("must-not-be-indexed")).unwrap();
+        for (name, destination) in [("redirected", &target), ("cycle", &root_path)] {
+            let link = root_path.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(destination, &link).unwrap();
+            #[cfg(windows)]
+            {
+                let result = std::process::Command::new("cmd")
+                    .args(["/d", "/c", "mklink", "/J"])
+                    .arg(&link)
+                    .arg(destination)
+                    .output()
+                    .unwrap();
+                assert!(result.status.success(), "Junction creation failed: {result:?}");
+            }
+        }
+        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root_path, manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        {
+            let mut writer = lock(&source.writer).unwrap();
+            let writer = writer.as_mut().unwrap();
+            let status = writer.status().unwrap();
+            assert_eq!(status.directory_count, 0);
+            assert_eq!(status.issue_count, 0);
+            assert_eq!(status.coverage, "complete");
+            writer.record_issue(1, "unsafe_traversal").unwrap();
+        }
+        lock(&source.observations)
+            .unwrap()
+            .publish_issue_details("", &HashMap::from([("unsafe_traversal", 1)]))
+            .unwrap();
+        source.scan(&manager.budget).unwrap();
+        let writer = lock(&source.writer).unwrap();
+        let status = writer.as_ref().unwrap().status().unwrap();
+        assert_eq!(status.directory_count, 0);
+        assert_eq!(status.issue_count, 0);
+        assert_eq!(status.coverage, "complete");
+        assert!(lock(&source.observations).unwrap().issue_details.is_empty());
     }
 
     #[test]

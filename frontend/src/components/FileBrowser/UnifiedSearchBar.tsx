@@ -30,6 +30,7 @@ import {
   Divider,
   IconButton,
   InputAdornment,
+  Link,
   ListItemButton,
   Menu,
   MenuItem,
@@ -43,7 +44,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type React from "react";
 import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { usePillButtonMenu } from "../../hooks/usePillButtonMenu";
 import { getSecondaryToolbarMenuPaperStyle, pillButtonStyle } from "../../theme/commonStyles";
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
@@ -1224,6 +1225,7 @@ export function UnifiedSearchBar({
         {/* Dropdown results panel */}
         <Popper
           open={
+            !statusDialog &&
             !suppressDropdown &&
             !disableDropdown &&
             isDropdownOpen &&
@@ -1257,10 +1259,6 @@ export function UnifiedSearchBar({
             {/* Status indicator */}
             {statusInfo && (
               <Box
-                role={statusInfo.loadDetails ? "link" : undefined}
-                tabIndex={statusInfo.loadDetails ? -1 : undefined}
-                onPointerDown={statusInfo.loadDetails ? (event) => event.preventDefault() : undefined}
-                onClick={statusInfo.loadDetails ? () => setStatusDialog(statusInfo) : undefined}
                 sx={{
                   px: 2,
                   py: 0.5,
@@ -1269,17 +1267,30 @@ export function UnifiedSearchBar({
                   gap: 1,
                   borderBottom: results.length > 0 || showNoResults || showSearchError || showRemoveError ? 1 : 0,
                   borderColor: "divider",
-                  cursor: statusInfo.loadDetails ? "pointer" : undefined,
-                  textDecoration: statusInfo.loadDetails ? "underline" : undefined,
-                  "&:hover": statusInfo.loadDetails ? { color: "primary.main" } : {},
                 }}
               >
                 {statusInfo.showSpinner && <CircularProgress size={14} />}
-                <Typography
-                  variant="caption"
-                  sx={{ color: statusInfo.loadDetails ? "inherit" : "text.secondary", overflowWrap: "anywhere" }}
-                >
-                  {statusInfo.label}
+                <Typography variant="caption" sx={{ color: "text.secondary", overflowWrap: "anywhere" }}>
+                  {statusInfo.loadDetails ? statusInfo.label.replace(/\.$/u, "") : statusInfo.label}
+                  {statusInfo.loadDetails && (
+                    <Trans
+                      i18nKey="fileBrowser.search.statusDetails.linkSuffix"
+                      components={{
+                        details: (
+                          <Link
+                            component="button"
+                            type="button"
+                            role="link"
+                            tabIndex={-1}
+                            underline="always"
+                            onPointerDown={(event) => event.preventDefault()}
+                            onClick={() => setStatusDialog(statusInfo)}
+                            sx={{ font: "inherit", verticalAlign: "baseline" }}
+                          />
+                        ),
+                      }}
+                    />
+                  )}
                 </Typography>
               </Box>
             )}

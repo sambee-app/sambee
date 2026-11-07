@@ -711,16 +711,20 @@ describe("UnifiedSearchBar", () => {
     const input = screen.getByRole("textbox");
     await user.click(input);
     await user.type(input, "reports");
-    const link = await screen.findByRole("link", { name: status.label });
+    const link = await screen.findByRole("link", { name: "details" });
+    expect(link.parentElement).toHaveTextContent("FS1: not all directories could be indexed (details).");
     expect(link).toHaveAttribute("tabindex", "-1");
     expect(link.querySelector("svg")).toBeNull();
     expect(loadDetails).not.toHaveBeenCalled();
     const selection = input.getAttribute("aria-activedescendant");
     await user.click(link);
     expect(await screen.findByRole("dialog", { name: "Directory Search Status" })).toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     expect(await screen.findByText("private")).toBeInTheDocument();
     expect(screen.getByText("Access denied")).toBeInTheDocument();
-    expect(screen.getByText("Only some affected directories are listed.")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Affected locations" })).toBeInTheDocument();
+    expect(screen.getByText("Containing directory")).toBeInTheDocument();
+    expect(screen.getByText("Only a sample of affected locations is shown. More directories may be affected.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => expect(input).toHaveFocus());
     expect(input).toHaveValue("reports");
@@ -744,7 +748,7 @@ describe("UnifiedSearchBar", () => {
     const input = screen.getByRole("textbox");
     await user.click(input);
     await user.type(input, "reports");
-    await user.click(await screen.findByRole("link", { name: status.label }));
+    await user.click(await screen.findByRole("link", { name: "details" }));
     const message =
       outcome === "stale"
         ? "These details are no longer available. Refresh the status."
