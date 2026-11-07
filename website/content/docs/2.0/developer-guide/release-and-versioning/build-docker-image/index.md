@@ -56,6 +56,12 @@ That signature repository can still show both digest-derived signature tags and 
 
 ## Retry Behavior
 
+Signing makes at most three attempts for recognized temporary failures, such as timeouts, connection failures, rate limits, and server errors. The delays between signing attempts are 15 and 30 seconds. Authentication, permission, policy, and unknown errors stop signing without a retry. Signature verification and registry inspection remain required: the workflow reuses a valid signature if a failed command published it, and refuses another signing attempt if existing signatures fail verification or registry inspection fails. Publication stays blocked until signing and verification succeed.
+
+The signing script accepts `SIGNATURE_SIGN_ATTEMPTS` and `SIGNATURE_SIGN_RETRY_DELAY_SECONDS` environment variables to change the attempt limit and base delay. Attempts must be positive whole numbers; delays must be non-negative whole seconds. Each retry delay is the base delay multiplied by the failed signing attempt number.
+
+If temporary signing failures continue, check [Sigstore service status](https://status.sigstore.dev/) and the runner's connectivity to Sigstore and GHCR. After recovery, use **Re-run failed jobs** only if the staging image and required artifacts still exist. Metadata artifacts expire after one day. If cleanup removed the staging image or required artifacts expired, dispatch `Release: Create Docker Image` again with the same `build_version`; before the candidate marker exists, this can rebuild the candidate.
+
 Before the late candidate marker is written, a failed run may be retried with the same `Z` version. The run uses a unique `stage-<run>-<attempt>-<platform>` tag in `sambee-staging` and cleans up its staging versions after promotion or failure. That package can also contain untagged digest-only platform manifests. The Docker publication lock serializes candidate and maintenance cleanup, so the cleanup may delete the whole isolated package when every tagged version is a staging tag; GHCR requires that package-level operation when the last tagged version remains. Scheduled cleanup reclaims stale staging artifacts and unreferenced signature and metadata artifacts.
 
 After a valid candidate marker exists, a matching dispatch takes the repair-only path. It verifies the signed digest and restores only missing matching immutable aliases or the `test` pointer; it does not rebuild the image. A conflicting immutable marker requires incrementing `Z` and publishing a new candidate.
