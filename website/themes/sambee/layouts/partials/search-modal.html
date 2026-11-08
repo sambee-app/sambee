@@ -40,7 +40,8 @@
   </div>
 </div>
 
-{{ $docsPathVersions := dict }}
+{{/* Keep version slugs in values: JS minification can convert numeric-looking object keys. */}}
+{{ $docsPathVersions := slice }}
 {{ with (index hugo.Data "docs-versions").versions }}
   {{ range . }}
     {{ $versionSlug := .slug }}
@@ -58,7 +59,7 @@
         {{ $versionBooks = merge $versionBooks (dict $bookSlug (dict "title" $bookTitle "sections" $sectionTitles)) }}
       {{ end }}
     {{ end }}
-    {{ $docsPathVersions = merge $docsPathVersions (dict $versionSlug (dict "label" (.label | default $versionSlug) "books" $versionBooks)) }}
+    {{ $docsPathVersions = $docsPathVersions | append (dict "slug" $versionSlug "label" (.label | default $versionSlug) "books" $versionBooks) }}
   {{ end }}
 {{ end }}
 
@@ -89,20 +90,13 @@
   const docsPathData = {{ dict "versions" $docsPathVersions | jsonify | safeJS }};
   const docsSearchConfig = {
     currentVersion: {{ printf "%q" ((index hugo.Data "docs-versions").current | default "") | safeJS }},
-    searchableVersions: {
-      {{- $versions := (index hugo.Data "docs-versions").versions | default slice -}}
-      {{- range $index, $version := $versions -}}
-      {{- if gt $index 0 }},{{ end }}
-      {{ printf "%q" $version.slug | safeJS }}: {{ $version.searchable | default false }}
-      {{- end -}}
-    }
   };
 
   function getActiveDocsVersion() {
     const match = window.location.pathname.match(/^\/docs\/([^/]+)(?:\/|$)/);
     const requestedVersion = match?.[1] ?? null;
 
-    if (requestedVersion && requestedVersion in docsSearchConfig.searchableVersions) {
+    if (requestedVersion && docsPathData.versions.some(version => version.slug === requestedVersion)) {
       return requestedVersion;
     }
 
@@ -127,15 +121,22 @@
   }
 
   function getSearchResultPath(url) {
-    if (url === '/') {
+    let pathname;
+    try {
+      pathname = new URL(url, window.location.origin).pathname;
+    } catch {
+      return '';
+    }
+
+    if (pathname === '/') {
       return 'Home';
     }
 
-    if (url === '/docs/') {
+    if (pathname === '/docs/') {
       return 'Documentation';
     }
 
-    const pathSegments = url.split('/').filter(Boolean);
+    const pathSegments = pathname.split('/').filter(Boolean);
     if (pathSegments[0] !== 'docs') {
       return '';
     }
@@ -143,11 +144,11 @@
     let versionSlug = pathSegments[1] || '';
     let bookSlug = pathSegments[2] || '';
     let sectionSlug = pathSegments[3] || '';
-    let versionData = docsPathData.versions?.[versionSlug];
+    let versionData = docsPathData.versions.find(version => version.slug === versionSlug);
 
     if (!versionData) {
       versionSlug = docsSearchConfig.currentVersion || '';
-      versionData = docsPathData.versions?.[versionSlug];
+      versionData = docsPathData.versions.find(version => version.slug === versionSlug);
       bookSlug = pathSegments[1] || '';
       sectionSlug = pathSegments[2] || '';
     }

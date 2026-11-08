@@ -261,13 +261,11 @@ Results Container
   font-family: var(--font-tertiary);
   font-size: var(--font-size-label-sm);
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   line-height: 1.3;
   color: var(--color-clr-text-light, #666);
   margin-bottom: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 
   .dark & {
     color: var(--color-clr-darkmode-text-light, #909090);
