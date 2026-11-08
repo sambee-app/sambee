@@ -13,9 +13,9 @@
 {{ $sectionSourcePage := false }}
 {{ $versionLabel := $version }}
 {{ $sectionTitle := "" }}
-{{ $bookURL := partial "docs/page-url.html" (dict "version" $version "book" $book) }}
-{{ $sectionURL := partial "docs/page-url.html" (dict "version" $version "book" $book "section" $section) }}
-{{ $versionURL := partial "docs/page-url.html" (dict "version" $version) }}
+{{ $bookURL := partial "docs/page-url.html" (dict "version" $version "book" $book "preferStable" $docsContext.isCurrentRoute) }}
+{{ $sectionURL := partial "docs/page-url.html" (dict "version" $version "book" $book "section" $section "preferStable" $docsContext.isCurrentRoute) }}
+{{ $versionURL := partial "docs/page-url.html" (dict "version" $version "preferStable" $docsContext.isCurrentRoute) }}
 
 {{ with $version }}
   {{ with site.GetPage (partial "docs/page-path.html" (dict "version" . "preferStable" false)) }}

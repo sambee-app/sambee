@@ -2,9 +2,70 @@
 
 ## Status and Scope
 
-Status: revised direction (unversioned canonical URLs, two rendered copies); implementation not started.
+Status: implementation and documentation relocation complete. Latest full-suite validation is blocked by the current route manifest template. Deployment and manual Cloudflare acceptance are not complete.
 
 Date: 2026-11-08.
+
+### Implementation Record
+
+The implementation renders current pages in both URL spaces, emits a Hugo route
+manifest, generates one validated rule file, records editor migrations, and uses
+one build pipeline in local commands and CI. Published routing and authoring docs
+have been updated. No deployment, live HTTP acceptance, or Cloudflare account
+configuration check has been performed.
+
+Documentation for this change starts at 2.0. Seven inherited pages were
+materialized in 2.0 with the docs editor. The redirect-related edits in 0.7,
+0.8, and 0.9 were reverted; earlier published docs remain unchanged. Later
+versions inherit the updated 2.0 pages.
+
+After relocation, docs content validation and the refreshed structure report
+pass. The latest website test run reports three errors in the consecutive-version
+Hugo fixture: the current `index.docsroutes.json` template has split Hugo
+delimiters and produces invalid JSON. That template was not changed during this
+documentation-only correction. The earlier full-suite and build results below
+describe the initial implementation, before these later template edits.
+
+The legacy rule audit used the tracked rule file and resolved content and
+navigation trees. This checkout has no usable Git log for the rule file; it does
+not establish the dates of older migrations. Scoped aliases retain only known
+destination locations. Scopes list actual declared versions with those locations,
+not a numeric range inferred from slugs.
+
+| Legacy Rule Group | Decision |
+| --- | --- |
+| `/docs/0.7` and `/docs/0.7/` | Replace the cross-version 301 with generated same-version entry 302 rules. |
+| 0.7 book and descendant blanket forwards | Remove. Explicit pages must remain HTTP 200; no cross-version wildcard is retained. |
+| 0.7 and unversioned landing-to-first-article rules | Remove obsolete overrides. Authored landings remain pages; structural folders gain no redirect landing. |
+| `accessing-files/access-local-drives` literal pairs | Retain the recorded move to the desktop-app section in each declared version where the target exists. |
+| `accessing-files/*` and `browsing-and-navigation/*` in both URL spaces | Replace with scoped literal aliases for known destination article locations; unknown suffixes are not matched. |
+| `viewing-and-editing-files/download-and-upload-files` literal pairs | Retain only in 1.0, 2.0, 3.0, and unversioned scope, where the target exists. |
+| `viewing-and-editing-files/edit-files-in-desktop-apps` literal pairs | Retain the recorded desktop-app move in each declared version with that target. |
+| `viewing-and-editing-files/*` in both URL spaces | Expand to known article locations only; newer text and recovery topics have only their applicable scopes. |
+| `companion-app/*` in both URL spaces | Expand to known desktop-app article locations only. |
+| `getting-started/manage-your-account` literal pairs | Retain only in 0.9 and later declared versions, plus unversioned scope. |
+| Broken `admin-guide/configuration` landing rules | Remove. The declared destination does not exist; no evidence justifies inventing a replacement for a structural folder. |
+
+The registry also records the 2.0 `share-files-and-links` move to
+`share-files-on-phones-and-tablets`, including inherited 3.0 and unversioned scope.
+It satisfies the current 1.0-to-2.0 release-transition check without altering the
+still-valid 1.0 article. Initial generation produces 341 static rules and no
+dynamic rules: 14 entry forms, one managed shortcut, and 326 historical alias
+forms. All targets are validated final pages; no rule overrides a page asset.
+
+Verification on 2026-11-08: all 161 website tests pass, including the pinned-Hugo
+fixture. Touched Python files pass Ruff, and the watcher passes Node syntax checks.
+Production, preview (`HUGO_BASEURL=/`), and development builds pass generated HTML,
+sitemap, Pagefind inclusion, complete docs asset inventory, and homepage CTA checks.
+The production manifest contains 739 docs routes; Pagefind indexes 115 pages.
+The website task is running at `http://localhost:1313`.
+
+Headless Firefox checks passed for development entry forwarding with a query and
+fragment, explicit-current navigation, inherited preview content, and unique
+unversioned Pagefind results. The shared VS Code browser was not used for website
+checks because the workspace instructions restrict it to the app demo connection.
+That specific browser check remains open; the headless check does not prove
+Cloudflare matching. No live Cloudflare acceptance is claimed.
 
 This plan moves production docs redirects from the browser to Cloudflare Pages.
 It also corrects existing redirect defects, removes manual redirect updates from
@@ -22,9 +83,9 @@ change website behavior.
 ## Existing Contract and Target Policy
 
 The existing public URL contract is defined in
-[Docs Content Model, Navigation, and Inheritance](../website/content/docs/0.7/website-dev-guide/docs-platform/docs-content-model-navigation-and-inheritance/index.md).
+[Docs Content Model, Navigation, and Inheritance](../website/content/docs/2.0/website-dev-guide/docs-platform/docs-content-model-navigation-and-inheritance/index.md).
 The runtime is described in
-[Docs Runtime and Route Resolution](../website/content/docs/0.7/website-dev-guide/docs-platform/docs-runtime-and-route-resolution/index.md).
+[Docs Runtime and Route Resolution](../website/content/docs/2.0/website-dev-guide/docs-platform/docs-runtime-and-route-resolution/index.md).
 
 The existing contract makes current-version canonical URLs unversioned. This
 plan keeps that policy. It changes these parts of the contract:
@@ -358,7 +419,7 @@ a second full-site build to the unit test job.
 6. **Update the deployment workflow and CI.** Apply the changes in [Deployment Workflow](#deployment-workflow).
 7. **Replace browser forwarding.** Remove meta refresh and JavaScript from entry routes in production and preview builds. Keep an accessible fallback link to the same resolved target. Keep automatic forwarding only in the development environment.
 8. **Deploy and verify the complete change.** Complete automated and local browser checks first. Deploy explicit current pages, HTTP rules, and fallback pages together from one build. The user then performs the manual Cloudflare checks and records the results. Do not report live acceptance as complete before those results are available.
-9. **Update published documentation.** Document the explicit-current-page change, entry redirects, HTTP status choices, the indexing policy, the manifest, migration records, managed-shortcut rules, local development behavior, manual post-deployment checks, and rollback. Publish these changes with the new behavior. Follow the docs-update skill and edit the earliest applicable source, normally 0.7 for this shared docs-system change.
+9. **Update published documentation.** Document the explicit-current-page change, entry redirects, HTTP status choices, the indexing policy, the manifest, migration records, managed-shortcut rules, local development behavior, manual post-deployment checks, and rollback. Publish these changes with the new behavior. Follow the docs-update skill. For this change, 2.0 is the earliest applicable version: materialize its inherited pages and keep earlier documentation unchanged.
 
 ## Validation and Acceptance Criteria
 
@@ -368,34 +429,34 @@ generated assets as proof of live HTTP status codes or platform matching.
 
 ### Automated and Local Checks
 
-- [ ] Generated `/docs` and `/docs/` rules target the current entry destination directly.
-- [ ] Generated version-root rules select the first actual routable location in that version's navigation.
-- [ ] Unversioned current article and landing-page assets contain current-version content.
-- [ ] Explicit current, archived, and preview page assets contain the requested version's content without browser forwarding.
-- [ ] The restored 0.7 page assets exist, including authored book and section landings.
-- [ ] Inherited pages keep their requested-version URL rather than redirecting to the content source version.
-- [ ] Fixture tests change current metadata consecutively from 1.0 to 2.0 to 3.0 and prove that unversioned assets contain the new current content while explicit versioned assets remain available, without redirect maintenance.
-- [ ] Only unversioned current routes are indexable, self-canonical, and listed in the sitemap. All explicit-version pages have `noindex,follow` and no canonical tag to another URL.
-- [ ] Pagefind does not return duplicate results for the explicit current copy. Current-version results use unversioned URLs.
-- [ ] Navigation stays in the requested URL space. The version switcher selects unversioned URLs for the current version.
-- [ ] Structural-only folders are not treated as canonical landing pages by generation.
-- [ ] Historical aliases apply only to affected versions and never override a route that returns HTTP 200.
-- [ ] Unknown versions and paths are not matched by general version-rewrite rules.
-- [ ] Every internal target resolves to a final page route in the manifest; missing targets, loops, and conflicts stop the build.
-- [ ] Each managed shortcut targets a final page route directly. Absolute targets on the docs site host are rejected.
-- [ ] The build stops when an unversioned route of the previous current version is missing without a recorded replacement or "gone" decision.
-- [ ] No unversioned route redirects to an explicit-version page.
-- [ ] Generated rules are deterministic and satisfy Cloudflare limits.
-- [ ] Rename and move operations record aliases in dry-run and apply modes, including inherited descendants.
-- [ ] Version creation carries only applicable aliases and detects source-path reuse or missing replacements.
-- [ ] Existing managed-shortcut tests pass, with new tests for one-hop validation.
-- [ ] CI runs all website tests, including generator, migration, docs editor, and Hugo manifest integration tests.
-- [ ] The Hugo fixture test uses the pinned deployment Hugo version, runs without asset or search build dependencies, and fails clearly if Hugo is missing or a subprocess times out.
-- [ ] All build paths use the same build steps. A clean build produces a matching manifest and `_redirects` file.
+- [x] Generated `/docs` and `/docs/` rules target the current entry destination directly.
+- [x] Generated version-root rules select the first actual routable location in that version's navigation.
+- [x] Unversioned current article and landing-page assets contain current-version content.
+- [x] Explicit current, archived, and preview page assets contain the requested version's content without browser forwarding.
+- [x] The restored 0.7 page assets exist, including authored book and section landings.
+- [x] Inherited pages keep their requested-version URL rather than redirecting to the content source version.
+- [x] Fixture tests change current metadata consecutively from 1.0 to 2.0 to 3.0 and prove that unversioned assets contain the new current content while explicit versioned assets remain available, without redirect maintenance.
+- [x] Only unversioned current routes are indexable, self-canonical, and listed in the sitemap. All explicit-version pages have `noindex,follow` and no canonical tag to another URL.
+- [x] Pagefind does not return duplicate results for the explicit current copy. Current-version results use unversioned URLs.
+- [x] Navigation stays in the requested URL space. The version switcher selects unversioned URLs for the current version.
+- [x] Structural-only folders are not treated as canonical landing pages by generation.
+- [x] Historical aliases apply only to affected versions and never override a route that returns HTTP 200.
+- [x] Unknown versions and paths are not matched by general version-rewrite rules.
+- [x] Every internal target resolves to a final page route in the manifest; missing targets, loops, and conflicts stop the build.
+- [x] Each managed shortcut targets a final page route directly. Absolute targets on the docs site host are rejected.
+- [x] The build stops when an unversioned route of the previous current version is missing without a recorded replacement or "gone" decision.
+- [x] No unversioned route redirects to an explicit-version page.
+- [x] Generated rules are deterministic and satisfy Cloudflare limits.
+- [x] Rename and move operations record aliases in dry-run and apply modes, including inherited descendants.
+- [x] Version creation carries only applicable aliases and detects source-path reuse or missing replacements.
+- [x] Existing managed-shortcut tests pass, with new tests for one-hop validation.
+- [x] CI runs all website tests, including generator, migration, docs editor, and Hugo manifest integration tests.
+- [x] The Hugo fixture test uses the pinned deployment Hugo version, runs without asset or search build dependencies, and fails clearly if Hugo is missing or a subprocess times out.
+- [x] All build paths use the same build steps. A clean build produces a matching manifest and `_redirects` file.
 - [ ] Fragment navigation and development forwarding are checked in the VS Code browser using the local website task; fragments do not reach the HTTP server.
-- [ ] Production and preview builds use no automatic browser forwarding for docs routes. In the development environment, entry routes forward automatically.
-- [ ] The Cloudflare Pages rollback procedure is documented.
-- [ ] Published routing and authoring documentation matches the implemented behavior.
+- [x] Production and preview builds use no automatic browser forwarding for docs routes. In the development environment, entry routes forward automatically.
+- [x] The Cloudflare Pages rollback procedure is documented.
+- [x] Published routing and authoring documentation matches the implemented behavior.
 
 Use focused temporary fixtures for release-transition and rename tests. Do not
 change committed version metadata merely to run a test. Use both unit tests for

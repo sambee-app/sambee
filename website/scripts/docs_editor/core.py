@@ -13,8 +13,17 @@ import textwrap
 import tomllib
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import wraps
 from pathlib import Path
 from typing import Any, Protocol, cast
+
+from .migrations import (
+    REGISTRY_PATH,
+    UNVERSIONED,
+    load_registry,
+    render_registry,
+    transition_decisions,
+)
 
 DEFAULT_WEBSITE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -150,11 +159,220 @@ def parse_bool(value: str) -> bool:
     raise argparse.ArgumentTypeError(f"expected a boolean value, got: {value}")
 
 
+def migration_plan(planner):
+    """Include migration writes in the same preview and rollback transaction."""
+
+    @wraps(planner)
+    def wrapped(editor, *args, **kwargs):
+        return editor.with_migrations(planner(editor, *args, **kwargs))
+
+    return wrapped
+
+
 class DocsEditor:
     """High-level planner and executor for docs tree operations."""
 
     def __init__(self, website_dir: Path = DEFAULT_WEBSITE_DIR):
         self.paths = EditorPaths.for_website(website_dir)
+
+    def routable_locations(self, version: str) -> set[str]:
+        """Return authored and inherited locations, excluding structural folders."""
+        root = self.version_root(version)
+        return {
+            path.parent.relative_to(root).as_posix() + "/"
+            for path in root.rglob("*.md")
+            if path.name in {DOCS_ROOT_INDEX, BRANCH_INHERIT, PAGE_INDEX, PAGE_INHERIT}
+            and path.parent != root
+        }
+
+    def with_migrations(self, plan: OperationPlan) -> OperationPlan:
+        """Record moves using the planner's already computed inherited descendants."""
+        registry_path = self.paths.website_dir / REGISTRY_PATH
+        try:
+            entries = load_registry(registry_path)
+            original = render_registry(entries)
+            metadata = dict(plan.metadata)
+            aliases: list[dict[str, Any]] = []
+            if metadata.get("operation") in {"rename", "move"}:
+                entity = metadata["entity"]
+                book = metadata["book"]
+                if entity == "book":
+                    old_prefix, new_prefix = book + "/", metadata["new_book"] + "/"
+                elif entity == "section":
+                    old_prefix = f"{book}/{metadata['section']}/"
+                    new_prefix = f"{book}/{metadata['new_section']}/"
+                else:
+                    old_prefix = f"{book}/{metadata.get('from_section', metadata.get('section'))}/{metadata['page']}/"
+                    new_prefix = f"{book}/{metadata.get('to_section', metadata.get('section'))}/{metadata['new_page']}/"
+                affected = list(
+                    dict.fromkeys(
+                        metadata.get("versions", [metadata["version"]])
+                        + metadata.get("propagated_versions", [])
+                    )
+                )
+                for version in affected:
+                    for source in sorted(self.routable_locations(version)):
+                        if source.startswith(old_prefix):
+                            target = new_prefix + source[len(old_prefix) :]
+                            aliases.append(
+                                {
+                                    "source": source,
+                                    "target": target,
+                                    "scopes": [version],
+                                }
+                            )
+                for alias in list(aliases):
+                    if not any(
+                        entry["source"] == alias["source"]
+                        and UNVERSIONED in entry["scopes"]
+                        for entry in entries + aliases
+                    ):
+                        aliases.append(
+                            {
+                                "source": alias["source"],
+                                "target": alias["target"],
+                                "scopes": [UNVERSIONED],
+                            }
+                        )
+                for alias in aliases:
+                    for entry in entries:
+                        if entry["source"] == alias["source"] and set(
+                            entry["scopes"]
+                        ) & set(alias["scopes"]):
+                            raise DocsEditorError(
+                                f"Migration source is already recorded: {alias['source']}; review source-path reuse."
+                            )
+                    entries.append(alias)
+                metadata["aliases"] = aliases
+            elif (
+                metadata.get("operation") == "create"
+                and metadata.get("entity") == "version"
+            ):
+                source_version = metadata.get("source_version")
+                new_version = metadata["new_version"]
+                if source_version:
+                    locations = self.routable_locations(source_version)
+                    scoped = {
+                        entry["source"]: entry.get("target")
+                        for entry in entries
+                        if source_version in entry["scopes"]
+                    }
+                    for entry in entries:
+                        if (
+                            source_version not in entry["scopes"]
+                            or entry["source"] in locations
+                        ):
+                            continue
+                        target = entry.get("target")
+                        visited: set[str] = set()
+                        while (
+                            target is not None
+                            and target not in locations
+                            and target in scoped
+                        ):
+                            if target in visited:
+                                raise DocsEditorError(
+                                    f"Migration loop when creating {new_version}: {entry['source']}"
+                                )
+                            visited.add(target)
+                            target = scoped[target]
+                        if target is not None and target not in locations:
+                            raise DocsEditorError(
+                                f"Migration {entry['source']} has missing replacement {target} in {new_version}."
+                            )
+                        entry["scopes"].append(new_version)
+                        aliases.append(
+                            {
+                                "source": entry["source"],
+                                "target": target,
+                                "scopes": [new_version],
+                            }
+                        )
+                    metadata["aliases"] = aliases
+                updated_change = next(
+                    change
+                    for change in plan.changes
+                    if change.path == self.paths.docs_versions_file
+                )
+                updated = tomllib.loads(updated_change.content or "")
+                current = self.load_versions_document().current
+                if updated["current"] != current and current:
+                    versions = [entry["slug"] for entry in updated["versions"]]
+                    if (
+                        versions.index(updated["current"])
+                        != versions.index(current) + 1
+                    ):
+                        raise DocsEditorError(
+                            "Current-version changes must advance one declared version at a time."
+                        )
+                    metadata["release_decisions"] = transition_decisions(
+                        self.routable_locations(current),
+                        self.routable_locations(source_version)
+                        if source_version
+                        else set(),
+                        entries,
+                    )
+            changes = list(plan.changes)
+            if render_registry(entries) != original:
+                changes.append(
+                    PlannedChange(
+                        "write_text",
+                        registry_path,
+                        "Record docs migration aliases",
+                        render_registry(entries),
+                    )
+                )
+            return OperationPlan(plan.summary, plan.destructive, changes, metadata)
+        except (ValueError, TypeError, OSError) as error:
+            raise DocsEditorError(str(error)) from error
+
+    def plan_version_set_current(self, version: str) -> OperationPlan:
+        """Advance current metadata only after checking removed unversioned routes."""
+        document = self.load_versions_document()
+        current_index = self.find_version_index(document.versions, document.current)
+        if self.find_version_index(document.versions, version) != current_index + 1:
+            raise DocsEditorError(
+                "Current-version changes must advance one declared version at a time."
+            )
+        try:
+            decisions = transition_decisions(
+                self.routable_locations(document.current),
+                self.routable_locations(version),
+                load_registry(self.paths.website_dir / REGISTRY_PATH),
+            )
+        except (ValueError, TypeError, OSError) as error:
+            raise DocsEditorError(str(error)) from error
+        updated_versions = [
+            VersionEntry(
+                entry.slug,
+                entry.label,
+                entry.visible,
+                "current"
+                if entry.slug == version
+                else (None if entry.status == "current" else entry.status),
+                entry.searchable,
+            )
+            for entry in document.versions
+        ]
+        updated = VersionsDocument(document.preamble, version, updated_versions)
+        return OperationPlan(
+            f"Set current docs version to {version}",
+            False,
+            [
+                PlannedChange(
+                    "write_text",
+                    self.paths.docs_versions_file,
+                    f"Set current docs version to {version}",
+                    self.render_versions_document(updated),
+                )
+            ],
+            {
+                "entity": "version",
+                "operation": "set-current",
+                "version": version,
+                "release_decisions": decisions,
+            },
+        )
 
     def load_toml(self, path: Path) -> dict[str, Any]:
         """Load TOML data from path."""
@@ -1489,6 +1707,7 @@ class DocsEditor:
 
         return changes
 
+    @migration_plan
     def plan_version_create(
         self,
         new_version: str,
@@ -1860,6 +2079,7 @@ class DocsEditor:
             },
         )
 
+    @migration_plan
     def plan_book_rename(
         self,
         version: str,
@@ -2143,6 +2363,7 @@ class DocsEditor:
             },
         )
 
+    @migration_plan
     def plan_section_rename(
         self,
         version: str,
@@ -2614,6 +2835,7 @@ python3 scripts/docs-editor.py page materialize --version {version} --book {book
             },
         )
 
+    @migration_plan
     def plan_page_rename(
         self,
         version: str,
@@ -2711,6 +2933,7 @@ python3 scripts/docs-editor.py page materialize --version {version} --book {book
             },
         )
 
+    @migration_plan
     def plan_page_move(
         self,
         version: str,
@@ -2849,6 +3072,7 @@ python3 scripts/docs-editor.py page materialize --version {version} --book {book
             },
         )
 
+    @migration_plan
     def plan_page_coordinated_rename(
         self,
         versions: list[str],
@@ -3277,6 +3501,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="replacement current version when deleting the current one",
     )
 
+    current_parser = version_commands.add_parser(
+        "set-current", help="advance current docs version after migration checks"
+    )
+    current_parser.add_argument("version", help="next declared version slug")
+
     book_create_parser = book_commands.add_parser("create", help="create a docs book")
     book_create_parser.add_argument(
         "--version", required=True, help="docs version slug"
@@ -3540,6 +3769,8 @@ def execute(args: argparse.Namespace) -> int:
             plan = editor.plan_version_delete(
                 args.version, new_current=args.new_current
             )
+        elif args.operation == "set-current":
+            plan = editor.plan_version_set_current(args.version)
         else:
             raise DocsEditorError(f"unsupported version operation: {args.operation}")
     elif args.entity == "book":

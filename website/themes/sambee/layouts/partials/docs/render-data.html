@@ -10,7 +10,7 @@
 
 {{ if and $docsContext.isDocs $docsContext.version }}
   {{ $isSearchIndexed = false }}
-  {{ if $docsContext.isCurrentRoute }}
+  {{ if or $docsContext.isCurrentRoute (and $docsContext.isExplicitVersion (not $docsContext.isCurrentVersion)) }}
     {{ with index (where $docsVersions "slug" $docsContext.version) 0 }}
       {{ $isSearchIndexed = .searchable | default false }}
     {{ end }}

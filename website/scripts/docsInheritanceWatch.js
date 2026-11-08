@@ -9,6 +9,7 @@ const chokidar = require("chokidar");
 const siteRoot = path.resolve(__dirname, "..");
 const docsContentRoot = path.join(siteRoot, "content", "docs");
 const devDocsOutputRoot = path.join(siteRoot, "public-dev", "docs");
+const manifestPath = path.join(siteRoot, "public-dev", "docs-routes.json");
 const watchedPaths = [
    docsContentRoot,
    path.join(siteRoot, "data", "docs-nav"),
@@ -26,6 +27,45 @@ const pendingOutputRemovals = new Set();
 const pendingPageIdentityChecks = new Set();
 const ignoredChangePaths = new Set();
 let hasPendingStructuralChange = false;
+let redirectTimer = null;
+let isGeneratingRedirects = false;
+let shouldGenerateRedirectsAgain = false;
+
+function generateRedirects() {
+   if (isGeneratingRedirects) {
+      shouldGenerateRedirectsAgain = true;
+      return;
+   }
+   isGeneratingRedirects = true;
+   shouldGenerateRedirectsAgain = false;
+   const child = spawn("python3", ["scripts/generate-managed-redirects.py", "--output", "public-dev/_redirects"], {
+      cwd: siteRoot,
+      stdio: ["ignore", "inherit", "inherit"],
+   });
+   child.on("error", (error) => {
+      console.error(`[docs] HTTP rule refresh failed: ${error.message}`);
+   });
+   child.on("close", (code) => {
+      isGeneratingRedirects = false;
+      if (code !== 0) {
+         console.error("[docs] HTTP rules are not current. Correct the reported migration or target, then rebuild.");
+      }
+      if (shouldGenerateRedirectsAgain) {
+         generateRedirects();
+      }
+   });
+}
+
+const redirectWatcher = chokidar.watch([manifestPath, path.join(siteRoot, "platform-redirects.txt")], {
+   ignoreInitial: true,
+   awaitWriteFinish: { stabilityThreshold: debounceMs, pollInterval: 100 },
+});
+redirectWatcher.on("all", () => {
+   clearTimeout(redirectTimer);
+   redirectTimer = setTimeout(generateRedirects, debounceMs);
+}).on("error", (error) => {
+   console.error(`[docs] HTTP rule watcher failed: ${error.message}`);
+});
 
 function pagePathForMarker(markerPath) {
    const pageName = path.basename(markerPath) === "_inherit.md" ? "_index.md" : "index.md";
@@ -191,7 +231,8 @@ watcher
 
 function shutdown() {
    clearTimeout(debounceTimer);
-   watcher.close().finally(() => process.exit(0));
+   clearTimeout(redirectTimer);
+   Promise.all([watcher.close(), redirectWatcher.close()]).finally(() => process.exit(0));
 }
 
 process.on("SIGINT", shutdown);

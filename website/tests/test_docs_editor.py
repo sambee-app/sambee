@@ -8,11 +8,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 WEBSITE_DIR = Path(__file__).resolve().parent.parent
 DOCS_EDITOR_PACKAGE_DIR = WEBSITE_DIR / "scripts" / "docs_editor"
@@ -244,6 +243,7 @@ title = "Configuration"
         return subprocess.run(
             [sys.executable, str(root / "scripts" / "docs-editor.py"), *args],
             cwd=root,
+            check=False,
             text=True,
             capture_output=True,
             stdin=subprocess.DEVNULL,
@@ -2037,6 +2037,194 @@ class DocsEditorPageTests(DocsEditorTestCase):
             )
 
 
+class DocsEditorMigrationTests(DocsEditorTestCase):
+    """Verify that preview, apply, and release operations preserve URL decisions."""
+
+    def test_rename_records_inherited_and_unversioned_aliases_and_repeated_moves(
+        self,
+    ) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        editor = DOCS_EDITOR.DocsEditor(root)
+        source = "website-and-docs-architecture-overview"
+        plan = editor.plan_page_rename(
+            "0.9",
+            book="website-dev-guide",
+            section="docs-platform",
+            old_page=source,
+            new_page="renamed",
+            title=None,
+        )
+        registry_path = root / "data/docs-migrations.json"
+        self.assertFalse(registry_path.exists())
+        self.assertEqual(
+            {scope for alias in plan.metadata["aliases"] for scope in alias["scopes"]},
+            {"0.9", "1.0", "unversioned"},
+        )
+        editor.apply_plan(plan)
+        second = editor.plan_page_rename(
+            "0.9",
+            book="website-dev-guide",
+            section="docs-platform",
+            old_page="renamed",
+            new_page="final",
+            title=None,
+        )
+        editor.apply_plan(second)
+        entries = json.loads(registry_path.read_text())["migrations"]
+        self.assertTrue(
+            any(
+                entry["source"].endswith(source + "/")
+                and entry["target"].endswith("renamed/")
+                for entry in entries
+            )
+        )
+        self.assertTrue(
+            any(
+                entry["source"].endswith("renamed/")
+                and entry["target"].endswith("final/")
+                for entry in entries
+            )
+        )
+
+    def test_structural_book_records_only_previously_routable_descendants(self) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        (root / "content/docs/0.9/website-dev-guide/_index.md").unlink()
+        (root / "content/docs/1.0/website-dev-guide/_inherit.md").unlink()
+        plan = DOCS_EDITOR.DocsEditor(root).plan_book_rename(
+            "0.9", old_book="website-dev-guide", new_book="web-guide", title=None
+        )
+        self.assertTrue(plan.metadata["aliases"])
+        self.assertTrue(
+            all(
+                alias["source"] != "website-dev-guide/"
+                for alias in plan.metadata["aliases"]
+            )
+        )
+
+    def test_new_version_carries_scoped_aliases(self) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        editor = DOCS_EDITOR.DocsEditor(root)
+        renamed = editor.plan_page_rename(
+            "0.9",
+            book="website-dev-guide",
+            section="docs-platform",
+            old_page="website-and-docs-architecture-overview",
+            new_page="renamed",
+            title=None,
+        )
+        editor.apply_plan(renamed)
+        created = editor.plan_version_create(
+            "new",
+            after="1.0",
+            latest=False,
+            label=None,
+            status=None,
+            visible=None,
+            searchable=None,
+            set_current=False,
+        )
+        self.assertTrue(created.metadata["aliases"])
+        editor.apply_plan(created)
+        entries = json.loads((root / "data/docs-migrations.json").read_text())[
+            "migrations"
+        ]
+        self.assertTrue(any("new" in entry["scopes"] for entry in entries))
+
+    def test_current_transition_refuses_missing_decisions_and_skipped_versions(
+        self,
+    ) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        editor = DOCS_EDITOR.DocsEditor(root)
+        with self.assertRaisesRegex(
+            DOCS_EDITOR.DocsEditorError, "one declared version"
+        ):
+            editor.plan_version_set_current("2.0")
+        with self.assertRaisesRegex(DOCS_EDITOR.DocsEditorError, "replacement or gone"):
+            editor.plan_version_set_current("1.1")
+        locations = editor.routable_locations("1.0") - editor.routable_locations("1.1")
+        (root / "data/docs-migrations.json").write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "migrations": [
+                        {"source": source, "target": None, "scopes": ["unversioned"]}
+                        for source in locations
+                    ],
+                }
+            )
+        )
+        plan = editor.plan_version_set_current("1.1")
+        self.assertEqual(set(plan.metadata["release_decisions"]), locations)
+        self.assertEqual(editor.load_versions_document().current, "1.0")
+        editor.apply_plan(plan)
+        self.assertEqual(editor.load_versions_document().current, "1.1")
+
+    def test_version_creation_omits_reused_source_and_refuses_missing_target(
+        self,
+    ) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        editor = DOCS_EDITOR.DocsEditor(root)
+        existing = (
+            "website-dev-guide/docs-platform/website-and-docs-architecture-overview/"
+        )
+        registry = root / "data/docs-migrations.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "migrations": [
+                        {
+                            "source": existing,
+                            "target": "website-dev-guide/missing/",
+                            "scopes": ["1.0"],
+                        }
+                    ],
+                }
+            )
+        )
+        plan = editor.plan_version_create(
+            "new",
+            after="1.0",
+            latest=False,
+            label=None,
+            status=None,
+            visible=None,
+            searchable=None,
+            set_current=False,
+        )
+        self.assertEqual(plan.metadata["aliases"], [])
+        registry.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "migrations": [
+                        {
+                            "source": "website-dev-guide/old/",
+                            "target": "website-dev-guide/missing/",
+                            "scopes": ["1.0"],
+                        }
+                    ],
+                }
+            )
+        )
+        with self.assertRaisesRegex(DOCS_EDITOR.DocsEditorError, "missing replacement"):
+            editor.plan_version_create(
+                "new",
+                after="1.0",
+                latest=False,
+                label=None,
+                status=None,
+                visible=None,
+                searchable=None,
+                set_current=False,
+            )
+
+
 class DocsEditorCliTests(DocsEditorTestCase):
     """Exercise the public CLI entrypoint and its user-facing output."""
 
@@ -2241,7 +2429,7 @@ class DocsEditorCliTests(DocsEditorTestCase):
             "create",
             "1.2",
             "--after",
-            "1.1",
+            "1.0",
             "--label",
             "Release 1.2",
             "--status",
@@ -2251,14 +2439,14 @@ class DocsEditorCliTests(DocsEditorTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn(
-            "Applied: Create docs version 1.2 after 1.1 with inherited content",
+            "Applied: Create docs version 1.2 after 1.0 with inherited content",
             result.stdout,
         )
 
         versions_data = self.assert_versions_state(
             root,
             current="1.2",
-            slugs=["0.9", "1.0", "1.1", "1.2", "2.0"],
+            slugs=["0.9", "1.0", "1.2", "1.1", "2.0"],
         )
 
         new_entry = next(
