@@ -20,6 +20,7 @@ from typing import Any, Protocol, cast
 from .migrations import (
     REGISTRY_PATH,
     UNVERSIONED,
+    current_migrations,
     load_registry,
     render_registry,
     transition_decisions,
@@ -186,7 +187,7 @@ class DocsEditor:
         }
 
     def with_migrations(self, plan: OperationPlan) -> OperationPlan:
-        """Record moves using the planner's already computed inherited descendants."""
+        """Include move and version migration changes in the operation plan."""
         registry_path = self.paths.website_dir / REGISTRY_PATH
         try:
             entries = load_registry(registry_path)
@@ -221,7 +222,10 @@ class DocsEditor:
                                     "scopes": [version],
                                 }
                             )
+                current = self.load_versions_document().current
                 for alias in list(aliases):
+                    if current not in alias["scopes"]:
+                        continue
                     if not any(
                         entry["source"] == alias["source"]
                         and UNVERSIONED in entry["scopes"]
@@ -310,8 +314,28 @@ class DocsEditor:
                         self.routable_locations(source_version)
                         if source_version
                         else set(),
-                        entries,
+                        current_migrations(entries, updated["current"]),
                     )
+            elif (
+                metadata.get("operation") == "delete"
+                and metadata.get("entity") == "version"
+            ):
+                version = metadata["version"]
+                metadata["removed_aliases"] = [
+                    {**entry, "scopes": [version]}
+                    for entry in entries
+                    if version in entry["scopes"]
+                ]
+                entries = [
+                    {
+                        **entry,
+                        "scopes": [
+                            scope for scope in entry["scopes"] if scope != version
+                        ],
+                    }
+                    for entry in entries
+                    if any(scope != version for scope in entry["scopes"])
+                ]
             changes = list(plan.changes)
             if render_registry(entries) != original:
                 changes.append(
@@ -338,7 +362,9 @@ class DocsEditor:
             decisions = transition_decisions(
                 self.routable_locations(document.current),
                 self.routable_locations(version),
-                load_registry(self.paths.website_dir / REGISTRY_PATH),
+                current_migrations(
+                    load_registry(self.paths.website_dir / REGISTRY_PATH), version
+                ),
             )
         except (ValueError, TypeError, OSError) as error:
             raise DocsEditorError(str(error)) from error
@@ -1858,6 +1884,7 @@ class DocsEditor:
             },
         )
 
+    @migration_plan
     def plan_version_delete(
         self, version: str, *, new_current: str | None
     ) -> OperationPlan:

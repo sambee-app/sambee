@@ -81,6 +81,20 @@ def render_registry(entries: list[dict[str, Any]]) -> str:
     )
 
 
+def current_migrations(
+    entries: list[dict[str, Any]], current: str
+) -> list[dict[str, Any]]:
+    """Activate current-version aliases without replacing explicit URL decisions."""
+    unversioned_sources = {
+        entry["source"] for entry in entries if UNVERSIONED in entry["scopes"]
+    }
+    return entries + [
+        {**entry, "scopes": [UNVERSIONED]}
+        for entry in entries
+        if current in entry["scopes"] and entry["source"] not in unversioned_sources
+    ]
+
+
 def transition_decisions(
     previous: set[str], current: set[str], entries: list[dict[str, Any]]
 ) -> dict[str, str | None]:

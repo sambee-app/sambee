@@ -218,7 +218,15 @@ including inherited descendants. Branch changes record only previously routable
 locations, not structural folders. Preview shows aliases; apply saves the registry
 in the same rollback transaction as content and navigation. Version creation carries
 applicable aliases, omits reused source paths, and refuses missing replacement targets.
+Version deletion removes that version from each alias's scopes and removes entries
+with no remaining scopes. Preview shows these changes before apply.
 Markdown links and managed shortcut targets still require explicit updates.
+
+Moves that do not affect the current version record explicit-version aliases only.
+They do not create active unversioned rules for missing current content. When their
+version becomes current, the build also applies its aliases to unversioned URLs.
+Explicit `unversioned` decisions take priority, and existing current pages remain
+HTTP 200. The editor uses the same alias selection for its release-transition check.
 
 Every build compares current routes with the immediately preceding declared version.
 Each removed unversioned location needs a current unversioned replacement or a gone

@@ -2087,6 +2087,93 @@ class DocsEditorMigrationTests(DocsEditorTestCase):
             )
         )
 
+    def test_preview_only_rename_records_only_explicit_aliases(self) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        editor = DOCS_EDITOR.DocsEditor(root)
+        plan = editor.plan_page_rename(
+            "1.1",
+            book="end-user",
+            section="getting-started",
+            old_page="install",
+            new_page="setup",
+            title=None,
+        )
+        registry = root / "data/docs-migrations.json"
+        self.assertFalse(registry.exists())
+        self.assertEqual(
+            plan.metadata["aliases"],
+            [
+                {
+                    "source": "end-user/getting-started/install/",
+                    "target": "end-user/getting-started/setup/",
+                    "scopes": ["1.1"],
+                }
+            ],
+        )
+        editor.apply_plan(plan)
+        self.assertEqual(
+            json.loads(registry.read_text())["migrations"], plan.metadata["aliases"]
+        )
+
+    def test_version_delete_removes_alias_scopes_in_preview_and_apply(self) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        editor = DOCS_EDITOR.DocsEditor(root)
+        editor.apply_plan(
+            editor.plan_page_rename(
+                "0.9",
+                book="website-dev-guide",
+                section="docs-platform",
+                old_page="website-and-docs-architecture-overview",
+                new_page="renamed",
+                title=None,
+            )
+        )
+        editor.apply_plan(
+            editor.plan_version_create(
+                "new",
+                after="1.0",
+                latest=False,
+                label=None,
+                status=None,
+                visible=None,
+                searchable=None,
+                set_current=False,
+            )
+        )
+        editor.apply_plan(
+            editor.plan_page_rename(
+                "new",
+                book="website-dev-guide",
+                section="docs-platform",
+                old_page="renamed",
+                new_page="final",
+                title=None,
+            )
+        )
+        registry = root / "data/docs-migrations.json"
+        before = registry.read_text()
+        plan = editor.plan_version_delete("new", new_current=None)
+        self.assertEqual(registry.read_text(), before)
+        registry_changes = [
+            change for change in plan.changes if change.path == registry
+        ]
+        self.assertEqual(len(registry_changes), 1)
+        expected = [
+            {**entry, "scopes": [scope for scope in entry["scopes"] if scope != "new"]}
+            for entry in json.loads(before)["migrations"]
+            if any(scope != "new" for scope in entry["scopes"])
+        ]
+        self.assertEqual(
+            json.loads(registry_changes[0].content or "")["migrations"], expected
+        )
+        editor.apply_plan(plan)
+        self.assertEqual(json.loads(registry.read_text())["migrations"], expected)
+        self.assert_paths_missing(
+            root / "content/docs/new", root / "data/docs-nav/new.toml"
+        )
+
     def test_structural_book_records_only_previously_routable_descendants(self) -> None:
         tempdir, root = self.build_temp_website()
         self.addCleanup(tempdir.cleanup)
@@ -2132,6 +2219,48 @@ class DocsEditorMigrationTests(DocsEditorTestCase):
             "migrations"
         ]
         self.assertTrue(any("new" in entry["scopes"] for entry in entries))
+
+    def test_preview_move_supplies_release_decision_when_promoted(self) -> None:
+        tempdir, root = self.build_temp_website()
+        self.addCleanup(tempdir.cleanup)
+        editor = DOCS_EDITOR.DocsEditor(root)
+        editor.apply_plan(
+            editor.plan_version_create(
+                "new",
+                after="1.0",
+                latest=False,
+                label=None,
+                status=None,
+                visible=None,
+                searchable=None,
+                set_current=False,
+            )
+        )
+        editor.apply_plan(
+            editor.plan_page_rename(
+                "new",
+                book="website-dev-guide",
+                section="docs-platform",
+                old_page="website-and-docs-architecture-overview",
+                new_page="renamed",
+                title=None,
+            )
+        )
+        registry = root / "data/docs-migrations.json"
+        before = registry.read_text()
+        self.assertNotIn("unversioned", before)
+        plan = editor.plan_version_set_current("new")
+        self.assertEqual(
+            plan.metadata["release_decisions"],
+            {
+                "website-dev-guide/docs-platform/website-and-docs-architecture-overview/": "website-dev-guide/docs-platform/renamed/"
+            },
+        )
+        self.assertEqual(registry.read_text(), before)
+        self.assertEqual(editor.load_versions_document().current, "1.0")
+        editor.apply_plan(plan)
+        self.assertEqual(editor.load_versions_document().current, "new")
+        self.assertEqual(registry.read_text(), before)
 
     def test_current_transition_refuses_missing_decisions_and_skipped_versions(
         self,

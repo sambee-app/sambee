@@ -14,6 +14,22 @@ one build pipeline in local commands and CI. Published routing and authoring doc
 have been updated. No deployment, live HTTP acceptance, or Cloudflare account
 configuration check has been performed.
 
+Review fixes on 2026-11-08 restrict non-current moves to explicit-version aliases.
+The generator and editor release check activate the current version's aliases for
+unversioned URLs, with explicit unversioned decisions taking priority. Version
+deletion removes its migration scopes and entries with no remaining scopes in the
+same operation plan and rollback transaction. Five regression tests cover these
+cases, including publication of a preview move. All 166 website tests pass; touched
+Python files pass Ruff lint and formatting checks. Production and relative-base
+preview builds pass the complete pipeline with 739 docs routes and 341 rules.
+
+With temporary user approval, the VS Code browser checked the local preview at
+`http://localhost:1314`. Entry fallback behavior, explicit 2.0 and inherited 3.0
+content, same-version navigation, indexing metadata, and fragment navigation pass.
+Existing long inline code paths cause horizontal overflow at a 390-pixel viewport;
+this layout issue was not changed. This preview check does not verify development
+forwarding or Cloudflare matching. Those acceptance checks remain open.
+
 Documentation for this change starts at 2.0. Seven inherited pages were
 materialized in 2.0 with the docs editor. The redirect-related edits in 0.7,
 0.8, and 0.9 were reverted; earlier published docs remain unchanged. Later
@@ -449,12 +465,15 @@ generated assets as proof of live HTTP status codes or platform matching.
 - [x] No unversioned route redirects to an explicit-version page.
 - [x] Generated rules are deterministic and satisfy Cloudflare limits.
 - [x] Rename and move operations record aliases in dry-run and apply modes, including inherited descendants.
+- [x] Non-current moves create no active unversioned rules for missing current content; their aliases activate when their version becomes current.
 - [x] Version creation carries only applicable aliases and detects source-path reuse or missing replacements.
+- [x] Version deletion removes its migration scopes and empty entries in preview and apply modes.
 - [x] Existing managed-shortcut tests pass, with new tests for one-hop validation.
 - [x] CI runs all website tests, including generator, migration, docs editor, and Hugo manifest integration tests.
 - [x] The Hugo fixture test uses the pinned deployment Hugo version, runs without asset or search build dependencies, and fails clearly if Hugo is missing or a subprocess times out.
 - [x] All build paths use the same build steps. A clean build produces a matching manifest and `_redirects` file.
 - [ ] Fragment navigation and development forwarding are checked in the VS Code browser using the local website task; fragments do not reach the HTTP server.
+- [x] The local preview build is checked in the VS Code browser for entry fallback behavior, explicit and inherited content, same-version links, metadata, and fragment navigation.
 - [x] Production and preview builds use no automatic browser forwarding for docs routes. In the development environment, entry routes forward automatically.
 - [x] The Cloudflare Pages rollback procedure is documented.
 - [x] Published routing and authoring documentation matches the implemented behavior.

@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from docs_editor.migrations import (
     REGISTRY_PATH,
     UNVERSIONED,
+    current_migrations,
     load_registry,
     transition_decisions,
 )
@@ -155,6 +156,7 @@ def complete_rules(
         pair(entry["source"], entry["target"], "302")
     versions = [entry["slug"] for entry in manifest["versions"]]
     current = manifest["current"]
+    migrations = current_migrations(migrations, current)
     current_locations = {
         route["path"].removeprefix("/docs/")
         for route in manifest["routes"]

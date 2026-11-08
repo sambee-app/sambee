@@ -191,9 +191,13 @@ python3 scripts/docs-editor.py version delete 1.1
 Behavior:
 
 1. removes the version from `website/data/docs-versions.toml`
-2. removes `website/data/docs-nav/<version>.toml`
-3. removes `website/content/docs/<version>/`
-4. revalidates inheritance resolution across remaining versions
+1. removes `website/data/docs-nav/<version>.toml`
+1. removes `website/content/docs/<version>/`
+1. removes the version's migration scopes and entries with no remaining scopes
+1. revalidates inheritance resolution across remaining versions
+
+Preview includes the migration changes. Apply saves them in the same rollback
+transaction as the version, navigation, and content changes.
 
 Refusal cases:
 

@@ -339,6 +339,72 @@ target = "https://sambee.net/docs/"
                 )
                 self.assertEqual("/docs/guide/removed " in output, target is not None)
 
+    def test_preview_alias_activates_only_after_current_version_changes(self) -> None:
+        manifest = self.manifest()
+        manifest["versions"].append({"slug": "3.0"})
+        manifest["entries"].append(
+            {"source": "/docs/3.0/", "target": "/docs/3.0/guide/section/page/"}
+        )
+        for location in ["guide/section/page/", "guide/setup/"]:
+            manifest["routes"].append(
+                {
+                    "path": "/docs/3.0/" + location,
+                    "version": "3.0",
+                    "sourceVersion": "3.0",
+                    "space": "explicit",
+                }
+            )
+        migrations = [
+            {"source": "guide/install/", "target": "guide/setup/", "scopes": ["3.0"]}
+        ]
+        output = GENERATOR.complete_rules(manifest, migrations, [], "", "sambee.net")
+        self.assertIn("/docs/3.0/guide/install /docs/3.0/guide/setup/ 301", output)
+        self.assertNotIn("/docs/guide/install", output)
+        manifest["current"] = "3.0"
+        for route in manifest["routes"]:
+            if route["space"] == "current":
+                route["version"] = "3.0"
+        manifest["routes"].append(
+            {
+                "path": "/docs/guide/setup/",
+                "version": "3.0",
+                "sourceVersion": "3.0",
+                "space": "current",
+            }
+        )
+        output = GENERATOR.complete_rules(manifest, migrations, [], "", "sambee.net")
+        self.assertIn("/docs/guide/install /docs/guide/setup/ 302", output)
+        self.assertIn("/docs/guide/install/ /docs/guide/setup/ 302", output)
+        self.assertEqual(migrations[0]["scopes"], ["3.0"])
+
+    def test_current_alias_supplies_transition_without_unversioned_record(self) -> None:
+        manifest = self.manifest()
+        manifest["routes"].append(
+            {
+                "path": "/docs/1.0/guide/removed/",
+                "version": "1.0",
+                "sourceVersion": "1.0",
+                "space": "explicit",
+            }
+        )
+        migrations = [
+            {
+                "source": "guide/removed/",
+                "target": "guide/section/page/",
+                "scopes": ["2.0"],
+            }
+        ]
+        output = GENERATOR.complete_rules(manifest, migrations, [], "", "sambee.net")
+        self.assertIn("/docs/guide/removed /docs/guide/section/page/ 302", output)
+        migrations.append(
+            {"source": "guide/removed/", "target": None, "scopes": ["unversioned"]}
+        )
+        output = GENERATOR.complete_rules(manifest, migrations, [], "", "sambee.net")
+        self.assertNotIn("/docs/guide/removed ", output)
+        self.assertIn(
+            "/docs/2.0/guide/removed /docs/2.0/guide/section/page/ 301", output
+        )
+
     def test_platform_limits_and_length(self) -> None:
         with self.assertRaisesRegex(ValueError, "limits exceeded"):
             GENERATOR.complete_rules(
