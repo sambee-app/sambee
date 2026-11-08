@@ -219,6 +219,48 @@ def test_candidate_matrix_builds_depend_on_shared_preflight() -> None:
                 assert "prepare" in needs
 
 
+def test_public_release_tag_push_uses_dedicated_token_after_preflight() -> None:
+    workflow = load_workflow("create-public-release.yml")
+    steps = workflow["jobs"]["create-release"]["steps"]
+    preflight_index = next(index for index, step in enumerate(steps) if step.get("id") == "preflight")
+    tag_index = next(index for index, step in enumerate(steps) if step.get("id") == "public-tag")
+    checkout_index = max(index for index, step in enumerate(steps[:tag_index]) if step.get("uses", "").startswith("actions/checkout@"))
+    checkout = steps[checkout_index]
+
+    assert preflight_index < checkout_index < tag_index
+    assert checkout["with"]["token"] == "${{ secrets.RELEASE_PUSH_TOKEN }}"
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    assert checkout["with"]["fetch-depth"] == 0
+    assert checkout["with"]["persist-credentials"] is True
+    assert 'git push origin "refs/tags/$release_tag"' in steps[tag_index]["run"]
+    metadata = next(step for step in steps if step.get("name") == "Create or verify draft release metadata")
+    assert metadata["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+
+
+@pytest.mark.parametrize("token", ["", "test-token"])
+def test_public_release_requires_push_token_without_disclosing_it(token: str) -> None:
+    workflow = load_workflow("create-public-release.yml")
+    step = workflow["jobs"]["create-release"]["steps"][0]
+    assert step["name"] == "Validate public release push token"
+    assert step["env"]["RELEASE_PUSH_TOKEN"] == "${{ secrets.RELEASE_PUSH_TOKEN }}"
+
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        env={"RELEASE_PUSH_TOKEN": token},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == (0 if token else 1)
+    assert result.stdout == ""
+    if token:
+        assert result.stderr == ""
+    else:
+        assert "Set the RELEASE_PUSH_TOKEN Actions secret" in result.stderr
+        assert "Contents and Workflows write access" in result.stderr
+
+
 def test_public_release_annotated_tag_has_explicit_ci_identity() -> None:
     workflow = load_workflow("create-public-release.yml")
     steps = workflow["jobs"]["create-release"]["steps"]

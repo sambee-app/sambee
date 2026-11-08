@@ -23,6 +23,16 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     steps:
+      - name: Validate public release push token
+        shell: bash
+        env:
+          RELEASE_PUSH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN }}
+        run: |
+          if [[ -z "$RELEASE_PUSH_TOKEN" ]]; then
+            echo "Set the RELEASE_PUSH_TOKEN Actions secret to a token with Contents and Workflows write access to this repository, then rerun this workflow." >&2
+            exit 1
+          fi
+
       - name: Checkout workflow actions
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -34,6 +44,14 @@ jobs:
           dispatch-ref: ${{ github.ref }}
           dispatch-sha: ${{ github.sha }}
           run-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Configure public tag push credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PUSH_TOKEN }}
+          persist-credentials: true
 
       - name: Create or verify immutable public tag
         id: public-tag
