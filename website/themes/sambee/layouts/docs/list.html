@@ -4,19 +4,11 @@
 {{ $docsContext := $renderData.docsContext }}
 {{ $targetURL := $renderData.redirectTarget }}
 {{ if $targetURL }}
-  {{ if and $docsContext.isExplicitVersion $docsContext.isCurrentVersion }}
     {{ partial "docs/redirect-page.html" (dict
       "targetURL" $targetURL
-      "heading" "Redirecting To Current Documentation"
-      "body" "This versioned docs URL now forwards to the stable current documentation URL."
+      "heading" "Documentation"
+      "body" "Open the documentation for the selected version."
     ) }}
-  {{ else }}
-    {{ partial "docs/redirect-page.html" (dict
-      "targetURL" $targetURL
-      "heading" "Redirecting To Documentation"
-      "body" "This docs entry point forwards to the most useful current documentation landing page."
-    ) }}
-  {{ end }}
 {{ else if or $docsContext.isBook $docsContext.isSection }}
   {{ partial "docs/article-shell.html" (dict
     "page" .

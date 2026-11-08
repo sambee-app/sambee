@@ -70,7 +70,8 @@
     "**/.vscode": false
   },
   "files.associations": {
-    "website/themes/sambee/assets/css/*.css": "tailwindcss"
+    "website/themes/sambee/assets/css/*.css": "tailwindcss",
+    "**/website/themes/sambee/layouts/index.docsroutes.json": "plaintext"
   },
   "tailwindCSS.experimental.configFile": {
     "website/themes/sambee/assets/css/main.css": "website/themes/sambee/assets/css/**"

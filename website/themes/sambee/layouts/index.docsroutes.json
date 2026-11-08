@@ -1,0 +1,27 @@
+{{- $routes := slice -}}
+{{- $entries := slice -}}
+{{- $siteRoutes := slice -}}
+{{- $metadata := index hugo.Data "docs-versions" -}}
+{{- range sort site.Pages "RelPermalink" -}}
+  {{- $context := partial "docs/context.html" . -}}
+  {{- if $context.isDocs -}}
+    {{- $data := partial "docs/render-data.html" . -}}
+    {{- if $data.redirectTarget -}}
+      {{- $entries = $entries | append (dict "source" .RelPermalink "target" $data.redirectTarget "reason" $context.kind) -}}
+    {{- else if and (not $context.isDocsRoot) (not $context.isVersion) .File -}}
+      {{- $space := cond $context.isCurrentRoute "current" "explicit" -}}
+      {{- $routes = $routes | append (dict
+        "path" .RelPermalink
+        "space" $space
+        "version" $context.version
+        "sourceVersion" $data.effectivePageData.resolvedVersion
+        "kind" $context.kind
+        "indexable" $context.isCurrentRoute
+        "searchable" $data.isSearchIndexed
+      ) -}}
+    {{- end -}}
+  {{- else if ne .Kind "404" -}}
+    {{- $siteRoutes = $siteRoutes | append .RelPermalink -}}
+  {{- end -}}
+{{- end -}}
+{{- dict "schemaVersion" 1 "current" $metadata.current "versions" $metadata.versions "routes" $routes "entries" $entries "siteRoutes" $siteRoutes | jsonify -}}

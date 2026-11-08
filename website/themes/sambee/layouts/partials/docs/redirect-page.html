@@ -11,6 +11,8 @@
     </div>
   </article>
 </section>
+{{ if eq hugo.Environment "development" }}
 <script>
-  window.location.replace('{{ $targetURL }}');
+  window.location.replace('{{ $targetURL }}' + window.location.search + window.location.hash);
 </script>
+{{ end }}

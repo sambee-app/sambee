@@ -11,7 +11,7 @@
     {{ range $bookSlug := $navData.books }}
       {{ $isCurrentBook := eq $bookSlug $book }}
       {{ $currentBookSourcePage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "preferStable" false)) }}
-      {{ $currentBookURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug) }}
+      {{ $currentBookURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "preferStable" $pageContext.isCurrentRoute) }}
       {{ $bookTitle := humanize $bookSlug }}
       {{ with $currentBookSourcePage }}
         {{ $bookEffectiveData := partial "docs/effective-page.html" . }}
@@ -55,7 +55,7 @@
           {{ $sectionSlug := $sectionEntry.slug }}
           {{ $sectionTitle := $sectionEntry.title | default (humanize $sectionSlug) }}
           {{ $sectionSourcePage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" false)) }}
-          {{ $sectionURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug) }}
+          {{ $sectionURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" $pageContext.isCurrentRoute) }}
           {{ $pageSlugs := slice }}
           {{ with index $navData.pages $bookSlug }}
             {{ with index . $sectionSlug }}
@@ -104,7 +104,7 @@
                   {{ if $isCurrentPage }}
                   <span class="docs-sidebar-link docs-sidebar-link-current type-docs-nav type-color-ink ui-current-primary-inset">{{ $navTitle }}</span>
                   {{ else }}
-                  <a class="docs-sidebar-link type-docs-nav type-color-muted ui-transition-color type-hover-ink ui-hover-surface-mid" href="{{ partial "docs/page-url.html" (dict "pageObject" .) }}">{{ $navTitle }}</a>
+                  <a class="docs-sidebar-link type-docs-nav type-color-muted ui-transition-color type-hover-ink ui-hover-surface-mid" href="{{ partial "docs/page-url.html" (dict "pageObject" . "preferStable" $pageContext.isCurrentRoute) }}">{{ $navTitle }}</a>
                   {{ end }}
                 </li>
               {{ end }}

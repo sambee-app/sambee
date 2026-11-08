@@ -6,6 +6,7 @@
    const COPY_BUTTON_CLASS = 'code-copy-btn';
    const DOCS_VERSION_DROPDOWN_SELECTOR = '.docs-sidebar-version-control';
    const DOCS_VERSION_DROPDOWN_CLOSE_SELECTOR = '[data-close-version-dropdown]';
+   const DOCS_VERSION_OPTION_SELECTOR = '.docs-sidebar-version-option';
    const DOCS_SIDEBAR_TOGGLE_SELECTOR = '.docs-sidebar-toggle';
    const DOCS_SECTION_TRIGGER_SELECTOR = '[data-docs-section-trigger="true"]';
    const DOCS_PAGE_SELECTOR = '.docs-shell--page';
@@ -154,12 +155,58 @@
          return;
       }
 
+      dropdowns.forEach((dropdown) => {
+         const trigger = dropdown.querySelector('summary');
+         const options = Array.from(dropdown.querySelectorAll(DOCS_VERSION_OPTION_SELECTOR));
+
+         dropdown.addEventListener('toggle', () => {
+            if (dropdown.open) {
+               const currentOption = dropdown.querySelector('[aria-current="true"]');
+               (currentOption || options[0])?.focus();
+            }
+         });
+
+         dropdown.addEventListener('keydown', (event) => {
+            if (!dropdown.open || !options.length) {
+               return;
+            }
+
+            const currentIndex = options.indexOf(document.activeElement);
+            let nextIndex;
+            switch (event.key) {
+               case 'ArrowDown':
+                  nextIndex = (currentIndex + 1) % options.length;
+                  break;
+               case 'ArrowUp':
+                  nextIndex = (currentIndex - 1 + options.length) % options.length;
+                  break;
+               case 'Home':
+                  nextIndex = 0;
+                  break;
+               case 'End':
+                  nextIndex = options.length - 1;
+                  break;
+               case 'Escape':
+                  event.preventDefault();
+                  dropdown.open = false;
+                  trigger?.focus();
+                  return;
+               default:
+                  return;
+            }
+
+            event.preventDefault();
+            options[nextIndex].focus();
+         });
+      });
+
       document.querySelectorAll(DOCS_VERSION_DROPDOWN_CLOSE_SELECTOR).forEach((button) => {
          button.addEventListener('click', () => {
             const dropdown = button.closest(DOCS_VERSION_DROPDOWN_SELECTOR);
 
             if (dropdown) {
                dropdown.open = false;
+               dropdown.querySelector('summary')?.focus();
             }
          });
       });

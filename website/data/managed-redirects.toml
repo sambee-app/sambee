@@ -4,4 +4,4 @@
 [[redirects]]
 id = "help-oidc-setup"
 source = "/mr/help-oidc-setup"
-target = "https://sambee.net/docs/admin-guide/authentication/openid-connect-authentication-setup/"
+target = "/docs/admin-guide/authentication/openid-connect-authentication-setup/"

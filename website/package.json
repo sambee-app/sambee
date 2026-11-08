@@ -6,7 +6,7 @@
     "build:theme": "node scripts/themeGenerator.js",
     "docs:materialize-inherited": "python3 scripts/materialize-inherited-docs.py",
     "docs:validate": "python3 scripts/validate-docs-content.py",
-    "build:site": "hugo --source . --cleanDestinationDir",
+    "build:site": "npm run build:deploy",
     "redirects:generate": "python3 scripts/generate-managed-redirects.py",
     "validate:homepage-ctas": "python3 scripts/validate-homepage-ctas.py",
     "social:generate": "python3 scripts/generate-social-assets.py",
@@ -18,14 +18,15 @@
     "build:search-index:dev": "npx pagefind --site public-dev --quiet",
     "dev": "npm run dev:prepare && npm run dev:watch",
     "dev:with-search": "npm run dev:prepare:with-search && npm run dev:watch:with-search",
-    "dev:prepare": "npm run build:theme && npm run docs:validate && npm run docs:materialize-inherited && rm -rf public-dev && hugo --source . --environment development --destination public-dev --cleanDestinationDir && npm run redirects:generate -- --output public-dev/_redirects && npm run validate:homepage-ctas -- public-dev",
-    "dev:prepare:with-search": "npm run dev:prepare && npm run build:search-index:dev",
+    "dev:prepare": "python3 scripts/build-website.py --environment development --destination public-dev",
+    "dev:prepare:with-search": "npm run dev:prepare",
     "dev:watch": "concurrently --kill-others-on-fail --names theme,hugo,webp,docs \"node scripts/themeGenerator.js --watch\" \"hugo server --source . --environment development --destination public-dev --renderToMemory=false --bind 0.0.0.0 --port 1313 --disableFastRender\" \"node scripts/webpWatch.js\" \"node scripts/docsInheritanceWatch.js\"",
     "dev:watch:with-search": "concurrently --kill-others-on-fail --names theme,hugo,pagefind,webp,docs \"node scripts/themeGenerator.js --watch\" \"hugo server --source . --environment development --destination public-dev --renderToMemory=false --bind 0.0.0.0 --port 1313 --disableFastRender\" \"node scripts/pagefindWatch.js --site public-dev\" \"node scripts/webpWatch.js\" \"node scripts/docsInheritanceWatch.js\"",
     "dev:search": "npm run dev:prepare",
-    "build": "npm run build:theme && npm run docs:validate && npm run docs:materialize-inherited && npm run build:site && npm run redirects:generate && npm run validate:homepage-ctas",
+    "build:deploy": "python3 scripts/build-website.py",
+    "build": "npm run build:deploy",
     "preview": "npm run build:search && hugo server --source . --bind 0.0.0.0 --port 1313 --environment production --disableFastRender",
-    "build:search": "npm run build && npm run build:search-index"
+    "build:search": "npm run build:deploy"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.18",

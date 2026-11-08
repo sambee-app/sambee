@@ -88,29 +88,16 @@ jobs:
     - name: Build website
       run: |
         cd website
-        npm run build:theme
-        npm run docs:validate
-        npm run docs:materialize-inherited
-
         # Production builds use the canonical public base URL.
         if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-          base_url="https://sambee.net/"
+          export HUGO_BASEURL="https://sambee.net/"
         else
-          base_url="/"
+          export HUGO_BASEURL="/"
         fi
+        npm run build:deploy
 
-        hugo \
-          --source . \
-          --cleanDestinationDir \
-          --gc \
-          --minify \
-          --templateMetrics \
-          --templateMetricsHints \
-          --forceSyncStatic \
-          --baseURL "$base_url"
-
-        npm run redirects:generate
-        npm run build:search-index
+    - name: Run website tests
+      run: python3 -m unittest discover -s website/tests
 
     - name: Upload website build artifact
       if: github.event_name != 'pull_request'
@@ -191,15 +178,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     env:
       SITE_URL: https://sambee.net
-      VERIFY_PAGE: https://sambee.net/docs/website-dev-guide/site-systems/media-publishing-workflow/
     steps:
       - name: Verify deployed pages and assets
         run: |
           set -euo pipefail
 
           curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /tmp/home.html "$SITE_URL/"
-          curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /tmp/verify-page.html "$VERIFY_PAGE"
-          curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /tmp/docs-home.html "$SITE_URL/docs/"
           curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /dev/null "$SITE_URL/pagefind/pagefind.js"
 
           python3 - <<'PY'
@@ -209,7 +193,6 @@ jobs:
           from pathlib import Path
 
           site_url = os.environ["SITE_URL"]
-          verify_page = os.environ["VERIFY_PAGE"]
           home_html = Path("/tmp/home.html").read_text(encoding="utf-8")
 
           def find_first_path(html: str, patterns: list[str]) -> str | None:
@@ -237,13 +220,11 @@ jobs:
 
             # Export the discovered asset URL so the shell can verify it with curl next.
           Path("/tmp/verify-production-urls.env").write_text(
-              f"IMAGE_URL={image_url}\nVERIFY_PAGE_URL={verify_page}\n",
+              f"IMAGE_URL={image_url}\n",
               encoding="utf-8",
           )
           PY
 
           . /tmp/verify-production-urls.env
           curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /dev/null "$SITE_URL/"
-          curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /dev/null "$SITE_URL/docs/"
-          curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /dev/null "$VERIFY_PAGE_URL"
           curl --retry 10 --retry-delay 10 --retry-all-errors --fail --location --output /dev/null "$IMAGE_URL"

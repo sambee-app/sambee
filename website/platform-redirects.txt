@@ -1,0 +1,2 @@
+# Non-docs platform rules only. Docs rules are generated from the Hugo manifest
+# and data/docs-migrations.json. Do not add release-specific rules here.

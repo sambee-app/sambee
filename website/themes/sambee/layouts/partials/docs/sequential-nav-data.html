@@ -26,7 +26,7 @@
         "kind" "book"
         "title" $bookTitle
         "context" (printf "Sambee %s" $versionLabel)
-        "url" (partial "docs/page-url.html" (dict "version" $version "book" $bookSlug))
+        "url" (partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "preferStable" $docsContext.isCurrentRoute))
       ) }}
     {{ end }}
 
@@ -45,7 +45,7 @@
           "kind" "section"
           "title" $sectionTitle
           "context" $bookTitle
-          "url" (partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug))
+          "url" (partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" $docsContext.isCurrentRoute))
         ) }}
       {{ end }}
 
@@ -64,7 +64,7 @@
             "kind" "page"
             "title" $pageEffectiveData.page.Title
             "context" $sectionTitle
-            "url" (partial "docs/page-url.html" (dict "pageObject" .))
+            "url" (partial "docs/page-url.html" (dict "pageObject" . "preferStable" $docsContext.isCurrentRoute))
           ) }}
         {{ end }}
       {{ end }}

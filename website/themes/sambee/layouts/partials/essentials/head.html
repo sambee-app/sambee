@@ -32,10 +32,11 @@
   {{ $redirectTarget = $renderData.redirectTarget }}
 
   {{ if $redirectTarget }}
-    {{ $canonicalURL = absURL $redirectTarget }}
-    {{ $openGraphURL = $canonicalURL }}
+    {{ $canonicalURL = "" }}
+    {{ $openGraphURL = absURL $redirectTarget }}
     {{ $robotsDirectives = "noindex,follow" }}
   {{ else if $docsContext.isExplicitVersion }}
+    {{ $canonicalURL = "" }}
     {{ $robotsDirectives = "noindex,follow" }}
   {{ else if $docsContext.isCurrentRoute }}
     {{ $canonicalURL = absURL (partial "docs/page-url.html" (dict "pageObject" .)) }}
@@ -60,7 +61,7 @@
 <title>{{ $pageTitle }}</title>
 {{/* Keep search/social metadata aligned with the same resolved title and description. */}}
 <meta name="description" content="{{ $pageDescription }}" />
-{{ if $redirectTarget }}
+{{ if and $redirectTarget (eq hugo.Environment "development") }}
 <meta http-equiv="refresh" content="0; url={{ $redirectTarget }}" />
 {{ end }}
 {{ if $robotsDirectives }}

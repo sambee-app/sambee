@@ -11,19 +11,6 @@
     {{ with and $currentVersion (index $docsNav $currentVersion) }}
       {{ $targetURL = partial "docs/first-routable-url.html" (dict "version" $currentVersion) }}
     {{ end }}
-  {{ else if and $docsContext.isExplicitVersion $docsContext.isCurrentVersion }}
-    {{ if $docsContext.isVersion }}
-      {{ with and $currentVersion (index $docsNav $currentVersion) }}
-        {{ $targetURL = partial "docs/first-routable-url.html" (dict "version" $currentVersion) }}
-      {{ end }}
-    {{ else }}
-      {{ $targetURL = partial "docs/page-url.html" (dict
-        "version" $currentVersion
-        "book" $docsContext.book
-        "section" $docsContext.section
-        "page" $docsContext.page
-      ) }}
-    {{ end }}
   {{ else if $docsContext.isVersion }}
     {{ with and $docsContext.version (index $docsNav $docsContext.version) }}
       {{ $targetURL = partial "docs/first-routable-url.html" (dict

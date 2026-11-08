@@ -183,6 +183,12 @@ A security review resulted in the following improvements:
 Type correctness of frontend code and tests is now enforced. As part of this implementation, 1,152 diagnostics across 162 files were fixed: 840 in tests, 311 in application code,
 and one in an imported browser-test helper.
 
+## Website
+
+- Automated generation of the Cloudflare `_redirects` file as part of the website build.
+- The `/docs/` URL now uses HTTP redirects instead of meta refresh and JavaScript.
+- Search results now list the book and the section.
+
 ## Internals
 
 - Companion build for Windows: Authenticode signing was removed from PR check builds and only remains on release workflows.

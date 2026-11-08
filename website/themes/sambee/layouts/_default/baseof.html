@@ -12,7 +12,8 @@
 {{- $pagefindIgnore := false -}}
 {{- if $docsContext.isDocs -}}
   {{- $docsRedirectTarget = partial "docs/redirect-target.html" . -}}
-  {{- $pagefindIgnore = or $docsContext.isExplicitVersion $docsRedirectTarget -}}
+  {{- $renderData := partial "docs/render-data.html" . -}}
+  {{- $pagefindIgnore = or (not $renderData.isSearchIndexed) $docsRedirectTarget -}}
 {{- end -}}
 {{- if eq .Kind "404" -}}
   {{- $pagefindIgnore = true -}}

@@ -731,9 +731,13 @@ Documentation Navigation
   text-align: left;
 }
 
-a.docs-sidebar-version-option:hover,
-a.docs-sidebar-version-option:focus-visible {
-  outline: none;
+.docs-sidebar-version-option:focus-visible {
+  outline: 2px solid var(--color-clr-primary);
+  outline-offset: -2px;
+}
+
+.dark .docs-sidebar-version-option:focus-visible {
+  outline-color: var(--color-clr-darkmode-primary);
 }
 
 .docs-sidebar-book + .docs-sidebar-book {

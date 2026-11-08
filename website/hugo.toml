@@ -15,9 +15,15 @@ pagerSize = 10
     disableTags = true
 
 [outputs]
-home = ["HTML"]
+home = ["HTML", "DocsRoutes"]
 section = ["HTML"]
 page = ["HTML"]
+
+[outputFormats.DocsRoutes]
+mediaType = "application/json"
+baseName = "docs-routes"
+isPlainText = true
+notAlternative = true
 
 [imaging]
 resampleFilter = "Lanczos"
