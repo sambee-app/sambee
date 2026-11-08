@@ -1,0 +1,345 @@
+books = [
+  "release-info",
+  "user-guide",
+  "admin-guide",
+  "developer-guide",
+  "website-dev-guide",
+]
+
+[[sections.release-info.items]]
+slug = "news-and-changes"
+title = "News and Changes"
+
+[pages.release-info.news-and-changes]
+items = [
+  "whats-new",
+]
+
+[[sections.release-info.items]]
+slug = "system-requirements"
+title = "System Requirements"
+
+[pages.release-info.system-requirements]
+items = [
+  "requirements",
+]
+
+[[sections.user-guide.items]]
+slug = "getting-started"
+title = "Getting Started"
+
+[pages.user-guide.getting-started]
+items = [
+  "what-is-sambee",
+  "what-can-you-do-with-sambee",
+]
+
+[[sections.user-guide.items]]
+slug = "find-and-browse-files"
+title = "Find and Browse Files"
+
+[pages.user-guide.find-and-browse-files]
+items = [
+  "connect-to-an-smb-share",
+  "select-files-and-folders",
+  "smart-navigation-and-the-quick-bar",
+  "mobile-navigation",
+  "dual-pane-mode",
+  "keyboard-navigation-and-shortcuts",
+]
+
+[[sections.user-guide.items]]
+slug = "organize-and-transfer-files"
+title = "Organize and Transfer Files"
+
+[pages.user-guide.organize-and-transfer-files]
+items = [
+  "copy-and-move-files",
+  "download-and-upload-files",
+  "work-with-zip-archives",
+  "share-files-on-phones-and-tablets",
+]
+
+[[sections.user-guide.items]]
+slug = "view-and-edit-files"
+title = "View and Edit Files"
+
+[pages.user-guide.view-and-edit-files]
+items = [
+  "view-images-and-read-documents",
+  "view-and-edit-text-files",
+  "edit-markdown",
+  "file-locking-and-conflict-resolution",
+  "recover-unsaved-edits",
+]
+
+[[sections.user-guide.items]]
+slug = "use-local-drives-and-desktop-apps"
+title = "Use Local Drives and Desktop Apps"
+
+[pages.user-guide.use-local-drives-and-desktop-apps]
+items = [
+  "install-and-pair-the-companion-app",
+  "access-local-drives",
+  "edit-files-in-desktop-apps",
+  "desktop-app-picker",
+]
+
+[[sections.user-guide.items]]
+slug = "account-and-preferences"
+title = "Account and Preferences"
+
+[pages.user-guide.account-and-preferences]
+items = [
+  "manage-your-account",
+  "file-browser-preferences",
+]
+
+[[sections.user-guide.items]]
+slug = "troubleshooting"
+title = "Troubleshooting"
+
+[pages.user-guide.troubleshooting]
+items = [
+  "common-user-problems",
+]
+
+[[sections.user-guide.items]]
+slug = "reference"
+title = "Reference"
+
+[pages.user-guide.reference]
+items = [
+  "supported-file-formats",
+  "text-file-support-and-syntax-highlighting",
+]
+
+[[sections.admin-guide.items]]
+slug = "overview-and-planning"
+title = "Overview and Planning"
+
+[pages.admin-guide.overview-and-planning]
+items = [
+  "architecture-overview",
+]
+
+[[sections.admin-guide.items]]
+slug = "installation-and-deployment"
+title = "Installation and Deployment"
+
+[pages.admin-guide.installation-and-deployment]
+items = [
+  "deploy-sambee-with-docker",
+  "first-startup-and-first-admin-login",
+]
+
+[[sections.admin-guide.items]]
+slug = "network-and-reverse-proxy"
+title = "Network and Reverse Proxy"
+
+[pages.admin-guide.network-and-reverse-proxy]
+items = [
+  "put-sambee-behind-a-reverse-proxy",
+  "network-settings",
+]
+
+[[sections.admin-guide.items]]
+slug = "authentication"
+title = "Authentication"
+
+[pages.admin-guide.authentication]
+items = [
+  "authentication-overview",
+  "password-authentication",
+  "openid-connect-authentication-setup",
+  "openid-connect-authentication-operations",
+]
+
+[[sections.admin-guide.items]]
+slug = "operations-and-maintenance"
+title = "Operations and Maintenance"
+
+[pages.admin-guide.operations-and-maintenance]
+items = [
+  "view-logs-and-restart-services",
+  "update-sambee-safely",
+  "backup-and-restore-planning",
+  "manage-directory-search",
+]
+
+[[sections.admin-guide.items]]
+slug = "reference"
+title = "Reference"
+
+[pages.admin-guide.reference]
+items = [
+  "configuration-file-reference",
+  "smb-settings",
+  "port-and-path-reference",
+  "companion-support-reference",
+]
+
+[[sections.developer-guide.items]]
+slug = "project-orientation"
+title = "Project Orientation"
+
+[pages.developer-guide.project-orientation]
+items = [
+  "what-sambee-consists-of",
+  "repository-tour",
+]
+
+[[sections.developer-guide.items]]
+slug = "local-development-workflow"
+title = "Local Development Workflow"
+
+[pages.developer-guide.local-development-workflow]
+items = [
+  "set-up-the-development-environment",
+  "common-task-commands",
+]
+
+[[sections.developer-guide.items]]
+slug = "backend-architecture"
+title = "Backend Architecture"
+
+[pages.developer-guide.backend-architecture]
+items = [
+  "backend-overview",
+  "request-flow-and-service-boundaries",
+  "image-preprocessing-and-conversion-pipeline",
+  "smb-change-notification-and-directory-freshness",
+  "file-operations-and-edit-locking",
+]
+
+[[sections.developer-guide.items]]
+slug = "frontend-architecture"
+title = "Frontend Architecture"
+
+[pages.developer-guide.frontend-architecture]
+items = [
+  "frontend-overview",
+  "theming-system-and-theme-selection",
+  "file-browser-and-navigation-model",
+  "keyboard-shortcuts-and-command-model",
+  "viewer-architecture-and-preview-contracts",
+  "settings-form-dialog-pattern",
+]
+
+[[sections.developer-guide.items]]
+slug = "companion-architecture"
+title = "Companion Architecture"
+
+[pages.developer-guide.companion-architecture]
+items = [
+  "companion-overview",
+  "companion-runtime-and-native-app-editing",
+  "browser-to-companion-trust-model",
+  "local-drive-and-save-back-pipeline",
+]
+
+[[sections.developer-guide.items]]
+slug = "cross-cutting-systems"
+title = "Cross-Cutting Systems"
+
+[pages.developer-guide.cross-cutting-systems]
+items = [
+  "logging-and-localization",
+  "localization-and-locale-behavior",
+  "frontend-logging-and-tracing",
+]
+
+[[sections.developer-guide.items]]
+slug = "testing-and-quality-gates"
+title = "Testing and Quality Gates"
+
+[pages.developer-guide.testing-and-quality-gates]
+items = [
+  "test-strategy-overview",
+  "image-conversion-test-assets",
+  "ci-workflows-and-repository-automation",
+]
+
+[[sections.developer-guide.items]]
+slug = "contribution-workflows"
+title = "Contribution Workflows"
+
+[pages.developer-guide.contribution-workflows]
+items = [
+  "how-to-plan-and-review-a-change",
+]
+
+[[sections.developer-guide.items]]
+slug = "security"
+title = "Security"
+
+[pages.developer-guide.security]
+items = [
+  "dependency-security-and-dependabot",
+  "container-image-security-and-artifact-integrity",
+]
+
+[[sections.developer-guide.items]]
+slug = "release-and-versioning"
+title = "Release and Versioning"
+
+[pages.developer-guide.release-and-versioning]
+items = [
+  "release-overview",
+  "product-versioning",
+  "docker-release-overview",
+  "build-docker-image",
+  "promote-docker-image",
+  "docker-backfill-and-cleanup",
+  "companion-release-overview",
+  "build-companion-release",
+  "promote-companion-release",
+  "companion-channels-feeds-and-downloads",
+  "dependency-update-workflow",
+  "companion-release-cleanup",
+]
+
+[[sections.website-dev-guide.items]]
+slug = "docs-platform"
+title = "Docs Platform"
+
+[pages.website-dev-guide.docs-platform]
+items = [
+  "website-and-docs-architecture-overview",
+  "docs-content-model-navigation-and-inheritance",
+  "docs-runtime-and-route-resolution",
+]
+
+[[sections.website-dev-guide.items]]
+slug = "authoring-and-tooling"
+title = "Authoring and Tooling"
+
+[pages.website-dev-guide.authoring-and-tooling]
+items = [
+  "docs-authoring-workflow",
+  "docs-style-guide",
+  "docs-shortcodes",
+  "docs-editor-tool",
+  "docs-editor-operation-reference",
+]
+
+[[sections.website-dev-guide.items]]
+slug = "site-systems"
+title = "Site Systems"
+
+[pages.website-dev-guide.site-systems]
+items = [
+  "media-publishing-workflow",
+  "typography-system",
+  "typography-usage-and-boundaries",
+  "managed-redirects",
+]
+
+[[sections.website-dev-guide.items]]
+slug = "setup-and-operations"
+title = "Setup and Operations"
+
+[pages.website-dev-guide.setup-and-operations]
+items = [
+  "set-up-cloudflare-pages-publishing",
+]
