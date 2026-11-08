@@ -8,8 +8,9 @@ Date: 2026-11-08.
 
 This plan moves production docs redirects from the browser to Cloudflare Pages.
 It also corrects existing redirect defects, removes manual redirect updates from
-normal release work, and makes redirects testable in CI and Cloudflare preview
-deployments.
+normal release work, and validates generated routes and rules in CI. The user
+will check Cloudflare responses manually after the change is deployed. These
+live checks are not automated CI or deployment gates.
 
 The current version keeps unversioned canonical URLs. These are the only docs
 URLs that search engines index. Every version, including the current version,
@@ -235,6 +236,9 @@ When the current version changes, an unversioned route of the previous current
 version can be missing from the new current version. Search engines can still
 have that URL indexed.
 
+Current-version changes follow declaration order, one version at a time. Skipped
+versions are outside this plan's scope. No publication-history tracking is needed.
+
 On every build, compare the unversioned routes of the current version with the
 explicit routes of the version declared immediately before it. For each missing
 route, require one of these decisions in the migration registry:
@@ -300,23 +304,49 @@ Every docs page is an HTML file, so the Hugo development server shows all pages.
 Only entry routes, managed shortcuts, and historical aliases are redirects.
 The generator validates all of them statically against the route manifest.
 Cloudflare-specific matching can be verified only on Cloudflare. A local Pages
-emulator is therefore not necessary.
+emulator is therefore not necessary. The user will verify live HTTP behavior
+manually after deployment.
 
 - Add a `build:deploy` npm script. It runs the theme build, docs validation, materialization, Hugo with the route manifest, redirect generation, the Pagefind index, and the homepage CTA check. It reads the base URL from `HUGO_BASEURL`.
 - Make `build`, `build:search`, and `dev:prepare` use the same steps, so the generator and its validation always run after Hugo.
 - Keep `dev:watch` as the authoring loop. Entry routes forward automatically in the development environment. Managed shortcuts and historical aliases return 404 locally.
-- Add a redirect check script. It reads the manifest and `_redirects` and sends requests to a base URL without following redirects. It checks the status, the `Location` header, and the robots and canonical tags of each final target. Preview deployments and production use this script.
+- Start the local website through the VS Code `Website: Start Dev Server` task. Use the VS Code browser at `http://localhost:1313` to check generated docs pages, navigation, fragment handling, and development entry forwarding. Website browser testing is permitted for this work.
+- The website task uses the development environment. It does not prove Cloudflare HTTP behavior or the absence of production browser forwarding. Check production output locally for meta refresh and JavaScript forwarding; the user checks live responses after deployment.
+- Do not add a live redirect check script or automatic Cloudflare request checks. Document the manual checks in [Manual Cloudflare Checks](#manual-cloudflare-checks).
 
 ## Deployment Workflow
 
 Update `.github/workflows/website-deploy.yml` and `.github/workflows/test.yml`:
 
 - **Build:** replace the inline build steps with `npm run build:deploy`. Pass the base URL through `HUGO_BASEURL`. Generator validation failures stop the workflow for all pull requests, including fork pull requests.
-- **Preview deployment:** deploy same-repository pull request branches with `pages deploy public --branch=<branch>`. Run the redirect check script against the deployment URL that `wrangler-action` returns. Skip fork pull requests, because they do not get the secrets.
-- **Production deployment:** deploy from `main` only after the build and the checks pass. Deploy the manifest and `_redirects` from the same build.
-- **Production verification:** replace the `curl --location` checks and the unversioned `VERIFY_PAGE` with the redirect check script. Without following redirects, check `/docs`, `/docs/`, one version root, one unversioned page, one explicit current page, one archived page, the managed shortcut, and one historical move. Then check each final target separately.
-- **Tests:** replace the two test-file patterns in `test.yml` with `python3 -m unittest discover -s website/tests`. Add the Hugo manifest integration test.
+- **Preview deployment:** do not add pull request preview deployment infrastructure for this change. Pull requests continue to build and validate without Cloudflare secrets.
+- **Production deployment:** deploy from `main` only after the build and automated checks pass. Deploy the manifest and `_redirects` from the same build. Manual Cloudflare acceptance follows deployment; it is not a pre-deployment gate.
+- **Production verification:** remove the docs-specific `curl --location` checks and `VERIFY_PAGE` from `verify-production`. Retain unrelated homepage and asset smoke checks. The user performs [Manual Cloudflare Checks](#manual-cloudflare-checks) after deployment.
+- **Tests:** replace the two test-file patterns in `test.yml` with `python3 -m unittest discover -s website/tests`. Install the same pinned Hugo version as the deployment build in the `website-docs` job. Add the small Hugo manifest integration test described below. Missing Hugo must fail the test, not skip it.
 - **Rollback:** the deploy job deletes the build artifact. Use Cloudflare Pages deployment rollback, and document the procedure in the website developer guide.
+
+### Fast and Robust CI Tests
+
+Keep the website unit and editor tests on the Python standard library. The
+existing 144 tests passed in about 9.4 seconds locally on 2026-11-08; this is a
+baseline, not a fixed CI time limit.
+
+Use a small temporary docs site for the Hugo integration test. It must use the
+real route partials and manifest template, not a copied route resolver. Cover
+authored and inherited pages, landing pages, structural folders, navigation
+entry selection, and consecutive current-version changes from 1.0 to 2.0 to 3.0.
+Compare the manifest with the generated fixture routes and redirect rules.
+
+Use fixed inputs, isolated output folders, bounded subprocess timeouts, and
+failure messages that include the command and its output. Do not start a server
+or make network requests in the fixture test. Only pinned Hugo and Python are
+required; do not add Go, Node, npm dependencies, Pagefind, or image processing
+to this test job.
+
+Keep full-site rendering, production robots and canonical tags, sitemap, and
+Pagefind checks in the existing website deployment build. The small fixture
+test does not replace these checks. Reuse the built output rather than adding
+a second full-site build to the unit test job.
 
 ## Implementation Steps
 
@@ -324,31 +354,35 @@ Update `.github/workflows/website-deploy.yml` and `.github/workflows/test.yml`:
 2. **Render explicit current pages and add the route manifest.** Remove the explicit-current-version browser redirect. Apply the indexing policy to robots tags, canonical tags, the sitemap, and Pagefind. Keep navigation in the requested URL space. Check authored pages, inherited pages, structural folders, and navigation entry selection.
 3. **Generate the complete HTTP rules.** Add manifest, migration, managed-shortcut, and release-transition handling to the existing command. Change the managed shortcut target to the relative form. Validate and compare the full replacement output before deployment. Do not leave conflicting legacy wildcards in place.
 4. **Automate migration records.** Update the docs editor, version-creation, and current-version-change operations. Test dry-run, apply, inherited descendants, repeated renames, source-path reuse, and removed unversioned routes.
-5. **Unify the build scripts.** Add `build:deploy` and the redirect check script. Make `build`, `build:search`, and `dev:prepare` use the same build steps and generator.
+5. **Unify the build scripts.** Add `build:deploy`. Make `build`, `build:search`, and `dev:prepare` use the same build steps and generator. Document local browser checks and the manual post-deployment checklist.
 6. **Update the deployment workflow and CI.** Apply the changes in [Deployment Workflow](#deployment-workflow).
 7. **Replace browser forwarding.** Remove meta refresh and JavaScript from entry routes in production and preview builds. Keep an accessible fallback link to the same resolved target. Keep automatic forwarding only in the development environment.
-8. **Deploy and verify the complete change.** Verify a pull request preview deployment first. Then deploy explicit current pages, HTTP rules, and fallback pages together from one build. Check production responses with the redirect check script.
-9. **Update published documentation.** Document the explicit-current-page change, entry redirects, HTTP status choices, the indexing policy, the manifest, migration records, managed-shortcut rules, local development behavior, the redirect check script, and rollback. Publish these changes with the new behavior. Follow the docs-update skill and edit the earliest applicable source, normally 0.7 for this shared docs-system change.
+8. **Deploy and verify the complete change.** Complete automated and local browser checks first. Deploy explicit current pages, HTTP rules, and fallback pages together from one build. The user then performs the manual Cloudflare checks and records the results. Do not report live acceptance as complete before those results are available.
+9. **Update published documentation.** Document the explicit-current-page change, entry redirects, HTTP status choices, the indexing policy, the manifest, migration records, managed-shortcut rules, local development behavior, manual post-deployment checks, and rollback. Publish these changes with the new behavior. Follow the docs-update skill and edit the earliest applicable source, normally 0.7 for this shared docs-system change.
 
 ## Validation and Acceptance Criteria
 
-Implementation is complete only when all applicable checks pass:
+Automated and local validation can be complete before deployment. Final
+acceptance also requires the user's manual Cloudflare results. Do not treat
+generated assets as proof of live HTTP status codes or platform matching.
 
-- [ ] `/docs` and `/docs/` reach the current entry destination through one HTTP redirect, with no production redirect-text flash.
-- [ ] Version-root redirects select the first actual routable location in that version's navigation.
-- [ ] Unversioned current article and landing-page URLs return HTTP 200 with current-version content.
-- [ ] Explicit current, archived, and preview pages return HTTP 200 without changing the requested version.
-- [ ] The restored 0.7 routes remain accessible, including authored book and section landings.
+### Automated and Local Checks
+
+- [ ] Generated `/docs` and `/docs/` rules target the current entry destination directly.
+- [ ] Generated version-root rules select the first actual routable location in that version's navigation.
+- [ ] Unversioned current article and landing-page assets contain current-version content.
+- [ ] Explicit current, archived, and preview page assets contain the requested version's content without browser forwarding.
+- [ ] The restored 0.7 page assets exist, including authored book and section landings.
 - [ ] Inherited pages keep their requested-version URL rather than redirecting to the content source version.
-- [ ] Tests change current metadata from 1.0 to 2.0 to 3.0 and prove that unversioned URLs serve the new current content while explicit versioned pages remain HTTP 200, without redirect maintenance.
+- [ ] Fixture tests change current metadata consecutively from 1.0 to 2.0 to 3.0 and prove that unversioned assets contain the new current content while explicit versioned assets remain available, without redirect maintenance.
 - [ ] Only unversioned current routes are indexable, self-canonical, and listed in the sitemap. All explicit-version pages have `noindex,follow` and no canonical tag to another URL.
 - [ ] Pagefind does not return duplicate results for the explicit current copy. Current-version results use unversioned URLs.
 - [ ] Navigation stays in the requested URL space. The version switcher selects unversioned URLs for the current version.
 - [ ] Structural-only folders are not treated as canonical landing pages by generation.
 - [ ] Historical aliases apply only to affected versions and never override a route that returns HTTP 200.
 - [ ] Unknown versions and paths are not matched by general version-rewrite rules.
-- [ ] Every internal target resolves to a final route that returns HTTP 200; missing targets, loops, and conflicts stop the build.
-- [ ] Each managed shortcut reaches a page that returns HTTP 200 in one hop. Absolute targets on the docs site host are rejected.
+- [ ] Every internal target resolves to a final page route in the manifest; missing targets, loops, and conflicts stop the build.
+- [ ] Each managed shortcut targets a final page route directly. Absolute targets on the docs site host are rejected.
 - [ ] The build stops when an unversioned route of the previous current version is missing without a recorded replacement or "gone" decision.
 - [ ] No unversioned route redirects to an explicit-version page.
 - [ ] Generated rules are deterministic and satisfy Cloudflare limits.
@@ -356,10 +390,9 @@ Implementation is complete only when all applicable checks pass:
 - [ ] Version creation carries only applicable aliases and detects source-path reuse or missing replacements.
 - [ ] Existing managed-shortcut tests pass, with new tests for one-hop validation.
 - [ ] CI runs all website tests, including generator, migration, docs editor, and Hugo manifest integration tests.
+- [ ] The Hugo fixture test uses the pinned deployment Hugo version, runs without asset or search build dependencies, and fails clearly if Hugo is missing or a subprocess times out.
 - [ ] All build paths use the same build steps. A clean build produces a matching manifest and `_redirects` file.
-- [ ] Preview deployments and production verification use the redirect check script without following redirects automatically.
-- [ ] Slash handling and query-string behavior are checked against Cloudflare's actual responses, not only a local rule simulator.
-- [ ] Fragment handling is verified in an allowed browser test environment; fragments do not reach the HTTP server.
+- [ ] Fragment navigation and development forwarding are checked in the VS Code browser using the local website task; fragments do not reach the HTTP server.
 - [ ] Production and preview builds use no automatic browser forwarding for docs routes. In the development environment, entry routes forward automatically.
 - [ ] The Cloudflare Pages rollback procedure is documented.
 - [ ] Published routing and authoring documentation matches the implemented behavior.
@@ -368,21 +401,41 @@ Use focused temporary fixtures for release-transition and rename tests. Do not
 change committed version metadata merely to run a test. Use both unit tests for
 rule validation and Hugo build tests for route-manifest agreement.
 
+### Manual Cloudflare Checks
+
+The user performs these checks after deployment, using fresh clients and the
+manifest and `_redirects` from that deployment. For each redirect, request the
+source without following redirects automatically. Check its status and
+`Location` header, then request the target separately. Record the deployment
+URL, date, checked paths, and results.
+
+- [ ] `/docs` and `/docs/` each return one HTTP 302 to the current entry destination, with no browser forwarding or redirect-text flash.
+- [ ] Known version roots return HTTP 302 to the first routable location within the same explicit version.
+- [ ] Unversioned current articles and landing pages return HTTP 200 with current-version content, self-canonical tags, and no `noindex` directive.
+- [ ] Explicit current, archived, preview, and inherited pages return HTTP 200 with the requested version's content, `noindex,follow`, no canonical tag, and no browser forwarding. Include restored 0.7 book and section landings.
+- [ ] The managed shortcut and a historical move reach their final HTTP 200 pages in one hop, with the status specified in the redirect policy.
+- [ ] Unknown versions and paths return HTTP 404 rather than matching a general version-rewrite rule.
+- [ ] Slash and slashless redirect sources both reach the final destination directly. Check query-string behavior and redirect cache headers against Cloudflare's actual responses.
+- [ ] Browser navigation through a deployed entry redirect preserves the intended fragment behavior.
+- [ ] No external Cloudflare dashboard or Bulk Redirect rule overrides the generated routing policy.
+
 ## Deployment Risks and Recovery
 
 - Previously cached HTTP 301 responses can remain in browsers. For example, cached 0.7 rules can still send 0.7 URLs to unversioned URLs. Deployment cannot clear them. Use fresh clients for acceptance checks and provide cache-clearing guidance when a user encounters a stale redirect.
 - Temporary status codes do not prove that every cache is disabled. Inspect actual redirect response headers and verify release transitions with the deployed cache policy.
 - External Cloudflare redirect rules can run before Pages rules. Check the account configuration for conflicting dashboard or Bulk Redirect rules during rollout.
 - Use Cloudflare Pages deployment rollback to restore the last known-good deployment. Deploy the manifest and HTTP rules from the same build; do not deploy either independently.
-- A generator or validation failure must prevent deployment. Do not publish a partial rule file. Verify the complete new rendering and redirect policy in a preview deployment before production rollout.
+- A generator or automated validation failure must prevent deployment. Do not publish a partial rule file. Complete local rendering and browser checks before deployment. The user verifies Cloudflare behavior manually afterward; use deployment rollback if those checks find a defect.
 
 ## Non-Goals
 
 - Replacing the existing docs inheritance or navigation ordering model.
+- Supporting skipped current-version releases or adding publication-history tracking.
+- Adding automated Cloudflare response tests, a live redirect check script, or pull request preview deployment infrastructure for this change.
 - Changing the unversioned canonical URLs of the current version.
 - Serving unversioned URLs through Cloudflare rewrites instead of rendered pages. Rewrites would remove the second copy, but they prevent `noindex` on explicit current pages, do not work in the Hugo server, and depend on a Cloudflare-only feature.
 - Redirecting all missing pages to a landing page.
-- Applying `_redirects` in local development. Generator validation and Cloudflare preview deployments cover redirect behavior.
+- Applying `_redirects` in local development. Generator validation checks the rules; the user's manual post-deployment checks verify Cloudflare behavior.
 - Removing archived or preview routes based on visibility or search settings.
 - Adding Pages Functions or a Worker without a demonstrated need.
 - Updating application frontend behavior.
