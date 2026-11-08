@@ -2,7 +2,7 @@
 
 ## Status and Scope
 
-Status: implementation and documentation relocation complete. Latest full-suite validation is blocked by the current route manifest template. Deployment and manual Cloudflare acceptance are not complete.
+Status: implementation, documentation relocation, and automated validation complete. Deployment and manual Cloudflare acceptance are not complete.
 
 Date: 2026-11-08.
 
@@ -19,12 +19,13 @@ materialized in 2.0 with the docs editor. The redirect-related edits in 0.7,
 0.8, and 0.9 were reverted; earlier published docs remain unchanged. Later
 versions inherit the updated 2.0 pages.
 
-After relocation, docs content validation and the refreshed structure report
-pass. The latest website test run reports three errors in the consecutive-version
-Hugo fixture: the current `index.docsroutes.json` template has split Hugo
-delimiters and produces invalid JSON. That template was not changed during this
-documentation-only correction. The earlier full-suite and build results below
-describe the initial implementation, before these later template edits.
+After relocation, the route manifest template's split Hugo delimiters were
+repaired. All 161 website tests now pass, including the consecutive-version
+Hugo fixture. The production build passes redirect generation and HTML,
+sitemap, search inclusion, and homepage CTA validation for 739 docs routes.
+Docs content validation and the refreshed structure report also pass.
+The preview, development, and headless browser results below describe the
+initial implementation; those checks were not repeated for this template repair.
 
 The legacy rule audit used the tracked rule file and resolved content and
 navigation trees. This checkout has no usable Git log for the rule file; it does
