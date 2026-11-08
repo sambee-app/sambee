@@ -68,4 +68,3 @@ missing or non-final internal targets, page overrides, loops, ambiguous rules,
 or Cloudflare limit violations. Each shortcut reaches its final page in one hop.
 The Hugo development server does not apply these rules; managed sources return
 404 locally. Check live status and `Location` headers manually after deployment.
-
