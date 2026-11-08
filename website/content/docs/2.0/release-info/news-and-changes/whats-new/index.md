@@ -112,7 +112,7 @@ Directory search and navigation in the quick bar was put on a new foundation:
 
 ### Native Mobile Sharing
 
-Consolidated the native mobile sharing implementation across the file list and image, PDF, text, and Markdown viewers and editors. When sharing fails, a dialog with details can be invoked to facilitate issue reporting.
+Sambee now has a new native mobile sharing implementation across the file list and image, PDF, text, and Markdown viewers and editors. When sharing fails, a dialog with details can be invoked to facilitate issue reporting.
 
 Text editor and Markdown viewer/editor now have an option to share the current content as text as an alternative to sharing the stored file. This helps circumvent Chrome restrictions that prevent sharing file types such as Markdown.
 
@@ -151,7 +151,7 @@ If your browser is too old or lacks features Sambee needs, you'll now see a clea
 
 ### Settings
 
-- User Management: Table column content could overflow into the next row. This was fixes with a comprehensive layout revision.
+- User Management: Table column content could overflow into the next row. This was fixed with a comprehensive layout revision.
 
 ## Under the Hood
 
