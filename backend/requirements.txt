@@ -3,9 +3,9 @@ opentelemetry-api==1.45.2
 uvicorn[standard]==0.54.0
 python-multipart==0.0.33
 sqlmodel==0.0.48
-SQLAlchemy==2.0.55
-Authlib==1.9.2
-joserfc==1.7.7
+SQLAlchemy==2.0.57
+Authlib==1.9.5
+joserfc==1.8.0
 cryptography==50.0.2
 httpx==0.28.1
 httpx2==2.16.0
