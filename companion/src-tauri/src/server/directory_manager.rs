@@ -5105,6 +5105,7 @@ mod tests {
         let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(path.clone(), manager.storage_directory());
         lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
+        lock(&source.observations).unwrap().scan_group_test_elapsed = Some(Duration::ZERO);
         source.scan(&manager.budget).unwrap();
         assert!(lock(&source.watcher).unwrap().is_none());
         let before = source.io.opens();
