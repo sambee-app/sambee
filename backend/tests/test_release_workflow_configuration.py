@@ -531,9 +531,15 @@ def test_docker_candidate_cleanup_and_summary_cover_staging_lifecycle() -> None:
     assert build_step["with"]["outputs"] == expected_output
 
     cleanup_job = workflow["jobs"]["cleanup-staging-image"]
-    assert cleanup_job["if"] == "${{ always() && needs.prepare.outputs.publication_state == 'build' }}"
+    assert cleanup_job["if"] == "${{ success() && needs.prepare.outputs.publication_state == 'build' }}"
+    assembled_job = workflow["jobs"]["build-and-publish-immutable"]
+    assert assembled_job["outputs"]["staging_tag"] == "${{ steps.assemble.outputs.staging_tag }}"
+    assemble_step = next(step for step in assembled_job["steps"] if step.get("id") == "assemble")
+    assert 'echo "staging_tag=${index_ref##*:}" >> "$GITHUB_OUTPUT"' in assemble_step["run"]
     cleanup_step = next(step for step in cleanup_job["steps"] if step.get("name") == "Delete run-scoped staging index")
-    assert "stage-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-index" in cleanup_step["run"]
+    assert cleanup_step["env"]["STAGING_TAG"] == "${{ needs.build-and-publish-immutable.outputs.staging_tag }}"
+    assert 'staging_tag="$STAGING_TAG"' in cleanup_step["run"]
+    assert "GITHUB_RUN_ATTEMPT" not in cleanup_step["run"]
     assert "amd64" not in cleanup_step["run"]
     assert "arm64" not in cleanup_step["run"]
     assert "cleanup_test_container_versions.py" in cleanup_step["run"]

@@ -459,6 +459,7 @@ jobs:
       packages: write
     outputs:
       digest: ${{ steps.assemble.outputs.digest }}
+      staging_tag: ${{ steps.assemble.outputs.staging_tag }}
     steps:
     - name: Checkout source code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -562,6 +563,7 @@ jobs:
         fi
 
         echo "digest=$index_digest" >> "$GITHUB_OUTPUT"
+        echo "staging_tag=${index_ref##*:}" >> "$GITHUB_OUTPUT"
 
     - name: Verify assembled preview image metadata
       shell: bash
@@ -995,7 +997,7 @@ jobs:
           --tag test
 
   cleanup-staging-image:
-    if: ${{ always() && needs.prepare.outputs.publication_state == 'build' }}
+    if: ${{ success() && needs.prepare.outputs.publication_state == 'build' }}
     needs: [prepare, build-and-publish-immutable, sign-preview, verify-signed-candidate, publish-immutable-markers, promote-test-tag]
     runs-on: ubuntu-latest
     permissions:
@@ -1018,8 +1020,9 @@ jobs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        STAGING_TAG: ${{ needs.build-and-publish-immutable.outputs.staging_tag }}
       run: |
-        staging_tag="stage-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-index"
+        staging_tag="$STAGING_TAG"
         python3 .github/scripts/cleanup_test_container_versions.py \
           --owner "${{ github.repository_owner }}" \
           --package-name sambee-staging \
