@@ -730,7 +730,7 @@ class TestUpdateDirectoryCacheFromListing:
             _update_directory_cache_from_listing("conn-1", listing)
 
         # Should have added the 2 directories (not the file)
-        cache.add_directories.assert_called_once_with(["/parent/subdir", "/parent/another_dir"])
+        cache.observe_listing.assert_called_once_with("/parent", ["/parent/subdir", "/parent/another_dir"])
 
     def test_skips_when_no_cache_exists(self):
         """Should do nothing if no cache exists for connection."""
@@ -798,7 +798,7 @@ class TestUpdateDirectoryCacheFromListing:
         ):
             _update_directory_cache_from_listing("conn-1", listing)
 
-        cache.add_directories.assert_not_called()
+        cache.observe_listing.assert_called_once_with("/", [])
 
     def test_does_not_crash_on_exception(self):
         """Should silently handle any exceptions."""
@@ -832,4 +832,4 @@ class TestUpdateDirectoryCacheFromListing:
         ):
             _update_directory_cache_from_listing("conn-1", listing)
 
-        cache.add_directories.assert_not_called()
+        cache.observe_listing.assert_called_once_with("/", [])

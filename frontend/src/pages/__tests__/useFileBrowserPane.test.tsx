@@ -16,7 +16,13 @@ import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType, type LocalLinkTargetListing } from "../../types";
 import type { ContentProviderRegistry } from "../FileBrowser/contentProviders";
 import type { UseFileBrowserPaneConfig } from "../FileBrowser/types";
-import { shouldLoadNextVirtualPage, useFileBrowserPane as useFileBrowserPaneImplementation } from "../FileBrowser/useFileBrowserPane";
+import {
+  DIRECTORY_CACHE_MAX_ENTRIES,
+  DIRECTORY_CACHE_STALE_MAX_AGE_MS,
+  DIRECTORY_CACHE_TTL_MS,
+  shouldLoadNextVirtualPage,
+  useFileBrowserPane as useFileBrowserPaneImplementation,
+} from "../FileBrowser/useFileBrowserPane";
 import { getPreferredViewerId, setPreferredViewerId } from "../FileBrowser/viewerPreferences";
 import { mockConnections, mockDirectoryListing, mockEmptyDirectory, mockNestedDirectory } from "./FileBrowser.test.utils";
 
@@ -2473,6 +2479,162 @@ describe("useFileBrowserPane", () => {
     expect(api.recordRecentDirectory).not.toHaveBeenCalled();
   });
 
+  it("commits a fresh cached parent immediately without a listing request", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+    act(() => result.current.seedDirectorySnapshot("conn-1", "", mockDirectoryListing.items));
+    vi.mocked(api.listDirectory).mockClear();
+
+    act(() => result.current.handleNavigateUpDirectory());
+
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.files).toEqual(mockDirectoryListing.items);
+    expect(result.current.navigationPending).toBe(false);
+    expect(api.listDirectory).not.toHaveBeenCalled();
+  });
+
+  it("commits a stale cached parent immediately and preserves its rows during refresh", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+    act(() => result.current.seedDirectorySnapshot("conn-1", "", mockDirectoryListing.items));
+    const refresh = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + DIRECTORY_CACHE_TTL_MS);
+    try {
+      act(() => result.current.handleNavigateUpDirectory());
+      expect(result.current.currentPath).toBe("");
+      expect(result.current.files).toEqual(mockDirectoryListing.items);
+      expect(result.current.loading).toBe(false);
+      expect(result.current.navigationPending).toBe(true);
+      await act(async () => refresh.resolve(mockEmptyDirectory));
+      expect(result.current.files).toEqual([]);
+      expect(result.current.navigationPending).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["abort", "late response"] as const)(
+    "keeps a stale cached parent's refresh pending after the previous navigation settles with %s",
+    async (completion) => {
+      const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+      act(() => result.current.applyLocation("conn-1", "one/two/three"));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+      act(() => result.current.seedDirectorySnapshot("conn-1", "one", mockDirectoryListing.items));
+      const first = deferred<typeof mockDirectoryListing>();
+      const refresh = deferred<typeof mockDirectoryListing>();
+      vi.mocked(api.listDirectory)
+        .mockClear()
+        .mockImplementationOnce((_connectionId, _path, options) => {
+          if (completion === "late response") return first.promise;
+          return new Promise<typeof mockDirectoryListing>((_resolve, reject) => {
+            options?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+          });
+        })
+        .mockReturnValueOnce(refresh.promise);
+      const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + DIRECTORY_CACHE_TTL_MS);
+      try {
+        act(() => result.current.handleNavigateUpDirectory());
+        const firstSignal = vi.mocked(api.listDirectory).mock.calls[0]?.[2]?.signal;
+        act(() => result.current.handleNavigateUpDirectory());
+        expect(firstSignal?.aborted).toBe(true);
+        expect(result.current.currentPath).toBe("one");
+        expect(api.listDirectory).toHaveBeenLastCalledWith("conn-1", "one", expect.anything());
+        await act(async () => first.resolve(mockEmptyDirectory));
+        expect(result.current.navigationPending).toBe(true);
+        expect(result.current.files).toEqual(mockDirectoryListing.items);
+        await act(async () => refresh.resolve({ ...mockEmptyDirectory, path: "one" }));
+        expect(result.current.navigationPending).toBe(false);
+        expect(result.current.files).toEqual([]);
+      } finally {
+        clock.mockRestore();
+      }
+    }
+  );
+
+  it("recovers when a stale cached parent no longer exists", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents/child"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.seedDirectorySnapshot("conn-1", "Documents", mockNestedDirectory.items));
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + DIRECTORY_CACHE_TTL_MS);
+    vi.mocked(api.listDirectory).mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "directory_not_found" } } } });
+    try {
+      act(() => result.current.handleNavigateUpDirectory());
+      expect(result.current.currentPath).toBe("Documents");
+      await waitFor(() => expect(result.current.currentPath).toBe(""));
+      expect(result.current.files).toEqual(mockDirectoryListing.items);
+      expect(result.current.navigationPending).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("goes up two levels on two fast parent requests and ignores the aborted response", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "one/two/three"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const first = deferred<typeof mockDirectoryListing>();
+    const second = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockClear().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    act(() => result.current.handleNavigateUpDirectory());
+    expect(result.current.navigationPending).toBe(true);
+    expect(result.current.currentPath).toBe("one/two/three");
+    const firstSignal = vi.mocked(api.listDirectory).mock.calls[0]?.[2]?.signal;
+    act(() => result.current.handleNavigateUpDirectory());
+    expect(firstSignal?.aborted).toBe(true);
+    expect(api.listDirectory).toHaveBeenLastCalledWith("conn-1", "one", expect.anything());
+    await act(async () => first.resolve(mockEmptyDirectory));
+    expect(result.current.navigationPending).toBe(true);
+    await act(async () => second.resolve({ ...mockEmptyDirectory, path: "one" }));
+    expect(result.current.currentPath).toBe("one");
+    expect(result.current.navigationPending).toBe(false);
+  });
+
+  it("clears pending navigation when returning to the displayed path", async () => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const pending = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockReturnValueOnce(pending.promise);
+    act(() => result.current.handleNavigateUpDirectory());
+    expect(result.current.navigationPending).toBe(true);
+    act(() => result.current.navigateToPath("Documents"));
+    expect(result.current.navigationPending).toBe(false);
+    await act(async () => pending.resolve(mockEmptyDirectory));
+    expect(result.current.currentPath).toBe("Documents");
+  });
+
+  it.each(["expired", "evicted"] as const)("fetches an %s parent instead of showing an unusable cache entry", async (kind) => {
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.seedDirectorySnapshot("conn-1", "", mockDirectoryListing.items));
+    if (kind === "evicted") {
+      act(() => {
+        for (let number = 0; number < DIRECTORY_CACHE_MAX_ENTRIES; number += 1) {
+          result.current.seedDirectorySnapshot("conn-1", `other-${number}`, []);
+        }
+      });
+    }
+    const pending = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockReturnValueOnce(pending.promise);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + (kind === "expired" ? DIRECTORY_CACHE_STALE_MAX_AGE_MS : 0));
+    try {
+      act(() => result.current.handleNavigateUpDirectory());
+      expect(result.current.currentPath).toBe("Documents");
+      expect(result.current.navigationPending).toBe(true);
+      await act(async () => pending.resolve(mockDirectoryListing));
+      expect(result.current.currentPath).toBe("");
+      expect(result.current.navigationPending).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("keeps the original location and selection when a target directory is missing", async () => {
     const onNavigatePath = vi.fn();
     const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, onNavigatePath }), { wrapper });
@@ -2484,7 +2646,9 @@ describe("useFileBrowserPane", () => {
       response: { status: 404, data: { detail: { code: "directory_not_found", message: "The folder was not found." } } },
     });
     act(() => result.current.navigateToPath("missing"));
+    expect(result.current.navigationPending).toBe(true);
     await waitFor(() => expect(result.current.error).toBe('Folder "missing" was not found. It may have been moved or deleted.'));
+    expect(result.current.navigationPending).toBe(false);
     expect(result.current.notification).toMatchObject({
       message: "Folder not found. It may have been moved or deleted.",
       targetLabel: `${mockConnections[0]!.name}: /missing`,

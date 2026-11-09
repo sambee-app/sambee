@@ -615,12 +615,26 @@ pub struct ArchiveV2ListQuery {
 }
 
 /// `GET /api/browse/{drive}/list` — list directory contents.
-pub async fn browse_list(Path(drive): Path<String>, Query(query): Query<BrowseQuery>) -> Result<Json<DirectoryListing>, ApiError> {
+pub async fn browse_list(
+    State(DirectoryMutationState(indexes)): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Query(query): Query<BrowseQuery>,
+) -> Result<Json<DirectoryListing>, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
 
     let relative = query.path.as_deref().unwrap_or("");
     let normalized_relative = normalize_drive_relative_path(&drive, relative)?;
-    let full_path = resolve_safe_path_with_error_mapper(&base_path, &drive, relative, map_directory_io_error)?;
+    let (canonical_base, full_path) = resolve_safe_path_and_root(&base_path, &drive, relative, map_directory_io_error)?;
+    let target = indexes.try_listing_target(&drive, &base_path);
+    let mut feedback = target.as_ref().and_then(|_| {
+        let native_parent = full_path.strip_prefix(&canonical_base).ok()?.to_str()?;
+        #[cfg(windows)]
+        let native_parent = native_parent.replace('\\', "/");
+        if native_parent != normalized_relative {
+            return None;
+        }
+        ListingCollection::new(&normalized_relative, super::directory_manager::limit("max_observation_bytes").ok()?)
+    });
 
     let mut items = Vec::new();
 
@@ -634,7 +648,12 @@ pub async fn browse_list(Path(drive): Path<String>, Query(query): Query<BrowseQu
         .map_err(|error| map_directory_io_error(error, &full_path))?
     {
         match build_file_info(&entry, &normalized_relative).await {
-            Ok(info) => items.push(info),
+            Ok(info) => {
+                if let Some(feedback) = feedback.as_mut() {
+                    feedback.observe(&info, entry.file_name().to_str().is_some());
+                }
+                items.push(info);
+            }
             Err(e) => {
                 // Skip entries we can't stat (e.g., broken symlinks)
                 log::debug!("Skipping entry {:?}: {e}", entry.file_name());
@@ -643,12 +662,56 @@ pub async fn browse_list(Path(drive): Path<String>, Query(query): Query<BrowseQu
     }
 
     let total = items.len();
+    // Without child directories, the index check can only report that all are known.
+    if let (Some(target), Some(feedback)) = (target, feedback.filter(|feedback| !feedback.children.is_empty())) {
+        target.submit(feedback.parent, feedback.children, feedback.truncated);
+    }
 
     Ok(Json(DirectoryListing {
         path: normalized_relative,
         items,
         total,
     }))
+}
+
+struct ListingCollection {
+    parent: String,
+    children: Vec<String>,
+    bytes: usize,
+    maximum_bytes: usize,
+    truncated: bool,
+}
+
+impl ListingCollection {
+    fn new(parent: &str, maximum_bytes: usize) -> Option<Self> {
+        if parent.len() > maximum_bytes || !parent.is_empty() && super::directory_index::validate_directory_path(parent).is_err() {
+            return None;
+        }
+        Some(Self {
+            parent: parent.to_owned(),
+            children: Vec::new(),
+            bytes: parent.len(),
+            maximum_bytes,
+            truncated: false,
+        })
+    }
+
+    fn observe(&mut self, info: &FileInfo, native_utf8: bool) {
+        if self.truncated
+            || info.file_type != FileType::Directory
+            || info.link_kind.is_some()
+            || !native_utf8
+            || super::directory_index::validate_directory_path(&info.path).is_err()
+        {
+            return;
+        }
+        if self.children.len() == super::directory_index::ROW_BATCH_SIZE || info.path.len() > self.maximum_bytes - self.bytes {
+            self.truncated = true;
+            return;
+        }
+        self.bytes += info.path.len();
+        self.children.push(info.path.clone());
+    }
 }
 
 /// Shared implementation for a bounded virtual ZIP directory page.
@@ -2664,12 +2727,15 @@ fn archive_relay_transport(
 struct ArchiveCompanionCapabilityResponse {
     token: String,
     selected_member_paths: Option<Vec<String>>,
+    #[serde(default)]
+    member_base_path: String,
 }
 
 struct ArchiveRelayCapability {
     server_url: String,
     operation_token: String,
     selected_member_paths: Option<Vec<String>>,
+    member_base_path: String,
 }
 
 async fn mint_archive_relay_capability(
@@ -2712,6 +2778,7 @@ async fn mint_archive_relay_capability(
         server_url,
         operation_token: capability.token,
         selected_member_paths: capability.selected_member_paths,
+        member_base_path: capability.member_base_path,
     })
 }
 
@@ -4503,6 +4570,7 @@ async fn start_v2_local_archive_execution(
             destination_path,
             destination_drive,
             selected_member_paths,
+            member_base_path,
         } => {
             require_archive_v2_contract_version(contract_version)?;
             match resolve_companion_archive_topology(CompanionArchiveOperationKind::Extract, true, true)? {
@@ -4516,6 +4584,8 @@ async fn start_v2_local_archive_execution(
             let (base_path, archive_path, destination_path) =
                 resolve_local_archive_extraction_request(&drive, destination_drive.as_deref(), &archive_path, &destination_path)?;
             let selected_member_roots = canonicalize_local_archive_member_roots(selected_member_paths).map_err(map_local_archive_error)?;
+            super::archive::validate_local_archive_member_base(&member_base_path, selected_member_roots.as_deref())
+                .map_err(map_local_archive_error)?;
             state
                 .archive_sessions
                 .create_extraction_with_selection(
@@ -4524,7 +4594,10 @@ async fn start_v2_local_archive_execution(
                     base_path,
                     archive_path,
                     destination_path,
-                    selected_member_roots,
+                    super::archive_sessions::ArchiveMemberSelection {
+                        roots: selected_member_roots,
+                        base: member_base_path,
+                    },
                 )
                 .await
         }
@@ -4743,6 +4816,7 @@ async fn execute_relay_extraction_from_local_source(
                 server_url: capability.server_url.clone(),
                 operation_token: capability.operation_token.clone(),
                 selected_member_roots,
+                member_base_path: capability.member_base_path,
             },
         )
         .await?;
@@ -6001,6 +6075,15 @@ fn resolve_safe_path_with_error_mapper(
     relative: &str,
     map_error: fn(std::io::Error, &std::path::Path) -> ApiError,
 ) -> Result<PathBuf, ApiError> {
+    resolve_safe_path_and_root(base, drive, relative, map_error).map(|(_, full)| full)
+}
+
+fn resolve_safe_path_and_root(
+    base: &std::path::Path,
+    drive: &str,
+    relative: &str,
+    map_error: fn(std::io::Error, &std::path::Path) -> ApiError,
+) -> Result<(PathBuf, PathBuf), ApiError> {
     let full = resolve_drive_relative_source_path(base, drive, relative)?;
 
     // Verify the resolved path is still under the base.
@@ -6012,7 +6095,7 @@ fn resolve_safe_path_with_error_mapper(
         return Err(ApiError::Forbidden("Path is outside the drive boundary".to_string()));
     }
 
-    Ok(canonical_full)
+    Ok((canonical_base, canonical_full))
 }
 
 /// Distinguish missing paths from file parents when the OS reports both as missing.
@@ -7040,6 +7123,205 @@ async fn rename_noreplace(_source: &FsPath, _destination: &FsPath) -> Result<(),
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn listing_feedback_is_nonblocking_and_wide_responses_remain_complete() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        for number in 0..=super::super::directory_index::ROW_BATCH_SIZE {
+            std::fs::create_dir(root.join(format!("child-{number}"))).unwrap();
+        }
+        let drive = format!("listing-feedback-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), root.clone());
+        let state = directory_mutation_state(temporary.path());
+        let source = state.0 .0.test_listing_source(&drive, &root);
+        let before = source.state();
+        let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let release = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let worker = std::thread::spawn({
+            let source = source.clone();
+            let entered = entered.clone();
+            let release = release.clone();
+            move || source.hold_feedback(&entered, &release)
+        });
+        entered.wait();
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::browse_list(
+                state.clone(),
+                axum::extract::Path(drive.clone()),
+                axum::extract::Query(super::BrowseQuery { path: None }),
+            ),
+        )
+        .await;
+        release.wait();
+        worker.join().unwrap();
+        let listing = response.expect("listing must not wait for the feedback state").unwrap().0;
+        assert_eq!(listing.total, super::super::directory_index::ROW_BATCH_SIZE + 1);
+        assert_eq!(listing.items.len(), listing.total);
+        assert!(source.queued().is_empty());
+        assert_eq!(source.busy_discards(), 1);
+        let listing = super::browse_list(
+            state.clone(),
+            axum::extract::Path(drive.clone()),
+            axum::extract::Query(super::BrowseQuery { path: None }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(listing.items.len(), super::super::directory_index::ROW_BATCH_SIZE + 1);
+        let queued = source.queued();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].0, "");
+        assert_eq!(queued[0].1.len(), super::super::directory_index::ROW_BATCH_SIZE);
+        assert!(queued[0].2);
+        source.process();
+        assert_eq!(source.state(), before);
+        let _listing = super::browse_list(
+            state,
+            axum::extract::Path(drive),
+            axum::extract::Query(super::BrowseQuery { path: None }),
+        )
+        .await
+        .unwrap();
+        source.process();
+        assert_eq!(source.state(), before);
+    }
+
+    #[test]
+    fn listing_collection_stops_before_copying_oversized_paths() {
+        let maximum_bytes = super::super::directory_manager::limit("max_observation_bytes").unwrap();
+        let parent = "p".repeat(maximum_bytes / (super::super::directory_index::ROW_BATCH_SIZE / 2));
+        let mut collection = super::ListingCollection::new(&parent, maximum_bytes).unwrap();
+        let mut response = Vec::new();
+        for number in 0..super::super::directory_index::ROW_BATCH_SIZE {
+            let info = super::FileInfo {
+                name: format!("child-{number}"),
+                path: format!("{parent}/child-{number}"),
+                file_type: super::FileType::Directory,
+                size: None,
+                mime_type: None,
+                created_at: None,
+                modified_at: None,
+                is_readable: true,
+                is_hidden: false,
+                link_kind: None,
+            };
+            collection.observe(&info, true);
+            response.push(info);
+        }
+        assert!(collection.truncated);
+        assert!(collection.children.len() < super::super::directory_index::ROW_BATCH_SIZE);
+        assert!(collection.bytes <= maximum_bytes);
+        assert_eq!(
+            collection.bytes,
+            collection.parent.len() + collection.children.iter().map(String::len).sum::<usize>()
+        );
+        assert_eq!(response.len(), super::super::directory_index::ROW_BATCH_SIZE);
+        assert!(super::ListingCollection::new(&parent, parent.len() - 1).is_none());
+    }
+
+    #[tokio::test]
+    async fn listing_feedback_preserves_native_nested_names_and_discards_failed_listings() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("MiXeD/Nested/Caf\u{e9}")).unwrap();
+        let drive = format!("listing-names-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), root.clone());
+        let state = directory_mutation_state(temporary.path());
+        let source = state.0 .0.test_listing_source(&drive, &root);
+        let before = source.state();
+        let listing = super::browse_list(
+            state.clone(),
+            axum::extract::Path(drive.clone()),
+            axum::extract::Query(super::BrowseQuery {
+                path: Some("MiXeD/Nested".into()),
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(listing.items[0].path, "MiXeD/Nested/Caf\u{e9}");
+        assert_eq!(source.queued()[0].1, ["MiXeD/Nested/Caf\u{e9}"]);
+        source.process();
+        assert_eq!(source.state(), before);
+        assert!(super::browse_list(
+            state,
+            axum::extract::Path(drive),
+            axum::extract::Query(super::BrowseQuery {
+                path: Some("missing".into())
+            })
+        )
+        .await
+        .is_err());
+        assert!(source.queued().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn listing_feedback_excludes_links_invalid_encoding_and_redirected_parents() {
+        use std::os::unix::ffi::OsStringExt;
+        use std::os::unix::fs::symlink;
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("real/child")).unwrap();
+        let drive = format!("listing-links-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), root.clone());
+        let state = directory_mutation_state(temporary.path());
+        let source = state.0 .0.test_listing_source(&drive, &root);
+        symlink(root.join("real"), root.join("link")).unwrap();
+        symlink(root.join("missing"), root.join("broken")).unwrap();
+        std::fs::create_dir(root.join(std::ffi::OsString::from_vec(b"invalid-\xff".to_vec()))).unwrap();
+        let listing = super::browse_list(
+            state.clone(),
+            axum::extract::Path(drive.clone()),
+            axum::extract::Query(super::BrowseQuery { path: None }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(listing.total, 4);
+        assert_eq!(source.queued()[0].1, ["real"]);
+        source.process();
+        let alias = super::browse_list(
+            state,
+            axum::extract::Path(drive),
+            axum::extract::Query(super::BrowseQuery { path: Some("link".into()) }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(alias.total, 1);
+        assert!(source.queued().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn listing_feedback_excludes_windows_junctions() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        let drive = format!("listing-junction-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), root.clone());
+        let state = directory_mutation_state(temporary.path());
+        let source = state.0 .0.test_listing_source(&drive, &root);
+        let result = std::process::Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(root.join("link"))
+            .arg(root.join("real"))
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "Junction creation failed: {result:?}");
+        let _listing = super::browse_list(
+            state,
+            axum::extract::Path(drive),
+            axum::extract::Query(super::BrowseQuery { path: None }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(source.queued()[0].1, ["real"]);
+    }
+
     fn directory_mutation_state(directory: &std::path::Path) -> axum::extract::State<super::DirectoryMutationState> {
         axum::extract::State(super::DirectoryMutationState(
             super::super::directory_manager::LocalDirectoryManager::new(directory.join("index-cache")).unwrap(),
@@ -7283,6 +7565,7 @@ mod tests {
         let drive = format!("directory-boundary-{}", uuid::Uuid::new_v4());
         super::drives::register_test_drive_path(drive.clone(), directory.path().to_path_buf());
         let listing = super::browse_list(
+            directory_mutation_state(directory.path()),
             axum::extract::Path(drive.clone()),
             axum::extract::Query(super::BrowseQuery { path: None }),
         )
@@ -7291,6 +7574,7 @@ mod tests {
         assert!(listing.0.items.is_empty());
 
         let traversal = super::browse_list(
+            directory_mutation_state(directory.path()),
             axum::extract::Path(drive.clone()),
             axum::extract::Query(super::BrowseQuery {
                 path: Some("../outside".to_string()),
@@ -7304,6 +7588,7 @@ mod tests {
             let outside = tempfile::tempdir().expect("outside directory should be created");
             std::os::unix::fs::symlink(outside.path(), directory.path().join("outside")).expect("symlink should be created");
             let escape = super::browse_list(
+                directory_mutation_state(directory.path()),
                 axum::extract::Path(drive),
                 axum::extract::Query(super::BrowseQuery {
                     path: Some("outside".to_string()),
@@ -7335,6 +7620,7 @@ mod tests {
             ),
         ] {
             let error = super::browse_list(
+                directory_mutation_state(directory.path()),
                 axum::extract::Path(drive.clone()),
                 axum::extract::Query(super::BrowseQuery {
                     path: Some(path.to_string()),
@@ -7413,8 +7699,10 @@ mod tests {
             if drive.starts_with("removed-") {
                 super::drives::register_test_drive_path(drive.clone(), directory.path().to_path_buf());
             }
+            let state = directory_mutation_state(directory.path());
             directory.close().expect("drive should be removed");
             let error = super::browse_list(
+                state,
                 axum::extract::Path(drive),
                 axum::extract::Query(super::BrowseQuery {
                     path: Some("missing".to_string()),

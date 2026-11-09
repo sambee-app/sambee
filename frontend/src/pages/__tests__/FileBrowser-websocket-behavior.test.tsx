@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { NavigateFunction } from "react-router-dom";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UseCompanionResult } from "../../hooks/useCompanion";
 import { LocalePreferencesProvider } from "../../i18n/LocalePreferencesProvider";
 import api from "../../services/api";
@@ -144,6 +144,8 @@ const buildDefaultCompanionResult = (): UseCompanionResult => ({
 });
 
 describe("FileBrowser WebSocket behavior", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   beforeEach(() => {
     vi.clearAllMocks();
     resetBackendAvailabilityForTests();
@@ -159,6 +161,29 @@ describe("FileBrowser WebSocket behavior", () => {
     mockBuildCompanionWsUrl.mockResolvedValue("ws://localhost:21549/api/ws?hmac=test&ts=1&origin=http%3A%2F%2Flocalhost%3A3000");
 
     setupSuccessfulApiMocks(api as unknown as ApiMock);
+  });
+
+  it("subscribes to directory changes without the secure-context UUID method", async () => {
+    const getRandomValues = crypto.getRandomValues.bind(crypto);
+    vi.stubGlobal("crypto", { getRandomValues });
+    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
+
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
+    const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
+    act(() => socket.open());
+
+    await waitFor(() =>
+      expect(socket.sentMessages.map((message) => JSON.parse(message))).toContainEqual(
+        expect.objectContaining({
+          action: "subscribe",
+          connection_id: "conn-1",
+          path: "",
+          request_id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+        })
+      )
+    );
+    await acknowledgeSubscriptions(socket);
   });
 
   it("redacts the server WebSocket token from connection logs", async () => {

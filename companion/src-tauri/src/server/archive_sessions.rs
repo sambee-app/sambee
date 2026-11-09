@@ -143,6 +143,7 @@ pub(crate) struct LiveLocalArchiveSourceSession {
     claimed_decision: Option<ClaimedLiveSourceDecision>,
     aggregate: LocalArchiveExtractionResult,
     selected_member_roots: Option<Vec<String>>,
+    member_base_path: String,
     projected_entries: Option<Vec<LocalArchiveReadEntry>>,
     projected_entry_index: usize,
 }
@@ -153,10 +154,20 @@ impl LiveLocalArchiveSourceSession {
         Self::open_with_selection(archive_path, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn open_with_selection(
         archive_path: &std::path::Path,
         selected_member_roots: Option<Vec<String>>,
     ) -> Result<Self, LocalArchiveError> {
+        Self::open_with_selection_base(archive_path, selected_member_roots, String::new())
+    }
+
+    pub(crate) fn open_with_selection_base(
+        archive_path: &std::path::Path,
+        selected_member_roots: Option<Vec<String>>,
+        member_base_path: String,
+    ) -> Result<Self, LocalArchiveError> {
+        super::archive::validate_local_archive_member_base(&member_base_path, selected_member_roots.as_deref())?;
         Ok(Self {
             source_session_id: Uuid::new_v4().to_string(),
             reader: LocalArchiveReader::open_pinned(archive_path)?,
@@ -177,6 +188,7 @@ impl LiveLocalArchiveSourceSession {
             claimed_decision: None,
             aggregate: LocalArchiveExtractionResult::default(),
             selected_member_roots,
+            member_base_path,
             projected_entries: None,
             projected_entry_index: 0,
         })
@@ -206,7 +218,16 @@ impl LiveLocalArchiveSourceSession {
         if let Some(target_path) = &self.current_target_path {
             return Ok(target_path.clone());
         }
-        Ok(current.entry.path.clone())
+        if self.member_base_path.is_empty() {
+            return Ok(current.entry.path.clone());
+        }
+        let target_path = current
+            .entry
+            .path
+            .strip_prefix(&format!("{}/", self.member_base_path))
+            .ok_or(LocalArchiveError::UnsafeEntryPath)?;
+        super::archive::validate_local_extraction_member_path(target_path, current.entry.is_directory)?;
+        Ok(target_path.to_string())
     }
 
     pub(crate) fn current_target_policy(&self) -> LocalArchiveTargetWritePolicy {
@@ -859,7 +880,14 @@ pub(crate) enum ArchiveSessionWork {
         archive_path: PathBuf,
         destination_path: PathBuf,
         selected_member_roots: Option<Vec<String>>,
+        member_base_path: String,
     },
+}
+
+#[derive(Default)]
+pub(crate) struct ArchiveMemberSelection {
+    pub(crate) roots: Option<Vec<String>>,
+    pub(crate) base: String,
 }
 
 pub(crate) struct PreparedLocalArchiveCreation {
@@ -1042,6 +1070,7 @@ pub(crate) struct RelayLiveSourceDetails {
     pub(crate) server_url: String,
     pub(crate) operation_token: String,
     pub(crate) selected_member_roots: Option<Vec<String>>,
+    pub(crate) member_base_path: String,
 }
 
 struct RelaySourceOpeningReservation {
@@ -1267,6 +1296,7 @@ impl ArchiveSessionManager {
                 server_url: server_url.to_string(),
                 operation_token: operation_token.to_string(),
                 selected_member_roots: None,
+                member_base_path: String::new(),
             },
             |source_path| LiveLocalArchiveSourceSession::open(&source_path),
         )
@@ -1280,8 +1310,9 @@ impl ArchiveSessionManager {
         details: RelayLiveSourceDetails,
     ) -> Result<(Arc<Mutex<LiveLocalArchiveSourceSession>>, Arc<AtomicBool>), ApiError> {
         let selected_member_roots = details.selected_member_roots.clone();
+        let member_base_path = details.member_base_path.clone();
         self.start_relay_live_source_with_opener(operation_id, details, move |source_path| {
-            LiveLocalArchiveSourceSession::open_with_selection(&source_path, selected_member_roots)
+            LiveLocalArchiveSourceSession::open_with_selection_base(&source_path, selected_member_roots, member_base_path)
         })
         .await
     }
@@ -1452,8 +1483,15 @@ impl ArchiveSessionManager {
         archive_path: PathBuf,
         destination_path: PathBuf,
     ) -> ArchiveSessionStatus {
-        self.create_extraction_with_selection(drive, owner_origin, drive_root, archive_path, destination_path, None)
-            .await
+        self.create_extraction_with_selection(
+            drive,
+            owner_origin,
+            drive_root,
+            archive_path,
+            destination_path,
+            ArchiveMemberSelection::default(),
+        )
+        .await
     }
 
     pub async fn create_extraction_with_selection(
@@ -1463,7 +1501,7 @@ impl ArchiveSessionManager {
         drive_root: PathBuf,
         archive_path: PathBuf,
         destination_path: PathBuf,
-        selected_member_roots: Option<Vec<String>>,
+        selection: ArchiveMemberSelection,
     ) -> ArchiveSessionStatus {
         self.create(
             drive,
@@ -1472,7 +1510,8 @@ impl ArchiveSessionManager {
             ArchiveSessionWork::Extraction {
                 archive_path,
                 destination_path,
-                selected_member_roots,
+                selected_member_roots: selection.roots,
+                member_base_path: selection.base,
             },
             None,
         )
@@ -1688,7 +1727,7 @@ impl ArchiveSessionManager {
         ),
         ApiError,
     > {
-        let (archive_path, selected_member_roots) = {
+        let (archive_path, selected_member_roots, member_base_path) = {
             let mut sessions = self.sessions.lock().await;
             Self::remove_expired(&mut sessions);
             let session = sessions
@@ -1700,6 +1739,7 @@ impl ArchiveSessionManager {
             let ArchiveSessionWork::Extraction {
                 archive_path,
                 selected_member_roots,
+                member_base_path,
                 ..
             } = &session.work
             else {
@@ -1707,17 +1747,19 @@ impl ArchiveSessionManager {
             };
             let archive_path = archive_path.clone();
             let selected_member_roots = selected_member_roots.clone();
+            let member_base_path = member_base_path.clone();
             session.phase = ArchiveSessionPhase::Streaming;
             session.revision += 1;
-            (archive_path, selected_member_roots)
+            (archive_path, selected_member_roots, member_base_path)
         };
         #[cfg(test)]
         self.record_phase_transition(execution_id, ArchiveSessionPhase::Streaming).await;
-        let source =
-            tokio::task::spawn_blocking(move || LiveLocalArchiveSourceSession::open_with_selection(&archive_path, selected_member_roots))
-                .await
-                .map_err(|error| ApiError::Internal(format!("Local archive source task failed: {error}")))?
-                .map_err(|error| ApiError::Internal(error.to_string()))?;
+        let source = tokio::task::spawn_blocking(move || {
+            LiveLocalArchiveSourceSession::open_with_selection_base(&archive_path, selected_member_roots, member_base_path)
+        })
+        .await
+        .map_err(|error| ApiError::Internal(format!("Local archive source task failed: {error}")))?
+        .map_err(|error| ApiError::Internal(error.to_string()))?;
         let source = Arc::new(Mutex::new(source));
         let (drive_root, archive_path, destination_path, cancellation_requested) = {
             let mut sessions = self.sessions.lock().await;
@@ -2191,6 +2233,34 @@ mod tests {
     }
 
     #[test]
+    fn selected_member_base_maps_targets_without_changing_source_identity() {
+        let directory = tempdir().unwrap();
+        let archive_path = directory.path().join("archive.zip");
+        let mut archive = ZipWriter::new(fs::File::create(&archive_path).unwrap());
+        archive.start_file("photos/image.jpg", SimpleFileOptions::default()).unwrap();
+        archive.write_all(b"image").unwrap();
+        archive.add_directory("photos/trip/", SimpleFileOptions::default()).unwrap();
+        archive.finish().unwrap();
+
+        for (root, expected) in [("photos/image.jpg", "image.jpg"), ("photos/trip", "trip")] {
+            let mut source =
+                LiveLocalArchiveSourceSession::open_with_selection_base(&archive_path, Some(vec![root.to_string()]), "photos".to_string())
+                    .unwrap();
+            let member = source.next_member().unwrap().unwrap();
+            assert_eq!(member.entry.path.trim_end_matches('/'), root);
+            assert_eq!(source.current_target_path().unwrap().trim_end_matches('/'), expected);
+        }
+        for root in ["photos", "photos-other/image.jpg", "other/image.jpg"] {
+            assert!(LiveLocalArchiveSourceSession::open_with_selection_base(
+                &archive_path,
+                Some(vec![root.to_string()]),
+                "photos".to_string(),
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn live_source_session_limits_delivery_to_selected_member_roots() {
         let directory = tempdir().unwrap();
         let archive_path = directory.path().join("archive.zip");
@@ -2532,6 +2602,7 @@ mod tests {
                         server_url: server_url.to_string(),
                         operation_token: operation_token.to_string(),
                         selected_member_roots: None,
+                        member_base_path: String::new(),
                     },
                     move |source_path| {
                         first_open_count.fetch_add(1, Ordering::AcqRel);
@@ -2557,6 +2628,7 @@ mod tests {
                     server_url: server_url.to_string(),
                     operation_token: operation_token.to_string(),
                     selected_member_roots: None,
+                    member_base_path: String::new(),
                 },
                 move |source_path| {
                     second_open_count.fetch_add(1, Ordering::AcqRel);
@@ -2603,6 +2675,7 @@ mod tests {
                         server_url: server_url.to_string(),
                         operation_token: operation_token.to_string(),
                         selected_member_roots: None,
+                        member_base_path: String::new(),
                     },
                     move |source_path| {
                         open_started_sender.send(()).unwrap();
@@ -2659,6 +2732,7 @@ mod tests {
                         server_url: server_url.to_string(),
                         operation_token: operation_token.to_string(),
                         selected_member_roots: None,
+                        member_base_path: String::new(),
                     },
                     move |source_path| {
                         open_started_sender.send(()).unwrap();
@@ -3360,6 +3434,58 @@ mod tests {
             direct_local_trace(&manager, &session.execution_id, &completed, vec!["source.txt"], vec!["source.txt"]).await,
             expected
         );
+    }
+
+    #[tokio::test]
+    async fn direct_local_copy_uses_the_captured_archive_folder() {
+        let directory = tempdir().unwrap();
+        let archive_path = directory.path().join("archive.zip");
+        let mut archive = ZipWriter::new(fs::File::create(&archive_path).unwrap());
+        for name in ["photos/one.jpg", "photos/two.jpg"] {
+            archive.start_file(name, SimpleFileOptions::default()).unwrap();
+            archive.write_all(name.as_bytes()).unwrap();
+        }
+        archive.add_directory("photos/empty/", SimpleFileOptions::default()).unwrap();
+        archive.finish().unwrap();
+        let destination = directory.path().join("output");
+        let manager = Arc::new(ArchiveSessionManager::new());
+        let session = manager
+            .create_extraction_with_selection(
+                "c".to_string(),
+                "https://sambee.example".to_string(),
+                directory.path().to_path_buf(),
+                archive_path,
+                destination.clone(),
+                super::ArchiveMemberSelection {
+                    roots: Some(vec![
+                        "photos/one.jpg".to_string(),
+                        "photos/two.jpg".to_string(),
+                        "photos/empty".to_string(),
+                    ]),
+                    base: "photos".to_string(),
+                },
+            )
+            .await;
+        FixtureDirectLocalInvocation::new(manager.clone())
+            .start(&session.execution_id)
+            .await
+            .unwrap();
+        let completed = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let status = manager.get("c", "https://sambee.example", &session.execution_id).await.unwrap();
+                if status.phase.is_terminal() {
+                    return status;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("copy should complete");
+        assert_eq!(completed.phase, ArchiveSessionPhase::Completed);
+        assert_eq!(fs::read(destination.join("one.jpg")).unwrap(), b"photos/one.jpg");
+        assert_eq!(fs::read(destination.join("two.jpg")).unwrap(), b"photos/two.jpg");
+        assert!(destination.join("empty").is_dir());
+        assert!(!destination.join("photos").exists());
     }
 
     #[tokio::test]

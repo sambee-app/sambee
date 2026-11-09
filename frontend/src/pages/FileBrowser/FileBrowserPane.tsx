@@ -16,7 +16,7 @@
 
 import BlockOutlinedIcon from "@mui/icons-material/BlockOutlined";
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
-import { alpha, Box, Button, CircularProgress, Typography, useTheme } from "@mui/material";
+import { alpha, Box, Button, CircularProgress, LinearProgress, Typography, useTheme } from "@mui/material";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CompactBadge as Chip } from "../../components/CompactBadge";
@@ -194,6 +194,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
     archiveLocation,
     error,
     loading,
+    navigationPending,
     viewMode,
     focusedIndex,
     selectedFiles,
@@ -644,6 +645,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
         />
       ) : (
         <Box
+          aria-busy={navigationPending}
           onDragEnter={(event) => {
             if (!Array.from(event.dataTransfer.types).includes("Files")) return;
             event.preventDefault();
@@ -680,6 +682,12 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
             outlineOffset: -2,
           }}
         >
+          {navigationPending && (
+            <LinearProgress
+              aria-label={t("app.loading")}
+              sx={{ position: "absolute", top: 0, insetInline: 0, zIndex: 1, pointerEvents: "none" }}
+            />
+          )}
           {fileDragActive && (
             <Box
               role="status"

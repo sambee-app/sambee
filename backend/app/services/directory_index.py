@@ -17,7 +17,7 @@ from contextlib import AbstractContextManager, closing, contextmanager, nullcont
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Literal
+from typing import Any, Callable, Iterable, Iterator, Literal, Sequence
 
 from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, MAX_SQL_INTEGER
 
@@ -1234,6 +1234,32 @@ class DirectoryIndex:
                 if active is None:
                     raise ValueError("Directory scan generation is no longer active. Request source verification.")
                 self._queue_scan_parent(connection, generation_id, path, defer=True)
+
+    def missing_directories(self, paths: Sequence[str]) -> list[str]:
+        """Return paths absent from any active catalogue, using pooled readers."""
+        unique_paths = list(dict.fromkeys(paths))
+        for path in unique_paths:
+            validate_directory_path(path)
+        missing: list[str] = []
+        with self._query_connection() as connection, transaction(connection):
+            for offset in range(0, len(unique_paths), ROW_BATCH_SIZE):
+                batch = unique_paths[offset : offset + ROW_BATCH_SIZE]
+                placeholders = ",".join("(?)" for _ in batch)
+                missing.extend(
+                    row[0]
+                    for row in connection.execute(
+                        f"WITH requested(path) AS (VALUES {placeholders}) "
+                        "SELECT r.path FROM requested r WHERE NOT EXISTS (SELECT 1 FROM generations g WHERE "
+                        "g.state = 'building' OR (g.state = 'accepted' AND g.id = "
+                        "(SELECT selected_generation FROM source_metadata WHERE id = 1))) "
+                        "OR EXISTS (SELECT 1 FROM generations g WHERE "
+                        "(g.state = 'building' OR (g.state = 'accepted' AND g.id = "
+                        "(SELECT selected_generation FROM source_metadata WHERE id = 1))) "
+                        "AND NOT EXISTS (SELECT 1 FROM directories d WHERE d.generation_id = g.id AND d.path = r.path))",
+                        batch,
+                    )
+                )
+        return missing
 
     def queue_observed_parent(self, parent: str) -> None:
         """Queue a source hint across active scans and the selected accepted generation."""

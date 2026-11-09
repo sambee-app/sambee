@@ -157,6 +157,27 @@ describe("Browser Component - Interactions", () => {
     }
   });
 
+  it("shows navigation progress while keeping the current list visible", async () => {
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    let finishListing: ((value: typeof mockDirectoryListing) => void) | undefined;
+    vi.mocked(api.listDirectory).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishListing = resolve;
+      })
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("file-list-container"));
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByRole("progressbar", { name: "Loading..." })).toBeInTheDocument();
+    const currentRow = screen.getByRole("button", { name: "File: readme.txt" });
+    expect(currentRow).toBeInTheDocument();
+    expect(currentRow.closest('[aria-busy="true"]')).not.toBeNull();
+    await act(async () => requireTestValue(finishListing)(mockDirectoryListing));
+    await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+  });
+
   it("ignores a stale picker result after a later upload attempt", async () => {
     const pickers: HTMLInputElement[] = [];
     const pickerClick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function (this: HTMLInputElement) {
@@ -2216,26 +2237,34 @@ describe("Browser Component - Interactions", () => {
     });
 
     it.each([
-      [{}, "Archive extraction completed."],
+      [{}, "Archive extraction completed.", ""],
+      [{}, "Archive extraction completed.", "photos"],
       [
         { members_skipped: 3, encrypted_members_skipped: 1, unsupported_compression_members_skipped: 2 },
         "Archive extraction completed with 3 members skipped. 1 encrypted member was skipped. 2 members with unsupported compression were skipped.",
+        "",
       ],
-    ])("extracts the selected ZIP member and reports skipped reasons: %j", async (aggregate, expectedNotice) => {
+    ])("extracts the selected ZIP member and reports skipped reasons: %j", async (aggregate, expectedNotice, memberBasePath) => {
       const user = userEvent.setup();
-      vi.mocked(api.listArchiveDirectory).mockResolvedValue({
+      const memberPath = memberBasePath ? `${memberBasePath}/inside.txt` : "inside.txt";
+      vi.mocked(api.listArchiveDirectory).mockImplementation(async (_connectionId, _archivePath, path) => ({
         archive: { path: "archive.zip", size: 1 },
-        path: "",
-        items: [{ name: "inside.txt", path: "inside.txt", type: FileType.FILE, state: "readable", is_hidden: false }],
+        path: path ?? "",
+        items:
+          memberBasePath && !path
+            ? [{ name: memberBasePath, path: memberBasePath, type: FileType.DIRECTORY, state: "readable", is_hidden: false }]
+            : [{ name: "inside.txt", path: memberPath, type: FileType.FILE, state: "readable", is_hidden: false }],
 
         page_size: 100,
-      });
+      }));
       vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-selected" } as never);
       vi.mocked(api.executeArchiveExtraction).mockResolvedValueOnce({
         phase: "completed",
         checkpoint_json: JSON.stringify({ aggregate_counters: aggregate }),
       } as never);
-      await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip?p2=smb/test-server-2");
+      await renderBrowserAndFlush(
+        `/browse/smb/test-server-1/archive.zip${memberBasePath ? `/${memberBasePath}` : ""}?p2=smb/test-server-2`
+      );
 
       const archiveMember = await screen.findByRole("button", { name: /file: inside\.txt/i });
       const archiveList = archiveMember.closest('[data-testid="virtual-list"]');
@@ -2249,13 +2278,15 @@ describe("Browser Component - Interactions", () => {
       await user.click(screen.getByRole("button", { name: "Copy" }));
 
       const extractDialog = await screen.findByRole("dialog", { name: "Extract from ZIP Archive" });
-      expect(within(extractDialog).getByLabelText("inside.txt")).toHaveTextContent("inside.txt");
+      expect(within(extractDialog).getByLabelText(memberPath)).toHaveTextContent(memberPath);
       expect(within(extractDialog).getByText("Destination directory:")).toBeInTheDocument();
       expect(within(extractDialog).getByLabelText("Test Server 2:/")).toHaveTextContent("Test Server 2:/");
       await user.click(within(extractDialog).getByRole("button", { name: "Extract" }));
 
       await waitFor(() => {
-        expect(api.prepareArchiveOperation).toHaveBeenCalledWith(expect.objectContaining({ selected_member_paths: ["inside.txt"] }));
+        expect(api.prepareArchiveOperation).toHaveBeenCalledWith(
+          expect.objectContaining({ selected_member_paths: [memberPath], ...(memberBasePath ? { member_base_path: memberBasePath } : {}) })
+        );
       });
       await waitFor(() => expect(screen.getByText(expectedNotice)).toBeInTheDocument());
       expect(api.copyItem).not.toHaveBeenCalled();

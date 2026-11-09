@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { translate } from "../i18n";
 import { isApiError } from "../types";
 import {
   COMPANION_SETTINGS_SECTIONS,
@@ -19,6 +20,10 @@ import { COMPANION_SETTINGS_CHANGED_EVENT } from "./companionSettingsEvents";
 const CHECK_INTERVAL_MS = 30_000;
 const RETRY_DELAYS_MS = [1_000, 3_000, 10_000];
 const SETTINGS_LOCK = "sambee-companion-settings";
+const LEGACY_DIRECTORY_POLICY_ERRORS = new Set([
+  "Directory settings are invalid. Correct server policy and retry.",
+  "Backend policy contains unsupported resource values.",
+]);
 export type SettingsSyncPhase =
   | "defaults_active"
   | "synchronized"
@@ -278,6 +283,10 @@ class CompanionSettingsSynchronizer {
       if (controller.signal.aborted || generation !== this.generation || !this.running) return;
       const status = isApiError(error) ? error.response?.status : undefined;
       const code = isApiError(error) ? error.response?.data?.code : undefined;
+      const errorMessage = getApiErrorMessage(
+        error,
+        "Settings delivery failed. Check the connection and retry. The last valid settings remain active."
+      );
       const phase =
         status === 404 || status === 426 || code === "settings_update_required" || code === "companion_browser_update_required"
           ? "update_required"
@@ -293,7 +302,9 @@ class CompanionSettingsSynchronizer {
         message:
           phase === "pairing_required"
             ? null
-            : getApiErrorMessage(error, "Settings delivery failed. Check the connection and retry. The last valid settings remain active."),
+            : LEGACY_DIRECTORY_POLICY_ERRORS.has(errorMessage)
+              ? translate("settings.companionSync.directoryPolicyUpdateRequired")
+              : errorMessage,
         sections: Object.fromEntries(Object.keys(this.snapshot.sections).map((name) => [name, phase])),
       });
       delay = RETRY_DELAYS_MS[this.retries++] ?? CHECK_INTERVAL_MS;

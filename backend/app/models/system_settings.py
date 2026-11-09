@@ -142,11 +142,8 @@ class DirectoryIndexPolicy(StrictSettingUpdate):
             raise ValueError("Directory-index policy values must be integers, not booleans, text, or fractions.")
         return value
 
-    @model_validator(mode="after")
-    def validate_verification_intervals(self) -> "DirectoryIndexPolicy":
-        if self.degraded_verification_seconds > self.healthy_verification_seconds:
-            raise ValueError("Degraded verification must not exceed the healthy verification interval.")
-        return self
+    def effective_verification_seconds(self, *, degraded: bool) -> int:
+        return min(self.degraded_verification_seconds, self.healthy_verification_seconds) if degraded else self.healthy_verification_seconds
 
 
 class DirectoryIndexSettingsRead(SQLModel):

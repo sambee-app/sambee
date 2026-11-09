@@ -81,7 +81,21 @@ import { getPreferredViewerId, setPreferredViewerId } from "./viewerPreferences"
 // ============================================================================
 
 /** How long a cached directory listing is considered fresh. */
-const DIRECTORY_CACHE_TTL_MS = 30_000;
+export const DIRECTORY_CACHE_TTL_MS = 30_000;
+export const DIRECTORY_CACHE_STALE_MAX_AGE_MS = 5 * 60_000;
+export const DIRECTORY_CACHE_MAX_ENTRIES = 32;
+
+type CachedDirectory = { items: FileEntry[]; timestamp: number };
+
+function cacheDirectoryListing(cache: Map<string, CachedDirectory>, key: string, value: CachedDirectory): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > DIRECTORY_CACHE_MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
 const INCREMENTAL_SEARCH_RESET_DELAY_MS = 1_000;
 
 /**
@@ -523,6 +537,8 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   const requestPhysicalNavigationRef = React.useRef<(connectionId: string, path: string, commit: () => void) => void>(() => {});
   const recoverMissingDirectoryRef = React.useRef<(connectionId: string, path: string) => Promise<void>>(async () => {});
   const navigationAbortRef = React.useRef<AbortController | null>(null);
+  const pendingNavigationTargetRef = React.useRef<{ connectionId: string; path: string } | null>(null);
+  const [navigationPending, setNavigationPending] = useState(false);
 
   const prepareDirectoryTransition = useCallback(
     (nextConnectionId: string, nextPath: string): void => {
@@ -891,7 +907,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
             });
             const cached = directoryCache.current.get(cacheKey);
             if (cached) {
-              directoryCache.current.set(cacheKey, {
+              cacheDirectoryListing(directoryCache.current, cacheKey, {
                 items: enrichedItems.map((item) => item.entry),
                 timestamp: cached.timestamp,
               });
@@ -964,9 +980,17 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
       if (physicalRequestOwnsLocation(requestId, targetConnectionId, targetPath)) {
         setLoading(!shouldKeepVisibleContent);
+        setNavigationPending(true);
         setError(null);
         setCompanionPairingError(null);
       }
+      abortController.signal.addEventListener(
+        "abort",
+        () => {
+          if (directoryLoadAbortRef.current === abortController) setNavigationPending(false);
+        },
+        { once: true }
+      );
 
       try {
         const providerLocation = physicalLocation(targetConnectionId, targetPath);
@@ -987,7 +1011,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
         const items = listing.items.map((item) => item.entry);
         if (!realtimeRefreshPendingRef.current) {
-          directoryCache.current.set(cacheKey, { items, timestamp: now });
+          cacheDirectoryListing(directoryCache.current, cacheKey, { items, timestamp: Date.now() });
         }
         hasPhysicalListingRef.current = true;
         setMonitoredLocation({ connectionId: targetConnectionId, path: targetPath });
@@ -1074,6 +1098,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
         if (physicalRequestOwnsLocation(requestId, targetConnectionId, targetPath)) {
           setLoading(false);
+          setNavigationPending(false);
           scheduleRealtimeRefreshRef.current();
         }
       }
@@ -1247,7 +1272,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       }
 
       const snapshot = [...items];
-      directoryCache.current.set(`${targetConnectionId}:${targetPath}`, {
+      cacheDirectoryListing(directoryCache.current, `${targetConnectionId}:${targetPath}`, {
         items: snapshot,
         timestamp: Date.now(),
       });
@@ -2583,8 +2608,10 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       return;
     }
 
-    if (!currentPathRef.current) return;
-    const pathParts = currentPathRef.current.split("/");
+    const pendingTarget = pendingNavigationTargetRef.current;
+    const path = pendingTarget?.connectionId === connectionIdRef.current ? pendingTarget.path : currentPathRef.current;
+    if (!path) return;
+    const pathParts = path.split("/");
     const childDirectoryName = pathParts[pathParts.length - 1] || null;
     const parentPath = pathParts.slice(0, -1).join("/");
 
@@ -3348,7 +3375,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       pendingArchiveRestoreRef.current = null;
 
       directoryCache.current.clear();
-      directoryCache.current.set(nextCacheKey, {
+      cacheDirectoryListing(directoryCache.current, nextCacheKey, {
         items: nextItems,
         timestamp: Date.now(),
       });
@@ -3453,7 +3480,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         setSelectedFiles(new Set());
         directoryCache.current.clear();
         if (seededSnapshot) {
-          directoryCache.current.set(nextCacheKey, seededSnapshot);
+          cacheDirectoryListing(directoryCache.current, nextCacheKey, seededSnapshot);
         }
         navigationHistory.current.clear();
         writeSelectedConnectionIdPreference(nextConnectionId || null);
@@ -3483,9 +3510,39 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     setErrorSeverity("error");
     latestLocalActivationRequestIdRef.current += 1;
     navigationAbortRef.current?.abort();
+    navigationAbortRef.current = null;
+    directoryLoadAbortRef.current?.abort();
+    const cached = directoryCache.current.get(`${targetConnectionId}:${targetPath}`);
+    const cacheAge = cached ? Date.now() - cached.timestamp : Number.POSITIVE_INFINITY;
+    if (cached && cacheAge < DIRECTORY_CACHE_STALE_MAX_AGE_MS && pendingRecentDirectoryRecordRef.current === null) {
+      commit();
+      if (connectionIdRef.current !== targetConnectionId || currentPathRef.current !== targetPath || archiveLocationRef.current !== null)
+        return;
+      setItems(toPhysicalItems(targetConnectionId, targetPath, cached.items));
+      hasPhysicalListingRef.current = true;
+      setMonitoredLocation({ connectionId: targetConnectionId, path: targetPath });
+      setLoading(false);
+      setError(null);
+      if (cacheAge >= DIRECTORY_CACHE_TTL_MS) {
+        pendingLocationReloadRef.current = {
+          connectionId: targetConnectionId,
+          path: targetPath,
+          options: { forceRefresh: true, preserveVisibleContent: true },
+        };
+        setNavigationPending(true);
+      }
+      return;
+    }
     const controller = new AbortController();
     navigationAbortRef.current = controller;
-    directoryLoadAbortRef.current?.abort();
+    pendingNavigationTargetRef.current = { connectionId: targetConnectionId, path: targetPath };
+    setNavigationPending(true);
+    const finishNavigation = () => {
+      if (navigationAbortRef.current !== controller) return;
+      pendingNavigationTargetRef.current = null;
+      setNavigationPending(false);
+    };
+    controller.signal.addEventListener("abort", finishNavigation, { once: true });
     latestLoadRequestIdRef.current += 1;
     setLoading(!hasPhysicalListingRef.current && archiveLocationRef.current === null);
     setError(null);
@@ -3496,7 +3553,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       .then(
         (listing) => {
           if (controller.signal.aborted) return;
-          directoryCache.current.set(`${targetConnectionId}:${targetPath}`, {
+          cacheDirectoryListing(directoryCache.current, `${targetConnectionId}:${targetPath}`, {
             items: listing.items.map((item) => item.entry),
             timestamp: Date.now(),
           });
@@ -3559,7 +3616,8 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
           }
           onResolveRouteLocationRef.current?.(currentPathRef.current, archiveLocationRef.current);
         }
-      );
+      )
+      .finally(finishNavigation);
   };
 
   recoverMissingDirectoryRef.current = async (targetConnectionId, missingPath) => {
@@ -3573,7 +3631,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       try {
         const listing = await providerRegistry.get(location).list(location, { signal: controller.signal });
         if (controller.signal.aborted) return;
-        directoryCache.current.set(`${targetConnectionId}:${parent}`, {
+        cacheDirectoryListing(directoryCache.current, `${targetConnectionId}:${parent}`, {
           items: listing.items.map((item) => item.entry),
           timestamp: Date.now(),
         });
@@ -3876,6 +3934,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     archiveLoadingMore,
     files,
     loading,
+    navigationPending,
     error,
     errorOccurrence,
     notification,

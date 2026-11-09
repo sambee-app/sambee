@@ -1219,7 +1219,8 @@ class ApiService {
     archivePath: string,
     destinationPath: string,
     selectedMemberPaths?: string[],
-    destinationConnectionId?: string
+    destinationConnectionId?: string,
+    memberBasePath?: string
   ): Promise<LocalArchiveExecution> {
     return this.startLocalArchiveExecution(connectionId, {
       kind: "extract",
@@ -1227,6 +1228,7 @@ class ApiService {
       archive_path: archivePath,
       destination_path: destinationPath,
       ...(selectedMemberPaths ? { selected_member_paths: selectedMemberPaths } : {}),
+      ...(memberBasePath ? { member_base_path: memberBasePath } : {}),
       ...(destinationConnectionId && destinationConnectionId !== connectionId
         ? { destination_drive: getBrowseSegment(destinationConnectionId) }
         : {}),
@@ -1251,6 +1253,7 @@ class ApiService {
           archive_path: string;
           destination_path: string;
           selected_member_paths?: string[];
+          member_base_path?: string;
           destination_drive?: string;
         }
       | { kind: "create"; contract_version: "v2"; source_paths: string[]; target_path: string }

@@ -122,6 +122,25 @@ describe("DirectorySearchSettings", () => {
     expect(api.updateAdvancedSettings).not.toHaveBeenCalled();
   });
 
+  it("saves a healthy interval below the degraded default", async () => {
+    const user = userEvent.setup();
+    render(<DirectorySearchSettings />);
+    const fields = await screen.findAllByLabelText("Healthy verification interval");
+    const degraded = screen.getAllByLabelText("Degraded verification interval");
+    expect(fields[0]).toHaveValue(String(contract.policy.healthy_verification_seconds.default));
+    expect(degraded[0]).toHaveValue(String(contract.policy.degraded_verification_seconds.default));
+    await user.clear(fields[0]!);
+    await user.type(fields[0]!, "600");
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(api.updateDirectoryIndexSettings).toHaveBeenCalledWith(
+        "backend",
+        { field: "healthy_verification_seconds", value: 600 },
+        expect.objectContaining({ signal: expect.anything() })
+      )
+    );
+  });
+
   it("keeps invalid drafts local and associates a failed save with the Companion field", async () => {
     const user = userEvent.setup();
     vi.mocked(api.updateDirectoryIndexSettings).mockRejectedValue({

@@ -303,6 +303,15 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
       });
       vi.mocked(api.getFileInfo).mockResolvedValue({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never);
     });
+    it("restores a file viewer without the secure-context UUID method", async () => {
+      const getRandomValues = crypto.getRandomValues.bind(crypto);
+      vi.stubGlobal("crypto", { getRandomValues });
+
+      await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+
+      expect(await screen.findByTestId("markdown-viewer")).toHaveAttribute("data-path", "readme.md");
+    });
+
     it("pushes a viewer location and restores it with Back and Forward", async () => {
       const user = userEvent.setup();
       const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");

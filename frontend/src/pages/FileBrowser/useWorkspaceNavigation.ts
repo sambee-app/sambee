@@ -7,6 +7,7 @@ import type { Connection } from "../../types";
 import { FileType } from "../../types";
 import { normalizePhysicalFileFailure } from "../../utils/apiErrors";
 import { getFileTypeByExtension } from "../../utils/FileTypeRegistry";
+import { randomUuid } from "../../utils/randomUuid";
 import { type BrowserItem, physicalLocation, virtualItemHandle, virtualLocation } from "./contentProviders";
 import { type BrowseRouteState, buildBrowseRouteTarget, resolveBrowseRouteTarget, serializeBrowseRoute } from "./routing";
 import type { PaneId, UseFileBrowserPaneReturn, ViewInfo } from "./types";
@@ -212,7 +213,7 @@ export function useWorkspaceNavigation({
         virtualSource,
         images: gallery,
         currentIndex: gallery?.indexOf(path),
-        sessionId: crypto.randomUUID(),
+        sessionId: randomUuid(),
       });
       resolveViewerSelection(viewerIdentity);
     })()

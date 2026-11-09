@@ -1,6 +1,4 @@
 export function randomUuid(): string {
-  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
-
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const view = new DataView(bytes.buffer);

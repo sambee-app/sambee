@@ -112,7 +112,7 @@ async def extract_live_archive_to_new_paths(
             member = await source_session.next_member()
         if member is None:
             return source_session.aggregate
-        target_path = member.target_path or _target_path(destination_root, member.path)
+        target_path = member.target_path or _target_path(destination_root, source_session.relative_member_path(member.path))
         directories_created = 0
         try:
             if member.is_directory:

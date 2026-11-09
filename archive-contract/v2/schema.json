@@ -14,6 +14,17 @@
       "maxLength": 4096,
       "pattern": "^(?!/)(?!.*//)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*:)(?!.*\\\\)[^\\u0000/]+(?:/[^\\u0000/]+)*$"
     },
+    "memberBasePath": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "$ref": "#/$defs/memberPath"
+        }
+      ],
+      "default": ""
+    },
     "timestamp": {
       "type": [
         "string",
@@ -482,6 +493,9 @@
           "items": {
             "$ref": "#/$defs/memberPath"
           }
+        },
+        "member_base_path": {
+          "$ref": "#/$defs/memberBasePath"
         }
       }
     },
@@ -695,6 +709,9 @@
           "items": {
             "$ref": "#/$defs/memberPath"
           }
+        },
+        "member_base_path": {
+          "$ref": "#/$defs/memberBasePath"
         }
       }
     },
@@ -1771,6 +1788,25 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 4096
+            },
+            "destination_drive": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "selected_member_paths": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/memberPath"
+              }
+            },
+            "member_base_path": {
+              "$ref": "#/$defs/memberBasePath"
             }
           }
         }

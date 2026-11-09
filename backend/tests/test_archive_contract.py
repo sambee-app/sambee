@@ -152,6 +152,19 @@ def test_v2_direct_local_execution_specimen_conforms_to_the_shared_schema() -> N
     }
     _validate_contract_instance("directLocalExecution", execution)
 
+    _validate_contract_instance(
+        "directLocalStart",
+        {
+            "contract_version": "v2",
+            "kind": "extract",
+            "archive_path": "photos.zip",
+            "destination_path": "output",
+            "selected_member_paths": ["photos/one.jpg"],
+            "member_base_path": "photos",
+            "destination_drive": "d",
+        },
+    )
+
     for invalid_collision in (
         {key: value for key, value in collision.items() if key != "source"},
         {**collision, "source": {"path": "notes.txt", "size": 42}},

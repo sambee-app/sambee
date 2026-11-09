@@ -215,6 +215,8 @@ export const EN_TRANSLATIONS = {
       synchronized: "Settings are synchronized.",
       synchronizing: "Settings are synchronizing. The last valid settings remain active.",
       update_required: "Update Sambee and Companion to use shared settings delivery.",
+      directoryPolicyUpdateRequired:
+        "Update Sambee Companion to use these directory-search policy values, then retry. The last valid policy and directory search remain available.",
       authority_conflict: "This server does not manage Companion settings. Pair the intended server again to change authority.",
       pairing_required:
         "Companion could not authenticate this browser. Pair this browser in Settings > Local Drives, or pair it again to repair the connection. Settings checks are paused until you retry or pair successfully.",

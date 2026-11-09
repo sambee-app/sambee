@@ -937,7 +937,9 @@ async def list_directory(
             )
 
         # Feed discovered directories into the directory cache (if active)
-        _update_directory_cache_from_listing(str(connection_id), listing)
+        task = asyncio.create_task(asyncio.to_thread(_update_directory_cache_from_listing, str(connection_id), listing))
+        _listing_feedback_tasks.add(task)
+        task.add_done_callback(_listing_feedback_tasks.discard)
 
         logger.debug(f"Successfully listed directory: connection_id={connection_id}, path='{path}', items={len(listing.items)}")
         return listing
@@ -3275,6 +3277,9 @@ async def _cross_connection_move(
 #
 # _update_directory_cache_from_listing
 #
+_listing_feedback_tasks: set[asyncio.Task[None]] = set()
+
+
 def _update_directory_cache_from_listing(connection_id: str, listing: DirectoryListing) -> None:
     """Feed discovered directories from a list_directory call into the cache.
 
@@ -3298,11 +3303,9 @@ def _update_directory_cache_from_listing(connection_id: str, listing: DirectoryL
 
         # Extract directory paths from the listing
         dir_paths = [item.path for item in listing.items if item.type == FileType.DIRECTORY]
-        if dir_paths:
-            cache.add_directories(dir_paths)
-    except Exception:
-        # Never let cache updates break the main flow
-        pass
+        cache.observe_listing(listing.path, dir_paths)
+    except Exception as error:
+        logger.debug("Directory listing feedback failed for connection %s (%s).", connection_id, type(error).__name__)
 
 
 #

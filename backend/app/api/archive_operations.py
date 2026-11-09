@@ -108,6 +108,7 @@ from app.services.archive.live_extraction import (
     LiveSourceSessionPhase,
     LiveSourceSessionRegistry,
     canonicalize_selected_member_roots,
+    validate_member_base_path,
 )
 from app.services.archive.operations import (
     fail_operation,
@@ -466,6 +467,12 @@ async def prepare_archive_operation(
             validate_selected_roots(payload.selected_member_paths)
         except ArchiveFormatError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        if payload.member_base_path and payload.kind != ArchiveOperationKind.EXTRACT:
+            raise LiveSourceSessionError("Archive member base is only valid for extraction")
+        validate_member_base_path(payload.member_base_path, canonicalize_selected_member_roots(payload.selected_member_paths))
+    except LiveSourceSessionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     selected_member_paths_json = json.dumps(payload.selected_member_paths) if payload.selected_member_paths is not None else None
     operation = ArchiveOperation(
         user_id=current_user.id,
@@ -578,6 +585,7 @@ async def create_archive_companion_session(
         expires_in=ARCHIVE_COMPANION_TOKEN_EXPIRE_MINUTES * 60,
         operation=ArchiveOperationRead.model_validate(operation),
         selected_member_paths=list(selected_member_roots) if selected_member_roots is not None else None,
+        member_base_path=operation.member_base_path,
     )
 
 
@@ -950,6 +958,7 @@ async def begin_live_companion_local_archive_extraction(
             archive_info.size,
             operation_id=operation.id,
             selected_member_roots=_selected_member_roots(operation),
+            member_base_path=operation.member_base_path,
         )
         reader = None
         archive_operation_cleanup_registry.register(
@@ -1015,7 +1024,7 @@ async def next_live_companion_local_archive_member(relay: ScopedCompanionRelay) 
             "is_directory": member.is_directory,
             "uncompressed_size": member.uncompressed_size,
             "modified_at": member.modified_at if isinstance(member.modified_at, datetime) else None,
-            "target_path": member.target_path,
+            "target_path": member.target_path or (source_session.relative_member_path(member.path) if operation.member_base_path else None),
             "collision_policy": member.collision_policy,
         }
     )
@@ -2194,6 +2203,7 @@ async def execute_archive_extraction(
                     archive_info.size,
                     operation_id=operation.id,
                     selected_member_roots=selected_member_roots,
+                    member_base_path=operation.member_base_path,
                 )
                 random_reader = None
             except LiveSourceSessionError as exc:

@@ -240,10 +240,9 @@ impl Receipt {
         }
         if let Some(section) = &self.directory_index {
             validate_marker(section, false)?;
-            section
-                .payload
-                .validate()
-                .map_err(|_| failure("Directory settings are invalid. Correct server policy and retry."))?;
+            section.payload.validate().map_err(|_| {
+                failure("Directory settings are not supported. Update Sambee Companion, then retry. The last valid policy remains active.")
+            })?;
         }
         Ok(())
     }

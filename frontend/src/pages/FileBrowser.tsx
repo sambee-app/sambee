@@ -86,6 +86,7 @@ import { getApiErrorMessage, getStorageErrorCode } from "../utils/apiErrors";
 import { openExternalUrl } from "../utils/externalLinks";
 import { compareLocalizedStrings } from "../utils/localeFormatting";
 import { createShareFile, supportsNativeShare } from "../utils/nativeShare";
+import { randomUuid } from "../utils/randomUuid";
 import { getConnectionById, isConnectionReadOnly, isConnectionWritable } from "./FileBrowser/access";
 import { captureDropEntries, manifestFromDrop, manifestFromFiles } from "./FileBrowser/browserUploadManifest";
 import {
@@ -574,6 +575,7 @@ const Browser: React.FC = () => {
   const [archiveExtractionContext, setArchiveExtractionContext] = useState<{
     location: VirtualLocation;
     extractionScope: ArchiveExtractionScope;
+    memberBasePath: string;
     destinationParent: PhysicalLocation;
     destinationPaneId: PaneId;
     usesSiblingDirectory: boolean;
@@ -1876,7 +1878,7 @@ const Browser: React.FC = () => {
   };
 
   const requestDirectorySubscription = React.useEffectEvent((socket: WebSocket, sub: DirectorySubscription) => {
-    const requestId = crypto.randomUUID();
+    const requestId = randomUuid();
     const timeoutId = window.setTimeout(
       () =>
         handleSubscriptionReply(socket, {
@@ -2831,7 +2833,8 @@ const Browser: React.FC = () => {
     (
       extractionScope: ArchiveExtractionScope = FULL_ARCHIVE_EXTRACTION_SCOPE,
       sourceOverride?: VirtualLocation,
-      destinationOverride?: CapturedDestination
+      destinationOverride?: CapturedDestination,
+      memberBasePath = ""
     ) => {
       const location = sourceOverride ?? archiveExtractionSource;
       if (
@@ -2858,6 +2861,7 @@ const Browser: React.FC = () => {
       setArchiveExtractionError(null);
       setArchiveExtractionContext({
         location,
+        memberBasePath,
         extractionScope:
           extractionScope.kind === "members"
             ? { kind: "members", memberPaths: [...extractionScope.memberPaths] }
@@ -2966,6 +2970,7 @@ const Browser: React.FC = () => {
         source: executionContext.location,
         destination,
         selectedMemberPaths: executionContext.extractionScope.kind === "members" ? executionContext.extractionScope.memberPaths : undefined,
+        memberBasePath: executionContext.memberBasePath,
       });
       archiveExtractionExecutionRef.current = execution;
       const unsubscribeProgress = execution.onProgress(setArchiveExtractionProgress);
@@ -3063,8 +3068,9 @@ const Browser: React.FC = () => {
               kind: "members",
               memberPaths: selectedMemberPaths,
             },
-            undefined,
-            invocation?.destination ?? getCapturedDestination(context.paneId)
+            location,
+            invocation?.destination ?? getCapturedDestination(context.paneId),
+            location.path
           );
         }
         return;

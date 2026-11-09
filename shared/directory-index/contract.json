@@ -40,7 +40,9 @@
     "event_coalescing_ms": 300,
     "idle_release_seconds": 600,
     "minimum_full_pass_spacing_seconds": 30,
+    "inactive_cleanup_interval_seconds": 300,
     "max_pending_observations": 1024,
+    "max_listing_add_observations": 64,
     "max_observation_bytes": 1048576,
     "max_source_depth": 256,
     "max_source_path_bytes": 32768,
@@ -85,18 +87,18 @@
     },
     "healthy_verification_seconds": {
       "label": "Healthy verification interval",
-      "description": "Full verification interval for active sources with healthy observation.",
-      "default": 900,
+      "description": "Safety-net verification interval for active sources while change monitoring is healthy. Shorten it only for servers with unreliable change notification.",
+      "default": 86400,
       "minimum": 60,
-      "maximum": 86400,
+      "maximum": 2592000,
       "step": 30
     },
     "degraded_verification_seconds": {
       "label": "Degraded verification interval",
-      "description": "Full verification interval when observation is unavailable or uncertain. It must not exceed the healthy interval.",
-      "default": 300,
+      "description": "Verification interval when change monitoring is unavailable, uncertain, or known to be unreliable for the source. Values above the healthy interval have no effect.",
+      "default": 1800,
       "minimum": 30,
-      "maximum": 3600,
+      "maximum": 86400,
       "step": 30
     }
   }

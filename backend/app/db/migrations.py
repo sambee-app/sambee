@@ -859,6 +859,17 @@ def _apply_archive_operation_member_selection_migration(connection: Connection) 
         connection.execute(text("ALTER TABLE archive_operations ADD COLUMN selected_member_paths_json TEXT"))
 
 
+def _apply_archive_operation_member_base_migration(connection: Connection) -> None:
+    """Keep existing extraction paths unchanged while adding a durable copy base."""
+
+    inspector = inspect(connection)
+    if not inspector.has_table("archive_operations"):
+        return
+    column_names = {column["name"] for column in inspector.get_columns("archive_operations")}
+    if "member_base_path" not in column_names:
+        connection.execute(text("ALTER TABLE archive_operations ADD COLUMN member_base_path TEXT NOT NULL DEFAULT ''"))
+
+
 def _apply_transfer_operations_migration(connection: Connection) -> None:
     """Create durable receipts for backend-owned SMB transfer operations."""
 
@@ -1125,6 +1136,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(version=37, name="add_oidc_no_refresh_sessions", apply=_apply_oidc_no_refresh_sessions_migration),
     Migration(version=38, name="case_insensitive_usernames", apply=_apply_case_insensitive_usernames_migration),
     Migration(version=39, name="add_history_usage_score", apply=_apply_history_usage_score_migration),
+    Migration(version=40, name="add_archive_operation_member_base", apply=_apply_archive_operation_member_base_migration),
 )
 
 

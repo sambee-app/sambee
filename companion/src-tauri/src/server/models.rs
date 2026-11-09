@@ -115,6 +115,8 @@ pub enum ArchiveV2ExecutionStartRequest {
         destination_path: String,
         destination_drive: Option<String>,
         selected_member_paths: Option<Vec<String>>,
+        #[serde(default)]
+        member_base_path: String,
     },
 }
 

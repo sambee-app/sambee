@@ -1310,11 +1310,14 @@ def test_v2_executes_same_connection_creation_with_strict_ledger(
     ]
 
 
+@pytest.mark.parametrize("member_base_path", ["", "photos"])
 def test_executes_same_connection_extraction(
     client: TestClient,
     auth_headers_user: dict,
     test_connection: Connection,
+    member_base_path: str,
 ) -> None:
+    source_paths = [f"{member_base_path}/{name}" if member_base_path else name for name in ("first.txt", "second.txt")]
     prepared = client.post(
         "/api/archive/v2/operations",
         headers=auth_headers_user,
@@ -1325,12 +1328,14 @@ def test_executes_same_connection_extraction(
             "source_path": "input.zip",
             "destination_connection_id": str(test_connection.id),
             "destination_path": "output",
+            "selected_member_paths": source_paths,
+            "member_base_path": member_base_path,
         },
     ).json()
     backend = AsyncMock()
     backend.connect.return_value = None
     backend.disconnect.return_value = None
-    configure_direct_extraction_archive(backend, {"first.txt": b"12345", "second.txt": b"67890"})
+    configure_direct_extraction_archive(backend, dict(zip(source_paths, (b"12345", b"67890"), strict=True)))
     directories: set[str] = set()
     files: dict[str, bytes] = {}
     archive_info = backend.get_file_info.return_value
@@ -1796,10 +1801,12 @@ def test_direct_extraction_source_loss_persists_known_aggregate_progress(
     assert reader.closed
 
 
+@pytest.mark.parametrize("member_base_path", ["", "docs"])
 def test_companion_capability_returns_persisted_selected_member_paths(
     client: TestClient,
     auth_headers_user: dict,
     test_connection: Connection,
+    member_base_path: str,
 ) -> None:
     prepared = client.post(
         "/api/archive/v2/operations",
@@ -1811,7 +1818,8 @@ def test_companion_capability_returns_persisted_selected_member_paths(
             "source_path": "input.zip",
             "destination_connection_id": "local-drive:c",
             "destination_path": "output",
-            "selected_member_paths": ["docs", "docs/readme.txt"],
+            "selected_member_paths": ["docs/readme.txt"],
+            "member_base_path": member_base_path,
         },
     ).json()
 
@@ -1821,7 +1829,39 @@ def test_companion_capability_returns_persisted_selected_member_paths(
     )
 
     assert capability.status_code == 200
-    assert capability.json()["selected_member_paths"] == ["docs"]
+    assert capability.json()["selected_member_paths"] == ["docs/readme.txt"]
+    assert capability.json()["member_base_path"] == member_base_path
+
+
+@pytest.mark.parametrize(
+    "base,selection",
+    [
+        ("docs", None),
+        ("docs", ["docs"]),
+        ("docs", ["docs-other/file.txt"]),
+        ("../docs", ["docs/file.txt"]),
+        ("docs/", ["docs/file.txt"]),
+        ("docs\\inner", ["docs/inner/file.txt"]),
+    ],
+)
+def test_archive_prepare_rejects_invalid_member_base(
+    client: TestClient, auth_headers_user: dict, test_connection: Connection, base: str, selection: list[str] | None
+) -> None:
+    response = client.post(
+        "/api/archive/v2/operations",
+        headers=auth_headers_user,
+        json={
+            "contract_version": "v2",
+            "kind": "extract",
+            "source_connection_id": "local-drive:c",
+            "source_path": "input.zip",
+            "destination_connection_id": str(test_connection.id),
+            "destination_path": "output",
+            "selected_member_paths": selection,
+            "member_base_path": base,
+        },
+    )
+    assert response.status_code == 422, response.text
 
 
 def test_local_selected_member_extraction_to_smb_share_root_skips_root_creation(
@@ -1860,11 +1900,14 @@ def test_local_selected_member_extraction_to_smb_share_root_skips_root_creation(
     backend.disconnect.assert_awaited_once()
 
 
+@pytest.mark.parametrize("member_base_path", ["", "photos"])
 def test_local_selected_member_extraction_to_existing_smb_file_awaits_collision_decision(
     client: TestClient,
     auth_headers_user: dict,
     test_connection: Connection,
+    member_base_path: str,
 ) -> None:
+    source_path = f"{member_base_path}/selected.txt" if member_base_path else "selected.txt"
     prepared = client.post(
         "/api/archive/v2/operations",
         headers=auth_headers_user,
@@ -1875,7 +1918,8 @@ def test_local_selected_member_extraction_to_existing_smb_file_awaits_collision_
             "source_path": "archives/input.zip",
             "destination_connection_id": str(test_connection.id),
             "destination_path": "output",
-            "selected_member_paths": ["selected.txt"],
+            "selected_member_paths": [source_path],
+            "member_base_path": member_base_path,
         },
     ).json()
     capability = client.post(f"/api/archive/v2/operations/{prepared['id']}/companion-session", headers=auth_headers_user).json()
@@ -1904,7 +1948,7 @@ def test_local_selected_member_extraction_to_existing_smb_file_awaits_collision_
             params={
                 "source_session_id": "local-source",
                 "delivery_sequence": 1,
-                "member_path": "selected.txt",
+                "member_path": source_path,
                 "target_path": "selected.txt",
                 "is_directory": False,
                 "collision_policy": "ask",
@@ -1921,11 +1965,14 @@ def test_local_selected_member_extraction_to_existing_smb_file_awaits_collision_
     backend.write_file_from_stream.assert_not_awaited()
 
 
+@pytest.mark.parametrize("member_base_path", ["", "photos"])
 def test_live_smb_to_companion_relay_is_source_driven_and_aggregate_only(
     client: TestClient,
     auth_headers_user: dict,
     test_connection: Connection,
+    member_base_path: str,
 ) -> None:
+    source_path = f"{member_base_path}/selected.txt" if member_base_path else "selected.txt"
     prepared = client.post(
         "/api/archive/v2/operations",
         headers=auth_headers_user,
@@ -1936,7 +1983,8 @@ def test_live_smb_to_companion_relay_is_source_driven_and_aggregate_only(
             "source_path": "input.zip",
             "destination_connection_id": "local-drive:c",
             "destination_path": "output",
-            "selected_member_paths": ["selected.txt"],
+            "selected_member_paths": [source_path],
+            "member_base_path": member_base_path,
         },
     ).json()
     capability = client.post(f"/api/archive/v2/operations/{prepared['id']}/companion-session", headers=auth_headers_user).json()
@@ -1944,7 +1992,7 @@ def test_live_smb_to_companion_relay_is_source_driven_and_aggregate_only(
     backend = AsyncMock()
     backend.connect.return_value = None
     backend.disconnect.return_value = None
-    configure_direct_extraction_archive(backend, {"selected.txt": b"contents", "excluded.txt": b"not selected"})
+    configure_direct_extraction_archive(backend, {source_path: b"contents", "excluded.txt": b"not selected"})
 
     with patch("app.api.archive_operations.SMBBackend", return_value=backend):
         begin = client.post(f"/api/archive/v2/operations/{prepared['id']}/relay/extraction/live/begin", headers=relay_headers)
@@ -1981,7 +2029,8 @@ def test_live_smb_to_companion_relay_is_source_driven_and_aggregate_only(
         completed = client.post(f"/api/archive/v2/operations/{prepared['id']}/relay/extraction/live/complete", headers=relay_headers)
 
     assert begin.status_code == 200, begin.text
-    assert member_data["member_path"] == "selected.txt"
+    assert member_data["member_path"] == source_path
+    assert member_data["target_path"] == ("selected.txt" if member_base_path else None)
     assert premature_result.status_code == 409
     assert content.content == b"contents"
     assert result.status_code == 200

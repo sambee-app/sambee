@@ -176,6 +176,23 @@ describe("shared Companion settings lifecycle", () => {
     expect(companionSettingsSync.getSnapshot().phase).toBe("synchronized");
   });
 
+  it.each(["Directory settings are invalid. Correct server policy and retry.", "Backend policy contains unsupported resource values."])(
+    "reports the update action for an older Companion policy rejection: %s",
+    async (detail) => {
+      const native = status();
+      native.sections.directory_index!.marker = "old";
+      mocks.status.mockResolvedValue(native);
+      mocks.redeem.mockRejectedValue({ response: { status: 400, data: { detail } } });
+      companionSettingsSync.start();
+      await settle();
+      expect(companionSettingsSync.getSnapshot()).toMatchObject({
+        phase: "delivery_failed",
+        message:
+          "Update Sambee Companion to use these directory-search policy values, then retry. The last valid policy and directory search remain available.",
+      });
+    }
+  );
+
   it("does not switch users during periodic checks", () => {
     const desired = metadata();
     desired.theme.user_scope = "other";

@@ -450,7 +450,7 @@ describe("content providers", () => {
     vi.clearAllMocks();
   });
 
-  it("persists selected ZIP member roots before starting extraction", async () => {
+  it.each(["", "docs"])("persists selected ZIP member roots and copy base '%s' before starting extraction", async (memberBasePath) => {
     vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-selected" } as never);
     vi.mocked(api.executeArchiveExtraction).mockResolvedValueOnce({
       phase: "completed",
@@ -462,12 +462,53 @@ describe("content providers", () => {
       startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
         source: archiveLocation,
         destination,
-        selectedMemberPaths: ["docs", "docs/readme.txt"],
+        selectedMemberPaths: ["docs/readme.txt"],
+        memberBasePath,
       }).result
     ).resolves.toMatchObject({ status: "completed" });
 
     expect(api.prepareArchiveOperation).toHaveBeenCalledWith(
-      expect.objectContaining({ selected_member_paths: ["docs", "docs/readme.txt"] })
+      expect.objectContaining({
+        selected_member_paths: ["docs/readme.txt"],
+        ...(memberBasePath ? { member_base_path: memberBasePath } : {}),
+      })
+    );
+  });
+
+  it("passes the captured ZIP folder to direct-local extraction", async () => {
+    vi.mocked(api.startLocalArchiveExtraction).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "streaming",
+        revision: 1,
+        progress: localArchiveProgress(),
+        cancellation_requested: false,
+      })
+    );
+    vi.mocked(api.waitForLocalArchiveExecution).mockResolvedValueOnce(
+      createMockLocalArchiveExecution({
+        execution_id: "local-extract-1",
+        phase: "completed",
+        revision: 2,
+        progress: localArchiveProgress(),
+        cancellation_requested: false,
+      })
+    );
+    await expect(
+      startArchiveExtraction(createStorageBackedTestContentProviderRegistry(), {
+        source: virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archive.zip"), "photos"),
+        destination: physicalLocation("local-drive:c", "output"),
+        selectedMemberPaths: ["photos/one.jpg", "photos/two.jpg"],
+        memberBasePath: "photos",
+      }).result
+    ).resolves.toMatchObject({ status: "completed" });
+    expect(api.startLocalArchiveExtraction).toHaveBeenCalledWith(
+      "local-drive:c",
+      "archive.zip",
+      "output",
+      ["photos/one.jpg", "photos/two.jpg"],
+      "local-drive:c",
+      "photos"
     );
   });
 
@@ -735,7 +776,7 @@ describe("content providers", () => {
   });
 
   it("routes a local archive to an SMB destination through the Companion", async () => {
-    const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "");
+    const localArchiveLocation = virtualLocation("zip", "local-drive:c", physicalLocation("local-drive:c", "archives/one.zip"), "docs");
     vi.mocked(api.prepareArchiveOperation).mockResolvedValueOnce({ id: "extract-1" } as never);
     vi.mocked(api.extractLocalArchiveToSmb).mockResolvedValueOnce(extractionAggregate() as never);
 
@@ -743,6 +784,7 @@ describe("content providers", () => {
       source: localArchiveLocation,
       destination: physicalLocation("conn-1", "output"),
       selectedMemberPaths: ["docs/readme.txt"],
+      memberBasePath: "docs",
     });
 
     await expect(execution.result).resolves.toMatchObject({
@@ -751,7 +793,9 @@ describe("content providers", () => {
       summary: { filesSkipped: 0, filesReplaced: 0, partialMembers: 0 },
     });
     expect(api.extractLocalArchiveToSmb).toHaveBeenCalledWith("local-drive:c", "archives/one.zip", "extract-1");
-    expect(api.prepareArchiveOperation).toHaveBeenCalledWith(expect.objectContaining({ selected_member_paths: ["docs/readme.txt"] }));
+    expect(api.prepareArchiveOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ selected_member_paths: ["docs/readme.txt"], member_base_path: "docs" })
+    );
   });
 
   it("resumes a paused local-to-SMB extraction through the Companion", async () => {

@@ -60,7 +60,9 @@ LIMIT_FIELDS = frozenset(
         "event_coalescing_ms",
         "idle_release_seconds",
         "minimum_full_pass_spacing_seconds",
+        "inactive_cleanup_interval_seconds",
         "max_pending_observations",
+        "max_listing_add_observations",
         "max_observation_bytes",
         "max_source_depth",
         "max_source_path_bytes",
@@ -136,7 +138,7 @@ def load_directory_index_contract(path: Path = CONTRACT_PATH) -> DirectoryIndexC
             raise ValueError("Directory-index policy bounds are inconsistent. Restore the shared contract file.")
         parsed[name] = field
     if parsed["degraded_verification_seconds"].default > parsed["healthy_verification_seconds"].default:
-        raise ValueError("Degraded verification must not exceed healthy verification. Restore the shared contract file.")
+        raise ValueError("Default degraded verification must not exceed default healthy verification. Restore the shared contract file.")
     return DirectoryIndexContract(MappingProxyType(limits), MappingProxyType(parsed))
 
 

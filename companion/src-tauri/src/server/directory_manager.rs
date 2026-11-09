@@ -5,7 +5,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use notify::{
@@ -22,8 +22,8 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use super::directory_index::{
     acquire_storage, epoch_milliseconds, open_directory_database, open_readonly_directory_database, search_terms, validate_directory_path,
-    validate_storage_files, DirectoryIndex, DirectoryIndexReader, DirectoryMutation, IndexError, SourceKind, StorageDirectory,
-    APPLICATION_ID, ROW_BATCH_SIZE, SCHEMA_VERSION, SQL_BUSY_TIMEOUT,
+    validate_storage_files, DirectoryIndex, DirectoryIndexReader, DirectoryMutation, IndexError, ListingCheck, ListingDeadline, SourceKind,
+    StorageDirectory, APPLICATION_ID, ROW_BATCH_SIZE, SCHEMA_VERSION, SQL_BUSY_TIMEOUT,
 };
 #[cfg(test)]
 use super::directory_traversal::NativeIdentity;
@@ -41,6 +41,9 @@ const DEFAULT_RESULT_LIMIT: usize = 50;
 const SEARCH_CONTRACT_VERSION: u32 = 1;
 pub(super) const MAX_WIRE_INTEGER: i64 = 9_007_199_254_740_991;
 const POLICY_VERSION: u32 = 1;
+// Return to required updates after one bounded child check, independently of queue size and interactive timeouts.
+const LISTING_FEEDBACK_ENTRIES_PER_CYCLE: usize = 1;
+const LISTING_FEEDBACK_QUERY_BUDGET: Duration = Duration::from_millis(100);
 
 #[cfg(windows)]
 #[path = "directory_removal_windows.rs"]
@@ -144,13 +147,23 @@ impl DirectoryPolicy {
                 return Err(IndexError::Invalid("Directory policy value is outside its supported range."));
             }
         }
-        if self.degraded_verification_seconds > self.healthy_verification_seconds {
-            return Err(IndexError::Invalid(
-                "Degraded verification must not be slower than healthy verification.",
-            ));
-        }
         Ok(())
     }
+
+    fn effective_verification_seconds(&self, degraded: bool) -> i64 {
+        if degraded {
+            self.degraded_verification_seconds.min(self.healthy_verification_seconds)
+        } else {
+            self.healthy_verification_seconds
+        }
+    }
+}
+
+fn inactive_cleanup_interval(policy: &DirectoryPolicy) -> Result<Duration, IndexError> {
+    let retention = u64::try_from(policy.inactive_retention_seconds).map_err(|_| IndexError::Invalid("Invalid inactive retention."))?;
+    let cadence =
+        u64::try_from(limit("inactive_cleanup_interval_seconds")?).map_err(|_| IndexError::Invalid("Invalid cleanup interval."))?;
+    Ok(Duration::from_secs(retention.min(cadence)))
 }
 
 fn lock<T>(value: &Mutex<T>) -> Result<MutexGuard<'_, T>, IndexError> {
@@ -432,16 +445,7 @@ impl DiskBudget {
         if pressure || Instant::now() >= state.next_cleanup_at {
             self.cleanup_inactive(&state.policy, state.reserved, pressure, epoch_milliseconds()?)?;
             self.cleanup_orphan_leases()?;
-            state.next_cleanup_at = Instant::now()
-                + Duration::from_secs(
-                    u64::try_from(
-                        state
-                            .policy
-                            .inactive_retention_seconds
-                            .min(state.policy.degraded_verification_seconds),
-                    )
-                    .map_err(|_| IndexError::Invalid("Invalid cleanup interval."))?,
-                );
+            state.next_cleanup_at = Instant::now() + inactive_cleanup_interval(&state.policy)?;
             bytes = self.managed_bytes()?;
             available_space = None;
         }
@@ -512,6 +516,7 @@ struct Observations {
     bytes: usize,
     verification_required: bool,
     observation_lost: bool,
+    required_pending: Arc<AtomicBool>,
     invalidation_count: u64,
     scan_group: Option<HashMap<u64, PendingScanParent>>,
     scan_group_reconcile: bool,
@@ -663,6 +668,7 @@ impl Observations {
     }
 
     fn invalidate_for(&mut self, reason: InvalidationReason) -> Result<(), IndexError> {
+        self.required_pending.store(true, Ordering::Release);
         self.observation_lost |= matches!(reason, InvalidationReason::ObservationLoss | InvalidationReason::ReadCapacity);
         self.invalidation_count = self.invalidation_count.saturating_add(1);
         log::info!(
@@ -759,14 +765,42 @@ impl Observations {
         self.barrier_bytes = self.barriers.iter().map(|(_, path)| path.len()).sum();
     }
 
-    fn enqueue(&mut self, mutation: DirectoryMutation, maximum_pending: usize, maximum_bytes: usize) -> Result<bool, IndexError> {
-        let paths = match &mutation {
+    fn mutation_effect(&self, mutation: &DirectoryMutation) -> (usize, Vec<(u64, String)>) {
+        let paths = match mutation {
             DirectoryMutation::Add { path } | DirectoryMutation::Remove { path } | DirectoryMutation::ReadParent { path } => {
                 vec![path.as_str()]
             }
             DirectoryMutation::Rename { path, new_path } => vec![path.as_str(), new_path.as_str()],
         };
         let bytes = paths.iter().map(|path| path.len()).sum::<usize>();
+        let mut barriers = self.barriers.clone();
+        for path in paths {
+            let mut prefix = path.to_owned();
+            barriers.retain(|(_, existing)| {
+                if is_prefix(existing, path) {
+                    prefix.clone_from(existing);
+                    false
+                } else {
+                    !is_prefix(path, existing)
+                }
+            });
+            barriers.push((self.sequence.saturating_add(1), prefix));
+        }
+        (bytes, barriers)
+    }
+
+    fn can_admit(&self, mutation: &DirectoryMutation, maximum_pending: usize, maximum_bytes: usize) -> bool {
+        let (bytes, barriers) = self.mutation_effect(mutation);
+        self.sequence != u64::MAX
+            && self.pending.len() < maximum_pending
+            && bytes <= maximum_bytes.saturating_sub(self.bytes)
+            && barriers.len() <= maximum_pending
+            && barriers.iter().map(|(_, path)| path.len()).sum::<usize>() <= maximum_bytes
+    }
+
+    fn enqueue(&mut self, mutation: DirectoryMutation, maximum_pending: usize, maximum_bytes: usize) -> Result<bool, IndexError> {
+        let (bytes, barriers) = self.mutation_effect(&mutation);
+        self.required_pending.store(true, Ordering::Release);
         if self.sequence == u64::MAX {
             self.invalidate()?;
             return Err(IndexError::Invalid(
@@ -779,18 +813,7 @@ impl Observations {
             self.invalidate()?;
             return Ok(false);
         }
-        for path in paths {
-            let mut prefix = path.to_owned();
-            self.barriers.retain(|(_, existing)| {
-                if is_prefix(existing, path) {
-                    prefix.clone_from(existing);
-                    false
-                } else {
-                    !is_prefix(path, existing)
-                }
-            });
-            self.barriers.push((self.sequence, prefix));
-        }
+        self.barriers = barriers;
         self.barrier_bytes = self.barriers.iter().map(|(_, path)| path.len()).sum();
         self.pending.push_back((self.sequence, mutation, bytes));
         self.bytes += bytes;
@@ -986,9 +1009,12 @@ struct LocalSource {
     writer: Mutex<Option<DirectoryIndex>>,
     reader: Mutex<Option<DirectoryIndexReader>>,
     observations: Mutex<Observations>,
+    listing_feedback: Mutex<ListingFeedback>,
+    listing_discards: Arc<ListingDiscards>,
     status: Mutex<SourceStatus>,
     watcher: Mutex<Option<RecommendedWatcher>>,
     watcher_failed: AtomicBool,
+    monitoring_limited_logged: AtomicBool,
     watcher_reconciling: AtomicBool,
     busy: AtomicBool,
     flush_busy: AtomicBool,
@@ -1013,6 +1039,32 @@ struct ScanGeneration {
 }
 
 impl LocalSource {
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::Release);
+        self.clear_listing_feedback();
+    }
+
+    fn clear_listing_feedback(&self) {
+        if let Ok(mut feedback) = self.listing_feedback.lock() {
+            feedback.clear();
+        }
+    }
+
+    fn effective_verification_seconds(&self, policy: &DirectoryPolicy) -> Result<i64, IndexError> {
+        let volume = lock(&self.volume)?;
+        let limited = !volume.monitoring_reliable();
+        if limited && !self.monitoring_limited_logged.swap(true, Ordering::AcqRel) {
+            log::info!(
+                "event=directory_monitoring_limited source={} session={} drive_class={:?} Remote changes require periodic verification.",
+                self.source_id,
+                self.session,
+                volume.class
+            );
+        }
+        let degraded = limited || lock(&self.observations)?.verification_required || self.watcher_failed.load(Ordering::Acquire);
+        Ok(policy.effective_verification_seconds(degraded))
+    }
+
     fn close_idle(&self, budget: &Arc<DiskBudget>) -> Result<(), IndexError> {
         let mut writer = lock(&self.writer)?.take();
         if let (Some(index), Some(accessed)) = (writer.as_mut(), lock(&self.status)?.accessed_at_ms) {
@@ -1093,8 +1145,11 @@ impl LocalSource {
             reader: Mutex::new(None),
             watcher: Mutex::new(None),
             watcher_failed: AtomicBool::new(false),
+            monitoring_limited_logged: AtomicBool::new(false),
             watcher_reconciling: AtomicBool::new(true),
             observations: Mutex::new(Observations::default()),
+            listing_feedback: Mutex::default(),
+            listing_discards: Arc::default(),
             status: Mutex::new(SourceStatus {
                 state: INDEX_OPENING_STATE,
                 message: None,
@@ -1296,7 +1351,11 @@ impl LocalSource {
     }
 
     fn invalidate_for(&self, reason: InvalidationReason) -> Result<(), IndexError> {
-        lock(&self.observations)?.invalidate_for(reason)
+        lock(&self.observations)?.invalidate_for(reason)?;
+        if matches!(reason, InvalidationReason::SourceRebind | InvalidationReason::Lifecycle) {
+            self.clear_listing_feedback();
+        }
+        Ok(())
     }
 
     fn begin_read(self: &Arc<Self>) -> Result<ObservationRead, IndexError> {
@@ -1483,6 +1542,7 @@ impl LocalSource {
     fn flush(&self, budget: &Arc<DiskBudget>) -> Result<(), IndexError> {
         let mut observations = lock(&self.observations)?;
         if !observations.uncertain && observations.pending.is_empty() && !self.reclamation_pending.load(Ordering::Acquire) {
+            observations.required_pending.store(false, Ordering::Release);
             if !self.busy.load(Ordering::Acquire) && self.active_queries.load(Ordering::Acquire) == 0 {
                 let writer = lock(&self.writer)?;
                 if let Some(writer) = writer.as_ref() {
@@ -1523,6 +1583,9 @@ impl LocalSource {
             observations.pending.pop_front();
         }
         observations.retire_barriers();
+        observations
+            .required_pending
+            .store(observations.uncertain || !observations.pending.is_empty(), Ordering::Release);
         let reconciliation_pending = writer.reconciliation_generation()?.is_some();
 
         if !reconciliation_pending
@@ -2007,6 +2070,7 @@ impl LocalSource {
         status.complete_pass(Instant::now());
         if complete {
             observations.verification_required = false;
+            lock(&self.listing_feedback)?.clear_suppression();
             if self.watcher_reconciling.swap(false, Ordering::AcqRel) && !self.watcher_failed.load(Ordering::Acquire) {
                 log::info!(
                     "event=directory_watcher_recovered operation=directory_index stage=watcher source_id={} generation_id={}",
@@ -2748,6 +2812,136 @@ impl LocalSource {
         })
     }
 
+    fn process_listing_feedback(&self) {
+        for _ in 0..LISTING_FEEDBACK_ENTRIES_PER_CYCLE {
+            let Ok(observations) = self.observations.try_lock() else { return };
+            if observations.uncertain || !observations.pending.is_empty() {
+                return;
+            }
+            let cancelled = Arc::clone(&observations.required_pending);
+            drop(observations);
+            let entry = {
+                let Ok(mut feedback) = self.listing_feedback.try_lock() else {
+                    return;
+                };
+                let Some(entry) = feedback.take() else { return };
+                InFlightListing { source: self, entry }
+            };
+            let outcome = self.check_listing_feedback(&entry.entry, cancelled);
+            if let Err(reason) = outcome {
+                self.listing_discards.count(reason);
+                log::debug!(
+                    "event=directory_listing_feedback_skipped source={} truncated={} reason={}",
+                    self.source_id,
+                    entry.entry.truncated,
+                    reason.as_str()
+                );
+            }
+        }
+    }
+
+    fn check_listing_feedback(&self, entry: &ListingFeedbackEntry, cancelled: Arc<AtomicBool>) -> Result<(), ListingDiscard> {
+        self.check_listing_feedback_with(entry, cancelled, || {})
+    }
+
+    fn check_listing_feedback_with(
+        &self,
+        entry: &ListingFeedbackEntry,
+        cancelled: Arc<AtomicBool>,
+        checked: impl FnOnce(),
+    ) -> Result<(), ListingDiscard> {
+        if self.ensure_available().is_err() || self.capability_failed.load(Ordering::Acquire) {
+            return Err(ListingDiscard::Stale);
+        }
+        if cancelled.load(Ordering::Acquire) {
+            return Err(ListingDiscard::Interrupted);
+        }
+        let root = self
+            .root
+            .try_lock()
+            .map_err(|_| ListingDiscard::Busy)?
+            .clone()
+            .ok_or(ListingDiscard::Stale)?;
+        root.verify().map_err(|_| ListingDiscard::Stale)?;
+        let deadline = ListingDeadline {
+            expires: Instant::now() + LISTING_FEEDBACK_QUERY_BUDGET,
+            cancelled,
+        };
+        let reader = self
+            .reader
+            .try_lock()
+            .map_err(|_| ListingDiscard::Busy)?
+            .clone()
+            .ok_or(ListingDiscard::Stale)?;
+        let result = reader.check_listing(&entry.parent, &entry.children, &deadline).map_err(|error| {
+            if matches!(error, IndexError::Interrupted) {
+                ListingDiscard::Interrupted
+            } else {
+                ListingDiscard::Invalid
+            }
+        })?;
+        checked();
+        root.verify().map_err(|_| ListingDiscard::Stale)?;
+        let ListingCheck::Missing {
+            generation_id,
+            accepted_revision,
+        } = result
+        else {
+            return Ok(());
+        };
+        self.admit_listing_feedback(entry, generation_id, accepted_revision, &deadline)
+    }
+
+    fn admit_listing_feedback(
+        &self,
+        entry: &ListingFeedbackEntry,
+        generation_id: i64,
+        accepted_revision: i64,
+        deadline: &ListingDeadline,
+    ) -> Result<(), ListingDiscard> {
+        let mut observations = self.observations.try_lock().map_err(|_| ListingDiscard::Busy)?;
+        let mut writer = self.writer.try_lock().map_err(|_| ListingDiscard::Busy)?;
+        if self.ensure_available().is_err() || self.capability_failed.load(Ordering::Acquire) {
+            return Err(ListingDiscard::Stale);
+        }
+        if self.busy.load(Ordering::Acquire) || observations.uncertain || !observations.pending.is_empty() {
+            return Err(ListingDiscard::Interrupted);
+        }
+        let index = writer.as_mut().ok_or(ListingDiscard::Stale)?;
+        if !index
+            .listing_admission_current(&entry.parent, generation_id, accepted_revision, deadline)
+            .map_err(|_| ListingDiscard::Interrupted)?
+        {
+            return Err(ListingDiscard::Stale);
+        }
+        let mut feedback = self.listing_feedback.try_lock().map_err(|_| ListingDiscard::Busy)?;
+        if feedback.suppressed.contains(&entry.parent) {
+            return Err(ListingDiscard::Suppressed);
+        }
+        let maximum_pending = limit("max_pending_observations").map_err(|_| ListingDiscard::Invalid)?;
+        let maximum_bytes = limit("max_observation_bytes").map_err(|_| ListingDiscard::Invalid)?;
+        if !feedback.suppression_capacity(&entry.parent, maximum_pending, maximum_bytes) {
+            return Err(ListingDiscard::Capacity);
+        }
+        let mutation = DirectoryMutation::ReadParent {
+            path: entry.parent.clone(),
+        };
+        if !observations.can_admit(&mutation, maximum_pending, maximum_bytes) {
+            return Err(ListingDiscard::Capacity);
+        }
+        if Instant::now() >= deadline.expires || deadline.cancelled.load(Ordering::Acquire) {
+            return Err(ListingDiscard::Interrupted);
+        }
+        if observations
+            .enqueue(mutation, maximum_pending, maximum_bytes)
+            .map_err(|_| ListingDiscard::Invalid)?
+        {
+            feedback.suppressed.insert(entry.parent.clone());
+            feedback.suppressed_bytes += entry.parent.len();
+        }
+        Ok(())
+    }
+
     fn reconcile(self: &Arc<Self>, budget: &Arc<DiskBudget>, scans: &Arc<Semaphore>) -> Result<(), IndexError> {
         if self.stopped.load(Ordering::Acquire) || Instant::now() < lock(&self.status)?.retry_at {
             return Ok(());
@@ -3221,6 +3415,7 @@ impl Drop for QueryCancellation {
 
 pub struct LocalDirectoryManager {
     sources: Mutex<HashMap<String, Arc<LocalSource>>>,
+    listing_discards: ListingDiscards,
     budget: Arc<DiskBudget>,
     scans: Arc<Semaphore>,
     queries: Arc<Semaphore>,
@@ -3234,7 +3429,274 @@ enum MutationScope {
     Ancestors,
 }
 
+#[derive(Clone, Copy)]
+enum ListingDiscard {
+    Busy,
+    Capacity,
+    Stale,
+    Suppressed,
+    Interrupted,
+    Invalid,
+}
+
+impl ListingDiscard {
+    /// All reasons in discriminant order, so that `reason as usize` indexes `ListingDiscards`.
+    const ALL: [Self; 6] = [
+        Self::Busy,
+        Self::Capacity,
+        Self::Stale,
+        Self::Suppressed,
+        Self::Interrupted,
+        Self::Invalid,
+    ];
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Busy => "busy",
+            Self::Capacity => "capacity",
+            Self::Stale => "stale_target",
+            Self::Suppressed => "suppressed",
+            Self::Interrupted => "interrupted",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+#[derive(Default)]
+struct ListingDiscards([AtomicUsize; ListingDiscard::ALL.len()]);
+
+impl ListingDiscards {
+    fn count(&self, reason: ListingDiscard) {
+        let _ = self.0[reason as usize].try_update(Ordering::Relaxed, Ordering::Relaxed, |count| Some(count.saturating_add(1)));
+    }
+
+    fn report(&self, source: &str) {
+        for reason in ListingDiscard::ALL {
+            let count = self.0[reason as usize].swap(0, Ordering::Relaxed);
+            if count != 0 {
+                log::info!(
+                    "event=directory_listing_feedback_discarded source={} reason={} count={}",
+                    source,
+                    reason.as_str(),
+                    count
+                );
+            }
+        }
+    }
+}
+
+struct ListingFeedbackEntry {
+    parent: String,
+    children: Vec<String>,
+    truncated: bool,
+    bytes: usize,
+}
+
+struct InFlightListing<'a> {
+    source: &'a LocalSource,
+    entry: ListingFeedbackEntry,
+}
+
+impl Drop for InFlightListing<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut feedback) = self.source.listing_feedback.lock() {
+            feedback.release(&self.entry);
+        }
+    }
+}
+
+#[derive(Default)]
+struct ListingFeedback {
+    queued: VecDeque<ListingFeedbackEntry>,
+    bytes: usize,
+    in_flight: usize,
+    in_flight_bytes: usize,
+    suppressed: HashSet<String>,
+    suppressed_bytes: usize,
+}
+
+impl ListingFeedback {
+    fn clear_suppression(&mut self) {
+        self.suppressed.clear();
+        self.suppressed_bytes = 0;
+    }
+
+    fn clear(&mut self) {
+        self.queued.clear();
+        self.bytes = self.in_flight_bytes;
+        self.clear_suppression();
+    }
+
+    fn suppression_capacity(&self, parent: &str, maximum_pending: usize, maximum_bytes: usize) -> bool {
+        self.suppressed.len() < maximum_pending && parent.len() <= maximum_bytes.saturating_sub(self.suppressed_bytes)
+    }
+
+    fn submit(&mut self, entry: ListingFeedbackEntry, maximum_pending: usize, maximum_bytes: usize) -> Result<(), ListingDiscard> {
+        if entry.children.len() > ROW_BATCH_SIZE || entry.bytes > maximum_bytes {
+            return Err(ListingDiscard::Capacity);
+        }
+        if self.suppressed.contains(&entry.parent) {
+            return Err(ListingDiscard::Suppressed);
+        }
+        if !self.suppression_capacity(&entry.parent, maximum_pending, maximum_bytes) {
+            return Err(ListingDiscard::Capacity);
+        }
+        let position = self.queued.iter().position(|old| old.parent == entry.parent);
+        let replaced_bytes = position.map_or(0, |position| self.queued[position].bytes);
+        if position.is_none() && self.queued.len() + self.in_flight >= maximum_pending
+            || entry.bytes > maximum_bytes.saturating_sub(self.bytes - replaced_bytes)
+        {
+            return Err(ListingDiscard::Capacity);
+        }
+        self.bytes = self.bytes - replaced_bytes + entry.bytes;
+        if let Some(position) = position {
+            self.queued[position] = entry;
+        } else {
+            self.queued.push_back(entry);
+        }
+        Ok(())
+    }
+
+    fn take(&mut self) -> Option<ListingFeedbackEntry> {
+        let entry = self.queued.pop_front()?;
+        self.in_flight += 1;
+        self.in_flight_bytes += entry.bytes;
+        Some(entry)
+    }
+
+    fn release(&mut self, entry: &ListingFeedbackEntry) {
+        self.in_flight -= 1;
+        self.in_flight_bytes -= entry.bytes;
+        self.bytes -= entry.bytes;
+    }
+}
+
+pub(super) struct ListingTarget {
+    source: Weak<LocalSource>,
+    session: String,
+    discards: Arc<ListingDiscards>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+pub(super) struct ListingTestSource(Arc<LocalSource>);
+
+#[cfg(test)]
+impl ListingTestSource {
+    pub(super) fn queued(&self) -> Vec<(String, Vec<String>, bool)> {
+        lock(&self.0.listing_feedback)
+            .unwrap()
+            .queued
+            .iter()
+            .map(|entry| (entry.parent.clone(), entry.children.clone(), entry.truncated))
+            .collect()
+    }
+
+    pub(super) fn process(&self) {
+        self.0.process_listing_feedback();
+    }
+
+    pub(super) fn state(&self) -> (u64, u64, bool, bool, i64) {
+        let observations = lock(&self.0.observations).unwrap();
+        let revision = lock(&self.0.writer).unwrap().as_ref().unwrap().status().unwrap().accepted_revision;
+        (
+            observations.epoch,
+            observations.sequence,
+            observations.verification_required,
+            observations.uncertain,
+            revision,
+        )
+    }
+
+    /// Holds the feedback state, the only lock that both `browse_list` and the update worker take.
+    pub(super) fn hold_feedback(&self, entered: &std::sync::Barrier, release: &std::sync::Barrier) {
+        let _feedback = lock(&self.0.listing_feedback).unwrap();
+        entered.wait();
+        release.wait();
+    }
+
+    pub(super) fn busy_discards(&self) -> usize {
+        self.0.listing_discards.0[ListingDiscard::Busy as usize].load(Ordering::Relaxed)
+    }
+}
+
+impl ListingTarget {
+    pub(super) fn submit(&self, parent: String, children: Vec<String>, truncated: bool) {
+        let Some(source) = self.source.upgrade().filter(|source| {
+            source.session == self.session
+                && !source.stopped.load(Ordering::Acquire)
+                && !source.capability_failed.load(Ordering::Acquire)
+                && !source.media_unavailable.load(Ordering::Acquire)
+        }) else {
+            self.discards.count(ListingDiscard::Stale);
+            return;
+        };
+        let Ok(mut feedback) = source.listing_feedback.try_lock() else {
+            self.discards.count(ListingDiscard::Busy);
+            return;
+        };
+        if source.stopped.load(Ordering::Acquire) {
+            self.discards.count(ListingDiscard::Stale);
+            return;
+        }
+        let outcome = (|| {
+            let maximum_pending = limit("max_pending_observations").map_err(|_| ListingDiscard::Invalid)?;
+            let maximum_bytes = limit("max_observation_bytes").map_err(|_| ListingDiscard::Invalid)?;
+            let bytes = children
+                .iter()
+                .try_fold(parent.len(), |bytes, child| bytes.checked_add(child.len()))
+                .ok_or(ListingDiscard::Capacity)?;
+            feedback.submit(
+                ListingFeedbackEntry {
+                    parent,
+                    children,
+                    truncated,
+                    bytes,
+                },
+                maximum_pending,
+                maximum_bytes,
+            )
+        })();
+        if let Err(reason) = outcome {
+            self.discards.count(reason);
+        }
+    }
+}
+
 impl LocalDirectoryManager {
+    #[cfg(test)]
+    pub(super) fn test_listing_source(&self, drive: &str, root: &Path) -> ListingTestSource {
+        let source = LocalSource::new(root.to_owned(), self.storage_directory());
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
+        source.scan(&self.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
+        lock(&source.status).unwrap().retry_at = Instant::now() + FAILURE_RETRY_MAX;
+        lock(&self.sources).unwrap().insert(drive.to_owned(), source.clone());
+        ListingTestSource(source)
+    }
+
+    pub(super) fn try_listing_target(&self, drive: &str, root: &Path) -> Option<ListingTarget> {
+        let Ok(sources) = self.sources.try_lock() else {
+            self.listing_discards.count(ListingDiscard::Busy);
+            return None;
+        };
+        // A drive without an active source is the normal unindexed state, not a discard.
+        let source = sources.get(drive)?;
+        if source.root_path != root
+            || source.stopped.load(Ordering::Acquire)
+            || source.capability_failed.load(Ordering::Acquire)
+            || source.media_unavailable.load(Ordering::Acquire)
+        {
+            self.listing_discards.count(ListingDiscard::Stale);
+            return None;
+        }
+        Some(ListingTarget {
+            source: Arc::downgrade(source),
+            session: source.session.clone(),
+            discards: Arc::clone(&source.listing_discards),
+        })
+    }
+
     #[cfg(feature = "recovery-verification")]
     pub(super) fn verification_watcher_loss(&self, drive: &str, restore: bool) -> Result<(), IndexError> {
         let source = lock(&self.sources)?
@@ -3259,7 +3721,7 @@ impl LocalDirectoryManager {
     pub(super) fn verification_stop(&self, drive: &str) -> Result<bool, IndexError> {
         let source = lock(&self.sources)?.get(drive).cloned();
         let Some(source) = source else { return Ok(true) };
-        source.stopped.store(true, Ordering::Release);
+        source.stop();
         lock(&source.watcher)?.take();
         if source.busy.load(Ordering::Acquire)
             || source.flush_busy.load(Ordering::Acquire)
@@ -3401,7 +3863,7 @@ impl LocalDirectoryManager {
             }
             if !restored {
                 for (source, reader) in sources.iter().zip(&mut readers) {
-                    source.stopped.store(true, Ordering::Release);
+                    source.stop();
                     **reader = None;
                 }
                 return Err(IndexError::Invalid(
@@ -3430,6 +3892,7 @@ impl LocalDirectoryManager {
     pub fn new(namespace: PathBuf) -> Result<Arc<Self>, IndexError> {
         let manager = Arc::new(Self {
             sources: Mutex::new(HashMap::new()),
+            listing_discards: ListingDiscards::default(),
             budget: Arc::new(DiskBudget {
                 namespace,
                 policy_gate: Mutex::new(()),
@@ -3548,6 +4011,7 @@ impl LocalDirectoryManager {
     }
 
     fn tick(self: &Arc<Self>) -> Result<(), IndexError> {
+        self.listing_discards.report("manager");
         let policy = self.budget.policy()?;
         let mut retired = Vec::new();
         let sources: Vec<_> = {
@@ -3573,7 +4037,7 @@ impl LocalDirectoryManager {
                     && !source.flush_busy.load(Ordering::Acquire)
                     && Arc::strong_count(source) == 1
                 {
-                    source.stopped.store(true, Ordering::Release);
+                    source.stop();
                     retired.push(Arc::clone(source));
                     return false;
                 }
@@ -3597,6 +4061,7 @@ impl LocalDirectoryManager {
             });
         }
         for source in sources {
+            source.listing_discards.report(&source.source_id);
             if source.capability_failed.load(Ordering::Acquire) || source.media_unavailable.load(Ordering::Acquire) {
                 continue;
             }
@@ -3639,6 +4104,8 @@ impl LocalDirectoryManager {
                                 .and_then(|()| task_source.reconcile(&budget, &scans));
                             if let Err(error) = &result {
                                 task_source.fail(error, &budget);
+                            } else {
+                                task_source.process_listing_feedback();
                             }
                             result
                         })
@@ -3651,13 +4118,8 @@ impl LocalDirectoryManager {
                     source.flush_busy.store(false, Ordering::Release);
                 }
             }
-            let required = lock(&source.observations)?.verification_required || source.watcher_failed.load(Ordering::Acquire);
+            let interval = source.effective_verification_seconds(&policy)?;
             let status = lock(&source.status)?;
-            let interval = if required {
-                policy.degraded_verification_seconds
-            } else {
-                policy.healthy_verification_seconds
-            };
             let due = status.verification_due(
                 Instant::now(),
                 Duration::from_secs(interval as u64),
@@ -3740,7 +4202,7 @@ impl LocalDirectoryManager {
                         previous.invalidate()?;
                         return Err(IndexError::QueryBusy);
                     }
-                    previous.stopped.store(true, Ordering::Release);
+                    previous.stop();
                     previous.close_idle(&self.budget)?;
                     sources.remove(&drive);
                 }
@@ -3904,7 +4366,7 @@ impl Drop for LocalDirectoryManager {
     fn drop(&mut self) {
         if let Ok(sources) = self.sources.lock() {
             for source in sources.values() {
-                source.stopped.store(true, Ordering::Release);
+                source.stop();
             }
         }
     }
@@ -3912,6 +4374,471 @@ impl Drop for LocalDirectoryManager {
 
 #[cfg(test)]
 mod tests {
+    fn listing_source() -> (tempfile::TempDir, Arc<LocalDirectoryManager>, Arc<LocalSource>, ListingTarget) {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("Parent/known")).unwrap();
+        std::fs::create_dir(root.join("Other")).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let source = LocalSource::new(root, manager.storage_directory());
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
+        source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_none());
+        let target = ListingTarget {
+            source: Arc::downgrade(&source),
+            session: source.session.clone(),
+            discards: source.listing_discards.clone(),
+        };
+        (temporary, manager, source, target)
+    }
+
+    fn observation_state(source: &LocalSource) -> (u64, u64, bool, bool, usize, usize) {
+        let observations = lock(&source.observations).unwrap();
+        (
+            observations.epoch,
+            observations.sequence,
+            observations.verification_required,
+            observations.uncertain,
+            observations.pending.len(),
+            observations.barriers.len(),
+        )
+    }
+
+    #[test]
+    fn listing_known_prefix_is_inert_and_missing_child_uses_safe_reconciliation() {
+        let (_temporary, manager, source, target) = listing_source();
+        let before = observation_state(&source);
+        let revision = lock(&source.writer).unwrap().as_ref().unwrap().status().unwrap().accepted_revision;
+        for truncated in [false, true] {
+            target.submit("Parent".into(), vec!["Parent/known".into()], truncated);
+            source.process_listing_feedback();
+            assert_eq!(observation_state(&source), before);
+            assert_eq!(
+                lock(&source.writer).unwrap().as_ref().unwrap().status().unwrap().accepted_revision,
+                revision
+            );
+        }
+        std::fs::create_dir_all(source.root_path.join("Parent/new/nested")).unwrap();
+        target.submit("Parent".into(), vec!["Parent/new".into()], false);
+        source.process_listing_feedback();
+        {
+            let observations = lock(&source.observations).unwrap();
+            assert_eq!(observations.sequence, before.1 + 1);
+            assert!(observations.verification_required);
+            assert!(matches!(&observations.pending[0].1, DirectoryMutation::ReadParent { path } if path == "Parent"));
+        }
+        assert!(!lock(&source.writer)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .contains_directory(1, "Parent/new")
+            .unwrap());
+        source.flush(&manager.budget).unwrap();
+        {
+            let writer = lock(&source.writer).unwrap();
+            let index = writer.as_ref().unwrap();
+            assert_eq!(index.status().unwrap().accepted_revision, revision + 1);
+            assert!(index.scan_parent_pending(1, "Parent").unwrap());
+        }
+        source.reconcile(&manager.budget, &manager.scans).unwrap();
+        assert!(lock(&source.writer)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .contains_directory(1, "Parent/new/nested")
+            .unwrap());
+        target.submit("Parent".into(), vec!["Parent/unindexable".into()], false);
+        assert!(lock(&source.listing_feedback).unwrap().queued.is_empty());
+        assert_eq!(observation_state(&source).1, before.1 + 1);
+        source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.listing_feedback).unwrap().suppressed.is_empty());
+        assert!(!lock(&source.observations).unwrap().verification_required);
+    }
+
+    #[test]
+    fn listing_unindexable_hint_is_suppressed_until_complete_pass() {
+        let (_temporary, manager, source, target) = listing_source();
+        let before = observation_state(&source).1;
+        for _ in 0..3 {
+            target.submit("Parent".into(), vec!["Parent/not-present".into()], false);
+            source.process_listing_feedback();
+            source.flush(&manager.budget).unwrap();
+            source.reconcile(&manager.budget, &manager.scans).unwrap();
+        }
+        assert_eq!(observation_state(&source).1, before + 1);
+        source.scan(&manager.budget).unwrap();
+        target.submit("Parent".into(), vec!["Parent/not-present".into()], false);
+        source.process_listing_feedback();
+        assert_eq!(observation_state(&source).1, before + 2);
+    }
+
+    #[test]
+    fn listing_final_admission_rejects_scan_revision_and_observation_races() {
+        for transition in ["scan", "revision", "observation", "stop", "media", "suppression"] {
+            let (_temporary, _manager, source, _target) = listing_source();
+            let before = observation_state(&source);
+            let entry = feedback_entry("Parent", &["Parent/new"]);
+            let cancelled = lock(&source.observations).unwrap().required_pending.clone();
+            let result = source.check_listing_feedback_with(&entry, cancelled, || match transition {
+                "scan" => {
+                    lock(&source.writer).unwrap().as_mut().unwrap().prepare_scan().unwrap();
+                }
+                "revision" => {
+                    lock(&source.writer)
+                        .unwrap()
+                        .as_mut()
+                        .unwrap()
+                        .mutate_path(&DirectoryMutation::ReadParent { path: "Other".into() })
+                        .unwrap();
+                }
+                "observation" => {
+                    lock(&source.observations)
+                        .unwrap()
+                        .enqueue(
+                            DirectoryMutation::ReadParent { path: "Other".into() },
+                            limit("max_pending_observations").unwrap(),
+                            limit("max_observation_bytes").unwrap(),
+                        )
+                        .unwrap();
+                }
+                "stop" => source.stop(),
+                "media" => source.media_unavailable.store(true, Ordering::Release),
+                "suppression" => {
+                    let mut state = lock(&source.listing_feedback).unwrap();
+                    state.suppressed.insert("Parent".into());
+                    state.suppressed_bytes = "Parent".len();
+                }
+                _ => unreachable!(),
+            });
+            assert!(result.is_err(), "{transition}");
+            if transition == "observation" {
+                assert_eq!(observation_state(&source).1, before.1 + 1);
+                assert_eq!(lock(&source.observations).unwrap().pending.len(), 1);
+            } else {
+                assert_eq!(observation_state(&source), before, "{transition}");
+            }
+        }
+    }
+
+    #[test]
+    fn listing_inflight_duplicate_cannot_bypass_suppression() {
+        let (_temporary, manager, source, target) = listing_source();
+        target.submit("Parent".into(), vec!["Parent/missing".into()], false);
+        let entry = InFlightListing {
+            source: &source,
+            entry: lock(&source.listing_feedback).unwrap().take().unwrap(),
+        };
+        let cancelled = lock(&source.observations).unwrap().required_pending.clone();
+        source
+            .check_listing_feedback_with(&entry.entry, cancelled, || {
+                target.submit("Parent".into(), vec!["Parent/missing".into()], false);
+            })
+            .unwrap_or_else(|_| panic!("initial hint rejected"));
+        drop(entry);
+        let before = observation_state(&source).1;
+        source.flush(&manager.budget).unwrap();
+        source.reconcile(&manager.budget, &manager.scans).unwrap();
+        source.process_listing_feedback();
+        assert_eq!(observation_state(&source).1, before);
+        assert_eq!(lock(&source.listing_feedback).unwrap().bytes, 0);
+    }
+
+    #[test]
+    fn listing_worker_defers_to_required_work_and_processes_one_entry() {
+        let (_temporary, manager, source, target) = listing_source();
+        source.flush_busy.store(true, Ordering::Release);
+        let _ownership = UpdateOwnership {
+            source: source.clone(),
+            _permit: manager.updates.clone().try_acquire_owned().unwrap(),
+        };
+        target.submit("Parent".into(), vec!["Parent/absent".into()], false);
+        target.submit("Other".into(), vec!["Other/absent".into()], false);
+        let before = observation_state(&source).1;
+        source.process_listing_feedback();
+        assert_eq!(observation_state(&source).1, before + 1);
+        assert_eq!(lock(&source.listing_feedback).unwrap().queued.len(), 1);
+        source.process_listing_feedback();
+        assert_eq!(lock(&source.listing_feedback).unwrap().queued.len(), 1);
+        source.flush(&manager.budget).unwrap();
+        source.reconcile(&manager.budget, &manager.scans).unwrap();
+        assert!(!lock(&source.observations).unwrap().required_pending.load(Ordering::Acquire));
+        source.process_listing_feedback();
+        assert_eq!(observation_state(&source).1, before + 2);
+        assert!(lock(&source.listing_feedback).unwrap().queued.is_empty());
+    }
+
+    #[test]
+    fn listing_capacity_preflight_does_not_invalidate_observations() {
+        for rejection in ["count", "bytes", "barrier_count", "barrier_bytes", "sequence"] {
+            let mut observations = Observations::default();
+            match rejection {
+                "count" => {
+                    observations
+                        .pending
+                        .push_back((0, DirectoryMutation::ReadParent { path: "a".into() }, 1));
+                }
+                "bytes" => observations.bytes = 8,
+                "barrier_count" => observations.barriers = vec![(0, "x".into())],
+                "barrier_bytes" => observations.barriers = vec![(0, "long-path".into())],
+                "sequence" => observations.sequence = u64::MAX,
+                _ => unreachable!(),
+            }
+            let sequence = observations.sequence;
+            let maximum = if rejection == "barrier_bytes" { 2 } else { 1 };
+            assert!(
+                !observations.can_admit(&DirectoryMutation::ReadParent { path: "parent".into() }, maximum, 8),
+                "{rejection}"
+            );
+            assert_eq!(observations.sequence, sequence);
+            assert_eq!(observations.epoch, 0);
+            assert!(!observations.uncertain);
+            assert!(!observations.verification_required);
+            assert!(!observations.required_pending.load(Ordering::Acquire));
+        }
+        let (_temporary, _manager, source, target) = listing_source();
+        target.submit("Parent".into(), vec!["Parent/new".into()], false);
+        let before = observation_state(&source);
+        {
+            let mut state = lock(&source.listing_feedback).unwrap();
+            for number in 0..limit("max_pending_observations").unwrap() {
+                let path = format!("suppressed-{number}");
+                state.suppressed_bytes += path.len();
+                state.suppressed.insert(path);
+            }
+        }
+        source.process_listing_feedback();
+        assert_eq!(observation_state(&source), before);
+        assert_eq!(lock(&source.listing_feedback).unwrap().bytes, 0);
+    }
+
+    #[test]
+    fn listing_optional_failures_release_payload_without_source_failure() {
+        let (_temporary, _manager, source, target) = listing_source();
+        let before = observation_state(&source);
+        let retry = lock(&source.status).unwrap().retry_at;
+        target.submit("Parent".into(), vec!["Parent/new".into()], false);
+        let writer = lock(&source.writer).unwrap();
+        source.process_listing_feedback();
+        drop(writer);
+        assert_eq!(observation_state(&source), before);
+        assert_eq!(lock(&source.status).unwrap().retry_at, retry);
+        assert_eq!(lock(&source.listing_feedback).unwrap().bytes, 0);
+        let deadline = ListingDeadline {
+            expires: Instant::now(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
+        assert!(source
+            .admit_listing_feedback(&feedback_entry("Parent", &["Parent/new"]), 1, 0, &deadline)
+            .is_err());
+        assert_eq!(observation_state(&source), before);
+        target.submit("Parent".into(), vec!["Parent/new".into()], false);
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _entry = InFlightListing {
+                source: &source,
+                entry: lock(&source.listing_feedback).unwrap().take().unwrap(),
+            };
+            panic!("injected optional worker panic");
+        }));
+        assert!(outcome.is_err());
+        assert_eq!(lock(&source.listing_feedback).unwrap().bytes, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn listing_redirect_replacements_never_add_rows() {
+        use std::os::unix::fs::symlink;
+        for replace_parent in [false, true] {
+            let (temporary, manager, source, target) = listing_source();
+            let outside = temporary.path().join("outside");
+            std::fs::create_dir_all(outside.join("new")).unwrap();
+            std::fs::create_dir(source.root_path.join("Parent/new")).unwrap();
+            target.submit("Parent".into(), vec!["Parent/new".into()], false);
+            if replace_parent {
+                std::fs::remove_dir_all(source.root_path.join("Parent")).unwrap();
+                symlink(&outside, source.root_path.join("Parent")).unwrap();
+            } else {
+                std::fs::remove_dir(source.root_path.join("Parent/new")).unwrap();
+                symlink(&outside, source.root_path.join("Parent/new")).unwrap();
+            }
+            source.process_listing_feedback();
+            source.flush(&manager.budget).unwrap();
+            source.reconcile(&manager.budget, &manager.scans).unwrap();
+            assert!(!lock(&source.writer)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .contains_directory(1, "Parent/new")
+                .unwrap());
+        }
+    }
+
+    #[tokio::test]
+    async fn listing_weak_targets_do_not_prevent_idle_cleanup() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let source = LocalSource::new(root.clone(), manager.storage_directory());
+        lock(&source.status).unwrap().accessed = Instant::now() - Duration::from_secs(limit("idle_release_seconds").unwrap() as u64 + 1);
+        lock(&manager.sources).unwrap().insert("drive".into(), source);
+        let target = manager.try_listing_target("drive", &root).unwrap();
+        target.submit("".into(), vec!["child".into()], false);
+        assert_eq!(target.source.strong_count(), 1);
+        manager.tick().unwrap();
+        assert!(lock(&manager.sources).unwrap().is_empty());
+        assert!(manager.try_listing_target("drive", &root).is_none());
+    }
+
+    fn feedback_entry(parent: &str, children: &[&str]) -> ListingFeedbackEntry {
+        ListingFeedbackEntry {
+            parent: parent.into(),
+            children: children.iter().map(|path| (*path).into()).collect(),
+            truncated: false,
+            bytes: parent.len() + children.iter().map(|path| path.len()).sum::<usize>(),
+        }
+    }
+
+    #[test]
+    fn listing_queue_bounds_coalescing_and_inflight_accounting() {
+        let mut feedback = ListingFeedback::default();
+        feedback
+            .submit(feedback_entry("a", &["a/one"]), 2, 20)
+            .unwrap_or_else(|_| panic!("initial entry rejected"));
+        feedback
+            .submit(feedback_entry("a", &["a/two", "a/three"]), 2, 20)
+            .unwrap_or_else(|_| panic!("coalescing rejected"));
+        assert_eq!(feedback.bytes, 13);
+        assert_eq!(feedback.queued.len(), 1);
+        let entry = feedback.take().unwrap();
+        assert_eq!(feedback.bytes, entry.bytes);
+        feedback
+            .submit(feedback_entry("b", &["b/new"]), 2, 20)
+            .unwrap_or_else(|_| panic!("second entry rejected"));
+        assert!(matches!(
+            feedback.submit(feedback_entry("c", &[]), 2, 20),
+            Err(ListingDiscard::Capacity)
+        ));
+        assert!(matches!(
+            feedback.submit(feedback_entry("b", &["b/too-much-payload"]), 2, 20),
+            Err(ListingDiscard::Capacity)
+        ));
+        feedback.clear();
+        assert_eq!(feedback.bytes, entry.bytes);
+        feedback.release(&entry);
+        assert_eq!(feedback.bytes, 0);
+        assert_eq!(feedback.in_flight, 0);
+        assert!(matches!(
+            feedback.submit(feedback_entry("huge", &["huge/child"]), 2, 1),
+            Err(ListingDiscard::Capacity)
+        ));
+        assert!(matches!(
+            feedback.submit(
+                ListingFeedbackEntry {
+                    children: vec!["x".into(); ROW_BATCH_SIZE + 1],
+                    ..feedback_entry("", &[])
+                },
+                2,
+                1000
+            ),
+            Err(ListingDiscard::Capacity)
+        ));
+        feedback.suppressed.insert("a".into());
+        feedback.suppressed_bytes = 1;
+        assert!(matches!(
+            feedback.submit(feedback_entry("a", &[]), 2, 20),
+            Err(ListingDiscard::Suppressed)
+        ));
+        assert!(matches!(
+            feedback.submit(feedback_entry("b", &[]), 1, 20),
+            Err(ListingDiscard::Capacity)
+        ));
+        feedback.clear_suppression();
+        assert!(feedback.submit(feedback_entry("a", &[]), 2, 20).is_ok());
+        feedback.suppressed.insert("s".repeat(20));
+        feedback.suppressed_bytes = 20;
+        assert!(matches!(
+            feedback.submit(feedback_entry("b", &[]), 2, 20),
+            Err(ListingDiscard::Capacity)
+        ));
+    }
+
+    #[test]
+    fn listing_targets_never_start_or_retain_sources_and_do_not_wait() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        assert!(manager.try_listing_target("drive", &root).is_none());
+        assert!(!manager.storage_directory().exists());
+        let source = LocalSource::new(root.clone(), manager.storage_directory());
+        lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+        let accessed = lock(&source.status).unwrap().accessed;
+        let count = Arc::strong_count(&source);
+        let target = manager.try_listing_target("drive", &root).unwrap();
+        assert_eq!(Arc::strong_count(&source), count);
+        assert!(manager.try_listing_target("drive", temporary.path()).is_none());
+        let sources = lock(&manager.sources).unwrap();
+        assert!(manager.try_listing_target("drive", &root).is_none());
+        drop(sources);
+        let feedback = lock(&source.listing_feedback).unwrap();
+        target.submit("".into(), vec!["child".into()], false);
+        drop(feedback);
+        assert!(lock(&source.listing_feedback).unwrap().queued.is_empty());
+        target.submit("".into(), vec!["child".into()], false);
+        assert_eq!(lock(&source.listing_feedback).unwrap().queued.len(), 1);
+        assert_eq!(Arc::strong_count(&source), count);
+        assert_eq!(lock(&source.status).unwrap().accessed, accessed);
+        assert!(lock(&source.writer).unwrap().is_none());
+        assert!(!manager.storage_directory().exists());
+        let observations = lock(&source.observations).unwrap();
+        assert_eq!(
+            (
+                observations.epoch,
+                observations.sequence,
+                observations.verification_required,
+                observations.uncertain
+            ),
+            (0, 0, false, false)
+        );
+        drop(observations);
+        let stale = ListingTarget {
+            session: "replaced".into(),
+            source: target.source.clone(),
+            discards: target.discards.clone(),
+        };
+        stale.submit("other".into(), vec![], false);
+        assert_eq!(lock(&source.listing_feedback).unwrap().queued.len(), 1);
+        for unavailable in [&source.capability_failed, &source.media_unavailable] {
+            unavailable.store(true, Ordering::Release);
+            assert!(manager.try_listing_target("drive", &root).is_none());
+            target.submit("unavailable".into(), vec![], false);
+            assert_eq!(lock(&source.listing_feedback).unwrap().queued.len(), 1);
+            unavailable.store(false, Ordering::Release);
+        }
+        for number in 0..=limit("max_pending_observations").unwrap() {
+            target.submit(format!("parent-{number}"), vec![], false);
+        }
+        assert_eq!(
+            lock(&source.listing_feedback).unwrap().queued.len(),
+            limit("max_pending_observations").unwrap()
+        );
+        target.submit("p".repeat(limit("max_observation_bytes").unwrap() + 1), vec![], false);
+        assert_eq!(
+            (lock(&source.observations).unwrap().epoch, lock(&source.status).unwrap().accessed),
+            (0, accessed)
+        );
+        let observations = lock(&source.observations).unwrap();
+        assert_eq!(
+            (observations.sequence, observations.verification_required, observations.uncertain),
+            (0, false, false)
+        );
+        drop(observations);
+        source.stop();
+        target.submit("".into(), vec!["child".into()], false);
+        assert!(lock(&source.listing_feedback).unwrap().queued.is_empty());
+        assert!(manager.try_listing_target("drive", &root).is_none());
+    }
+
     #[test]
     fn issue_details_remove_deleted_subtree_after_reconciliation() {
         for parent_hint in [false, true] {
@@ -4135,7 +5062,7 @@ mod tests {
             observations.scan_commits = 0;
         }
         let policy = DirectoryPolicy::defaults().unwrap();
-        let next_cleanup_at = Instant::now() + Duration::from_secs(u64::try_from(policy.degraded_verification_seconds).unwrap());
+        let next_cleanup_at = Instant::now() + inactive_cleanup_interval(&policy).unwrap();
         let budget = Arc::new(DiskBudget {
             namespace: manager.storage_directory().to_path_buf(),
             policy_gate: Mutex::new(()),
@@ -6153,7 +7080,7 @@ mod tests {
             let next_cleanup_at = if cleanup {
                 Instant::now()
             } else {
-                Instant::now() + Duration::from_secs(u64::try_from(policy.degraded_verification_seconds).unwrap())
+                Instant::now() + inactive_cleanup_interval(&policy).unwrap()
             };
             PROBE_STATE.with(|state| state.set((0, space_lost)));
             let budget = Arc::new(DiskBudget {
@@ -6233,10 +7160,77 @@ mod tests {
         assert!(invalid.validate().is_err());
         invalid = policy.clone();
         invalid.degraded_verification_seconds = 3600;
-        assert!(invalid.validate().is_err());
+        assert!(invalid.validate().is_ok());
         let mut serialized = serde_json::to_value(&policy).unwrap();
         serialized["page_cache_kib"] = json!(true);
         assert!(serde_json::from_value::<DirectoryPolicy>(serialized).is_err());
+    }
+
+    #[test]
+    fn effective_verification_interval_caps_degraded_at_healthy() {
+        let mut policy = DirectoryPolicy::defaults().unwrap();
+        policy.healthy_verification_seconds = 60;
+        policy.validate().unwrap();
+        assert_eq!(policy.effective_verification_seconds(true), 60);
+        assert_eq!(policy.effective_verification_seconds(false), 60);
+        policy.degraded_verification_seconds = 30;
+        assert_eq!(policy.effective_verification_seconds(true), 30);
+        assert_eq!(policy.effective_verification_seconds(false), 60);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn network_monitoring_selects_degraded_without_requesting_verification() {
+        let temporary = tempfile::tempdir().unwrap();
+        let source = LocalSource::with_volume(
+            temporary.path().join("root"),
+            temporary.path(),
+            VolumeEvidence {
+                class: super::super::models::DriveType::Network,
+                ..VolumeEvidence::default()
+            },
+        );
+        lock(&source.observations).unwrap().verification_required = false;
+        source.watcher_failed.store(false, Ordering::Release);
+        source.watcher_reconciling.store(false, Ordering::Release);
+        let policy = DirectoryPolicy::defaults().unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                source.effective_verification_seconds(&policy).unwrap(),
+                policy.degraded_verification_seconds
+            );
+            assert!(!lock(&source.observations).unwrap().verification_required);
+        }
+        assert!(source.monitoring_limited_logged.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn inactive_cleanup_cadence_is_independent_of_verification() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut policy = DirectoryPolicy::defaults().unwrap();
+        policy.degraded_verification_seconds = contract().unwrap().policy["degraded_verification_seconds"].maximum;
+        let cadence = Duration::from_secs(limit("inactive_cleanup_interval_seconds").unwrap() as u64);
+        assert_eq!(inactive_cleanup_interval(&policy).unwrap(), cadence);
+        let budget = Arc::new(DiskBudget {
+            namespace: temporary.path().to_path_buf(),
+            policy_gate: Mutex::new(()),
+            state: Mutex::new(DiskState {
+                policy: policy.clone(),
+                reserved: 0,
+                next_cleanup_at: Instant::now(),
+            }),
+            space_probe: |_| Ok(u64::MAX),
+        });
+        let before = Instant::now();
+        drop(budget.reserve().unwrap());
+        let next = lock(&budget.state).unwrap().next_cleanup_at;
+        assert!(next >= before + cadence);
+        assert!(next <= Instant::now() + cadence);
+        policy.inactive_retention_seconds = contract().unwrap().policy["inactive_retention_seconds"].minimum;
+        assert_eq!(
+            inactive_cleanup_interval(&policy).unwrap(),
+            Duration::from_secs(policy.inactive_retention_seconds as u64)
+        );
     }
 
     #[test]
@@ -7758,6 +8752,7 @@ mod tests {
         let verified = lock(&source.status).unwrap().verified;
         let manager = Arc::new(LocalDirectoryManager {
             sources: Mutex::new(HashMap::from([("fixture".into(), Arc::clone(&source))])),
+            listing_discards: ListingDiscards::default(),
             budget,
             scans: Arc::new(Semaphore::new(limit("scan_workers").unwrap())),
             queries: Arc::new(Semaphore::new(limit("query_workers").unwrap())),

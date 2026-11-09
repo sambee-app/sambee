@@ -165,6 +165,7 @@ function createMockPane(overrides: Partial<UseFileBrowserPaneReturn> = {}): UseF
     archiveLoadingMore: false,
     files: testFiles,
     loading: false,
+    navigationPending: false,
     error: null,
     setError: vi.fn(),
 
@@ -516,6 +517,36 @@ describe("FileBrowserPane", () => {
   // --------------------------------------------------------------------------
 
   describe("loading state", () => {
+    it.each([false, true])("overlays navigation progress without replacing the list (compact: %s)", (useCompactLayout) => {
+      const pane = createMockPane();
+      const props = defaultProps({ pane, useCompactLayout });
+      const { rerender } = render(<FileBrowserPane {...props} />);
+      const list = screen.getByTestId("file-list");
+      const listRegion = list.parentElement;
+
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      rerender(<FileBrowserPane {...props} pane={{ ...pane, navigationPending: true }} />);
+
+      const progress = screen.getByRole("progressbar", { name: "app.loading" });
+      expect(progress.parentElement).toBe(listRegion);
+      expect(listRegion).toHaveStyle({ position: "relative" });
+      expect(progress).toHaveStyle({ position: "absolute", top: "0px", pointerEvents: "none" });
+      expect(listRegion).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByTestId("file-list")).toBe(list);
+
+      rerender(<FileBrowserPane {...props} />);
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.getByTestId("file-list")).toBe(list);
+      expect(listRegion).toHaveAttribute("aria-busy", "false");
+    });
+
+    it("uses only the existing spinner during initial loading", () => {
+      const pane = createMockPane({ loading: true, navigationPending: true });
+      render(<FileBrowserPane {...defaultProps({ pane })} />);
+      expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+      expect(screen.queryByRole("progressbar", { name: "app.loading" })).not.toBeInTheDocument();
+    });
+
     it("shows a spinner when loading is true", () => {
       const pane = createMockPane({ loading: true });
       render(<FileBrowserPane {...defaultProps({ pane })} />);

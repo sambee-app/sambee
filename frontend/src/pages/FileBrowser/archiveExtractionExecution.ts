@@ -159,7 +159,7 @@ function toExtractionOutcome(operation: ArchiveOperation): ArchiveExtractionOutc
 }
 
 export function startZipArchiveExtraction(request: ArchiveExtractionRequest): ArchiveExtractionExecution {
-  const { source: location, destination, selectedMemberPaths } = request;
+  const { source: location, destination, selectedMemberPaths, memberBasePath = "" } = request;
   const destinationPath = destination.path;
   if (location.providerId !== "zip") {
     return {
@@ -366,13 +366,14 @@ export function startZipArchiveExtraction(request: ArchiveExtractionRequest): Ar
       localSignal.addEventListener("abort", onLocalAbort, { once: true });
       try {
         const execution =
-          selectedMemberPaths || location.connectionId !== destination.connectionId
+          selectedMemberPaths || memberBasePath || location.connectionId !== destination.connectionId
             ? await api.startLocalArchiveExtraction(
                 location.connectionId,
                 location.source.path,
                 destinationPath,
                 selectedMemberPaths,
-                destination.connectionId
+                destination.connectionId,
+                ...(memberBasePath ? [memberBasePath] : [])
               )
             : await api.startLocalArchiveExtraction(location.connectionId, location.source.path, destinationPath);
         localExecution = { executionId: execution.execution_id, revision: execution.revision };
@@ -394,6 +395,7 @@ export function startZipArchiveExtraction(request: ArchiveExtractionRequest): Ar
         destination_connection_id: destination.connectionId,
         destination_path: destinationPath,
         selected_member_paths: selectedMemberPaths,
+        ...(memberBasePath ? { member_base_path: memberBasePath } : {}),
       });
       operationId = operation.id;
       storeForegroundArchiveOperation(operationId);

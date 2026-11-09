@@ -11,6 +11,7 @@ from sqlmodel.pool import StaticPool
 
 import app.api.system_settings as system_settings_api
 import app.db.database as database_module
+from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
 from app.core.system_setting_definitions import SystemSettingKey
 from app.db.migrations import _apply_per_field_system_settings_migration
 from app.models.connection import Connection
@@ -68,16 +69,19 @@ def test_directory_index_policy_updates_are_scoped_and_revisioned(client, auth_h
     assert client.get("/api/admin/settings/directory-index/backend", headers=auth_headers_admin).json()["revision"] == 1
 
 
-def test_directory_index_policy_correlated_update_rolls_back(client, auth_headers_admin):
+def test_directory_index_policy_shorter_healthy_override_loads(client, auth_headers_admin):
+    initial = client.get("/api/admin/settings/directory-index/backend", headers=auth_headers_admin).json()
+    assert initial["policy"]["healthy_verification_seconds"] == DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].default
     response = client.put(
         "/api/admin/settings/directory-index/backend",
         headers=auth_headers_admin,
-        json={"field": "healthy_verification_seconds", "value": 60},
+        json={"field": "healthy_verification_seconds", "value": 600},
     )
-    assert response.status_code == 400
+    assert response.status_code == 200
     policy = client.get("/api/admin/settings/directory-index/backend", headers=auth_headers_admin).json()
-    assert policy["revision"] == 0
-    assert policy["policy"]["healthy_verification_seconds"] == 900
+    assert policy["revision"] == 1
+    assert policy["policy"]["healthy_verification_seconds"] == 600
+    assert policy["policy"]["degraded_verification_seconds"] == DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].default
 
 
 def test_directory_index_policy_rejects_extra_browser_values(client, auth_headers_admin):

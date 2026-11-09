@@ -43,7 +43,6 @@
 
 - Only ever use the following connection for testing in the VS Code browser: http://localhost:3000/browse/smb/demo
 
-## Backend Python
+## Backends
 
-- Never activate the virtual environment with `source`.
-- Run `scripts/setup-backend-venv` only to create or rebuild that environment.
+- Treat SMB connections and local drives as backends of equivalent importance. As a rule, changes to the one should be mirrored in the other.

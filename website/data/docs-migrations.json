@@ -10,7 +10,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -23,7 +23,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -36,7 +36,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -49,7 +49,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -62,7 +62,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -75,7 +75,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -88,7 +88,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -101,7 +101,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -114,7 +114,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -127,7 +127,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -140,7 +140,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -153,92 +153,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
-        "unversioned"
-      ]
-    },
-    {
-      "source": "user-guide/viewing-and-editing-files/edit-markdown/",
-      "target": "user-guide/view-and-edit-files/edit-markdown/",
-      "scopes": [
-        "0.7",
-        "0.8",
-        "0.9",
-        "1.0",
-        "2.0",
-        "3.0",
-        "unversioned"
-      ]
-    },
-    {
-      "source": "user-guide/viewing-and-editing-files/file-locking-and-conflict-resolution/",
-      "target": "user-guide/view-and-edit-files/file-locking-and-conflict-resolution/",
-      "scopes": [
-        "0.7",
-        "0.8",
-        "0.9",
-        "1.0",
-        "2.0",
-        "3.0",
-        "unversioned"
-      ]
-    },
-    {
-      "source": "user-guide/viewing-and-editing-files/view-images-and-read-documents/",
-      "target": "user-guide/view-and-edit-files/view-images-and-read-documents/",
-      "scopes": [
-        "0.7",
-        "0.8",
-        "0.9",
-        "1.0",
-        "2.0",
-        "3.0",
-        "unversioned"
-      ]
-    },
-    {
-      "source": "user-guide/viewing-and-editing-files/view-and-edit-text-files/",
-      "target": "user-guide/view-and-edit-files/view-and-edit-text-files/",
-      "scopes": [
-        "0.8",
-        "0.9",
-        "1.0",
-        "2.0",
-        "3.0",
-        "unversioned"
-      ]
-    },
-    {
-      "source": "user-guide/viewing-and-editing-files/recover-unsaved-edits/",
-      "target": "user-guide/view-and-edit-files/recover-unsaved-edits/",
-      "scopes": [
-        "0.9",
-        "1.0",
-        "2.0",
-        "3.0",
-        "unversioned"
-      ]
-    },
-    {
-      "source": "user-guide/viewing-and-editing-files/download-and-upload-files/",
-      "target": "user-guide/organize-and-transfer-files/download-and-upload-files/",
-      "scopes": [
-        "1.0",
-        "2.0",
-        "3.0",
-        "unversioned"
-      ]
-    },
-    {
-      "source": "user-guide/viewing-and-editing-files/edit-files-in-desktop-apps/",
-      "target": "user-guide/use-local-drives-and-desktop-apps/edit-files-in-desktop-apps/",
-      "scopes": [
-        "0.7",
-        "0.8",
-        "0.9",
-        "1.0",
-        "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -251,7 +166,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -264,7 +179,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -277,7 +192,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -290,7 +205,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -301,7 +216,7 @@
         "0.9",
         "1.0",
         "2.0",
-        "3.0",
+        "2.1",
         "unversioned"
       ]
     },
@@ -310,7 +225,92 @@
       "target": "user-guide/organize-and-transfer-files/share-files-on-phones-and-tablets/",
       "scopes": [
         "2.0",
-        "3.0",
+        "2.1",
+        "unversioned"
+      ]
+    },
+    {
+      "source": "user-guide/viewing-and-editing-files/download-and-upload-files/",
+      "target": "user-guide/organize-and-transfer-files/download-and-upload-files/",
+      "scopes": [
+        "1.0",
+        "2.0",
+        "2.1",
+        "unversioned"
+      ]
+    },
+    {
+      "source": "user-guide/viewing-and-editing-files/edit-files-in-desktop-apps/",
+      "target": "user-guide/use-local-drives-and-desktop-apps/edit-files-in-desktop-apps/",
+      "scopes": [
+        "0.7",
+        "0.8",
+        "0.9",
+        "1.0",
+        "2.0",
+        "2.1",
+        "unversioned"
+      ]
+    },
+    {
+      "source": "user-guide/viewing-and-editing-files/edit-markdown/",
+      "target": "user-guide/view-and-edit-files/edit-markdown/",
+      "scopes": [
+        "0.7",
+        "0.8",
+        "0.9",
+        "1.0",
+        "2.0",
+        "2.1",
+        "unversioned"
+      ]
+    },
+    {
+      "source": "user-guide/viewing-and-editing-files/file-locking-and-conflict-resolution/",
+      "target": "user-guide/view-and-edit-files/file-locking-and-conflict-resolution/",
+      "scopes": [
+        "0.7",
+        "0.8",
+        "0.9",
+        "1.0",
+        "2.0",
+        "2.1",
+        "unversioned"
+      ]
+    },
+    {
+      "source": "user-guide/viewing-and-editing-files/recover-unsaved-edits/",
+      "target": "user-guide/view-and-edit-files/recover-unsaved-edits/",
+      "scopes": [
+        "0.9",
+        "1.0",
+        "2.0",
+        "2.1",
+        "unversioned"
+      ]
+    },
+    {
+      "source": "user-guide/viewing-and-editing-files/view-and-edit-text-files/",
+      "target": "user-guide/view-and-edit-files/view-and-edit-text-files/",
+      "scopes": [
+        "0.8",
+        "0.9",
+        "1.0",
+        "2.0",
+        "2.1",
+        "unversioned"
+      ]
+    },
+    {
+      "source": "user-guide/viewing-and-editing-files/view-images-and-read-documents/",
+      "target": "user-guide/view-and-edit-files/view-images-and-read-documents/",
+      "scopes": [
+        "0.7",
+        "0.8",
+        "0.9",
+        "1.0",
+        "2.0",
+        "2.1",
         "unversioned"
       ]
     }

@@ -43,6 +43,9 @@ pub const SCHEMA: &str = include_str!("../../../../shared/directory-index/schema
 const FTS_SCHEMA: &str = include_str!("../../../../shared/directory-index/fts.sql");
 const GENERATION_VALIDATION: &str = include_str!("../../../../shared/directory-index/validate-generations.sql");
 const SCAN_FILE_ID_UPDATE_SQL: &str = "file_id = ?3, processed = CASE WHEN scan_queue.file_id IS NOT NULL AND scan_queue.file_id <> ?3 THEN 0 ELSE scan_queue.processed END WHERE ?3 IS NOT NULL AND scan_queue.file_id IS NOT ?3";
+const ACCEPTED_GENERATION_SQL: &str = "SELECT g.id, m.accepted_revision FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted' AND g.scan_active = 0";
+const PENDING_PARENT_SQL: &str = "SELECT EXISTS(SELECT 1 FROM scan_queue WHERE generation_id = ?1 AND path = ?2 AND processed = 0)";
+const LISTING_PARENT_SQL: &str = "SELECT (?2 = '' OR EXISTS(SELECT 1 FROM directories WHERE generation_id = ?1 AND path = ?2))";
 pub const UNICODE_CONTRACT: &str = include_str!("../../../../shared/directory-index/unicode.json");
 #[cfg(unix)]
 const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
@@ -1186,11 +1189,9 @@ impl DirectoryIndex {
 
     #[cfg(test)]
     pub(super) fn scan_parent_pending(&self, generation_id: i64, parent: &str) -> Result<bool, IndexError> {
-        Ok(self.writer.query_row(
-            "SELECT EXISTS(SELECT 1 FROM scan_queue WHERE generation_id = ? AND path = ? AND processed = 0)",
-            params![generation_id, parent],
-            |row| row.get(0),
-        )?)
+        Ok(self
+            .writer
+            .query_row(PENDING_PARENT_SQL, params![generation_id, parent], |row| row.get(0))?)
     }
 
     pub(super) fn requeue_completed_scan_batch(&mut self, generation_id: i64) -> Result<bool, IndexError> {
@@ -1910,14 +1911,20 @@ impl DirectoryIndex {
     }
 
     pub fn accepted_generation(&self) -> Result<Option<i64>, IndexError> {
-        Ok(self
-            .writer
-            .query_row(
-                "SELECT g.id FROM generations g JOIN source_metadata m ON m.selected_generation = g.id WHERE g.state = 'accepted' AND g.scan_active = 0",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?)
+        Ok(self.writer.query_row(ACCEPTED_GENERATION_SQL, [], |row| row.get(0)).optional()?)
+    }
+
+    pub(super) fn listing_admission_current(
+        &mut self,
+        parent: &str,
+        generation_id: i64,
+        accepted_revision: i64,
+        deadline: &ListingDeadline,
+    ) -> Result<bool, IndexError> {
+        deadline.run(&mut self.writer, |connection| {
+            let current = listing_version(connection, parent, deadline)?;
+            Ok(current == Some((generation_id, accepted_revision)))
+        })
     }
 
     pub(super) fn mutation_generations(&self) -> Result<Vec<i64>, IndexError> {
@@ -2295,6 +2302,74 @@ pub struct DirectoryIndexReader {
     file_identity: (u64, u64, u64),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ListingCheck {
+    Skip,
+    Known,
+    Missing { generation_id: i64, accepted_revision: i64 },
+}
+
+#[derive(Clone)]
+pub(super) struct ListingDeadline {
+    pub expires: Instant,
+    pub cancelled: Arc<AtomicBool>,
+}
+
+impl ListingDeadline {
+    pub(super) fn check(&self, connection: &Connection) -> Result<(), IndexError> {
+        if self.cancelled.load(Ordering::Acquire) || Instant::now() >= self.expires {
+            return Err(IndexError::Interrupted);
+        }
+        connection.busy_timeout(self.expires.saturating_duration_since(Instant::now()))?;
+        Ok(())
+    }
+
+    fn run<T>(&self, connection: &mut Connection, query: impl FnOnce(&mut Connection) -> Result<T, IndexError>) -> Result<T, IndexError> {
+        struct Restore<'a>(&'a mut Connection);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                if self.0.progress_handler(SQL_PROGRESS_STEPS, None::<fn() -> bool>).is_err()
+                    || self.0.busy_timeout(SQL_BUSY_TIMEOUT).is_err()
+                {
+                    log::error!("event=directory_feedback_sql_cleanup_failed");
+                }
+            }
+        }
+        let restore = Restore(connection);
+        self.check(restore.0)?;
+        let deadline = self.clone();
+        restore.0.progress_handler(
+            SQL_PROGRESS_STEPS,
+            Some(move || deadline.cancelled.load(Ordering::Acquire) || Instant::now() >= deadline.expires),
+        )?;
+        let result = query(restore.0);
+        if self.cancelled.load(Ordering::Acquire)
+            || Instant::now() >= self.expires
+            || matches!(&result, Err(IndexError::Sql(rusqlite::Error::SqliteFailure(code, _))) if code.code == rusqlite::ErrorCode::OperationInterrupted)
+        {
+            return Err(IndexError::Interrupted);
+        }
+        let result = result?;
+        self.check(restore.0)?;
+        Ok(result)
+    }
+}
+
+fn listing_version(connection: &Connection, parent: &str, deadline: &ListingDeadline) -> Result<Option<(i64, i64)>, IndexError> {
+    deadline.check(connection)?;
+    let version = connection
+        .query_row(ACCEPTED_GENERATION_SQL, [], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })
+        .optional()?;
+    let Some((generation, _)) = version else { return Ok(None) };
+    deadline.check(connection)?;
+    let present: bool = connection.query_row(LISTING_PARENT_SQL, params![generation, parent], |row| row.get(0))?;
+    deadline.check(connection)?;
+    let pending: bool = connection.query_row(PENDING_PARENT_SQL, params![generation, parent], |row| row.get(0))?;
+    Ok(version.filter(|_| present && !pending))
+}
+
 struct PooledReader {
     connection: Connection,
     identity: (u64, u64, u64),
@@ -2384,6 +2459,42 @@ impl Drop for DirectoryIndex {
 }
 
 impl DirectoryIndexReader {
+    pub(super) fn check_listing(&self, parent: &str, children: &[String], deadline: &ListingDeadline) -> Result<ListingCheck, IndexError> {
+        if !parent.is_empty() {
+            validate_directory_path(parent)?;
+        }
+        let maximum_bytes = super::directory_manager::limit("max_observation_bytes")?;
+        if children.len() > ROW_BATCH_SIZE || parent.len() > maximum_bytes {
+            return Err(IndexError::Invalid("Listing feedback exceeds its count or byte limit."));
+        }
+        let mut bytes = parent.len();
+        let mut unique = BTreeSet::new();
+        for child in children {
+            validate_directory_path(child)?;
+            if child.rsplit_once('/').map_or("", |(ancestor, _)| ancestor) != parent || child.len() > maximum_bytes - bytes {
+                return Err(IndexError::Invalid("Listing feedback must contain bounded immediate child paths."));
+            }
+            bytes += child.len();
+            unique.insert(child);
+        }
+        let encoded = serde_json::to_string(&unique).map_err(|_| IndexError::Invalid("Listing feedback paths could not be encoded."))?;
+        let mut connection = self.checkout()?;
+        deadline.run(&mut connection, |connection| {
+            connection.pragma_update(None, "cache_size", -self.page_cache_kib)?;
+            let transaction = connection.transaction()?;
+            let Some((generation_id, accepted_revision)) = listing_version(&transaction, parent, deadline)? else {
+                return Ok(ListingCheck::Skip);
+            };
+            deadline.check(&transaction)?;
+            let missing: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM json_each(?2) children LEFT JOIN directories d ON d.generation_id = ?1 AND d.path = children.value WHERE d.id IS NULL)",
+                params![generation_id, encoded],
+                |row| row.get(0),
+            )?;
+            Ok(if missing { ListingCheck::Missing { generation_id, accepted_revision } } else { ListingCheck::Known })
+        })
+    }
+
     fn checkout(&self) -> Result<ReaderCheckout<'_>, IndexError> {
         let directory = self
             .path
@@ -2528,6 +2639,162 @@ impl DirectoryIndexReader {
 
 #[cfg(test)]
 mod tests {
+    fn feedback_deadline() -> ListingDeadline {
+        ListingDeadline {
+            expires: Instant::now() + Duration::from_secs(1),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[test]
+    fn listing_sql_interruption_restores_connection_and_writes_nothing() {
+        let temporary = tempfile::tempdir().unwrap();
+        let index = DirectoryIndex::open(
+            &temporary.path().join("private/source.sqlite3"),
+            SourceKind::Local,
+            &json!({"root": "interruption"}),
+        )
+        .unwrap();
+        let reader = index.reader();
+        let before = index.writer.total_changes();
+        let mut connection = reader.checkout().unwrap();
+        let deadline = feedback_deadline();
+        let result = deadline.run(&mut connection, |connection| {
+            deadline.cancelled.store(true, Ordering::Release);
+            let total: i64 = connection.query_row(
+                "WITH RECURSIVE work(value) AS (VALUES(0) UNION ALL SELECT value + 1 FROM work WHERE value < 100000) SELECT sum(value) FROM work",
+                [], |row| row.get(0),
+            )?;
+            Ok(total)
+        });
+        assert!(matches!(result, Err(IndexError::Interrupted)));
+        assert_eq!(
+            connection
+                .query_row::<i64, _, _>("PRAGMA busy_timeout", [], |row| row.get(0))
+                .unwrap(),
+            SQL_BUSY_TIMEOUT.as_millis() as i64
+        );
+        assert!(connection.is_autocommit());
+        assert_eq!(index.writer.total_changes(), before);
+        drop(connection);
+        assert!(reader
+            .search("directory", 10, true, &Arc::new(AtomicBool::new(false)), false)
+            .is_ok());
+    }
+
+    #[test]
+    fn listing_checks_are_bounded_readonly_and_restore_readers() {
+        let temporary = tempfile::tempdir().unwrap();
+        let mut index = DirectoryIndex::open(
+            &temporary.path().join("private/source.sqlite3"),
+            SourceKind::Local,
+            &json!({"root": "listing"}),
+        )
+        .unwrap();
+        let reader = index.reader();
+        let children = vec!["parent".to_owned()];
+        assert_eq!(
+            reader.check_listing("", &children, &feedback_deadline()).unwrap(),
+            ListingCheck::Skip
+        );
+        index
+            .writer
+            .execute_batch("UPDATE generations SET state = 'accepted', scan_active = 0;")
+            .unwrap();
+        let before = index.writer.total_changes();
+        let missing = reader.check_listing("", &children, &feedback_deadline()).unwrap();
+        assert!(matches!(missing, ListingCheck::Missing { .. }));
+        assert_eq!(before, index.writer.total_changes());
+        index.mutate_path(&DirectoryMutation::Add { path: "parent".to_owned() }).unwrap();
+        assert_eq!(
+            reader
+                .check_listing("", &["parent".into(), "parent".into()], &feedback_deadline())
+                .unwrap(),
+            ListingCheck::Known
+        );
+        assert!(matches!(
+            reader
+                .check_listing("", &["parent".into(), "absent".into()], &feedback_deadline())
+                .unwrap(),
+            ListingCheck::Missing { .. }
+        ));
+        assert_eq!(
+            reader
+                .check_listing("absent", &["absent/child".into()], &feedback_deadline())
+                .unwrap(),
+            ListingCheck::Skip
+        );
+        assert_eq!(
+            reader.check_listing("parent", &[], &feedback_deadline()).unwrap(),
+            ListingCheck::Known
+        );
+        index
+            .writer
+            .execute("INSERT INTO scan_queue(generation_id,path) VALUES (1,'parent')", [])
+            .unwrap();
+        assert_eq!(
+            reader
+                .check_listing("parent", &["parent/child".into()], &feedback_deadline())
+                .unwrap(),
+            ListingCheck::Skip
+        );
+        index.writer.execute_batch("UPDATE generations SET scan_active = 1").unwrap();
+        assert_eq!(
+            reader.check_listing("", &children, &feedback_deadline()).unwrap(),
+            ListingCheck::Skip
+        );
+        index
+            .writer
+            .execute_batch("UPDATE generations SET scan_active = 0, state = 'building'")
+            .unwrap();
+        assert_eq!(
+            reader.check_listing("", &children, &feedback_deadline()).unwrap(),
+            ListingCheck::Skip
+        );
+        for (parent, invalid) in [
+            ("", vec!["../bad".into()]),
+            ("parent", vec!["other/child".into()]),
+            ("", vec!["a/b".into()]),
+            ("../bad", vec![]),
+            ("", vec!["a".into(); ROW_BATCH_SIZE + 1]),
+            (
+                "",
+                vec!["a".repeat(super::super::directory_manager::limit("max_observation_bytes").unwrap() + 1)],
+            ),
+        ] {
+            assert!(matches!(
+                reader.check_listing(parent, &invalid, &feedback_deadline()),
+                Err(IndexError::Invalid(_))
+            ));
+        }
+        let mut deadline = feedback_deadline();
+        deadline.expires = Instant::now();
+        assert!(matches!(
+            reader.check_listing("", &children, &deadline),
+            Err(IndexError::Interrupted)
+        ));
+        let deadline = feedback_deadline();
+        deadline.cancelled.store(true, Ordering::Release);
+        assert!(matches!(
+            reader.check_listing("", &children, &deadline),
+            Err(IndexError::Interrupted)
+        ));
+        let connection = reader.checkout().unwrap();
+        let busy: i64 = connection.query_row("PRAGMA busy_timeout", [], |row| row.get(0)).unwrap();
+        assert_eq!(busy, SQL_BUSY_TIMEOUT.as_millis() as i64);
+        drop(connection);
+        assert!(reader.search("parent", 10, true, &Arc::new(AtomicBool::new(false)), false).is_ok());
+        assert!(index
+            .listing_admission_current("", 1, index.status().unwrap().accepted_revision, &feedback_deadline())
+            .is_ok());
+        let mut changed_reader = reader.clone();
+        changed_reader.file_identity.1 ^= 1;
+        assert!(matches!(
+            changed_reader.check_listing("", &children, &feedback_deadline()),
+            Err(IndexError::Invalid(_))
+        ));
+    }
+
     #[test]
     fn parent_issue_counts_commit_with_snapshot() {
         for reject_completion in [false, true] {

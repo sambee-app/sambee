@@ -44,6 +44,11 @@ impl VolumeEvidence {
         matches!(self.class, DriveType::Removable | DriveType::Unknown)
     }
 
+    /// Linux inotify cannot observe remote changes on network or FUSE drives.
+    pub fn monitoring_reliable(&self) -> bool {
+        !(cfg!(target_os = "linux") && matches!(self.class, DriveType::Network | DriveType::Virtual))
+    }
+
     pub fn index_volume(&self) -> Option<&str> {
         (!matches!(self.class, DriveType::Network | DriveType::Virtual))
             .then_some(self.volume.as_deref())
@@ -743,6 +748,30 @@ fn default_root_drive() -> DriveInfo {
 #[cfg(test)]
 mod volume_tests {
     use super::*;
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn monitoring_reliability_matches_platform_and_drive_class() {
+        for class in [
+            DriveType::Fixed,
+            DriveType::Removable,
+            DriveType::Unknown,
+            DriveType::Network,
+            DriveType::Virtual,
+        ] {
+            let evidence = VolumeEvidence {
+                class,
+                ..VolumeEvidence::default()
+            };
+            #[cfg(target_os = "linux")]
+            assert_eq!(
+                evidence.monitoring_reliable(),
+                !matches!(class, DriveType::Network | DriveType::Virtual)
+            );
+            #[cfg(target_os = "windows")]
+            assert!(evidence.monitoring_reliable());
+        }
+    }
 
     #[cfg(target_os = "windows")]
     #[test]

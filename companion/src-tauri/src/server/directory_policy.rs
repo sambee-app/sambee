@@ -640,10 +640,9 @@ impl DirectoryPolicyState {
                 "Backend policy receipt does not match this companion. Request a new grant.",
             ));
         }
-        receipt
-            .policy
-            .validate()
-            .map_err(|_| failure("Backend policy contains unsupported resource values."))?;
+        receipt.policy.validate().map_err(|_| {
+            failure("Backend policy values are not supported. Update Sambee Companion, then retry. The last valid policy remains active.")
+        })?;
         if let Some(owner) = &state.stored.approved {
             if owner.origin != receipt.origin || owner.backend_identity != receipt.backend_identity || receipt.revision < owner.revision {
                 return Err(ApiError::Conflict(serde_json::json!("Policy owner identity changed or its revision moved backwards. Reset the owner in native preferences before accepting it.")));

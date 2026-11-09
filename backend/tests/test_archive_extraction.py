@@ -235,6 +235,41 @@ async def test_live_extraction_streams_members_in_record_order_without_preflight
 
 
 @pytest.mark.asyncio
+async def test_live_extraction_copies_members_relative_to_source_folder() -> None:
+    backend = MemoryExtractionBackend(
+        _flat_archive_bytes(["photos/one.jpg", "photos/trip/", "photos/trip/empty/", "photos/trip/two.jpg", "other.txt"])
+    )
+    source_session = LiveSourceSession(
+        ZipReader(backend.reader, len(backend.archive)),
+        selected_member_roots=("photos/one.jpg", "photos/trip"),
+        member_base_path="photos",
+    )
+
+    await extract_live_archive_to_new_paths(source_session, destination=backend, destination_root="output", existing_file_policy=None)
+
+    assert backend.written_file_paths == ["output/one.jpg", "output/trip/two.jpg"]
+    assert "output/trip" in backend.directories
+    assert "output/trip/empty" in backend.directories
+    assert "output/photos" not in backend.directories
+
+
+@pytest.mark.parametrize(
+    "base,roots",
+    [
+        ("photos", ("photos",)),
+        ("photos", ("photos-other/one.jpg",)),
+        ("photos", None),
+        ("../photos", ("photos/one.jpg",)),
+        ("photos/", ("photos/one.jpg",)),
+    ],
+)
+def test_live_extraction_rejects_invalid_member_bases(base: str, roots: tuple[str, ...] | None) -> None:
+    backend = MemoryExtractionBackend(_flat_archive_bytes(["photos/one.jpg"]))
+    with pytest.raises(ValueError):
+        LiveSourceSession(ZipReader(backend.reader, len(backend.archive)), selected_member_roots=roots, member_base_path=base)
+
+
+@pytest.mark.asyncio
 async def test_live_extraction_limits_delivery_to_selected_member_roots() -> None:
     backend = MemoryExtractionBackend(_flat_archive_bytes(["included/empty/", "included/report.txt", "excluded/secret.txt"]))
     source_session = LiveSourceSession(
@@ -307,10 +342,14 @@ async def test_live_extraction_selects_the_last_replacement_decoded_name() -> No
 
 
 @pytest.mark.asyncio
-async def test_live_extraction_retains_a_regular_member_when_its_parent_is_a_file() -> None:
-    backend = MemoryExtractionBackend(_flat_archive_bytes(["parent/file.txt"]))
+@pytest.mark.parametrize("member_base_path", ["", "photos"])
+async def test_live_extraction_retains_a_regular_member_when_its_parent_is_a_file(member_base_path: str) -> None:
+    source_path = f"{member_base_path}/parent/file.txt" if member_base_path else "parent/file.txt"
+    backend = MemoryExtractionBackend(_flat_archive_bytes([source_path]))
     backend.files["output/parent"] = b"blocked"
-    source_session = LiveSourceSession(ZipReader(backend.reader, len(backend.archive)))
+    source_session = LiveSourceSession(
+        ZipReader(backend.reader, len(backend.archive)), selected_member_roots=(source_path,), member_base_path=member_base_path
+    )
 
     aggregate = await extract_live_archive_to_new_paths(
         source_session,
@@ -323,7 +362,7 @@ async def test_live_extraction_retains_a_regular_member_when_its_parent_is_a_fil
     assert aggregate.members_processed == 0
     assert source_session.phase == LiveSourceSessionPhase.AWAITING_DECISION
     assert decision is not None
-    assert decision.member_path == "parent/file.txt"
+    assert decision.member_path == source_path
     assert decision.target_path == "output/parent"
     assert backend.written_file_paths == []
 
@@ -346,7 +385,7 @@ async def test_live_extraction_retains_a_regular_member_when_its_parent_is_a_fil
 
     assert aggregate.members_processed == 1
     assert aggregate.members_completed == 1
-    assert backend.files["renamed/file.txt"] == b"parent/file.txt"
+    assert backend.files["renamed/file.txt"] == source_path.encode()
 
 
 @pytest.mark.asyncio

@@ -136,6 +136,7 @@ export interface ArchiveExtractionRequest {
   source: VirtualLocation;
   destination: PhysicalLocation;
   selectedMemberPaths?: string[];
+  memberBasePath?: string;
 }
 
 export type ArchiveExtractionOutcome =

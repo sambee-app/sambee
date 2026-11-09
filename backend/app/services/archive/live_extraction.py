@@ -12,6 +12,7 @@ from app.services.archive.zip_reader import ArchiveFormatError, ValidatedZipEntr
 from app.storage.base import RandomAccessReader
 
 _MAX_AGGREGATE_COUNTER = (1 << 63) - 1
+MAX_ARCHIVE_MEMBER_PATH_CHARACTERS = 4096
 
 
 def canonicalize_selected_member_roots(paths: list[str] | tuple[str, ...] | None) -> tuple[str, ...] | None:
@@ -38,6 +39,22 @@ def canonicalize_selected_member_roots(paths: list[str] | tuple[str, ...] | None
 
 class LiveSourceSessionError(ValueError):
     """Raised when a live source transition does not match its current state."""
+
+
+def validate_member_base_path(base: str, roots: tuple[str, ...] | None) -> None:
+    """Require a canonical copy base with selected descendants, not sibling prefixes."""
+
+    if not base:
+        return
+    if (
+        len(base) > MAX_ARCHIVE_MEMBER_PATH_CHARACTERS
+        or "\\" in base
+        or ":" in base
+        or canonicalize_selected_member_roots((base,)) != (base,)
+    ):
+        raise LiveSourceSessionError("Archive member base must be a canonical relative folder path")
+    if not roots or any(not root.startswith(f"{base}/") for root in roots):
+        raise LiveSourceSessionError("Selected archive members must be below the member base folder")
 
 
 class LiveSourceSessionCancelled(Exception):
@@ -190,6 +207,7 @@ class LiveSourceSession:
 
     reader: ZipReader
     selected_member_roots: tuple[str, ...] | None = None
+    member_base_path: str = ""
     source_session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     aggregate: LiveExtractionAggregate = field(default_factory=LiveExtractionAggregate)
     phase: LiveSourceSessionPhase = LiveSourceSessionPhase.READY
@@ -210,6 +228,17 @@ class LiveSourceSession:
 
     def __post_init__(self) -> None:
         self.selected_member_roots = canonicalize_selected_member_roots(self.selected_member_roots)
+        validate_member_base_path(self.member_base_path, self.selected_member_roots)
+
+    def relative_member_path(self, member_path: str) -> str:
+        """Map an initial output path without changing the source or a rename target."""
+
+        if not self.member_base_path:
+            return member_path
+        prefix = f"{self.member_base_path}/"
+        if not member_path.startswith(prefix) or member_path == prefix:
+            raise LiveSourceSessionError("Archive member is outside the member base folder")
+        return member_path[len(prefix) :]
 
     async def next_member(self) -> LiveSourceMember | None:
         """Return the next destination-facing record after source-only rejections."""
@@ -597,8 +626,9 @@ class LiveSourceSessionRegistry:
         *,
         operation_id: object | None = None,
         selected_member_roots: tuple[str, ...] | None = None,
+        member_base_path: str = "",
     ) -> LiveSourceSession:
-        session = LiveSourceSession(ZipReader(reader, size), selected_member_roots)
+        session = LiveSourceSession(ZipReader(reader, size), selected_member_roots, member_base_path)
         async with self._lock:
             if operation_id is not None and operation_id in self._operation_sessions:
                 raise LiveSourceSessionError("Archive operation already has a live source session")

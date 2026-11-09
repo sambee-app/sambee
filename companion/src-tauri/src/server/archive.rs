@@ -30,6 +30,7 @@ use super::target_resolution::{resolve_target_mutation, TargetResolutionDisposit
 /// Bounded source-read size for direct local archive output.
 pub const ARCHIVE_COPY_BUFFER_SIZE: usize = 64 * 1024;
 const ARCHIVE_WRITE_BUFFER_SIZE: usize = 256 * 1024;
+const MAX_ARCHIVE_MEMBER_PATH_CHARACTERS: usize = 4096;
 pub const TEMPORARY_ARCHIVE_SIZE_LIMIT_EXCEEDED: &str = "temporary_archive_size_limit_exceeded";
 const TEMPORARY_ARCHIVE_DIRECTORY: &str = "sambee-archive-downloads";
 const TEMPORARY_ARCHIVE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -2004,6 +2005,21 @@ pub fn reopen_partial_local_extraction_file(drive_root: &Path, destination_path:
 /// Validate a manifest member path before combining it with a local destination root.
 pub fn validate_local_extraction_member_path(member_path: &str, is_directory: bool) -> Result<(), LocalArchiveError> {
     normalized_archive_path(member_path, is_directory).map(|_| ())
+}
+
+/// Require a canonical copy base with selected descendants, not sibling prefixes.
+pub fn validate_local_archive_member_base(base: &str, roots: Option<&[String]>) -> Result<(), LocalArchiveError> {
+    if base.is_empty() {
+        return Ok(());
+    }
+    if base.chars().count() > MAX_ARCHIVE_MEMBER_PATH_CHARACTERS || base.contains('\\') || normalized_archive_path(base, false)? != base {
+        return Err(LocalArchiveError::UnsafeEntryPath);
+    }
+    let prefix = format!("{base}/");
+    if roots.is_none_or(|roots| roots.is_empty() || roots.iter().any(|root| !root.starts_with(&prefix) || root.len() == prefix.len())) {
+        return Err(LocalArchiveError::UnsafeEntryPath);
+    }
+    Ok(())
 }
 
 /// Normalize, validate, and collapse the immutable roots selected for extraction.

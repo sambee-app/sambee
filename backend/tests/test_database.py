@@ -38,6 +38,28 @@ from app.models.user import User, UserRole
 class TestDatabaseInitialization:
     """Test database initialization."""
 
+    def test_archive_member_base_upgrade_preserves_existing_operations(self, tmp_path: Path):
+        test_engine = create_engine(f"sqlite:///{tmp_path / 'archive-base-upgrade.db'}")
+        try:
+            with test_engine.begin() as connection:
+                connection.execute(text("CREATE TABLE archive_operations (id TEXT PRIMARY KEY, selected_member_paths_json TEXT)"))
+                connection.execute(text("INSERT INTO archive_operations (id) VALUES ('existing')"))
+                connection.execute(
+                    text(
+                        f"CREATE TABLE {MIGRATION_TABLE_NAME} (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+                    )
+                )
+                connection.execute(
+                    text(f"INSERT INTO {MIGRATION_TABLE_NAME} (version, name) VALUES (:version, :name)"),
+                    [{"version": migration.version, "name": migration.name} for migration in MIGRATIONS if migration.version < 40],
+                )
+            run_migrations(test_engine)
+            run_migrations(test_engine)
+            with test_engine.connect() as connection:
+                assert connection.execute(text("SELECT id, member_base_path FROM archive_operations")).one() == ("existing", "")
+        finally:
+            test_engine.dispose()
+
     @pytest.mark.parametrize("retention_limit", [0, 1, 200])
     def test_history_upgrade_applies_existing_directory_retention(self, tmp_path: Path, retention_limit: int):
         test_engine = create_engine(f"sqlite:///{tmp_path / 'history-retention-upgrade.db'}")

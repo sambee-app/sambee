@@ -57,6 +57,25 @@ such as collision decisions, do not increase these reason counters.
 
 ## Extraction Checkpoints And Decisions
 
+Extraction accepts an optional immutable `member_base_path`, which defaults to
+the empty ZIP-root path. A non-empty base must be a canonical member path and
+requires a non-empty `selected_member_paths` selection. Every selected root must
+be strictly below the base, using complete path components. Creation rejects a
+non-empty extraction base.
+
+Dual-pane Copy captures the source pane's current ZIP folder as this base when
+the command starts. Initial output paths are relative to that folder: copying
+`photos/one.jpg` from `photos` writes `one.jpg`, while copying `photos/trip`
+preserves `trip` and its descendants. Source member identities remain ZIP-root
+relative for selection, reads, result matching, and decisions. Rename targets
+are not stripped again, and retries retain the current mapped or renamed target.
+Full-archive extraction keeps the empty base and preserves archive paths.
+
+The backend validates and persists the base before accepting an operation. The
+Companion capability returns that operation-owned base with its selected roots;
+the relay source does not accept a replacement base from its caller. Direct-local
+extraction validates the same rules before starting its session.
+
 An extraction checkpoint has exactly `version` (integer `2`) and
 `aggregate_counters`. It rejects manifests, source snapshots, member outcomes,
 reader cursors, decisions, pending-decision payloads, delivery IDs, and every

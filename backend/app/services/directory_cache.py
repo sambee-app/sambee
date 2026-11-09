@@ -127,6 +127,7 @@ PATH_SEPARATOR = "/"
 # Persistence configuration
 CACHE_PERSIST_SUBDIR = "directory_cache"  # Default subdirectory under data_dir
 MAX_PENDING_OBSERVATIONS = DIRECTORY_INDEX_CONTRACT.limits["max_pending_observations"]
+MAX_LISTING_ADD_OBSERVATIONS = DIRECTORY_INDEX_CONTRACT.limits["max_listing_add_observations"]
 MAX_OBSERVATION_BYTES = DIRECTORY_INDEX_CONTRACT.limits["max_observation_bytes"]
 MAX_LOGGED_SCAN_ISSUES_PER_PASS = DIRECTORY_INDEX_CONTRACT.limits["max_logged_scan_issues_per_pass"]
 SOURCE_RESOURCE_ERRNOS = frozenset(
@@ -168,8 +169,6 @@ SOURCE_TRANSPORT_STATUSES = frozenset(
 SCAN_SEEN_CHILD_BYTES = MAX_OBSERVATION_BYTES
 SQLITE_CACHE_SUBDIR = "sqlite"
 SQLITE_CACHE_EXTENSION = ".sqlite3"
-DEGRADED_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].default
-HEALTHY_VERIFICATION_SECONDS = DIRECTORY_INDEX_CONTRACT.policy["healthy_verification_seconds"].default
 OBSERVATION_POLL_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["event_coalescing_ms"] / 1000
 OBSERVATION_RETRY_SECONDS = 1.0
 CONTINUOUS_CHANGE_STALE_TURNS = 3
@@ -989,6 +988,15 @@ class ConnectionDirectoryCache(ABC):
     #
     # add_directories
     #
+    def observe_parent(self, parent: str) -> None:
+        """Request a source check instead of trusting a listing snapshot."""
+        self._apply_mutations([_DirectoryMutation(READ_PARENT_ACTION, parent.strip("/"))])
+
+    def observe_listing(self, parent: str, child_directories: list[str]) -> None:
+        """Keep listing feedback bounded for cache implementations."""
+        if child_directories:
+            self.observe_parent(parent)
+
     def add_directories(self, paths: list[str]) -> None:
         """Add multiple directory paths to the cache.
 
@@ -1698,6 +1706,31 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     def observe_parent(self, parent: str) -> None:
         """Queue source validation without assuming that a destination is a directory."""
         self._apply_mutations([_DirectoryMutation(READ_PARENT_ACTION, parent.strip("/"))])
+
+    def observe_listing(self, parent: str, child_directories: list[str]) -> None:
+        """Skip known directories and collapse large additions to one parent check."""
+        normalized = list(dict.fromkeys(path.strip("/") for path in child_directories if path.strip("/")))
+        if not normalized:
+            return
+        missing = self.index.missing_directories(normalized)
+        if not missing:
+            return
+        parent = parent.strip("/")
+        mutations = [_DirectoryMutation(FileAction.FILE_ACTION_ADDED, path) for path in missing[:MAX_LISTING_ADD_OBSERVATIONS]]
+        with self.coordinator.lock:
+            size = sum(len(mutation.path.encode("utf-8")) for mutation in mutations)
+            if (
+                len(missing) > MAX_LISTING_ADD_OBSERVATIONS
+                or len(self.coordinator.pending) + len(mutations) > self.coordinator.maximum_pending
+                or self.coordinator.pending_bytes + size > self.coordinator.maximum_bytes
+            ):
+                if (
+                    len(self.coordinator.pending) < self.coordinator.maximum_pending
+                    and self.coordinator.pending_bytes + len(parent.encode("utf-8")) <= self.coordinator.maximum_bytes
+                ):
+                    self.observe_parent(parent)
+                return
+            self._apply_mutations(mutations)
 
     def _observation_lost(self) -> None:
         self.coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
@@ -2586,10 +2619,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
 
     def _verification_due(self, verified_at: float, *, now: float | None = None) -> bool:
         current = time.monotonic() if now is None else now
-        interval = (
-            self.policy.degraded_verification_seconds
-            if self.coordinator.verification_required or not self._watcher_ready.is_set()
-            else self.policy.healthy_verification_seconds
+        interval = self.policy.effective_verification_seconds(
+            degraded=self.coordinator.verification_required or not self._watcher_ready.is_set()
         )
         delay = interval * (100 - self._retry_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1)) / 100
         return current >= self._resource_retry_at and (

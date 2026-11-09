@@ -205,6 +205,7 @@ export interface UseFileBrowserPaneReturn {
   archiveLoadingMore: boolean;
   files: FileEntry[];
   loading: boolean;
+  navigationPending: boolean;
   error: string | null;
   errorOccurrence?: number;
   notification?: import("../../components/OperationNotifications").OperationNotice | null;

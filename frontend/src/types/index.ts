@@ -527,6 +527,7 @@ export interface ArchiveOperationPrepare {
   manifest_hash?: string;
   plan_json?: string;
   selected_member_paths?: string[];
+  member_base_path?: string;
 }
 
 export interface ArchiveOperation {

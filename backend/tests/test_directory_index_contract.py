@@ -29,6 +29,79 @@ def _lose_observations(coordinator) -> None:
     coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
 
 
+def test_missing_directories_batches_and_skips_known_paths(index):
+    from app.services.directory_index import ROW_BATCH_SIZE
+
+    paths = [f"folder-{number}" for number in range(ROW_BATCH_SIZE + 1)]
+    assert index.missing_directories(paths) == paths
+    index.write_paths(paths)
+    assert index.missing_directories([*paths, "new", "new"]) == ["new"]
+    assert index.missing_directories([]) == []
+
+
+@pytest.mark.parametrize("path", ["", "/alpha", "alpha/", "a//b", "a/../b", "a\x00b"])
+def test_missing_directories_rejects_invalid_paths(index, path):
+    with pytest.raises(ValueError):
+        index.missing_directories([path])
+
+
+def test_missing_directories_checks_building_generation(index):
+    index.write_paths(["known"])
+    assert index.missing_directories(["known", "absent"]) == ["absent"]
+    assert index.finish_generation(1)
+    assert index.missing_directories(["known", "absent"]) == ["absent"]
+
+
+@pytest.mark.parametrize("count", [1, 64, 65, 1025])
+def test_listing_feedback_is_bounded_and_skips_known_paths(sqlite_cache, count):
+    from app.services.directory_cache import MAX_LISTING_ADD_OBSERVATIONS, READ_PARENT_ACTION
+
+    cache = sqlite_cache
+    cache.index.write_paths(["parent", "parent/known"])
+    cache.observe_listing("/parent/", ["/parent/known/"])
+    assert not cache.coordinator.pending
+    children = [f"/parent/new-{number}/" for number in range(count)]
+    cache.observe_listing("/parent/", ["/parent/known/", *children])
+    pending = [mutation for _sequence, mutation, _size in cache.coordinator.pending]
+    assert len(pending) == (count if count <= MAX_LISTING_ADD_OBSERVATIONS else 1)
+    if count > MAX_LISTING_ADD_OBSERVATIONS:
+        assert pending[0].action == READ_PARENT_ACTION
+        assert pending[0].path == "parent"
+    else:
+        assert {entry.path for entry in pending} == {path.strip("/") for path in children}
+    assert not cache.coordinator.observation_lost
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_listing_feedback_does_not_overflow_busy_queue(sqlite_cache, full):
+    from app.services.directory_cache import READ_PARENT_ACTION, DirectoryScanCoordinator
+
+    cache = sqlite_cache
+    cache.coordinator = DirectoryScanCoordinator(cache.index, maximum_pending=2)
+    cache.observe_parent("busy")
+    if full:
+        cache.observe_parent("other")
+    cache.observe_listing("parent", ["parent/one", "parent/two"])
+    pending = [mutation for _sequence, mutation, _size in cache.coordinator.pending]
+    assert len(pending) == cache.coordinator.maximum_pending
+    assert pending[-1].action == READ_PARENT_ACTION
+    assert pending[-1].path == ("other" if full else "parent")
+    assert not cache.coordinator.observation_lost
+
+
+def test_listing_feedback_respects_queue_byte_limit(sqlite_cache):
+    from app.services.directory_cache import DirectoryScanCoordinator
+
+    cache = sqlite_cache
+    cache.coordinator = DirectoryScanCoordinator(cache.index, maximum_bytes=len("parent"))
+    cache.observe_listing("parent", ["parent/long-child-name"])
+    assert len(cache.coordinator.pending) == 1
+    assert cache.coordinator.pending_bytes == len("parent")
+    cache.observe_listing("parent", ["parent/another-long-name"])
+    assert len(cache.coordinator.pending) == 1
+    assert not cache.coordinator.observation_lost
+
+
 def test_deep_hint_does_not_invalidate_ancestor_listing(index):
     from app.services.directory_cache import READ_PARENT_ACTION, DirectoryScanCoordinator, _DirectoryMutation
 
@@ -2403,11 +2476,23 @@ def test_resource_policy_model_rejects_unsafe_values(invalid):
         DirectoryIndexPolicy(page_cache_kib=invalid)
 
 
-def test_resource_policy_model_validates_correlated_intervals():
+def test_resource_policy_model_accepts_degraded_above_healthy():
     from app.models.system_settings import DirectoryIndexPolicy
 
-    with pytest.raises(ValueError, match="must not exceed"):
-        DirectoryIndexPolicy(healthy_verification_seconds=60, degraded_verification_seconds=300)
+    policy = DirectoryIndexPolicy(healthy_verification_seconds=60, degraded_verification_seconds=300)
+    assert policy.effective_verification_seconds(degraded=True) == 60
+    assert policy.effective_verification_seconds(degraded=False) == 60
+
+
+def test_shared_resource_contract_rejects_inverted_default_intervals(tmp_path):
+    from app.core.directory_index_contract import load_directory_index_contract
+
+    contract = json.loads((CONTRACT_ROOT / "contract.json").read_text())
+    contract["policy"]["healthy_verification_seconds"]["default"] = 60
+    path = tmp_path / "invalid.json"
+    path.write_text(json.dumps(contract), encoding="utf-8")
+    with pytest.raises(ValueError, match="Default degraded verification must not exceed"):
+        load_directory_index_contract(path)
 
 
 @pytest.mark.parametrize("invalid", [0, True, "2", -1])
@@ -5089,6 +5174,21 @@ def test_sqlite_source_policy_applies_at_connection_boundaries(sqlite_cache):
     with closing(sqlite_cache.index._connect(readonly=True)) as connection:
         assert connection.execute("PRAGMA cache_size").fetchone() == (-1024,)
     assert sqlite_cache.search_index("accepted") == before
+
+
+@pytest.mark.parametrize("watcher_ready", [False, True])
+def test_degraded_verification_uses_shorter_healthy_interval(sqlite_cache, watcher_ready):
+    from app.models.system_settings import DirectoryIndexPolicy
+
+    sqlite_cache.apply_policy(DirectoryIndexPolicy(healthy_verification_seconds=60, degraded_verification_seconds=300))
+    sqlite_cache.coordinator.verification_required = True
+    if watcher_ready:
+        sqlite_cache._watcher_ready.set()
+    else:
+        sqlite_cache._watcher_ready.clear()
+    sqlite_cache._retry_jitter = 0
+    assert not sqlite_cache._verification_due(0, now=59)
+    assert sqlite_cache._verification_due(0, now=60)
 
 
 def test_failed_verification_backoff_is_due_before_the_full_pass_interval(sqlite_cache):
