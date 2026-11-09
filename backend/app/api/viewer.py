@@ -1,8 +1,10 @@
 import asyncio
 import hashlib
 import secrets
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextvars import copy_context
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Literal, Optional
@@ -36,7 +38,7 @@ from app.services.archive.coordinator import (
 from app.services.archive.execution import ArchiveExecutionDriver, resolve_archive_inspection_topology_plan
 from app.services.archive.zip_reader import ArchiveFormatError, ArchiveInspectionManifestMember, ZipEntry, ZipReader
 from app.services.connection_access import get_accessible_connection_or_404
-from app.services.image_converter import convert_image_for_viewer
+from app.services.image_converter import MILLISECONDS_PER_SECOND, convert_image_for_viewer
 from app.services.pdf_derivative_cache import PDFDerivativeCachePolicy, PDFSourceRevision, pdf_derivative_cache
 from app.services.pdf_inspector import PDFScreenProfile, analyze_pdf_for_screen
 from app.services.pdf_normalizer import (
@@ -714,18 +716,36 @@ async def create_converted_image_response(
 ) -> Response:
     """Convert already-resolved image bytes into a browser-compatible response."""
 
-    try:
-        loop = asyncio.get_running_loop()
-        converted_bytes, converted_mime, converter_name, duration_ms = await loop.run_in_executor(
-            None,
-            partial(
-                convert_image_for_viewer,
+    submitted_at = time.perf_counter()
+    conversion_context = copy_context()
+
+    def convert_in_worker() -> tuple[bytes, str, str, float]:
+        started_at = time.perf_counter()
+        logger.debug(
+            "Image conversion worker started: filename=%r executor_queue_ms=%.1f",
+            filename,
+            (started_at - submitted_at) * MILLISECONDS_PER_SECOND,
+        )
+        try:
+            return convert_image_for_viewer(
                 image_bytes,
                 filename,
                 max_width=None if no_resizing else max_width,
                 max_height=None if no_resizing else max_height,
                 output_format="auto",
-            ),
+            )
+        finally:
+            logger.debug(
+                "Image conversion worker finished: filename=%r worker_ms=%.1f",
+                filename,
+                (time.perf_counter() - started_at) * MILLISECONDS_PER_SECOND,
+            )
+
+    try:
+        loop = asyncio.get_running_loop()
+        converted_bytes, converted_mime, converter_name, duration_ms = await loop.run_in_executor(
+            None,
+            partial(conversion_context.run, convert_in_worker),
         )
         logger.info(
             "Image converted: %s -> %s (%d -> %d KB) via %s in %.0f ms",
@@ -768,6 +788,12 @@ async def create_converted_image_response(
     except Exception as exc:
         logger.error("Unexpected error during image conversion: filename=%r error=%s: %s", filename, type(exc).__name__, exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process image") from exc
+    finally:
+        logger.debug(
+            "Image conversion dispatch complete: filename=%r dispatch_total_ms=%.1f",
+            filename,
+            (time.perf_counter() - submitted_at) * MILLISECONDS_PER_SECOND,
+        )
 
 
 async def read_and_convert_image(
@@ -788,15 +814,43 @@ async def read_and_convert_image(
     - Error handling for conversion failures
     """
 
+    preparation_started = time.perf_counter()
     try:
         # Read file into memory
         chunks = []
+        read_started = time.perf_counter()
+        first_chunk_ms = None
+        input_bytes = 0
+        read_complete = False
         try:
             async for chunk in backend.read_file(path):
+                if first_chunk_ms is None:
+                    first_chunk_ms = (time.perf_counter() - read_started) * MILLISECONDS_PER_SECOND
                 chunks.append(chunk)
+                input_bytes += len(chunk)
+            read_complete = True
         finally:
-            await disconnect_backend_safely(backend, logger=logger, context=f"image conversion read for '{path}'")
+            read_finished = time.perf_counter()
+            try:
+                await disconnect_backend_safely(backend, logger=logger, context=f"image conversion read for '{path}'")
+            finally:
+                logger.debug(
+                    "Image source read: filename=%r read_ms=%.1f first_chunk_ms=%s cleanup_ms=%.1f chunks=%d input_bytes=%d complete=%s",
+                    filename,
+                    (read_finished - read_started) * MILLISECONDS_PER_SECOND,
+                    first_chunk_ms,
+                    (time.perf_counter() - read_finished) * MILLISECONDS_PER_SECOND,
+                    len(chunks),
+                    input_bytes,
+                    read_complete,
+                )
+        assembly_started = time.perf_counter()
         image_bytes = b"".join(chunks)
+        logger.debug(
+            "Image source assembled: filename=%r assembly_ms=%.1f",
+            filename,
+            (time.perf_counter() - assembly_started) * MILLISECONDS_PER_SECOND,
+        )
 
         return await create_converted_image_response(
             image_bytes=image_bytes,
@@ -826,6 +880,12 @@ async def read_and_convert_image(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process image",
+        )
+    finally:
+        logger.debug(
+            "Image preparation complete: filename=%r preparation_total_ms=%.1f",
+            filename,
+            (time.perf_counter() - preparation_started) * MILLISECONDS_PER_SECOND,
         )
 
 
@@ -876,7 +936,9 @@ async def view_file(
         # Create SMB backend...
         backend = build_smb_backend(connection, backend_factory=SMBBackend)
         # ...and connect
+        connect_started = time.perf_counter()
         await backend.connect()
+        connect_finished = time.perf_counter()
 
         # Get file info and ensure path points to a file (not a directory)
         try:
@@ -892,6 +954,15 @@ async def view_file(
 
         # Check if image needs processing for browser compatibility and viewing speed
         if needs_processing(file_info.name, file_info.size):
+            logger.debug(
+                "Image source resolved: filename=%r connect_ms=%.1f metadata_ms=%.1f viewport=%sx%s no_resizing=%s",
+                file_info.name,
+                (connect_finished - connect_started) * MILLISECONDS_PER_SECOND,
+                (time.perf_counter() - connect_finished) * MILLISECONDS_PER_SECOND,
+                viewport_width,
+                viewport_height,
+                no_resizing,
+            )
             size_string = f"{file_info.size / 1024:.0f} KB" if file_info.size else "unknown"
             logger.debug(f"Image requires processing: connection_id={connection_id}, path='{path}', size={size_string}")
             return await read_and_convert_image(

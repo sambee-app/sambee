@@ -6,6 +6,7 @@ Uses mocked SMB backend to avoid dependency on real SMB server.
 import asyncio
 import io
 import json
+import logging
 import uuid
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,7 @@ from sqlmodel import Session, select
 from app.api import browser as browser_api
 from app.api import viewer as viewer_api
 from app.api.companion import COMPANION_OPERATION_PURPOSE, COMPANION_TOKEN_CLAIM, COMPANION_TOKEN_CLASS
+from app.core.logging import request_id_var, user_var
 from app.core.security import create_access_token
 from app.core.system_setting_definitions import SystemSettingKey
 from app.models.connection import Connection, ConnectionScope
@@ -153,6 +155,67 @@ async def test_image_preview_size_limit_returns_a_safe_actionable_error():
         "code": "image_preview_too_large",
         "message": "This image is too large to preview (351 MB; maximum 100 MB).",
     }
+
+
+@pytest.mark.asyncio
+async def test_image_debug_timings_preserve_request_context(caplog: pytest.LogCaptureFixture):
+    """Executor diagnostics and conversion retain the originating request context."""
+    request_token = request_id_var.set("image-timing-request")
+    user_token = user_var.set("image-timing-user")
+
+    def convert(*args, **kwargs):
+        assert request_id_var.get() == "image-timing-request"
+        assert user_var.get() == "image-timing-user"
+        return b"converted", "image/webp", "libvips", 1.0
+
+    try:
+        with (
+            caplog.at_level(logging.DEBUG, logger="app.api.viewer"),
+            patch("app.api.viewer.convert_image_for_viewer", side_effect=convert),
+        ):
+            response = await viewer_api.create_converted_image_response(image_bytes=b"source", filename="photo.jpg")
+    finally:
+        request_id_var.reset(request_token)
+        user_var.reset(user_token)
+
+    assert response.body == b"converted"
+    for field in ("executor_queue_ms=", "worker_ms=", "dispatch_total_ms="):
+        assert field in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read_error", [False, True])
+async def test_image_source_debug_timings_include_failed_reads(caplog: pytest.LogCaptureFixture, read_error: bool):
+    """Partial reads still report byte counts, timing, and backend cleanup."""
+    backend = AsyncMock()
+
+    async def read_chunks(path):
+        yield b"first"
+        if read_error:
+            raise FileNotFoundError(path)
+        yield b"second"
+
+    backend.read_file = read_chunks
+    with (
+        caplog.at_level(logging.DEBUG, logger="app.api.viewer"),
+        patch("app.api.viewer.convert_image_for_viewer", return_value=(b"converted", "image/webp", "libvips", 1.0)) as convert,
+    ):
+        if read_error:
+            with pytest.raises(HTTPException) as error:
+                await viewer_api.read_and_convert_image(backend, "photo.jpg", "photo.jpg", uuid.uuid4())
+            assert error.value.status_code == 404
+            convert.assert_not_called()
+        else:
+            response = await viewer_api.read_and_convert_image(backend, "photo.jpg", "photo.jpg", uuid.uuid4())
+            assert response.body == b"converted"
+            assert "assembly_ms=" in caplog.text
+            assert "chunks=2 input_bytes=11 complete=True" in caplog.text
+
+    backend.disconnect.assert_awaited_once()
+    for field in ("read_ms=", "first_chunk_ms=", "cleanup_ms=", "preparation_total_ms="):
+        assert field in caplog.text
+    if read_error:
+        assert "chunks=1 input_bytes=5 complete=False" in caplog.text
 
 
 @pytest.mark.asyncio

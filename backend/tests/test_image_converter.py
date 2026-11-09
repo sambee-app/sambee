@@ -1,5 +1,7 @@
 """Tests for image conversion service using libvips."""
 
+import hashlib
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -170,6 +172,71 @@ class TestImageConversion:
         assert result_img.width == 200  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.height == 150  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.bands >= 3  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]  # RGB or grayscale
+
+    def test_debug_timings_preserve_conversion(self, caplog: pytest.LogCaptureFixture):
+        """Debug diagnostics describe lazy evaluation without changing output bytes."""
+        test_image = self.create_test_image("RGB", (200, 150))
+        expected = convert_image_for_viewer(test_image, "test.png", max_width=100)
+        with caplog.at_level(logging.DEBUG, logger="app.services.image_converter"):
+            actual = convert_image_for_viewer(test_image, "test.png", max_width=100)
+
+        assert actual[:3] == expected[:3]
+        assert f"input_sha256={hashlib.sha256(test_image).hexdigest()}" in caplog.text
+        assert "source=200x150 output=100x75" in caplog.text
+        for field in ("metadata_ms=", "pipeline_setup_ms=", "evaluate_encode_ms=", "process_cpu_ms=", "cgroup_delta=", "evaluation=lazy"):
+            assert field in caplog.text
+
+    @pytest.mark.parametrize("contents", [None, "invalid", "usage_usec not-a-number"])
+    def test_missing_cpu_diagnostics_do_not_break_conversion(self, contents, caplog: pytest.LogCaptureFixture):
+        """Unsupported or unavailable cgroups must not affect image viewing."""
+        test_image = self.create_test_image()
+        with (
+            caplog.at_level(logging.DEBUG, logger="app.services.image_converter"),
+            patch("app.services.image_converter.CGROUP_CPU_MAX_PATH") as quota,
+            patch("app.services.image_converter.CGROUP_CPU_STAT_PATH") as counters,
+        ):
+            quota.read_text.side_effect = OSError("not available")
+            if contents is None:
+                counters.read_text.side_effect = OSError("not available")
+            else:
+                counters.read_text.return_value = contents
+            result = convert_image_for_viewer(test_image, "test.png")
+
+        assert result[1] == "image/webp"
+        assert "cpu_max=None" in caplog.text
+        assert "cgroup_delta={}" in caplog.text
+
+    def test_debug_cpu_counters_report_deltas(self, caplog: pytest.LogCaptureFixture):
+        """CPU totals identify shared process and cgroup activity during conversion."""
+        test_image = self.create_test_image()
+        with (
+            caplog.at_level(logging.DEBUG, logger="app.services.image_converter"),
+            patch("app.services.image_converter.CGROUP_CPU_MAX_PATH") as quota,
+            patch("app.services.image_converter.CGROUP_CPU_STAT_PATH") as counters,
+        ):
+            quota.read_text.return_value = "100000 100000"
+            counters.read_text.side_effect = [
+                "usage_usec 100\nnr_throttled 2\nthrottled_usec 30\n",
+                "usage_usec 150\nnr_throttled 3\nthrottled_usec 70\n",
+            ]
+            convert_image_for_viewer(test_image, "test.png")
+
+        assert "cpu_max='100000 100000'" in caplog.text
+        for field in ("'usage_usec': 50", "'nr_throttled': 1", "'throttled_usec': 40"):
+            assert field in caplog.text
+
+    def test_info_logging_skips_expensive_diagnostics(self, caplog: pytest.LogCaptureFixture):
+        """Normal logging does not hash image contents or read cgroup files."""
+        test_image = self.create_test_image()
+        with (
+            caplog.at_level(logging.INFO, logger="app.services.image_converter"),
+            patch("app.services.image_converter._read_image_cpu_state") as cpu_state,
+            patch("app.services.image_converter.hashlib.sha256") as source_hash,
+        ):
+            convert_image_for_viewer(test_image, "test.png")
+
+        cpu_state.assert_not_called()
+        source_hash.assert_not_called()
 
     def test_convert_rgba_to_jpeg(self):
         """Test converting RGBA image to WebP (preserves or removes alpha based on format)."""

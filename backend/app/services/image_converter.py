@@ -18,9 +18,12 @@ For formats libvips doesn't natively support (PSD, PSB), we use
 ImageMagick-based preprocessors to convert directly to a browser-ready format.
 """
 
+import hashlib
 import logging
 import os
+import platform
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 import pyvips
@@ -33,6 +36,36 @@ from app.services.preprocessor import (
 )
 
 logger = logging.getLogger(__name__)
+CGROUP_CPU_MAX_PATH = Path("/sys/fs/cgroup/cpu.max")
+CGROUP_CPU_STAT_PATH = Path("/sys/fs/cgroup/cpu.stat")
+CPU_STAT_FIELDS = frozenset({"usage_usec", "nr_throttled", "throttled_usec"})
+MILLISECONDS_PER_SECOND = 1000
+
+
+def _read_image_cpu_state() -> tuple[str | None, dict[str, int]]:
+    """Read optional cgroup v2 counters without making conversion depend on them."""
+    try:
+        quota = CGROUP_CPU_MAX_PATH.read_text().strip()
+    except OSError:
+        quota = None
+    try:
+        counters = {}
+        for line in CGROUP_CPU_STAT_PATH.read_text().splitlines():
+            name, value = line.split()
+            if name in CPU_STAT_FIELDS:
+                counters[name] = int(value)
+    except (OSError, ValueError):
+        counters = {}
+    return quota, counters
+
+
+def _log_image_cpu_timing(filename: str, started_cpu: float, before: dict[str, int]) -> None:
+    """Report process-wide CPU and cgroup-wide counters, not per-request CPU."""
+    cpu_ms = (time.process_time() - started_cpu) * MILLISECONDS_PER_SECOND
+    _, after = _read_image_cpu_state()
+    deltas = {name: after[name] - value for name, value in before.items() if name in after and after[name] >= value}
+    logger.debug("Image CPU timing: filename=%r process_cpu_ms=%.1f cgroup_delta=%s", filename, cpu_ms, deltas)
+
 
 # Check libvips availability and configure
 try:
@@ -89,6 +122,31 @@ def convert_image_for_viewer(
     if not VIPS_AVAILABLE:
         raise ImportError("libvips is not available")
 
+    debug_enabled = logger.isEnabledFor(logging.DEBUG)
+    started_cpu = time.process_time() if debug_enabled else 0.0
+    cpu_before: dict[str, int] = {}
+    if debug_enabled:
+        quota, cpu_before = _read_image_cpu_state()
+        logger.debug(
+            "Image conversion start: filename=%r input_bytes=%d input_sha256=%s viewport=%sx%s "
+            "requested_format=%s architecture=%s pyvips=%s libvips=%s cpu_count=%s available_cpu_count=%s "
+            "cpu_max=%r VIPS_CONCURRENCY=%r VIPS_NOVECTOR=%r",
+            filename,
+            len(image_bytes),
+            hashlib.sha256(image_bytes).hexdigest(),
+            max_width,
+            max_height,
+            output_format,
+            platform.machine(),
+            pyvips.__version__,
+            ".".join(str(pyvips.version(index)) for index in range(3)),
+            os.cpu_count(),
+            os.process_cpu_count(),
+            quota,
+            os.environ.get("VIPS_CONCURRENCY"),
+            os.environ.get("VIPS_NOVECTOR"),
+        )
+
     # Extract extension for format-specific handling
     extension = f".{filename.lower().rsplit('.', 1)[-1]}" if "." in filename else ""
 
@@ -126,6 +184,8 @@ def convert_image_for_viewer(
                 f"({len(image_bytes) / 1024:.0f} → {len(result_bytes) / 1024:.0f} KB) "
                 f"via {converter_name} in {duration_ms:.0f} ms"
             )
+            if debug_enabled:
+                _log_image_cpu_timing(filename, started_cpu, cpu_before)
 
             return result_bytes, mime_type, converter_name, duration_ms
 
@@ -146,6 +206,8 @@ def convert_image_for_viewer(
         # Load image (lazy - only metadata read at this point)
         # The empty string tells vips to auto-detect format from buffer
         image = pyvips.Image.new_from_buffer(image_bytes, "")
+        metadata_finished = time.perf_counter()
+        source_width, source_height = image.width, image.height
 
         # Determine output format based on transparency, file type, and user preference
         has_alpha = image.hasalpha()  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
@@ -196,6 +258,22 @@ def convert_image_for_viewer(
         # Step 4: Convert to output format
         # Pipeline executes NOW when we call save
         # Use centralized settings from IMAGE_SETTINGS
+        pipeline_finished = time.perf_counter()
+        if debug_enabled:
+            logger.debug(
+                "Image pipeline ready: filename=%r source=%sx%s output=%sx%s bands=%s format=%s "
+                "metadata_ms=%.1f pipeline_setup_ms=%.1f evaluation=lazy",
+                filename,
+                source_width,
+                source_height,
+                image.width,
+                image.height,
+                image.bands,
+                output_format,
+                (metadata_finished - start_time) * MILLISECONDS_PER_SECOND,
+                (pipeline_finished - metadata_finished) * MILLISECONDS_PER_SECOND,
+            )
+        evaluation_started = time.perf_counter()
         if output_format == "webp":
             # WebP: good compression, wide browser support
             # Q=80 provides good balance between quality and file size
@@ -207,9 +285,19 @@ def convert_image_for_viewer(
             png_kwargs = get_libvips_png_kwargs()
             output_bytes = image.pngsave_buffer(**png_kwargs)  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
 
+        evaluation_finished = time.perf_counter()
         # Convert pyvips buffer to bytes
         result_bytes = bytes(output_bytes)
         duration_ms = (time.perf_counter() - start_time) * 1000
+        if debug_enabled:
+            logger.debug(
+                "Image evaluation complete: filename=%r evaluate_encode_ms=%.1f output_bytes=%d total_ms=%.1f",
+                filename,
+                (evaluation_finished - evaluation_started) * MILLISECONDS_PER_SECOND,
+                len(result_bytes),
+                duration_ms,
+            )
+            _log_image_cpu_timing(filename, started_cpu, cpu_before)
 
         # Extract just the filename from the path
         basename = os.path.basename(filename)
