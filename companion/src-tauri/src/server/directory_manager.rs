@@ -4680,7 +4680,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("root");
         std::fs::create_dir(&root).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("storage")).unwrap();
         let source = LocalSource::new(root.clone(), manager.storage_directory());
         lock(&source.status).unwrap().accessed = Instant::now() - Duration::from_secs(limit("idle_release_seconds").unwrap() as u64 + 1);
         lock(&manager.sources).unwrap().insert("drive".into(), source);
@@ -5530,7 +5530,8 @@ mod tests {
             let read = source.begin_read().unwrap();
             let scan = ScanGeneration { id: 1, read: read.token };
             let mut observations = lock(&source.observations).unwrap();
-            observations.scan_group_started = Some(Instant::now() - interval);
+            let expired_start = Instant::now() - interval;
+            observations.scan_group_started = Some(expired_start);
             source
                 .stage_scan_parent_locked(&mut observations, scan, "", content, 0, &manager.budget)
                 .unwrap();
@@ -5548,7 +5549,8 @@ mod tests {
                 .complete_scan_parent_locked(&mut observations, scan, "", &manager.budget)
                 .unwrap();
             assert_eq!(observations.scan_commits, 0);
-            assert!(observations.scan_group_started.unwrap().elapsed() < interval);
+            assert!(observations.scan_group_started.unwrap() > expired_start);
+            assert_eq!(observations.scan_group_elapsed(), Some(Duration::ZERO));
             observations.scan_group_started = Some(Instant::now() - interval);
             observations.scan_group_test_elapsed = Some(interval);
             source.flush_scan_group_if_due_locked(&mut observations, &manager.budget).unwrap();
@@ -6084,7 +6086,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("root");
         std::fs::create_dir_all(root.join("retained")).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(root, manager.storage_directory());
         source.bind_root(&manager.budget).unwrap();
         {
@@ -6135,67 +6137,75 @@ mod tests {
     #[cfg(feature = "recovery-verification")]
     #[tokio::test]
     async fn verification_controls_reconcile_gap_and_release_resources() {
-        const DEADLINE: Duration = Duration::from_secs(10);
-        const POLL_INTERVAL: Duration = Duration::from_millis(20);
+        async fn wait_for_workers(manager: &LocalDirectoryManager, phase: &str) {
+            let deadline = Duration::from_secs(limit("query_timeout_seconds").unwrap() as u64);
+            tokio::time::timeout(deadline, async {
+                let _updates = manager
+                    .updates
+                    .acquire_many(u32::try_from(limit("query_workers").unwrap()).unwrap())
+                    .await
+                    .unwrap();
+                let _scans = manager
+                    .scans
+                    .acquire_many(u32::try_from(limit("scan_workers").unwrap()).unwrap())
+                    .await
+                    .unwrap();
+            })
+            .await
+            .unwrap_or_else(|error| panic!("Verification {phase} workers did not finish: {error}"));
+        }
+
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("source");
         std::fs::create_dir_all(root.join("retained-reports")).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
-        let search = || async {
-            loop {
-                match manager.search("verification".into(), root.clone(), "reports".into(), false).await {
-                    Err(IndexError::Interrupted | IndexError::QueryBusy) => tokio::time::sleep(POLL_INTERVAL).await,
-                    result => break result,
-                }
-            }
-        };
-        tokio::time::timeout(DEADLINE, async {
-            loop {
-                let response = search().await.unwrap();
-                if response.monitoring_state.as_deref() == Some("healthy") && response.results.contains(&"retained-reports".into()) {
-                    break;
-                }
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            manager.verification_watcher_loss("verification", false).unwrap();
-            let source = lock(&manager.sources).unwrap().get("verification").unwrap().clone();
-            source.flush(&manager.budget).unwrap();
-            let retained = search().await.unwrap();
-            assert_eq!(retained.monitoring_state.as_deref(), Some("unavailable"));
-            assert_eq!(retained.coverage.as_deref(), Some("uncertain"));
-            assert!(retained.results.contains(&"retained-reports".into()));
-            std::fs::create_dir(root.join("gap-reports")).unwrap();
-            manager.verification_watcher_loss("verification", true).unwrap();
-            {
-                *lock(&source.next_full_pass).unwrap() = Some(Instant::now());
-            }
-            loop {
-                let response = search().await.unwrap();
-                if response.monitoring_state.as_deref() == Some("healthy") && response.coverage.as_deref() == Some("complete") {
-                    assert!(response.results.contains(&"gap-reports".into()));
-                    assert!(response.results.contains(&"retained-reports".into()));
-                    break;
-                }
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            std::fs::create_dir(root.join("native-reports")).unwrap();
-            loop {
-                let response = search().await.unwrap();
-                if response.monitoring_state.as_deref() == Some("healthy") && response.results.contains(&"native-reports".into()) {
-                    assert_eq!(response.coverage.as_deref(), Some("complete"));
-                    break;
-                }
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            while !manager.verification_stop("verification").unwrap() {
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            assert!(lock(&manager.sources).unwrap().is_empty());
-            assert_eq!(manager.scans.available_permits(), limit("scan_workers").unwrap());
-            assert_eq!(manager.updates.available_permits(), limit("query_workers").unwrap());
-        })
-        .await
-        .expect("bounded verification lifecycle");
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
+        let search = || manager.search("verification".into(), root.clone(), "reports".into(), false);
+        search().await.unwrap();
+        wait_for_workers(&manager, "initial scan").await;
+        let initial = search().await.unwrap();
+        assert_eq!(initial.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(initial.results, ["retained-reports"]);
+
+        manager.verification_watcher_loss("verification", false).unwrap();
+        let source = lock(&manager.sources).unwrap().get("verification").unwrap().clone();
+        source.flush(&manager.budget).unwrap();
+        let retained = search().await.unwrap();
+        assert_eq!(retained.monitoring_state.as_deref(), Some("unavailable"));
+        assert_eq!(retained.coverage.as_deref(), Some("uncertain"));
+        assert_eq!(retained.results, ["retained-reports"]);
+
+        std::fs::create_dir(root.join("gap-reports")).unwrap();
+        manager.verification_watcher_loss("verification", true).unwrap();
+        *lock(&source.next_full_pass).unwrap() = Some(Instant::now());
+        source.flush(&manager.budget).unwrap();
+        manager.start_scan(&source).unwrap();
+        wait_for_workers(&manager, "gap recovery").await;
+        let recovered = search().await.unwrap();
+        assert_eq!(recovered.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(recovered.coverage.as_deref(), Some("complete"));
+        assert!(recovered.results.contains(&"gap-reports".into()));
+        assert!(recovered.results.contains(&"retained-reports".into()));
+
+        let native_path = root.join("native-reports");
+        std::fs::create_dir(&native_path).unwrap();
+        // Test the Windows event shape without depending on native callback timing.
+        source
+            .observe(Ok(Event::new(EventKind::Create(CreateKind::Any)).add_path(native_path)))
+            .unwrap();
+        manager.tick().unwrap();
+        wait_for_workers(&manager, "parent reconciliation").await;
+        let reconciled = search().await.unwrap();
+        assert_eq!(reconciled.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(reconciled.coverage.as_deref(), Some("complete"));
+        assert!(reconciled.results.contains(&"native-reports".into()));
+        assert_eq!(reconciled.last_verified_at_ms, recovered.last_verified_at_ms);
+
+        assert!(manager.verification_stop("verification").unwrap());
+        assert!(lock(&manager.sources).unwrap().is_empty());
+        assert!(lock(&source.root).unwrap().is_none());
+        assert!(lock(&source.watcher).unwrap().is_none());
+        assert_eq!(manager.scans.available_permits(), limit("scan_workers").unwrap());
+        assert_eq!(manager.updates.available_permits(), limit("query_workers").unwrap());
     }
 
     #[tokio::test]
@@ -8820,13 +8830,20 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         std::fs::create_dir(root.join("alpha")).unwrap();
         std::fs::create_dir(root.join(".hidden")).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
-        let started = Instant::now();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
+        let scan_permits = manager
+            .scans
+            .acquire_many(u32::try_from(limit("scan_workers").unwrap()).unwrap())
+            .await
+            .unwrap();
         let cold = manager.search("fixture".into(), root.clone(), "".into(), false).await.unwrap();
         assert_eq!(cold.total_matches, 0);
         assert_eq!(cold.search_contract_version, Some(SEARCH_CONTRACT_VERSION));
-        assert!(started.elapsed() < Duration::from_secs(1));
         let source = Arc::clone(manager.sources.lock().unwrap().get("fixture").unwrap());
+        assert!(!source.busy.load(Ordering::Acquire));
+        assert!(lock(&source.writer).unwrap().is_none());
+        drop(scan_permits);
+        manager.start_scan(&source).unwrap();
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let finished = source.finished.notified();
