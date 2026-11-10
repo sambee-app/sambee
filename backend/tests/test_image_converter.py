@@ -1,12 +1,14 @@
 """Tests for image conversion service using libvips."""
 
-import hashlib
 import logging
+import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 import pyvips
 
+from app.core.system_setting_definitions import ImageConversionPreference
 from app.services.image_converter import (
     convert_image_for_viewer,
     get_image_info,
@@ -143,13 +145,12 @@ class TestImageConversion:
             return bytes(image.pngsave_buffer())
 
     def test_convert_rgb_to_jpeg(self):
-        """Test converting RGB image to WebP (default)."""
+        """Speed mode converts opaque sources to JPEG."""
         test_image = self.create_test_image("RGB", (200, 150))
 
         result_bytes, mime_type, converter_name, duration_ms = convert_image_for_viewer(test_image, "test.png")
 
-        # Default format is now WebP
-        assert mime_type == "image/webp"
+        assert mime_type == "image/jpeg"
         assert len(result_bytes) > 0
 
         # Verify it's a valid WebP using pyvips
@@ -158,13 +159,15 @@ class TestImageConversion:
         assert result_img.height == 150  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.bands >= 3  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]  # RGB or grayscale
 
-    def test_convert_rgb_to_jpeg_explicit(self):
-        """Test converting RGB image to JPEG explicitly."""
+    def test_convert_rgb_size_preference(self):
+        """Size mode converts opaque sources to WebP."""
         test_image = self.create_test_image("RGB", (200, 150))
 
-        result_bytes, mime_type, converter_name, duration_ms = convert_image_for_viewer(test_image, "test.png", output_format="jpeg")
+        result_bytes, mime_type, converter_name, duration_ms = convert_image_for_viewer(
+            test_image, "test.png", preference=ImageConversionPreference.SIZE
+        )
 
-        assert mime_type == "image/jpeg"
+        assert mime_type == "image/webp"
         assert len(result_bytes) > 0
 
         # Verify it's a valid JPEG using pyvips
@@ -172,6 +175,50 @@ class TestImageConversion:
         assert result_img.width == 200  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.height == 150  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.bands >= 3  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]  # RGB or grayscale
+
+    @pytest.mark.parametrize("orientation", [6, 8])
+    @pytest.mark.parametrize("viewport,expected_size", [((800, 1200), (500, 1000)), ((400, 600), (300, 600))])
+    def test_jpeg_orientation_and_original(self, orientation, viewport, expected_size):
+        image = pyvips.Image.black(1000, 500, bands=3).copy(interpretation="srgb")
+        image.set_type(pyvips.GValue.gint_type, "orientation", orientation)
+        source = bytes(image.jpegsave_buffer())
+        with patch.object(pyvips.Image, "thumbnail_buffer", wraps=pyvips.Image.thumbnail_buffer) as thumbnail:
+            output, mime, converter, _ = convert_image_for_viewer(source, "photo.jpg", *viewport)
+        assert mime == "image/jpeg"
+        result = pyvips.Image.new_from_buffer(output, "").autorot()
+        assert (result.width, result.height) == expected_size
+        if viewport == (800, 1200):
+            assert output == source
+            assert converter == "original"
+            thumbnail.assert_not_called()
+        else:
+            assert output != source
+            assert converter == "libvips"
+            thumbnail.assert_called_once()
+
+    @pytest.mark.parametrize("orientation", [6, 8])
+    @pytest.mark.parametrize("viewport,expected_size", [((800, 1200), (500, 1000)), ((400, 600), (300, 600))])
+    def test_explicit_format_applies_orientation(self, orientation, viewport, expected_size):
+        image = pyvips.Image.black(1000, 500, bands=3).copy(interpretation="srgb")
+        image.set_type(pyvips.GValue.gint_type, "orientation", orientation)
+        source = bytes(image.jpegsave_buffer())
+        output, mime, _, _ = convert_image_for_viewer(source, "photo.jpg", *viewport, preference=ImageConversionPreference.SIZE)
+        assert mime == "image/webp"
+        result = pyvips.Image.new_from_buffer(output, "")
+        assert (result.width, result.height) == expected_size
+
+    def test_jpeg_original_without_viewport(self, caplog):
+        source = bytes(pyvips.Image.black(100, 50, bands=3).jpegsave_buffer())
+        with caplog.at_level(logging.DEBUG, logger="app.services.image_converter"):
+            output, mime, converter, _ = convert_image_for_viewer(source, "photo.jpeg")
+        assert (output, mime, converter) == (source, "image/jpeg", "original")
+        assert "path=original" in caplog.text
+
+    def test_content_not_extension_selects_jpeg_output(self):
+        source = bytes(pyvips.Image.black(100, 50, bands=3).jpegsave_buffer())
+        assert convert_image_for_viewer(source, "wrong.png")[1] == "image/jpeg"
+        source = self.create_test_image()
+        assert convert_image_for_viewer(source, "wrong.jpg")[2] == "libvips"
 
     def test_debug_timings_preserve_conversion(self, caplog: pytest.LogCaptureFixture):
         """Debug diagnostics describe lazy evaluation without changing output bytes."""
@@ -181,62 +228,23 @@ class TestImageConversion:
             actual = convert_image_for_viewer(test_image, "test.png", max_width=100)
 
         assert actual[:3] == expected[:3]
-        assert f"input_sha256={hashlib.sha256(test_image).hexdigest()}" in caplog.text
         assert "source=200x150 output=100x75" in caplog.text
-        for field in ("metadata_ms=", "pipeline_setup_ms=", "evaluate_encode_ms=", "process_cpu_ms=", "cgroup_delta=", "evaluation=lazy"):
-            assert field in caplog.text
-
-    @pytest.mark.parametrize("contents", [None, "invalid", "usage_usec not-a-number"])
-    def test_missing_cpu_diagnostics_do_not_break_conversion(self, contents, caplog: pytest.LogCaptureFixture):
-        """Unsupported or unavailable cgroups must not affect image viewing."""
-        test_image = self.create_test_image()
-        with (
-            caplog.at_level(logging.DEBUG, logger="app.services.image_converter"),
-            patch("app.services.image_converter.CGROUP_CPU_MAX_PATH") as quota,
-            patch("app.services.image_converter.CGROUP_CPU_STAT_PATH") as counters,
-        ):
-            quota.read_text.side_effect = OSError("not available")
-            if contents is None:
-                counters.read_text.side_effect = OSError("not available")
-            else:
-                counters.read_text.return_value = contents
-            result = convert_image_for_viewer(test_image, "test.png")
-
-        assert result[1] == "image/webp"
-        assert "cpu_max=None" in caplog.text
-        assert "cgroup_delta={}" in caplog.text
-
-    def test_debug_cpu_counters_report_deltas(self, caplog: pytest.LogCaptureFixture):
-        """CPU totals identify shared process and cgroup activity during conversion."""
-        test_image = self.create_test_image()
-        with (
-            caplog.at_level(logging.DEBUG, logger="app.services.image_converter"),
-            patch("app.services.image_converter.CGROUP_CPU_MAX_PATH") as quota,
-            patch("app.services.image_converter.CGROUP_CPU_STAT_PATH") as counters,
-        ):
-            quota.read_text.return_value = "100000 100000"
-            counters.read_text.side_effect = [
-                "usage_usec 100\nnr_throttled 2\nthrottled_usec 30\n",
-                "usage_usec 150\nnr_throttled 3\nthrottled_usec 70\n",
-            ]
-            convert_image_for_viewer(test_image, "test.png")
-
-        assert "cpu_max='100000 100000'" in caplog.text
-        for field in ("'usage_usec': 50", "'nr_throttled': 1", "'throttled_usec': 40"):
+        assert len(caplog.records) == 1
+        for field in ("path=libvips", "setup_ms=", "encode_ms=", "output_bytes=", "format=jpeg", "preference=speed", "webp_fallback=none"):
             assert field in caplog.text
 
     def test_info_logging_skips_expensive_diagnostics(self, caplog: pytest.LogCaptureFixture):
-        """Normal logging does not hash image contents or read cgroup files."""
+        """Normal logging only reads the clock for the public duration result."""
         test_image = self.create_test_image()
         with (
             caplog.at_level(logging.INFO, logger="app.services.image_converter"),
-            patch("app.services.image_converter._read_image_cpu_state") as cpu_state,
-            patch("app.services.image_converter.hashlib.sha256") as source_hash,
+            patch("app.services.image_converter.time.perf_counter", side_effect=[1.0, 2.0]) as clock,
         ):
-            convert_image_for_viewer(test_image, "test.png")
+            result = convert_image_for_viewer(test_image, "test.png")
 
-        cpu_state.assert_not_called()
-        source_hash.assert_not_called()
+        assert result[3] == 1000
+        assert clock.call_count == 2
+        assert not caplog.records
 
     def test_convert_rgba_to_jpeg(self):
         """Test converting RGBA image to WebP (preserves or removes alpha based on format)."""
@@ -252,18 +260,20 @@ class TestImageConversion:
         assert result_img.width == 100  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.height == 100  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
 
-    def test_convert_rgba_to_jpeg_explicit(self):
-        """Test converting RGBA image to JPEG explicitly (removes alpha)."""
+    def test_convert_rgba_size_preference(self):
+        """An alpha band retains WebP in size mode, even when fully opaque."""
         test_image = self.create_test_image("RGBA", (100, 100))
 
-        result_bytes, mime_type, converter_name, duration_ms = convert_image_for_viewer(test_image, "test.png", output_format="jpeg")
+        result_bytes, mime_type, converter_name, duration_ms = convert_image_for_viewer(
+            test_image, "test.png", preference=ImageConversionPreference.SIZE
+        )
 
-        assert mime_type == "image/jpeg"
+        assert mime_type == "image/webp"
 
-        # Verify alpha channel was handled (composite on white)
+        # WebP retains this fixture's alpha band.
         result_img = pyvips.Image.new_from_buffer(result_bytes, "")
-        assert not result_img.hasalpha()  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]  # No alpha in JPEG
-        assert result_img.bands == 3  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]  # RGB
+        assert result_img.hasalpha()
+        assert result_img.bands == 4
 
     def test_convert_bmp_to_jpeg(self):
         """Test converting BMP to WebP (default)."""
@@ -271,7 +281,7 @@ class TestImageConversion:
 
         result_bytes, mime_type, converter_name, duration_ms = convert_image_for_viewer(test_bmp, "test.bmp")
 
-        assert mime_type == "image/webp"
+        assert mime_type == "image/jpeg"
         result_img = pyvips.Image.new_from_buffer(result_bytes, "")
         assert result_img.width == 150  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.height == 200  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
@@ -312,7 +322,7 @@ class TestImageConversion:
         result_bytes, mime_type, converter_name, duration_ms = convert_image_for_viewer(test_image, "test.png")
 
         # Verify it's a valid WebP (default format)
-        assert mime_type == "image/webp"
+        assert mime_type == "image/jpeg"
         result_img = pyvips.Image.new_from_buffer(result_bytes, "")
         assert result_img.width == 500  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
         assert result_img.height == 500  # pyright: ignore[reportOptionalMemberAccess, reportAttributeAccessIssue]
@@ -320,6 +330,67 @@ class TestImageConversion:
         # File size should be reasonable (solid color image compresses well)
         # Expect roughly 1-15 KB for a 500x500 solid color image (WebP compresses better than JPEG)
         assert 500 < len(result_bytes) < 20_000
+
+    @pytest.mark.parametrize("preference", list(ImageConversionPreference))
+    @pytest.mark.parametrize("extension,alpha", [(".png", False), (".tiff", False), (".png", True), (".ico", True)])
+    def test_format_policy_signatures(self, preference, extension, alpha):
+        source = self.create_test_image("RGBA" if alpha else "RGB")
+        if extension == ".tiff":
+            source = bytes(pyvips.Image.new_from_buffer(source, "").tiffsave_buffer())
+        elif extension == ".ico":
+            source = subprocess.run(["magick", "png:-", "ico:-"], input=source, capture_output=True, check=True).stdout
+        output, mime, _, _ = convert_image_for_viewer(source, f"image{extension}", preference=preference)
+        expected = "png" if extension == ".ico" else "webp" if alpha or preference is ImageConversionPreference.SIZE else "jpeg"
+        assert mime == f"image/{expected}"
+        assert pyvips.Image.new_from_buffer(output, "").get("vips-loader").startswith(expected)
+
+    @pytest.mark.parametrize("alpha", [False, True])
+    @pytest.mark.parametrize("preference", list(ImageConversionPreference))
+    def test_webp_dimension_fallback(self, alpha, preference, caplog):
+        source = self.create_test_image("RGBA" if alpha else "RGB", (16_384, 1))
+        with caplog.at_level(logging.DEBUG, logger="app.services.image_converter"):
+            output, mime, _, _ = convert_image_for_viewer(source, "wide.png", preference=preference)
+        assert mime == ("image/png" if alpha else "image/jpeg")
+        result = pyvips.Image.new_from_buffer(output, "")
+        assert (result.width, result.height) == (16_384, 1)
+        if alpha or preference is ImageConversionPreference.SIZE:
+            assert f"webp_fallback={'png' if alpha else 'jpeg'}" in caplog.text
+
+    def test_fitting_jpeg_above_webp_limit_is_original(self):
+        source = bytes(pyvips.Image.black(16_384, 1, bands=3).jpegsave_buffer())
+        output, mime, converter, _ = convert_image_for_viewer(source, "wide.jpg", preference=ImageConversionPreference.SIZE)
+        assert (output, mime, converter) == (source, "image/jpeg", "original")
+
+    def test_fitting_jpeg_keeps_original_when_webp_is_not_smaller(self):
+        source = bytes(pyvips.Image.black(1, 1, bands=3).jpegsave_buffer())
+        with patch.object(pyvips.Image, "webpsave_buffer", return_value=b"x" * len(source)):
+            output, mime, converter, _ = convert_image_for_viewer(source, "tiny.jpg", preference=ImageConversionPreference.SIZE)
+        assert (output, mime, converter) == (source, "image/jpeg", "original")
+
+    @pytest.mark.parametrize("extension", ["psd", "psb", "eps", "ai"])
+    @pytest.mark.parametrize("preference", list(ImageConversionPreference))
+    def test_imagemagick_format_policy(self, extension, preference):
+        source = (
+            Path("tests/test_data/images/cmyk/photoshop_cmyk.psd").read_bytes()
+            if extension in {"psd", "psb"}
+            else Path("tests/test_data/images/rgb/postscript_rgb.eps").read_bytes()
+        )
+        if extension == "psb":
+            source = subprocess.run(["magick", "psd:-[0]", "psb:-"], input=source, capture_output=True, check=True).stdout
+        output, mime, _, _ = convert_image_for_viewer(source, f"image.{extension}", preference=preference)
+        expected = "png" if extension in {"eps", "ai"} else "webp" if preference is ImageConversionPreference.SIZE else "jpeg"
+        assert mime == f"image/{expected}"
+        assert pyvips.Image.new_from_buffer(output, "").get("vips-loader").startswith(expected)
+
+    @pytest.mark.parametrize("metadata", [("Unknown", False), ("sRGB", False)])
+    def test_psd_size_falls_back_to_jpeg(self, metadata):
+        from app.services.preprocessor import ImageMagickPreprocessor
+
+        source = Path("tests/test_data/images/cmyk/photoshop_cmyk.psd").read_bytes()
+        with patch.object(ImageMagickPreprocessor, "inspect_image", return_value=metadata):
+            output, mime, _, _ = convert_image_for_viewer(source, "image.psd", preference=ImageConversionPreference.SIZE)
+        assert mime == "image/jpeg"
+        assert output.startswith(b"\xff\xd8")
 
     def test_invalid_image_raises_error(self):
         """Test that invalid image data raises ValueError."""

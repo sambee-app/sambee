@@ -22,14 +22,13 @@
 import { AppBar, Box, Button, Container, Divider, Menu, MenuItem, Toolbar, Typography, useMediaQuery, useTheme } from "@mui/material";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { type Location, type NavigateFunction, type NavigateOptions, type To, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArchiveExtractDialog, type ArchiveExtractionScope } from "../components/FileBrowser/ArchiveExtractDialog";
 import { ArchiveOperationProgress } from "../components/FileBrowser/ArchiveOperationProgress";
 import type { CompactItemAction } from "../components/FileBrowser/CompactItemActionsMenu";
 import CopyMoveDialog, { type CopyMoveMode } from "../components/FileBrowser/CopyMoveDialog";
 import { DesktopToolbar } from "../components/FileBrowser/DesktopToolbar";
 import { DialogOperationContext } from "../components/FileBrowser/DialogOperationContext";
-import { DynamicViewer, ViewerFallbackDialog } from "../components/FileBrowser/DynamicViewer";
 import type { CompanionLifecycleStatus } from "../components/FileBrowser/FileBrowserAlerts";
 import { FileBrowserAlerts, FileBrowserStatus } from "../components/FileBrowser/FileBrowserAlerts";
 import { FileOperationsToolbar } from "../components/FileBrowser/FileOperationsToolbar";
@@ -147,13 +146,14 @@ import {
   parseBrowseRoute,
   resolveBrowseRouteState,
   serializeBrowseRoute,
+  VIEWER_QUERY_KEYS,
 } from "./FileBrowser/routing";
 import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, ViewInfo, VirtualRouteLocation } from "./FileBrowser/types";
 import { ACTIVE_PANE_QUERY_KEY, ACTIVE_PANE_STORAGE_KEY, RIGHT_PANE_QUERY_KEY } from "./FileBrowser/types";
 import { useBrowserDownload } from "./FileBrowser/useBrowserDownload";
 import { useBrowserUpload } from "./FileBrowser/useBrowserUpload";
 import { useFileBrowserPane } from "./FileBrowser/useFileBrowserPane";
-import { useWorkspaceNavigation } from "./FileBrowser/useWorkspaceNavigation";
+import { WorkspaceViewer, type WorkspaceViewerHandle } from "./FileBrowser/WorkspaceViewer";
 
 // ============================================================================
 // Main Component
@@ -413,7 +413,14 @@ function collectDirectorySubscriptions({
   return subscriptions;
 }
 
-const Browser: React.FC = () => {
+interface BrowserWorkspaceProps {
+  params: { targetType?: string; targetId?: string; "*"?: string };
+  location: Pick<Location, "pathname" | "search" | "hash">;
+  getLocation: () => Location;
+  navigate: NavigateFunction;
+}
+
+const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location, getLocation, navigate }: BrowserWorkspaceProps) {
   // Track renders for performance monitoring
   const renderCountRef = React.useRef(0);
   React.useEffect(() => {
@@ -423,17 +430,15 @@ const Browser: React.FC = () => {
     }
   });
 
-  const navigate = useNavigate();
-  const params = useParams<{ targetType: string; targetId: string; "*": string }>();
-  const location = useLocation();
-  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const actualLocation = getLocation();
+  const searchParams = useMemo(() => new URLSearchParams(actualLocation.search), [actualLocation.search]);
   const currentRoute = useMemo(
     () => parseBrowseRoute({ targetType: params.targetType, targetId: params.targetId, path: params["*"], searchParams }),
     [params.targetType, params.targetId, params["*"], searchParams]
   );
   const theme = useTheme();
   const { t } = useTranslation();
-  const initialRecoverySnapshotRef = React.useRef(loadBrowserRecoverySnapshot(location.pathname + location.search));
+  const initialRecoverySnapshotRef = React.useRef(loadBrowserRecoverySnapshot(location.pathname + actualLocation.search));
   const hasHydratedRecoverySnapshotRef = React.useRef(false);
   const hasStartedInitialConnectionLoadRef = React.useRef(false);
   const [recoveryPhase, setRecoveryPhase] = useState<RecoveryPhase>(() =>
@@ -683,6 +688,7 @@ const Browser: React.FC = () => {
   const pendingPaneFocusRef = React.useRef<PaneId | null>(null);
   const routeSyncTokenRef = React.useRef(0);
   const openViewerRef = React.useRef<(paneId: PaneId, info: ViewInfo) => void>(() => undefined);
+  const workspaceRef = React.useRef<WorkspaceViewerHandle | null>(null);
 
   // WebSocket for real-time directory updates (server)
   const wsRef = React.useRef<WebSocket | null>(null);
@@ -748,18 +754,8 @@ const Browser: React.FC = () => {
   const rightPaneRef = React.useRef(rightPane);
   leftPaneRef.current = leftPane;
   rightPaneRef.current = rightPane;
-  const workspace = useWorkspaceNavigation({
-    route: currentRoute,
-    connections: allConnections,
-    services: browserContentServices,
-    left: leftPane,
-    right: rightPane,
-    ready: !loadingConnections && recoveryPhase === "ready",
-  });
   const [viewerLeaveGuard, setViewerLeaveGuard] = useState<ViewerLeaveGuard | null>(null);
-  const displayedViewerPane = leftPane.viewInfo ? leftPane : rightPane;
-  const displayedViewerInfo = displayedViewerPane.viewInfo;
-  openViewerRef.current = workspace.openViewer;
+  openViewerRef.current = (paneId, info) => workspaceRef.current?.openViewer(paneId, info);
 
   /**
    * Active pane — the pane that receives keyboard input and toolbar actions.
@@ -1293,12 +1289,12 @@ const Browser: React.FC = () => {
 
     hasHydratedRecoverySnapshotRef.current = true;
 
-    if (snapshot.routeUrl === location.pathname + location.search) {
+    if (snapshot.routeUrl === getLocation().pathname + getLocation().search) {
       if (snapshot.left) leftPane.restoreRecoverySnapshot(snapshot.left);
       if (snapshot.right) rightPane.restoreRecoverySnapshot(snapshot.right);
     }
     setRecoveryPhase("ready");
-  }, [leftPane, location.pathname, location.search, rightPane]);
+  }, [getLocation, leftPane, rightPane]);
 
   useEffect(() => {
     restoreInitialRecoverySnapshot();
@@ -1339,7 +1335,7 @@ const Browser: React.FC = () => {
       return;
     saveBrowserRecoverySnapshot({
       savedAt: Date.now(),
-      routeUrl: serializeBrowseRoute(currentRoute),
+      routeUrl: getLocation().pathname + getLocation().search,
       activePaneId: rightTarget ? activePaneId : "left",
       paneMode: rightTarget ? "dual" : "single",
       connections,
@@ -1351,6 +1347,7 @@ const Browser: React.FC = () => {
     allConnections,
     connections,
     currentRoute,
+    getLocation,
     leftPane.error,
     leftPane.loading,
     paneMode,
@@ -1366,21 +1363,23 @@ const Browser: React.FC = () => {
 
   const navigateToBrowseState = useCallback(
     (nextRoute: BrowseRouteState, options?: { replace?: boolean }) => {
+      const actualLocation = getLocation();
+      const actualRoute = parseBrowseRoute({ ...params, path: params["*"], searchParams: new URLSearchParams(actualLocation.search) });
       const nextUrl = serializeBrowseRoute({
         ...nextRoute,
         extraSearch: nextRoute.extraSearch ?? currentRoute.extraSearch,
         ...(options?.replace
-          ? { viewer: nextRoute.viewer ?? currentRoute.viewer, settings: nextRoute.settings ?? currentRoute.settings }
+          ? { viewer: nextRoute.viewer ?? actualRoute.viewer, settings: nextRoute.settings ?? currentRoute.settings }
           : {}),
       });
-      const currentUrl = location.pathname + location.search;
+      const currentUrl = actualLocation.pathname + actualLocation.search;
       if (currentUrl === nextUrl) {
         return;
       }
 
-      navigate(nextUrl + location.hash, { replace: options?.replace ?? false, state: location.state });
+      navigate(nextUrl + actualLocation.hash, { replace: options?.replace ?? false, state: actualLocation.state });
     },
-    [currentRoute, location, navigate]
+    [currentRoute, getLocation, navigate, params]
   );
 
   const getCurrentLeftTarget = useCallback(() => {
@@ -2684,11 +2683,11 @@ const Browser: React.FC = () => {
   }, [copyMoveProcessing]);
 
   const handleOpenSettings = useCallback(() => {
-    workspace.openSettings("main");
-  }, [workspace.openSettings]);
+    workspaceRef.current?.openSettings("main");
+  }, []);
 
   const handleSettingsClose = () => {
-    workspace.closeSettings();
+    workspaceRef.current?.closeSettings();
     // Return focus to active pane's file list after closing settings
     setTimeout(() => {
       activePane.listContainerEl?.focus();
@@ -2700,12 +2699,12 @@ const Browser: React.FC = () => {
   }, []);
 
   const openConnectionsSettings = useCallback(() => {
-    workspace.openSettings("connections");
-  }, [workspace.openSettings]);
+    workspaceRef.current?.openSettings("connections");
+  }, []);
 
   const openLocalDrivesSettings = useCallback(() => {
-    workspace.openSettings("local-drives");
-  }, [workspace.openSettings]);
+    workspaceRef.current?.openSettings("local-drives");
+  }, []);
 
   const focusQuickBarInput = useCallback(
     (sourcePaneId: PaneId) => {
@@ -4432,7 +4431,7 @@ const Browser: React.FC = () => {
             onClose={handleSettingsClose}
             initialCategory={settingsInitialCategory}
             category={settingsInitialCategory}
-            onNavigate={workspace.openSettings}
+            onNavigate={(settings) => workspaceRef.current?.openSettings(settings)}
             onConnectionsChanged={handleConnectionsChanged}
           />
         )}
@@ -4444,43 +4443,26 @@ const Browser: React.FC = () => {
             onConnectionsChanged={handleConnectionsChanged}
             initialView={mobileSettingsInitialView}
             view={mobileSettingsInitialView}
-            onNavigate={workspace.openSettings}
-            onBack={workspace.backSettings}
+            onNavigate={(settings) => workspaceRef.current?.openSettings(settings)}
+            onBack={() => workspaceRef.current?.backSettings()}
           />
         )}
         {/* Viewer overlay — full-screen, from whichever pane opened it */}
         {viewerLeaveGuard ? <WorkspaceNavigationGuard guard={viewerLeaveGuard} /> : null}
-        {workspace.viewerError && currentRoute.viewer ? (
-          <ViewerFallbackDialog
-            mode="failed"
-            path={currentRoute.viewer.file.path}
-            error={workspace.viewerError}
-            onClose={workspace.closeViewer}
-            onRetry={workspace.retryViewer}
-          />
-        ) : null}
-        {displayedViewerInfo && (
-          <DynamicViewer
-            connectionId={displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId}
-            isReadOnly={isConnectionReadOnly(
-              getConnectionById(allConnections, displayedViewerInfo.connectionId ?? displayedViewerPane.connectionId)
-            )}
-            isPending={workspace.viewerLoading}
-            viewInfo={displayedViewerInfo}
-            navigation={{
-              selectionKey: workspace.viewerSelectionKey,
-              mode: currentRoute.viewer?.mode ?? "view",
-              onModeChange: workspace.changeMode,
-              onGuardChange: setViewerLeaveGuard,
-            }}
-            onClose={workspace.closeViewer}
-            onIndexChange={(index) => workspace.changeImage(leftPane.viewInfo ? "left" : "right", index)}
-            hasMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveHasMore : false}
-            isLoadingMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.archiveLoadingMore : false}
-            onLoadMoreItems={displayedViewerInfo.virtualSource ? displayedViewerPane.loadMoreArchive : undefined}
-            contentProviders={browserContentServices.providers}
-          />
-        )}
+        <WorkspaceViewer
+          ref={workspaceRef}
+          connections={allConnections}
+          services={browserContentServices}
+          left={leftPane}
+          right={rightPane}
+          ready={
+            !loadingConnections &&
+            recoveryPhase === "ready" &&
+            (!resolvedRoute.left || leftPane.connectionId === resolvedRoute.left.connectionId) &&
+            (!resolvedRoute.right || rightPane.connectionId === resolvedRoute.right.connectionId)
+          }
+          onGuardChange={setViewerLeaveGuard}
+        />
         {/* Keyboard Shortcuts Help */}
         <KeyboardShortcutsHelp
           open={showHelp}
@@ -4790,6 +4772,36 @@ const Browser: React.FC = () => {
       </Box>
     </OperationNotificationProvider>
   );
+});
+
+const Browser: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = useParams<{ targetType: string; targetId: string; "*": string }>();
+  const routerRef = React.useRef({ location, navigate });
+  routerRef.current = { location, navigate };
+  const getLocation = useCallback(() => routerRef.current.location, []);
+  const navigateWorkspace = useCallback<NavigateFunction>(
+    (to: To | number, options?: NavigateOptions) =>
+      typeof to === "number" ? routerRef.current.navigate(to) : routerRef.current.navigate(to, options),
+    []
+  );
+  const directorySearch = useMemo(() => {
+    const search = new URLSearchParams(location.search);
+    for (const key of VIEWER_QUERY_KEYS) search.delete(key);
+    const query = search.toString();
+    return query ? `?${query}` : "";
+  }, [location.search]);
+  const directoryLocation = useMemo(
+    () => ({ pathname: location.pathname, search: directorySearch, hash: location.hash }),
+    [location.pathname, directorySearch, location.hash]
+  );
+  const directoryParams = useMemo(
+    () => ({ targetType: params.targetType, targetId: params.targetId, "*": params["*"] }),
+    [params.targetType, params.targetId, params["*"]]
+  );
+
+  return <BrowserWorkspace params={directoryParams} location={directoryLocation} getLocation={getLocation} navigate={navigateWorkspace} />;
 };
 
 export default Browser;

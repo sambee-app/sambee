@@ -2,11 +2,13 @@
 
 import logging
 import time
+from codecs import decode
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PureWindowsPath
 from struct import error as StructError
+from struct import unpack_from
 from threading import RLock
 from typing import Any
 from uuid import UUID
@@ -25,6 +27,7 @@ from smbprotocol.open import (
     Open,
     QueryDirectoryFlags,
     ShareAccess,
+    SMB2QueryDirectoryResponse,
     SMB2QueryInfoRequest,
     SMB2QueryInfoResponse,
 )
@@ -51,6 +54,13 @@ OPTIONAL_INFORMATION_UNAVAILABLE = frozenset(
     (NtStatus.STATUS_INVALID_INFO_CLASS, NtStatus.STATUS_NOT_SUPPORTED, NtStatus.STATUS_INVALID_PARAMETER)
 )
 logger = logging.getLogger(__name__)
+DIRECTORY_NEXT_OFFSET = 0
+DIRECTORY_ATTRIBUTES_OFFSET = 56
+DIRECTORY_NAME_LENGTH_OFFSET = 60
+DIRECTORY_FILE_ID_OFFSET = 72
+DIRECTORY_NAME_OFFSET = 80
+DIRECTORY_RECORD_ALIGNMENT = 8
+UTF16_CODE_UNIT_BYTES = 2
 
 
 class DirectoryTraversalError(OSError):
@@ -116,6 +126,70 @@ class SmbDirectoryEntry:
     name: str | None
     smb_info: SmbDirectoryEntryInformation
     file_id: bytes | None = None
+
+
+@dataclass(frozen=True)
+class SmbDirectoryBatch:
+    """A nonempty wire batch can contain no directory entries."""
+
+    entries: tuple[SmbDirectoryEntry, ...]
+
+    def __iter__(self) -> Iterator[SmbDirectoryEntry]:
+        return iter(self.entries)
+
+
+def parse_directory_records(data: bytes) -> SmbDirectoryBatch:
+    """Read FILE_ID_FULL_DIRECTORY_INFORMATION without copying buffer tails."""
+    view = memoryview(data)
+    offset = 0
+    entries = []
+    while True:
+        if len(view) - offset < DIRECTORY_NAME_OFFSET:
+            raise DirectoryTraversalError("Directory record header is truncated. Retry source verification.")
+        next_offset = unpack_from("<I", view, offset + DIRECTORY_NEXT_OFFSET)[0]
+        attributes = unpack_from("<I", view, offset + DIRECTORY_ATTRIBUTES_OFFSET)[0]
+        name_length = unpack_from("<I", view, offset + DIRECTORY_NAME_LENGTH_OFFSET)[0]
+        file_id = unpack_from("<Q", view, offset + DIRECTORY_FILE_ID_OFFSET)[0]
+        end = offset + next_offset if next_offset else len(view)
+        if next_offset and (
+            next_offset < DIRECTORY_NAME_OFFSET or next_offset % DIRECTORY_RECORD_ALIGNMENT or end > len(view) - DIRECTORY_NAME_OFFSET
+        ):
+            raise DirectoryTraversalError("Directory record offset is outside the response bounds or unaligned. Retry source verification.")
+        name_start = offset + DIRECTORY_NAME_OFFSET
+        if name_length > end - name_start:
+            raise DirectoryTraversalError("Directory record name exceeds its record bounds. Retry source verification.")
+        if attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
+            if name_length % UTF16_CODE_UNIT_BYTES:
+                raise DirectoryTraversalError("Directory record name has an odd UTF-16 length. Retry source verification.")
+            name: str | None
+            try:
+                name = decode(view[name_start : name_start + name_length], "utf-16-le", errors="strict")
+                if name not in (".", ".."):
+                    _component(name)
+                else:
+                    name = None
+                    if not next_offset:
+                        break
+                    offset = end
+                    continue
+            except (UnicodeError, ValueError, DirectoryTraversalError):
+                name = None
+            expected_id = None if file_id in SMB_UNAVAILABLE_FILE_IDS else file_id.to_bytes(8, "little")
+            entries.append(SmbDirectoryEntry(name, SmbDirectoryEntryInformation(attributes), expected_id))
+        if not next_offset:
+            break
+        offset = end
+    return SmbDirectoryBatch(tuple(entries))
+
+
+def _receive_directory(connection: Any, request: Any) -> SmbDirectoryBatch:
+    response = connection.receive(request)
+    parsed = SMB2QueryDirectoryResponse()
+    try:
+        parsed.unpack(response["data"].get_value())
+    except (StructError, ValueError) as error:
+        raise DirectoryTraversalError("Directory query response is truncated. Retry source verification.") from error
+    return parse_directory_records(parsed["buffer"].get_value())
 
 
 def _directory_tree(path: str, **session: Any) -> tuple[Any, str]:
@@ -292,7 +366,7 @@ class SmbDirectoryHandle:
                 raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
         return SmbDirectoryIdentity(server_guid, numbers[0], numbers[1], volume_serial, volume_created, numbers[2], native_name)
 
-    def records(self, check: Callable[[], None], *, pattern: str = "*") -> Generator[Any, None, None]:
+    def records(self, check: Callable[[], None], *, pattern: str = "*") -> Generator[SmbDirectoryEntry, None, None]:
         flags = QueryDirectoryFlags.SMB2_RESTART_SCANS | QueryDirectoryFlags.SMB2_REOPEN
         while True:
             check()
@@ -308,12 +382,16 @@ class SmbDirectoryHandle:
                 maximum = min(maximum, SMB_CREDIT_BYTES)
             try:
                 self._io.record_request()
-                records = self.fd.query_directory(
+                query, _receive = self.fd.query_directory(
                     pattern,
                     FileInformationClass.FILE_ID_FULL_DIRECTORY_INFORMATION,
                     flags=flags,
                     max_output=maximum,
+                    send=False,
                 )
+                tree = self.fd.tree_connect
+                request = connection.send(query, tree.session.session_id, tree.tree_connect_id)
+                records = _receive_directory(_NoFollowConnection(connection), request)
             except (NoMoreFiles, NoSuchFile):
                 check()
                 return
@@ -350,29 +428,13 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
     def __next__(self) -> SmbDirectoryEntry:
         while True:
             record = next(self._records)
-            attributes = record["file_attributes"].get_value()
-            if type(attributes) is not int or attributes < 0:
-                raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
-            try:
-                name = record["file_name"].get_value().decode("utf-16-le", errors="strict")
-                if name in (".", ".."):
-                    continue
-                _component(name)
-                if attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
-                    parent = self._identities[-1].native_name.replace("\\", "/").lstrip("/")
-                    _validate_traversal_path(f"{parent}/{name}" if parent else name)
-            except (UnicodeError, ValueError, DirectoryTraversalError):
-                if attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
-                    return SmbDirectoryEntry(None, SmbDirectoryEntryInformation(attributes))
-                continue
-            try:
-                file_id = record["file_id"].get_value()
-            except KeyError:
-                file_id = None
-            if file_id is not None and (type(file_id) is not int or not 0 <= file_id <= 0xFFFFFFFFFFFFFFFF):
-                raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
-            expected_id = None if file_id is None or file_id in SMB_UNAVAILABLE_FILE_IDS else file_id.to_bytes(8, "little")
-            return SmbDirectoryEntry(name, SmbDirectoryEntryInformation(attributes), expected_id)
+            if record.name is not None:
+                parent = self._identities[-1].native_name.replace("\\", "/").lstrip("/")
+                try:
+                    _validate_traversal_path(f"{parent}/{record.name}" if parent else record.name)
+                except DirectoryTraversalError:
+                    return SmbDirectoryEntry(None, record.smb_info)
+            return record
 
     def verify_file_id(self, expected: bytes) -> None:
         self._check()
@@ -393,14 +455,13 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
         _component(name)
         parent = self._identities[-1].native_name.replace("\\", "/").lstrip("/")
         _validate_traversal_path(f"{parent}/{name}" if parent else name)
-        native_name = name.encode("utf-16-le", errors="strict")
         self.verify()
         records = self._handles[-1].records(self._check, pattern=name)
         try:
             for record in records:
-                if record["file_name"].get_value() != native_name:
+                if record.name != name:
                     continue
-                attributes = record["file_attributes"].get_value()
+                attributes = record.smb_info.file_attributes
                 if attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT:
                     raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
                 self.verify()
@@ -524,6 +585,9 @@ class SmbCompoundDirectoryReader(SmbDirectoryRead):
             parsed.unpack(response["data"].get_value())
             return parsed.parse_buffer(FileInternalInformation)
 
+        def receive_directory(request: Any) -> SmbDirectoryBatch:
+            return _receive_directory(descriptor.connection, request)
+
         actions = [
             create,
             (query, receive_identity),
@@ -544,6 +608,7 @@ class SmbCompoundDirectoryReader(SmbDirectoryRead):
             descriptor.close(send=False),
         ]
         check()
+        actions = [(message, receive_directory if position in (2, 3) else receive) for position, (message, receive) in enumerate(actions)]
         messages = [message for message, _receive in actions]
         if credit_reserve:
             send_scan_compound = getattr(connection, "send_scan_compound", None)

@@ -33,6 +33,14 @@ vi.mock("../../services/companion", () => ({
 import companionService from "../../services/companion";
 
 const mockAdvancedSettings: AdvancedSystemSettings = {
+  image_conversion_preference: {
+    key: "image_viewer.conversion_preference",
+    label: "Image conversion preference",
+    description: "Applies to backend image previews, including libvips conversions. Local-drive images are unchanged.",
+    value: "speed",
+    default_value: "speed",
+    source: "default",
+  },
   preprocessors: {
     imagemagick: {
       max_file_size_bytes: {
@@ -133,6 +141,70 @@ describe("AdvancedSettings", () => {
     expect(screen.getByLabelText("Maximum file size")).toHaveAccessibleDescription(/Largest input file/);
   });
 
+  it("keeps the desktop select label inside its control with help text below", async () => {
+    const matchMedia = window.matchMedia;
+    window.matchMedia = (query) => ({
+      matches: query.includes("min-width"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    try {
+      render(<AdvancedSettings />);
+      const select = await screen.findByRole("combobox", { name: "Image conversion preference" });
+      expect(select).toHaveAccessibleDescription(/Applies to backend image previews, including libvips/);
+      expect(select).toHaveTextContent("Conversion speed");
+      expect(select.closest(".MuiFormControl-root")?.querySelector(".MuiInputLabel-root")).toHaveTextContent("Image conversion preference");
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
+  it("saves the preference on change and keeps it after a numeric save", async () => {
+    const user = userEvent.setup();
+    render(<AdvancedSettings />);
+    const select = await screen.findByRole("combobox", { name: "Image conversion preference" });
+    expect(select).toHaveTextContent("Conversion speed");
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: /Target size/ }));
+    await waitFor(() =>
+      expect(api.updateAdvancedSettings).toHaveBeenCalledWith(
+        { field: "image_viewer.conversion_preference", value: "size" },
+        expect.objectContaining({ signal: expect.anything() })
+      )
+    );
+    expect(select).toHaveTextContent("Target size");
+    const timeout = screen.getByLabelText("Conversion timeout");
+    expect(timeout).toHaveValue("30");
+    await user.clear(timeout);
+    await user.type(timeout, "45");
+    await user.tab();
+    await waitFor(() => expect(api.updateAdvancedSettings).toHaveBeenCalledTimes(2));
+    expect(select).toHaveTextContent("Target size");
+    expect(timeout).toHaveValue("45");
+  });
+
+  it("keeps the confirmed preference after failure and permits retry", async () => {
+    vi.mocked(api.updateAdvancedSettings).mockRejectedValueOnce({
+      response: { data: { detail: "Check the server connection and try again." } },
+    });
+    const user = userEvent.setup();
+    render(<AdvancedSettings />);
+    const select = await screen.findByRole("combobox", { name: "Image conversion preference" });
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: /Target size/ }));
+    expect(await screen.findByText("Check the server connection and try again.")).toBeInTheDocument();
+    expect(select).toHaveTextContent("Conversion speed");
+    await user.click(select);
+    await user.click(await screen.findByRole("option", { name: /Target size/ }));
+    await waitFor(() => expect(select).toHaveTextContent("Target size"));
+    expect(screen.queryByText("Check the server connection and try again.")).not.toBeInTheDocument();
+  });
+
   it("persists a valid updated value on blur", async () => {
     const user = userEvent.setup();
 
@@ -160,7 +232,7 @@ describe("AdvancedSettings", () => {
   });
 
   it("does not invent settings for an unavailable optional preprocessor", async () => {
-    vi.mocked(api.getAdvancedSettings).mockResolvedValue({ preprocessors: {} });
+    vi.mocked(api.getAdvancedSettings).mockResolvedValue({ ...mockAdvancedSettings, preprocessors: {} });
     render(
       <SambeeThemeProvider>
         <AdvancedSettings />

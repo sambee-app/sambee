@@ -808,7 +808,6 @@ impl Observations {
             ));
         }
         self.sequence += 1;
-        self.verification_required = true;
         if self.pending.len() >= maximum_pending || bytes > maximum_bytes.saturating_sub(self.bytes) {
             self.invalidate()?;
             return Ok(false);
@@ -4424,7 +4423,7 @@ mod tests {
         {
             let observations = lock(&source.observations).unwrap();
             assert_eq!(observations.sequence, before.1 + 1);
-            assert!(observations.verification_required);
+            assert!(!observations.verification_required);
             assert!(matches!(&observations.pending[0].1, DirectoryMutation::ReadParent { path } if path == "Parent"));
         }
         assert!(!lock(&source.writer)
@@ -6621,7 +6620,7 @@ mod tests {
                 assert_eq!(reader.search("target", 3, false, &cancelled, false).unwrap().total_matches, 0);
             }
             assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
-            assert!(lock(&source.observations).unwrap().verification_required);
+            assert!(!lock(&source.observations).unwrap().verification_required);
             assert!(lock(&source.observations).unwrap().pending.is_empty());
             assert_eq!(lock(&manager.budget.state).unwrap().reserved, 0);
         }
@@ -6664,7 +6663,7 @@ mod tests {
             assert!(observations.producers.is_empty());
             if matches!(scenario, "renamed-parent" | "replaced-by-file") {
                 assert!(matches!(error, IndexError::Interrupted));
-                assert!(observations.verification_required);
+                assert!(!observations.verification_required);
                 assert_eq!(observations.pending.len(), 1);
                 assert!(matches!(&observations.pending.front().unwrap().1, DirectoryMutation::ReadParent { path } if path.is_empty()));
                 drop(observations);
@@ -6783,7 +6782,7 @@ mod tests {
             let observations = lock(&source.observations).unwrap();
             assert!(observations.producers.is_empty());
             assert_eq!(observations.pending.len(), 2);
-            assert!(observations.verification_required);
+            assert!(!observations.verification_required);
         }
     }
 
@@ -7750,7 +7749,7 @@ mod tests {
             source.flush(&budget).unwrap();
             let cancelled = Arc::new(AtomicBool::new(false));
             assert_eq!(reader.search("renamed-file", 3, false, &cancelled, false).unwrap().total_matches, 0);
-            assert!(lock(&source.observations).unwrap().verification_required);
+            assert!(!lock(&source.observations).unwrap().verification_required);
             source.scan(&budget).unwrap();
             assert_eq!(
                 reader
@@ -7817,6 +7816,10 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
         let initial = reader.search("reports", 5, false, &cancelled, false).unwrap();
         assert_eq!(initial.coverage, "complete");
+        source.watcher_failed.store(false, Ordering::Release);
+        let policy = DirectoryPolicy::defaults().unwrap();
+        let healthy_interval = source.effective_verification_seconds(&policy).unwrap();
+        assert_eq!(healthy_interval, policy.healthy_verification_seconds);
         std::fs::create_dir_all(root.join("reports")).unwrap();
         source
             .observe(Ok(Event::new(EventKind::Create(CreateKind::Folder)).add_path(root.join("reports"))))
@@ -7828,6 +7831,13 @@ mod tests {
         assert_eq!(result.total_matches, 1);
         assert_eq!(result.coverage, "complete");
         assert_eq!(result.last_verified_at_ms, initial.last_verified_at_ms);
+        assert!(!lock(&source.observations).unwrap().verification_required);
+        assert_eq!(source.effective_verification_seconds(&policy).unwrap(), healthy_interval);
+        source.invalidate_for(InvalidationReason::ObservationLoss).unwrap();
+        assert_eq!(
+            source.effective_verification_seconds(&policy).unwrap(),
+            policy.degraded_verification_seconds
+        );
     }
 
     #[tokio::test]
@@ -8684,7 +8694,7 @@ mod tests {
                 .total_matches,
             2
         );
-        assert!(lock(&source.observations).unwrap().verification_required);
+        assert!(!lock(&source.observations).unwrap().verification_required);
     }
 
     #[test]

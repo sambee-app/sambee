@@ -7,8 +7,10 @@ from app.core.image_settings import (
     ImageConversionSettings,
     get_imagemagick_jpeg_args,
     get_imagemagick_png_args,
+    get_imagemagick_webp_args,
     get_libvips_jpeg_kwargs,
     get_libvips_png_kwargs,
+    get_libvips_webp_kwargs,
 )
 
 
@@ -125,6 +127,10 @@ class TestLibvipsKwargs:
 
 class TestSettingsConsistency:
     """Test consistency across different conversion backends."""
+
+    def test_webp_settings_match_measured_encoding(self):
+        assert get_libvips_webp_kwargs() == {"Q": 80, "strip": True}
+        assert get_imagemagick_webp_args() == ["-quality", "80", "-define", "webp:method=4", "-strip"]
 
     def test_jpeg_quality_consistent(self):
         """JPEG quality should be same across supported backends."""

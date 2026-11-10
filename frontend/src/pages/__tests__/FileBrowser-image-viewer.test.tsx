@@ -16,9 +16,11 @@ import FileBrowser from "../FileBrowser";
 
 const FILE_LIST_READY_TIMEOUT_MS = 5000;
 
-const { loadImageBlob, recordFilename } = vi.hoisted(() => ({
+const { loadImageBlob, recordFilename, recordPending, recordPaneRender } = vi.hoisted(() => ({
   loadImageBlob: vi.fn(),
   recordFilename: vi.fn(),
+  recordPending: vi.fn(),
+  recordPaneRender: vi.fn(),
 }));
 
 // Mock the API service
@@ -27,6 +29,17 @@ const mockedApi = apiService as MockedObject<typeof apiService>;
 
 // Mock @tanstack/react-virtual for virtualized list rendering
 vi.mock("@tanstack/react-virtual", () => import("../../__mocks__/@tanstack/react-virtual"));
+
+vi.mock("../FileBrowser/FileBrowserPane", async () => {
+  const actual = await vi.importActual<typeof import("../FileBrowser/FileBrowserPane")>("../FileBrowser/FileBrowserPane");
+  return {
+    ...actual,
+    FileBrowserPane: (props: Parameters<typeof actual.FileBrowserPane>[0]) => {
+      recordPaneRender();
+      return <actual.FileBrowserPane {...props} />;
+    },
+  };
+});
 
 // Mock the view components
 vi.mock("../../utils/FileTypeRegistry", async () => {
@@ -45,6 +58,7 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
             onClose,
             connectionId,
             navigation,
+            isTransitioning,
           }: ViewerComponentProps) {
             const { currentIndex, setCurrentIndex, filename, errorStates, retryCurrentImage } = useCachedImageGallery({
               connectionId,
@@ -55,6 +69,7 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
               loadImageBlob,
             });
             useEffect(() => recordFilename(filename), [filename]);
+            useEffect(() => recordPending(isTransitioning), [isTransitioning]);
             const error = errorStates.get(currentIndex);
             return (
               <div data-testid="image-view" data-path={path} data-filename={filename}>
@@ -172,6 +187,8 @@ describe("Browser - Image View Integration", () => {
     expect(await screen.findByTestId("image-view")).toHaveAttribute("data-path", "one.jpg");
     await waitFor(() => expect(loadImageBlob).toHaveBeenCalledTimes(2));
     recordFilename.mockClear();
+    recordPending.mockClear();
+    recordPaneRender.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Next image" }));
     await waitFor(() => expect(new URLSearchParams(router.state.location.search).get("file")).toBe("smb/test-server-1/two.jpg"));
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
@@ -188,6 +205,8 @@ describe("Browser - Image View Integration", () => {
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
     expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "two.jpg");
     expect(loadImageBlob).toHaveBeenCalledTimes(2);
+    expect(recordPending.mock.calls.flat()).not.toContain(true);
+    expect(recordPaneRender).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Close image" }));
     await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
     await act(() => router.navigate(-1));
@@ -196,6 +215,34 @@ describe("Browser - Image View Integration", () => {
     await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "one.jpg"));
     await act(() => router.navigate(2));
     await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
+  });
+
+  it("keeps distinct history entries for rapid gallery moves", async () => {
+    mockedApi.listDirectory.mockResolvedValue({
+      path: "/",
+      total: 3,
+      items: ["one.jpg", "two.jpg", "three.jpg"].map((name) => ({
+        name,
+        path: name,
+        type: FileType.FILE,
+        mime_type: "image/jpeg",
+        size: 10,
+        is_readable: true,
+        is_hidden: false,
+      })),
+    });
+    const { router } = await renderBrowser();
+    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
+    await screen.findByTestId("image-view");
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
+    await act(() => router.navigate(-1));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "three.jpg"));
+    await act(() => router.navigate(-1));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "one.jpg"));
+    await act(() => router.navigate(2));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "two.jpg"));
   });
 
   it("shows the selected image error and retries without retaining the previous filename", async () => {

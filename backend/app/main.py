@@ -282,6 +282,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             logger.warning("Ignoring unsupported configuration settings in '%s': %s", config_file, ", ".join(ignored_paths))
 
         logger.info("Starting Sambee application...")
+        from app.services.image_converter import log_image_environment
+
+        log_image_environment()
         if settings.disable_auth_enforcement:
             logger.warning(
                 "Authentication enforcement is disabled by configuration; all requests are treated as the configured administrator"

@@ -2,7 +2,7 @@
 Image preprocessing service for formats not natively supported by libvips.
 
 This module provides a preprocessing pipeline that converts exotic image formats
-(like PSD, PSB, EPS, and AI) directly into browser-ready formats (JPEG, PNG).
+(like PSD, PSB, EPS, and AI) directly into browser-ready formats (JPEG, PNG, WebP).
 The preprocessor uses ImageMagick to handle formats that libvips doesn't
 natively support.
 
@@ -31,8 +31,10 @@ from typing import Optional
 
 from app.core.exceptions import SambeeError
 from app.core.image_settings import (
+    WEBP_MAX_DIMENSION,
     get_imagemagick_jpeg_args,
     get_imagemagick_png_args,
+    get_imagemagick_webp_args,
 )
 from app.core.system_setting_definitions import SystemSettingKey
 from app.services.system_settings import get_integer_setting_value
@@ -61,7 +63,7 @@ class PreprocessorInterface(ABC):
     Abstract base class for image preprocessors.
 
     Preprocessors convert exotic formats directly into browser-ready formats
-    (JPEG, PNG). All conversion settings come from centralized IMAGE_SETTINGS.
+    (JPEG, PNG, WebP). All conversion settings come from centralized IMAGE_SETTINGS.
     """
 
     # Formats this preprocessor can handle
@@ -73,7 +75,9 @@ class PreprocessorInterface(ABC):
     # convert_to_final_format
     #
     @abstractmethod
-    def convert_to_final_format(self, input_data: bytes, filename: str, output_format: str = "jpeg") -> bytes:
+    def convert_to_final_format(
+        self, input_data: bytes, filename: str, output_format: str = "jpeg", *, colorspace: str | None = None
+    ) -> bytes:
         """
         Convert an exotic format file directly to browser-ready format.
 
@@ -84,7 +88,8 @@ class PreprocessorInterface(ABC):
         Args:
             input_data: Raw image file bytes (e.g., PSD file contents)
             filename: Original filename (for logging and validation)
-            output_format: Target browser format (jpeg, png). Default: jpeg
+            output_format: Target browser format (jpeg, png, webp). Default: jpeg
+            colorspace: Previously detected colorspace, if available.
 
         Returns:
             Converted image bytes (in-memory, not written to disk)
@@ -229,20 +234,8 @@ class ImageMagickPreprocessor(PreprocessorInterface):
     #
     # _detect_colorspace
     #
-    def _detect_colorspace(self, input_data: bytes, filename: str) -> str:
-        """
-        Detect the colorspace of an image file.
-
-        Args:
-            input_data: Raw image file bytes
-            filename: Original filename (for format hint)
-
-        Returns:
-            Colorspace name (e.g., 'CMYK', 'sRGB', 'RGB', 'Gray')
-
-        Raises:
-            PreprocessorError: If colorspace detection fails
-        """
+    def inspect_image(self, input_data: bytes, filename: str, *, dimensions: bool = False) -> tuple[str, bool]:
+        """Use one tolerant identify probe for colorspace and optional WebP size eligibility."""
 
         try:
             command_name = self._get_command()
@@ -253,7 +246,7 @@ class ImageMagickPreprocessor(PreprocessorInterface):
                 command_name,
                 "identify",
                 "-format",
-                "%[colorspace]",
+                "%[colorspace] %w %h" if dimensions else "%[colorspace]",
                 f"{extension}:-[0]",
             ]
 
@@ -265,24 +258,37 @@ class ImageMagickPreprocessor(PreprocessorInterface):
                     timeout=30,
                     check=True,
                 )
-                colorspace = result.stdout.decode().strip()
+                metadata = result.stdout.decode().strip().split()
+                colorspace = metadata[0] if metadata else "Unknown"
                 logger.debug(f"Detected colorspace for {filename}: {colorspace}")
-                return colorspace
+                fits_webp = False
+                if dimensions and len(metadata) == 3:
+                    try:
+                        width, height = int(metadata[1]), int(metadata[2])
+                        fits_webp = 0 < width <= WEBP_MAX_DIMENSION and 0 < height <= WEBP_MAX_DIMENSION
+                    except ValueError:
+                        pass
+                return colorspace, fits_webp
             except subprocess.CalledProcessError:
                 logger.debug("Could not detect colorspace for %s", filename)
-                return "Unknown"
+                return "Unknown", False
 
         except subprocess.TimeoutExpired:
             logger.warning(f"Colorspace detection timed out for {filename}")
-            return "Unknown"
+            return "Unknown", False
         except Exception as e:
             logger.warning(f"Error detecting colorspace for {filename}: {e}")
-            return "Unknown"
+            return "Unknown", False
+
+    def _detect_colorspace(self, input_data: bytes, filename: str) -> str:
+        return self.inspect_image(input_data, filename)[0]
 
     #
     # convert_to_final_format
     #
-    def convert_to_final_format(self, input_data: bytes, filename: str, output_format: str = "jpeg") -> bytes:
+    def convert_to_final_format(
+        self, input_data: bytes, filename: str, output_format: str = "jpeg", *, colorspace: str | None = None
+    ) -> bytes:
         """
         Convert PSD/PSB directly to browser-ready format using ImageMagick.
 
@@ -293,7 +299,8 @@ class ImageMagickPreprocessor(PreprocessorInterface):
         Args:
             input_data: Raw PSD/PSB file bytes
             filename: Original filename (for logging and validation)
-            output_format: Browser format (jpeg, png). Default: jpeg
+            output_format: Browser format (jpeg, png, webp). Default: jpeg
+            colorspace: Previously detected colorspace; avoids another identify call.
 
         Returns:
             Converted image bytes (in-memory)
@@ -309,7 +316,7 @@ class ImageMagickPreprocessor(PreprocessorInterface):
             raise PreprocessorError("ImageMagick is not installed or not accessible. Install with: apt-get install imagemagick")
 
         # Validate output format
-        valid_formats = {"png", "jpeg", "jpg"}
+        valid_formats = {"png", "jpeg", "jpg", "webp"}
         if output_format.lower() not in valid_formats:
             raise PreprocessorError(f"Invalid output format: {output_format}. Valid formats: {', '.join(sorted(valid_formats))}")
 
@@ -349,7 +356,8 @@ class ImageMagickPreprocessor(PreprocessorInterface):
                     command.append("-flatten")
 
                 # Detect colorspace to apply correct conversion
-                colorspace = self._detect_colorspace(input_data, filename)
+                if colorspace is None:
+                    colorspace = self._detect_colorspace(input_data, filename)
 
                 if colorspace == "CMYK":
                     # CMYK → sRGB with ICC profile conversion
@@ -373,6 +381,8 @@ class ImageMagickPreprocessor(PreprocessorInterface):
                 command.extend(get_imagemagick_jpeg_args())
             elif output_format == "png":
                 command.extend(get_imagemagick_png_args())
+            elif output_format == "webp":
+                command.extend(get_imagemagick_webp_args())
 
             # Output to stdout in specified format
             command.append(f"{output_format}:-")

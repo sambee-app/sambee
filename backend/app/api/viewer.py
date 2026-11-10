@@ -1,10 +1,12 @@
 import asyncio
 import hashlib
+import logging
 import secrets
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import copy_context
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import Literal, Optional
@@ -49,14 +51,49 @@ from app.services.pdf_normalizer import (
     normalize_pdf_with_queue,
 )
 from app.services.preprocessor import PreprocessorFileTooLargeError
-from app.services.system_settings import get_integer_setting_value
+from app.services.system_settings import get_image_conversion_preference, get_integer_setting_value
 from app.storage.smb import SMBBackend
 from app.utils.content_disposition import build_content_disposition, is_active_document_mime_type
-from app.utils.file_type_registry import needs_processing
+from app.utils.file_type_registry import is_image_file, needs_processing
 
 router = APIRouter()
 logger = get_logger(__name__)
 DOWNLOAD_INTENT_TTL = timedelta(seconds=90)
+
+
+@dataclass
+class ImageRequestTimings:
+    """Share DEBUG-only stage measurements across the image request helpers."""
+
+    started: float = field(default_factory=time.perf_counter)
+    connect_ms: float | None = None
+    metadata_ms: float | None = None
+    read_ms: float | None = None
+    first_chunk_ms: float | None = None
+    chunks: int = 0
+    input_bytes: int = 0
+    read_complete: bool = False
+    executor_queue_ms: float | None = None
+    conversion_ms: float | None = None
+    outcome: str = "error"
+
+    def log(self, filename: str) -> None:
+        logger.debug(
+            "Image request: filename=%r connect_ms=%s metadata_ms=%s read_ms=%s first_chunk_ms=%s "
+            "chunks=%d input_bytes=%d read_complete=%s executor_queue_ms=%s conversion_ms=%s total_ms=%.1f outcome=%s",
+            filename,
+            self.connect_ms,
+            self.metadata_ms,
+            self.read_ms,
+            self.first_chunk_ms,
+            self.chunks,
+            self.input_bytes,
+            self.read_complete,
+            self.executor_queue_ms,
+            self.conversion_ms,
+            (time.perf_counter() - self.started) * MILLISECONDS_PER_SECOND,
+            self.outcome,
+        )
 
 
 class DownloadIntentRequest(BaseModel):
@@ -713,33 +750,32 @@ async def create_converted_image_response(
     max_width: int | None = None,
     max_height: int | None = None,
     no_resizing: bool = False,
+    timings: ImageRequestTimings | None = None,
 ) -> Response:
     """Convert already-resolved image bytes into a browser-compatible response."""
 
-    submitted_at = time.perf_counter()
+    owns_timings = timings is None
+    if owns_timings and logger.isEnabledFor(logging.DEBUG):
+        timings = ImageRequestTimings(input_bytes=len(image_bytes), read_complete=True)
+    submitted_at = time.perf_counter() if timings else 0.0
     conversion_context = copy_context()
+    preference = get_image_conversion_preference()
 
     def convert_in_worker() -> tuple[bytes, str, str, float]:
-        started_at = time.perf_counter()
-        logger.debug(
-            "Image conversion worker started: filename=%r executor_queue_ms=%.1f",
-            filename,
-            (started_at - submitted_at) * MILLISECONDS_PER_SECOND,
-        )
+        started_at = time.perf_counter() if timings else 0.0
+        if timings:
+            timings.executor_queue_ms = (started_at - submitted_at) * MILLISECONDS_PER_SECOND
         try:
             return convert_image_for_viewer(
                 image_bytes,
                 filename,
                 max_width=None if no_resizing else max_width,
                 max_height=None if no_resizing else max_height,
-                output_format="auto",
+                preference=preference,
             )
         finally:
-            logger.debug(
-                "Image conversion worker finished: filename=%r worker_ms=%.1f",
-                filename,
-                (time.perf_counter() - started_at) * MILLISECONDS_PER_SECOND,
-            )
+            if timings:
+                timings.conversion_ms = (time.perf_counter() - started_at) * MILLISECONDS_PER_SECOND
 
     try:
         loop = asyncio.get_running_loop()
@@ -747,6 +783,8 @@ async def create_converted_image_response(
             None,
             partial(conversion_context.run, convert_in_worker),
         )
+        if timings:
+            timings.outcome = "original" if converter_name == "original" else "converted"
         logger.info(
             "Image converted: %s -> %s (%d -> %d KB) via %s in %.0f ms",
             filename,
@@ -762,12 +800,16 @@ async def create_converted_image_response(
             headers={"Content-Disposition": build_content_disposition("inline", filename)},
         )
     except ImportError as exc:
+        if timings:
+            timings.outcome = type(exc).__name__
         logger.error("Image conversion failed - missing dependency: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="Image format not supported: HEIC/HEIF requires additional system libraries",
         ) from exc
     except PreprocessorFileTooLargeError as exc:
+        if timings:
+            timings.outcome = type(exc).__name__
         file_size_mb = exc.file_size / (1024 * 1024)
         max_file_size_mb = exc.max_file_size / (1024 * 1024)
         raise HTTPException(
@@ -778,6 +820,8 @@ async def create_converted_image_response(
             },
         ) from exc
     except ValueError as exc:
+        if timings:
+            timings.outcome = type(exc).__name__
         import re
 
         error_message = re.sub(r"\.(\s*\.)+", ".", re.sub(r"[ \t]+", " ", re.sub(r"\r?\n", ". ", str(exc)))).strip()
@@ -786,14 +830,13 @@ async def create_converted_image_response(
     except HTTPException:
         raise
     except Exception as exc:
+        if timings:
+            timings.outcome = type(exc).__name__
         logger.error("Unexpected error during image conversion: filename=%r error=%s: %s", filename, type(exc).__name__, exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process image") from exc
     finally:
-        logger.debug(
-            "Image conversion dispatch complete: filename=%r dispatch_total_ms=%.1f",
-            filename,
-            (time.perf_counter() - submitted_at) * MILLISECONDS_PER_SECOND,
-        )
+        if owns_timings and timings:
+            timings.log(filename)
 
 
 async def read_and_convert_image(
@@ -804,6 +847,7 @@ async def read_and_convert_image(
     max_width: int | None = None,
     max_height: int | None = None,
     no_resizing: bool = False,
+    timings: ImageRequestTimings | None = None,
 ) -> Response:
     """Read an image file from SMB backend and convert it to browser-compatible format
 
@@ -814,43 +858,32 @@ async def read_and_convert_image(
     - Error handling for conversion failures
     """
 
-    preparation_started = time.perf_counter()
+    owns_timings = timings is None
+    if owns_timings and logger.isEnabledFor(logging.DEBUG):
+        timings = ImageRequestTimings()
     try:
         # Read file into memory
         chunks = []
-        read_started = time.perf_counter()
-        first_chunk_ms = None
-        input_bytes = 0
-        read_complete = False
+        read_started = time.perf_counter() if timings else 0.0
         try:
             async for chunk in backend.read_file(path):
-                if first_chunk_ms is None:
-                    first_chunk_ms = (time.perf_counter() - read_started) * MILLISECONDS_PER_SECOND
                 chunks.append(chunk)
-                input_bytes += len(chunk)
-            read_complete = True
+                if timings:
+                    if timings.first_chunk_ms is None:
+                        timings.first_chunk_ms = (time.perf_counter() - read_started) * MILLISECONDS_PER_SECOND
+                    timings.chunks += 1
+                    timings.input_bytes += len(chunk)
+            if timings:
+                timings.read_complete = True
+        except Exception as exc:
+            if timings:
+                timings.outcome = type(exc).__name__
+            raise
         finally:
-            read_finished = time.perf_counter()
-            try:
-                await disconnect_backend_safely(backend, logger=logger, context=f"image conversion read for '{path}'")
-            finally:
-                logger.debug(
-                    "Image source read: filename=%r read_ms=%.1f first_chunk_ms=%s cleanup_ms=%.1f chunks=%d input_bytes=%d complete=%s",
-                    filename,
-                    (read_finished - read_started) * MILLISECONDS_PER_SECOND,
-                    first_chunk_ms,
-                    (time.perf_counter() - read_finished) * MILLISECONDS_PER_SECOND,
-                    len(chunks),
-                    input_bytes,
-                    read_complete,
-                )
-        assembly_started = time.perf_counter()
+            if timings:
+                timings.read_ms = (time.perf_counter() - read_started) * MILLISECONDS_PER_SECOND
+            await disconnect_backend_safely(backend, logger=logger, context=f"image conversion read for '{path}'")
         image_bytes = b"".join(chunks)
-        logger.debug(
-            "Image source assembled: filename=%r assembly_ms=%.1f",
-            filename,
-            (time.perf_counter() - assembly_started) * MILLISECONDS_PER_SECOND,
-        )
 
         return await create_converted_image_response(
             image_bytes=image_bytes,
@@ -858,6 +891,7 @@ async def read_and_convert_image(
             max_width=max_width,
             max_height=max_height,
             no_resizing=no_resizing,
+            timings=timings,
         )
 
     except HTTPException:
@@ -882,11 +916,8 @@ async def read_and_convert_image(
             detail="Failed to process image",
         )
     finally:
-        logger.debug(
-            "Image preparation complete: filename=%r preparation_total_ms=%.1f",
-            filename,
-            (time.perf_counter() - preparation_started) * MILLISECONDS_PER_SECOND,
-        )
+        if owns_timings and timings:
+            timings.log(filename)
 
 
 #
@@ -932,13 +963,16 @@ async def view_file(
         logger.warning(f"Connection has no share name: connection_id={connection_id}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Connection has no share name configured")
 
+    timings = ImageRequestTimings() if logger.isEnabledFor(logging.DEBUG) and is_image_file(path) else None
     try:
         # Create SMB backend...
         backend = build_smb_backend(connection, backend_factory=SMBBackend)
         # ...and connect
-        connect_started = time.perf_counter()
+        connect_started = time.perf_counter() if timings else 0.0
         await backend.connect()
-        connect_finished = time.perf_counter()
+        connect_finished = time.perf_counter() if timings else 0.0
+        if timings:
+            timings.connect_ms = (connect_finished - connect_started) * MILLISECONDS_PER_SECOND
 
         # Get file info and ensure path points to a file (not a directory)
         try:
@@ -952,19 +986,11 @@ async def view_file(
             await disconnect_backend_safely(backend, logger=logger, context=f"view file info failure for '{path}'")
             raise file_target_http_error(e) from e
 
+        if timings:
+            timings.metadata_ms = (time.perf_counter() - connect_finished) * MILLISECONDS_PER_SECOND
+
         # Check if image needs processing for browser compatibility and viewing speed
         if needs_processing(file_info.name, file_info.size):
-            logger.debug(
-                "Image source resolved: filename=%r connect_ms=%.1f metadata_ms=%.1f viewport=%sx%s no_resizing=%s",
-                file_info.name,
-                (connect_finished - connect_started) * MILLISECONDS_PER_SECOND,
-                (time.perf_counter() - connect_finished) * MILLISECONDS_PER_SECOND,
-                viewport_width,
-                viewport_height,
-                no_resizing,
-            )
-            size_string = f"{file_info.size / 1024:.0f} KB" if file_info.size else "unknown"
-            logger.debug(f"Image requires processing: connection_id={connection_id}, path='{path}', size={size_string}")
             return await read_and_convert_image(
                 backend=backend,
                 path=path,
@@ -973,6 +999,7 @@ async def view_file(
                 max_width=viewport_width,
                 max_height=viewport_height,
                 no_resizing=no_resizing,
+                timings=timings,
             )
 
         if pdf_variant == "normalized":
@@ -996,6 +1023,8 @@ async def view_file(
                 ),
             )
 
+        if timings:
+            timings.outcome = "original"
         # Stream the file (browser-native format or non-image/non-PDF)
         logger.debug(f"Streaming file for viewing: connection_id={connection_id}, path='{path}', mime_type={file_info.mime_type}")
         return StreamingResponse(
@@ -1009,9 +1038,13 @@ async def view_file(
             },
         )
 
-    except HTTPException:
+    except HTTPException as exc:
+        if timings and timings.outcome == "error":
+            timings.outcome = type(exc).__name__
         raise
     except Exception as e:
+        if timings:
+            timings.outcome = type(e).__name__
         logger.error(
             f"Failed to view file: connection_id={connection_id}, path='{path}', "
             f"host={connection.host}, share={connection.share_name}, "
@@ -1019,6 +1052,9 @@ async def view_file(
             exc_info=True,
         )
         raise file_target_http_error(e) from e
+    finally:
+        if timings:
+            timings.log(path)
 
 
 #

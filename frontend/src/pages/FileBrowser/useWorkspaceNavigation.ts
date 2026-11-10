@@ -61,6 +61,32 @@ export function useWorkspaceNavigation({
   const resolvedRetry = useRef(0);
   const viewer = route.viewer;
   const viewerIdentity = viewer ? JSON.stringify([viewer.file, viewer.viewerId, viewer.paneId]) : "";
+  const galleryPane = viewer ? panes.current[viewer.paneId] : undefined;
+  const galleryInfo = galleryPane?.viewInfo;
+  const galleryTarget = viewer ? resolveBrowseRouteTarget(viewer.file, connections) : null;
+  const galleryVirtual = viewer?.file.virtualLocation;
+  const galleryPath = galleryVirtual?.virtualPath ?? viewer?.file.path ?? "";
+  const galleryIndex = galleryInfo?.images?.indexOf(galleryPath) ?? -1;
+  const isSameGallery =
+    ready &&
+    retry === resolvedRetry.current &&
+    viewer?.viewerId === "image" &&
+    galleryInfo?.viewerId === "image" &&
+    galleryIndex >= 0 &&
+    (galleryInfo.connectionId ?? galleryPane?.connectionId) === galleryTarget?.connectionId &&
+    (galleryVirtual
+      ? galleryInfo.virtualSource?.location.providerId === galleryVirtual.providerId &&
+        galleryInfo.virtualSource.location.source.path === galleryVirtual.sourcePath
+      : !galleryInfo.virtualSource);
+  const gallerySelection: ViewInfo | null =
+    isSameGallery && galleryInfo
+      ? {
+          ...galleryInfo,
+          path: galleryPath,
+          currentIndex: galleryIndex,
+          virtualSource: galleryInfo.virtualSource ? { ...galleryInfo.virtualSource, path: galleryPath } : undefined,
+        }
+      : null;
   const getViewer = useEffectEvent(() => viewer);
   const applyViewer = useEffectEvent((paneId: PaneId, info: ViewInfo | null) => {
     const pane = panes.current[paneId];
@@ -138,6 +164,12 @@ export function useWorkspaceNavigation({
     const paneId = viewer.paneId;
     const cached = pendingViewer.current;
     pendingViewer.current = null;
+    if (gallerySelection) {
+      panes.current[paneId].handleViewIndexChange(gallerySelection.currentIndex ?? 0, { updatePresentation: false });
+      setViewerLoading(false);
+      resolveViewerSelection(viewerIdentity);
+      return;
+    }
     if (cached?.identity === viewerIdentity) {
       applyViewer(paneId, cached.info);
       setViewerLoading(false);
@@ -241,14 +273,19 @@ export function useWorkspaceNavigation({
     changeImage: (paneId: PaneId, index: number) => {
       const info = panes.current[paneId].viewInfo;
       const path = info?.images?.[index];
-      if (info && path) {
-        openViewer(paneId, {
-          ...info,
-          path,
-          currentIndex: index,
-          virtualSource: info.virtualSource ? { ...info.virtualSource, path } : undefined,
-        });
-      }
+      if (info?.viewerId !== "image" || !path) return;
+      const virtual = info.virtualSource;
+      const target = buildBrowseRouteTarget(
+        info.connectionId ?? panes.current[paneId].connectionId,
+        path,
+        connections,
+        virtual ? { providerId: virtual.location.providerId, sourcePath: virtual.location.source.path, virtualPath: path } : null
+      );
+      if (!target) return;
+      startTransition(() => {
+        setViewerRequestRevision((revision) => revision + 1);
+        navigateRoute({ ...route, viewer: { file: target, paneId, viewerId: "image", mode: "view" }, settings: undefined });
+      });
     },
     changeMode: (mode: "view" | "edit", replace = false) => {
       if (!viewer || viewer.mode === mode) return;
@@ -262,8 +299,9 @@ export function useWorkspaceNavigation({
       else navigateRoute({ ...route, settings: route.settings === "main" ? undefined : "main" }, { replace: true });
     },
     viewerError,
+    viewerSelection: gallerySelection,
     viewerSelectionKey: String(viewerSelectionRevision),
-    viewerLoading: Boolean(viewer && (viewerLoading || resolvedViewerIdentity !== viewerIdentity)),
+    viewerLoading: Boolean(viewer && !gallerySelection && (viewerLoading || resolvedViewerIdentity !== viewerIdentity)),
     retryViewer: () => setRetry((value) => value + 1),
   };
 }

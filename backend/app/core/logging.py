@@ -17,6 +17,8 @@ from typing import Any, Optional
 request_id_var: ContextVar[Optional[str]] = ContextVar("request_id", default=None)
 user_var: ContextVar[Optional[str]] = ContextVar("user", default=None)
 
+SENSITIVE_HEADER_NAMES = ("Cookie", "Set-Cookie", "Authorization", "Proxy-Authorization")
+
 
 #
 # set_request_id
@@ -99,6 +101,10 @@ def format_audit_fields(**fields: Any) -> str:
 class SensitiveDataLogFilter(logging.Filter):
     """Remove credentials and query strings from emitted log messages."""
 
+    _SENSITIVE_HEADER_PATTERN = re.compile(
+        rf"(?P<header>^[ \t]*(?:[<>][ \t]*)?(?:{'|'.join(map(re.escape, SENSITIVE_HEADER_NAMES))})[ \t]*:[ \t]*)[^\r\n]*",
+        re.IGNORECASE | re.MULTILINE,
+    )
     _QUERY_STRING_PATTERN = re.compile(r"(?P<target>(?:https?|wss?)://[^\s\"']+|/[^\s\"'?]+)\?[^\s\"']*", re.IGNORECASE)
     _TOKEN_PARAMETER_PATTERN = re.compile(r"(?P<name>\b(?:access_token|id_token|refresh_token|token)\b\s*=\s*)[^\s,;&\"']+", re.IGNORECASE)
     _BEARER_TOKEN_PATTERN = re.compile(r"(?P<scheme>\bBearer\s+)[^\s,;]+", re.IGNORECASE)
@@ -106,7 +112,8 @@ class SensitiveDataLogFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
-        redacted_message = self._QUERY_STRING_PATTERN.sub(r"\g<target>?<redacted>", message)
+        redacted_message = self._SENSITIVE_HEADER_PATTERN.sub(r"\g<header><redacted>", message)
+        redacted_message = self._QUERY_STRING_PATTERN.sub(r"\g<target>?<redacted>", redacted_message)
         redacted_message = self._TOKEN_PARAMETER_PATTERN.sub(r"\g<name><redacted>", redacted_message)
         redacted_message = self._BEARER_TOKEN_PATTERN.sub(r"\g<scheme><redacted>", redacted_message)
         redacted_message = self._DOWNLOAD_INTENT_PATTERN.sub(r"\g<path><redacted>", redacted_message)

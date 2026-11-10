@@ -14,6 +14,8 @@ The disk budget and cache target are not hard disk or process-memory limits. Lea
 
 Change monitoring keeps the index current. Full verification is a safety net for missed changes. The defaults are 24 hours when monitoring is healthy and 30 minutes when monitoring is unavailable, uncertain, or known to be unreliable. A full verification always runs after a restart and after monitoring recovers.
 
+Normal watcher events and listing feedback check the affected parent folders. After those checks finish, a healthy source keeps the healthy interval; ordinary changes do not request another full pass. Lost observations, exhausted read capacity, stalled reads, or a source reconnect request verification. Reopening an idle source also requires a full pass because changes could occur while it was closed. These rules apply to SMB and local drives.
+
 On Linux, Companion network and FUSE drives always use the degraded interval because native monitoring cannot report changes from other clients. The backend treats SMB change notification as reliable while its watcher is ready. For older NAS or Samba servers with unreliable change notification, set a shorter healthy interval manually.
 
 The healthy interval can be 60 seconds to 30 days. The degraded interval can be 30 seconds to 24 hours. A degraded value above the healthy value has no effect: both runtimes use the shorter value when monitoring is degraded. Existing administrator values are not changed during an upgrade.

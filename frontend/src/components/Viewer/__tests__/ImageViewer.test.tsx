@@ -365,6 +365,46 @@ describe("ImageViewer", () => {
     expect(galleryKey.defaultPrevented).toBe(true);
   });
 
+  it("keeps the lightbox mounted while route navigation becomes pending and completes", async () => {
+    const onClose = vi.fn();
+    const viewer = (isTransitioning: boolean) => (
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} isTransitioning={isTransitioning} />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer(false));
+    const lightbox = screen.getByTestId("image-lightbox");
+
+    for (const isTransitioning of [true, false]) {
+      rerender(viewer(isTransitioning));
+      expect(screen.getByTestId("image-lightbox")).toBe(lightbox);
+    }
+  });
+
+  it.each(["ArrowLeft", "ArrowRight"])("blocks %s during pending navigation and forwards it again when ready", async (key) => {
+    const onClose = vi.fn();
+    const viewer = (isTransitioning: boolean) => (
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} isTransitioning={isTransitioning} />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer(true));
+    const lightbox = screen.getByTestId("image-lightbox");
+    const lightboxKeyDown = vi.fn();
+    lightbox.addEventListener("keydown", lightboxKeyDown);
+
+    fireEvent.keyDown(lightbox, { key });
+    expect(lightboxKeyDown).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(lightbox, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+
+    lightboxKeyDown.mockClear();
+    rerender(viewer(false));
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key });
+    expect(lightboxKeyDown).toHaveBeenCalledOnce();
+  });
+
   it("closes shortcuts help on Escape without closing the viewer", async () => {
     const onClose = vi.fn();
 

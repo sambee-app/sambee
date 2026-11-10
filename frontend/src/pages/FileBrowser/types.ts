@@ -318,7 +318,7 @@ export interface UseFileBrowserPaneReturn {
   reloadCurrentLocation: (options?: { forceRefresh?: boolean; preserveVisibleContent?: boolean }) => Promise<void>;
 
   // ── Viewer Handlers ────────────────────────────────────────────────────
-  handleViewIndexChange: (index: number) => void;
+  handleViewIndexChange: (index: number, options?: { updatePresentation?: boolean }) => void;
   handleViewClose: () => void;
   closeBrowserViewerPicker: () => void;
   confirmBrowserViewerPicker: (selection: { viewerId: ViewerId | null; rememberSelection: boolean }) => Promise<void>;

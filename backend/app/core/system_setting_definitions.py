@@ -28,6 +28,7 @@ class SystemSettingKey(StrEnum):
     SMB_CONNECTION_TIMEOUT_SECONDS = "smb.connection_timeout_seconds"
     PREPROCESSOR_IMAGEMAGICK_MAX_FILE_SIZE_BYTES = "preprocessors.imagemagick.max_file_size_bytes"
     PREPROCESSOR_IMAGEMAGICK_TIMEOUT_SECONDS = "preprocessors.imagemagick.timeout_seconds"
+    IMAGE_CONVERSION_PREFERENCE = "image_viewer.conversion_preference"
     PDF_VIEWER_CACHE_QUOTA_BYTES = "pdf.viewer.cache_quota_bytes"
     PDF_VIEWER_CACHE_INACTIVITY_TTL_SECONDS = "pdf.viewer.cache_inactivity_ttl_seconds"
     PDF_NORMALIZER_MAX_SOURCE_SIZE_BYTES = "pdf.normalizer.max_source_size_bytes"
@@ -50,6 +51,14 @@ class SystemSettingSource(StrEnum):
     DATABASE = "database"
     CONFIG_FILE = "config_file"
     DEFAULT = "default"
+
+
+class ImageConversionPreference(StrEnum):
+    SPEED = "speed"
+    SIZE = "size"
+
+
+DEFAULT_IMAGE_CONVERSION_PREFERENCE = ImageConversionPreference.SPEED
 
 
 class DirectoryIndexPolicyScope(StrEnum):

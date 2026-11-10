@@ -11,7 +11,8 @@ export const BROWSE_TARGET_KIND_LOCAL = "local";
 
 export type BrowseTargetKind = typeof BROWSE_TARGET_KIND_SMB | typeof BROWSE_TARGET_KIND_LOCAL;
 
-export const WORKSPACE_QUERY_KEYS = ["file", "viewer", "mode", "pane", "virtual", "settings"] as const;
+export const VIEWER_QUERY_KEYS = ["file", "viewer", "mode", "pane", "virtual"] as const;
+export const WORKSPACE_QUERY_KEYS = [...VIEWER_QUERY_KEYS, "settings"] as const;
 const VIEWER_IDS: readonly string[] = ["image", "markdown", "pdf", "text"];
 
 export interface ViewerRoute {

@@ -455,6 +455,55 @@ class TestPublicSupportReportApi:
 
 
 class TestAdvancedSystemSettingsApi:
+    def test_image_conversion_preference_default(self, client, auth_headers_admin):
+        setting = client.get("/api/admin/settings/advanced", headers=auth_headers_admin).json()["image_conversion_preference"]
+        assert setting["value"] == setting["default_value"] == "speed"
+        assert setting["source"] == "default"
+
+    @pytest.mark.parametrize("value", ["size", "speed"])
+    def test_image_conversion_preference_save(self, client, auth_headers_admin, value):
+        from app.services.system_settings import get_image_conversion_preference
+
+        payload = {"field": "image_viewer.conversion_preference", "value": value}
+        response = client.put("/api/admin/settings/advanced", headers=auth_headers_admin, json=payload)
+        assert response.status_code == 200
+        assert response.json() == payload
+        assert get_image_conversion_preference() == value
+        setting = client.get("/api/admin/settings/advanced", headers=auth_headers_admin).json()["image_conversion_preference"]
+        assert setting["value"] == value
+        assert setting["source"] == "database"
+        report = client.get("/api/admin/settings/support-report", headers=auth_headers_admin).json()["content"]
+        assert f'image_viewer.conversion_preference = "{value}" # source: database' in report
+
+    @pytest.mark.parametrize("value", ["invalid", None, 1])
+    def test_image_conversion_preference_rejects_invalid_values(self, client, auth_headers_admin, value):
+        response = client.put(
+            "/api/admin/settings/advanced",
+            headers=auth_headers_admin,
+            json={"field": "image_viewer.conversion_preference", "value": value},
+        )
+        assert response.status_code == 422
+
+    def test_image_conversion_preference_rejects_extra_fields(self, client, auth_headers_admin):
+        response = client.put(
+            "/api/admin/settings/advanced",
+            headers=auth_headers_admin,
+            json={"field": "image_viewer.conversion_preference", "value": "size", "extra": True},
+        )
+        assert response.status_code == 422
+
+    def test_invalid_stored_image_conversion_preference(self, session, monkeypatch):
+        from app.services import system_settings
+
+        session.add(SystemSetting(key=SystemSettingKey.IMAGE_CONVERSION_PREFERENCE.value, value="invalid"))
+        session.commit()
+        system_settings_store.refresh_from_session(session)
+        with patch.object(system_settings.logger, "error") as log:
+            setting = system_settings.build_advanced_system_settings_read().image_conversion_preference
+        assert setting.value == "speed"
+        assert setting.source == "default"
+        log.assert_called_once()
+
     def test_returns_default_when_system_settings_table_is_missing(self, tmp_path: Path, monkeypatch) -> None:
         test_engine = create_engine(
             f"sqlite:///{tmp_path / 'missing-system-settings.db'}",

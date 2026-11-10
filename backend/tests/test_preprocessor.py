@@ -225,6 +225,34 @@ class TestImageMagickPreprocessor:
             with pytest.raises(PreprocessorError, match="ImageMagick 7 is required"):
                 preprocessor._get_command()
 
+    @pytest.mark.parametrize(
+        "metadata,expected",
+        [
+            (b"CMYK 16383 100", ("CMYK", True)),
+            (b"sRGB 100 16384", ("sRGB", False)),
+            (b"sRGB 0 100", ("sRGB", False)),
+            (b"sRGB invalid 100", ("sRGB", False)),
+            (b"sRGB", ("sRGB", False)),
+        ],
+    )
+    def test_dimension_probe_reuses_colorspace_identification(self, metadata, expected):
+        preprocessor = ImageMagickPreprocessor()
+        with (
+            patch.object(preprocessor, "_get_command", return_value="magick"),
+            patch("subprocess.run", return_value=MagicMock(stdout=metadata)) as run,
+        ):
+            assert preprocessor.inspect_image(b"PSD", "image.psd", dimensions=True) == expected
+        run.assert_called_once()
+        assert run.call_args.args[0] == ["magick", "identify", "-format", "%[colorspace] %w %h", "psd:-[0]"]
+
+    def test_dimension_probe_failure_is_tolerant(self):
+        preprocessor = ImageMagickPreprocessor()
+        with (
+            patch.object(preprocessor, "_get_command", return_value="magick"),
+            patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "magick")),
+        ):
+            assert preprocessor.inspect_image(b"PSD", "image.psd", dimensions=True) == ("Unknown", False)
+
     def test_colorspace_probe_failure_does_not_log_imagemagick_stderr_at_warning_level(self, caplog: pytest.LogCaptureFixture):
         """Expected malformed files must not expose ImageMagick diagnostics in normal logs."""
         preprocessor = ImageMagickPreprocessor()
