@@ -7124,6 +7124,29 @@ async fn rename_noreplace(_source: &FsPath, _destination: &FsPath) -> Result<(),
 #[cfg(test)]
 mod tests {
     #[tokio::test]
+    async fn listing_feedback_is_retained_until_manager_shutdown() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        let drive = format!("listing-lifetime-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), root.clone());
+        let state = directory_listing_state(temporary.path());
+        let source = state.0 .0.test_listing_source(&drive, &root);
+        let listing = super::browse_list(
+            state.clone(),
+            axum::extract::Path(drive),
+            axum::extract::Query(super::BrowseQuery { path: None }),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(listing.total, 1);
+        assert_eq!(source.queued(), vec![(String::new(), vec!["real".to_owned()], false)]);
+        drop(state);
+        assert!(source.queued().is_empty());
+    }
+
+    #[tokio::test]
     async fn listing_feedback_is_nonblocking_and_wide_responses_remain_complete() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("root");
@@ -7313,7 +7336,7 @@ mod tests {
             .unwrap();
         assert!(result.status.success(), "Junction creation failed: {result:?}");
         let listing = super::browse_list(
-            state,
+            state.clone(),
             axum::extract::Path(drive),
             axum::extract::Query(super::BrowseQuery { path: None }),
         )
