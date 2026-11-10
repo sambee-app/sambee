@@ -3889,23 +3889,7 @@ impl LocalDirectoryManager {
     }
 
     pub fn new(namespace: PathBuf) -> Result<Arc<Self>, IndexError> {
-        let manager = Arc::new(Self {
-            sources: Mutex::new(HashMap::new()),
-            listing_discards: ListingDiscards::default(),
-            budget: Arc::new(DiskBudget {
-                namespace,
-                policy_gate: Mutex::new(()),
-                space_probe: available_disk_bytes,
-                state: Mutex::new(DiskState {
-                    policy: DirectoryPolicy::defaults()?,
-                    reserved: 0,
-                    next_cleanup_at: Instant::now(),
-                }),
-            }),
-            scans: Arc::new(Semaphore::new(limit("scan_workers")?)),
-            queries: Arc::new(Semaphore::new(limit("query_workers")?)),
-            updates: Arc::new(Semaphore::new(limit("query_workers")?)),
-        });
+        let manager = Self::new_without_maintenance(namespace)?;
         let weak = Arc::downgrade(&manager);
         tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(limit("event_coalescing_ms").unwrap_or(300) as u64));
@@ -3928,6 +3912,26 @@ impl LocalDirectoryManager {
             }
         });
         Ok(manager)
+    }
+
+    pub(super) fn new_without_maintenance(namespace: PathBuf) -> Result<Arc<Self>, IndexError> {
+        Ok(Arc::new(Self {
+            sources: Mutex::new(HashMap::new()),
+            listing_discards: ListingDiscards::default(),
+            budget: Arc::new(DiskBudget {
+                namespace,
+                policy_gate: Mutex::new(()),
+                space_probe: available_disk_bytes,
+                state: Mutex::new(DiskState {
+                    policy: DirectoryPolicy::defaults()?,
+                    reserved: 0,
+                    next_cleanup_at: Instant::now(),
+                }),
+            }),
+            scans: Arc::new(Semaphore::new(limit("scan_workers")?)),
+            queries: Arc::new(Semaphore::new(limit("query_workers")?)),
+            updates: Arc::new(Semaphore::new(limit("query_workers")?)),
+        }))
     }
 
     fn start_scan(self: &Arc<Self>, source: &Arc<LocalSource>) -> Result<(), IndexError> {

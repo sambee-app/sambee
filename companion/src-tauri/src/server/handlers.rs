@@ -7133,7 +7133,7 @@ mod tests {
         }
         let drive = format!("listing-feedback-{}", uuid::Uuid::new_v4());
         super::drives::register_test_drive_path(drive.clone(), root.clone());
-        let state = directory_mutation_state(temporary.path());
+        let state = directory_listing_state(temporary.path());
         let source = state.0 .0.test_listing_source(&drive, &root);
         let before = source.state();
         let entered = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -7228,7 +7228,7 @@ mod tests {
         std::fs::create_dir_all(root.join("MiXeD/Nested/Caf\u{e9}")).unwrap();
         let drive = format!("listing-names-{}", uuid::Uuid::new_v4());
         super::drives::register_test_drive_path(drive.clone(), root.clone());
-        let state = directory_mutation_state(temporary.path());
+        let state = directory_listing_state(temporary.path());
         let source = state.0 .0.test_listing_source(&drive, &root);
         let before = source.state();
         let listing = super::browse_list(
@@ -7267,7 +7267,7 @@ mod tests {
         std::fs::create_dir_all(root.join("real/child")).unwrap();
         let drive = format!("listing-links-{}", uuid::Uuid::new_v4());
         super::drives::register_test_drive_path(drive.clone(), root.clone());
-        let state = directory_mutation_state(temporary.path());
+        let state = directory_listing_state(temporary.path());
         let source = state.0 .0.test_listing_source(&drive, &root);
         symlink(root.join("real"), root.join("link")).unwrap();
         symlink(root.join("missing"), root.join("broken")).unwrap();
@@ -7303,7 +7303,7 @@ mod tests {
         std::fs::create_dir_all(root.join("real")).unwrap();
         let drive = format!("listing-junction-{}", uuid::Uuid::new_v4());
         super::drives::register_test_drive_path(drive.clone(), root.clone());
-        let state = directory_mutation_state(temporary.path());
+        let state = directory_listing_state(temporary.path());
         let source = state.0 .0.test_listing_source(&drive, &root);
         let result = std::process::Command::new("cmd")
             .args(["/d", "/c", "mklink", "/J"])
@@ -7312,14 +7312,22 @@ mod tests {
             .output()
             .unwrap();
         assert!(result.status.success(), "Junction creation failed: {result:?}");
-        let _listing = super::browse_list(
+        let listing = super::browse_list(
             state,
             axum::extract::Path(drive),
             axum::extract::Query(super::BrowseQuery { path: None }),
         )
         .await
-        .unwrap();
-        assert_eq!(source.queued()[0].1, ["real"]);
+        .unwrap()
+        .0;
+        assert_eq!(listing.total, 2);
+        assert_eq!(source.queued(), vec![(String::new(), vec!["real".to_owned()], false)]);
+    }
+
+    fn directory_listing_state(directory: &std::path::Path) -> axum::extract::State<super::DirectoryMutationState> {
+        axum::extract::State(super::DirectoryMutationState(
+            super::super::directory_manager::LocalDirectoryManager::new_without_maintenance(directory.join("index-cache")).unwrap(),
+        ))
     }
 
     fn directory_mutation_state(directory: &std::path::Path) -> axum::extract::State<super::DirectoryMutationState> {
