@@ -1015,6 +1015,8 @@ struct LocalSource {
     watcher_failed: AtomicBool,
     monitoring_limited_logged: AtomicBool,
     watcher_reconciling: AtomicBool,
+    #[cfg(feature = "recovery-verification")]
+    verification_scan_requested: AtomicBool,
     busy: AtomicBool,
     flush_busy: AtomicBool,
     reclamation_pending: AtomicBool,
@@ -1146,6 +1148,8 @@ impl LocalSource {
             watcher_failed: AtomicBool::new(false),
             monitoring_limited_logged: AtomicBool::new(false),
             watcher_reconciling: AtomicBool::new(true),
+            #[cfg(feature = "recovery-verification")]
+            verification_scan_requested: AtomicBool::new(false),
             observations: Mutex::new(Observations::default()),
             listing_feedback: Mutex::default(),
             listing_discards: Arc::default(),
@@ -3697,7 +3701,7 @@ impl LocalDirectoryManager {
     }
 
     #[cfg(feature = "recovery-verification")]
-    pub(super) fn verification_watcher_loss(&self, drive: &str, restore: bool) -> Result<(), IndexError> {
+    pub(super) fn verification_watcher_loss(self: &Arc<Self>, drive: &str, restore: bool) -> Result<(), IndexError> {
         let source = lock(&self.sources)?
             .get(drive)
             .cloned()
@@ -3705,9 +3709,11 @@ impl LocalDirectoryManager {
         if restore {
             lock(&source.status)?.watcher_retry_at = Instant::now();
             source.recover_watcher()?;
-            let mut status = lock(&source.status)?;
-            status.verified = Instant::now() - FAILURE_RETRY_MAX;
-            status.retry_at = Instant::now();
+            source.flush(&self.budget)?;
+            lock(&source.status)?.retry_at = Instant::now();
+            *lock(&source.next_full_pass)? = Some(Instant::now());
+            source.verification_scan_requested.store(true, Ordering::Release);
+            self.start_scan(&source)?;
         } else {
             lock(&source.watcher)?.take();
             source.lose_watcher()?;
@@ -3985,6 +3991,8 @@ impl LocalDirectoryManager {
         {
             *lock(&source.next_full_pass)? = Some(Instant::now() + Duration::from_secs(limit("minimum_full_pass_spacing_seconds")? as u64));
         }
+        #[cfg(feature = "recovery-verification")]
+        source.verification_scan_requested.store(false, Ordering::Release);
         let ownership = ScanOwnership {
             source: Arc::clone(source),
             _permit: permit,
@@ -4134,6 +4142,8 @@ impl LocalDirectoryManager {
                 .map(DirectoryIndex::has_resumable_scan)
                 .transpose()?
                 .unwrap_or(false);
+            #[cfg(feature = "recovery-verification")]
+            let due = due || source.verification_scan_requested.load(Ordering::Acquire);
             if due || resumable {
                 self.start_scan(&source)?;
             }
@@ -6175,14 +6185,32 @@ mod tests {
         assert_eq!(retained.results, ["retained-reports"]);
 
         std::fs::create_dir(root.join("gap-reports")).unwrap();
+        let scan_permits = manager
+            .scans
+            .acquire_many(u32::try_from(limit("scan_workers").unwrap()).unwrap())
+            .await
+            .unwrap();
         manager.verification_watcher_loss("verification", true).unwrap();
-        *lock(&source.next_full_pass).unwrap() = Some(Instant::now());
-        source.flush(&manager.budget).unwrap();
-        manager.start_scan(&source).unwrap();
+        assert!(source.verification_scan_requested.load(Ordering::Acquire));
+        assert!(!source.busy.load(Ordering::Acquire));
+        drop(scan_permits);
+        manager.tick().unwrap();
         wait_for_workers(&manager, "gap recovery").await;
+        assert!(!source.verification_scan_requested.load(Ordering::Acquire));
         let recovered = search().await.unwrap();
         assert_eq!(recovered.monitoring_state.as_deref(), Some("healthy"));
         assert_eq!(recovered.coverage.as_deref(), Some("complete"));
+        assert!(recovered.results.contains(&"gap-reports".into()));
+        assert!(recovered.results.contains(&"retained-reports".into()));
+
+        manager.verification_watcher_loss("verification", false).unwrap();
+        std::fs::create_dir(root.join("repeated-gap-reports")).unwrap();
+        manager.verification_watcher_loss("verification", true).unwrap();
+        wait_for_workers(&manager, "direct repeated gap recovery").await;
+        let recovered = search().await.unwrap();
+        assert_eq!(recovered.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(recovered.coverage.as_deref(), Some("complete"));
+        assert!(recovered.results.contains(&"repeated-gap-reports".into()));
         assert!(recovered.results.contains(&"gap-reports".into()));
         assert!(recovered.results.contains(&"retained-reports".into()));
 

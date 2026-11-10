@@ -23,6 +23,31 @@ SHUTDOWN_TIMEOUT_SECONDS = 15
 POLL_INTERVAL_SECONDS = 0.2
 
 
+def wait_for(check, seconds: int, *, phase: str, report: dict, process=None):
+    """Poll a recovery phase and retain evidence when it cannot complete."""
+    report["phase"] = phase
+    deadline = time.monotonic() + seconds
+    last_error = None
+    while time.monotonic() < deadline:
+        if process is not None and (exit_code := process.poll()) is not None:
+            raise RuntimeError(
+                f"Recovery phase {phase} stopped: application exited with code "
+                f"{exit_code}. Inspect process.log."
+            )
+        try:
+            result = check()
+            if result:
+                return result
+        except (OSError, urllib.error.URLError) as error:
+            last_error = f"{type(error).__name__}: {error}"
+        time.sleep(POLL_INTERVAL_SECONDS)
+    raise TimeoutError(
+        f"Recovery phase {phase} exceeded {seconds} seconds. "
+        f"Last request failure: {last_error}. "
+        f"Last response: {json.dumps(report.get('last_response'))}"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--executable", type=Path, required=True)
@@ -50,23 +75,26 @@ def main() -> int:
         message = urllib.request.Request(
             url, method="GET" if health else "POST", headers={"x-recovery-token": token}
         )
-        with opener.open(message, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            return json.load(response)
+        report["last_request"] = action
+        try:
+            with opener.open(message, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                result = json.load(response)
+                report["last_response"] = {
+                    "action": action,
+                    "status": response.status,
+                    "body": result,
+                }
+                return result
+        except urllib.error.HTTPError as error:
+            report["last_response"] = {
+                "action": action,
+                "status": error.code,
+                "reason": str(error.reason),
+            }
+            raise
 
-    def wait_for(check, seconds: int):
-        deadline = time.monotonic() + seconds
-        last_error = None
-        while time.monotonic() < deadline:
-            try:
-                result = check()
-                if result:
-                    return result
-            except (OSError, urllib.error.URLError) as error:
-                last_error = type(error).__name__
-            time.sleep(POLL_INTERVAL_SECONDS)
-        raise TimeoutError(
-            f"Recovery check exceeded {seconds} seconds. Last request failure: {last_error}"
-        )
+    def wait(check, seconds: int, phase: str):
+        return wait_for(check, seconds, phase=phase, report=report, process=process)
 
     def record(name: str):
         report["checks"].append(name)
@@ -96,7 +124,11 @@ def main() -> int:
                     stderr=output,
                 )
                 try:
-                    wait_for(lambda: request("health"), STARTUP_TIMEOUT_SECONDS)
+                    wait(
+                        lambda: request("health"),
+                        STARTUP_TIMEOUT_SECONDS,
+                        "actual-application-startup",
+                    )
                     record("actual-application-startup")
 
                     def healthy_contains(path, *, require_complete=True):
@@ -110,9 +142,10 @@ def main() -> int:
                             and path in response["results"]
                         )
 
-                    wait_for(
+                    wait(
                         lambda: healthy_contains("retained-reports"),
                         RECOVERY_TIMEOUT_SECONDS,
+                        "initial-native-index-and-watcher",
                     )
                     record("initial-native-index-and-watcher")
                     assert request("subscribe")["subscriptions"] == 1
@@ -123,23 +156,27 @@ def main() -> int:
                     record("watcher-loss-retains-results")
                     (source / "gap-reports").mkdir()
                     request("restore")
-                    wait_for(
+                    wait(
                         lambda: healthy_contains("gap-reports"),
                         RECOVERY_TIMEOUT_SECONDS,
+                        "event-gap-reconciled-before-healthy",
                     )
                     record("event-gap-reconciled-before-healthy")
                     (source / "native-reports").mkdir()
-                    wait_for(
+                    wait(
                         lambda: healthy_contains(
                             "native-reports", require_complete=False
                         ),
                         RECOVERY_TIMEOUT_SECONDS,
+                        "native-events-after-recovery",
                     )
                     record("native-events-after-recovery")
                     assert request("unsubscribe")["subscriptions"] == 0
                     record("unsubscribe-releases-watcher")
-                    wait_for(
-                        lambda: request("stop")["stopped"], SHUTDOWN_TIMEOUT_SECONDS
+                    wait(
+                        lambda: request("stop")["stopped"],
+                        SHUTDOWN_TIMEOUT_SECONDS,
+                        "stop-releases-index-resources",
                     )
                     request("shutdown")
                     assert process.wait(timeout=SHUTDOWN_TIMEOUT_SECONDS) == 0
