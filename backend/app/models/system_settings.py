@@ -23,6 +23,7 @@ from app.core.directory_index_contract import (
 from app.core.system_setting_definitions import (
     DIRECTORY_INDEX_ALL_SETTING_KEYS,
     DirectoryIndexPolicyScope,
+    ImageConversionPreference,
     SystemSettingKey,
     SystemSettingSource,
 )
@@ -67,7 +68,17 @@ class PdfAdvancedSettingsRead(SQLModel):
     screen_max_decoded_pixels: IntegerSystemSettingRead
 
 
+class ImageConversionPreferenceRead(SQLModel):
+    key: SystemSettingKey
+    label: str
+    description: str
+    value: ImageConversionPreference
+    default_value: ImageConversionPreference
+    source: SystemSettingSource
+
+
 class AdvancedSystemSettingsRead(SQLModel):
+    image_conversion_preference: ImageConversionPreferenceRead
     preprocessors: dict[str, PreprocessorAdvancedSettingsRead]
     pdf: PdfAdvancedSettingsRead
     temporary_archive_download_size_bytes: IntegerSystemSettingRead
@@ -191,6 +202,11 @@ class AdvancedSystemSettingUpdate(StrictSettingUpdate):
         ):
             raise ValueError("Field is not an editable advanced system setting")
         return self
+
+
+class ImageConversionPreferenceUpdate(StrictSettingUpdate):
+    field: Literal["image_viewer.conversion_preference"]
+    value: ImageConversionPreference
 
 
 class SmbReadChunkSizeUpdate(StrictSettingUpdate):

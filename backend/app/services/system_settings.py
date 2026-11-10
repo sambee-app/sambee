@@ -23,10 +23,12 @@ from app import __version__
 from app.core.directory_index_contract import MAX_WIRE_INTEGER
 from app.core.logging import get_logger
 from app.core.system_setting_definitions import (
+    DEFAULT_IMAGE_CONVERSION_PREFERENCE,
     DIRECTORY_INDEX_REVISION_KEYS,
     DIRECTORY_INDEX_SETTING_KEYS,
     SYSTEM_SETTING_DEFINITIONS,
     DirectoryIndexPolicyScope,
+    ImageConversionPreference,
     IntegerSystemSettingDefinition,
     SystemSettingKey,
     SystemSettingSource,
@@ -44,6 +46,8 @@ from app.models.system_settings import (
     FileSearchSettingsRead,
     FileSearchSettingsUpdate,
     FileSearchSettingsUpdateResult,
+    ImageConversionPreferenceRead,
+    ImageConversionPreferenceUpdate,
     IntegerSystemSettingRead,
     NetworkSettingsRead,
     NetworkSettingsUpdate,
@@ -429,8 +433,31 @@ def update_file_search_settings(
     return payload.model_copy(update={"value": value})
 
 
+def _resolve_image_conversion_preference() -> tuple[ImageConversionPreference, SystemSettingSource]:
+    raw_value = store.get_override(SystemSettingKey.IMAGE_CONVERSION_PREFERENCE)
+    if raw_value is not None:
+        try:
+            return ImageConversionPreference(raw_value), SystemSettingSource.DATABASE
+        except ValueError:
+            logger.error("Invalid database override for %s: %r; using speed", SystemSettingKey.IMAGE_CONVERSION_PREFERENCE.value, raw_value)
+    return DEFAULT_IMAGE_CONVERSION_PREFERENCE, SystemSettingSource.DEFAULT
+
+
+def get_image_conversion_preference() -> ImageConversionPreference:
+    return _resolve_image_conversion_preference()[0]
+
+
 def build_advanced_system_settings_read() -> AdvancedSystemSettingsRead:
+    preference, source = _resolve_image_conversion_preference()
     return AdvancedSystemSettingsRead(
+        image_conversion_preference=ImageConversionPreferenceRead(
+            key=SystemSettingKey.IMAGE_CONVERSION_PREFERENCE,
+            label="Image conversion preference",
+            description="Applies to backend image previews, including libvips conversions. Local-drive images are unchanged.",
+            value=preference,
+            default_value=DEFAULT_IMAGE_CONVERSION_PREFERENCE,
+            source=source,
+        ),
         temporary_archive_download_size_bytes=_build_integer_read(
             SYSTEM_SETTING_DEFINITIONS[SystemSettingKey.TEMPORARY_ARCHIVE_DOWNLOAD_SIZE_BYTES]
         ),
@@ -628,6 +655,8 @@ def _append_config_file_report(lines: list[str], aliases: PublicSupportReportAli
 def _append_advanced_settings_report(lines: list[str]) -> None:
     advanced = build_advanced_system_settings_read()
     lines.append("[ui_configuration.advanced]")
+    preference = advanced.image_conversion_preference
+    _append_report_setting(lines, preference.key.value, preference.value.value, preference.source.value)
     imagemagick = advanced.preprocessors["imagemagick"]
     _append_report_setting(
         lines,
@@ -756,14 +785,17 @@ def build_public_support_report_read(session: Session) -> PublicSupportReportRea
 
 
 def update_advanced_system_settings(
-    payload: AdvancedSystemSettingUpdate, *, updated_by_user_id: Optional[uuid.UUID], session: Session
-) -> AdvancedSystemSettingUpdate:
-    definition = SYSTEM_SETTING_DEFINITIONS[payload.field]
-    value = _validate_integer_value(definition, payload.value)
-    _write_system_setting(session, payload.field, str(value), updated_by_user_id)
+    payload: AdvancedSystemSettingUpdate | ImageConversionPreferenceUpdate, *, updated_by_user_id: Optional[uuid.UUID], session: Session
+) -> AdvancedSystemSettingUpdate | ImageConversionPreferenceUpdate:
+    if isinstance(payload, ImageConversionPreferenceUpdate):
+        _write_system_setting(session, SystemSettingKey.IMAGE_CONVERSION_PREFERENCE, payload.value.value, updated_by_user_id)
+    else:
+        definition = SYSTEM_SETTING_DEFINITIONS[payload.field]
+        _validate_integer_value(definition, payload.value)
+        _write_system_setting(session, payload.field, str(payload.value), updated_by_user_id)
     session.commit()
     store.refresh_from_session(session)
-    return payload.model_copy(update={"value": value})
+    return payload
 
 
 def _write_system_setting(session: Session, key: SystemSettingKey, value: str, updated_by_user_id: Optional[uuid.UUID]) -> None:

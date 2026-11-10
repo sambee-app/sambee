@@ -121,6 +121,51 @@ def test_sensitive_data_log_filter_redacts_access_credentials() -> None:
     assert "/api/viewer/download-intents/<redacted>" in download_record.getMessage()
 
 
+@pytest.mark.parametrize("header", ["Cookie", "Set-Cookie", "Authorization", "Proxy-Authorization"])
+@pytest.mark.parametrize("prefix", ["", "< ", "> "])
+@pytest.mark.parametrize("mixed_case", [False, True])
+def test_sensitive_headers_are_redacted(header: str, prefix: str, mixed_case: bool) -> None:
+    name = header.swapcase() if mixed_case else header
+    message = f"{prefix}{name}: Basic secret; session=private"
+    record = logging.LogRecord("uvicorn.error", logging.DEBUG, __file__, 0, "%s", (message,), None)
+    assert SensitiveDataLogFilter().filter(record)
+    assert record.getMessage() == f"{prefix}{name}: <redacted>"
+
+
+def test_other_headers_are_not_redacted() -> None:
+    message = "< user-agent: example\n> Content-Type: text/plain"
+    record = logging.LogRecord("uvicorn.error", logging.DEBUG, __file__, 0, message, (), None)
+    assert SensitiveDataLogFilter().filter(record)
+    assert record.getMessage() == message
+
+
+def test_empty_sensitive_header_does_not_consume_next_header() -> None:
+    message = "< cookie: \n< user-agent: example\n> Set-Cookie: session=secret\r\n> Content-Type: text/plain"
+    record = logging.LogRecord("uvicorn.error", logging.DEBUG, __file__, 0, message, (), None)
+    assert SensitiveDataLogFilter().filter(record)
+    assert record.getMessage() == "< cookie: <redacted>\n< user-agent: example\n> Set-Cookie: <redacted>\r\n> Content-Type: text/plain"
+
+
+def test_uvicorn_debug_headers_are_redacted() -> None:
+    logger_names = ("uvicorn", "uvicorn.error", "uvicorn.access", "httpx")
+    original_state = {
+        name: (logging.getLogger(name).level, logging.getLogger(name).handlers[:], logging.getLogger(name).propagate)
+        for name in logger_names
+    }
+    stream = io.StringIO()
+    try:
+        configure_uvicorn_loggers([logging.StreamHandler(stream)], "%(message)s", logging.DEBUG, logging.DEBUG, logging.DEBUG)
+        logging.getLogger("uvicorn.error").debug("< cookie: name=%s", "secret")
+        assert "< cookie: <redacted>" in stream.getvalue()
+        assert "secret" not in stream.getvalue()
+    finally:
+        for name, (level, handlers, propagate) in original_state.items():
+            logger = logging.getLogger(name)
+            logger.setLevel(level)
+            logger.handlers = handlers
+            logger.propagate = propagate
+
+
 def test_uvicorn_protocol_filter_applies_access_policy_to_websocket_handshakes() -> None:
     log_filter = UvicornProtocolLogFilter(protocol_log_level=logging.WARNING, access_log_level=logging.WARNING)
     rejected_websocket_record = logging.LogRecord(

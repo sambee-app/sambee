@@ -643,6 +643,14 @@ export const EN_TRANSLATIONS = {
       },
     },
     advanced: {
+      imageConversion: {
+        label: "Image conversion preference",
+        description: "Applies to backend image previews, including libvips conversions. Local-drive images are unchanged.",
+        speed: "Conversion speed",
+        speedDescription: "Use faster encoding for opaque previews. Files can be larger.",
+        size: "Target size",
+        sizeDescription: "Use WebP for smaller opaque previews. Conversion can use more CPU.",
+      },
       saveChanges: "Save changes",
       saveSuccess: "Advanced settings saved",
       loadFailed: "Failed to load advanced settings",

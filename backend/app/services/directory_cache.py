@@ -491,7 +491,6 @@ class DirectoryScanCoordinator:
                 return False
             self.pending.append((self.sequence, mutation, size))
             self.pending_bytes += size
-            self.verification_required = True
             for path in paths:
                 self._record_barrier(path)
             return True

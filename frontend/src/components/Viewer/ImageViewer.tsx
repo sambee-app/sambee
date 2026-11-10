@@ -701,7 +701,12 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
           ref={portalRef}
           className={currentImageError ? "image-viewer-load-error" : undefined}
           onKeyDownCapture={(event) => {
-            if (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) event.stopPropagation();
+            if (
+              (isTransitioning && event.key !== "Escape") ||
+              (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight"))
+            ) {
+              event.stopPropagation();
+            }
           }}
           sx={{
             flex: 1,
@@ -711,7 +716,6 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
         >
           {portalElement && (
             <Lightbox
-              key={isTransitioning ? "retained" : "interactive"}
               open={true}
               close={handleClose}
               index={currentIndex}

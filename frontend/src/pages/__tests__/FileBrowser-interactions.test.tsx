@@ -170,7 +170,7 @@ describe("Browser Component - Interactions", () => {
     await user.click(screen.getByTestId("file-list-container"));
     await user.keyboard("{Enter}");
 
-    expect(screen.getByRole("progressbar", { name: "Loading..." })).toBeInTheDocument();
+    expect(await screen.findByRole("progressbar", { name: "Loading..." })).toBeInTheDocument();
     const currentRow = screen.getByRole("button", { name: "File: readme.txt" });
     expect(currentRow).toBeInTheDocument();
     expect(currentRow.closest('[aria-busy="true"]')).not.toBeNull();

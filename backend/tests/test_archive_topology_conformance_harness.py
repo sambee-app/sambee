@@ -342,13 +342,14 @@ def _backend_creation_trace(case: FixtureCase) -> dict[str, Any]:
 
 @pytest.mark.parametrize("case", BACKEND_FIXTURE_CASES, ids=lambda case: case.name)
 def test_backend_fixture_dispatcher_runs_every_backend_owned_case(case: FixtureCase) -> None:
+    assert case.operation == ArchiveOperationKind.CREATE.value
     resolved = resolve_archive_operation_topology_plan(
         kind=ArchiveOperationKind(case.operation),
         source_connection_id=case.topology.source_connection_id,
         destination_connection_id=case.topology.destination_connection_id,
     )
     assert resolved.topology.driver == ArchiveExecutionDriver.BACKEND
-    trace = _backend_creation_trace(case) if case.operation == "create" else _backend_extraction_trace(case)
+    trace = _backend_creation_trace(case)
     assert trace == case.expected_trace
 
 

@@ -3472,7 +3472,7 @@ describe("useFileBrowserPane", () => {
     expect(result.current.viewInfo?.images).toBeUndefined();
   });
 
-  it("records each newly displayed gallery image once", async () => {
+  it.each([true, false])("records each newly displayed gallery image once with presentation updates %s", async (updatePresentation) => {
     const { result } = renderHook(
       () =>
         useFileBrowserPane({
@@ -3494,9 +3494,9 @@ describe("useFileBrowserPane", () => {
       });
     });
     act(() => {
-      result.current.handleViewIndexChange(0);
-      result.current.handleViewIndexChange(1);
-      result.current.handleViewIndexChange(1);
+      result.current.handleViewIndexChange(0, { updatePresentation });
+      result.current.handleViewIndexChange(1, { updatePresentation });
+      result.current.handleViewIndexChange(1, { updatePresentation });
     });
 
     await waitFor(() => {
@@ -3504,5 +3504,6 @@ describe("useFileBrowserPane", () => {
       expect(api.recordRecentFile).toHaveBeenNthCalledWith(1, "conn-1", "first.jpg");
       expect(api.recordRecentFile).toHaveBeenNthCalledWith(2, "conn-1", "second.jpg");
     });
+    expect(result.current.viewInfo?.path).toBe(updatePresentation ? "second.jpg" : "first.jpg");
   });
 });

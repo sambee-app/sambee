@@ -139,6 +139,22 @@ def _archive_bytes_with_encrypted_members() -> bytes:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["size", "speed"])
+async def test_saved_image_preference_is_used_by_next_preview(client, auth_headers_admin, value):
+    from app.core.system_setting_definitions import ImageConversionPreference
+
+    payload = {"field": "image_viewer.conversion_preference", "value": value}
+    assert client.put("/api/admin/settings/advanced", headers=auth_headers_admin, json=payload).status_code == 200
+    with (
+        patch("app.api.viewer.get_image_conversion_preference", wraps=viewer_api.get_image_conversion_preference) as read,
+        patch("app.api.viewer.convert_image_for_viewer", return_value=(b"preview", "image/webp", "libvips", 1.0)) as convert,
+    ):
+        await viewer_api.create_converted_image_response(image_bytes=b"source", filename="image.jpg")
+    read.assert_called_once_with()
+    assert convert.call_args.kwargs["preference"] is ImageConversionPreference(value)
+
+
+@pytest.mark.asyncio
 async def test_image_preview_size_limit_returns_a_safe_actionable_error():
     """The viewer exposes only the configured limit, not converter diagnostics."""
     with (
@@ -179,7 +195,8 @@ async def test_image_debug_timings_preserve_request_context(caplog: pytest.LogCa
         user_var.reset(user_token)
 
     assert response.body == b"converted"
-    for field in ("executor_queue_ms=", "worker_ms=", "dispatch_total_ms="):
+    assert caplog.text.count("Image request:") == 1
+    for field in ("executor_queue_ms=", "conversion_ms=", "total_ms=", "outcome=converted"):
         assert field in caplog.text
 
 
@@ -208,14 +225,15 @@ async def test_image_source_debug_timings_include_failed_reads(caplog: pytest.Lo
         else:
             response = await viewer_api.read_and_convert_image(backend, "photo.jpg", "photo.jpg", uuid.uuid4())
             assert response.body == b"converted"
-            assert "assembly_ms=" in caplog.text
-            assert "chunks=2 input_bytes=11 complete=True" in caplog.text
+            assert "chunks=2 input_bytes=11 read_complete=True" in caplog.text
 
     backend.disconnect.assert_awaited_once()
-    for field in ("read_ms=", "first_chunk_ms=", "cleanup_ms=", "preparation_total_ms="):
+    assert caplog.text.count("Image request:") == 1
+    for field in ("read_ms=", "first_chunk_ms=", "total_ms="):
         assert field in caplog.text
     if read_error:
-        assert "chunks=1 input_bytes=5 complete=False" in caplog.text
+        assert "chunks=1 input_bytes=5 read_complete=False" in caplog.text
+        assert "outcome=FileNotFoundError" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -1837,7 +1855,11 @@ class TestStreamArchiveMember:
         assert response.status_code == 200
         assert response.content == b"converted"
         assert response.headers["content-type"].startswith("image/webp")
-        convert_image.assert_called_once_with(content, "photo.jxl", max_width=1280, max_height=720, output_format="auto")
+        from app.core.system_setting_definitions import ImageConversionPreference
+
+        convert_image.assert_called_once_with(
+            content, "photo.jxl", max_width=1280, max_height=720, preference=ImageConversionPreference.SPEED
+        )
         assert archive_reader.closed is True
 
     def test_archive_pdf_conversion_uses_the_configured_source_size_limit(

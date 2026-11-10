@@ -11,6 +11,7 @@ The implementation is deliberately split between shared page logic and per-pane 
 | Area | Responsibility |
 |---|---|
 | `pages/FileBrowser.tsx` | owns shared browser-level concerns such as active pane routing, URL sync, WebSocket lifecycle, and global shortcut registration |
+| `pages/FileBrowser/WorkspaceViewer.tsx` | subscribes to viewer route changes and owns the dynamic viewer host without rendering the directory workspace for image-only navigation |
 | `pages/FileBrowser/useFileBrowserPane.ts` | owns per-pane state such as connection and path, selection, sorting, filtering, dialogs, viewer state, incremental search, and directory refresh handling |
 | `pages/FileBrowser/routing.ts` | parses and serializes typed directory, viewer, editor, and settings locations |
 | `pages/FileBrowser/useWorkspaceNavigation.ts` | resolves viewer targets and owns workspace navigation and safe overlay return entries |
@@ -166,6 +167,12 @@ Loading feedback belongs to the selected image, PDF, text, or Markdown viewer. W
 One viewer component is mounted at a time. Metadata resolution and component imports can retain the displayed resource while controls and shortcuts are suspended; Escape remains available. Once the selected component and metadata are available, that viewer owns content loading and errors. There is no hidden candidate viewer or content-readiness promotion. The editor leave guard remains the sole owner of dirty-navigation decisions.
 
 Image-gallery navigation updates the current index in the same viewer instance and publishes it to the route. The gallery keeps its local bounded cache and preloading; no image-byte cache is shared between viewer instances. An image is ready only when its decoded source exists. A failed image uses the selected image's error controls without displaying the previous image under a new filename. Explicit Retry invalidates failed local bytes and makes a fresh request. Encrypted PDFs retain the standard responsive password dialog.
+
+`FileBrowser.tsx` separates its route subscriber from the memoized directory workspace. Directory paths, pane layout, settings, and unrelated query parameters remain workspace inputs. Viewer-only query changes update `WorkspaceViewer` instead of rendering the background file lists and toolbars. Real directory, connection, and content updates still reach the workspace. Direct viewer links wait for the directory pane connection bindings before resolving, so pane initialization cannot clear a newly opened viewer.
+
+A known image in the active gallery uses a selection path rather than reopening the viewer. Source matching includes the connection and, for archive members, the provider and source archive. Selection retains the viewer session, cache, and lightbox instance without entering the pending-viewer state. React Router immediately pushes each accepted image change. Back and Forward apply the selected index without adding entries; a request revision also restores the routed index when immediate Back coalesces an optimistic move. Unknown files and source changes retain normal metadata validation and recovery.
+
+The pane tracks the last selected image and recent-file visits without updating its directory presentation on each move. Close uses that tracked index to restore file-list focus. Do not delay URL updates until an animation ends or write history outside React Router to avoid rendering costs.
 
 Viewer content failures use the selected viewer's error state with Retry and Close, not a generic replacement toast. Individual loaders reject late results after a newer selection or close. There is no guarantee that a previous document remains displayed until the next document's content is ready.
 

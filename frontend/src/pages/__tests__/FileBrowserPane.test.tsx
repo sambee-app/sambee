@@ -20,9 +20,9 @@
  * - Resolves connection name from connections list
  */
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OperationNotificationProvider } from "../../components/OperationNotifications";
 import { createMockConnection } from "../../test/fixtures/connections";
 import type { Connection, FileEntry } from "../../types";
@@ -517,6 +517,15 @@ describe("FileBrowserPane", () => {
   // --------------------------------------------------------------------------
 
   describe("loading state", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      cleanup();
+      vi.useRealTimers();
+    });
+
     it.each([false, true])("overlays navigation progress without replacing the list (compact: %s)", (useCompactLayout) => {
       const pane = createMockPane();
       const props = defaultProps({ pane, useCompactLayout });
@@ -526,6 +535,11 @@ describe("FileBrowserPane", () => {
 
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
       rerender(<FileBrowserPane {...props} pane={{ ...pane, navigationPending: true }} />);
+
+      expect(listRegion).toHaveAttribute("aria-busy", "true");
+      act(() => vi.advanceTimersByTime(199));
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1));
 
       const progress = screen.getByRole("progressbar", { name: "app.loading" });
       expect(progress.parentElement).toBe(listRegion);
@@ -538,6 +552,33 @@ describe("FileBrowserPane", () => {
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
       expect(screen.getByTestId("file-list")).toBe(list);
       expect(listRegion).toHaveAttribute("aria-busy", "false");
+    });
+
+    it("cancels progress for fast navigation and restarts the delay for the next navigation", () => {
+      const pane = createMockPane();
+      const props = defaultProps({ pane });
+      const pendingPane = { ...pane, navigationPending: true };
+      const { rerender } = render(<FileBrowserPane {...props} pane={pendingPane} />);
+
+      act(() => vi.advanceTimersByTime(100));
+      rerender(<FileBrowserPane {...props} />);
+      act(() => vi.advanceTimersByTime(200));
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+      rerender(<FileBrowserPane {...props} pane={pendingPane} />);
+      act(() => vi.advanceTimersByTime(199));
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.getByRole("progressbar", { name: "app.loading" })).toBeInTheDocument();
+    });
+
+    it("clears the pending progress timer when the pane unmounts", () => {
+      const pane = createMockPane({ navigationPending: true });
+      const { unmount } = render(<FileBrowserPane {...defaultProps({ pane })} />);
+
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
     });
 
     it("uses only the existing spinner during initial loading", () => {

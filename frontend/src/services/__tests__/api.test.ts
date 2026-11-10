@@ -1470,6 +1470,14 @@ describe("API Service", () => {
 
     it("getAdvancedSettings() returns admin advanced settings", async () => {
       const advancedSettings: AdvancedSystemSettings = {
+        image_conversion_preference: {
+          key: "image_viewer.conversion_preference",
+          label: "Image conversion preference",
+          description: "Applies to backend image previews, including libvips conversions. Local-drive images are unchanged.",
+          value: "speed",
+          default_value: "speed",
+          source: "default",
+        },
         preprocessors: {
           imagemagick: {
             max_file_size_bytes: {

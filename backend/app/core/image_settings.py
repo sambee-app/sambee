@@ -11,6 +11,8 @@ to ensure consistency across the entire image processing pipeline.
 
 from dataclasses import dataclass
 
+from app.core.system_setting_definitions import ImageConversionPreference
+
 
 @dataclass(frozen=True)
 class ImageConversionSettings:
@@ -30,6 +32,9 @@ class ImageConversionSettings:
     # PNG settings
     png_compression: int = 6  # 0-9, balance speed vs compression
 
+    webp_quality: int = 80
+    webp_method: int = 4
+
     # Common settings
     strip_metadata: bool = True  # Remove EXIF/IPTC for privacy & smaller size
     color_space: str = "srgb"  # Web standard color space
@@ -40,6 +45,29 @@ class ImageConversionSettings:
 
 # Single instance - import this everywhere
 IMAGE_SETTINGS = ImageConversionSettings()
+SOURCE_LOADER_OUTPUT_FORMATS = {"jpegload_buffer": "jpeg"}
+DEFAULT_VIEWER_OUTPUT_FORMAT = "webp"
+ROTATED_EXIF_ORIENTATIONS = frozenset((5, 6, 7, 8))
+WEBP_MAX_DIMENSION = 16_383
+
+
+def select_viewer_output_format(extension: str, has_alpha: bool, preference: ImageConversionPreference) -> str:
+    if extension in {".eps", ".ai"} or (extension == ".ico" and has_alpha):
+        return "png"
+    if has_alpha or preference is ImageConversionPreference.SIZE:
+        return "webp"
+    return "jpeg"
+
+
+def get_libvips_webp_kwargs(settings: ImageConversionSettings = IMAGE_SETTINGS) -> dict[str, int | bool]:
+    return {"Q": settings.webp_quality, "strip": settings.strip_metadata}
+
+
+def get_imagemagick_webp_args(settings: ImageConversionSettings = IMAGE_SETTINGS) -> list[str]:
+    args = ["-quality", str(settings.webp_quality), "-define", f"webp:method={settings.webp_method}"]
+    if settings.strip_metadata:
+        args.append("-strip")
+    return args
 
 
 def get_imagemagick_jpeg_args(

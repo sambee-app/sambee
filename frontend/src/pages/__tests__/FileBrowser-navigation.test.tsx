@@ -300,7 +300,7 @@ describe("Browser Component - Navigation", () => {
     });
 
     expect(screen.getByText("readme.txt")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "Loading..." })).toBeInTheDocument();
+    expect(await screen.findByRole("progressbar", { name: "Loading..." })).toBeInTheDocument();
 
     resolveSubfolder?.({
       items: subfolderFiles,

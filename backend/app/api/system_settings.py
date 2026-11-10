@@ -29,6 +29,7 @@ from app.models.system_settings import (
     FileSearchSettingsRead,
     FileSearchSettingsUpdate,
     FileSearchSettingsUpdateResult,
+    ImageConversionPreferenceUpdate,
     NetworkSettingsRead,
     NetworkSettingsUpdate,
     NetworkSettingsUpdateResult,
@@ -191,12 +192,12 @@ async def get_advanced_system_settings(
     return build_advanced_system_settings_read()
 
 
-@router.put("/settings/advanced", response_model=AdvancedSystemSettingUpdate)
+@router.put("/settings/advanced", response_model=AdvancedSystemSettingUpdate | ImageConversionPreferenceUpdate)
 async def put_advanced_system_settings(
-    payload: AdvancedSystemSettingUpdate,
+    payload: AdvancedSystemSettingUpdate | ImageConversionPreferenceUpdate,
     current_user: User = Depends(require_capability(Capability.ACCESS_ADMIN_SETTINGS)),
     session: Session = Depends(get_session),
-) -> AdvancedSystemSettingUpdate:
+) -> AdvancedSystemSettingUpdate | ImageConversionPreferenceUpdate:
     set_user(current_user.username)
     try:
         return update_advanced_system_settings(payload, updated_by_user_id=current_user.id, session=session)

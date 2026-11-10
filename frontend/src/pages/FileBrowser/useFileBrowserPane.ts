@@ -416,6 +416,8 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   // ──────────────────────────────────────────────────────────────────────────
 
   const [viewInfo, setViewInfo] = useState<UseFileBrowserPaneReturn["viewInfo"]>(null);
+  const viewInfoRef = React.useRef(viewInfo);
+  viewInfoRef.current = viewInfo;
   const [browserViewerPickerState, setBrowserViewerPickerState] = useState<UseFileBrowserPaneReturn["browserViewerPickerState"]>(null);
   const browserViewerPickerConfirmationTokenRef = React.useRef(0);
 
@@ -1702,15 +1704,19 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   // ──────────────────────────────────────────────────────────────────────────
 
   const handleViewIndexChange = useCallback(
-    (index: number) => {
+    (index: number, options?: { updatePresentation?: boolean }) => {
       currentViewIndexRef.current = index;
+      const current = viewInfoRef.current;
+      if (!current?.images?.length) return;
+      const nextPath = current.images[index] ?? current.path;
+      if (!current.virtualSource && lastDisplayedImagePathRef.current !== nextPath) {
+        recordRecentFileAttempt(current.connectionId ?? connectionIdRef.current, nextPath);
+        lastDisplayedImagePathRef.current = nextPath;
+      }
+      if (options?.updatePresentation === false) return;
       setViewInfo((prev) => {
         if (!prev?.images || prev.images.length === 0) return prev;
         const nextPath = prev.images[index] ?? prev.path;
-        if (!prev.virtualSource && lastDisplayedImagePathRef.current !== nextPath) {
-          recordRecentFileAttempt(prev.connectionId ?? connectionIdRef.current, nextPath);
-          lastDisplayedImagePathRef.current = nextPath;
-        }
         if (prev.currentIndex === index && prev.path === nextPath) return prev;
         return { ...prev, currentIndex: index, path: nextPath };
       });

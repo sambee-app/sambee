@@ -23,6 +23,138 @@ from app.services.directory_index import MAX_QUERY_BYTES, MAX_QUERY_TERMS, Direc
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "shared" / "directory-index"
 
 
+def _directory_wire_records(entries):
+    from smbprotocol.file_info import FileIdFullDirectoryInformation
+
+    from app.services.directory_traversal import DIRECTORY_RECORD_ALIGNMENT
+
+    packed = []
+    for position, (name, attributes, file_id) in enumerate(entries):
+        record = FileIdFullDirectoryInformation()
+        record["file_name"] = name
+        record["file_attributes"] = attributes
+        record["file_id"] = file_id
+        padding = -len(record) % DIRECTORY_RECORD_ALIGNMENT
+        if position < len(entries) - 1:
+            record["next_entry_offset"] = len(record) + padding
+        packed.append(record.pack() + bytes(padding))
+    return b"".join(packed)
+
+
+@pytest.mark.parametrize("count", [1, 2, 500])
+def test_directory_parser_matches_smbprotocol(count):
+    from smbprotocol.file_info import FileInformationClass
+    from smbprotocol.open import SMB2QueryDirectoryRequest
+
+    from app.services.directory_traversal import parse_directory_records
+
+    wire = _directory_wire_records(
+        [(f"folder-{number}".encode("utf-16-le"), 16 | (1024 if number % 2 else 0), number + 1) for number in range(count)]
+    )
+    legacy = SMB2QueryDirectoryRequest.unpack_response(FileInformationClass.FILE_ID_FULL_DIRECTORY_INFORMATION, wire)
+    actual = list(parse_directory_records(wire))
+    assert [(entry.name, entry.smb_info.file_attributes, entry.file_id) for entry in actual] == [
+        (
+            record["file_name"].get_value().decode("utf-16-le"),
+            record["file_attributes"].get_value(),
+            record["file_id"].get_value().to_bytes(8, "little"),
+        )
+        for record in legacy
+    ]
+
+
+@pytest.mark.parametrize("name", [b"", b"\x00\xd8", "bad/name".encode("utf-16-le")])
+def test_directory_parser_preserves_unsafe_directory_issue(name):
+    from app.services.directory_traversal import parse_directory_records
+
+    (entry,) = parse_directory_records(_directory_wire_records([(name, 16, 1)]))
+    assert entry.name is None
+
+
+def test_directory_parser_skips_files_and_dot_entries():
+    from app.services.directory_traversal import parse_directory_records
+
+    records = [
+        (b"\xff", 0, 0),
+        (".".encode("utf-16-le"), 16, 1),
+        ("..".encode("utf-16-le"), 16, 2),
+        ("child".encode("utf-16-le"), 16 | 1024, 3),
+    ]
+    entries = list(parse_directory_records(_directory_wire_records(records)))
+    assert [entry.name for entry in entries] == ["child"]
+    assert entries[0].smb_info.file_attributes & 1024
+    files_only = parse_directory_records(_directory_wire_records([(b"\xff", 0, 0)]))
+    assert files_only
+    assert list(files_only) == []
+
+
+@pytest.mark.parametrize("file_id", [0, 0xFFFFFFFFFFFFFFFF])
+def test_directory_parser_unavailable_file_id(file_id):
+    from app.services.directory_traversal import parse_directory_records
+
+    (entry,) = parse_directory_records(_directory_wire_records([("child".encode("utf-16-le"), 16, file_id)]))
+    assert entry.file_id is None
+
+
+@pytest.mark.parametrize(
+    "field,value,message",
+    [
+        ("next", 8, "offset"),
+        ("next", 81, "offset"),
+        ("next", 8000, "offset"),
+        ("length", 8000, "bounds"),
+        ("length", 3, "odd UTF-16"),
+    ],
+)
+def test_directory_parser_rejects_invalid_bounds(field, value, message):
+    from struct import pack_into
+
+    from app.services.directory_traversal import (
+        DIRECTORY_NAME_LENGTH_OFFSET,
+        DIRECTORY_NEXT_OFFSET,
+        DirectoryTraversalError,
+        parse_directory_records,
+    )
+
+    wire = bytearray(_directory_wire_records([("child".encode("utf-16-le"), 16, 1)]))
+    pack_into("<I", wire, DIRECTORY_NEXT_OFFSET if field == "next" else DIRECTORY_NAME_LENGTH_OFFSET, value)
+    with pytest.raises(DirectoryTraversalError, match=message):
+        parse_directory_records(bytes(wire))
+
+
+@pytest.mark.parametrize("length", [0, 1, 79])
+def test_directory_parser_rejects_truncated_headers(length):
+    from app.services.directory_traversal import DirectoryTraversalError, parse_directory_records
+
+    with pytest.raises(DirectoryTraversalError, match="header is truncated"):
+        parse_directory_records(bytes(length))
+
+
+@pytest.mark.skipif(os.environ.get("SAMBEE_RUN_BENCHMARKS") != "1", reason="Opt-in development benchmark, not a CI gate")
+def test_directory_parser_benchmark():
+    from statistics import median
+
+    from smbprotocol.file_info import FileInformationClass
+    from smbprotocol.open import SMB2QueryDirectoryRequest
+
+    from app.services.directory_traversal import parse_directory_records
+
+    wire = _directory_wire_records([(f"folder-{number:08d}".encode("utf-16-le"), 16, number + 1) for number in range(8000)])
+    timings = {}
+    for name, parse in (
+        ("smbprotocol", lambda: SMB2QueryDirectoryRequest.unpack_response(FileInformationClass.FILE_ID_FULL_DIRECTORY_INFORMATION, wire)),
+        ("memoryview", lambda: parse_directory_records(wire)),
+    ):
+        samples = []
+        for _attempt in range(3):
+            start = time.perf_counter()
+            parse()
+            samples.append(time.perf_counter() - start)
+        timings[name] = median(samples)
+    print(f"8000 records, {len(wire)} bytes: {timings}")
+    assert timings["memoryview"] < 0.020
+
+
 def _lose_observations(coordinator) -> None:
     from app.services.directory_cache import InvalidationReason
 
@@ -2571,7 +2703,13 @@ def test_smb_handle_uses_no_redirect_open_and_bounded_native_reads(monkeypatch):
     from smbprotocol.exceptions import PathNotCovered
     from smbprotocol.open import CreateOptions, ShareAccess
 
-    from app.services.directory_traversal import DIRECTORY_READ_BUFFER_BYTES, SmbDirectoryHandle
+    from app.services.directory_traversal import (
+        DIRECTORY_READ_BUFFER_BYTES,
+        SmbDirectoryBatch,
+        SmbDirectoryEntry,
+        SmbDirectoryEntryInformation,
+        SmbDirectoryHandle,
+    )
 
     calls = []
     replies = [[object()], _smb_response_error(NtStatus.STATUS_NO_MORE_FILES), _smb_response_error(NtStatus.STATUS_PATH_NOT_COVERED)]
@@ -2583,6 +2721,7 @@ def test_smb_handle_uses_no_redirect_open_and_bounded_native_reads(monkeypatch):
         def __init__(self, tree, path):
             calls.append((tree, path))
             self.connection = tree.session.connection
+            self.tree_connect = tree
 
         def create(self, *args):
             calls.append(args)
@@ -2592,7 +2731,7 @@ def test_smb_handle_uses_no_redirect_open_and_bounded_native_reads(monkeypatch):
             reply = replies.pop(0)
             if isinstance(reply, BaseException):
                 raise reply
-            return reply
+            return object(), None
 
         def close(self):
             self.connected = False
@@ -2601,6 +2740,13 @@ def test_smb_handle_uses_no_redirect_open_and_bounded_native_reads(monkeypatch):
         share_name=r"\\host\share",
         is_dfs_share=False,
         session=SimpleNamespace(connection=SimpleNamespace(max_transact_size=DIRECTORY_READ_BUFFER_BYTES, supports_multi_credit=False)),
+    )
+    tree.session.session_id = 1
+    tree.tree_connect_id = 1
+    tree.session.connection.send = lambda *args: object()
+    monkeypatch.setattr(
+        "app.services.directory_traversal._receive_directory",
+        lambda *args: SmbDirectoryBatch((SmbDirectoryEntry("child", SmbDirectoryEntryInformation(16)),)),
     )
     monkeypatch.setattr("app.services.directory_traversal.get_smb_tree", lambda *args, **kwargs: (tree, "parent"))
     monkeypatch.setattr("app.services.directory_traversal.Open", Handle)
@@ -2706,6 +2852,7 @@ def smb_directory_server(monkeypatch):
             if resolve(self.path) not in server.directories:
                 raise FileNotFoundError("Injected missing directory.")
             self._connected = True
+            self.file_id = (server.handles.index(self) + 1).to_bytes(16, "little")
 
         def close(self, *, send=True):
             if not send:
@@ -2764,7 +2911,7 @@ def smb_directory_server(monkeypatch):
         assert not resolve_symlinks
         assert timeout is None or timeout > 0
         server.received.append(request.position)
-        server.events.append(("receive", request.descriptor.path))
+        server.events.append(("standalone_receive" if request.position == 5 else "receive", request.descriptor.path))
         if request.descriptor.path == server.stall_path and request.position == 0:
             raise TimeoutError("Injected stalled pipeline response.")
         if server.credit_accounting:
@@ -2791,7 +2938,7 @@ def smb_directory_server(monkeypatch):
                 []
                 if request.position == server.empty_compound_response
                 else descriptor.query_directory(
-                    "*",
+                    message["buffer"].get_value().decode("utf-16-le"),
                     message["file_information_class"].get_value(),
                     flags=message["flags"].get_value(),
                     max_output=message["output_buffer_length"].get_value(),
@@ -2819,7 +2966,10 @@ def smb_directory_server(monkeypatch):
         server.standalone.append(message)
         header = SMB2HeaderRequest()
         header["data"] = message.pack()
-        return SimpleNamespace(position=5, body=message, message=header, descriptor=server.handles[-1])
+        descriptor = server.handles[-1]
+        if message.COMMAND == Commands.SMB2_QUERY_DIRECTORY:
+            descriptor = next(handle for handle in server.handles if handle.file_id == message["file_id"].get_value())
+        return SimpleNamespace(position=5, body=message, message=header, descriptor=descriptor)
 
     server.connection.send = send
 
@@ -2944,7 +3094,7 @@ def test_smb_traversal_bounds_reject_before_open_and_preserve_exact_limits(smb_d
         try:
             read = root.read("parent", lambda: None)
             try:
-                assert [entry.name for entry in read] == [None, "file", None]
+                assert [entry.name for entry in read] == [None, None]
             finally:
                 read.close()
         finally:
@@ -3421,7 +3571,7 @@ def test_smb_compound_small_directory_uses_one_request_group(smb_directory_serve
     reader = SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None)
     try:
         assert reader.complete
-        assert [entry.name for entry in reader] == ([] if empty else ["Exact", "file"])
+        assert [entry.name for entry in reader] == ([] if empty else ["Exact"])
         assert len(server.compounds) == 1
         messages = server.compounds[0]
         assert [message.COMMAND for message in messages] == [
@@ -3526,7 +3676,7 @@ def test_smb_compound_rejects_empty_successful_response(smb_directory_server, po
     server.connection.sequence_window["high"] = 128
     server.identifiers["base\\parent"] = 42
     server.empty_compound_response = position
-    with pytest.raises(DirectoryTraversalError, match="invalid response data"):
+    with pytest.raises(DirectoryTraversalError, match="header is truncated"):
         SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None)
     assert server.received == list(range(5))
 
@@ -3582,7 +3732,7 @@ def test_smb_compound_large_directory_or_low_credits_use_loop(smb_directory_serv
         server.identifiers["base\\parent"] = 42
         read = root.read_observed("parent", (42).to_bytes(8, "little"), lambda: None)
         try:
-            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            assert [entry.name for entry in read] == ["Exact", "redirect"]
             assert read.has_directory_child("Exact")
             assert len(server.compounds) == (1 if credits > 1 else 0)
             assert not server.tree.session.open_table
@@ -3615,7 +3765,7 @@ def test_smb_observed_read_opens_only_target_and_uses_safe_child_lookup(smb_dire
         read = root.read_observed("parent", (42).to_bytes(8, "little"), lambda: None)
         try:
             assert [handle.path for handle in server.handles[before:]] == ["base\\parent"]
-            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            assert [entry.name for entry in read] == ["Exact", "redirect"]
             assert read.has_directory_child("Exact")
             assert len(server.handles) - before == 2
         finally:
@@ -3725,7 +3875,7 @@ def test_smb_root_holds_ancestors_and_checks_exact_children(smb_directory_server
     read = root.read("parent", lambda: None)
     try:
         assert all(handle.connected for handle in smb_directory_server.handles)
-        assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+        assert [entry.name for entry in read] == ["Exact", "redirect"]
         assert read.has_directory_child("Exact")
         assert not read.has_directory_child("exact")
         assert not read.has_directory_child("file")
@@ -3799,7 +3949,7 @@ def test_smb_root_accepts_unavailable_ids_and_inconsistent_volume_metadata(smb_d
     try:
         read = root.read("parent", lambda: None)
         try:
-            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            assert [entry.name for entry in read] == ["Exact", "redirect"]
             smb_directory_server.volumes["base\\parent"] += 1
             read.verify()
         finally:
@@ -4051,7 +4201,7 @@ def test_smb_optional_volume_query_does_not_prevent_safe_traversal(smb_directory
     try:
         read = root.read("parent", lambda: None)
         try:
-            assert [entry.name for entry in read] == ["Exact", "file", "redirect"]
+            assert [entry.name for entry in read] == ["Exact", "redirect"]
             read.verify()
             assert smb_directory_server.volume_queries == 1
         finally:
@@ -4556,7 +4706,7 @@ def test_smb_full_worker_reconciles_through_capture_and_retains_later_events(sql
     assert sqlite_cache.index.search("stable").total_matches == 1
     assert sqlite_cache.index.search("").coverage == "complete"
     assert len(sqlite_cache.coordinator.pending) == 1
-    assert sqlite_cache.coordinator.verification_required
+    assert not sqlite_cache.coordinator.verification_required
     assert not sqlite_cache.coordinator._producers
     assert not sqlite_cache._scan_running.is_set()
     sqlite_cache._request_stop()
@@ -4682,7 +4832,7 @@ def test_smb_many_file_traversal_checks_control_before_directory_filtering(smb_d
         read = root.read("", check)
         try:
             entries = list(read)
-            assert len(entries) == 514
+            assert len(entries) == 1
             assert entries[-1].name == "last-directory"
         finally:
             read.close()
@@ -5189,6 +5339,45 @@ def test_degraded_verification_uses_shorter_healthy_interval(sqlite_cache, watch
     sqlite_cache._retry_jitter = 0
     assert not sqlite_cache._verification_due(0, now=59)
     assert sqlite_cache._verification_due(0, now=60)
+
+
+@pytest.mark.parametrize("observation", ["watcher", "listing"])
+def test_reconciled_observation_keeps_healthy_verification_interval(sqlite_cache, monkeypatch, observation):
+    from smbprotocol.change_notify import FileAction
+
+    from app.services.directory_cache import _DirectoryMutation
+
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    index = sqlite_cache.index
+    index.write_paths(["retained"])
+    assert index.finish_generation(1)
+    sqlite_cache.coordinator.verification_required = False
+    sqlite_cache._watcher_ready.set()
+    sqlite_cache._retry_jitter = 0
+    if observation == "watcher":
+        sqlite_cache.coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "photo.jpg"))
+    else:
+        sqlite_cache.observe_listing("", ["new"])
+    sqlite_cache.coordinator.apply_pending()
+    sqlite_cache._reconcile_disk_queue()
+    assert index.reconciliation_generation() is None
+    assert not sqlite_cache.coordinator.pending
+    assert not sqlite_cache._verification_due(0, now=sqlite_cache.policy.degraded_verification_seconds)
+    assert sqlite_cache._verification_due(0, now=sqlite_cache.policy.healthy_verification_seconds)
+    assert not sqlite_cache.coordinator.verification_required
+
+
+def test_observation_loss_keeps_degraded_verification_interval(sqlite_cache):
+    from app.services.directory_cache import InvalidationReason
+
+    sqlite_cache.coordinator.verification_required = False
+    sqlite_cache._watcher_ready.set()
+    sqlite_cache._retry_jitter = 0
+    sqlite_cache.coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
+    assert sqlite_cache.coordinator.verification_required
+    deadline = sqlite_cache.policy.degraded_verification_seconds
+    assert not sqlite_cache._verification_due(0, now=deadline - 1)
+    assert sqlite_cache._verification_due(0, now=deadline)
 
 
 def test_failed_verification_backoff_is_due_before_the_full_pass_interval(sqlite_cache):
@@ -6611,7 +6800,7 @@ async def test_update_loop_discovers_accepted_subtrees_without_full_verification
     clock = sqlite_cache._last_scan_time
     sqlite_cache.coordinator.verification_required = False
     assert sqlite_cache.coordinator.enqueue(_DirectoryMutation(FileAction.FILE_ACTION_ADDED, "tree"))
-    assert sqlite_cache.coordinator.verification_required
+    assert not sqlite_cache.coordinator.verification_required
     reads = []
     ticks = 0
 
@@ -6647,7 +6836,7 @@ async def test_update_loop_discovers_accepted_subtrees_without_full_verification
     assert {row.path for row in response.results} == {"retained", "tree", "tree/deep", "tree/deep/child"}
     assert response.last_verified_at_ms == verified
     assert sqlite_cache._last_scan_time == clock
-    assert sqlite_cache.coordinator.verification_required
+    assert not sqlite_cache.coordinator.verification_required
     assert index.accepted_generation() == 1
     assert index.reconciliation_generation() is None
     assert not sqlite_cache.coordinator._producers

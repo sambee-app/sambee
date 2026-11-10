@@ -70,6 +70,8 @@ jobs:
           New-Item -ItemType Directory -Force companion/recovery-report | Out-Null
           @{ source_sha = '${{ github.sha }}'; run_id = '${{ github.run_id }}'; target = 'windows-x64' } |
             ConvertTo-Json | Set-Content companion/recovery-report/source.json
+          python -m unittest discover -s companion/scripts -p 'test_*.py' -v
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery smoke unit tests failed.' }
           cd companion
           npx tsc --noEmit
           if ($LASTEXITCODE -ne 0) { throw 'Companion TypeScript check failed.' }

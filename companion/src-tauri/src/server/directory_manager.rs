@@ -808,7 +808,6 @@ impl Observations {
             ));
         }
         self.sequence += 1;
-        self.verification_required = true;
         if self.pending.len() >= maximum_pending || bytes > maximum_bytes.saturating_sub(self.bytes) {
             self.invalidate()?;
             return Ok(false);
@@ -1016,6 +1015,8 @@ struct LocalSource {
     watcher_failed: AtomicBool,
     monitoring_limited_logged: AtomicBool,
     watcher_reconciling: AtomicBool,
+    #[cfg(feature = "recovery-verification")]
+    verification_scan_requested: AtomicBool,
     busy: AtomicBool,
     flush_busy: AtomicBool,
     reclamation_pending: AtomicBool,
@@ -1147,6 +1148,8 @@ impl LocalSource {
             watcher_failed: AtomicBool::new(false),
             monitoring_limited_logged: AtomicBool::new(false),
             watcher_reconciling: AtomicBool::new(true),
+            #[cfg(feature = "recovery-verification")]
+            verification_scan_requested: AtomicBool::new(false),
             observations: Mutex::new(Observations::default()),
             listing_feedback: Mutex::default(),
             listing_discards: Arc::default(),
@@ -3698,7 +3701,7 @@ impl LocalDirectoryManager {
     }
 
     #[cfg(feature = "recovery-verification")]
-    pub(super) fn verification_watcher_loss(&self, drive: &str, restore: bool) -> Result<(), IndexError> {
+    pub(super) fn verification_watcher_loss(self: &Arc<Self>, drive: &str, restore: bool) -> Result<(), IndexError> {
         let source = lock(&self.sources)?
             .get(drive)
             .cloned()
@@ -3706,9 +3709,11 @@ impl LocalDirectoryManager {
         if restore {
             lock(&source.status)?.watcher_retry_at = Instant::now();
             source.recover_watcher()?;
-            let mut status = lock(&source.status)?;
-            status.verified = Instant::now() - FAILURE_RETRY_MAX;
-            status.retry_at = Instant::now();
+            source.flush(&self.budget)?;
+            lock(&source.status)?.retry_at = Instant::now();
+            *lock(&source.next_full_pass)? = Some(Instant::now());
+            source.verification_scan_requested.store(true, Ordering::Release);
+            self.start_scan(&source)?;
         } else {
             lock(&source.watcher)?.take();
             source.lose_watcher()?;
@@ -3890,23 +3895,7 @@ impl LocalDirectoryManager {
     }
 
     pub fn new(namespace: PathBuf) -> Result<Arc<Self>, IndexError> {
-        let manager = Arc::new(Self {
-            sources: Mutex::new(HashMap::new()),
-            listing_discards: ListingDiscards::default(),
-            budget: Arc::new(DiskBudget {
-                namespace,
-                policy_gate: Mutex::new(()),
-                space_probe: available_disk_bytes,
-                state: Mutex::new(DiskState {
-                    policy: DirectoryPolicy::defaults()?,
-                    reserved: 0,
-                    next_cleanup_at: Instant::now(),
-                }),
-            }),
-            scans: Arc::new(Semaphore::new(limit("scan_workers")?)),
-            queries: Arc::new(Semaphore::new(limit("query_workers")?)),
-            updates: Arc::new(Semaphore::new(limit("query_workers")?)),
-        });
+        let manager = Self::new_without_maintenance(namespace)?;
         let weak = Arc::downgrade(&manager);
         tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(limit("event_coalescing_ms").unwrap_or(300) as u64));
@@ -3929,6 +3918,26 @@ impl LocalDirectoryManager {
             }
         });
         Ok(manager)
+    }
+
+    pub(super) fn new_without_maintenance(namespace: PathBuf) -> Result<Arc<Self>, IndexError> {
+        Ok(Arc::new(Self {
+            sources: Mutex::new(HashMap::new()),
+            listing_discards: ListingDiscards::default(),
+            budget: Arc::new(DiskBudget {
+                namespace,
+                policy_gate: Mutex::new(()),
+                space_probe: available_disk_bytes,
+                state: Mutex::new(DiskState {
+                    policy: DirectoryPolicy::defaults()?,
+                    reserved: 0,
+                    next_cleanup_at: Instant::now(),
+                }),
+            }),
+            scans: Arc::new(Semaphore::new(limit("scan_workers")?)),
+            queries: Arc::new(Semaphore::new(limit("query_workers")?)),
+            updates: Arc::new(Semaphore::new(limit("query_workers")?)),
+        }))
     }
 
     fn start_scan(self: &Arc<Self>, source: &Arc<LocalSource>) -> Result<(), IndexError> {
@@ -3982,6 +3991,8 @@ impl LocalDirectoryManager {
         {
             *lock(&source.next_full_pass)? = Some(Instant::now() + Duration::from_secs(limit("minimum_full_pass_spacing_seconds")? as u64));
         }
+        #[cfg(feature = "recovery-verification")]
+        source.verification_scan_requested.store(false, Ordering::Release);
         let ownership = ScanOwnership {
             source: Arc::clone(source),
             _permit: permit,
@@ -4131,6 +4142,8 @@ impl LocalDirectoryManager {
                 .map(DirectoryIndex::has_resumable_scan)
                 .transpose()?
                 .unwrap_or(false);
+            #[cfg(feature = "recovery-verification")]
+            let due = due || source.verification_scan_requested.load(Ordering::Acquire);
             if due || resumable {
                 self.start_scan(&source)?;
             }
@@ -4424,7 +4437,7 @@ mod tests {
         {
             let observations = lock(&source.observations).unwrap();
             assert_eq!(observations.sequence, before.1 + 1);
-            assert!(observations.verification_required);
+            assert!(!observations.verification_required);
             assert!(matches!(&observations.pending[0].1, DirectoryMutation::ReadParent { path } if path == "Parent"));
         }
         assert!(!lock(&source.writer)
@@ -4677,7 +4690,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("root");
         std::fs::create_dir(&root).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("storage")).unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("storage")).unwrap();
         let source = LocalSource::new(root.clone(), manager.storage_directory());
         lock(&source.status).unwrap().accessed = Instant::now() - Duration::from_secs(limit("idle_release_seconds").unwrap() as u64 + 1);
         lock(&manager.sources).unwrap().insert("drive".into(), source);
@@ -5096,6 +5109,7 @@ mod tests {
     #[test]
     fn full_native_tree_does_not_open_regular_files() {
         const FILES_PER_PARENT: usize = 32;
+        const FILE_POPULATIONS: usize = 2;
         const PARENTS: [&str; 5] = ["", "shallow", "deep", "deep/deeper", "deep/deeper/leaf"];
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("root");
@@ -5111,19 +5125,27 @@ mod tests {
         let before = source.io.opens();
         source.scan(&manager.budget).unwrap();
         let directory_only_opens = source.io.opens() - before;
-        for parent in PARENTS {
-            for file in 0..FILES_PER_PARENT {
-                std::fs::write(path.join(parent).join(format!("file-{file}")), b"file").unwrap();
+        assert!(directory_only_opens > 0);
+        for population in 0..FILE_POPULATIONS {
+            for parent in PARENTS {
+                for file in 0..FILES_PER_PARENT {
+                    std::fs::write(path.join(parent).join(format!("file-{population}-{file}")), b"file").unwrap();
+                }
             }
+            let before = source.io.opens();
+            source.scan(&manager.budget).unwrap();
+            assert!(lock(&source.watcher).unwrap().is_none());
+            let populated_opens = source.io.opens() - before;
+            // Cached Windows capability probes can reduce later directory-open counts.
+            assert!(
+                populated_opens <= directory_only_opens,
+                "Adding regular files increased native opens: {populated_opens} > {directory_only_opens} (population {population})"
+            );
+            let writer = lock(&source.writer).unwrap();
+            let status = writer.as_ref().unwrap().status().unwrap();
+            assert_eq!(status.directory_count, i64::try_from(PARENTS.len() - 1).unwrap());
+            assert_eq!(status.coverage, "complete");
         }
-        let before = source.io.opens();
-        source.scan(&manager.budget).unwrap();
-        assert!(lock(&source.watcher).unwrap().is_none());
-        assert_eq!(source.io.opens() - before, directory_only_opens);
-        let writer = lock(&source.writer).unwrap();
-        let status = writer.as_ref().unwrap().status().unwrap();
-        assert_eq!(status.directory_count, i64::try_from(PARENTS.len() - 1).unwrap());
-        assert_eq!(status.coverage, "complete");
     }
 
     #[test]
@@ -5518,7 +5540,8 @@ mod tests {
             let read = source.begin_read().unwrap();
             let scan = ScanGeneration { id: 1, read: read.token };
             let mut observations = lock(&source.observations).unwrap();
-            observations.scan_group_started = Some(Instant::now() - interval);
+            let expired_start = Instant::now() - interval;
+            observations.scan_group_started = Some(expired_start);
             source
                 .stage_scan_parent_locked(&mut observations, scan, "", content, 0, &manager.budget)
                 .unwrap();
@@ -5536,7 +5559,8 @@ mod tests {
                 .complete_scan_parent_locked(&mut observations, scan, "", &manager.budget)
                 .unwrap();
             assert_eq!(observations.scan_commits, 0);
-            assert!(observations.scan_group_started.unwrap().elapsed() < interval);
+            assert!(observations.scan_group_started.unwrap() > expired_start);
+            assert_eq!(observations.scan_group_elapsed(), Some(Duration::ZERO));
             observations.scan_group_started = Some(Instant::now() - interval);
             observations.scan_group_test_elapsed = Some(interval);
             source.flush_scan_group_if_due_locked(&mut observations, &manager.budget).unwrap();
@@ -6072,7 +6096,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("root");
         std::fs::create_dir_all(root.join("retained")).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(root, manager.storage_directory());
         source.bind_root(&manager.budget).unwrap();
         {
@@ -6123,67 +6147,93 @@ mod tests {
     #[cfg(feature = "recovery-verification")]
     #[tokio::test]
     async fn verification_controls_reconcile_gap_and_release_resources() {
-        const DEADLINE: Duration = Duration::from_secs(10);
-        const POLL_INTERVAL: Duration = Duration::from_millis(20);
+        async fn wait_for_workers(manager: &LocalDirectoryManager, phase: &str) {
+            let deadline = Duration::from_secs(limit("query_timeout_seconds").unwrap() as u64);
+            tokio::time::timeout(deadline, async {
+                let _updates = manager
+                    .updates
+                    .acquire_many(u32::try_from(limit("query_workers").unwrap()).unwrap())
+                    .await
+                    .unwrap();
+                let _scans = manager
+                    .scans
+                    .acquire_many(u32::try_from(limit("scan_workers").unwrap()).unwrap())
+                    .await
+                    .unwrap();
+            })
+            .await
+            .unwrap_or_else(|error| panic!("Verification {phase} workers did not finish: {error}"));
+        }
+
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("source");
         std::fs::create_dir_all(root.join("retained-reports")).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
-        let search = || async {
-            loop {
-                match manager.search("verification".into(), root.clone(), "reports".into(), false).await {
-                    Err(IndexError::Interrupted | IndexError::QueryBusy) => tokio::time::sleep(POLL_INTERVAL).await,
-                    result => break result,
-                }
-            }
-        };
-        tokio::time::timeout(DEADLINE, async {
-            loop {
-                let response = search().await.unwrap();
-                if response.monitoring_state.as_deref() == Some("healthy") && response.results.contains(&"retained-reports".into()) {
-                    break;
-                }
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            manager.verification_watcher_loss("verification", false).unwrap();
-            let source = lock(&manager.sources).unwrap().get("verification").unwrap().clone();
-            source.flush(&manager.budget).unwrap();
-            let retained = search().await.unwrap();
-            assert_eq!(retained.monitoring_state.as_deref(), Some("unavailable"));
-            assert_eq!(retained.coverage.as_deref(), Some("uncertain"));
-            assert!(retained.results.contains(&"retained-reports".into()));
-            std::fs::create_dir(root.join("gap-reports")).unwrap();
-            manager.verification_watcher_loss("verification", true).unwrap();
-            {
-                *lock(&source.next_full_pass).unwrap() = Some(Instant::now());
-            }
-            loop {
-                let response = search().await.unwrap();
-                if response.monitoring_state.as_deref() == Some("healthy") && response.coverage.as_deref() == Some("complete") {
-                    assert!(response.results.contains(&"gap-reports".into()));
-                    assert!(response.results.contains(&"retained-reports".into()));
-                    break;
-                }
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            std::fs::create_dir(root.join("native-reports")).unwrap();
-            loop {
-                let response = search().await.unwrap();
-                if response.monitoring_state.as_deref() == Some("healthy") && response.results.contains(&"native-reports".into()) {
-                    assert_eq!(response.coverage.as_deref(), Some("complete"));
-                    break;
-                }
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            while !manager.verification_stop("verification").unwrap() {
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            assert!(lock(&manager.sources).unwrap().is_empty());
-            assert_eq!(manager.scans.available_permits(), limit("scan_workers").unwrap());
-            assert_eq!(manager.updates.available_permits(), limit("query_workers").unwrap());
-        })
-        .await
-        .expect("bounded verification lifecycle");
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
+        let search = || manager.search("verification".into(), root.clone(), "reports".into(), false);
+        search().await.unwrap();
+        wait_for_workers(&manager, "initial scan").await;
+        let initial = search().await.unwrap();
+        assert_eq!(initial.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(initial.results, ["retained-reports"]);
+
+        manager.verification_watcher_loss("verification", false).unwrap();
+        let source = lock(&manager.sources).unwrap().get("verification").unwrap().clone();
+        source.flush(&manager.budget).unwrap();
+        let retained = search().await.unwrap();
+        assert_eq!(retained.monitoring_state.as_deref(), Some("unavailable"));
+        assert_eq!(retained.coverage.as_deref(), Some("uncertain"));
+        assert_eq!(retained.results, ["retained-reports"]);
+
+        std::fs::create_dir(root.join("gap-reports")).unwrap();
+        let scan_permits = manager
+            .scans
+            .acquire_many(u32::try_from(limit("scan_workers").unwrap()).unwrap())
+            .await
+            .unwrap();
+        manager.verification_watcher_loss("verification", true).unwrap();
+        assert!(source.verification_scan_requested.load(Ordering::Acquire));
+        assert!(!source.busy.load(Ordering::Acquire));
+        drop(scan_permits);
+        manager.tick().unwrap();
+        wait_for_workers(&manager, "gap recovery").await;
+        assert!(!source.verification_scan_requested.load(Ordering::Acquire));
+        let recovered = search().await.unwrap();
+        assert_eq!(recovered.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(recovered.coverage.as_deref(), Some("complete"));
+        assert!(recovered.results.contains(&"gap-reports".into()));
+        assert!(recovered.results.contains(&"retained-reports".into()));
+
+        manager.verification_watcher_loss("verification", false).unwrap();
+        std::fs::create_dir(root.join("repeated-gap-reports")).unwrap();
+        manager.verification_watcher_loss("verification", true).unwrap();
+        wait_for_workers(&manager, "direct repeated gap recovery").await;
+        let recovered = search().await.unwrap();
+        assert_eq!(recovered.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(recovered.coverage.as_deref(), Some("complete"));
+        assert!(recovered.results.contains(&"repeated-gap-reports".into()));
+        assert!(recovered.results.contains(&"gap-reports".into()));
+        assert!(recovered.results.contains(&"retained-reports".into()));
+
+        let native_path = root.join("native-reports");
+        std::fs::create_dir(&native_path).unwrap();
+        // Test the Windows event shape without depending on native callback timing.
+        source
+            .observe(Ok(Event::new(EventKind::Create(CreateKind::Any)).add_path(native_path)))
+            .unwrap();
+        manager.tick().unwrap();
+        wait_for_workers(&manager, "parent reconciliation").await;
+        let reconciled = search().await.unwrap();
+        assert_eq!(reconciled.monitoring_state.as_deref(), Some("healthy"));
+        assert_eq!(reconciled.coverage.as_deref(), Some("complete"));
+        assert!(reconciled.results.contains(&"native-reports".into()));
+        assert_eq!(reconciled.last_verified_at_ms, recovered.last_verified_at_ms);
+
+        assert!(manager.verification_stop("verification").unwrap());
+        assert!(lock(&manager.sources).unwrap().is_empty());
+        assert!(lock(&source.root).unwrap().is_none());
+        assert!(lock(&source.watcher).unwrap().is_none());
+        assert_eq!(manager.scans.available_permits(), limit("scan_workers").unwrap());
+        assert_eq!(manager.updates.available_permits(), limit("query_workers").unwrap());
     }
 
     #[tokio::test]
@@ -6621,7 +6671,7 @@ mod tests {
                 assert_eq!(reader.search("target", 3, false, &cancelled, false).unwrap().total_matches, 0);
             }
             assert_eq!(after.last_verified_at_ms, before.last_verified_at_ms);
-            assert!(lock(&source.observations).unwrap().verification_required);
+            assert!(!lock(&source.observations).unwrap().verification_required);
             assert!(lock(&source.observations).unwrap().pending.is_empty());
             assert_eq!(lock(&manager.budget.state).unwrap().reserved, 0);
         }
@@ -6664,7 +6714,7 @@ mod tests {
             assert!(observations.producers.is_empty());
             if matches!(scenario, "renamed-parent" | "replaced-by-file") {
                 assert!(matches!(error, IndexError::Interrupted));
-                assert!(observations.verification_required);
+                assert!(!observations.verification_required);
                 assert_eq!(observations.pending.len(), 1);
                 assert!(matches!(&observations.pending.front().unwrap().1, DirectoryMutation::ReadParent { path } if path.is_empty()));
                 drop(observations);
@@ -6783,7 +6833,7 @@ mod tests {
             let observations = lock(&source.observations).unwrap();
             assert!(observations.producers.is_empty());
             assert_eq!(observations.pending.len(), 2);
-            assert!(observations.verification_required);
+            assert!(!observations.verification_required);
         }
     }
 
@@ -7750,7 +7800,7 @@ mod tests {
             source.flush(&budget).unwrap();
             let cancelled = Arc::new(AtomicBool::new(false));
             assert_eq!(reader.search("renamed-file", 3, false, &cancelled, false).unwrap().total_matches, 0);
-            assert!(lock(&source.observations).unwrap().verification_required);
+            assert!(!lock(&source.observations).unwrap().verification_required);
             source.scan(&budget).unwrap();
             assert_eq!(
                 reader
@@ -7817,6 +7867,10 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
         let initial = reader.search("reports", 5, false, &cancelled, false).unwrap();
         assert_eq!(initial.coverage, "complete");
+        source.watcher_failed.store(false, Ordering::Release);
+        let policy = DirectoryPolicy::defaults().unwrap();
+        let healthy_interval = source.effective_verification_seconds(&policy).unwrap();
+        assert_eq!(healthy_interval, policy.healthy_verification_seconds);
         std::fs::create_dir_all(root.join("reports")).unwrap();
         source
             .observe(Ok(Event::new(EventKind::Create(CreateKind::Folder)).add_path(root.join("reports"))))
@@ -7828,6 +7882,13 @@ mod tests {
         assert_eq!(result.total_matches, 1);
         assert_eq!(result.coverage, "complete");
         assert_eq!(result.last_verified_at_ms, initial.last_verified_at_ms);
+        assert!(!lock(&source.observations).unwrap().verification_required);
+        assert_eq!(source.effective_verification_seconds(&policy).unwrap(), healthy_interval);
+        source.invalidate_for(InvalidationReason::ObservationLoss).unwrap();
+        assert_eq!(
+            source.effective_verification_seconds(&policy).unwrap(),
+            policy.degraded_verification_seconds
+        );
     }
 
     #[tokio::test]
@@ -8684,7 +8745,7 @@ mod tests {
                 .total_matches,
             2
         );
-        assert!(lock(&source.observations).unwrap().verification_required);
+        assert!(!lock(&source.observations).unwrap().verification_required);
     }
 
     #[test]
@@ -8797,13 +8858,20 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         std::fs::create_dir(root.join("alpha")).unwrap();
         std::fs::create_dir(root.join(".hidden")).unwrap();
-        let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
-        let started = Instant::now();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
+        let scan_permits = manager
+            .scans
+            .acquire_many(u32::try_from(limit("scan_workers").unwrap()).unwrap())
+            .await
+            .unwrap();
         let cold = manager.search("fixture".into(), root.clone(), "".into(), false).await.unwrap();
         assert_eq!(cold.total_matches, 0);
         assert_eq!(cold.search_contract_version, Some(SEARCH_CONTRACT_VERSION));
-        assert!(started.elapsed() < Duration::from_secs(1));
         let source = Arc::clone(manager.sources.lock().unwrap().get("fixture").unwrap());
+        assert!(!source.busy.load(Ordering::Acquire));
+        assert!(lock(&source.writer).unwrap().is_none());
+        drop(scan_permits);
+        manager.start_scan(&source).unwrap();
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let finished = source.finished.notified();

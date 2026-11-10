@@ -75,7 +75,7 @@ Each index retains one generation: `building` initially, then `accepted`. Full v
 
 Non-root item failures do not stop a pass. Invalid names are skipped; failed parents retain descendants, including published batches. Acceptance records issues as partial coverage and uses the regular verification interval, not a special item retry. Event loss blocks acceptance. Root, transport, authentication, capacity, and storage failures use source-level recovery.
 
-Read tokens and barriers reject stale results. Observed changes request verification without changing coverage; lost events or observation overflow mark coverage uncertain without deleting rows. Acceptance requires a valid root and no conflicting observations or reads.
+Read tokens and barriers reject stale results. Normal observed changes and listing feedback queue parent reconciliation without setting `verification_required` or changing coverage. When reconciliation drains without observation loss, healthy monitoring keeps the healthy interval. Lost events or observation overflow request full verification and mark coverage uncertain without deleting rows. Stalled reads request verification without changing coverage. Startup, source rebinding, and reopening after idle release still require a full pass. Acceptance requires a valid root and no conflicting observations or reads.
 
 Rows, FTS entries, counts, issues, queued work, and revisions commit atomically. Queries read results and metadata in one selected-generation transaction.
 
@@ -125,7 +125,7 @@ Checks require a selected accepted generation without an active scan, an indexed
 
 One missing child can request one `ReadParent`, never listing-derived `Add`, `Remove`, or `Rename`. Unlike `Add`, which publishes rows before filesystem checks, parent reconciliation verifies children through the safe reader. Final admission rechecks generation/revision, parent state, source availability, and observation/suppression capacity. Lock order is observations, writer, then feedback state; SQLite statements finish before the last lock. Rejection changes no observation state.
 
-Admission sets `verification_required`, adds a parent barrier, and advances revision once on flush; a content-changing reconciliation can advance it again. The degraded interval applies until a complete pass is accepted, without changing policy. The parent stays suppressed until that pass to avoid repeated reads for unindexable children. Stop or rebinding clears feedback and suppression.
+Admission adds a parent barrier and advances revision once on flush; a content-changing reconciliation can advance it again. It does not set `verification_required` or select the degraded interval. The parent stays suppressed until the next complete pass to avoid repeated reads for unindexable children. Stop or rebinding clears feedback and suppression.
 
 Busy, full, suppressed, stale, interrupted, or failed hints are discarded without source failure handling. Required native and application observations keep their existing paths. A drive without an active source is not a discard. `directory_listing_feedback_discarded` logs INFO counts once per non-zero reason per cycle; worker rejections also log DEBUG `directory_listing_feedback_skipped` events.
 
@@ -180,6 +180,8 @@ The pool creates `ScanCreditConnection` before setup; `smbclient` applies config
 Connections without atomic admission use the loop. Failed compound sends retire and abort the connection generation rather than reuse uncertain state.
 
 The loop adapts each buffer to current credits and leaves the browse reserve where possible, but permits a one-credit query. Buffer sizing does not give loop reads atomic pipeline admission.
+
+Both query paths parse `FILE_ID_FULL_DIRECTORY_INFORMATION` with bounded `memoryview` and `struct.unpack_from()` reads. They validate record offsets and lengths, skip file records without decoding names, and retain directory FileIds and reparse attributes. Directory names use the existing strict UTF-16 and component checks. A files-only wire batch is progress, not end-of-directory. Malformed bounds fail the read before publication; compound failures still drain all responses.
 
 Compound handles allow read/write/delete sharing. Client-side symlink retries are disabled, and errors drain remaining responses. Deadlines start at submission; timeout, including during cleanup, defers unfinished parents and retires the generation through the pool abort path. A parent barrier defers only that parent; watcher loss defers all observed reads before safe traversal resumes.
 

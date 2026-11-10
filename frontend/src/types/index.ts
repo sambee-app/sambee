@@ -247,13 +247,27 @@ export interface PdfAdvancedSettings {
   screen_max_decoded_pixels: IntegerSystemSetting;
 }
 
+export type ImageConversionPreference = "speed" | "size";
+
+export interface ImageConversionPreferenceSetting {
+  key: "image_viewer.conversion_preference";
+  label: string;
+  description: string;
+  value: ImageConversionPreference;
+  default_value: ImageConversionPreference;
+  source: SystemSettingSource;
+}
+
 export interface AdvancedSystemSettings {
+  image_conversion_preference: ImageConversionPreferenceSetting;
   preprocessors: Record<string, PreprocessorAdvancedSettings>;
   pdf?: PdfAdvancedSettings;
   temporary_archive_download_size_bytes?: IntegerSystemSetting;
 }
 
-export type AdvancedSystemSettingsUpdate = { field: string; value: number };
+export type AdvancedSystemSettingsUpdate =
+  | { field: string; value: number }
+  | { field: "image_viewer.conversion_preference"; value: ImageConversionPreference };
 
 export type FileSearchExclusionCategory = "images" | "temporary_backup";
 

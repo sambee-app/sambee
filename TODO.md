@@ -1,5 +1,21 @@
 # TODO
 
+## Basic System Health Monitoring
+
+- Monitor the health of the backend's host
+   - In the main file list UI, only show an indicator icon with 3 states: OK, warning, error
+   - Clicking the indicator icon opens a dialog with details
+   - Add a new settings category Administration > Health Monitoring with the settings:
+      - Enable health monitoring (default: yes)
+      - Show health info to: admins, editors, both
+   - Metrics to monitor (depending on feasibility):
+      - CPU/system temperature (detect overheating)
+      - CPU usage in %
+      - Linux system load
+      - Memory usage in %
+      - Free disk space in %
+   - Don't store metrics on disk; keep data in RAM only.
+
 ## Viewers
 
 - Delete: add a delete function to all viewers.
@@ -8,6 +24,7 @@
    - If the user confirms, delete the file and then:
       - Close the viewer (Markdown, PDF)
       - Advance to the next image (image). If there is no next image, close the viewer.
+- Home/End: support these keys to jump to the first/last images, respectively.
 
 ## Auditing
 

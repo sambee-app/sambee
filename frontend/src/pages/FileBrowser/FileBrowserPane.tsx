@@ -44,6 +44,8 @@ import type { BrowserItem } from "./contentProviders";
 import type { FileOperationAction, FileOperationPolicyContext } from "./fileOperationActions";
 import type { PaneId, PaneMode, UseFileBrowserPaneReturn } from "./types";
 
+const NAVIGATION_PROGRESS_DELAY_MS = 200;
+
 // ============================================================================
 // Props
 // ============================================================================
@@ -236,6 +238,18 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
     closeBrowserViewerPicker,
     confirmBrowserViewerPicker,
   } = pane;
+  const [navigationProgressVisible, setNavigationProgressVisible] = useState(false);
+
+  useEffect(() => {
+    if (!navigationPending) {
+      setNavigationProgressVisible(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => setNavigationProgressVisible(true), NAVIGATION_PROGRESS_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [navigationPending]);
+
   useEffect(() => {
     const location = `${connectionId}:${currentPath}`;
     if (dragLocationRef.current === location) return;
@@ -682,7 +696,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
             outlineOffset: -2,
           }}
         >
-          {navigationPending && (
+          {navigationPending && navigationProgressVisible && (
             <LinearProgress
               aria-label={t("app.loading")}
               sx={{ position: "absolute", top: 0, insetInline: 0, zIndex: 1, pointerEvents: "none" }}
