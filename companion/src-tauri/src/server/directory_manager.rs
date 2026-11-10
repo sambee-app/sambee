@@ -5099,6 +5099,7 @@ mod tests {
     #[test]
     fn full_native_tree_does_not_open_regular_files() {
         const FILES_PER_PARENT: usize = 32;
+        const FILE_POPULATIONS: usize = 2;
         const PARENTS: [&str; 5] = ["", "shallow", "deep", "deep/deeper", "deep/deeper/leaf"];
         let temporary = tempfile::tempdir().unwrap();
         let path = temporary.path().join("root");
@@ -5114,19 +5115,27 @@ mod tests {
         let before = source.io.opens();
         source.scan(&manager.budget).unwrap();
         let directory_only_opens = source.io.opens() - before;
-        for parent in PARENTS {
-            for file in 0..FILES_PER_PARENT {
-                std::fs::write(path.join(parent).join(format!("file-{file}")), b"file").unwrap();
+        assert!(directory_only_opens > 0);
+        for population in 0..FILE_POPULATIONS {
+            for parent in PARENTS {
+                for file in 0..FILES_PER_PARENT {
+                    std::fs::write(path.join(parent).join(format!("file-{population}-{file}")), b"file").unwrap();
+                }
             }
+            let before = source.io.opens();
+            source.scan(&manager.budget).unwrap();
+            assert!(lock(&source.watcher).unwrap().is_none());
+            let populated_opens = source.io.opens() - before;
+            // Cached Windows capability probes can reduce later directory-open counts.
+            assert!(
+                populated_opens <= directory_only_opens,
+                "Adding regular files increased native opens: {populated_opens} > {directory_only_opens} (population {population})"
+            );
+            let writer = lock(&source.writer).unwrap();
+            let status = writer.as_ref().unwrap().status().unwrap();
+            assert_eq!(status.directory_count, i64::try_from(PARENTS.len() - 1).unwrap());
+            assert_eq!(status.coverage, "complete");
         }
-        let before = source.io.opens();
-        source.scan(&manager.budget).unwrap();
-        assert!(lock(&source.watcher).unwrap().is_none());
-        assert_eq!(source.io.opens() - before, directory_only_opens);
-        let writer = lock(&source.writer).unwrap();
-        let status = writer.as_ref().unwrap().status().unwrap();
-        assert_eq!(status.directory_count, i64::try_from(PARENTS.len() - 1).unwrap());
-        assert_eq!(status.coverage, "complete");
     }
 
     #[test]
