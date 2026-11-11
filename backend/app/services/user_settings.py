@@ -6,13 +6,14 @@ import uuid
 from datetime import datetime, timezone
 from json import JSONDecodeError
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from sqlmodel import Session, col, select
 
 from app.core.logging import get_logger
 from app.core.user_setting_definitions import (
     DEFAULT_FILE_BROWSER_VIEW_MODE,
+    DEFAULT_IMAGE_VIEWER_TRANSITION,
     DEFAULT_LANGUAGE_PREFERENCE,
     DEFAULT_PANE_MODE,
     DEFAULT_QUICK_BAR_SHORTCUT_HINT_VISIBILITY,
@@ -31,6 +32,7 @@ from app.models.user_settings import (
     CurrentUserSettingsRead,
     CurrentUserSettingsUpdate,
     CurrentUserSettingsUpdateResult,
+    ImageViewerUserSettingsRead,
     LanguagePreference,
     LocalizationUserSettingsRead,
     QuickBarShortcutHintVisibility,
@@ -47,6 +49,7 @@ VALID_FILE_BROWSER_VIEW_MODES = {"list", "details"}
 VALID_PANE_MODES = {"single", "dual"}
 VALID_QUICK_BAR_SHORTCUT_HINT_VISIBILITIES = {"auto", "always", "never"}
 VALID_TOUCH_FRIENDLY_FILE_SELECTIONS = {"auto", "always", "never"}
+VALID_IMAGE_VIEWER_TRANSITIONS = {"carousel", "none"}
 MIN_TEXT_EDITOR_MAX_FILE_SIZE_BYTES = 65_536
 MAX_TEXT_EDITOR_MAX_FILE_SIZE_BYTES = 104_857_600
 VALID_LANGUAGE_PREFERENCES = {DEFAULT_LANGUAGE_PREFERENCE, "en", "en-XA"}
@@ -206,6 +209,17 @@ def build_current_user_settings_read(*, user_id: uuid.UUID, session: Session) ->
     explicit_theme_id = values.get(UserSettingKey.APPEARANCE_THEME_ID.value)
     site_default = session.get(SystemSetting, "appearance.site_default_theme_id")
     return CurrentUserSettingsRead(
+        image_viewer=ImageViewerUserSettingsRead(
+            transition=cast(
+                Literal["carousel", "none"],
+                _parse_choice(
+                    values.get(UserSettingKey.IMAGE_VIEWER_TRANSITION.value),
+                    key=UserSettingKey.IMAGE_VIEWER_TRANSITION,
+                    valid_values=VALID_IMAGE_VIEWER_TRANSITIONS,
+                    default=DEFAULT_IMAGE_VIEWER_TRANSITION,
+                ),
+            )
+        ),
         appearance=AppearanceUserSettingsRead(
             theme_id=_parse_theme_id(explicit_theme_id or (site_default.value if site_default else None)),
             has_theme_override=explicit_theme_id is not None,

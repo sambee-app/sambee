@@ -3,6 +3,7 @@ export const SETTINGS_CATEGORY_ORDER = [
   "account",
   "file-browser",
   "text-editor",
+  "image-viewer",
   "connections",
   "local-drives",
   "admin-network",
@@ -12,6 +13,8 @@ export const SETTINGS_CATEGORY_ORDER = [
   "admin-file-search",
   "admin-directory-search",
   "admin-system",
+  "admin-image-viewer",
+  "admin-pdf-viewer",
   "admin-about",
 ] as const;
 

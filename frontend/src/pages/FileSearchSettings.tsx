@@ -137,7 +137,7 @@ export function FileSearchSettings() {
 
   return (
     <SettingsPage category="admin-file-search" contextualNotice={loadError ? <Alert severity="error">{loadError}</Alert> : null}>
-      <SettingsGroup title={t("settings.fileSearch.title")}>
+      <SettingsGroup>
         <Stack spacing={2} sx={{ maxWidth: 480 }}>
           <TextField
             label={t("settings.fileSearch.retentionLimit")}

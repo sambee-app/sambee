@@ -1382,10 +1382,10 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
   /** Image files in display order — used for gallery mode. */
   const imageFiles = useMemo(() => {
-    return sortedFiles
-      .filter((f: FileEntry) => f.type === "file" && isImageFile(f.name))
-      .map((f: FileEntry) => (currentPath ? `${currentPath}/${f.name}` : f.name));
-  }, [sortedFiles, currentPath]);
+    return sortedItems
+      .filter((item) => item.entry.type === "file" && isImageFile(item.entry.name))
+      .map((item) => (isVirtualItem(item) ? item.handle.path : currentPath ? `${currentPath}/${item.entry.name}` : item.entry.name));
+  }, [sortedItems, currentPath]);
 
   useEffect(() => {
     setViewInfo((previous) => {
@@ -1393,10 +1393,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         return previous;
       }
 
-      const nextImages = sortedItems
-        .filter(isVirtualItem)
-        .filter((item) => item.entry.type === "file" && isImageFile(item.entry.name))
-        .map((item) => item.handle.path);
+      const nextImages = imageFiles;
       const imagesAreUnchanged =
         previous.images?.length === nextImages.length && previous.images.every((imagePath, index) => imagePath === nextImages[index]);
       if (imagesAreUnchanged) {
@@ -1408,7 +1405,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       currentViewIndexRef.current = currentIndex;
       return { ...previous, images: nextImages, currentIndex };
     });
-  }, [sortedItems]);
+  }, [imageFiles]);
 
   const getVirtualizerItemKey = useCallback(
     (index: number) => {

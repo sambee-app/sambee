@@ -23,7 +23,6 @@ Use `config.example.toml` as the source of truth for supported keys. This page e
 | `[auth]` | `disable_enforcement` | Temporarily bypasses all Sambee authentication enforcement at runtime. |
 | `[security]` | `access_token_expire_minutes` | Changes the short-lived API-token lifetime. OIDC sessions refresh this token in the background; configure the OIDC interactive sign-in interval separately in Authentication settings. |
 | `[admin]` | `username` | Sets the initial administrator username. |
-| `[image_viewer]` | `conv_size_thresh` | Controls when large images are always converted for viewing. |
 | `[frontend_logging]` | `logging_enabled`, `log_level` | Controls browser-console logging behavior. |
 | `[frontend_logging]` | `tracing_enabled`, `tracing_level`, `tracing_retention_hours` | Controls backend trace collection for frontend logging. |
 | `[frontend_logging]` | `tracing_components`, `tracing_username_regex` | Restricts tracing by component or user scope. |
@@ -34,7 +33,7 @@ Use `config.example.toml` as the source of truth for supported keys. This page e
 
 ## Image Conversion Preference
 
-Use **Administrator > System > ImageMagick > Image conversion preference** to choose how backend image previews balance CPU use and transfer size. This setting also applies to libvips conversions. Local-drive images from Companion and original downloads are unchanged.
+Use **Settings > Administration > Image viewer > Image conversion preference** to choose how backend image previews balance CPU use and transfer size. This setting also applies to libvips conversions. Local-drive images from Companion and original downloads are unchanged.
 
 | Option | Behavior |
 | --- | --- |
@@ -46,6 +45,16 @@ Images with an alpha band stay WebP in both modes, except ICO images with alpha,
 The saved value applies to subsequent backend preview requests without a restart. Previously loaded gallery images can remain cached; reload the page to request them again.
 
 This setting is stored as `image_viewer.conversion_preference` in the database, with `speed` or `size` as its value. There is no TOML or environment override. If the stored value is invalid, Sambee logs an error and uses the speed default. The public support report includes the effective value and its source.
+
+### Conversion Threshold
+
+**Image conversion threshold** defaults to **5 MiB (5,242,880 bytes)**. Backend previews process browser-native images only when their known file size is strictly greater than this value. Zero processes every non-empty image. Formats that require conversion are always processed, regardless of this threshold. An unknown size keeps the existing format-based behavior.
+
+This setting is stored only in the database as `image_viewer.conversion_threshold_bytes`. Changes apply to subsequent preview requests, including archive members, without a restart. Cached gallery images are not fetched again automatically. The old `[image_viewer].conv_size_thresh` configuration key is no longer supported and is not migrated.
+
+The threshold is a transfer and conversion trade-off, not a decoded-pixel or memory limit. The 5 MiB default is a starting point, not a measured optimum. Compare 2, 5, and 10 MiB on the target device and network before tuning it. ImageMagick input-size and timeout limits are separate controls on the same page.
+
+PDF compatibility and processing controls are under **Administration > PDF viewer**. **Administration > System** keeps archive creation limits. Personal and administration categories are each sorted by their translated labels.
 
 ## File Search and History Policy
 

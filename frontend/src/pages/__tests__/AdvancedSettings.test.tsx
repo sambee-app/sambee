@@ -10,7 +10,9 @@ import {
   type DirectoryIndexPolicyScope,
   type DirectoryIndexSettings,
 } from "../../types";
-import { AdvancedSettings } from "../AdvancedSettings";
+import { AdvancedSettings as AdvancedSettingsPage } from "../AdvancedSettings";
+
+const AdvancedSettings = () => <AdvancedSettingsPage category="admin-image-viewer" />;
 
 vi.mock("../../services/api", () => ({
   default: {
@@ -33,6 +35,17 @@ vi.mock("../../services/companion", () => ({
 import companionService from "../../services/companion";
 
 const mockAdvancedSettings: AdvancedSystemSettings = {
+  image_conversion_threshold_bytes: {
+    key: "image_viewer.conversion_threshold_bytes",
+    label: "Image conversion threshold",
+    description: "Resize browser-native images larger than this size.",
+    value: 5242880,
+    default_value: 5242880,
+    source: "default",
+    min_value: 0,
+    max_value: 1073741824,
+    step: 1,
+  },
   image_conversion_preference: {
     key: "image_viewer.conversion_preference",
     label: "Image conversion preference",
@@ -132,6 +145,9 @@ describe("AdvancedSettings", () => {
     expect(screen.queryByText("Set the file-size and runtime limits used when ImageMagick conversions run.")).not.toBeInTheDocument();
     expect(await screen.findByLabelText("Maximum file size")).toBeInTheDocument();
     expect(screen.getByLabelText("Conversion timeout")).toBeInTheDocument();
+    expect(screen.getByLabelText("Image conversion threshold")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Image Viewer" })).toHaveLength(1);
+    expect(screen.queryByText("Preprocessors")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Value")).not.toBeInTheDocument();
     expect(screen.queryByText(/exact value:/i)).not.toBeInTheDocument();
     expect(api.getDirectoryIndexSettings).not.toHaveBeenCalled();
@@ -139,6 +155,13 @@ describe("AdvancedSettings", () => {
     expect(screen.queryByText("Companion Directory Indexes")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Conversion timeout")).toHaveAccessibleDescription(/Maximum time allowed/);
     expect(screen.getByLabelText("Maximum file size")).toHaveAccessibleDescription(/Largest input file/);
+  });
+
+  it("keeps image controls out of the system category", async () => {
+    render(<AdvancedSettingsPage />);
+    await waitFor(() => expect(api.getAdvancedSettings).toHaveBeenCalled());
+    expect(screen.queryByLabelText("Image conversion threshold")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Conversion timeout")).not.toBeInTheDocument();
   });
 
   it("keeps the desktop select label inside its control with help text below", async () => {
@@ -238,7 +261,8 @@ describe("AdvancedSettings", () => {
         <AdvancedSettings />
       </SambeeThemeProvider>
     );
-    expect(await screen.findByText("Preprocessors")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Image conversion threshold")).toBeInTheDocument();
+    expect(screen.queryByText("Preprocessors")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Maximum file size")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Conversion timeout")).not.toBeInTheDocument();
     expect(api.updateAdvancedSettings).not.toHaveBeenCalled();
@@ -270,7 +294,7 @@ describe("AdvancedSettings", () => {
     );
 
     const maximumFileSize = await screen.findByLabelText("Maximum file size");
-    const unit = (await screen.findAllByLabelText("Unit"))[0]!;
+    const unit = (await screen.findAllByLabelText("Unit"))[1]!;
     await user.click(unit);
     await user.click(await screen.findByRole("option", { name: "KiB" }));
 

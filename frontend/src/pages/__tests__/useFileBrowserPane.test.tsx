@@ -2104,6 +2104,7 @@ describe("useFileBrowserPane", () => {
     await waitFor(() => {
       expect(result.current.viewInfo?.images).toEqual(["images/first.png"]);
     });
+    expect(result.current.imageFiles).toEqual(["images/first.png"]);
 
     act(() => {
       result.current.loadMoreArchive();
@@ -2111,6 +2112,8 @@ describe("useFileBrowserPane", () => {
     await waitFor(() => {
       expect(result.current.viewInfo?.images).toEqual(["images/first.png", "images/second.png"]);
     });
+    expect(result.current.archiveHasMore).toBe(false);
+    expect(result.current.imageFiles).toEqual(["images/first.png", "images/second.png"]);
   });
 
   it("opens the resolved local file rather than its link source", async () => {

@@ -199,6 +199,8 @@ export function prefetchSettingsDataForItem(item: SettingsNavItem) {
         primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminUserContext, loadUserManagementContextData),
       ]);
     case "admin-system":
+    case "admin-image-viewer":
+    case "admin-pdf-viewer":
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminSystem, loadAdvancedSettingsData);
     case "admin-smb":
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminSmb, loadSmbSettingsData);

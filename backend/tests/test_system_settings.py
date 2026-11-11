@@ -44,6 +44,34 @@ def _create_system_settings_table(connection) -> None:
     )
 
 
+def test_image_conversion_threshold_is_database_only_and_updates_runtime(client, auth_headers_admin, auth_headers_user, tmp_path):
+    from app.core.config import Settings, load_toml_config
+    from app.utils.file_type_registry import needs_processing
+
+    threshold = 5 * 1024 * 1024
+    assert "image_viewer_conv_size_thresh" not in Settings.model_fields
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[image_viewer]\nconv_size_thresh = 1\n", encoding="utf-8")
+    assert "image_viewer_conv_size_thresh" not in load_toml_config(config_path)
+    assert not needs_processing("photo.jpg", threshold)
+    assert needs_processing("photo.jpg", threshold + 1)
+    assert not needs_processing("photo.jpg", None)
+    assert needs_processing("photo.tiff", 1)
+    payload = {"field": SystemSettingKey.IMAGE_CONVERSION_THRESHOLD_BYTES.value, "value": 0}
+    assert client.put("/api/admin/settings/advanced", headers=auth_headers_user, json=payload).status_code == 403
+    response = client.put("/api/admin/settings/advanced", headers=auth_headers_admin, json=payload)
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert needs_processing("photo.jpg", 1)
+    assert not needs_processing("photo.jpg", 0)
+    assert not needs_processing("notes.txt", threshold + 1)
+    saved = client.get("/api/admin/settings/advanced", headers=auth_headers_admin).json()["image_conversion_threshold_bytes"]
+    assert saved["value"] == 0
+    assert saved["source"] == "database"
+    assert saved["default_value"] == threshold
+    assert client.put("/api/admin/settings/advanced", headers=auth_headers_admin, json={**payload, "value": -1}).status_code == 400
+
+
 @pytest.mark.parametrize("scope", ["backend", "companion"])
 def test_directory_index_policy_settings_require_administrator(client, auth_headers_user, scope):
     assert client.get(f"/api/admin/settings/directory-index/{scope}", headers=auth_headers_user).status_code == 403

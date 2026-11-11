@@ -17,6 +17,7 @@ class UserSettingKey(StrEnum):
     BROWSER_VIEWER_ASSOCIATIONS = "browser.viewer_associations"
     TEXT_EDITOR_MAX_FILE_SIZE_BYTES = "text_editor.max_file_size_bytes"
     TEXT_EDITOR_WORD_WRAP_ENABLED = "text_editor.word_wrap_enabled"
+    IMAGE_VIEWER_TRANSITION = "image_viewer.transition"
 
 
 DEFAULT_THEME_ID = "sambee-light"
@@ -28,3 +29,4 @@ DEFAULT_TOUCH_FRIENDLY_FILE_SELECTION = "auto"
 DEFAULT_FILE_BROWSER_VIEW_MODE = "list"
 DEFAULT_PANE_MODE = "single"
 DEFAULT_TEXT_EDITOR_MAX_FILE_SIZE_BYTES = 52_428_800
+DEFAULT_IMAGE_VIEWER_TRANSITION = "none"

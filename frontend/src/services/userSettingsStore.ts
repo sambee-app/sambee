@@ -65,6 +65,8 @@ function getFieldValue<Field extends CurrentUserSettingsField>(
     return undefined;
   }
   switch (field) {
+    case "image_viewer.transition":
+      return (settings.image_viewer?.transition ?? "none") as ValueForField<Field>;
     case "appearance.theme_id":
       return settings.appearance.theme_id as ValueForField<Field>;
     case "localization.language":
@@ -94,6 +96,8 @@ function getFieldValue<Field extends CurrentUserSettingsField>(
 
 function setFieldValue(settings: CurrentUserSettings, update: CurrentUserSettingsUpdate): CurrentUserSettings {
   switch (update.field) {
+    case "image_viewer.transition":
+      return { ...settings, image_viewer: { transition: update.value } };
     case "appearance.theme_id":
       return { ...settings, appearance: { ...settings.appearance, theme_id: update.value, has_theme_override: true } };
     case "localization.language":

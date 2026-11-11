@@ -9,6 +9,8 @@ import { SETTINGS_PAGE_LOADERS, scheduleSettingsPagePrefetch } from "./settingsP
 const AboutSettings = lazy(SETTINGS_PAGE_LOADERS["admin-about"]);
 const AccountSettings = lazy(SETTINGS_PAGE_LOADERS.account);
 const AdvancedSettings = lazy(SETTINGS_PAGE_LOADERS["admin-system"]);
+const AdminImageViewerSettings = lazy(SETTINGS_PAGE_LOADERS["admin-image-viewer"]);
+const AdminPdfViewerSettings = lazy(SETTINGS_PAGE_LOADERS["admin-pdf-viewer"]);
 const AuthenticationSettings = lazy(SETTINGS_PAGE_LOADERS["admin-authentication"]);
 const ConnectionsSettings = lazy(SETTINGS_PAGE_LOADERS.connections);
 const FileBrowserSettings = lazy(SETTINGS_PAGE_LOADERS["file-browser"]);
@@ -19,6 +21,7 @@ const NetworkSettings = lazy(SETTINGS_PAGE_LOADERS["admin-network"]);
 const AppearanceSettings = lazy(SETTINGS_PAGE_LOADERS.appearance);
 const SmbSettings = lazy(SETTINGS_PAGE_LOADERS["admin-smb"]);
 const TextEditorSettings = lazy(SETTINGS_PAGE_LOADERS["text-editor"]);
+const ImageViewerSettings = lazy(SETTINGS_PAGE_LOADERS["image-viewer"]);
 const UserManagementSettings = lazy(SETTINGS_PAGE_LOADERS["admin-users"]);
 
 interface SettingsCategoryContentProps {
@@ -68,6 +71,8 @@ function SettingsCategoryPage({
       return <FileBrowserSettings />;
     case "text-editor":
       return <TextEditorSettings />;
+    case "image-viewer":
+      return <ImageViewerSettings />;
     case "connections":
       return (
         <ConnectionsSettings
@@ -98,6 +103,10 @@ function SettingsCategoryPage({
       return isAdmin ? <DirectorySearchSettings dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-system":
       return isAdmin ? <AdvancedSettings dialogSafeHeader={dialogSafeHeader} /> : null;
+    case "admin-image-viewer":
+      return isAdmin ? <AdminImageViewerSettings category="admin-image-viewer" dialogSafeHeader={dialogSafeHeader} /> : null;
+    case "admin-pdf-viewer":
+      return isAdmin ? <AdminPdfViewerSettings category="admin-pdf-viewer" dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-about":
       return isAdmin ? <AboutSettings dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-users":

@@ -24,7 +24,6 @@
    - If the user confirms, delete the file and then:
       - Close the viewer (Markdown, PDF)
       - Advance to the next image (image). If there is no next image, close the viewer.
-- Home/End: support these keys to jump to the first/last images, respectively.
 
 ## Auditing
 
@@ -59,9 +58,12 @@
 - Support multi-page image files:
   - TIFF
   - ICO (test with uberAgent icon)
-
 - Additional formats
    - DCM (medical image format)
+
+## Directory search & navigation
+
+- Add an option to search only below the current directory in the active pane
 
 ## Storage
 

@@ -4,10 +4,12 @@ import {
   Dns as DnsIcon,
   Folder as FolderIcon,
   FolderOpen as FolderOpenIcon,
+  ImageOutlined as ImageIcon,
   InfoOutlined as InfoOutlinedIcon,
   ManageAccounts as ManageAccountsIcon,
   ManageSearch as ManageSearchIcon,
   Palette as PaletteIcon,
+  PictureAsPdfOutlined as PdfIcon,
   PeopleAlt as PeopleAltIcon,
   Public as PublicIcon,
   Storage as StorageIcon,
@@ -138,6 +140,11 @@ function renderCategoryIcon(item: SettingsNavItem, iconGlyphSx?: SxProps<Theme>)
       return <FolderIcon sx={iconGlyphSx} />;
     case "admin-system":
       return <TuneIcon sx={iconGlyphSx} />;
+    case "admin-image-viewer":
+    case "image-viewer":
+      return <ImageIcon sx={iconGlyphSx} />;
+    case "admin-pdf-viewer":
+      return <PdfIcon sx={iconGlyphSx} />;
     case "admin-about":
       return <InfoOutlinedIcon sx={iconGlyphSx} />;
   }

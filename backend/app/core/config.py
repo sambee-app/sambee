@@ -144,12 +144,6 @@ def load_toml_config(config_file: Path) -> dict[str, Any]:
         if "username" in admin:
             flat_config["admin_username"] = admin["username"]
 
-    # Image viewer settings
-    if "image_viewer" in toml_data:
-        image_viewer = toml_data["image_viewer"]
-        if "conv_size_thresh" in image_viewer:
-            flat_config["image_viewer_conv_size_thresh"] = image_viewer["conv_size_thresh"]
-
     # Frontend logging settings
     if "frontend_logging" in toml_data:
         frontend_logging = toml_data["frontend_logging"]
@@ -273,9 +267,6 @@ class Settings(BaseModel):
 
     # Admin settings
     admin_username: str = "admin"
-
-    # Image viewer settings
-    image_viewer_conv_size_thresh: int = 512000
 
     # Frontend console logging settings
     frontend_logging_enabled: bool = False

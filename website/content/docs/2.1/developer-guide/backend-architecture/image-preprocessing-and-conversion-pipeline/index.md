@@ -65,7 +65,9 @@ This is the path used for formats such as TIFF, HEIC, BMP, ICO, and similar serv
 
 ## Conversion Preference
 
-`create_converted_image_response()` reads `image_viewer.conversion_preference` once per request and passes an `ImageConversionPreference` enum to `convert_image_for_viewer()`. Ordinary SMB previews and SMB archive-member previews share this function. Existing processing thresholds are unchanged. Companion streams local images without a backend encoder.
+`create_converted_image_response()` reads `image_viewer.conversion_preference` once per request and passes an `ImageConversionPreference` enum to `convert_image_for_viewer()`. Ordinary SMB previews and SMB archive-member previews share this function. Companion streams local images without a backend encoder.
+
+`needs_processing()` reads the database-only integer setting `image_viewer.conversion_threshold_bytes`. Its central default is 5 MiB. Mandatory-conversion formats bypass the size check; native formats use a strict `size > threshold` comparison. Unknown sizes keep format-based delivery. The ordinary file and archive-member paths share this decision. There is no configuration-file field, environment override, or legacy-value migration. Successful saves update the effective settings cache for subsequent requests, not image blobs already cached in the viewer.
 
 The database setting defaults to `speed`. A successful save refreshes the process-local settings cache, so the next request uses the new value without a restart. There is no TOML or environment override. Invalid stored values log an error and use the default. Previously loaded gallery images remain cached until the browser requests them again.
 
@@ -188,6 +190,7 @@ The converter then turns preprocessing failures into user-visible conversion fai
 
 The main advanced settings for ImageMagick-backed preprocessing are:
 
+- `image_viewer.conversion_threshold_bytes` (shared backend preview decision)
 - `image_viewer.conversion_preference` (also applies to libvips)
 - `preprocessors.imagemagick.max_file_size_bytes`
 - `preprocessors.imagemagick.timeout_seconds`

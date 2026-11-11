@@ -260,6 +260,7 @@ export interface ImageConversionPreferenceSetting {
 
 export interface AdvancedSystemSettings {
   image_conversion_preference: ImageConversionPreferenceSetting;
+  image_conversion_threshold_bytes?: IntegerSystemSetting;
   preprocessors: Record<string, PreprocessorAdvancedSettings>;
   pdf?: PdfAdvancedSettings;
   temporary_archive_download_size_bytes?: IntegerSystemSetting;
@@ -444,9 +445,11 @@ export interface CurrentUserSettings {
     max_file_size_bytes: number;
     word_wrap_enabled: boolean | null;
   };
+  image_viewer?: { transition: "carousel" | "none" };
 }
 
 export type CurrentUserSettingsUpdate =
+  | { field: "image_viewer.transition"; value: "carousel" | "none" }
   | { field: "appearance.theme_id"; value: string }
   | { field: "localization.language"; value: LanguagePreference }
   | { field: "localization.regional_locale"; value: RegionalLocalePreference }

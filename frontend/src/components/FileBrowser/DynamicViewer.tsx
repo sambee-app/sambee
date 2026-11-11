@@ -36,6 +36,7 @@ interface DynamicViewerProps {
   onIndexChange?: (index: number) => void;
   hasMoreItems?: boolean;
   isLoadingMoreItems?: boolean;
+  loadMoreError?: string | null;
   onLoadMoreItems?: () => void;
   contentProviders: ContentProviderRegistry;
   navigation?: ViewerNavigation;
@@ -257,6 +258,7 @@ export const DynamicViewer = memo(function DynamicViewer(props: DynamicViewerPro
         virtualSource={displayedInfo.virtualSource}
         hasMoreItems={hasMoreItems}
         isLoadingMoreItems={isLoadingMoreItems}
+        loadMoreError={displayed.loadMoreError}
         onLoadMoreItems={isTransitioning ? undefined : onLoadMoreItems}
         images={displayedInfo.images}
         currentIndex={displayedInfo.currentIndex}

@@ -1,5 +1,5 @@
 import { Box, Button, CircularProgress, Dialog, Typography, useMediaQuery, useTheme } from "@mui/material";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Lightbox, { type Slide } from "yet-another-react-lightbox";
 import Fullscreen from "yet-another-react-lightbox/plugins/fullscreen";
@@ -19,6 +19,7 @@ import {
   verifyViewerSourceAfterFailure,
 } from "../../pages/FileBrowser/contentProviders";
 import { error as logError, info as logInfo } from "../../services/logger";
+import { useCurrentUserSetting } from "../../services/userSettingsStore";
 import { useSambeeTheme } from "../../theme";
 import { getViewerColors } from "../../theme/viewerStyles";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
@@ -63,6 +64,16 @@ const PRELOAD_COUNT = 5;
 const CACHE_COUNT = 20;
 const IMAGE_LOADING_PHASE_DELAY_MS = 2000;
 const IMAGE_LOADING_SLOW_DELAY_MS = 5000;
+const IMAGE_SWIPE_DURATION_MS = 400;
+
+interface PresentedImage {
+  identity: string;
+  index: number;
+  path: string;
+  source: string;
+  blob: Blob;
+  release: () => void;
+}
 
 // Transparent 1x1 pixel PNG as placeholder to avoid broken image icon while loading
 const TRANSPARENT_PIXEL =
@@ -78,6 +89,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   virtualSource,
   hasMoreItems = false,
   isLoadingMoreItems = false,
+  loadMoreError = null,
   onLoadMoreItems,
   images = [path],
   currentIndex: initialIndex = 0,
@@ -91,6 +103,18 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const [showHelp, setShowHelp] = useState(false);
   const zoomRef = useRef<ZoomRef | null>(null);
   const fullscreenRef = useRef<FullscreenRef | null>(null);
+  const controllerRef = useRef<import("yet-another-react-lightbox").ControllerRef | null>(null);
+  const transitionSetting = useCurrentUserSetting("image_viewer.transition");
+  const [lightboxIndex, setLightboxIndex] = useState(initialIndex);
+  const [presentedImage, setPresentedImage] = useState<PresentedImage | null>(null);
+  const presentedImageRef = useRef<PresentedImage | null>(null);
+  const discreteNavigationRef = useRef(false);
+  const toolbarTouchRef = useRef(false);
+  const [navigationDuration, setNavigationDuration] = useState(IMAGE_SWIPE_DURATION_MS);
+  const [endIntent, setEndIntent] = useState(false);
+  const endRequestRef = useRef<{ length: number; loadingSeen: boolean } | null>(null);
+  const [endError, setEndError] = useState<string | null>(null);
+  const galleryIdentity = `${connectionId}:${virtualSource ? `${virtualSource.location.providerId}:${virtualSource.location.source.path}` : images.join("\u0000")}`;
 
   // Callback-ref + state ensures the Lightbox only renders once the portal
   // container is mounted.  Without this, portalRef.current is null on the
@@ -135,6 +159,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     filename,
     getCachedImageSrc,
     getCachedImageBlob,
+    pinCachedImage,
+    imageSourceRevision,
     errorStates,
     currentImageLoadPhase,
     showLoadingSpinner,
@@ -157,7 +183,9 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     preloadRange: PRELOAD_COUNT,
     cacheRange: CACHE_COUNT,
   });
-  useViewerDocumentTitle(filename);
+  const retainingImage = discreteNavigationRef.current && presentedImage?.identity === galleryIdentity && lightboxIndex !== currentIndex;
+  const displayedFilename = retainingImage ? (presentedImage.path.split("/").pop() ?? filename) : filename;
+  useViewerDocumentTitle(displayedFilename);
   const viewerSessionMetaRef = useRef({
     filename,
     gallerySize: images.length,
@@ -165,6 +193,57 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const [imageLoadingFeedbackStage, setImageLoadingFeedbackStage] = useState<ImageLoadingFeedbackStage>("spinner");
   const isCurrentImageLoading = currentImageLoadPhase === "fetching" || currentImageLoadPhase === "decoding";
   const isCurrentImageReady = currentImageLoadPhase === "ready" && Boolean(getCachedImageSrc(currentIndex));
+  const targetSource = getCachedImageSrc(currentIndex);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: route index changes do not replace the gallery session.
+  useLayoutEffect(() => {
+    discreteNavigationRef.current = false;
+    setLightboxIndex(initialIndex);
+    presentedImageRef.current?.release();
+    presentedImageRef.current = null;
+    setPresentedImage(null);
+    setEndIntent(false);
+    endRequestRef.current = null;
+  }, [galleryIdentity]);
+
+  useLayoutEffect(() => {
+    if (!isCurrentImageReady || !targetSource) return;
+    const blob = getCachedImageBlob(currentIndex);
+    if (!blob) return;
+    const previous = presentedImageRef.current;
+    if (previous?.identity === galleryIdentity && previous.index === currentIndex && previous.blob === blob) return;
+    const next = {
+      identity: galleryIdentity,
+      index: currentIndex,
+      path: currentPath,
+      source: targetSource,
+      blob,
+      release: pinCachedImage(currentIndex),
+    };
+    presentedImageRef.current = next;
+    setPresentedImage(next);
+    previous?.release();
+  }, [currentIndex, currentPath, galleryIdentity, getCachedImageBlob, isCurrentImageReady, targetSource, pinCachedImage]);
+
+  useEffect(
+    () => () => {
+      const previous = presentedImageRef.current;
+      previous?.release();
+      presentedImageRef.current = null;
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (discreteNavigationRef.current && !isCurrentImageReady) return;
+    if (currentIndex === lightboxIndex) return;
+    const distance = currentIndex - lightboxIndex;
+    if (discreteNavigationRef.current && Math.abs(distance) === 1 && navigationDuration > 0 && controllerRef.current) {
+      if (distance > 0) controllerRef.current.next();
+      else controllerRef.current.prev();
+    } else {
+      setLightboxIndex(currentIndex);
+    }
+  }, [currentIndex, isCurrentImageReady, lightboxIndex, navigationDuration]);
   const currentImageError = errorStates.get(currentIndex) ?? null;
   const imageDecodeChecksRef = useRef({ connectionId, path: currentPath, contentProviders, requests: new Map<string, AbortController>() });
   useEffect(() => {
@@ -250,13 +329,21 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     };
   }, [sessionId]);
 
-  const slides: LightboxImageSlide[] = images.map((imagePath, index) => ({
-    type: "image",
-    src: getCachedImageSrc(index) ?? TRANSPARENT_PIXEL,
-    alt: imagePath.split("/").pop() ?? imagePath,
-    imageIndex: index,
-    originalPath: imagePath,
-  }));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: source revision tracks the mutable cache.
+  const slides: LightboxImageSlide[] = useMemo(
+    () =>
+      images.map((imagePath, index) => ({
+        type: "image",
+        src:
+          (presentedImage?.identity === galleryIdentity && presentedImage.index === index
+            ? presentedImage.source
+            : getCachedImageSrc(index)) ?? TRANSPARENT_PIXEL,
+        alt: imagePath.split("/").pop() ?? imagePath,
+        imageIndex: index,
+        originalPath: imagePath,
+      })),
+    [images, imageSourceRevision, presentedImage, galleryIdentity, getCachedImageSrc]
+  );
 
   const handleClose = useCallback(() => {
     onClose();
@@ -287,8 +374,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
 
   const handleViewChange = useCallback(
     ({ index }: { index: number }) => {
-      // Lightbox handles its own navigation - sync our state with it
-      if (index !== currentIndex) {
+      setLightboxIndex(index);
+      if (!discreteNavigationRef.current && index !== currentIndex) {
         setCurrentIndex(index);
       }
     },
@@ -347,28 +434,74 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     setShowHelp(true);
   }, []);
 
+  const requestImage = useCallback(
+    (index: number, discrete = true) => {
+      setEndIntent(false);
+      endRequestRef.current = null;
+      setEndError(null);
+      discreteNavigationRef.current = discrete;
+      setNavigationDuration(discrete && transitionSetting.confirmedValue !== "carousel" ? 0 : IMAGE_SWIPE_DURATION_MS);
+      setCurrentIndex(index);
+    },
+    [setCurrentIndex, transitionSetting.confirmedValue]
+  );
+
   const handleNavigateNext = useCallback(() => {
+    const discrete = !toolbarTouchRef.current;
+    toolbarTouchRef.current = false;
     if (currentIndex < images.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+      requestImage(currentIndex + 1, discrete);
       return;
     }
 
     if (hasMoreItems && !isLoadingMoreItems) {
       onLoadMoreItems?.();
     }
-  }, [currentIndex, hasMoreItems, images.length, isLoadingMoreItems, onLoadMoreItems, setCurrentIndex]);
+  }, [currentIndex, hasMoreItems, images.length, isLoadingMoreItems, onLoadMoreItems, requestImage]);
 
   const handleNavigatePrevious = useCallback(() => {
     if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
+      requestImage(currentIndex - 1, !toolbarTouchRef.current);
     }
-  }, [currentIndex, setCurrentIndex]);
+    toolbarTouchRef.current = false;
+  }, [currentIndex, requestImage]);
+
+  const handleLastImage = useCallback(() => {
+    if (hasMoreItems && onLoadMoreItems) {
+      setEndError(null);
+      setEndIntent(true);
+    } else {
+      requestImage(images.length - 1);
+    }
+  }, [hasMoreItems, images.length, onLoadMoreItems, requestImage]);
 
   useEffect(() => {
-    if (currentIndex === images.length - 1 && hasMoreItems && !isLoadingMoreItems) {
+    if (!endIntent) return;
+    if (!hasMoreItems) {
+      requestImage(images.length - 1);
+      return;
+    }
+    if (isLoadingMoreItems) {
+      if (endRequestRef.current) endRequestRef.current.loadingSeen = true;
+      return;
+    }
+    const previous = endRequestRef.current;
+    if (previous?.loadingSeen && loadMoreError) {
+      setEndIntent(false);
+      endRequestRef.current = null;
+      setEndError(`${loadMoreError} Try End again or select another image.`);
+      return;
+    }
+    if (previous && !previous.loadingSeen) return;
+    endRequestRef.current = { length: images.length, loadingSeen: false };
+    onLoadMoreItems?.();
+  }, [endIntent, hasMoreItems, images.length, isLoadingMoreItems, loadMoreError, onLoadMoreItems, requestImage]);
+
+  useEffect(() => {
+    if (!endIntent && !loadMoreError && currentIndex === images.length - 1 && hasMoreItems && !isLoadingMoreItems) {
       onLoadMoreItems?.();
     }
-  }, [currentIndex, hasMoreItems, images.length, isLoadingMoreItems, onLoadMoreItems]);
+  }, [currentIndex, endIntent, hasMoreItems, images.length, isLoadingMoreItems, loadMoreError, onLoadMoreItems]);
 
   const handleToggleFullscreen = useCallback(() => {
     if (fullscreenRef.current?.fullscreen) {
@@ -397,7 +530,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     ({ slide }: { slide: Slide }) => {
       const typedSlide = slide as LightboxImageSlide;
       const imageIndex = typedSlide.imageIndex;
-      const isCurrentSlide = imageIndex === currentIndex;
+      const isCurrentSlide = imageIndex === lightboxIndex;
 
       return (
         <>
@@ -427,7 +560,9 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                     px: 2,
                   }}
                 >
-                  <Typography>{currentImageLoadPhase === "decoding" ? "Rendering image" : "Preparing image"}</Typography>
+                  <Typography>
+                    {currentImageLoadPhase === "decoding" ? "Rendering image" : "Preparing image"}: {filename}
+                  </Typography>
                   {imageLoadingFeedbackStage === "slow" && (
                     <>
                       <Typography variant="body2">This image is taking longer than usual.</Typography>
@@ -478,7 +613,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       canRetryCurrentImage,
       currentImageError,
       currentImageLoadPhase,
-      currentIndex,
+      lightboxIndex,
+      filename,
       imageLoadingFeedbackStage,
       isCurrentImageLoading,
       retryCurrentImage,
@@ -531,6 +667,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
 
   const imageShortcuts = useMemo(
     () => [
+      { ...COMMON_SHORTCUTS.FIRST_IMAGE, handler: () => requestImage(0) },
+      { ...COMMON_SHORTCUTS.LAST_IMAGE, handler: handleLastImage },
       {
         ...COMMON_SHORTCUTS.DOWNLOAD,
         handler: handleDownload,
@@ -581,6 +719,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     ],
     [
       handleDownload,
+      requestImage,
+      handleLastImage,
       handleEscape,
       handleRotateLeft,
       handleRotateRight,
@@ -630,6 +770,16 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
         slotProps={{
           paper: {
             onKeyDown: handlePaperKeyDown,
+            onKeyDownCapture: (event: React.KeyboardEvent) => {
+              toolbarTouchRef.current = false;
+              if (showHelp || isTransitioning || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+              if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                if ((zoomRef.current?.zoom ?? 1) > 1) return;
+                event.preventDefault();
+                event.stopPropagation();
+                requestImage(Math.max(0, Math.min(images.length - 1, currentIndex + (event.key === "ArrowRight" ? 1 : -1))));
+              }
+            },
             sx: {
               backgroundColor: viewerBg,
               boxShadow: "none",
@@ -648,13 +798,19 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
         {/* Our toolbar at top */}
         {!hideControls && (
           <Box
+            onPointerDownCapture={(event) => {
+              toolbarTouchRef.current = event.pointerType === "touch";
+            }}
+            onPointerCancelCapture={() => {
+              toolbarTouchRef.current = false;
+            }}
             sx={{
               flexShrink: 0,
               zIndex: 10,
             }}
           >
             <ViewerControls
-              filename={filename}
+              filename={displayedFilename}
               filenameAdornment={readOnlyIndicator}
               toolbarBackground={toolbarBg}
               toolbarText={toolbarText}
@@ -689,17 +845,41 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
               shareDisabled={nativeSharing.sharing || !nativeSharing.ready}
               controlsDisabled={!isCurrentImageReady}
               navigationDisabled={false}
-              downloadDisabled={isCurrentImageLoading}
+              downloadDisabled={!isCurrentImageReady}
             />
           </Box>
         )}
 
         {nativeSharing.failureDialog}
+        {endError && (
+          <Typography role="alert" sx={{ color: toolbarText, px: 2 }}>
+            {endError}
+          </Typography>
+        )}
 
         {/* Lightbox container - fills remaining space below toolbar */}
         <Box
           ref={portalRef}
           className={currentImageError ? "image-viewer-load-error" : undefined}
+          onPointerDownCapture={(event) => {
+            if (event.target instanceof Element && event.target.closest("button")) return;
+            setEndIntent(false);
+            endRequestRef.current = null;
+            if (discreteNavigationRef.current) {
+              discreteNavigationRef.current = false;
+              setEndIntent(false);
+              endRequestRef.current = null;
+              setCurrentIndex(lightboxIndex);
+            }
+          }}
+          onWheelCapture={(event) => {
+            if (event.deltaX && discreteNavigationRef.current) {
+              discreteNavigationRef.current = false;
+              setEndIntent(false);
+              endRequestRef.current = null;
+              setCurrentIndex(lightboxIndex);
+            }
+          }}
           onKeyDownCapture={(event) => {
             if (
               (isTransitioning && event.key !== "Escape") ||
@@ -718,7 +898,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
             <Lightbox
               open={true}
               close={handleClose}
-              index={currentIndex}
+              index={lightboxIndex}
               slides={slides}
               portal={{ root: portalElement }}
               noScroll={{ disabled: true }} // Dialog handles scroll lock
@@ -733,7 +913,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                 controls: () => null, // Controls rendered in our custom toolbar
               }}
               toolbar={{ buttons: [] }}
-              controller={{ focus: true, closeOnEscape: false }} // The viewer owns Escape dismissal.
+              controller={{ ref: controllerRef, focus: true, closeOnEscape: false }} // The viewer owns Escape dismissal.
               carousel={{
                 finite: true,
                 padding: 0,
@@ -744,7 +924,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
               }}
               animation={{
                 fade: 0,
-                swipe: 400,
+                swipe: IMAGE_SWIPE_DURATION_MS,
+                navigation: navigationDuration,
               }}
               styles={{
                 root: {
@@ -784,6 +965,25 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                 pinchZoomV4: true,
                 maxZoomPixelRatio: 3, // Allow up to 3x upscaling for closer inspection
               }}
+            />
+          )}
+          {retainingImage && targetSource && (
+            <img
+              key={targetSource}
+              src={targetSource}
+              alt=""
+              aria-hidden="true"
+              data-testid="pending-image-decode"
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                const index = currentIndex;
+                void (image.decode ? image.decode() : Promise.resolve()).then(
+                  () => markImageAsDecoded(index, targetSource),
+                  () => markImageDecodeFailed(index, targetSource)
+                );
+              }}
+              onError={() => markImageDecodeFailed(currentIndex, targetSource)}
             />
           )}
         </Box>

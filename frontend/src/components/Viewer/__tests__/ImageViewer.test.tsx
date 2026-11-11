@@ -1,6 +1,6 @@
 import { act, createEvent, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ImageLoadPhase } from "../../../hooks/useCachedImageGallery";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
@@ -11,6 +11,12 @@ import ImageViewer from "../ImageViewer";
 import { downloadViewerBlob } from "../viewerContent";
 
 const contentProviders = createStorageBackedTestContentProviderRegistry();
+const transitionPreference = vi.hoisted(() => ({ value: "carousel" as "carousel" | "none" | undefined }));
+const lightboxZoom = vi.hoisted(() => ({ zoom: 1, changeZoom: vi.fn() }));
+
+vi.mock("../../../services/userSettingsStore", () => ({
+  useCurrentUserSetting: () => ({ confirmedValue: transitionPreference.value }),
+}));
 
 function ContentProviderTestWrapper({ children }: { children: ReactNode }) {
   return <ContentProviderRegistryContext.Provider value={contentProviders}>{children}</ContentProviderRegistryContext.Provider>;
@@ -29,6 +35,8 @@ vi.mock("yet-another-react-lightbox", () => ({
     render: lightboxRender,
     close,
     controller,
+    animation,
+    zoom,
   }: {
     slides: Array<{ src: string }>;
     index: number;
@@ -36,7 +44,17 @@ vi.mock("yet-another-react-lightbox", () => ({
     render?: { slideHeader?: (props: { slide: { src: string } }) => React.ReactNode };
     close?: () => void;
     controller?: { closeOnEscape?: boolean };
+    animation?: { navigation?: number; swipe?: number };
+    zoom?: { ref?: { current: typeof lightboxZoom | null } };
   }) => {
+    useLayoutEffect(() => {
+      const ref = zoom?.ref;
+      if (!ref) return;
+      ref.current = lightboxZoom;
+      return () => {
+        ref.current = null;
+      };
+    }, [zoom?.ref]);
     const slide = slides[index];
     const imageProps = slide ? carousel?.imageProps?.(slide) : undefined;
 
@@ -46,6 +64,8 @@ vi.mock("yet-another-react-lightbox", () => ({
         tabIndex={-1}
         data-testid="image-lightbox"
         data-current-src={slide?.src ?? ""}
+        data-navigation-duration={animation?.navigation}
+        data-swipe-duration={animation?.swipe}
         onKeyDown={(event) => {
           if (event.key === "Escape" && (controller?.closeOnEscape ?? true)) {
             event.stopPropagation();
@@ -78,6 +98,7 @@ const createGalleryMock = () => ({
   imageCacheRef: { current: new Map() },
   getCachedImageSrc: (_index: number): string | undefined => undefined,
   getCachedImageBlob: (): Blob | undefined => undefined,
+  pinCachedImage: vi.fn(() => vi.fn()),
   loadingStates: new Map(),
   errorStates: new Map(),
   currentImageLoadPhase: "ready" as ImageLoadPhase,
@@ -112,7 +133,262 @@ vi.mock("../../../services/logger", () => ({
 vi.mock("../viewerContent", () => ({ downloadViewerBlob: vi.fn() }));
 
 describe("ImageViewer", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each(["ArrowLeft", "ArrowRight"])("leaves %s to the lightbox while zoomed", async (key) => {
+    const gallery = createGalleryMock();
+    mockUseCachedImageGallery.mockReturnValue(gallery);
+    await render(
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" images={["/images/photo.jpg", "/images/next.jpg"]} onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    lightboxZoom.zoom = 2;
+    const lightbox = screen.getByTestId("image-lightbox");
+    const lightboxKeyDown = vi.fn();
+    lightbox.addEventListener("keydown", lightboxKeyDown);
+    const event = createEvent.keyDown(lightbox, { key });
+    fireEvent(lightbox, event);
+    expect(lightboxKeyDown).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(false);
+    expect(gallery.setCurrentIndex).not.toHaveBeenCalled();
+  });
+
+  it.each(["Retry", "Cancel"] as const)("keeps the requested target selected during pointer activation of %s", async (action) => {
+    if (action === "Cancel") vi.useFakeTimers();
+    const images = ["/images/photo.jpg", "/images/next.jpg"];
+    const blob = new Blob(["image"], { type: "image/jpeg" });
+    const gallery = {
+      ...createGalleryMock(),
+      getCachedImageSrc: (index: number) => (index === 0 ? "blob:first" : undefined),
+      getCachedImageBlob: () => blob,
+    };
+    mockUseCachedImageGallery.mockImplementation(() => gallery);
+    const viewer = () => (
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path={images[0]!} images={images} onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer());
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "ArrowRight" });
+    gallery.currentIndex = 1;
+    gallery.currentPath = images[1]!;
+    gallery.filename = "next.jpg";
+    gallery.currentImageLoadPhase = action === "Retry" ? "error" : "fetching";
+    gallery.errorStates = action === "Retry" ? new Map([[1, "Failed to load image"]]) : new Map();
+    gallery.canRetryCurrentImage = action === "Retry";
+    gallery.showLoadingSpinner = action === "Cancel";
+    rerender(viewer());
+    if (action === "Cancel") {
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+    }
+    gallery.setCurrentIndex.mockClear();
+    const button = screen.getByRole("button", { name: action });
+    fireEvent.pointerDown(button);
+    expect(gallery.setCurrentIndex).not.toHaveBeenCalled();
+    fireEvent.pointerUp(button);
+    fireEvent.click(button);
+    expect(action === "Retry" ? gallery.retryCurrentImage : gallery.cancelCurrentImageLoad).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:first");
+  });
+
+  it("ignores an older decode completion while the latest target is still decoding", async () => {
+    const images = ["/first.jpg", "/second.jpg", "/last.jpg"];
+    const sources = ["blob:first", "blob:second", "blob:last"];
+    const blob = new Blob(["image"], { type: "image/jpeg" });
+    const gallery = {
+      ...createGalleryMock(),
+      currentPath: images[0]!,
+      filename: "first.jpg",
+      getCachedImageSrc: (index: number) => sources[index],
+      getCachedImageBlob: () => blob,
+    };
+    mockUseCachedImageGallery.mockImplementation(() => gallery);
+    const viewer = () => (
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path={images[0]!} images={images} onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer());
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "ArrowRight" });
+    gallery.currentIndex = 1;
+    gallery.currentPath = images[1]!;
+    gallery.filename = "second.jpg";
+    gallery.currentImageLoadPhase = "decoding";
+    rerender(viewer());
+    let finishOlderDecode!: () => void;
+    const olderDecode = new Promise<void>((resolve) => {
+      finishOlderDecode = resolve;
+    });
+    const pending = screen.getByTestId("pending-image-decode");
+    Object.defineProperty(pending, "decode", { value: () => olderDecode });
+    fireEvent.load(pending);
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "End" });
+    gallery.currentIndex = 2;
+    gallery.currentPath = images[2]!;
+    gallery.filename = "last.jpg";
+    rerender(viewer());
+    await act(async () => finishOlderDecode());
+    expect(gallery.markImageAsDecoded).toHaveBeenCalledWith(1, "blob:second");
+    expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:first");
+    expect(screen.getByTestId("pending-image-decode")).toHaveAttribute("src", "blob:last");
+    fireEvent.load(screen.getByTestId("pending-image-decode"));
+    await act(async () => {});
+    expect(gallery.markImageAsDecoded).toHaveBeenCalledWith(2, "blob:last");
+    gallery.currentImageLoadPhase = "ready";
+    rerender(viewer());
+    await waitFor(() => expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:last"));
+  });
+
+  it.each(["none", undefined] as const)("disables discrete animation without changing touch animation (%s)", async (preference) => {
+    transitionPreference.value = preference;
+    const gallery = createGalleryMock();
+    mockUseCachedImageGallery.mockReturnValue(gallery);
+    await render(
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/images/photo.jpg" images={["/images/photo.jpg", "/images/next.jpg"]} onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    const lightbox = screen.getByTestId("image-lightbox");
+    fireEvent.keyDown(lightbox, { key: "ArrowRight" });
+    expect(lightbox).toHaveAttribute("data-navigation-duration", "0");
+    expect(lightbox).toHaveAttribute("data-swipe-duration", "400");
+    const next = screen.getByRole("button", { name: "Next" });
+    const touch = createEvent.pointerDown(next);
+    Object.defineProperty(touch, "pointerType", { value: "touch" });
+    fireEvent(next, touch);
+    fireEvent.click(next);
+    expect(lightbox).toHaveAttribute("data-navigation-duration", "400");
+    expect(lightbox).toHaveAttribute("data-swipe-duration", "400");
+    fireEvent.keyDown(next, { key: "Enter" });
+    fireEvent.click(next);
+    expect(lightbox).toHaveAttribute("data-navigation-duration", "0");
+  });
+
+  it("loads all remaining archive pages for End, including pages without images", async () => {
+    const onLoadMoreItems = vi.fn();
+    const gallery = createGalleryMock();
+    mockUseCachedImageGallery.mockReturnValue(gallery);
+    const images = ["/0.jpg", "/1.jpg"];
+    const virtualSource = {
+      kind: "virtual" as const,
+      path: "/0.jpg",
+      location: {
+        kind: "virtual" as const,
+        providerId: "zip",
+        connectionId: "conn-1",
+        source: { kind: "physical" as const, connectionId: "conn-1", path: "/images.zip" },
+        path: "",
+      },
+    };
+    const viewer = (loading: boolean, more: boolean, error: string | null = null) => (
+      <SambeeThemeProvider>
+        <ImageViewer
+          connectionId="conn-1"
+          path="/0.jpg"
+          images={[...images]}
+          virtualSource={virtualSource}
+          onClose={() => {}}
+          hasMoreItems={more}
+          isLoadingMoreItems={loading}
+          loadMoreError={error}
+          onLoadMoreItems={onLoadMoreItems}
+        />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer(false, true));
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "End" });
+    expect(onLoadMoreItems).toHaveBeenCalledTimes(1);
+    rerender(viewer(true, true));
+    rerender(viewer(false, true));
+    expect(onLoadMoreItems).toHaveBeenCalledTimes(2);
+    rerender(viewer(true, true));
+    images.push("/2.jpg");
+    rerender(viewer(false, false));
+    expect(gallery.setCurrentIndex).toHaveBeenLastCalledWith(2);
+  });
+
+  it("stops a failed End intent and cancels pending desktop navigation when a gesture starts", async () => {
+    const gallery = createGalleryMock();
+    mockUseCachedImageGallery.mockReturnValue(gallery);
+    const onLoadMoreItems = vi.fn();
+    const images = ["/0.jpg", "/1.jpg"];
+    const viewer = (loading: boolean, error: string | null = null) => (
+      <SambeeThemeProvider>
+        <ImageViewer
+          connectionId="conn-1"
+          path="/0.jpg"
+          images={images}
+          onClose={() => {}}
+          hasMoreItems
+          isLoadingMoreItems={loading}
+          loadMoreError={error}
+          onLoadMoreItems={onLoadMoreItems}
+        />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer(false));
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "End" });
+    rerender(viewer(true));
+    rerender(viewer(false, "The archive listing failed."));
+    expect(screen.getByRole("alert")).toHaveTextContent("Try End again");
+    expect(onLoadMoreItems).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "ArrowRight" });
+    expect(gallery.setCurrentIndex).toHaveBeenLastCalledWith(1);
+    fireEvent.pointerDown(screen.getByTestId("image-lightbox"));
+    expect(gallery.setCurrentIndex).toHaveBeenLastCalledWith(0);
+  });
+
+  it("retains the decoded image and filename until the latest requested target is ready", async () => {
+    const images = ["/images/photo.jpg", "/images/second.jpg", "/images/last.jpg"];
+    const blob = new Blob(["image"], { type: "image/jpeg" });
+    const gallery = {
+      ...createGalleryMock(),
+      getCachedImageSrc: (index: number) => (index === 0 ? "blob:first" : (undefined as string | undefined)),
+      getCachedImageBlob: () => blob,
+    };
+    mockUseCachedImageGallery.mockImplementation(() => gallery);
+    const viewer = () => (
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path={images[0]!} images={images} onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer());
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "ArrowRight" });
+    gallery.currentIndex = 1;
+    gallery.currentPath = images[1]!;
+    gallery.filename = "second.jpg";
+    gallery.currentImageLoadPhase = "fetching";
+    rerender(viewer());
+    expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:first");
+    expect(screen.getByText("photo.jpg")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download/ })).toBeDisabled();
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "End" });
+    expect(gallery.setCurrentIndex).toHaveBeenLastCalledWith(2);
+    gallery.currentIndex = 2;
+    gallery.currentPath = images[2]!;
+    gallery.filename = "last.jpg";
+    gallery.currentImageLoadPhase = "ready";
+    gallery.getCachedImageSrc = (index) => (index === 2 ? "blob:last" : undefined);
+    gallery.imageSourceRevision++;
+    rerender(
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path={images[0]!} images={images} onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    await waitFor(() => expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:last"));
+    expect(screen.getByText("last.jpg")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "Home" });
+    expect(gallery.setCurrentIndex).toHaveBeenLastCalledWith(0);
+  });
+
   beforeEach(() => {
+    transitionPreference.value = "carousel";
+    lightboxZoom.zoom = 1;
     mockUseCachedImageGallery.mockReset();
     mockUseCachedImageGallery.mockReturnValue(createGalleryMock());
 
@@ -347,7 +623,7 @@ describe("ImageViewer", () => {
     expect(onLoadMoreItems).toHaveBeenCalledOnce();
   });
 
-  it.each(["ArrowLeft", "ArrowRight"])("leaves Alt+%s to browser history while forwarding the plain arrow to the lightbox", async (key) => {
+  it.each(["ArrowLeft", "ArrowRight"])("leaves Alt+%s to browser history and handles plain arrows in the viewer", async (key) => {
     await render(
       <SambeeThemeProvider>
         <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={() => {}} />
@@ -364,7 +640,8 @@ describe("ImageViewer", () => {
 
     const galleryKey = createEvent.keyDown(lightbox, { key });
     fireEvent(lightbox, galleryKey);
-    expect(lightboxKeyDown).toHaveBeenCalledTimes(1);
+    expect(lightboxKeyDown).not.toHaveBeenCalled();
+    expect(mockUseCachedImageGallery.mock.results[0]?.value.setCurrentIndex).toHaveBeenCalled();
     expect(galleryKey.defaultPrevented).toBe(true);
   });
 
@@ -384,7 +661,7 @@ describe("ImageViewer", () => {
     }
   });
 
-  it.each(["ArrowLeft", "ArrowRight"])("blocks %s during pending navigation and forwards it again when ready", async (key) => {
+  it.each(["ArrowLeft", "ArrowRight"])("blocks %s during pending route navigation and handles it again when ready", async (key) => {
     const onClose = vi.fn();
     const viewer = (isTransitioning: boolean) => (
       <SambeeThemeProvider>
@@ -405,7 +682,8 @@ describe("ImageViewer", () => {
     lightboxKeyDown.mockClear();
     rerender(viewer(false));
     fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key });
-    expect(lightboxKeyDown).toHaveBeenCalledOnce();
+    expect(lightboxKeyDown).not.toHaveBeenCalled();
+    expect(mockUseCachedImageGallery.mock.results[0]?.value.setCurrentIndex).toHaveBeenCalled();
   });
 
   it("closes shortcuts help on Escape without closing the viewer", async () => {
@@ -550,7 +828,7 @@ describe("ImageViewer", () => {
       vi.advanceTimersByTime(5000);
     });
 
-    expect(screen.getByText("Preparing image")).toBeInTheDocument();
+    expect(screen.getByText("Preparing image: photo.jpg")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(cancelCurrentImageLoad).toHaveBeenCalledOnce();
   });

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional
 
-from app.core.config import settings
+from app.core.system_setting_definitions import SystemSettingKey
 
 
 class FileCategory(StrEnum):
@@ -493,8 +493,10 @@ def needs_processing(filename: str, size: Optional[int] = None) -> bool:
         return True
 
     # Check file size against configured threshold (only for images)
-    if size is not None and size > settings.image_viewer_conv_size_thresh:
-        return True
+    if size is not None:
+        from app.services.system_settings import get_integer_setting_value
+
+        return size > get_integer_setting_value(SystemSettingKey.IMAGE_CONVERSION_THRESHOLD_BYTES)
 
     return False
 

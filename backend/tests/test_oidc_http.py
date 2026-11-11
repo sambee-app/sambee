@@ -1,4 +1,6 @@
 import asyncio
+import logging
+from http import HTTPStatus
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -15,6 +17,70 @@ from app.services.oidc_http import (
     validate_oidc_url,
     validate_resolved_address,
 )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_http_request_emits_one_safe_summary(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch, fails: bool) -> None:
+    monkeypatch.setattr(logging.getLogger("app.protocol.http"), "handlers", [])
+    monkeypatch.setattr(logging.getLogger("app.protocol.http"), "propagate", True)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if fails:
+            raise httpx.ConnectError("private transport details")
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=b"{}")
+
+    with caplog.at_level(logging.INFO, logger="app.protocol.http"):
+        async with ValidatedOidcHttpClient(transport=httpx.MockTransport(handler), development=False) as client:
+            try:
+                await client.request_json("GET", "https://idp.example.test/data?token=private", response_limit=2)
+            except OidcHttpError:
+                assert fails
+    summaries = [record.getMessage() for record in caplog.records if record.name == "app.protocol.http"]
+    assert len(summaries) == 1
+    assert "event=http_client" in summaries[0]
+    assert "host='idp.example.test' path='/data'" in summaries[0]
+    assert "private" not in summaries[0]
+    assert f"outcome={'failed' if fails else 'success'}" in summaries[0]
+    assert f"status={None if fails else HTTPStatus.OK.value}" in summaries[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_code", "content_type", "body", "error_code"),
+    [
+        (HTTPStatus.UNAUTHORIZED, "application/json", b"{}", OidcHttpErrorCode.REQUEST_FAILED),
+        (HTTPStatus.INTERNAL_SERVER_ERROR, "application/json", b"{}", OidcHttpErrorCode.REQUEST_FAILED),
+        (HTTPStatus.FOUND, "application/json", b"{}", OidcHttpErrorCode.REDIRECT_REJECTED),
+        (HTTPStatus.OK, "text/html", b"{}", OidcHttpErrorCode.INVALID_CONTENT_TYPE),
+        (HTTPStatus.OK, "application/json", b"!", OidcHttpErrorCode.INVALID_JSON),
+        (HTTPStatus.OK, "application/json", b"{ }", OidcHttpErrorCode.RESPONSE_TOO_LARGE),
+    ],
+)
+async def test_failed_http_summary_retains_response_status(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: HTTPStatus,
+    content_type: str,
+    body: bytes,
+    error_code: OidcHttpErrorCode,
+) -> None:
+    monkeypatch.setattr(logging.getLogger("app.protocol.http"), "handlers", [])
+    monkeypatch.setattr(logging.getLogger("app.protocol.http"), "propagate", True)
+    transport = httpx.MockTransport(lambda request: httpx.Response(status_code, headers={"content-type": content_type}, content=body))
+
+    with caplog.at_level(logging.INFO, logger="app.protocol.http"):
+        async with ValidatedOidcHttpClient(transport=transport, development=False) as client:
+            with pytest.raises(OidcHttpError) as error:
+                await client.request_json("GET", "https://idp.example.test/data?token=private", response_limit=2)
+
+    assert error.value.code == error_code
+    summaries = [record.getMessage() for record in caplog.records if record.name == "app.protocol.http"]
+    assert len(summaries) == 1
+    assert f"status={status_code.value}" in summaries[0]
+    assert "outcome=failed" in summaries[0]
+    assert f"error_code={error_code.name}" in summaries[0]
+    assert "private" not in summaries[0]
 
 
 @pytest.mark.parametrize(

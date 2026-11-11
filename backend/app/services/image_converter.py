@@ -162,7 +162,7 @@ def convert_image_for_viewer(
 
             if debug_enabled:
                 logger.debug(
-                    "Image conversion: filename=%r path=preprocessor source=unknown output=unknown "
+                    "event=image_conversion filename=%r path=preprocessor source=unknown output=unknown "
                     "format=%s output_bytes=%d setup_ms=0 encode_ms=%.1f preference=%s webp_fallback=%s",
                     filename,
                     output_format,
@@ -206,7 +206,7 @@ def convert_image_for_viewer(
             duration_ms = (time.perf_counter() - start_time) * MILLISECONDS_PER_SECOND
             if debug_enabled:
                 logger.debug(
-                    "Image conversion: filename=%r path=original source=%sx%s output=%sx%s "
+                    "event=image_conversion filename=%r path=original source=%sx%s output=%sx%s "
                     "format=jpeg output_bytes=%d setup_ms=%.1f encode_ms=0 preference=%s webp_fallback=%s",
                     filename,
                     source_width,
@@ -282,7 +282,7 @@ def convert_image_for_viewer(
         duration_ms = (time.perf_counter() - start_time) * MILLISECONDS_PER_SECOND
         if debug_enabled:
             logger.debug(
-                "Image conversion: filename=%r path=%s source=%sx%s output=%sx%s "
+                "event=image_conversion filename=%r path=%s source=%sx%s output=%sx%s "
                 "format=%s output_bytes=%d setup_ms=%.1f encode_ms=%.1f preference=%s webp_fallback=%s",
                 filename,
                 converter_name,

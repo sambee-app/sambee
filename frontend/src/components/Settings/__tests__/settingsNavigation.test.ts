@@ -20,7 +20,7 @@ describe("settingsNavigation", () => {
       {
         section: "personal",
         label: "Personal",
-        categories: ["appearance", "account", "file-browser", "text-editor", "connections", "local-drives"],
+        categories: ["account", "appearance", "connections", "file-browser", "image-viewer", "local-drives", "text-editor"],
       },
     ]);
   });
@@ -30,20 +30,22 @@ describe("settingsNavigation", () => {
       {
         section: "personal",
         label: "Personal",
-        categories: ["appearance", "account", "file-browser", "text-editor", "connections", "local-drives"],
+        categories: ["account", "appearance", "connections", "file-browser", "image-viewer", "local-drives", "text-editor"],
       },
       {
         section: "administration",
         label: "Administration",
         categories: [
-          "admin-network",
-          "admin-authentication",
-          "admin-users",
-          "admin-smb",
-          "admin-file-search",
-          "admin-directory-search",
-          "admin-system",
           "admin-about",
+          "admin-authentication",
+          "admin-directory-search",
+          "admin-file-search",
+          "admin-image-viewer",
+          "admin-network",
+          "admin-pdf-viewer",
+          "admin-smb",
+          "admin-system",
+          "admin-users",
         ],
       },
     ]);
@@ -63,6 +65,8 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryByPath("/settings/admin/file-search")).toBe("admin-file-search");
     expect(getSettingsCategoryByPath("/settings/admin/directory-search")).toBe("admin-directory-search");
     expect(getSettingsCategoryByPath("/settings/admin/system")).toBe("admin-system");
+    expect(getSettingsCategoryByPath("/settings/admin/image-viewer")).toBe("admin-image-viewer");
+    expect(getSettingsCategoryByPath("/settings/admin/pdf-viewer")).toBe("admin-pdf-viewer");
   });
 
   it("maps nested settings routes to the correct nav items", () => {
@@ -76,12 +80,13 @@ describe("settingsNavigation", () => {
 
   it("returns visible settings nav items as a flat list", () => {
     expect(getVisibleSettingsNavItems(false)).toEqual([
-      "appearance",
       "account",
-      "file-browser",
-      "text-editor",
+      "appearance",
       "connections",
+      "file-browser",
+      "image-viewer",
       "local-drives",
+      "text-editor",
     ]);
   });
 
@@ -98,6 +103,9 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryLabel("account")).toBe("Account");
     expect(getSettingsCategoryLabel("file-browser")).toBe("File Browser");
     expect(getSettingsCategoryLabel("text-editor")).toBe("Text Editor");
+    expect(getSettingsCategoryLabel("image-viewer")).toBe("Image Viewer");
+    expect(getSettingsCategoryLabel("admin-image-viewer")).toBe("Image Viewer");
+    expect(getSettingsCategoryLabel("admin-pdf-viewer")).toBe("PDF Viewer");
     expect(getSettingsCategoryLabel("admin-file-search")).toBe("File Search");
     expect(getSettingsCategoryLabel("admin-directory-search")).toBe("Directory Search");
     expect(getSettingsNavItemLabel("local-drives")).toBe("Local Drives");

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import pyvips
 
-from app.core.system_setting_definitions import ImageConversionPreference
+from app.core.system_setting_definitions import SYSTEM_SETTING_DEFINITIONS, ImageConversionPreference, SystemSettingKey
 from app.services.image_converter import (
     convert_image_for_viewer,
     get_image_info,
@@ -18,6 +18,8 @@ from app.utils.file_type_registry import (
     is_image_file,
     needs_processing,
 )
+
+CONVERSION_THRESHOLD_BYTES = SYSTEM_SETTING_DEFINITIONS[SystemSettingKey.IMAGE_CONVERSION_THRESHOLD_BYTES].default_value
 
 
 class TestImageFormatDetection:
@@ -54,14 +56,16 @@ class TestImageFormatDetection:
             # Browser-native formats below threshold - no processing
             ("photo.jpg", 100 * 1024, False),  # 100 KB JPEG
             ("photo.png", 250 * 1024, False),  # 250 KB PNG
-            ("photo.webp", 499 * 1024, False),  # 499 KB WebP (just under threshold)
+            ("photo.webp", 499 * 1024, False),
             ("photo.gif", 100 * 1024, False),  # 100 KB GIF
             # Browser-native formats above threshold - needs processing
-            ("photo.jpg", 500 * 1024, False),  # 500 KB JPEG (exactly at threshold, but not over)
-            ("photo.jpg", 500 * 1024 + 1, True),  # 500 KB + 1 byte JPEG (over threshold)
-            ("photo.png", 501 * 1024, True),  # 501 KB PNG (over threshold)
-            ("photo.webp", 1024 * 1024, True),  # 1 MB WebP
-            ("photo.gif", 2 * 1024 * 1024, True),  # 2 MB GIF
+            ("photo.jpg", CONVERSION_THRESHOLD_BYTES, False),
+            ("photo.jpg", CONVERSION_THRESHOLD_BYTES + 1, True),
+            ("photo.png", CONVERSION_THRESHOLD_BYTES + 1, True),
+            ("photo.webp", 1024 * 1024, False),
+            ("photo.webp", CONVERSION_THRESHOLD_BYTES + 1, True),
+            ("photo.gif", 2 * 1024 * 1024, False),
+            ("photo.gif", CONVERSION_THRESHOLD_BYTES + 1, True),
             ("photo.jpeg", 10 * 1024 * 1024, True),  # 10 MB JPEG
             # Formats requiring conversion regardless of size
             ("photo.tiff", 100 * 1024, True),  # 100 KB TIFF - still needs conversion
@@ -93,7 +97,7 @@ class TestImageFormatDetection:
             # Edge cases
             ("photo.jpg", 0, False),  # 0 bytes - no processing
             ("photo.jpg", 1, False),  # 1 byte - no processing
-            ("photo.jpg", 499 * 1024 + 1023, False),  # Just under 500 KB - no processing
+            ("photo.jpg", CONVERSION_THRESHOLD_BYTES - 1, False),
         ],
     )
     def test_needs_processing_with_size(self, filename: str, size: int | None, expected: bool):

@@ -11,6 +11,21 @@ from app.models.user_settings import UserSetting
 from app.services import user_settings
 
 
+def test_image_transition_setting_is_personal_and_strict(
+    client: TestClient, auth_headers_user: dict[str, str], auth_headers_admin: dict[str, str]
+) -> None:
+    endpoint = "/api/auth/me/settings"
+    assert client.get(endpoint, headers=auth_headers_user).json()["image_viewer"] == {"transition": "none"}
+    for value in ("none", "carousel"):
+        payload = {"field": "image_viewer.transition", "value": value}
+        response = client.put(endpoint, headers=auth_headers_user, json=payload)
+        assert response.status_code == 200, response.text
+        assert response.json() == payload
+        assert client.get(endpoint, headers=auth_headers_user).json()["image_viewer"]["transition"] == value
+    assert client.put(endpoint, headers=auth_headers_user, json={"field": "image_viewer.transition", "value": "fade"}).status_code == 422
+    assert client.get(endpoint, headers=auth_headers_admin).json()["image_viewer"] == {"transition": "none"}
+
+
 def complete_theme_definition() -> dict:
     def colors(shape: object) -> object:
         if isinstance(shape, tuple):

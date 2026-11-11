@@ -46,11 +46,16 @@ class TextEditorUserSettingsRead(SQLModel):
     word_wrap_enabled: Optional[bool] = None
 
 
+class ImageViewerUserSettingsRead(SQLModel):
+    transition: Literal["carousel", "none"] = "none"
+
+
 class CurrentUserSettingsRead(SQLModel):
     appearance: AppearanceUserSettingsRead
     localization: LocalizationUserSettingsRead
     browser: BrowserUserSettingsRead
     text_editor: TextEditorUserSettingsRead
+    image_viewer: ImageViewerUserSettingsRead
 
 
 class StrictCurrentUserSettingUpdate(SQLModel):
@@ -117,6 +122,11 @@ class TextEditorWordWrapUserSettingUpdate(StrictCurrentUserSettingUpdate):
     value: bool | None
 
 
+class ImageViewerTransitionUserSettingUpdate(StrictCurrentUserSettingUpdate):
+    field: Literal["image_viewer.transition"]
+    value: Literal["carousel", "none"]
+
+
 CurrentUserSettingsUpdate = Annotated[
     ThemeIdUserSettingUpdate
     | LanguageUserSettingUpdate
@@ -129,7 +139,8 @@ CurrentUserSettingsUpdate = Annotated[
     | SelectedConnectionUserSettingUpdate
     | ViewerAssociationsUserSettingUpdate
     | TextEditorMaxFileSizeUserSettingUpdate
-    | TextEditorWordWrapUserSettingUpdate,
+    | TextEditorWordWrapUserSettingUpdate
+    | ImageViewerTransitionUserSettingUpdate,
     Field(discriminator="field"),
 ]
 CurrentUserSettingsUpdateResult = CurrentUserSettingsUpdate
