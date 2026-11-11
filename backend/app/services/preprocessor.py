@@ -24,7 +24,6 @@ import logging
 import os
 import subprocess
 import tempfile
-import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -260,7 +259,6 @@ class ImageMagickPreprocessor(PreprocessorInterface):
                 )
                 metadata = result.stdout.decode().strip().split()
                 colorspace = metadata[0] if metadata else "Unknown"
-                logger.debug(f"Detected colorspace for {filename}: {colorspace}")
                 fits_webp = False
                 if dimensions and len(metadata) == 3:
                     try:
@@ -387,11 +385,7 @@ class ImageMagickPreprocessor(PreprocessorInterface):
             # Output to stdout in specified format
             command.append(f"{output_format}:-")
 
-            logger.debug(f"Converting {filename} to {output_format.upper()} with ImageMagick (in-memory)")
-            logger.debug(f"Command: {' '.join(command)}")
-
             # Execute conversion - pipe input via stdin, capture stdout
-            start_time = time.perf_counter()
             try:
                 result = subprocess.run(
                     command,
@@ -405,19 +399,11 @@ class ImageMagickPreprocessor(PreprocessorInterface):
                 logger.debug("ImageMagick failed to convert %s: %s", filename, error_msg)
                 raise PreprocessorError("The image could not be converted.") from None
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
-
             # Verify output was produced
             if not result.stdout or len(result.stdout) == 0:
                 raise PreprocessorError("Conversion produced no output")
 
             output_bytes = result.stdout
-
-            logger.debug(
-                f"Converted (ImageMagick): {filename} ({len(input_data) / 1024:.0f} KB) → "
-                f"{output_format.upper()} ({len(output_bytes) / 1024:.0f} KB) "
-                f"in {duration_ms:.0f} ms"
-            )
 
             return output_bytes
 
@@ -596,8 +582,6 @@ class PreprocessorFactory:
         # Get configuration
         if preprocessor_type is None:
             preprocessor_type = os.getenv("PREPROCESSOR", "auto").lower()
-
-        logger.debug(f"Creating preprocessor: {preprocessor_type}")
 
         # Auto-detect the single supported preprocessor.
         if preprocessor_type == "auto":

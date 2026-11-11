@@ -29,6 +29,7 @@ class SystemSettingKey(StrEnum):
     PREPROCESSOR_IMAGEMAGICK_MAX_FILE_SIZE_BYTES = "preprocessors.imagemagick.max_file_size_bytes"
     PREPROCESSOR_IMAGEMAGICK_TIMEOUT_SECONDS = "preprocessors.imagemagick.timeout_seconds"
     IMAGE_CONVERSION_PREFERENCE = "image_viewer.conversion_preference"
+    IMAGE_CONVERSION_THRESHOLD_BYTES = "image_viewer.conversion_threshold_bytes"
     PDF_VIEWER_CACHE_QUOTA_BYTES = "pdf.viewer.cache_quota_bytes"
     PDF_VIEWER_CACHE_INACTIVITY_TTL_SECONDS = "pdf.viewer.cache_inactivity_ttl_seconds"
     PDF_NORMALIZER_MAX_SOURCE_SIZE_BYTES = "pdf.normalizer.max_source_size_bytes"
@@ -90,6 +91,16 @@ class IntegerSystemSettingDefinition:
 
 
 SYSTEM_SETTING_DEFINITIONS: dict[SystemSettingKey, IntegerSystemSettingDefinition] = {
+    SystemSettingKey.IMAGE_CONVERSION_THRESHOLD_BYTES: IntegerSystemSettingDefinition(
+        key=SystemSettingKey.IMAGE_CONVERSION_THRESHOLD_BYTES,
+        config_attr=None,
+        label="Image conversion threshold",
+        description="Resize browser-native images larger than this size for backend previews. Formats requiring conversion always convert.",
+        default_value=5 * 1024 * 1024,
+        min_value=0,
+        max_value=1024 * 1024 * 1024,
+        step=1,
+    ),
     SystemSettingKey.TEMPORARY_ARCHIVE_DOWNLOAD_SIZE_BYTES: IntegerSystemSettingDefinition(
         key=SystemSettingKey.TEMPORARY_ARCHIVE_DOWNLOAD_SIZE_BYTES,
         config_attr=None,
@@ -113,7 +124,7 @@ SYSTEM_SETTING_DEFINITIONS: dict[SystemSettingKey, IntegerSystemSettingDefinitio
     SystemSettingKey.PREPROCESSOR_IMAGEMAGICK_MAX_FILE_SIZE_BYTES: IntegerSystemSettingDefinition(
         key=SystemSettingKey.PREPROCESSOR_IMAGEMAGICK_MAX_FILE_SIZE_BYTES,
         config_attr="preprocessor_imagemagick_max_file_size_bytes",
-        label="Maximum file size",
+        label="ImageMagick maximum file size",
         description="Largest input file ImageMagick is allowed to preprocess.",
         default_value=100 * 1024 * 1024,
         min_value=1 * 1024 * 1024,
@@ -123,7 +134,7 @@ SYSTEM_SETTING_DEFINITIONS: dict[SystemSettingKey, IntegerSystemSettingDefinitio
     SystemSettingKey.PREPROCESSOR_IMAGEMAGICK_TIMEOUT_SECONDS: IntegerSystemSettingDefinition(
         key=SystemSettingKey.PREPROCESSOR_IMAGEMAGICK_TIMEOUT_SECONDS,
         config_attr="preprocessor_imagemagick_timeout_seconds",
-        label="Conversion timeout",
+        label="ImageMagick conversion timeout",
         description="Maximum time allowed for an ImageMagick preprocessing run.",
         default_value=30,
         min_value=5,

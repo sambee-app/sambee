@@ -1,5 +1,5 @@
 import type { ParseKeys } from "i18next";
-import { translate } from "../../i18n";
+import i18n, { translate } from "../../i18n";
 import { SETTINGS_CATEGORY_ORDER, type SettingsCategory } from "./settingsCategories";
 
 export { SETTINGS_CATEGORY_ORDER, type SettingsCategory } from "./settingsCategories";
@@ -29,6 +29,7 @@ export const SETTINGS_ROUTE_BY_CATEGORY: Record<SettingsCategory, string> = {
   account: "/settings/account",
   "file-browser": "/settings/file-browser",
   "text-editor": "/settings/text-editor",
+  "image-viewer": "/settings/image-viewer",
   connections: "/settings/connections",
   "local-drives": "/settings/connections/local-drives",
   "admin-network": "/settings/admin/network",
@@ -38,6 +39,8 @@ export const SETTINGS_ROUTE_BY_CATEGORY: Record<SettingsCategory, string> = {
   "admin-file-search": "/settings/admin/file-search",
   "admin-directory-search": "/settings/admin/directory-search",
   "admin-system": "/settings/admin/system",
+  "admin-image-viewer": "/settings/admin/image-viewer",
+  "admin-pdf-viewer": "/settings/admin/pdf-viewer",
   "admin-about": "/settings/admin/about",
 };
 
@@ -91,6 +94,14 @@ export const SETTINGS_CATEGORY_META: Record<SettingsCategory, SettingsCategoryMe
     },
     descriptionKey: "settings.categories.connections.description",
     route: SETTINGS_ROUTE_BY_CATEGORY.connections,
+    section: "personal",
+  },
+  "image-viewer": {
+    get label() {
+      return translate("settings.categories.imageViewer.label");
+    },
+    descriptionKey: "settings.categories.imageViewer.description",
+    route: SETTINGS_ROUTE_BY_CATEGORY["image-viewer"],
     section: "personal",
   },
   "local-drives": {
@@ -164,6 +175,24 @@ export const SETTINGS_CATEGORY_META: Record<SettingsCategory, SettingsCategoryMe
     section: "administration",
     adminOnly: true,
   },
+  "admin-image-viewer": {
+    get label() {
+      return translate("settings.categories.adminImageViewer.label");
+    },
+    descriptionKey: "settings.categories.adminImageViewer.description",
+    route: SETTINGS_ROUTE_BY_CATEGORY["admin-image-viewer"],
+    section: "administration",
+    adminOnly: true,
+  },
+  "admin-pdf-viewer": {
+    get label() {
+      return translate("settings.categories.adminPdfViewer.label");
+    },
+    descriptionKey: "settings.categories.adminPdfViewer.description",
+    route: SETTINGS_ROUTE_BY_CATEGORY["admin-pdf-viewer"],
+    section: "administration",
+    adminOnly: true,
+  },
   "admin-about": {
     get label() {
       return translate("settings.categories.adminAbout.label");
@@ -202,10 +231,11 @@ export function getSettingsParentCategory(item: SettingsNavItem): SettingsCatego
 }
 
 export function getVisibleSettingsCategories(isAdmin: boolean): SettingsCategory[] {
+  const collator = new Intl.Collator(i18n.resolvedLanguage ?? "en");
   return SETTINGS_CATEGORY_ORDER.filter((category) => {
     const meta = SETTINGS_CATEGORY_META[category];
     return !meta.adminOnly || isAdmin;
-  });
+  }).sort((left, right) => collator.compare(getSettingsCategoryLabel(left), getSettingsCategoryLabel(right)) || left.localeCompare(right));
 }
 
 export function getVisibleSettingsSections(isAdmin: boolean): VisibleSettingsSection[] {

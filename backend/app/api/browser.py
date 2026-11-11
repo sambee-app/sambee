@@ -941,7 +941,6 @@ async def list_directory(
         _listing_feedback_tasks.add(task)
         task.add_done_callback(_listing_feedback_tasks.discard)
 
-        logger.debug(f"Successfully listed directory: connection_id={connection_id}, path='{path}', items={len(listing.items)}")
         return listing
 
     except FileNotFoundError as error:
@@ -1038,8 +1037,6 @@ async def get_file_info(
     # Set user context for logging
     set_user(current_user.username)
 
-    logger.debug(f"Getting file info: connection_id={connection_id}, path='{path}'")
-
     connection = _get_connection_or_404(session, current_user, connection_id)
 
     try:
@@ -1055,7 +1052,6 @@ async def get_file_info(
                 context=f"file info request: connection_id={connection_id}, path='{path}'",
             )
 
-        logger.debug(f"Successfully retrieved file info: connection_id={connection_id}, path='{path}', type={file_info.type}")
         return file_info
 
     except (FileNotFoundError, PermissionError, NotADirectoryError, TimeoutError) as error:

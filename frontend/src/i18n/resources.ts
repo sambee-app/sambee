@@ -156,6 +156,10 @@ export const EN_TRANSLATIONS = {
         label: "Text Editor",
         description: "Configure defaults and safety limits for the generic text editor.",
       },
+      imageViewer: {
+        label: "Image Viewer",
+        description: "Configure desktop image transitions. Touch navigation is unchanged.",
+      },
       connections: {
         label: "Connections",
         description: "Manage shared and private SMB connections.",
@@ -174,7 +178,15 @@ export const EN_TRANSLATIONS = {
       },
       adminSystem: {
         label: "System",
-        description: "Manage system-wide application and preprocessing runtime settings.",
+        description: "Manage archive creation limits.",
+      },
+      adminImageViewer: {
+        label: "Image Viewer",
+        description: "Configure image conversion and processing limits.",
+      },
+      adminPdfViewer: {
+        label: "PDF Viewer",
+        description: "Configure PDF compatibility, cache, and processing limits.",
       },
       adminSmb: {
         label: "SMB",
@@ -192,6 +204,13 @@ export const EN_TRANSLATIONS = {
         label: "About",
         description: "Review Sambee build, software, and hardware information.",
       },
+    },
+    imageViewerPage: {
+      transitionDescription:
+        "Carousel slides between images during mouse and keyboard navigation. No animation switches images without a slide effect. Touch swipes always use the carousel animation.",
+      transition: "Transition",
+      carousel: "Carousel",
+      none: "No animation",
     },
     directorySearch: {
       loadFailed: "Could not load directory-search policy. Check the backend connection, then retry.",
@@ -663,7 +682,7 @@ export const EN_TRANSLATIONS = {
         preprocessors: "Preprocessors",
         imageMagick: "ImageMagick",
         pdfCompatibility: "PDF compatibility",
-        archiveDownloads: "Archive downloads",
+        archiveDownloads: "Archive creation",
       },
       fields: {
         value: "Value",
@@ -1574,6 +1593,8 @@ export const EN_TRANSLATIONS = {
       previousMatch: "Previous match",
       firstPage: "First page",
       lastPage: "Last page",
+      firstImage: "First image",
+      lastImage: "Last image",
       nextPage: "Next page",
       previousPage: "Previous page",
       next: "Next",

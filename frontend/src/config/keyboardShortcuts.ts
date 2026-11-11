@@ -130,6 +130,24 @@ export const COMMON_SHORTCUTS = {
     label: "Home",
     helpGroup: "navigation",
   },
+  FIRST_IMAGE: {
+    id: "first-image",
+    keys: "Home",
+    get description() {
+      return translate("viewer.shortcuts.firstImage");
+    },
+    label: "Home",
+    helpGroup: "navigation",
+  },
+  LAST_IMAGE: {
+    id: "last-image",
+    keys: "End",
+    get description() {
+      return translate("viewer.shortcuts.lastImage");
+    },
+    label: "End",
+    helpGroup: "navigation",
+  },
   LAST_PAGE: {
     id: "last-page",
     keys: "End",

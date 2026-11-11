@@ -9,13 +9,14 @@
 # Backend log level: DEBUG, INFO, WARNING, ERROR (case-insensitive)
 log_level = "INFO"
 
-# Uvicorn HTTP access log level: DEBUG, INFO, WARNING, ERROR.
+# HTTP access and WebSocket handshake log level: DEBUG, INFO, WARNING, ERROR.
 # Defaults to WARNING so successful requests do not obscure application-level INFO events.
 # Set to INFO for request auditing.
 # access_log_level = "WARNING"
 
-# Uvicorn WebSocket protocol log level: DEBUG, INFO, WARNING, ERROR.
-# Defaults to WARNING so connection open, accepted, and closed messages stay quiet.
+# WebSocket lifetime summary log level: DEBUG, INFO, WARNING, ERROR.
+# Set to DEBUG for close codes, message totals, byte totals, and connection duration.
+# Raw headers, frame payloads, and keepalive messages are never logged.
 # Uvicorn startup, shutdown, and error messages continue to use log_level.
 # protocol_log_level = "WARNING"
 
@@ -26,10 +27,6 @@ access_token_expire_minutes = 1440
 [admin]
 # Initial admin account username
 username = "admin"
-
-[image_viewer]
-# Conversion size threshold: images larger than this are always converted for viewing
-# conv_size_thresh = 512000
 
 [frontend_logging]
 # Browser console logging (for development/debugging)

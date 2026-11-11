@@ -101,7 +101,6 @@ CONFIG_FILE_SETTING_FIELDS = (
     ("app.protocol_log_level", "protocol_log_level"),
     ("auth.disable_enforcement", "disable_auth_enforcement"),
     ("security.access_token_expire_minutes", "access_token_expire_minutes"),
-    ("image_viewer.conv_size_thresh", "image_viewer_conv_size_thresh"),
     ("frontend_logging.logging_enabled", "frontend_logging_enabled"),
     ("frontend_logging.log_level", "frontend_log_level"),
     ("frontend_logging.tracing_enabled", "frontend_tracing_enabled"),
@@ -450,6 +449,7 @@ def get_image_conversion_preference() -> ImageConversionPreference:
 def build_advanced_system_settings_read() -> AdvancedSystemSettingsRead:
     preference, source = _resolve_image_conversion_preference()
     return AdvancedSystemSettingsRead(
+        image_conversion_threshold_bytes=_build_integer_read(SYSTEM_SETTING_DEFINITIONS[SystemSettingKey.IMAGE_CONVERSION_THRESHOLD_BYTES]),
         image_conversion_preference=ImageConversionPreferenceRead(
             key=SystemSettingKey.IMAGE_CONVERSION_PREFERENCE,
             label="Image conversion preference",
@@ -657,6 +657,8 @@ def _append_advanced_settings_report(lines: list[str]) -> None:
     lines.append("[ui_configuration.advanced]")
     preference = advanced.image_conversion_preference
     _append_report_setting(lines, preference.key.value, preference.value.value, preference.source.value)
+    threshold = advanced.image_conversion_threshold_bytes
+    _append_report_setting(lines, threshold.key.value, threshold.value, threshold.source.value)
     imagemagick = advanced.preprocessors["imagemagick"]
     _append_report_setting(
         lines,

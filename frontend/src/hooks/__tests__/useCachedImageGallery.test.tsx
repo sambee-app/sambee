@@ -40,6 +40,34 @@ const loadMockImageBlob = (path: string, options: { signal: AbortSignal; viewpor
   apiService.getImageBlob("conn-1", path, options);
 
 describe("useCachedImageGallery", () => {
+  it("retains a pinned decoded URL across distant eviction and releases it once", async () => {
+    let sequence = 0;
+    vi.mocked(URL.createObjectURL).mockImplementation(() => `blob:retained-${sequence++}`);
+    vi.mocked(apiService.getImageBlob).mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
+    const images = ["/0.jpg", "/1.jpg", "/2.jpg"];
+    const { result, unmount } = renderHook(() =>
+      useCachedImageGallery({
+        connectionId: "conn-1",
+        images,
+        loadImageBlob: loadMockImageBlob,
+        preloadRange: 0,
+        cacheRange: 0,
+      })
+    );
+    await waitFor(() => expect(result.current.getCachedImageSrc(0)).toBeDefined());
+    const source = result.current.getCachedImageSrc(0);
+    const release = result.current.pinCachedImage(0);
+    act(() => result.current.setCurrentIndex(2));
+    await waitFor(() => expect(result.current.getCachedImageSrc(2)).toBeDefined());
+    expect(result.current.getCachedImageSrc(0)).toBeUndefined();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(source);
+    release();
+    release();
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.filter(([url]) => url === source)).toHaveLength(1);
+    unmount();
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.filter(([url]) => url === source)).toHaveLength(1);
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();

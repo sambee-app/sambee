@@ -86,6 +86,11 @@ describe("userSettingsStore", () => {
     vi.useRealTimers();
   });
 
+  it("defaults to no animation when the settings response has no image viewer preference", async () => {
+    await authenticateAndLoad();
+    expect(userSettingsStore.getValue("image_viewer.transition").confirmedValue).toBe("none");
+  });
+
   it("commits a canonical field response and broadcasts an invalidation", async () => {
     await authenticateAndLoad();
     const result = { field: "appearance.theme_id", value: "sambee-dark" } as const;

@@ -79,6 +79,7 @@ class ImageConversionPreferenceRead(SQLModel):
 
 class AdvancedSystemSettingsRead(SQLModel):
     image_conversion_preference: ImageConversionPreferenceRead
+    image_conversion_threshold_bytes: IntegerSystemSettingRead
     preprocessors: dict[str, PreprocessorAdvancedSettingsRead]
     pdf: PdfAdvancedSettingsRead
     temporary_archive_download_size_bytes: IntegerSystemSettingRead

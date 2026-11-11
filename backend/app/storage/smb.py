@@ -439,7 +439,6 @@ class SMBBackend(StorageBackend):
         """
 
         # Connection pooling is handled transparently in operations.
-        logger.debug("SMB backend is ready for pooled work.")
 
     #
     # disconnect
@@ -464,8 +463,6 @@ class SMBBackend(StorageBackend):
                 reason="ephemeral connection validation completed",
             )
             return
-
-        logger.debug("SMB backend released; pooled connections remain owned.")
 
     #
     # _normalize_prefix
@@ -714,7 +711,6 @@ class SMBBackend(StorageBackend):
         """List contents of a directory"""
 
         smb_path = self._build_smb_path(path)
-        logger.debug("SMB directory listing started.", extra={"operation": "list_directory"})
 
         try:
             # Acquire connection from pool
@@ -1147,7 +1143,6 @@ class SMBBackend(StorageBackend):
         # Write chunk size — 4 MB matches read_file for consistency
         write_chunk_size: int = 4 * 1024 * 1024
         smb_path = self._build_smb_path(path)
-        logger.debug("SMB write started.", extra={"operation": "write_file"})
 
         try:
             pool = await get_connection_pool()
@@ -1185,7 +1180,6 @@ class SMBBackend(StorageBackend):
                     mutation_paths=(smb_path,),
                 )
 
-                logger.debug("SMB write completed.", extra={"operation": "write_file"})
                 return bytes_written
 
         except TimeoutError:
@@ -1358,7 +1352,6 @@ class SMBBackend(StorageBackend):
         """
 
         smb_path = self._build_smb_path(path)
-        logger.debug("SMB delete started.", extra={"operation": "delete_item"})
 
         try:
             pool = await get_connection_pool()
@@ -1401,8 +1394,6 @@ class SMBBackend(StorageBackend):
                     smb_path=smb_path,
                     mutation_paths=(smb_path,),
                 )
-
-                logger.debug("SMB delete completed.", extra={"operation": "delete_item"})
 
         except TimeoutError as error:
             logger.error("SMB delete timed out.", extra={"operation": "delete_item"})
@@ -1504,8 +1495,6 @@ class SMBBackend(StorageBackend):
         parent = smb_src.rsplit("\\", 1)[0]
         smb_dst = f"{parent}\\{normalized_name}"
 
-        logger.debug("SMB rename started.", extra={"operation": "rename_item"})
-
         try:
             pool = await get_connection_pool()
 
@@ -1524,8 +1513,6 @@ class SMBBackend(StorageBackend):
                     smb_path=smb_src,
                     mutation_paths=(smb_src, smb_dst),
                 )
-
-                logger.debug("SMB rename completed.", extra={"operation": "rename_item"})
 
         except asyncio.TimeoutError:
             logger.error("SMB rename timed out.", extra={"operation": "rename_item"})
@@ -1568,7 +1555,6 @@ class SMBBackend(StorageBackend):
         """
 
         smb_path = self._build_smb_path(path)
-        logger.debug("SMB directory creation started.", extra={"operation": "create_directory"})
 
         try:
             pool = await get_connection_pool()
@@ -1588,8 +1574,6 @@ class SMBBackend(StorageBackend):
                     smb_path=smb_path,
                     mutation_paths=(smb_path,),
                 )
-
-                logger.debug("SMB directory creation completed.", extra={"operation": "create_directory"})
 
         except asyncio.TimeoutError:
             logger.error("SMB directory creation timed out.", extra={"operation": "create_directory"})
@@ -1634,7 +1618,6 @@ class SMBBackend(StorageBackend):
         """
 
         smb_path = self._build_smb_path(path)
-        logger.debug("SMB file creation started.", extra={"operation": "create_file"})
 
         try:
             pool = await get_connection_pool()
@@ -1659,8 +1642,6 @@ class SMBBackend(StorageBackend):
                     smb_path=smb_path,
                     mutation_paths=(smb_path,),
                 )
-
-                logger.debug("SMB file creation completed.", extra={"operation": "create_file"})
 
         except asyncio.TimeoutError:
             logger.error("SMB file creation timed out.", extra={"operation": "create_file"})
@@ -1747,7 +1728,6 @@ class SMBBackend(StorageBackend):
 
         smb_src = self._build_smb_path(source_path)
         smb_dst = self._build_smb_path(dest_path)
-        logger.debug("SMB copy started.", extra={"operation": "copy_item"})
 
         try:
             pool = await get_connection_pool()
@@ -1808,8 +1788,6 @@ class SMBBackend(StorageBackend):
                     mutation_paths=(smb_dst,),
                 )
 
-                logger.debug("SMB copy completed.", extra={"operation": "copy_item"})
-
         except asyncio.TimeoutError:
             logger.error("SMB copy timed out.", extra={"operation": "copy_item"})
             raise TimeoutError(f"SMB operation timed out while copying: {source_path}")
@@ -1859,7 +1837,6 @@ class SMBBackend(StorageBackend):
 
         smb_src = self._build_smb_path(source_path)
         smb_dst = self._build_smb_path(dest_path)
-        logger.debug("SMB move started.", extra={"operation": "move_item"})
 
         try:
             pool = await get_connection_pool()
@@ -1895,8 +1872,6 @@ class SMBBackend(StorageBackend):
                     smb_path=smb_src,
                     mutation_paths=(smb_src, smb_dst),
                 )
-
-                logger.debug("SMB move completed.", extra={"operation": "move_item"})
 
         except asyncio.TimeoutError:
             logger.error("SMB move timed out.", extra={"operation": "move_item"})
@@ -1964,7 +1939,6 @@ class SMBBackend(StorageBackend):
         chunk_write_timeout_s: float = 60.0
 
         smb_path = self._build_smb_path(path)
-        logger.debug("SMB stream write started.", extra={"operation": "write_file_from_stream"})
 
         bytes_written = 0
         replaced = False
@@ -2044,7 +2018,6 @@ class SMBBackend(StorageBackend):
                         smb_path=smb_path,
                     )
 
-                logger.debug("SMB stream write completed.", extra={"operation": "write_file_from_stream"})
                 return TargetWriteResult(bytes_written, replaced=replaced)
 
         except asyncio.TimeoutError as exc:

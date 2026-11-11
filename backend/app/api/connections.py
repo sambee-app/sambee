@@ -105,10 +105,9 @@ async def list_connections(
     """List all configured connections visible to the current user."""
 
     set_user(current_user.username)
-    logger.debug(f"Listing connections: user={current_user.username}")
 
     connections = list_accessible_connections(session, current_user)
-    logger.debug(f"Found {len(connections)} visible connections")
+    logger.debug("event=connections_listed count=%s", len(connections))
     return [build_connection_read(connection, current_user) for connection in connections]
 
 

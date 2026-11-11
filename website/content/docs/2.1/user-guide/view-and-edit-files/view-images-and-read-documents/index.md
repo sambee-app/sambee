@@ -12,6 +12,12 @@ On SMB connections, Sambee shrinks large images and converts formats the browser
 
 Local-drive images come directly from Companion without backend image conversion. Downloaded images are always the unaltered original.
 
+Desktop keyboard and mouse-button navigation keeps the displayed image visible until the requested image is ready. Repeated navigation selects the latest requested target and can skip intermediate images. If loading fails, the current image stays visible; use Retry or select another image. Image-specific actions are unavailable while a replacement loads.
+
+Use Home for the first image and End for the last image. In an archive, End can take time while Sambee loads the remaining directory pages. Another navigation action cancels that jump.
+
+**Settings > Personal > Image viewer > Transition** selects **Carousel** or **No animation** for desktop navigation. Touch swipes and touch navigation buttons keep their existing animation and loading behavior, including on touchscreen laptops. The preference is saved with your account and also applies to local-drive images.
+
 ## PDFs
 
 PDF search works in any PDF document that has a text layer.

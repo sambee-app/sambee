@@ -30,6 +30,7 @@ export interface ViewerComponentProps {
   virtualSource?: VirtualItemHandle;
   hasMoreItems?: boolean;
   isLoadingMoreItems?: boolean;
+  loadMoreError?: string | null;
   onLoadMoreItems?: () => void;
   // Gallery mode support
   images?: string[];

@@ -35,14 +35,23 @@ from app.api import (
     websocket,
 )
 from app.api.archive_v2_errors import archive_v2_http_exception_handler, archive_v2_request_validation_exception_handler
-from app.core.config import consume_unsupported_config_settings, settings
+from app.core.config import consume_unsupported_config_settings, settings, static
 from app.core.environment import DEV_CORS_ORIGINS, IS_DEVELOPMENT, IS_PRODUCTION
 from app.core.exceptions import ConfigurationError, SambeeError
-from app.core.logging import RecoveryLogFormatter, SensitiveDataLogFilter, configure_uvicorn_loggers, log_error, set_request_id
+from app.core.logging import (
+    ExceptionDiagnosticFilter,
+    RecoveryLogFormatter,
+    SensitiveDataLogFilter,
+    configure_uvicorn_loggers,
+    create_diagnostic_handler,
+    log_error,
+    set_request_id,
+)
 from app.core.secrets import generate_admin_password
 from app.core.security import get_password_hash
 from app.db.database import DATABASE_FILE_PATH, engine, init_db
 from app.middleware.authentication import PasswordFormBodyLimitMiddleware
+from app.middleware.logging import OperationSummaryMiddleware
 from app.models.oidc import OidcProviderConfiguration
 from app.models.user import User, UserRole
 from app.services.system_settings import store as system_settings_store
@@ -86,7 +95,18 @@ def bootstrap_admin_if_pristine(session: Session) -> tuple[User | None, str | No
 # Convert log level string (e.g., "INFO") to Python logging constant (e.g., logging.INFO = 20)
 # This allows config.toml to use human-readable strings like "DEBUG" or "ERROR"
 log_level = getattr(logging, settings.log_level)
-logging.basicConfig(level=log_level, format=log_format, handlers=handlers)
+diagnostic_handler: logging.Handler | None = None
+try:
+    diagnostic_handler = create_diagnostic_handler(static.data_dir / "logs")
+except OSError:
+    diagnostic_handler = logging.StreamHandler(sys.stderr)
+    diagnostic_handler.addFilter(ExceptionDiagnosticFilter())
+    diagnostic_handler.setFormatter(logging.Formatter("%(name)s - %(levelname)s - error_id=%(error_id)s - %(message)s"))
+    print(
+        "Backend exception log is unavailable. Full exceptions go to stderr. Check write permission for the data/logs directory.",
+        file=sys.stderr,
+    )
+logging.basicConfig(level=log_level, format=log_format, handlers=[diagnostic_handler, *handlers] if diagnostic_handler else handlers)
 for handler in handlers:
     handler.setFormatter(RecoveryLogFormatter(log_format))
 
@@ -96,6 +116,7 @@ configure_uvicorn_loggers(
     application_log_level=log_level,
     access_log_level=getattr(logging, settings.access_log_level),
     protocol_log_level=getattr(logging, settings.protocol_log_level),
+    diagnostic_handler=diagnostic_handler,
 )
 
 # Reduce noise from third-party libraries (only show warnings/errors)
@@ -413,6 +434,7 @@ app = FastAPI(
     openapi_url=None,
 )
 app.add_middleware(PasswordFormBodyLimitMiddleware)
+app.add_middleware(OperationSummaryMiddleware)
 app.add_exception_handler(HTTPException, archive_v2_http_exception_handler)
 app.add_exception_handler(RequestValidationError, archive_v2_request_validation_exception_handler)
 

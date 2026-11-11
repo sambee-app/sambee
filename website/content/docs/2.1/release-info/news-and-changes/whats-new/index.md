@@ -10,8 +10,19 @@ title = "What's New"
 
 ## Image Viewer
 
-- The new setting **Image conversion preference** allows choosing between conversion speed (default) and target image size.
-- Fixed the animation smoothness when browsing between images in the viewer.
+- Improved the speed and smoothness of image display and animation when browsing between images in the viewer.
+- Keyboard shortcuts now include <kbd>Home</kbd> and <kbd>End</kbd> to move to the first and last image in a folder, respectively.
+- New settings category **Administration** > **Image Viewer**:
+   - **Image conversion threshold**: this was moved from the config file to the settings UI and the default was changed from 512 KB to 5 MB.
+   - **Image conversion preference**: choose between conversion speed (default) and target image size.
+   - ImageMagick settings were moved here from **System**.
+- New settings category **Personal** > **Image Viewer**:
+   - **Transition**: choose the animation between images in desktop mode (default: no animation).
+
+## PDF Viewer
+
+- New settings category **Administration** > **PDF Viewer**:
+   - PDF settings were moved here from **System**.
 
 ## Unencrypted HTTP Support
 
@@ -24,4 +35,8 @@ title = "What's New"
 ## Security
 
 - Updated all dependencies with known issues or vulnerabilities to fixed versions.
+
+## Logging
+
 - Docker container logs are now redacted so that session cookies and other credentials don't get logged.
+- Docker container log messages from Uvicorn (http layer) and spnego (authentication) are now filtered so that messages are only logged once per completed operation. Log messages are formatted to fit on one line.

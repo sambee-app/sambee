@@ -491,13 +491,13 @@ describe("SettingsDialog Component", () => {
 
     await user.keyboard("{End}");
 
-    expect(await screen.findByText("Local Drives Settings Content")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /local drives/i })).toHaveFocus();
+    expect(await screen.findByText("Text Editor Settings Content")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /text editor/i })).toHaveFocus();
 
     await user.keyboard("{Home}");
 
-    expect(await screen.findByText("Appearance Settings Content")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /appearance/i })).toHaveFocus();
+    expect(await screen.findByText("Account Settings Content")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^account$/i })).toHaveFocus();
   });
 
   it("supports PageUp and PageDown keyboard navigation in the category list", async () => {
@@ -517,13 +517,13 @@ describe("SettingsDialog Component", () => {
 
     await user.keyboard("{PageDown}");
 
-    expect(await screen.findByText("About Settings Content")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /^about$/i })).toHaveFocus();
+    expect(await screen.findByText("User Management Settings Content")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /user management/i })).toHaveFocus();
 
     await user.keyboard("{PageUp}");
 
-    expect(await screen.findByText("Appearance Settings Content")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /appearance/i })).toHaveFocus();
+    expect(await screen.findByText("Account Settings Content")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^account$/i })).toHaveFocus();
   });
 
   it("prefetches only permitted categories after the selected page renders, during idle time", async () => {
@@ -532,7 +532,14 @@ describe("SettingsDialog Component", () => {
     const { unmount } = renderWithTheme(<SettingsDialog open={true} onClose={mockOnClose} />);
     await screen.findByText("Appearance Settings Content");
     expect(scheduleSettingsPagePrefetch).toHaveBeenCalledOnce();
-    expect(scheduleSettingsPagePrefetch).toHaveBeenCalledWith(["account", "file-browser", "text-editor", "connections", "local-drives"]);
+    expect(scheduleSettingsPagePrefetch).toHaveBeenCalledWith([
+      "account",
+      "connections",
+      "file-browser",
+      "image-viewer",
+      "local-drives",
+      "text-editor",
+    ]);
     unmount();
     expect(cancel).toHaveBeenCalledOnce();
   });

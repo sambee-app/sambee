@@ -1,10 +1,12 @@
 import ipaddress
 import json
+import logging
 import socket
 import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from enum import IntEnum
+from time import monotonic
 from types import TracebackType
 from typing import Any, Final, Protocol, cast
 from urllib.parse import urlsplit
@@ -14,7 +16,10 @@ import httpcore
 import httpx
 
 from app.core.environment import IS_DEVELOPMENT
+from app.core.logging import http_summary_active
 
+logger = logging.getLogger("app.protocol.http")
+MILLISECONDS_PER_SECOND: Final = 1000
 CONNECT_TIMEOUT_SECONDS: Final = 3.0
 READ_TIMEOUT_SECONDS: Final = 5.0
 DISCOVERY_RESPONSE_LIMIT_BYTES: Final = 1024 * 1024
@@ -237,10 +242,73 @@ class ValidatedOidcHttpClient:
         auth: httpx.Auth | None = None,
         accepted_error_statuses: frozenset[int] = frozenset(),
     ) -> OidcJsonResponse:
+        started = monotonic()
+        context_token = http_summary_active.set(True)
+        response: OidcJsonResponse | None = None
+        response_status: int | None = None
+        error_code: OidcHttpErrorCode | None = None
+        error_type: str | None = None
+
+        def capture_response_status(status_code: int) -> None:
+            nonlocal response_status
+            response_status = status_code
+
+        try:
+            response = await self._request_json(
+                method,
+                url,
+                response_limit=response_limit,
+                headers=headers,
+                data=data,
+                auth=auth,
+                accepted_error_statuses=accepted_error_statuses,
+                on_response_status=capture_response_status,
+            )
+            return response
+        except OidcHttpError as error:
+            error_code = error.code
+            error_type = type(error).__name__
+            raise
+        except BaseException as error:
+            error_type = type(error).__name__
+            raise
+        finally:
+            http_summary_active.reset(context_token)
+            if logger.isEnabledFor(logging.INFO):
+                try:
+                    destination = urlsplit(url)
+                    host, path = destination.hostname, destination.path
+                except ValueError:
+                    host, path = None, None
+                logger.info(
+                    "event=http_client method=%r host=%r path=%r status=%s duration_ms=%.1f outcome=%s error_code=%s error_type=%r",
+                    method,
+                    host,
+                    path,
+                    response_status,
+                    (monotonic() - started) * MILLISECONDS_PER_SECOND,
+                    "success" if response else "failed",
+                    error_code.name if error_code else None,
+                    error_type,
+                )
+
+    async def _request_json(
+        self,
+        method: str,
+        url: str,
+        *,
+        response_limit: int,
+        headers: dict[str, str] | None,
+        data: dict[str, str] | None,
+        auth: httpx.Auth | None,
+        accepted_error_statuses: frozenset[int],
+        on_response_status: Callable[[int], None],
+    ) -> OidcJsonResponse:
         validate_oidc_url(url, development=self._development)
         try:
             async with _OIDC_REQUEST_LIMITER:
                 async with self._client.stream(method, url, headers=headers, data=data, auth=auth) as response:
+                    on_response_status(response.status_code)
                     if response.is_redirect:
                         raise OidcHttpError(OidcHttpErrorCode.REDIRECT_REJECTED, "OIDC endpoint redirects are not allowed")
                     if response.status_code not in accepted_error_statuses:

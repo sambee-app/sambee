@@ -1,15 +1,184 @@
 """Tests for backend logging configuration and frontend logging API."""
 
+import asyncio
 import errno
 import io
 import logging
+import socket
 import sqlite3
 import sys
+from pathlib import Path
 
 import pytest
+import uvicorn
 from fastapi.testclient import TestClient
+from starlette.types import Message, Scope
+from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 
-from app.core.logging import RecoveryLogFormatter, SensitiveDataLogFilter, UvicornProtocolLogFilter, configure_uvicorn_loggers
+from app.core.logging import (
+    RecoveryLogFormatter,
+    SensitiveDataLogFilter,
+    UvicornProtocolLogFilter,
+    configure_uvicorn_loggers,
+    create_diagnostic_handler,
+)
+from app.middleware.logging import OperationSummaryMiddleware
+
+
+@pytest.fixture(autouse=True)
+def restore_configured_loggers():
+    names = (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "httpx",
+        "httpx2",
+        "httpcore",
+        "httpcore2",
+        "watchfiles",
+        "python_multipart",
+        "spnego",
+        "app.protocol.http",
+        "app.protocol.websocket",
+    )
+    original = {
+        name: (logging.getLogger(name).level, logging.getLogger(name).handlers[:], logging.getLogger(name).propagate) for name in names
+    }
+    yield
+    for name, (level, handlers, propagate) in original.items():
+        logger = logging.getLogger(name)
+        logger.setLevel(level)
+        logger.handlers = handlers
+        logger.propagate = propagate
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepted", [False, True])
+async def test_real_uvicorn_handshake_has_one_safe_summary(accepted: bool) -> None:
+    stream = io.StringIO()
+    configure_uvicorn_loggers([logging.StreamHandler(stream)], "%(message)s", logging.DEBUG, logging.INFO, logging.DEBUG)
+
+    async def app(scope, receive, send) -> None:
+        await receive()
+        if accepted:
+            await send({"type": "websocket.accept"})
+        await send({"type": "websocket.close", "code": 1000})
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        server = uvicorn.Server(uvicorn.Config(OperationSummaryMiddleware(app), log_config=None, lifespan="off", ws="websockets-sansio"))
+        serving = asyncio.create_task(server.serve(sockets=[listener]))
+        try:
+            address = f"ws://127.0.0.1:{listener.getsockname()[1]}/api/ws?token=private"
+            if accepted:
+                async with connect(address, additional_headers={"Cookie": "private"}) as websocket:
+                    await websocket.wait_closed()
+            else:
+                with pytest.raises(InvalidStatus) as error:
+                    await connect(address, additional_headers={"Cookie": "private"})
+                assert error.value.response.status_code == 403
+        finally:
+            server.should_exit = True
+            await asyncio.wait_for(serving, timeout=5)
+    output = stream.getvalue()
+    assert output.count("event=ws_handshake") == 1
+    assert f"status={101 if accepted else 403}" in output
+    assert output.count("event=ws_closed") == int(accepted)
+    assert "private" not in output
+    assert "< GET" not in output
+    assert "connection is " not in output
+
+
+@pytest.mark.asyncio
+async def test_websocket_summary_counts_traffic_without_payloads(caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(logging.getLogger("app.protocol.websocket"), "handlers", [])
+    monkeypatch.setattr(logging.getLogger("app.protocol.websocket"), "propagate", True)
+    incoming = iter([{"type": "websocket.receive", "text": "private"}, {"type": "websocket.disconnect", "code": 1000}])
+    sent = []
+
+    async def receive() -> Message:
+        return next(incoming)
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    async def app(scope, receive, send) -> None:
+        await send({"type": "websocket.accept"})
+        await receive()
+        await send({"type": "websocket.send", "bytes": b"private"})
+        await receive()
+
+    with caplog.at_level(logging.DEBUG, logger="app.protocol.websocket"):
+        await OperationSummaryMiddleware(app)({"type": "websocket"}, receive, send)
+    assert len(caplog.records) == 1
+    output = caplog.records[0].getMessage()
+    assert "event=ws_closed" in output
+    assert "rx_messages=1 tx_messages=1 rx_bytes=7 tx_bytes=7" in output
+    assert "private" not in output
+    assert len(sent) == 2
+
+
+@pytest.mark.asyncio
+async def test_operation_summary_keeps_stream_and_omits_file_paths(caplog: pytest.LogCaptureFixture) -> None:
+    sent = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    async def app(scope, receive, send) -> None:
+        scope["path_params"] = {"connection_id": "opaque-source"}
+        await send({"type": "http.response.start", "status": 200})
+        await send({"type": "http.response.body", "body": b"private", "more_body": False})
+
+    scope: Scope = {"type": "http", "path": "/api/browse/opaque-source/list", "query_string": b"path=private"}
+    with caplog.at_level(logging.DEBUG, logger="app.operations"):
+        await OperationSummaryMiddleware(app)(scope, receive, send)
+    assert len(caplog.records) == 1
+    assert "event=storage_operation" in caplog.text
+    assert "source_id='opaque-source' status=200" in caplog.text
+    assert "private" not in caplog.text
+    assert sent[-1]["body"] == b"private"
+
+
+def test_exception_summary_and_private_diagnostic_share_error_id(tmp_path: Path) -> None:
+    handler = create_diagnostic_handler(tmp_path / "logs")
+    try:
+        try:
+            raise ValueError("private exception detail")
+        except ValueError:
+            record = logging.LogRecord(
+                "app.example", logging.ERROR, __file__, 1, "Operation failed\nRetry the operation.", (), sys.exc_info()
+            )
+        handler.handle(record)
+        output = RecoveryLogFormatter("%(message)s").format(record)
+        assert len(output.splitlines()) == 1
+        assert "error_type='ValueError'" in output
+        assert f"error_id='{record.error_id}'" in output
+        assert "private exception detail" not in output
+        diagnostic = Path(handler.baseFilename).read_text()
+        assert record.error_id in diagnostic
+        assert "ValueError: private exception detail" in diagnostic
+        assert "Traceback" in diagnostic
+        assert Path(handler.baseFilename).stat().st_mode & 0o777 == 0o600
+        handler.doRollover()
+        assert Path(handler.baseFilename).stat().st_mode & 0o777 == 0o600
+        assert Path(f"{handler.baseFilename}.1").stat().st_mode & 0o777 == 0o600
+    finally:
+        handler.close()
+
+
+def test_diagnostic_log_excludes_records_without_exceptions(tmp_path: Path) -> None:
+    handler = create_diagnostic_handler(tmp_path)
+    try:
+        handler.handle(logging.LogRecord("app.example", logging.INFO, __file__, 1, "Normal event", (), None))
+        assert Path(handler.baseFilename).read_text() == ""
+    finally:
+        handler.close()
 
 
 def test_recovery_formatter_renders_safe_codes_from_causes_without_tracebacks():
@@ -139,6 +308,43 @@ def test_other_headers_are_not_redacted() -> None:
     assert record.getMessage() == message
 
 
+@pytest.mark.parametrize("protocol", ["SPNEGO", "NTLM", "GSSAPI", "SSPI"])
+@pytest.mark.parametrize("direction", ["input", "output"])
+def test_authentication_step_tokens_are_redacted(protocol: str, direction: str) -> None:
+    message = f"{protocol} step {direction}: %s"
+    record = logging.LogRecord("spnego._negotiate", logging.DEBUG, __file__, 0, message, ("cHJpdmF0ZQ==",), None)
+    log_filter = SensitiveDataLogFilter()
+    assert log_filter.filter(record)
+    assert record.getMessage() == f"{protocol} step {direction}: <redacted>"
+    assert log_filter.filter(record)
+    assert record.getMessage() == f"{protocol} step {direction}: <redacted>"
+
+
+def test_empty_authentication_step_token_does_not_consume_next_line() -> None:
+    message = "SPNEGO step output: \nAuthentication finished."
+    record = logging.LogRecord("spnego._negotiate", logging.DEBUG, __file__, 0, message, (), None)
+    assert SensitiveDataLogFilter().filter(record)
+    assert record.getMessage() == "SPNEGO step output: <redacted>\nAuthentication finished."
+
+
+def test_spnego_routine_messages_are_suppressed_but_warnings_and_errors_remain(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    logger = logging.getLogger("spnego._negotiate")
+    monkeypatch.setattr(logger, "level", logging.NOTSET)
+    with caplog.at_level(logging.DEBUG):
+        configure_uvicorn_loggers([logging.StreamHandler(io.StringIO())], "%(message)s", logging.DEBUG, logging.DEBUG, logging.DEBUG)
+        logger.debug("SPNEGO step input: %s", "cHJpdmF0ZQ==")
+        logger.info("Creating authentication context.")
+        logger.warning("Authentication warning.")
+        logger.error("Authentication failed.")
+    records = [record for record in caplog.records if record.name == logger.name]
+    assert [(record.levelno, record.getMessage()) for record in records] == [
+        (logging.WARNING, "Authentication warning."),
+        (logging.ERROR, "Authentication failed."),
+    ]
+
+
 def test_empty_sensitive_header_does_not_consume_next_header() -> None:
     message = "< cookie: \n< user-agent: example\n> Set-Cookie: session=secret\r\n> Content-Type: text/plain"
     record = logging.LogRecord("uvicorn.error", logging.DEBUG, __file__, 0, message, (), None)
@@ -147,7 +353,17 @@ def test_empty_sensitive_header_does_not_consume_next_header() -> None:
 
 
 def test_uvicorn_debug_headers_are_redacted() -> None:
-    logger_names = ("uvicorn", "uvicorn.error", "uvicorn.access", "httpx")
+    logger_names = (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "httpx",
+        "httpx2",
+        "httpcore",
+        "httpcore2",
+        "watchfiles",
+        "python_multipart",
+    )
     original_state = {
         name: (logging.getLogger(name).level, logging.getLogger(name).handlers[:], logging.getLogger(name).propagate)
         for name in logger_names
@@ -156,14 +372,66 @@ def test_uvicorn_debug_headers_are_redacted() -> None:
     try:
         configure_uvicorn_loggers([logging.StreamHandler(stream)], "%(message)s", logging.DEBUG, logging.DEBUG, logging.DEBUG)
         logging.getLogger("uvicorn.error").debug("< cookie: name=%s", "secret")
-        assert "< cookie: <redacted>" in stream.getvalue()
-        assert "secret" not in stream.getvalue()
+        assert stream.getvalue() == ""
     finally:
         for name, (level, handlers, propagate) in original_state.items():
             logger = logging.getLogger(name)
             logger.setLevel(level)
             logger.handlers = handlers
             logger.propagate = propagate
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "= connection is CONNECTING",
+        "< GET /api/ws?token=secret HTTP/1.1",
+        "< host: example.test",
+        "> HTTP/1.1 403 Forbidden",
+        "> EOF",
+        "% sending keepalive ping",
+        "> TEXT secret [6 bytes]",
+        "connection open",
+        "connection rejected (400 Bad Request)",
+        "x closing TCP connection",
+    ],
+)
+def test_uvicorn_protocol_details_are_suppressed(message: str) -> None:
+    record = logging.LogRecord("uvicorn.error", logging.DEBUG, __file__, 0, message, (), None)
+    assert not UvicornProtocolLogFilter(logging.DEBUG, logging.DEBUG).filter(record)
+
+
+def test_uvicorn_handshake_is_one_safe_summary() -> None:
+    record = logging.LogRecord("uvicorn.error", logging.INFO, __file__, 0, '127.0.0.1 - "WebSocket /api/ws?token=secret" 403', (), None)
+    assert UvicornProtocolLogFilter(logging.WARNING, logging.DEBUG).filter(record)
+    assert record.getMessage() == "event=ws_handshake path='/api/ws' status=403 outcome=rejected"
+
+
+def test_invalid_handshake_is_summarized_before_asgi_starts() -> None:
+    record = logging.LogRecord("uvicorn.error", logging.INFO, __file__, 0, "connection rejected (426 Upgrade Required)", (), None)
+    assert UvicornProtocolLogFilter(logging.WARNING, logging.INFO).filter(record)
+    assert record.getMessage() == "event=ws_handshake status=426 outcome=rejected"
+
+
+def test_access_and_protocol_thresholds_are_independent_of_application_level() -> None:
+    stream = io.StringIO()
+    configure_uvicorn_loggers([logging.StreamHandler(stream)], "%(message)s", logging.ERROR, logging.INFO, logging.DEBUG)
+    logging.getLogger("uvicorn.error").info('127.0.0.1 - "WebSocket /api/ws" [accepted]')
+    logging.getLogger("uvicorn.error").info("Started server process")
+    logging.getLogger("app.protocol.websocket").debug("event=ws_closed close_code=1000")
+    assert stream.getvalue().splitlines() == [
+        "event=ws_handshake path='/api/ws' status=101 outcome=accepted",
+        "event=ws_closed close_code=1000",
+    ]
+
+
+def test_handshake_summary_reaches_each_handler_with_independent_thresholds() -> None:
+    streams = [io.StringIO(), io.StringIO()]
+    configure_uvicorn_loggers(
+        [logging.StreamHandler(stream) for stream in streams], "%(message)s", logging.ERROR, logging.INFO, logging.WARNING
+    )
+    logging.getLogger("uvicorn.error").info('127.0.0.1 - "WebSocket /api/ws?token=private" 403')
+    assert all(stream.getvalue() == "event=ws_handshake path='/api/ws' status=403 outcome=rejected\n" for stream in streams)
 
 
 def test_uvicorn_protocol_filter_applies_access_policy_to_websocket_handshakes() -> None:
@@ -215,7 +483,7 @@ def test_configure_uvicorn_loggers_applies_access_policy_to_httpx() -> None:
 
         assert "secret-token" not in stream.getvalue()
         assert "https://auth.example.test/callback?<redacted>" in stream.getvalue()
-        assert "httpx - DEBUG" in stream.getvalue()
+        assert "httpx - WARNING" in stream.getvalue()
         assert "WebSocket /api/ws" not in stream.getvalue()
     finally:
         for name, (level, handlers, propagate) in original_logger_state.items():

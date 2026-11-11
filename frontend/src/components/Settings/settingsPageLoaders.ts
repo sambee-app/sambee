@@ -6,6 +6,7 @@ export const SETTINGS_PAGE_LOADERS = {
   account: () => import("../../pages/AccountSettings").then((module) => ({ default: module.AccountSettings })),
   "file-browser": () => import("../../pages/FileBrowserSettings").then((module) => ({ default: module.FileBrowserSettings })),
   "text-editor": () => import("../../pages/TextEditorSettings").then((module) => ({ default: module.TextEditorSettings })),
+  "image-viewer": () => import("../../pages/ImageViewerSettings").then((module) => ({ default: module.ImageViewerSettings })),
   connections: () => import("../../pages/ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings })),
   "local-drives": () => import("../../pages/LocalDrivesSettings").then((module) => ({ default: module.LocalDrivesSettings })),
   "admin-network": () => import("../../pages/NetworkSettings").then((module) => ({ default: module.NetworkSettings })),
@@ -16,6 +17,8 @@ export const SETTINGS_PAGE_LOADERS = {
   "admin-directory-search": () =>
     import("../../pages/DirectorySearchSettings").then((module) => ({ default: module.DirectorySearchSettings })),
   "admin-system": () => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })),
+  "admin-image-viewer": () => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })),
+  "admin-pdf-viewer": () => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })),
   "admin-about": () => import("../../pages/AboutSettings").then((module) => ({ default: module.AboutSettings })),
 };
 

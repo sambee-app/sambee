@@ -41,6 +41,10 @@ export function WorkspaceViewer({ ref, connections, services, left, right, ready
   useImperativeHandle(ref, () => workspace, [workspace]);
   const pane = left.viewInfo ? left : right;
   const info = workspace.viewerSelection ?? pane.viewInfo;
+  const viewerInfo =
+    info?.virtualSource && info.viewerId === "image"
+      ? { ...info, images: pane.imageFiles, currentIndex: Math.max(pane.imageFiles.indexOf(info.path), 0) }
+      : info;
 
   return (
     <>
@@ -58,7 +62,7 @@ export function WorkspaceViewer({ ref, connections, services, left, right, ready
           connectionId={info.connectionId ?? pane.connectionId}
           isReadOnly={isConnectionReadOnly(connections.find((connection) => connection.id === (info.connectionId ?? pane.connectionId)))}
           isPending={workspace.viewerLoading || Boolean(workspace.viewerError)}
-          viewInfo={info}
+          viewInfo={viewerInfo ?? info}
           navigation={{
             selectionKey: workspace.viewerSelectionKey,
             mode: route.viewer?.mode ?? "view",
@@ -69,6 +73,7 @@ export function WorkspaceViewer({ ref, connections, services, left, right, ready
           onIndexChange={(index) => workspace.changeImage(left.viewInfo ? "left" : "right", index)}
           hasMoreItems={info.virtualSource ? pane.archiveHasMore : false}
           isLoadingMoreItems={info.virtualSource ? pane.archiveLoadingMore : false}
+          loadMoreError={info.virtualSource ? pane.error : null}
           onLoadMoreItems={info.virtualSource ? pane.loadMoreArchive : undefined}
           contentProviders={services.providers}
         />

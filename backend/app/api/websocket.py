@@ -59,7 +59,6 @@ class ConnectionManager:
         self.users[websocket] = user
         if token is not None:
             self.authentication_tokens[websocket] = token
-        logger.debug(f"WebSocket connected: {id(websocket)}")
 
     async def is_authorized(self, websocket: WebSocket) -> bool:
         token = self.authentication_tokens.get(websocket)
@@ -102,14 +101,11 @@ class ConnectionManager:
                         resolved = self._resolved_paths.pop(key, path)
                         monitor = get_monitor()
                         monitor.stop_monitoring(connection_id, resolved)
-                        logger.debug(f"Stopped SMB monitoring for {key} (last subscriber disconnected)")
                     except Exception as e:
                         logger.error(
                             f"Failed to stop SMB monitoring for {key}: {e}",
                             exc_info=True,
                         )
-
-        logger.debug(f"WebSocket disconnected: {id(websocket)}")
 
     #
     # subscribe
@@ -174,7 +170,6 @@ class ConnectionManager:
                     expected_generation=expected_generation,
                 )
                 self._resolved_paths[key] = resolved_path
-                logger.debug(f"Started SMB monitoring for {key} (resolved: {resolved_path})")
             except (FileNotFoundError, NotADirectoryError, PermissionError, TimeoutError) as error:
                 self.subscription_errors[websocket] = (
                     "directory_not_found"
@@ -196,7 +191,7 @@ class ConnectionManager:
             self.subscriptions[websocket].add(key)
         self.active_connections.setdefault(key, set()).add(websocket)
 
-        logger.debug(f"WebSocket {id(websocket)} subscribed to {key}")
+        logger.debug("event=ws_subscription action=subscribe source_id=%s", connection_id)
         self.subscription_errors.pop(websocket, None)
         return True
 
@@ -221,11 +216,10 @@ class ConnectionManager:
                     monitor = get_monitor()
                     resolved = self._resolved_paths.pop(key, path)
                     monitor.stop_monitoring(connection_id, resolved)
-                    logger.debug(f"Stopped SMB monitoring for {key}")
                 except Exception as e:
                     logger.error(f"Failed to stop SMB monitoring for {key}: {e}", exc_info=True)
 
-        logger.debug(f"WebSocket {id(websocket)} unsubscribed from {key}")
+        logger.debug("event=ws_subscription action=unsubscribe source_id=%s", connection_id)
 
     #
     # _make_change_callback
@@ -266,7 +260,6 @@ class ConnectionManager:
                             "path": path,
                         }
                     )
-                    logger.debug(f"Notified WebSocket {id(websocket)} about change in {key}")
                 except Exception as e:
                     logger.error(f"Failed to notify WebSocket {id(websocket)}: {e}")
                     disconnected.append(websocket)
@@ -402,11 +395,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "pong"})
 
     except WebSocketDisconnect:
-        logger.debug(f"WebSocket disconnected normally: {id(websocket)}")
-        manager.disconnect(websocket)
+        pass
     except Exception as e:
         logger.error(f"WebSocket error: {e}", exc_info=True)
-        manager.disconnect(websocket)
     finally:
         manager.disconnect(websocket)
 

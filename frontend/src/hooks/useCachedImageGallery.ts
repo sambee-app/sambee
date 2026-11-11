@@ -69,6 +69,7 @@ export interface UseImageGalleryDataResult {
   imageCacheRef: React.MutableRefObject<Map<number, string>>;
   getCachedImageSrc: (index: number) => string | undefined;
   getCachedImageBlob: (index: number) => Blob | undefined;
+  pinCachedImage: (index: number) => () => void;
   loadingStates: Map<number, boolean>;
   errorStates: Map<number, string | null>;
   currentImageLoadPhase: ImageLoadPhase;
@@ -109,6 +110,7 @@ interface GallerySessionResources {
   generation: number;
   imageCache: Map<number, string>;
   imageBlobs: Map<number, Blob>;
+  pinnedSources: Map<string, number>;
   abortControllers: Map<number, AbortController>;
   inFlightRequests: Map<number, InFlightImageRequest>;
   failedBackgroundRequestKeys: Set<string>;
@@ -153,6 +155,7 @@ function createGallerySessionResources(galleryIdentity: string, generation: numb
     generation,
     imageCache: new Map(),
     imageBlobs: new Map(),
+    pinnedSources: new Map(),
     abortControllers: new Map(),
     inFlightRequests: new Map(),
     failedBackgroundRequestKeys: new Set(),
@@ -219,9 +222,10 @@ function disposeGallerySessionResources(session: GallerySessionResources): void 
   session.inFlightRequests.clear();
   session.failedBackgroundRequestKeys.clear();
   session.currentRetryGate = null;
-  session.imageCache.forEach((url) => {
+  new Set([...session.imageCache.values(), ...session.pinnedSources.keys()]).forEach((url) => {
     URL.revokeObjectURL(url);
   });
+  session.pinnedSources.clear();
   session.imageCache.clear();
   session.imageBlobs.clear();
 }
@@ -968,7 +972,7 @@ export const useCachedImageGallery = ({
     imageCache.forEach((url, index) => {
       if (!indicesToKeep.has(index)) {
         logInfo("Revoking blob URL for distant image", { index, url });
-        URL.revokeObjectURL(url);
+        if (!sessionResourcesRef.current.pinnedSources.has(url)) URL.revokeObjectURL(url);
         imageCache.delete(index);
         sessionResourcesRef.current.imageBlobs.delete(index);
         removedIndexes.push(index);
@@ -1035,7 +1039,7 @@ export const useCachedImageGallery = ({
     retireRequest(resources.inFlightRequests, resources.abortControllers, index);
 
     if (cachedSource) {
-      URL.revokeObjectURL(cachedSource);
+      if (!resources.pinnedSources.has(cachedSource)) URL.revokeObjectURL(cachedSource);
       resources.imageCache.delete(index);
       resources.imageBlobs.delete(index);
       setImageSourceRevision((revision) => revision + 1);
@@ -1056,7 +1060,7 @@ export const useCachedImageGallery = ({
     const index = currentIndexRef.current;
     const source = resources.imageCache.get(index);
     if (source) {
-      URL.revokeObjectURL(source);
+      if (!resources.pinnedSources.has(source)) URL.revokeObjectURL(source);
       resources.imageCache.delete(index);
       resources.imageBlobs.delete(index);
       setImageSourceRevision((revision) => revision + 1);
@@ -1075,6 +1079,28 @@ export const useCachedImageGallery = ({
     [activeSessionResources.imageCache]
   );
 
+  const pinCachedImage = useCallback(
+    (index: number) => {
+      const resources = activeSessionResources;
+      const source = resources.imageCache.get(index);
+      if (!source) return () => {};
+      resources.pinnedSources.set(source, (resources.pinnedSources.get(source) ?? 0) + 1);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const count = resources.pinnedSources.get(source);
+        if (count === undefined) return;
+        if (count > 1) resources.pinnedSources.set(source, count - 1);
+        else {
+          resources.pinnedSources.delete(source);
+          if (![...resources.imageCache.values()].includes(source)) URL.revokeObjectURL(source);
+        }
+      };
+    },
+    [activeSessionResources]
+  );
+
   return {
     currentIndex,
     setCurrentIndex,
@@ -1082,6 +1108,7 @@ export const useCachedImageGallery = ({
     filename,
     imageCacheRef,
     getCachedImageSrc,
+    pinCachedImage,
     getCachedImageBlob: (index: number) => activeSessionResources.imageBlobs.get(index),
     loadingStates,
     errorStates,

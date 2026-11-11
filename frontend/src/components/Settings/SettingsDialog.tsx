@@ -56,7 +56,7 @@ function SettingsCategoryFocus({
       initialized.current = false;
       return;
     }
-    const item = availableItems.includes(selectedItem) ? selectedItem : (availableItems[0] ?? DEFAULT_SETTINGS_CATEGORY);
+    const item = availableItems.includes(selectedItem) ? selectedItem : DEFAULT_SETTINGS_CATEGORY;
     const element = categoryRefs.current[item];
     if (!element) return;
     const ownsFocus = Object.values(categoryRefs.current).some((category) => category === element.ownerDocument.activeElement);
@@ -85,15 +85,17 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   const selectedItem = category ?? localSelectedItem;
   const setSelectedItem = onNavigate ?? setLocalSelectedItem;
   const { isAdmin, canWrite } = useSettingsAccess(open);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   // Refs for category list items (for arrow key navigation and initial focus)
   const categoryRefs = useRef<Partial<Record<SettingsNavItem, HTMLDivElement | null>>>({});
   const { displayedSize, paperRef, resizeHandleProps } = useResizableDialogSize(SETTINGS_DIALOG_RESIZE_CONFIG);
 
   // Build list of available items based on admin status
-  const availableItems = useMemo(() => getVisibleSettingsNavItems(isAdmin), [isAdmin]);
-  const visibleSections = useMemo(() => getVisibleSettingsSections(isAdmin), [isAdmin]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: labels and sorting follow the active language.
+  const availableItems = useMemo(() => getVisibleSettingsNavItems(isAdmin), [isAdmin, i18n.resolvedLanguage]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: labels and sorting follow the active language.
+  const visibleSections = useMemo(() => getVisibleSettingsSections(isAdmin), [isAdmin, i18n.resolvedLanguage]);
 
   const focusCategoryButton = useCallback((item: SettingsNavItem) => {
     categoryRefs.current[item]?.focus();
@@ -149,7 +151,7 @@ const SettingsDialog: React.FC<SettingsDialogProps> = ({
   // Set category when dialog opens (use initialCategory prop)
   useEffect(() => {
     if (open && category === undefined) {
-      setLocalSelectedItem(availableItems.includes(initialCategory) ? initialCategory : (availableItems[0] ?? DEFAULT_SETTINGS_CATEGORY));
+      setLocalSelectedItem(availableItems.includes(initialCategory) ? initialCategory : DEFAULT_SETTINGS_CATEGORY);
     }
   }, [availableItems, initialCategory, open, category]);
 

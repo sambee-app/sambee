@@ -9,6 +9,7 @@ import logging
 import random
 import threading
 from collections.abc import Awaitable, Callable
+from time import monotonic
 from typing import Dict, Optional
 from uuid import uuid4
 
@@ -36,6 +37,7 @@ from app.storage.smb_errors import translate_smb_target_error
 from app.utils.worker_wait import wait_for_worker
 
 logger = logging.getLogger(__name__)
+MILLISECONDS_PER_SECOND = 1000
 
 # Connection retry configuration
 MAX_RETRY_ATTEMPTS = 5
@@ -612,7 +614,6 @@ class MonitoredDirectory:
             self._cleanup()
             if self.on_stopped and not self._restarting:
                 self.on_stopped()
-            logger.debug("File-list monitor worker stopped.")
 
     #
     # _get_action_name
@@ -666,7 +667,6 @@ class MonitoredDirectory:
     def _stop_locked(self) -> bool:
         """Stop monitor resources while holding the lifecycle lock."""
 
-        logger.debug("File-list monitor stop requested.")
         self._stop_event.set()
 
         # Cancel any pending watcher
@@ -693,14 +693,17 @@ class MonitoredDirectory:
     def _cleanup(self) -> None:
         """Clean up SMB resources in proper order."""
 
+        started = monotonic()
+        has_resources = any((self._open, self._tree, self._session, self._connection))
+        cleanup_errors = 0
         self._watcher = None
         # Close in reverse order of creation to prevent leaks
 
         if self._open:
             try:
                 self._open.close()
-                logger.debug("File-list directory handle closed.")
             except Exception as e:
+                cleanup_errors += 1
                 logger.warning("File-list directory handle cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._open = None
@@ -708,8 +711,8 @@ class MonitoredDirectory:
         if self._tree:
             try:
                 self._tree.disconnect()
-                logger.debug("File-list tree disconnected.")
             except Exception as e:
+                cleanup_errors += 1
                 logger.warning("File-list tree cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._tree = None
@@ -717,8 +720,8 @@ class MonitoredDirectory:
         if self._session:
             try:
                 self._session.disconnect()
-                logger.debug("File-list session disconnected.")
             except Exception as e:
+                cleanup_errors += 1
                 logger.warning("File-list session cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._session = None
@@ -726,15 +729,23 @@ class MonitoredDirectory:
         if self._connection:
             try:
                 self._connection.disconnect()
-                logger.debug("File-list connection disconnected.")
             except RuntimeError as e:
                 # smbprotocol bug: disconnect() tries to join the current
                 # thread when called from the message-worker after a timeout.
-                logger.debug("File-list disconnect worker could not join itself.", extra={"error_type": type(e).__name__})
+                cleanup_errors += 1
+                logger.warning("File-list disconnect worker could not join itself.", extra={"error_type": type(e).__name__})
             except Exception as e:
+                cleanup_errors += 1
                 logger.warning("File-list connection cleanup failed.", extra={"error_type": type(e).__name__})
             finally:
                 self._connection = None
+        if has_resources:
+            logger.debug(
+                "event=monitor_cleanup duration_ms=%.1f cleanup_errors=%s outcome=%s",
+                (monotonic() - started) * MILLISECONDS_PER_SECOND,
+                cleanup_errors,
+                "failed" if cleanup_errors else "success",
+            )
 
 
 # Global monitor instance

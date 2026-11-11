@@ -1,4 +1,4 @@
-import { Alert, Box, Button, Stack, TextField } from "@mui/material";
+import { Alert, Box, Button, TextField } from "@mui/material";
 import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formSelectMenuProps, formSelectSx } from "../components/Form/FormLayout";
@@ -21,9 +21,11 @@ const IMAGE_PREFERENCE_CONTROL_MAX_WIDTH = 240;
 
 interface AdvancedSettingsProps {
   dialogSafeHeader?: boolean;
+  category?: "admin-system" | "admin-image-viewer" | "admin-pdf-viewer";
 }
 
 interface AdvancedSettingsFormState {
+  imageConversionThresholdBytes: number | null;
   temporaryArchiveDownloadSizeBytes: number | null;
   imagemagickMaxFileSizeBytes: number | null;
   imagemagickTimeoutSeconds: number | null;
@@ -43,6 +45,7 @@ interface AdvancedSettingsFormState {
 
 function createFormState(settings: AdvancedSystemSettings): AdvancedSettingsFormState {
   return {
+    imageConversionThresholdBytes: settings.image_conversion_threshold_bytes?.value ?? null,
     temporaryArchiveDownloadSizeBytes: settings.temporary_archive_download_size_bytes?.value ?? null,
     imagemagickMaxFileSizeBytes: settings.preprocessors["imagemagick"]?.max_file_size_bytes.value ?? null,
     imagemagickTimeoutSeconds: settings.preprocessors["imagemagick"]?.timeout_seconds.value ?? null,
@@ -78,6 +81,9 @@ function applyAdvancedSettingUpdate(settings: AdvancedSystemSettings, update: Ad
   const imagemagick = settings.preprocessors["imagemagick"];
   return {
     ...settings,
+    image_conversion_threshold_bytes: settings.image_conversion_threshold_bytes
+      ? updateSetting(settings.image_conversion_threshold_bytes)
+      : undefined,
     temporary_archive_download_size_bytes: settings.temporary_archive_download_size_bytes
       ? updateSetting(settings.temporary_archive_download_size_bytes)
       : undefined,
@@ -113,7 +119,7 @@ function applyAdvancedSettingUpdate(settings: AdvancedSystemSettings, update: Ad
   };
 }
 
-export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsProps) {
+export function AdvancedSettings({ dialogSafeHeader = false, category = "admin-system" }: AdvancedSettingsProps) {
   const { t } = useTranslation();
   const preferenceId = useId();
   const [pageError, setPageError] = useState<string | null>(null);
@@ -190,7 +196,7 @@ export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsP
 
   return (
     <SettingsPage
-      category="admin-system"
+      category={category}
       dialogSafeHeader={dialogSafeHeader}
       contextualNotice={
         pageError ? (
@@ -211,7 +217,7 @@ export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsP
 
       {settings && formState && (
         <SettingsSectionList>
-          {settings.temporary_archive_download_size_bytes && (
+          {category === "admin-system" && settings.temporary_archive_download_size_bytes && (
             <SettingsGroup title={t("settings.advanced.sections.archiveDownloads")}>
               <ByteSizeSettingField
                 setting={settings.temporary_archive_download_size_bytes}
@@ -224,64 +230,72 @@ export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsP
               />
             </SettingsGroup>
           )}
-          <SettingsGroup title={t("settings.advanced.sections.preprocessors")}>
-            <Stack spacing={3.5}>
+          {category === "admin-image-viewer" && (
+            <SettingsGroup>
+              {settings.image_conversion_threshold_bytes && (
+                <ByteSizeSettingField
+                  setting={settings.image_conversion_threshold_bytes}
+                  value={formState.imageConversionThresholdBytes}
+                  onChange={(value) => updateFormField("imageConversionThresholdBytes", value, settings.image_conversion_threshold_bytes!)}
+                  {...getFieldPersistenceProps(settings.image_conversion_threshold_bytes)}
+                />
+              )}
+              {preference && (
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, py: 1.5 }}>
+                  <TextField
+                    id={preferenceId}
+                    select
+                    sx={{ width: "100%", maxWidth: { xs: "100%", sm: IMAGE_PREFERENCE_CONTROL_MAX_WIDTH } }}
+                    label={t("settings.advanced.imageConversion.label")}
+                    value={preference.value}
+                    onFocus={() => restorePreferenceFocus()}
+                    onChange={(event) => void persistPreference(event.target.value as ImageConversionPreference)}
+                    disabled={persistence.isPending(preferenceKey)}
+                    error={Boolean(persistence.fieldErrors[preferenceKey])}
+                    slotProps={{
+                      select: {
+                        sx: formSelectSx,
+                        MenuProps: formSelectMenuProps,
+                        SelectDisplayProps: {
+                          "aria-describedby": `${preferenceId}-description`,
+                        },
+                        renderValue: (value) =>
+                          value === "size" ? t("settings.advanced.imageConversion.size") : t("settings.advanced.imageConversion.speed"),
+                      },
+                      input: {
+                        endAdornment: (
+                          <SettingPersistenceAdornment
+                            pending={persistence.isPending(preferenceKey)}
+                            saved={persistence.isSaved(preferenceKey)}
+                            savingLabel={t("settings.saveStatus.saving")}
+                            savedLabel={t("settings.saveStatus.saved")}
+                          />
+                        ),
+                      },
+                    }}
+                  >
+                    <SettingsSelectMenuItem
+                      value="speed"
+                      label={t("settings.advanced.imageConversion.speed")}
+                      description={t("settings.advanced.imageConversion.speedDescription")}
+                    />
+                    <SettingsSelectMenuItem
+                      value="size"
+                      label={t("settings.advanced.imageConversion.size")}
+                      description={t("settings.advanced.imageConversion.sizeDescription")}
+                    />
+                  </TextField>
+                  <SettingsFieldHelp
+                    id={`${preferenceId}-description`}
+                    error={Boolean(persistence.fieldErrors[preferenceKey])}
+                    sx={{ mx: 0 }}
+                  >
+                    {persistence.fieldErrors[preferenceKey] ?? t("settings.advanced.imageConversion.description")}
+                  </SettingsFieldHelp>
+                </Box>
+              )}
               {imagemagick && (
-                <SettingsGroup title={t("settings.advanced.sections.imageMagick")} level="subsection">
-                  {preference && (
-                    <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, py: 1.5 }}>
-                      <TextField
-                        id={preferenceId}
-                        select
-                        sx={{ width: "100%", maxWidth: { xs: "100%", sm: IMAGE_PREFERENCE_CONTROL_MAX_WIDTH } }}
-                        label={t("settings.advanced.imageConversion.label")}
-                        value={preference.value}
-                        onFocus={() => restorePreferenceFocus()}
-                        onChange={(event) => void persistPreference(event.target.value as ImageConversionPreference)}
-                        disabled={persistence.isPending(preferenceKey)}
-                        error={Boolean(persistence.fieldErrors[preferenceKey])}
-                        slotProps={{
-                          select: {
-                            sx: formSelectSx,
-                            MenuProps: formSelectMenuProps,
-                            SelectDisplayProps: {
-                              "aria-describedby": `${preferenceId}-description`,
-                            },
-                            renderValue: (value) =>
-                              value === "size" ? t("settings.advanced.imageConversion.size") : t("settings.advanced.imageConversion.speed"),
-                          },
-                          input: {
-                            endAdornment: (
-                              <SettingPersistenceAdornment
-                                pending={persistence.isPending(preferenceKey)}
-                                saved={persistence.isSaved(preferenceKey)}
-                                savingLabel={t("settings.saveStatus.saving")}
-                                savedLabel={t("settings.saveStatus.saved")}
-                              />
-                            ),
-                          },
-                        }}
-                      >
-                        <SettingsSelectMenuItem
-                          value="speed"
-                          label={t("settings.advanced.imageConversion.speed")}
-                          description={t("settings.advanced.imageConversion.speedDescription")}
-                        />
-                        <SettingsSelectMenuItem
-                          value="size"
-                          label={t("settings.advanced.imageConversion.size")}
-                          description={t("settings.advanced.imageConversion.sizeDescription")}
-                        />
-                      </TextField>
-                      <SettingsFieldHelp
-                        id={`${preferenceId}-description`}
-                        error={Boolean(persistence.fieldErrors[preferenceKey])}
-                        sx={{ mx: 0 }}
-                      >
-                        {persistence.fieldErrors[preferenceKey] ?? t("settings.advanced.imageConversion.description")}
-                      </SettingsFieldHelp>
-                    </Box>
-                  )}
+                <>
                   <ByteSizeSettingField
                     setting={imagemagick.max_file_size_bytes}
                     value={formState.imagemagickMaxFileSizeBytes}
@@ -295,90 +309,90 @@ export function AdvancedSettings({ dialogSafeHeader = false }: AdvancedSettingsP
                     unitAdornment={t("settings.advanced.fields.seconds")}
                     {...getFieldPersistenceProps(imagemagick.timeout_seconds)}
                   />
-                </SettingsGroup>
+                </>
               )}
-              {pdf && (
-                <SettingsGroup title={t("settings.advanced.sections.pdfCompatibility")} level="subsection">
-                  <ByteSizeSettingField
-                    setting={pdf.cache_quota_bytes}
-                    value={formState.pdfCacheQuotaBytes}
-                    onChange={(value) => updateFormField("pdfCacheQuotaBytes", value, pdf.cache_quota_bytes)}
-                    {...getFieldPersistenceProps(pdf.cache_quota_bytes)}
-                  />
-                  <SettingField
-                    setting={pdf.cache_inactivity_ttl_seconds}
-                    value={formState.pdfCacheInactivityTtlSeconds}
-                    onChange={(value) => updateFormField("pdfCacheInactivityTtlSeconds", value, pdf.cache_inactivity_ttl_seconds)}
-                    unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(pdf.cache_inactivity_ttl_seconds)}
-                  />
-                  <ByteSizeSettingField
-                    setting={pdf.max_source_size_bytes}
-                    value={formState.pdfMaxSourceSizeBytes}
-                    onChange={(value) => updateFormField("pdfMaxSourceSizeBytes", value, pdf.max_source_size_bytes)}
-                    {...getFieldPersistenceProps(pdf.max_source_size_bytes)}
-                  />
-                  <ByteSizeSettingField
-                    setting={pdf.max_output_size_bytes}
-                    value={formState.pdfMaxOutputSizeBytes}
-                    onChange={(value) => updateFormField("pdfMaxOutputSizeBytes", value, pdf.max_output_size_bytes)}
-                    {...getFieldPersistenceProps(pdf.max_output_size_bytes)}
-                  />
-                  <ByteSizeSettingField
-                    setting={pdf.address_space_bytes}
-                    value={formState.pdfAddressSpaceBytes}
-                    onChange={(value) => updateFormField("pdfAddressSpaceBytes", value, pdf.address_space_bytes)}
-                    {...getFieldPersistenceProps(pdf.address_space_bytes)}
-                  />
-                  <ByteSizeSettingField
-                    setting={pdf.temporary_disk_bytes}
-                    value={formState.pdfTemporaryDiskBytes}
-                    onChange={(value) => updateFormField("pdfTemporaryDiskBytes", value, pdf.temporary_disk_bytes)}
-                    {...getFieldPersistenceProps(pdf.temporary_disk_bytes)}
-                  />
-                  <SettingField
-                    setting={pdf.timeout_seconds}
-                    value={formState.pdfTimeoutSeconds}
-                    onChange={(value) => updateFormField("pdfTimeoutSeconds", value, pdf.timeout_seconds)}
-                    unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(pdf.timeout_seconds)}
-                  />
-                  <SettingField
-                    setting={pdf.cpu_time_seconds}
-                    value={formState.pdfCpuTimeSeconds}
-                    onChange={(value) => updateFormField("pdfCpuTimeSeconds", value, pdf.cpu_time_seconds)}
-                    unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(pdf.cpu_time_seconds)}
-                  />
-                  <SettingField
-                    setting={pdf.max_concurrent}
-                    value={formState.pdfMaxConcurrent}
-                    onChange={(value) => updateFormField("pdfMaxConcurrent", value, pdf.max_concurrent)}
-                    {...getFieldPersistenceProps(pdf.max_concurrent)}
-                  />
-                  <SettingField
-                    setting={pdf.queue_wait_seconds}
-                    value={formState.pdfQueueWaitSeconds}
-                    onChange={(value) => updateFormField("pdfQueueWaitSeconds", value, pdf.queue_wait_seconds)}
-                    unitAdornment={t("settings.advanced.fields.seconds")}
-                    {...getFieldPersistenceProps(pdf.queue_wait_seconds)}
-                  />
-                  <SettingField
-                    setting={pdf.screen_derivative_enabled}
-                    value={formState.pdfScreenDerivativeEnabled}
-                    onChange={(value) => updateFormField("pdfScreenDerivativeEnabled", value, pdf.screen_derivative_enabled)}
-                    {...getFieldPersistenceProps(pdf.screen_derivative_enabled)}
-                  />
-                  <SettingField
-                    setting={pdf.screen_max_decoded_pixels}
-                    value={formState.pdfScreenMaxDecodedPixels}
-                    onChange={(value) => updateFormField("pdfScreenMaxDecodedPixels", value, pdf.screen_max_decoded_pixels)}
-                    {...getFieldPersistenceProps(pdf.screen_max_decoded_pixels)}
-                  />
-                </SettingsGroup>
-              )}
-            </Stack>
-          </SettingsGroup>
+            </SettingsGroup>
+          )}
+          {category === "admin-pdf-viewer" && pdf && (
+            <SettingsGroup>
+              <ByteSizeSettingField
+                setting={pdf.cache_quota_bytes}
+                value={formState.pdfCacheQuotaBytes}
+                onChange={(value) => updateFormField("pdfCacheQuotaBytes", value, pdf.cache_quota_bytes)}
+                {...getFieldPersistenceProps(pdf.cache_quota_bytes)}
+              />
+              <SettingField
+                setting={pdf.cache_inactivity_ttl_seconds}
+                value={formState.pdfCacheInactivityTtlSeconds}
+                onChange={(value) => updateFormField("pdfCacheInactivityTtlSeconds", value, pdf.cache_inactivity_ttl_seconds)}
+                unitAdornment={t("settings.advanced.fields.seconds")}
+                {...getFieldPersistenceProps(pdf.cache_inactivity_ttl_seconds)}
+              />
+              <ByteSizeSettingField
+                setting={pdf.max_source_size_bytes}
+                value={formState.pdfMaxSourceSizeBytes}
+                onChange={(value) => updateFormField("pdfMaxSourceSizeBytes", value, pdf.max_source_size_bytes)}
+                {...getFieldPersistenceProps(pdf.max_source_size_bytes)}
+              />
+              <ByteSizeSettingField
+                setting={pdf.max_output_size_bytes}
+                value={formState.pdfMaxOutputSizeBytes}
+                onChange={(value) => updateFormField("pdfMaxOutputSizeBytes", value, pdf.max_output_size_bytes)}
+                {...getFieldPersistenceProps(pdf.max_output_size_bytes)}
+              />
+              <ByteSizeSettingField
+                setting={pdf.address_space_bytes}
+                value={formState.pdfAddressSpaceBytes}
+                onChange={(value) => updateFormField("pdfAddressSpaceBytes", value, pdf.address_space_bytes)}
+                {...getFieldPersistenceProps(pdf.address_space_bytes)}
+              />
+              <ByteSizeSettingField
+                setting={pdf.temporary_disk_bytes}
+                value={formState.pdfTemporaryDiskBytes}
+                onChange={(value) => updateFormField("pdfTemporaryDiskBytes", value, pdf.temporary_disk_bytes)}
+                {...getFieldPersistenceProps(pdf.temporary_disk_bytes)}
+              />
+              <SettingField
+                setting={pdf.timeout_seconds}
+                value={formState.pdfTimeoutSeconds}
+                onChange={(value) => updateFormField("pdfTimeoutSeconds", value, pdf.timeout_seconds)}
+                unitAdornment={t("settings.advanced.fields.seconds")}
+                {...getFieldPersistenceProps(pdf.timeout_seconds)}
+              />
+              <SettingField
+                setting={pdf.cpu_time_seconds}
+                value={formState.pdfCpuTimeSeconds}
+                onChange={(value) => updateFormField("pdfCpuTimeSeconds", value, pdf.cpu_time_seconds)}
+                unitAdornment={t("settings.advanced.fields.seconds")}
+                {...getFieldPersistenceProps(pdf.cpu_time_seconds)}
+              />
+              <SettingField
+                setting={pdf.max_concurrent}
+                value={formState.pdfMaxConcurrent}
+                onChange={(value) => updateFormField("pdfMaxConcurrent", value, pdf.max_concurrent)}
+                {...getFieldPersistenceProps(pdf.max_concurrent)}
+              />
+              <SettingField
+                setting={pdf.queue_wait_seconds}
+                value={formState.pdfQueueWaitSeconds}
+                onChange={(value) => updateFormField("pdfQueueWaitSeconds", value, pdf.queue_wait_seconds)}
+                unitAdornment={t("settings.advanced.fields.seconds")}
+                {...getFieldPersistenceProps(pdf.queue_wait_seconds)}
+              />
+              <SettingField
+                setting={pdf.screen_derivative_enabled}
+                value={formState.pdfScreenDerivativeEnabled}
+                onChange={(value) => updateFormField("pdfScreenDerivativeEnabled", value, pdf.screen_derivative_enabled)}
+                {...getFieldPersistenceProps(pdf.screen_derivative_enabled)}
+              />
+              <SettingField
+                setting={pdf.screen_max_decoded_pixels}
+                value={formState.pdfScreenMaxDecodedPixels}
+                onChange={(value) => updateFormField("pdfScreenMaxDecodedPixels", value, pdf.screen_max_decoded_pixels)}
+                {...getFieldPersistenceProps(pdf.screen_max_decoded_pixels)}
+              />
+            </SettingsGroup>
+          )}
         </SettingsSectionList>
       )}
     </SettingsPage>
