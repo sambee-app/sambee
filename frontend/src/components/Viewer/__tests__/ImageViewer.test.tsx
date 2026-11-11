@@ -1,6 +1,6 @@
 import { act, createEvent, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ImageLoadPhase } from "../../../hooks/useCachedImageGallery";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
