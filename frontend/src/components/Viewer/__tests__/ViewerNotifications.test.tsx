@@ -350,7 +350,7 @@ describe("ViewerNotifications", () => {
     rerender(view(true));
     await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("status")).toHaveTextContent(warning.message));
     expect(screen.queryByText(failure.message)).not.toBeInTheDocument();
-    within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }).focus();
+    await act(async () => within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }).focus());
     expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Close" })).toHaveFocus();
   });
 });

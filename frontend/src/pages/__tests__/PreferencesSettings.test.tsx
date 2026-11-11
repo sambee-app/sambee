@@ -236,7 +236,7 @@ describe("AppearanceSettings", () => {
       .mockResolvedValue({ id: "new-id", scope: "user", version: 1, definition: builtInThemes[0]! });
     render(<AppearanceSettings />);
 
-    act(() => screen.getByRole("radio", { name: "Sambee dark" }).focus());
+    await act(async () => screen.getByRole("radio", { name: "Sambee dark" }).focus());
 
     expect(screen.queryByRole("button", { name: "Target Sambee dark for actions" })).not.toBeInTheDocument();
     expect(themeCommitMock).not.toHaveBeenCalled();
@@ -258,7 +258,7 @@ describe("AppearanceSettings", () => {
     });
     render(<AppearanceSettings />);
 
-    act(() => screen.getByRole("radio", { name: "Sambee dark" }).focus());
+    await act(async () => screen.getByRole("radio", { name: "Sambee dark" }).focus());
     await user.click(screen.getByRole("button", { name: "Delete" }));
     await user.click(within(screen.getByRole("dialog", { name: "Delete theme?" })).getByRole("button", { name: "Delete" }));
 
@@ -275,7 +275,7 @@ describe("AppearanceSettings", () => {
     const user = userEvent.setup();
     render(<AppearanceSettings />);
 
-    screen.getByRole("radio", { name: "Sambee dark" }).focus();
+    await act(async () => screen.getByRole("radio", { name: "Sambee dark" }).focus());
     await user.keyboard(key);
 
     await waitFor(() => expect(themeCommitMock).toHaveBeenCalledWith("sambee-dark"));
@@ -286,7 +286,7 @@ describe("AppearanceSettings", () => {
     themeCommitMock.mockImplementationOnce(() => new Promise<void>(() => undefined));
     render(<AppearanceSettings />);
 
-    screen.getByRole("radio", { name: "Sambee dark" }).focus();
+    await act(async () => screen.getByRole("radio", { name: "Sambee dark" }).focus());
     await user.keyboard(" ");
 
     await waitFor(() => expect(themeCommitMock).toHaveBeenCalledWith("sambee-dark"));
@@ -310,12 +310,12 @@ describe("AppearanceSettings", () => {
     render(<AppearanceSettings />);
 
     const darkTheme = screen.getByRole("radio", { name: "Sambee dark" });
-    darkTheme.focus();
+    await act(async () => darkTheme.focus());
     await user.keyboard(" ");
 
     await waitFor(() => expect(darkTheme).toBeDisabled());
-    darkTheme.blur();
-    resolveThemeUpdate?.();
+    await act(async () => darkTheme.blur());
+    await act(async () => resolveThemeUpdate?.());
 
     await waitFor(() => expect(darkTheme).toHaveFocus());
   });

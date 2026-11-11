@@ -994,6 +994,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
     const characterRights = [4, 5, 7, 7, 9, 10, 10];
     const pre = document.createElement("pre");
     pre.style.whiteSpace = "pre";
+    document.body.append(pre);
     Object.defineProperties(pre, { scrollWidth: { value: 20 }, clientWidth: { value: 1 } });
     const rect = vi.spyOn(pre, "getBoundingClientRect").mockReturnValue({ left, right } as DOMRect);
     const rangeAt = (from: number) => ({ getBoundingClientRect: () => ({ right: characterRights[from] }) }) as Range;
@@ -1007,6 +1008,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       ]);
     } finally {
       rect.mockRestore();
+      pre.remove();
     }
   });
 
@@ -1016,6 +1018,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
   ])("skips character probes when the horizontal clip is outside the viewport (%#)", (clip) => {
     const pre = document.createElement("pre");
     pre.style.whiteSpace = "pre";
+    document.body.append(pre);
     Object.defineProperties(pre, { scrollWidth: { value: 100 }, clientWidth: { value: 50 } });
     const rect = vi.spyOn(pre, "getBoundingClientRect").mockReturnValue(clip as DOMRect);
     const rangeAt = vi.fn();
@@ -1024,6 +1027,7 @@ describe("engine-neutral Markdown syntax adapter", () => {
       expect(rangeAt).not.toHaveBeenCalled();
     } finally {
       rect.mockRestore();
+      pre.remove();
     }
   });
 

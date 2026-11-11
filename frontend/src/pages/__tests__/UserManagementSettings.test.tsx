@@ -71,6 +71,13 @@ async function openUserActions(user: ReturnType<typeof userEvent.setup>, usernam
   await user.click(await screen.findByRole("button", { name: `User actions for ${username}` }));
 }
 
+async function findDesktopDirectoryHeader() {
+  const header = await screen.findByTestId("user-directory-header");
+  // jsdom has no layout engine to evaluate the directory's container query.
+  header.style.display = "grid";
+  return header;
+}
+
 function mockOidcAuthenticationEnabled() {
   vi.mocked(api.getOidcConfiguration).mockResolvedValue({
     configuration: null,
@@ -692,7 +699,7 @@ describe("UserManagementSettings", () => {
         </SambeeThemeProvider>
       );
 
-      const header = await screen.findByTestId("user-directory-header");
+      const header = await findDesktopDirectoryHeader();
       const roleSort = within(header).getByRole("button", { name: "Sort by Role" });
 
       expect(screen.queryByRole("combobox", { name: "Sort" })).not.toBeInTheDocument();
@@ -730,7 +737,7 @@ describe("UserManagementSettings", () => {
         </SambeeThemeProvider>
       );
 
-      const header = await screen.findByTestId("user-directory-header");
+      const header = await findDesktopDirectoryHeader();
       const row = await screen.findByTestId("user-row");
 
       expect(header.querySelectorAll('[role="columnheader"]')).toHaveLength(6);
@@ -777,8 +784,8 @@ describe("UserManagementSettings", () => {
         </SambeeThemeProvider>
       );
 
-      await screen.findByTestId("user-directory-header");
-      const columnsButton = within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Manage visible columns" });
+      const header = await findDesktopDirectoryHeader();
+      const columnsButton = within(header).getByRole("button", { name: "Manage visible columns" });
       const headerBounds = vi.spyOn(columnsButton, "getBoundingClientRect").mockReturnValue(new DOMRect(800, 200, 28, 28));
       await user.click(columnsButton);
       const expectStableTrigger = () => {
@@ -879,7 +886,7 @@ describe("UserManagementSettings", () => {
         </SambeeThemeProvider>
       );
 
-      const header = await screen.findByTestId("user-directory-header");
+      const header = await findDesktopDirectoryHeader();
       const row = await screen.findByTestId("user-row");
 
       expect(within(header).getByRole("columnheader", { name: "Sign-in" })).toHaveStyle({ display: "flex" });
@@ -1057,7 +1064,8 @@ describe("UserManagementSettings", () => {
       );
 
       await screen.findByText("admin (you)", { exact: true });
-      await user.click(within(screen.getByTestId("user-directory-header")).getByRole("button", { name: "Sort by Role" }));
+      const header = await findDesktopDirectoryHeader();
+      await user.click(within(header).getByRole("button", { name: "Sort by Role" }));
 
       expect(screen.getByText("admin (you)", { exact: true })).toBeInTheDocument();
       expect(screen.getByRole("progressbar", { name: "Updating user directory" })).toBeInTheDocument();

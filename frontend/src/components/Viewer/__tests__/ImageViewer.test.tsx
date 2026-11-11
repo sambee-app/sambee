@@ -1,4 +1,5 @@
 import { act, createEvent, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ImageLoadPhase } from "../../../hooks/useCachedImageGallery";
@@ -146,6 +147,7 @@ describe("ImageViewer", () => {
   });
 
   it("blurs toolbar focus on the first Escape and closes once on the next", async () => {
+    const user = userEvent.setup();
     const onClose = vi.fn();
     await render(
       <SambeeThemeProvider>
@@ -153,13 +155,13 @@ describe("ImageViewer", () => {
       </SambeeThemeProvider>
     );
     const close = screen.getByRole("button", { name: "Close" });
-    close.focus();
+    await act(async () => close.focus());
 
-    fireEvent.keyDown(close, { key: "Escape" });
+    await user.keyboard("{Escape}");
     expect(close).not.toHaveFocus();
     expect(onClose).not.toHaveBeenCalled();
 
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -215,6 +217,7 @@ describe("ImageViewer", () => {
   });
 
   it("blocks stale image bytes during replacement and downloads the exact failed displayed attachment", async () => {
+    const user = userEvent.setup();
     const share = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new DOMException("blocked", "NotAllowedError"));
     vi.stubGlobal("navigator", { share, canShare: () => true });
     vi.stubGlobal(
@@ -247,7 +250,7 @@ describe("ImageViewer", () => {
     );
     try {
       const { rerender } = await render(viewer);
-      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      await user.click(screen.getByRole("button", { name: "Share" }));
       await waitFor(() => expect(screen.getByRole("button", { name: "Share" })).toBeEnabled());
       await act(async () => {
         expect(await readBlobAsText(share.mock.calls[0]?.[0]?.files[0])).toBe("displayed original JPEG");
@@ -272,19 +275,19 @@ describe("ImageViewer", () => {
           <ImageViewer connectionId="conn-1" path="/images/photo.jpg" onClose={onClose} />
         </SambeeThemeProvider>
       );
-      fireEvent.click(screen.getByRole("button", { name: "Share" }));
+      await user.click(screen.getByRole("button", { name: "Share" }));
       const details = await screen.findByRole("button", { name: "Details" });
       const attachment = share.mock.calls[1]?.[0]?.files[0];
       expect(attachment).toMatchObject({ name: "photo.png", type: "image/png" });
       await act(async () => {
         expect(await readBlobAsText(attachment)).toBe("replacement resized PNG");
       });
-      fireEvent.click(details);
+      await user.click(details);
       await screen.findByText(/"reason": "NotAllowedError"/);
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await user.keyboard("{Escape}");
       await screen.findByRole("button", { name: "Details" });
       expect(onClose).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("button", { name: "Download" }));
+      await user.click(screen.getByRole("button", { name: "Download" }));
       expect(downloadViewerBlob).toHaveBeenCalledWith(attachment, "photo.png");
       expect(apiService.getImageBlob).not.toHaveBeenCalled();
     } finally {

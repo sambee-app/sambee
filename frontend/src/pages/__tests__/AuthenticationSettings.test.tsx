@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -254,7 +254,7 @@ describe("Authentication settings", () => {
 
     const guide = await screen.findByRole("link", { name: "OpenID Connect setup guide" });
     const authenticationMode = screen.getByRole("combobox", { name: "Authentication mode" });
-    guide.focus();
+    await act(async () => guide.focus());
     await user.tab();
 
     expect(authenticationMode).toHaveFocus();
