@@ -1184,43 +1184,84 @@ describe("Authentication settings", () => {
     expect(scopes).toHaveValue("openid, profile, groups,email");
   });
 
-  it("preserves comma-separated group drafts and submits parsed group arrays", async () => {
+  const groupDraftCases = [
+    {
+      label: "Admission groups",
+      initialValue: "sambee-users",
+      firstGroup: "sambee-users",
+      secondGroup: "Engineering Team",
+      expected: { admission_groups: ["sambee-users", "Engineering Team"] },
+    },
+    {
+      label: "Administrator groups",
+      initialValue: "sambee-admins",
+      firstGroup: "sambee-admins",
+      secondGroup: "Platform Admins",
+      expected: { role_mappings: { admin: ["sambee-admins", "Platform Admins"] } },
+    },
+    {
+      label: "Editor groups",
+      initialValue: "",
+      firstGroup: "Content Editors",
+      secondGroup: "Release Editors",
+      expected: { role_mappings: { editor: ["Content Editors", "Release Editors"] } },
+    },
+    {
+      label: "Viewer groups",
+      initialValue: "",
+      firstGroup: "Read Only",
+      secondGroup: "Support Team",
+      expected: { role_mappings: { viewer: ["Read Only", "Support Team"] } },
+    },
+  ];
+
+  it.each(groupDraftCases)(
+    "preserves comma-separated $label drafts and submits parsed group arrays",
+    async ({ label, initialValue, firstGroup, secondGroup, expected }) => {
+      const user = userEvent.setup();
+      vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Active Provider")));
+      vi.mocked(api.startOidcTest).mockRejectedValue(new Error("Test request stopped"));
+      window.location.hash = "";
+      renderSettings();
+
+      await openOidcConfiguration(user);
+      const groups = await screen.findByRole("textbox", { name: label });
+      expect(groups).toHaveValue(initialValue);
+      await user.click(groups);
+      if (!initialValue) await user.paste(firstGroup);
+      await user.keyboard("{End},");
+      expect(groups).toHaveValue(`${firstGroup},`);
+      await user.paste(` ${secondGroup}`);
+      expect(groups).toHaveValue(`${firstGroup}, ${secondGroup}`);
+
+      await user.click(screen.getByRole("button", { name: "Connect and test" }));
+
+      expect(await screen.findByTestId("oidc-configuration-test-error")).toBeInTheDocument();
+      expect(api.startOidcTest).toHaveBeenCalledOnce();
+      expect(vi.mocked(api.startOidcTest).mock.calls[0]?.[0]).toMatchObject(expected);
+    }
+  );
+
+  it("submits all group drafts together without overwriting another group's edits", async () => {
     const user = userEvent.setup();
     vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Active Provider")));
     vi.mocked(api.startOidcTest).mockRejectedValue(new Error("Test request stopped"));
     window.location.hash = "";
     renderSettings();
-
     await openOidcConfiguration(user);
-    const admissionGroups = await screen.findByRole("textbox", { name: "Admission groups" });
-    const administratorGroups = screen.getByRole("textbox", { name: "Administrator groups" });
-    const editorGroups = screen.getByRole("textbox", { name: "Editor groups" });
-    const viewerGroups = screen.getByRole("textbox", { name: "Viewer groups" });
 
-    await user.click(admissionGroups);
-    await user.keyboard("{End}, Engineering Team");
-    await user.click(administratorGroups);
-    await user.keyboard("{End}, Platform Admins");
-    await user.type(editorGroups, "Content Editors, Release Editors");
-    await user.type(viewerGroups, "Read Only, Support Team");
-
-    expect(admissionGroups).toHaveValue("sambee-users, Engineering Team");
-    expect(administratorGroups).toHaveValue("sambee-admins, Platform Admins");
-    expect(editorGroups).toHaveValue("Content Editors, Release Editors");
-    expect(viewerGroups).toHaveValue("Read Only, Support Team");
+    for (const { label, firstGroup, secondGroup } of groupDraftCases) {
+      await user.clear(screen.getByRole("textbox", { name: label }));
+      await user.paste(`${firstGroup}, ${secondGroup}`);
+    }
 
     await user.click(screen.getByRole("button", { name: "Connect and test" }));
 
-    expect(api.startOidcTest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        admission_groups: ["sambee-users", "Engineering Team"],
-        role_mappings: {
-          admin: ["sambee-admins", "Platform Admins"],
-          editor: ["Content Editors", "Release Editors"],
-          viewer: ["Read Only", "Support Team"],
-        },
-      })
-    );
+    expect(await screen.findByTestId("oidc-configuration-test-error")).toBeInTheDocument();
+    expect(api.startOidcTest).toHaveBeenCalledOnce();
+    for (const { expected } of groupDraftCases) {
+      expect(vi.mocked(api.startOidcTest).mock.calls[0]?.[0]).toMatchObject(expected);
+    }
   });
 
   it("does not re-evaluate a tested policy for a separator-only group edit", async () => {

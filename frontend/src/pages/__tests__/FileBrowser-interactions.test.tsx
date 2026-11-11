@@ -8,7 +8,7 @@ import { createMockCurrentUserSettings } from "../../test/helpers/mockFactories"
 
 import { act, cleanup, createEvent, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type Mock, onTestFinished, vi } from "vitest";
 import * as viewerContent from "../../components/Viewer/viewerContent";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
@@ -101,17 +101,19 @@ function setupCompactNativeShare() {
   Object.defineProperty(navigator, "share", { configurable: true, value: share });
   Object.defineProperty(navigator, "canShare", { configurable: true, value: canShare });
 
-  return {
-    share,
-    canShare,
-    restore() {
-      window.matchMedia = originalMatchMedia;
-      if (originalShare) Object.defineProperty(navigator, "share", originalShare);
-      else Reflect.deleteProperty(navigator, "share");
-      if (originalCanShare) Object.defineProperty(navigator, "canShare", originalCanShare);
-      else Reflect.deleteProperty(navigator, "canShare");
-    },
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    window.matchMedia = originalMatchMedia;
+    if (originalShare) Object.defineProperty(navigator, "share", originalShare);
+    else Reflect.deleteProperty(navigator, "share");
+    if (originalCanShare) Object.defineProperty(navigator, "canShare", originalCanShare);
+    else Reflect.deleteProperty(navigator, "canShare");
   };
+  // A timeout does not stop the test body; its late finally must not restore another test's mocks.
+  onTestFinished(restore);
+  return { share, canShare, restore };
 }
 
 // Mock the API module
@@ -140,6 +142,20 @@ describe("Browser Component - Interactions", () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
+  });
+
+  it("does not restore compact sharing mocks twice over a later override", () => {
+    const first = setupCompactNativeShare();
+    first.restore();
+    const second = setupCompactNativeShare();
+    const secondMatchMedia = window.matchMedia;
+
+    first.restore();
+
+    expect(window.matchMedia).toBe(secondMatchMedia);
+    expect(navigator.share).toBe(second.share);
+    expect(navigator.canShare).toBe(second.canShare);
+    second.restore();
   });
 
   it("flushes mocked initial loading without advancing timers", async () => {
@@ -3120,45 +3136,37 @@ describe("Browser Component - Interactions", () => {
       });
     });
 
-    it("switches quick-bar modes from the mode pill", async () => {
-      const user = userEvent.setup();
-      await renderBrowserAndFlush("/browse/smb/test-server-1");
+    it.each([
+      { shortcut: "{Control>}k{/Control}", source: "Navigate", destination: "Commands", placeholder: "Run a command" },
+      {
+        shortcut: "{Control>}p{/Control}",
+        source: "Commands",
+        destination: "File Search",
+        placeholder: "Search recent and current-directory files",
+      },
+      { shortcut: "/", source: "File Search", destination: "Navigate", placeholder: "Navigate to any directory" },
+    ])(
+      "switches quick-bar modes from $source to $destination with the mode pill",
+      async ({ shortcut, source, destination, placeholder }) => {
+        const user = userEvent.setup();
+        await renderBrowserAndFlush("/browse/smb/test-server-1");
+        await screen.findByRole("button", { name: "Folder: Documents" });
 
-      await waitFor(() => {
-        const documentsElements = screen.getAllByText("Documents");
-        expect(documentsElements.length).toBeGreaterThan(0);
-      });
+        await user.keyboard(shortcut);
 
-      await user.keyboard("{Control>}k{/Control}");
+        const modeButton = await screen.findByRole("button", { name: "Switch quick bar mode" });
+        expect(modeButton).toHaveTextContent(source);
 
-      const modeButton = await screen.findByRole("button", { name: "Switch quick bar mode" });
-      expect(modeButton).toHaveTextContent("Navigate");
+        await user.click(modeButton);
+        await user.click(await screen.findByRole("menuitem", { name: destination }));
 
-      await user.click(modeButton);
-      await user.click(await screen.findByRole("menuitem", { name: "Commands" }));
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText("Run a command")).toHaveFocus();
-        expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("Commands");
-      });
-
-      await user.click(screen.getByRole("button", { name: "Switch quick bar mode" }));
-      await user.click(await screen.findByRole("menuitem", { name: "File Search" }));
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText("Search recent and current-directory files")).toHaveFocus();
-        expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("File Search");
-      });
-
-      await user.click(screen.getByRole("button", { name: "Switch quick bar mode" }));
-      await user.click(await screen.findByRole("menuitem", { name: "Navigate" }));
-
-      await waitFor(() => {
-        expect(screen.getByPlaceholderText("Navigate to any directory")).toHaveFocus();
-        expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("Navigate");
-        expect(screen.getByRole("button", { name: /readme.txt/i })).toBeInTheDocument();
-      });
-    });
+        await waitFor(() => {
+          expect(screen.getByPlaceholderText(placeholder)).toHaveFocus();
+          expect(modeButton).toHaveTextContent(destination);
+        });
+        expect(screen.getByRole("button", { name: "File: readme.txt" })).toBeInTheDocument();
+      }
+    );
 
     it("navigates down with ArrowDown key", async () => {
       const user = userEvent.setup();
@@ -3837,7 +3845,7 @@ describe("Browser Component - Interactions", () => {
         await user.click(screen.getByRole("menuitem", { name: "Select" }));
         await user.click(screen.getByRole("button", { name: "More actions for Pictures" }));
         await user.click(screen.getByRole("menuitem", { name: "Select" }));
-        await user.click(screen.getByRole("button", { name: "Selection actions" }));
+        await user.click(await screen.findByRole("button", { name: "Selection actions" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
         expect(await screen.findByText("2 files ready to share")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Share" }));
@@ -3846,16 +3854,37 @@ describe("Browser Component - Interactions", () => {
         const files = share.mock.calls[0]![0].files as File[];
         expect(files.map((file) => file.name)).toEqual(["Documents", "Pictures"]);
         expect(files.map((file) => file.type)).toEqual(["text/plain", "text/plain"]);
-
-        await user.click(screen.getByRole("button", { name: "Selection actions" }));
-        await user.click(screen.getByRole("menuitem", { name: "Share" }));
-        expect(await screen.findByText("2 files ready to share")).toBeInTheDocument();
-        await user.click(screen.getByRole("button", { name: "Clear selection" }));
-        await waitFor(() => expect(screen.queryByText("2 files ready to share")).not.toBeInTheDocument());
-        expect(share).toHaveBeenCalledOnce();
       } finally {
         restore();
       }
+    });
+
+    it("cancels a second prepared compact selection share when the selection is cleared", async () => {
+      const { share } = setupCompactNativeShare();
+      setupRegularFileTransferListing();
+      vi.mocked(api.getOriginalFileBlob).mockImplementation(async (_connectionId, path) => new Blob([path], { type: "text/plain" }));
+      const user = userEvent.setup();
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
+
+      await user.click(await screen.findByTestId("file-list-container"));
+      await user.keyboard("{Control>}a{/Control}");
+      await user.click(await screen.findByRole("button", { name: "Selection actions" }));
+      await user.click(screen.getByRole("menuitem", { name: "Share" }));
+      expect(await screen.findByText("2 files ready to share")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Share" }));
+      await waitFor(() => {
+        expect(share).toHaveBeenCalledOnce();
+        expect(screen.queryByText("2 files ready to share")).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole("button", { name: "Selection actions" }));
+      await user.click(screen.getByRole("menuitem", { name: "Share" }));
+      expect(await screen.findByText("2 files ready to share")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Clear selection" }));
+
+      await waitFor(() => expect(screen.queryByText("2 files ready to share")).not.toBeInTheDocument());
+      expect(share).toHaveBeenCalledOnce();
     });
 
     it("shares selections beyond the former count and listed-size limits", async () => {
@@ -3880,7 +3909,7 @@ describe("Browser Component - Interactions", () => {
         const list = await screen.findByTestId("file-list-container");
         await user.click(list);
         await user.keyboard("{Control>}a{/Control}");
-        await user.click(screen.getByRole("button", { name: "Selection actions" }));
+        await user.click(await screen.findByRole("button", { name: "Selection actions" }));
         await user.click(screen.getByRole("menuitem", { name: "Share" }));
         expect(await screen.findByText("21 files ready to share")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "Share" }));
@@ -4145,7 +4174,7 @@ describe("Browser Component - Interactions", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await screen.findAllByText("Documents");
-      await user.click(screen.getByRole("button", { name: "Rename" }));
+      await user.click(await screen.findByRole("button", { name: "Rename" }));
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
@@ -4214,12 +4243,13 @@ describe("Browser Component - Interactions", () => {
           { timeout: PANE_READY_TIMEOUT_MS }
         );
 
-        const leftPane = container.querySelector('[data-pane-id="left"]');
-        const rightPane = container.querySelector('[data-pane-id="right"]');
-        expect(leftPane).toBeInstanceOf(HTMLElement);
-        expect(rightPane).toBeInstanceOf(HTMLElement);
-        const left = within(leftPane as HTMLElement);
-        const right = within(rightPane as HTMLElement);
+        const { left, right } = await waitFor(
+          () => ({
+            left: within(requireTestValue(container.querySelector<HTMLElement>('[data-pane-id="left"]'))),
+            right: within(requireTestValue(container.querySelector<HTMLElement>('[data-pane-id="right"]'))),
+          }),
+          { timeout: PANE_READY_TIMEOUT_MS }
+        );
         if (loading === "delayed") {
           expect(left.queryByRole("button", { name: "File: left-item.txt" })).not.toBeInTheDocument();
           expect(right.queryByRole("button", { name: "File: right-item.txt" })).not.toBeInTheDocument();

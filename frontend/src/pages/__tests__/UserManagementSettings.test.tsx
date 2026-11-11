@@ -2,7 +2,7 @@ import { act, render as renderBase, screen, waitFor, within } from "@testing-lib
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   clearCachedAsyncData,
   clearCachedAsyncDataByPrefix,
@@ -62,9 +62,14 @@ function mockViewportWidth(width: number) {
     };
   });
 
-  return () => {
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
     window.matchMedia = originalMatchMedia;
   };
+  onTestFinished(restore);
+  return restore;
 }
 
 async function openUserActions(user: ReturnType<typeof userEvent.setup>, username: string) {
@@ -127,6 +132,18 @@ describe("UserManagementSettings", () => {
     vi.mocked(api.resetUserPassword).mockResolvedValue({
       message: "Password reset",
     });
+  });
+
+  it("does not restore a viewport twice over a later override", () => {
+    const restoreFirst = mockViewportWidth(390);
+    restoreFirst();
+    const restoreSecond = mockViewportWidth(1200);
+    const secondMatchMedia = window.matchMedia;
+
+    restoreFirst();
+
+    expect(window.matchMedia).toBe(secondMatchMedia);
+    restoreSecond();
   });
 
   it("invalidates every cached directory query after a user mutation", async () => {
@@ -1411,206 +1428,220 @@ describe("UserManagementSettings", () => {
     expect(screen.queryByText("Failed to load users")).not.toBeInTheDocument();
   });
 
-  it("uses the centralized OIDC mapping dialog and closes change and move workflows with Escape", async () => {
-    const restoreViewport = mockViewportWidth(1200);
-    vi.mocked(api.getUsers).mockResolvedValue(
-      createMockAdminUserList([
-        createMockAdminUser({
-          id: "user-1",
-          username: "linked-admin",
-          role: "admin",
-          is_active: true,
-          must_change_password: false,
-          has_local_password: true,
-          oidc_role_assignment: null,
-          oidc: {
-            identity_id: "identity-1",
-            user_id: "user-1",
-            provider_display_name: "Corporate login",
-            issuer: "https://idp.example.test",
-            subject: "provider-subject-1",
-            last_seen_username: "linked-admin",
-            last_groups: ["admins", "operators"],
+  describe("OIDC mapping dialogs", () => {
+    beforeEach(async () => {
+      mockViewportWidth(1200);
+      vi.mocked(api.getUsers).mockResolvedValue(
+        createMockAdminUserList([
+          createMockAdminUser({
+            id: "user-1",
+            username: "linked-admin",
+            role: "admin",
+            is_active: true,
+            must_change_password: false,
+            has_local_password: true,
+            oidc_role_assignment: null,
+            oidc: {
+              identity_id: "identity-1",
+              user_id: "user-1",
+              provider_display_name: "Corporate login",
+              issuer: "https://idp.example.test",
+              subject: "provider-subject-1",
+              last_seen_username: "linked-admin",
+              last_groups: ["admins", "operators"],
+              created_at: "2026-03-01T10:00:00Z",
+              last_login_at: null,
+            },
+            pending_oidc: null,
             created_at: "2026-03-01T10:00:00Z",
-            last_login_at: null,
-          },
-          pending_oidc: null,
-          created_at: "2026-03-01T10:00:00Z",
-          updated_at: "2026-03-01T10:00:00Z",
-        }),
-        createMockAdminUser({
-          id: "user-2",
-          username: "unmapped-user",
-          role: "viewer",
-          is_active: true,
-          must_change_password: false,
-          has_local_password: true,
-          oidc_role_assignment: null,
-          oidc: null,
-          pending_oidc: null,
-          created_at: "2026-03-01T10:00:00Z",
-          updated_at: "2026-03-01T10:00:00Z",
-        }),
-      ])
-    );
-    vi.mocked(api.getOidcConfiguration).mockResolvedValue({
-      configuration: {
-        no_refresh_session_limit_hours: 8,
-        display_name: "Corporate login",
-        issuer_url: "https://idp.example.test",
-        client_id: "sambee",
-        client_secret_configured: true,
-        scopes: ["openid", "groups"],
-        username_claim: "preferred_username",
-        name_claim: "name",
-        email_claim: "email",
-        groups_claim: "groups",
-        sign_in_mode: "oidc_or_password",
-        interactive_reauthentication_max_age_days: 30,
-        admission_mode: "selected_groups",
-        admission_groups: ["users"],
-        role_assignment_mode: "uniform",
-        uniform_role: "editor",
-        role_mappings: { admin: ["admins"], editor: [], viewer: [] },
-        auto_link_by_username: true,
-        configuration_revision: 2,
-        identity_mapping_revision: 1,
-      },
-      active_passwordless_user_count: 0,
-      auth_mode: "oidc_or_password",
-      auth_enforcement_disabled: false,
-      health: {
-        public_url_configured: true,
-        public_url: "https://sambee.example.test",
-        redirect_uri: "https://sambee.example.test/api/auth/oidc/callback",
-        status: "healthy",
-        reasons: [],
-      },
-    });
-    vi.mocked(api.getCurrentUser).mockResolvedValue({
-      id: "other-admin",
-      username: "other-admin",
-      role: "admin",
-    });
-    const user = userEvent.setup();
-
-    render(
-      <SambeeThemeProvider>
-        <UserManagementSettings />
-      </SambeeThemeProvider>
-    );
-
-    await openUserActions(user, "unmapped-user");
-    expect(screen.getByRole("menuitem", { name: "Map OIDC account" })).toBeEnabled();
-    await user.click(screen.getByRole("menuitem", { name: "Map OIDC account" }));
-    const newExpectedUsername = await screen.findByLabelText("Expected provider username");
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(await screen.findByText("Provider username is required.")).toBeInTheDocument();
-    expect(newExpectedUsername).toHaveAttribute("aria-invalid", "true");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await user.type(newExpectedUsername, "unmapped-user");
-    expect(newExpectedUsername).toHaveAttribute("aria-invalid", "false");
-    expect(screen.queryByText("Provider username is required.")).not.toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Map OIDC account" })).not.toBeInTheDocument());
-    vi.mocked(api.getUsers).mockResolvedValue({
-      items: [
-        {
-          id: "user-2",
-          username: "unmapped-user",
-          role: "viewer",
-          is_active: true,
-          must_change_password: false,
-          has_local_password: true,
-          oidc_role_assignment: null,
-          oidc: null,
-          pending_oidc: null,
-          created_at: "2026-03-01T10:00:00Z",
-          updated_at: "2026-03-01T10:00:00Z",
+            updated_at: "2026-03-01T10:00:00Z",
+          }),
+          createMockAdminUser({
+            id: "user-2",
+            username: "unmapped-user",
+            role: "viewer",
+            is_active: true,
+            must_change_password: false,
+            has_local_password: true,
+            oidc_role_assignment: null,
+            oidc: null,
+            pending_oidc: null,
+            created_at: "2026-03-01T10:00:00Z",
+            updated_at: "2026-03-01T10:00:00Z",
+          }),
+        ])
+      );
+      vi.mocked(api.getOidcConfiguration).mockResolvedValue({
+        configuration: {
+          no_refresh_session_limit_hours: 8,
+          display_name: "Corporate login",
+          issuer_url: "https://idp.example.test",
+          client_id: "sambee",
+          client_secret_configured: true,
+          scopes: ["openid", "groups"],
+          username_claim: "preferred_username",
+          name_claim: "name",
+          email_claim: "email",
+          groups_claim: "groups",
+          sign_in_mode: "oidc_or_password",
+          interactive_reauthentication_max_age_days: 30,
+          admission_mode: "selected_groups",
+          admission_groups: ["users"],
+          role_assignment_mode: "uniform",
+          uniform_role: "editor",
+          role_mappings: { admin: ["admins"], editor: [], viewer: [] },
+          auto_link_by_username: true,
+          configuration_revision: 2,
+          identity_mapping_revision: 1,
         },
-      ],
-      total: 1,
-      summary: { total: 1, active_admins: 0, disabled: 0, expiring_soon: 0, pending_oidc: 0, unavailable_sign_in: 0 },
+        active_passwordless_user_count: 0,
+        auth_mode: "oidc_or_password",
+        auth_enforcement_disabled: false,
+        health: {
+          public_url_configured: true,
+          public_url: "https://sambee.example.test",
+          redirect_uri: "https://sambee.example.test/api/auth/oidc/callback",
+          status: "healthy",
+          reasons: [],
+        },
+      });
+      vi.mocked(api.getCurrentUser).mockResolvedValue({
+        id: "other-admin",
+        username: "other-admin",
+        role: "admin",
+      });
+      vi.mocked(api.moveOidcIdentity).mockResolvedValue({ identity_mapping_revision: 2, pending_mappings: [] });
+      await act(async () => {
+        render(
+          <SambeeThemeProvider>
+            <UserManagementSettings />
+          </SambeeThemeProvider>
+        );
+      });
     });
 
-    await openUserActions(user, "linked-admin");
-    await user.click(screen.getByRole("menuitem", { name: "View OIDC identity details" }));
-    const identityDetailsDialog = await screen.findByRole("dialog", { name: "OIDC identity details for linked-admin" });
-    expect(identityDetailsDialog).toBeInTheDocument();
-    const providerSubject = screen.getByLabelText("IdP subject");
-    expect(screen.getByTestId("oidc-details-form-surface")).toContainElement(providerSubject);
-    expect(providerSubject).toHaveValue("provider-subject-1");
-    expect(providerSubject.closest(".MuiInputBase-root")).toHaveClass("MuiInputBase-sizeSmall");
-    expect(providerSubject).toHaveAttribute("aria-describedby", "oidc-details-subject-description");
-    const idpGroups = screen.getByLabelText("IdP groups");
-    expect(idpGroups.tagName).toBe("TEXTAREA");
-    expect(idpGroups).toHaveValue("admins\noperators");
-    expect(screen.getByText("Linked in Sambee")).not.toHaveClass("MuiInputLabel-root");
-    expect(screen.getByText("When Sambee first linked this IdP identity to the account")).not.toHaveClass("MuiFormHelperText-root");
-    expect(screen.queryByText("Sambee OIDC identity record ID")).not.toBeInTheDocument();
-    expect(screen.queryByText("Sambee local user ID")).not.toBeInTheDocument();
-    expect(screen.queryByText("Stored identity properties for linked-admin.")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Close" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "OIDC identity details" })).not.toBeInTheDocument());
-
-    await openUserActions(user, "linked-admin");
-    expect(screen.getByRole("menuitem", { name: "Change OIDC account" })).toBeEnabled();
-    await user.click(screen.getByRole("menuitem", { name: "Change OIDC account" }));
-    const expectedUsername = await screen.findByLabelText("Expected provider username");
-    expect(expectedUsername).toHaveFocus();
-    expect(screen.getByTestId("oidc-mapping-editor-form-surface")).toContainElement(expectedUsername);
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("oidc-mapping-contextual-error")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("oidc-mapping-action-error")).not.toBeInTheDocument();
-
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    it("validates a new provider username and closes mapping with Escape", async () => {
+      const user = userEvent.setup();
+      await openUserActions(user, "unmapped-user");
+      expect(screen.getByRole("menuitem", { name: "Map OIDC account" })).toBeEnabled();
+      await user.click(screen.getByRole("menuitem", { name: "Map OIDC account" }));
+      const newExpectedUsername = await screen.findByLabelText("Expected provider username");
+      await user.click(screen.getByRole("button", { name: "Confirm" }));
+      expect(await screen.findByText("Provider username is required.")).toBeInTheDocument();
+      expect(newExpectedUsername).toHaveAttribute("aria-invalid", "true");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await user.click(newExpectedUsername);
+      await user.paste("unmapped-user");
+      expect(newExpectedUsername).toHaveAttribute("aria-invalid", "false");
+      expect(screen.queryByText("Provider username is required.")).not.toBeInTheDocument();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Map OIDC account" })).not.toBeInTheDocument());
     });
 
-    await openUserActions(user, "linked-admin");
-    await user.click(screen.getByRole("menuitem", { name: "Move identity to another local user" }));
-    const targetAccount = await screen.findByLabelText("Move identity to");
-    expect(targetAccount).toHaveFocus();
-    expect(screen.getByTestId("oidc-mapping-editor-form-surface")).toContainElement(targetAccount);
-    expect(screen.getByText("Search eligible active, unlinked local accounts by username, name, or email")).toBeInTheDocument();
-    await waitFor(() =>
-      expect(api.getUsers).toHaveBeenLastCalledWith({
-        page: 1,
-        pageSize: 100,
-        q: undefined,
-        states: ["active"],
-        oidcStates: ["unlinked"],
-      })
-    );
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(await screen.findByText("Select an available local account.")).toBeInTheDocument();
-    expect(targetAccount).toHaveAttribute("aria-invalid", "true");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await user.click(targetAccount);
-    expect(await screen.findByRole("option", { name: "unmapped-user" })).toBeInTheDocument();
-    await user.keyboard("{ArrowDown}{Enter}");
-    expect(targetAccount).toHaveValue("unmapped-user");
-    expect(targetAccount).toHaveAttribute("aria-invalid", "false");
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(api.moveOidcIdentity).not.toHaveBeenCalled();
-    vi.mocked(api.moveOidcIdentity).mockRejectedValueOnce({ response: { data: { detail: "OIDC mapping rejected." } } });
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-    const mappingActionError = await screen.findByTestId("oidc-mapping-action-error");
-    expect(mappingActionError).toHaveTextContent("OIDC mapping rejected.");
-    expect(mappingActionError).toHaveAttribute("role", "alert");
-    expect(
-      mappingActionError.compareDocumentPosition(screen.getByTestId("responsive-form-dialog-desktop-actions")) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Confirm" }));
-    await waitFor(() => expect(api.moveOidcIdentity).toHaveBeenCalledWith("identity-1", 1, "user-2"));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    it("shows OIDC identity details with desktop descriptions", async () => {
+      const user = userEvent.setup();
+      await openUserActions(user, "linked-admin");
+      await user.click(screen.getByRole("menuitem", { name: "View OIDC identity details" }));
+      const identityDetailsDialog = await screen.findByRole("dialog", { name: "OIDC identity details for linked-admin" });
+      expect(identityDetailsDialog).toBeInTheDocument();
+      const providerSubject = screen.getByLabelText("IdP subject");
+      expect(screen.getByTestId("oidc-details-form-surface")).toContainElement(providerSubject);
+      expect(providerSubject).toHaveValue("provider-subject-1");
+      expect(providerSubject.closest(".MuiInputBase-root")).toHaveClass("MuiInputBase-sizeSmall");
+      expect(providerSubject).toHaveAttribute("aria-describedby", "oidc-details-subject-description");
+      const idpGroups = screen.getByLabelText("IdP groups");
+      expect(idpGroups.tagName).toBe("TEXTAREA");
+      expect(idpGroups).toHaveValue("admins\noperators");
+      expect(screen.getByText("Linked in Sambee")).not.toHaveClass("MuiInputLabel-root");
+      expect(screen.getByText("When Sambee first linked this IdP identity to the account")).not.toHaveClass("MuiFormHelperText-root");
+      expect(screen.queryByText("Sambee OIDC identity record ID")).not.toBeInTheDocument();
+      expect(screen.queryByText("Sambee local user ID")).not.toBeInTheDocument();
+      expect(screen.queryByText("Stored identity properties for linked-admin.")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(identityDetailsDialog).not.toBeInTheDocument());
     });
-    restoreViewport();
+
+    it("uses the centralized change-account editor and closes it with Escape", async () => {
+      const user = userEvent.setup();
+      await openUserActions(user, "linked-admin");
+      expect(screen.getByRole("menuitem", { name: "Change OIDC account" })).toBeEnabled();
+      await user.click(screen.getByRole("menuitem", { name: "Change OIDC account" }));
+      const expectedUsername = await screen.findByLabelText("Expected provider username");
+      await waitFor(() => expect(expectedUsername).toHaveFocus());
+      expect(screen.getByTestId("oidc-mapping-editor-form-surface")).toContainElement(expectedUsername);
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+      expect(screen.queryByTestId("oidc-mapping-contextual-error")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("oidc-mapping-action-error")).not.toBeInTheDocument();
+
+      await user.keyboard("{Escape}");
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+    });
+
+    async function openMoveDialog(user: ReturnType<typeof userEvent.setup>) {
+      vi.mocked(api.getUsers).mockResolvedValue(
+        createMockAdminUserList([createMockAdminUser({ id: "user-2", username: "unmapped-user", role: "viewer" })])
+      );
+      await openUserActions(user, "linked-admin");
+      await user.click(screen.getByRole("menuitem", { name: "Move identity to another local user" }));
+      const targetAccount = await screen.findByLabelText("Move identity to");
+      await waitFor(() => expect(targetAccount).toHaveFocus());
+      return targetAccount;
+    }
+
+    it("closes the move-identity editor with Escape without moving the identity", async () => {
+      const user = userEvent.setup();
+      await openMoveDialog(user);
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(api.moveOidcIdentity).not.toHaveBeenCalled();
+    });
+
+    it("validates the move target and retains it after a failed request for retry", async () => {
+      const user = userEvent.setup();
+      const targetAccount = await openMoveDialog(user);
+      expect(screen.getByTestId("oidc-mapping-editor-form-surface")).toContainElement(targetAccount);
+      expect(screen.getByText("Search eligible active, unlinked local accounts by username, name, or email")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(api.getUsers).toHaveBeenLastCalledWith({
+          page: 1,
+          pageSize: 100,
+          q: undefined,
+          states: ["active"],
+          oidcStates: ["unlinked"],
+        })
+      );
+      await user.click(screen.getByRole("button", { name: "Confirm" }));
+      expect(await screen.findByText("Select an available local account.")).toBeInTheDocument();
+      expect(targetAccount).toHaveAttribute("aria-invalid", "true");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await user.click(targetAccount);
+      expect(await screen.findByRole("option", { name: "unmapped-user" })).toBeInTheDocument();
+      await user.keyboard("{ArrowDown}{Enter}");
+      expect(targetAccount).toHaveValue("unmapped-user");
+      expect(targetAccount).toHaveAttribute("aria-invalid", "false");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(api.moveOidcIdentity).not.toHaveBeenCalled();
+      vi.mocked(api.moveOidcIdentity).mockRejectedValueOnce({ response: { data: { detail: "OIDC mapping rejected." } } });
+      await user.click(screen.getByRole("button", { name: "Confirm" }));
+      const mappingActionError = await screen.findByTestId("oidc-mapping-action-error");
+      expect(mappingActionError).toHaveTextContent("OIDC mapping rejected.");
+      expect(mappingActionError).toHaveAttribute("role", "alert");
+      expect(
+        mappingActionError.compareDocumentPosition(screen.getByTestId("responsive-form-dialog-desktop-actions")) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Confirm" }));
+      await waitFor(() => expect(api.moveOidcIdentity).toHaveBeenCalledWith("identity-1", 1, "user-2"));
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+    });
   });
 
   it.each([
