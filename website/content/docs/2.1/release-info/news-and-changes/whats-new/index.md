@@ -39,4 +39,4 @@ title = "What's New"
 ## Logging
 
 - Docker container logs are now redacted so that session cookies and other credentials don't get logged.
-- Docker container log messages from Uvicorn (http layer) and spnego (authentication) are now filtered so that messages are only logged once per completed operation. Log messages are formatted to fit on one line.
+- Docker container log messages from Uvicorn (http layer) and spnego (authentication) are now filtered so that messages are only logged once per completed operation and formatted to fit on one line.
