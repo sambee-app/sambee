@@ -12,8 +12,10 @@ const theme = builtInThemes[0]!;
 function renderEditor() {
   const onClose = vi.fn();
   const onSaved = vi.fn().mockResolvedValue(undefined);
-  render(<ThemeEditorDialog theme={theme} stored={undefined} storedThemes={[]} isAdmin={false} onClose={onClose} onSaved={onSaved} />);
-  return { onClose, onSaved };
+  const { unmount } = render(
+    <ThemeEditorDialog theme={theme} stored={undefined} storedThemes={[]} isAdmin={false} onClose={onClose} onSaved={onSaved} />
+  );
+  return { onClose, onSaved, unmount };
 }
 
 async function chooseCopyDestination(user: ReturnType<typeof userEvent.setup>, destination = "Your themes") {
@@ -243,8 +245,10 @@ describe("ThemeEditorDialog", () => {
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     try {
-      renderEditor();
+      const { unmount } = renderEditor();
       await user.click(screen.getByRole("button", { name: "Export" }));
+      // Cancel dialog transitions before waiting for file I/O outside React's act scope.
+      unmount();
       const json = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result));
