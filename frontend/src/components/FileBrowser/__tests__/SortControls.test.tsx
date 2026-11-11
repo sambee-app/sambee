@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../../i18n";
@@ -52,7 +52,7 @@ describe("SortControls", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "Sort options" });
-    trigger.focus();
+    await act(async () => trigger.focus());
 
     await user.keyboard(sequence);
 

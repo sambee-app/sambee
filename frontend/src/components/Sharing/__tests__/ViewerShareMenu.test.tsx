@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ViewerShareMenu } from "../ViewerShareMenu";
@@ -24,7 +24,7 @@ describe("viewer sharing menu", () => {
     const onText = vi.fn();
     render(<ViewerShareMenu onFile={onFile} onText={onText} fileDisabled />);
     const trigger = screen.getByRole("button", { name: "common.actions.share" });
-    trigger.focus();
+    await act(async () => trigger.focus());
     await user.keyboard("{ArrowDown}");
     expect(screen.getByRole("menuitem", { name: "viewer.share.asFile" })).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("menuitem", { name: "viewer.share.asText" })).not.toHaveAttribute("aria-disabled", "true");

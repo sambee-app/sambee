@@ -848,7 +848,7 @@ describe("UnifiedSearchBar", () => {
     expect(await screen.findByText("2 results")).toBeInTheDocument();
     expect(screen.queryByText("Keyboard shortcuts")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Recent files" })).toHaveStyle({ fontSize: "14px" });
-    expect(screen.getByText("Quarterly report")).toHaveStyle({ fontSize: "16px", lineHeight: "1.25" });
+    expect(screen.getByText("Quarterly report")).toHaveStyle({ fontSize: "16px", lineHeight: "20px" });
   });
 
   it("shows a retryable error instead of no-results when a search request fails", async () => {
@@ -994,7 +994,7 @@ describe("UnifiedSearchBar", () => {
     const searchInput = screen.getByRole("textbox");
     const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
 
-    modeButton.focus();
+    await act(async () => modeButton.focus());
     expect(modeButton).toHaveFocus();
 
     await user.keyboard("{Escape}");
@@ -1346,7 +1346,7 @@ describe("UnifiedSearchBar", () => {
     renderWithProvider(<UnifiedSearchBar provider={fileSearchProvider} modeOptions={modeOptions} disableDropdown={true} />);
 
     const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
-    modeButton.focus();
+    await act(async () => modeButton.focus());
 
     await user.keyboard("{Space}");
 
@@ -1371,7 +1371,7 @@ describe("UnifiedSearchBar", () => {
     renderWithProvider(<UnifiedSearchBar provider={fileSearchProvider} modeOptions={modeOptions} disableDropdown={true} />);
 
     const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
-    modeButton.focus();
+    await act(async () => modeButton.focus());
 
     await user.keyboard("{ArrowDown}");
 
@@ -1388,7 +1388,7 @@ describe("UnifiedSearchBar", () => {
     renderWithProvider(<UnifiedSearchBar provider={fileSearchProvider} modeOptions={modeOptions} disableDropdown={true} />);
 
     const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
-    modeButton.focus();
+    await act(async () => modeButton.focus());
 
     await user.keyboard("{Control>}{ArrowDown}{/Control}");
 

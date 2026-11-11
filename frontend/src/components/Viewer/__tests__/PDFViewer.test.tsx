@@ -1,4 +1,4 @@
-import { act, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ComponentProps, type ReactNode, useCallback, useEffect, useRef } from "react";
 import type { Mock } from "vitest";
@@ -569,7 +569,7 @@ describe("PDFViewer", () => {
         expect(presentation).toHaveStyle({
           opacity: "1",
           visibility: "visible",
-          transition: `opacity ${reducedMotion ? 0 : 160}ms ease-in-out`,
+          transition: `opacity ${reducedMotion ? 0 : 0.16}s ease-in-out`,
         });
         expect(presentation).toHaveAttribute("aria-hidden", "false");
         expect(presentation).not.toHaveAttribute("inert");
@@ -596,7 +596,8 @@ describe("PDFViewer", () => {
         expect(presentation).toHaveStyle({ opacity: "1", visibility: "visible" });
         expect(screen.queryByTestId("pdf-loading-overlay")).not.toBeInTheDocument();
       } finally {
-        vi.clearAllTimers();
+        cleanup();
+        await act(() => vi.runOnlyPendingTimersAsync());
         vi.useRealTimers();
       }
     });
@@ -683,7 +684,8 @@ describe("PDFViewer", () => {
         expect(screen.queryByTestId("pdf-loading-overlay")).not.toBeInTheDocument();
       } finally {
         downloadClick.mockRestore();
-        vi.clearAllTimers();
+        cleanup();
+        await act(() => vi.runOnlyPendingTimersAsync());
         vi.useRealTimers();
       }
     });
@@ -1283,7 +1285,7 @@ describe("PDFViewer", () => {
 
       await waitFor(() => {
         expect(track.style.transform).not.toBe(initialTransform);
-        expect(track.style.transform).toMatch(/\+ -[1-9]\d*px/);
+        expect(track.style.transform).toMatch(/(?:\+ -|- )[1-9]\d*px/);
       });
 
       fireEvent.pointerUp(window, { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: 200, clientY: 200 });

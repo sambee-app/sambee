@@ -153,6 +153,7 @@ describe("Browser Component - Interactions", () => {
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     } finally {
       cleanup();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   });
@@ -315,7 +316,7 @@ describe("Browser Component - Interactions", () => {
   it("navigates the upload choices by keyboard and restores focus on Escape", async () => {
     await renderBrowserAndFlush("/browse/smb/test-server-1");
     const trigger = await screen.findByRole("button", { name: "Upload" });
-    trigger.focus();
+    await act(async () => trigger.focus());
     fireEvent.click(trigger);
     const files = await screen.findByRole("menuitem", { name: "Files" });
     await waitFor(() => expect(files).toHaveFocus());
@@ -328,7 +329,7 @@ describe("Browser Component - Interactions", () => {
 
     const previousTarget = screen.getByTestId("virtual-list");
     previousTarget.tabIndex = 0;
-    previousTarget.focus();
+    await act(async () => previousTarget.focus());
     expect(previousTarget).toHaveFocus();
     fireEvent.keyDown(document, { key: "u", code: "KeyU", ctrlKey: true });
     const shortcutChoice = await screen.findByRole("menuitem", { name: "Files" });
@@ -840,6 +841,7 @@ describe("Browser Component - Interactions", () => {
         expect(screen.queryByText("Copy requires dual-pane mode.")).not.toBeInTheDocument();
       } finally {
         cleanup();
+        await act(() => vi.runOnlyPendingTimersAsync());
         vi.useRealTimers();
         window.matchMedia = originalMatchMedia;
       }
@@ -1184,7 +1186,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const settingsButton = screen.getByRole("button", { name: /open settings/i });
-      settingsButton.focus();
+      await act(async () => settingsButton.focus());
       expect(settingsButton).toHaveFocus();
 
       await user.keyboard("{Control>}b{/Control}");
@@ -1196,7 +1198,7 @@ describe("Browser Component - Interactions", () => {
         );
       });
 
-      settingsButton.focus();
+      await act(async () => settingsButton.focus());
       expect(settingsButton).toHaveFocus();
 
       await user.keyboard("{Control>}b{/Control}");
@@ -2686,7 +2688,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const settingsButton = screen.getByRole("button", { name: /open settings/i });
-      settingsButton.focus();
+      await act(async () => settingsButton.focus());
       expect(settingsButton).toHaveFocus();
 
       await user.keyboard("{Control>}k{/Control}");
@@ -2724,7 +2726,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
-      modeButton.focus();
+      await act(async () => modeButton.focus());
       expect(modeButton).toHaveFocus();
 
       await user.keyboard("{Control>}{ArrowDown}{/Control}");
@@ -3500,7 +3502,7 @@ describe("Browser Component - Interactions", () => {
 
       const documentsRow = screen.getByTestId("file-list-container").querySelector<HTMLButtonElement>('button[aria-label*="Documents"]');
       expect(documentsRow).not.toBeNull();
-      documentsRow?.focus();
+      await act(async () => documentsRow?.focus());
       expect(documentsRow).toHaveFocus();
 
       await user.keyboard("{Escape}");
@@ -3517,7 +3519,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       const deleteButton = screen.getByRole("button", { name: "Delete" });
-      deleteButton.focus();
+      await act(async () => deleteButton.focus());
       fireEvent.click(screen.getByTestId("file-operations-toolbar"));
       expect(deleteButton).toHaveFocus();
 

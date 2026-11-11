@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "../../i18n";
@@ -212,12 +212,12 @@ describe("ThemeSelector Component", () => {
 
       const darkThemeCard = screen.getByText(/Sambee dark/i).closest("button");
       expect(darkThemeCard).not.toBeNull();
-      darkThemeCard?.focus();
+      await act(async () => darkThemeCard?.focus());
       await user.keyboard("{Enter}");
 
       await waitFor(() => expect(darkThemeCard).toBeDisabled());
-      darkThemeCard?.blur();
-      resolveThemeUpdate?.();
+      await act(async () => darkThemeCard?.blur());
+      await act(async () => resolveThemeUpdate?.());
 
       await waitFor(() => expect(darkThemeCard).toHaveFocus());
     });

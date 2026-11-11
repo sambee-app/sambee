@@ -738,7 +738,7 @@ describe("TextEditor", () => {
     renderViewer({ onClose });
     await screen.findByRole("textbox", { name: "Text editor" });
     const close = screen.getByRole("button", { name: "Close" });
-    close.focus();
+    await act(async () => close.focus());
 
     fireEvent.keyDown(close, { key: "Escape" });
     expect(close).not.toHaveFocus();

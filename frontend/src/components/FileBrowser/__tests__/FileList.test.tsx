@@ -285,7 +285,8 @@ describe("FileList", () => {
     expect(screen.getByTestId("selection-dock-overlay").parentElement).toHaveStyle({ left: "0px", right: "0px", bottom: "0px" });
   });
 
-  it("offers archive extraction only for eligible compact item actions", () => {
+  it("offers archive extraction only for eligible compact item actions", async () => {
+    const user = userEvent.setup();
     const files: FileEntry[] = [
       {
         name: "backup.zip",
@@ -323,8 +324,8 @@ describe("FileList", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for backup.zip" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Extract archive" }));
+    await user.click(screen.getByRole("button", { name: "More actions for backup.zip" }));
+    await user.click(screen.getByRole("menuitem", { name: "Extract archive" }));
 
     expect(onExtractArchive).toHaveBeenCalledWith(files[0], 0);
   });

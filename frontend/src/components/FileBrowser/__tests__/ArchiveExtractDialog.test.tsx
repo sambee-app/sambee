@@ -286,6 +286,7 @@ describe("ArchiveExtractDialog", () => {
   });
 
   it("continues the safe collision resolution with Enter", async () => {
+    const user = userEvent.setup();
     const onConflictDecision = vi.fn();
     render(
       <ArchiveExtractDialog
@@ -298,7 +299,7 @@ describe("ArchiveExtractDialog", () => {
     );
 
     await waitFor(() => expect(screen.getByRole("button", { name: S.BUTTON_CONTINUE })).toBeEnabled());
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
+    await user.keyboard("{Enter}");
 
     expect(onConflictDecision).toHaveBeenCalledWith("skip", "docs/readme.txt", undefined);
   });

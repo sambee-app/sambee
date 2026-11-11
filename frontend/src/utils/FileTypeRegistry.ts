@@ -10,6 +10,7 @@
 
 import type React from "react";
 import type { ViewerNavigation } from "../hooks/useRoutedViewerEditing";
+import type { FrontendTranslations } from "../i18n/resources";
 import type { VirtualItemHandle } from "../pages/FileBrowser/contentProviders";
 import { logger } from "../services/logger";
 import { isTextFilename, matchFileLanguage } from "./fileLanguages";
@@ -41,9 +42,12 @@ export interface ViewerComponentProps {
 export type ViewerComponent = React.ComponentType<ViewerComponentProps>;
 export type ViewerId = "image" | "markdown" | "pdf" | "text";
 
+type ViewerTranslationKey =
+  `fileBrowser.viewerPicker.viewers.${keyof FrontendTranslations["fileBrowser"]["viewerPicker"]["viewers"] & string}`;
+
 export interface ViewerDefinition {
   id: ViewerId;
-  translationKey: import("i18next").ParseKeys;
+  translationKey: ViewerTranslationKey;
   description: string;
 }
 

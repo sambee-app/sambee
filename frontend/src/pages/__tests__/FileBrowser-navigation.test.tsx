@@ -178,7 +178,7 @@ describe("Browser Component - Navigation", () => {
     });
 
     const destinationButton = screen.getByRole("button", { name: /folder: destination/i });
-    destinationButton.focus();
+    await act(async () => destinationButton.focus());
     destinationButton.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.stopPropagation();

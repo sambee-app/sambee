@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
@@ -1321,6 +1321,8 @@ describe("useFileBrowserPane", () => {
       expect(api.listDirectory).toHaveBeenCalledTimes(3);
       expect(result.current.loading).toBe(false);
     } finally {
+      cleanup();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   });
@@ -1350,6 +1352,8 @@ describe("useFileBrowserPane", () => {
       await act(async () => vi.advanceTimersByTimeAsync(1_000));
       expect(api.listDirectory).toHaveBeenCalledTimes(4);
     } finally {
+      cleanup();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   });
@@ -1389,6 +1393,8 @@ describe("useFileBrowserPane", () => {
       expect(api.listDirectory).toHaveBeenCalledTimes(4);
       expect(result.current.loading).toBe(false);
     } finally {
+      cleanup();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   });
@@ -1412,6 +1418,8 @@ describe("useFileBrowserPane", () => {
       await act(async () => vi.advanceTimersByTimeAsync(5_000));
       expect(api.listDirectory).toHaveBeenCalledTimes(3);
     } finally {
+      cleanup();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   });
@@ -1439,6 +1447,8 @@ describe("useFileBrowserPane", () => {
         expect(result.current.currentPath).toBe("Documents");
       }
     } finally {
+      cleanup();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   });
@@ -1485,6 +1495,8 @@ describe("useFileBrowserPane", () => {
         expect(list.scrollTop).toBe(120);
       } finally {
         list.remove();
+        cleanup();
+        await act(() => vi.runOnlyPendingTimersAsync());
         vi.useRealTimers();
       }
     }

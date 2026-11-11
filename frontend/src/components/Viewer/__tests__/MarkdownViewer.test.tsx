@@ -1512,6 +1512,7 @@ describe("MarkdownViewer", () => {
       expect(apiService.saveTextFile).not.toHaveBeenCalled();
     } finally {
       unmount();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     }
   });
@@ -1748,7 +1749,7 @@ describe("MarkdownViewer", () => {
     renderViewerWithProps({ onClose });
     await screen.findByText("Readme");
     const close = screen.getByRole("button", { name: "Close" });
-    close.focus();
+    await act(async () => close.focus());
 
     fireEvent.keyDown(close, { key: "Escape" });
     expect(close).not.toHaveFocus();

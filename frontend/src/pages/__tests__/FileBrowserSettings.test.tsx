@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "../../test/utils/test-utils";
@@ -126,13 +126,13 @@ describe("FileBrowserSettings", () => {
     const { rerender } = render(<FileBrowserSettings />);
     const includeDotDirectories = screen.getByRole("checkbox", { name: "Include dot directories in quick nav" });
 
-    includeDotDirectories.focus();
+    await act(async () => includeDotDirectories.focus());
     await user.keyboard(" ");
     expect(commitMock).toHaveBeenCalledWith(true);
 
     settingStates.includeDotDirectories.pending = true;
     rerender(<FileBrowserSettings />);
-    includeDotDirectories.blur();
+    await act(async () => includeDotDirectories.blur());
     settingStates.includeDotDirectories.pending = false;
     rerender(<FileBrowserSettings />);
 
@@ -144,7 +144,7 @@ describe("FileBrowserSettings", () => {
     render(<FileBrowserSettings />);
 
     const trigger = screen.getByRole("button", { name: "Clear recent files" });
-    trigger.focus();
+    await act(async () => trigger.focus());
     await user.click(trigger);
 
     const dialog = screen.getByRole("dialog");
@@ -174,7 +174,7 @@ describe("FileBrowserSettings", () => {
     render(<FileBrowserSettings />);
 
     const trigger = screen.getByRole("button", { name: "Clear recent files" });
-    trigger.focus();
+    await act(async () => trigger.focus());
     await user.click(trigger);
     const dialog = screen.getByRole("dialog");
     const confirm = within(dialog).getByRole("button", { name: "Clear recent files" });
