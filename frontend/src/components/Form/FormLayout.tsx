@@ -29,6 +29,18 @@ export type FieldFeedback = {
   severity: "error" | "warning";
 } | null;
 
+const ACCORDION_FOCUS_RING_WIDTH_PX = 2;
+
+export const formAccordionSummarySx = {
+  width: (theme: Theme) => `calc(100% + ${theme.spacing(2)})`,
+  mx: -1,
+  px: 1,
+  "&.Mui-focusVisible": {
+    bgcolor: "transparent",
+    boxShadow: (theme: Theme) => `inset 0 0 0 ${ACCORDION_FOCUS_RING_WIDTH_PX}px ${theme.palette.primary.main}`,
+  },
+};
+
 export const formFieldControlSx = {
   display: "flex",
   justifyContent: { md: "flex-end" },

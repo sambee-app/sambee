@@ -9,15 +9,17 @@ When your administrator enables health monitoring for your role, Sambee shows a 
 - On desktop: Select the **System health** icon immediately to the right of **Settings** in the top toolbar.
 - On phones and narrow screens: Select the main **Sambee** icon to open the navigation drawer, then select **System health** directly below **Settings**. The mobile toolbar does not show a separate health button.
 
-Closing the dialog returns keyboard focus to the control that opened it (or to the main **Sambee** menu button on mobile).
+Closing the dialog returns keyboard focus to the file list on desktop or to the main **Sambee** menu button on mobile.
 
 ## Health at a Glance
 
-The dialog shows a short summary, **Server** readings, and **Connection storage**. Connection storage warnings and errors appear first. Missing or old readings are marked separately; they do not mean that a resource is healthy.
+The dialog groups readings under **Server**, **Container**, and **Connection storage**. Connection storage warnings and errors appear first. Missing or old readings are marked separately; they do not mean that a resource is healthy.
 
 Readings update automatically every 5 seconds while the dialog is open and the browser tab is visible.
 
 Each reading has its own expandable row for capacity, check limits, and its data source. The current value appears only once.
+
+**Load average (normalized)** shows the 5-minute load average divided by the logical CPU count, not CPU usage. Container **Memory** shows used bytes and a percentage of its memory limit. With no limit, the percentage uses total host memory when available; the details identify the basis. This host-based percentage does not trigger container memory alerts.
 
 The desktop toolbar icon combines a monitor-and-pulse symbol with a status badge. The dialog and mobile menu use simple status icons. Their shapes show the state without color alone:
 
@@ -34,7 +36,7 @@ Sambee checks free space only for locations active in your current browser:
 - The SMB connection open in the current pane (or both panes in dual-pane mode, without duplicates). Saved SMB connections that are not open are not queried.
 - Local drives exposed by your paired Companion app on desktop.
 
-**Container application data** and **Container temporary storage** appear under **Server**. A shared filesystem uses one combined row. Drives and connections appear under **Connection storage**, with **Local drive** or **SMB connection** shown separately from the name. If Companion cannot provide drive information, a single **Local drives** row shows its status.
+**Storage: application data** and **Storage: temporary data** appear under **Container**. A shared filesystem uses one combined row. Drives and connections appear under **Connection storage**, with **Local drive** or **SMB connection** shown separately from the name. If Companion cannot provide drive information, a single **Local drives** row shows its status.
 
 Storage entries show free space and its percentage. On SMB shares and Windows local drives, this value includes enforced user quotas.
 

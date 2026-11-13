@@ -308,9 +308,9 @@ describe("System Health Monitoring UI and Hook", () => {
     expect(screen.getByText("Action needed")).toBeInTheDocument();
     expect(screen.getByText("25% used")).toBeInTheDocument();
     expect(screen.getByText("18.0 GB free (4%)")).toBeInTheDocument();
-    expect(screen.getByText("No limit set")).toBeInTheDocument();
-    expect(screen.getByText("Container memory")).toBeInTheDocument();
-    expect(screen.getByText("128.0 MB used")).toBeInTheDocument();
+    expect(screen.queryByText("No limit set")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Memory")).toHaveLength(2);
+    expect(screen.getByText("128.0 MB used (0.8%)")).toBeInTheDocument();
     expect(screen.getByText("Media Archive With A Very Long Descriptive Connection Name")).toBeInTheDocument();
     expect(screen.getByText(/Free space or select another location\./)).toBeInTheDocument();
     expect(screen.getByText(/Update Companion to show drive space\./)).toBeInTheDocument();
@@ -320,9 +320,14 @@ describe("System Health Monitoring UI and Hook", () => {
     expect(screen.queryByText(/CPU usage/i)).not.toBeInTheDocument();
 
     const server = within(screen.getByTestId("system-health-resource-overview"));
+    const container = within(screen.getByTestId("system-health-container-overview"));
     expect(screen.queryByText("Sambee storage")).not.toBeInTheDocument();
-    expect(server.getByText("Container application data")).toBeInTheDocument();
-    expect(server.getByText("Container temporary storage")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Container" })).toBeInTheDocument();
+    expect(server.getByText("Memory")).toBeInTheDocument();
+    expect(server.queryByText("Storage: application data")).not.toBeInTheDocument();
+    expect(container.getByText("Memory")).toBeInTheDocument();
+    expect(container.getByText("Storage: application data")).toBeInTheDocument();
+    expect(container.getByText("Storage: temporary data")).toBeInTheDocument();
     expect(server.queryByText("Local drives")).not.toBeInTheDocument();
     expect(screen.getByText("Connection storage")).toBeInTheDocument();
     const storage = screen.getByTestId("system-health-connection-storage");
@@ -333,14 +338,16 @@ describe("System Health Monitoring UI and Hook", () => {
     ]);
     expect(within(storage).getByText("SMB connection")).toBeInTheDocument();
     expect(within(storage).queryByText("Local drive")).not.toBeInTheDocument();
-    expect(within(storage).queryByText("Container application data")).not.toBeInTheDocument();
+    expect(within(storage).queryByText("Storage: application data")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Technical details" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog").querySelector('[data-health-symbol="monitor-pulse"]')).toBeNull();
 
     const user = userEvent.setup();
-    const loadButton = screen.getByRole("button", { name: /^Server load/ });
+    const loadButton = screen.getByRole("button", { name: /Load average \(normalized\)/ });
+    expect(within(loadButton).getByText("0.40")).toBeInTheDocument();
+    expect(within(loadButton).queryByText("OK", { selector: "span" })).not.toBeInTheDocument();
     await user.click(loadButton);
-    const loadDetails = within(screen.getByRole("region", { name: /^Server load/ }));
+    const loadDetails = within(screen.getByRole("region", { name: /Load average \(normalized\)/ }));
     expect(loadButton).toHaveAttribute("aria-expanded", "true");
     expect(loadDetails.getByText("5 min (evaluated):")).toBeInTheDocument();
     expect(loadDetails.getByText(/8 logical CPUs/)).toBeInTheDocument();
@@ -350,7 +357,7 @@ describe("System Health Monitoring UI and Hook", () => {
     await waitFor(() => expect(screen.queryByText(/Source:/)).not.toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /^Media Archive/ }));
     const details = within(screen.getByRole("region", { name: /^Media Archive/ }));
-    expect(screen.getAllByText("128.0 MB used")).toHaveLength(1);
+    expect(screen.getAllByText("128.0 MB used (0.8%)")).toHaveLength(1);
     expect(screen.getAllByText("18.0 GB free (4%)")).toHaveLength(1);
     expect(screen.getAllByText("Media Archive With A Very Long Descriptive Connection Name")).toHaveLength(1);
     expect(details.queryByText(/128\.0 MB|4\.0% available|No memory limit/)).not.toBeInTheDocument();
@@ -361,13 +368,48 @@ describe("System Health Monitoring UI and Hook", () => {
     expect(details.getByText("Capacity: 450.0 GB")).toBeInTheDocument();
     expect(details.queryByText(/Caller-available space/)).not.toBeInTheDocument();
     expect(details.getByText(/Total physical free on share/)).toBeInTheDocument();
-    await user.click(server.getByRole("button", { name: /Container application data/ }));
-    const containerStorageDetails = within(screen.getByRole("region", { name: /Container application data/ }));
+    await user.click(container.getByRole("button", { name: /Storage: application data/ }));
+    const containerStorageDetails = within(screen.getByRole("region", { name: /Storage: application data/ }));
     expect(containerStorageDetails.getByText("Capacity: 100.0 GB")).toBeInTheDocument();
     expect(containerStorageDetails.queryByText(/Unprivileged filesystem blocks|statvfs/)).not.toBeInTheDocument();
     await user.click(within(storage).getByRole("button", { name: /^Local drives/ }));
     const localDetails = within(screen.getByRole("region", { name: /^Local drives/ }));
     expect(localDetails.queryByText(/Unprivileged filesystem blocks|statvfs/)).not.toBeInTheDocument();
+    const containerMemoryButton = container.getByRole("button", { name: /Memory/ });
+    expect(within(containerMemoryButton).queryByText("Informational", { selector: "span" })).not.toBeInTheDocument();
+    await user.click(containerMemoryButton);
+    expect(screen.getByText(/No container memory limit is set; percentage alerts are disabled/)).toBeInTheDocument();
+    expect(screen.getByText(/Percentage is based on total host memory/)).toBeInTheDocument();
+  });
+
+  it.each([
+    { name: "missing", total_bytes: null, is_stale: false },
+    { name: "zero", total_bytes: 0, is_stale: false },
+    { name: "stale", total_bytes: baseSnapshot.host_memory.total_bytes, is_stale: true },
+  ])("shows unlimited container bytes without a percentage when host memory is $name", async ({ total_bytes, is_stale }) => {
+    await act(async () => {
+      render(
+        <SambeeThemeProvider>
+          <SystemHealthDialog
+            open
+            onClose={vi.fn()}
+            health={{
+              ...baseHealth,
+              snapshot: {
+                ...baseSnapshot,
+                host_memory: { ...baseSnapshot.host_memory, total_bytes, is_stale },
+              },
+            }}
+          />
+        </SambeeThemeProvider>
+      );
+    });
+    const container = within(screen.getByTestId("system-health-container-overview"));
+    expect(container.getByText("128.0 MB used")).toBeInTheDocument();
+    expect(container.queryByText(/128\.0 MB used \(/)).not.toBeInTheDocument();
+    await userEvent.setup().click(container.getByRole("button", { name: /Memory/ }));
+    expect(screen.getByText(/No container memory limit is set; percentage alerts are disabled/)).toBeInTheDocument();
+    expect(screen.queryByText(/Percentage is based on total host memory/)).not.toBeInTheDocument();
   });
 
   it("keeps a shared application and temporary filesystem as one container storage row", async () => {
@@ -392,11 +434,11 @@ describe("System Health Monitoring UI and Hook", () => {
         </SambeeThemeProvider>
       );
     });
-    const server = within(screen.getByTestId("system-health-resource-overview"));
-    expect(server.getByRole("button", { name: /Container application data and temporary storage/ })).toBeInTheDocument();
-    expect(server.getAllByText("40.0 GB free (40%)")).toHaveLength(1);
-    expect(server.queryByText("Container application data", { exact: true })).not.toBeInTheDocument();
-    expect(server.queryByText("Container temporary storage", { exact: true })).not.toBeInTheDocument();
+    const container = within(screen.getByTestId("system-health-container-overview"));
+    expect(container.getByRole("button", { name: /Storage: application data and temporary data/ })).toBeInTheDocument();
+    expect(container.getAllByText("40.0 GB free (40%)")).toHaveLength(1);
+    expect(container.queryByText("Storage: application data", { exact: true })).not.toBeInTheDocument();
+    expect(container.queryByText("Storage: temporary data", { exact: true })).not.toBeInTheDocument();
   });
 
   it("shows each unavailable source once without raw messages or setup instructions", async () => {
@@ -433,10 +475,14 @@ describe("System Health Monitoring UI and Hook", () => {
       );
     });
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^Server memory/ }));
-    await user.click(screen.getByRole("button", { name: /^Container memory/ }));
-    const memoryDetails = within(screen.getByRole("region", { name: /^Server memory/ }));
-    const containerDetails = within(screen.getByRole("region", { name: /^Container memory/ }));
+    const memoryButton = within(screen.getByTestId("system-health-resource-overview")).getByRole("button", { name: /^Memory/ });
+    const containerButton = within(screen.getByTestId("system-health-container-overview")).getByRole("button", { name: /^Memory/ });
+    await user.click(memoryButton);
+    await user.click(containerButton);
+    const memoryDetails = within(within(screen.getByTestId("system-health-resource-overview")).getByRole("region", { name: /^Memory/ }));
+    const containerDetails = within(
+      within(screen.getByTestId("system-health-container-overview")).getByRole("region", { name: /^Memory/ })
+    );
     expect(screen.getByRole("dialog").textContent?.split(source)).toHaveLength(2);
     expect(memoryDetails.getByText(/Not available \(mount not configured\)/)).toBeInTheDocument();
     expect(containerDetails.getByText(/Permission denied · Old data/)).toBeInTheDocument();
@@ -469,7 +515,7 @@ describe("System Health Monitoring UI and Hook", () => {
         </SambeeThemeProvider>
       );
     });
-    await userEvent.setup().click(screen.getByRole("button", { name: /Container memory/ }));
+    await userEvent.setup().click(within(screen.getByTestId("system-health-container-overview")).getByRole("button", { name: /Memory/ }));
     expect(screen.getAllByText("128.0 MB used (25%)")).toHaveLength(1);
     expect(screen.getByText("File cache: 256.0 MB")).toBeInTheDocument();
     expect(screen.queryByText("256.0 MB used (25%)")).not.toBeInTheDocument();
@@ -500,9 +546,12 @@ describe("System Health Monitoring UI and Hook", () => {
       screen.getByText("Cannot update server checks. Checks retry automatically. Check your network connection if this continues.")
     ).toBeInTheDocument();
     const resources = within(screen.getByTestId("system-health-resource-overview"));
-    expect(resources.getAllByText("Out of date")).toHaveLength(5);
-    expect(resources.getByRole("button", { name: /Container application data Out of date/ })).toBeInTheDocument();
+    const container = within(screen.getByTestId("system-health-container-overview"));
+    expect(resources.getAllByText("Out of date")).toHaveLength(3);
+    expect(container.getAllByText("Out of date")).toHaveLength(2);
+    expect(container.getByRole("button", { name: /Storage: application data Out of date/ })).toBeInTheDocument();
     expect(resources.queryByText("25% used")).not.toBeInTheDocument();
+    expect(resources.queryByText("0.40")).not.toBeInTheDocument();
     const storage = within(screen.getByTestId("system-health-connection-storage"));
     expect(storage.getAllByText("Out of date")).toHaveLength(1);
     expect(storage.getByText("Local drive")).toBeInTheDocument();
@@ -541,6 +590,34 @@ describe("System Health Monitoring UI and Hook", () => {
     expect(screen.queryByRole("button", { name: /retry|refresh/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("does not show a load value when the five-minute average is unavailable", async () => {
+    await act(async () => {
+      render(
+        <SambeeThemeProvider>
+          <SystemHealthDialog
+            open
+            onClose={vi.fn()}
+            health={{
+              ...baseHealth,
+              snapshot: {
+                ...baseSnapshot,
+                system_load: {
+                  ...baseSnapshot.system_load,
+                  severity: "unknown",
+                  availability: "collecting",
+                  normalized_5m: null,
+                },
+              },
+            }}
+          />
+        </SambeeThemeProvider>
+      );
+    });
+    const loadButton = screen.getByRole("button", { name: /Load average \(normalized\)/ });
+    expect(within(loadButton).getByText("Checking")).toBeInTheDocument();
+    expect(within(loadButton).queryByText("0.40")).not.toBeInTheDocument();
   });
 
   it("returns focus to the main Sambee icon after opening System health from the mobile drawer and closing the dialog", async () => {

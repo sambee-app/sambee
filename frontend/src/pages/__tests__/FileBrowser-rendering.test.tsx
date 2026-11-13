@@ -5,8 +5,10 @@ import { createMockAuthToken } from "../../test/fixtures/users";
  */
 
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileBrowserAlerts } from "../../components/FileBrowser/FileBrowserAlerts";
+import * as systemHealthMonitoring from "../../hooks/useSystemHealthMonitoring";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { markBackendAvailable, markBackendReconnecting, resetBackendAvailabilityForTests } from "../../services/backendAvailability";
@@ -154,6 +156,38 @@ describe("Browser Component - Rendering", () => {
     });
     expect(screen.getByTestId("router-location")).toHaveTextContent("/browse/smb/test-server-1/Documents");
     expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument();
+  });
+
+  it.each(["Escape", "Close"])("returns focus to the file list after closing System health with %s", async (action) => {
+    const healthSpy = vi.spyOn(systemHealthMonitoring, "useSystemHealthMonitoring").mockReturnValue({
+      visible: true,
+      severity: "ok",
+      headline: "All monitored checks are OK.",
+      incompleteCoverage: false,
+      coverageNotes: [],
+      lastUpdatedAt: null,
+      backendUnavailable: false,
+      snapshot: null,
+      localDrives: [],
+      companionUpdateRequired: false,
+    });
+    try {
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
+      const user = userEvent.setup();
+      const healthButton = screen.getByRole("button", { name: /^System health:/ });
+      await user.click(healthButton);
+      expect(await screen.findByRole("dialog", { name: "System Health" })).toBeInTheDocument();
+      if (action === "Escape") {
+        await user.keyboard("{Escape}");
+      } else {
+        await user.click(screen.getByRole("button", { name: "Close" }));
+      }
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "System Health" })).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.getByTestId("file-list-container")).toHaveFocus());
+      expect(healthButton).not.toHaveFocus();
+    } finally {
+      healthSpy.mockRestore();
+    }
   });
 
   it("displays connection selector with available connections", async () => {

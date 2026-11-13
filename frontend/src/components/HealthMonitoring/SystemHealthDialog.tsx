@@ -16,7 +16,7 @@ import type {
 } from "../../types";
 import { formatLocalizedNumber } from "../../utils/localeFormatting";
 import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
-import { FormSurface } from "../Form/FormLayout";
+import { FormSurface, formAccordionSummarySx } from "../Form/FormLayout";
 import { HealthStatusIcon } from "./HealthStatusIcon";
 
 interface SystemHealthDialogProps {
@@ -55,6 +55,7 @@ type OverviewMetric = Pick<MemoryMetric, "severity" | "availability" | "is_stale
 type SourceMetric = Pick<MemoryMetric, "source" | "availability" | "age_seconds" | "is_stale">;
 
 const SEVERITY_ORDER: Record<HealthSeverity, number> = { error: 0, warning: 1, unknown: 2, ok: 3, informational: 4 };
+const PERCENT_SCALE = 100;
 
 export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = null }: SystemHealthDialogProps) {
   const { t } = useTranslation();
@@ -198,6 +199,12 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
         <Typography variant="caption" component="div" sx={{ color: "text.secondary" }}>
           {t("systemHealth.metrics.containerMemoryScope")}
         </Typography>
+        {metric.limit_state === "unlimited" && (
+          <Typography variant="caption" component="div" sx={{ color: "text.secondary", mt: 0.5 }}>
+            {t("systemHealth.metrics.noMemoryLimit")}
+            {containerMemoryPercent !== null ? ` ${t("systemHealth.metrics.hostMemoryPercent")}` : ""}
+          </Typography>
+        )}
         {metric.cache_bytes !== null && (
           <Typography variant="body2" sx={{ mt: 0.5 }}>
             {t("systemHealth.metrics.fileCache", { cache: formatFileSize(metric.cache_bytes) })}
@@ -268,10 +275,10 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
     metric: OverviewMetric,
     value: string | null,
     details: ReactNode,
-    { local = false, note, status, type }: { local?: boolean; note?: string; status?: string; type?: string } = {}
+    { local = false, note, type }: { local?: boolean; note?: string; type?: string } = {}
   ) => {
     const state = overviewStatus(metric, local);
-    const showStatus = !state.current || status || state.severity !== "ok" || !value;
+    const showStatus = !state.current || (state.severity !== "ok" && state.severity !== "informational") || !value;
     const rowId = `${detailsId}-${encodeURIComponent(id)}`;
     return (
       <Accordion
@@ -284,7 +291,7 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
           expandIcon={<ExpandMoreIcon />}
           id={`${rowId}-summary`}
           aria-controls={`${rowId}-content`}
-          sx={{ px: 0, "& .MuiAccordionSummary-content": { my: 0.75, minWidth: 0 } }}
+          sx={{ ...formAccordionSummarySx, "& .MuiAccordionSummary-content": { my: 0.75, minWidth: 0 } }}
         >
           <Box component="span" sx={{ width: "100%", minWidth: 0 }}>
             <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -321,7 +328,7 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
                 )}
                 {showStatus && (
                   <Typography variant="caption" component="span" sx={{ display: "block", color: getSeverityColor(state.severity) }}>
-                    {state.current && status ? status : state.label}
+                    {state.label}
                   </Typography>
                 )}
               </Box>
@@ -339,6 +346,23 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
       : t("systemHealth.overview.percentUsed", { percent: formatLocalizedNumber(percent, { maximumFractionDigits: 1 }) });
 
   const snapshot = health.snapshot;
+
+  const getContainerMemoryPercent = (): number | null => {
+    if (!snapshot) return null;
+    const { container_memory: container, host_memory: host } = snapshot;
+    if (container.limit_state !== "unlimited") return container.used_percent;
+    if (
+      container.used_bytes === null ||
+      !overviewStatus(host).current ||
+      host.total_bytes === null ||
+      !Number.isFinite(host.total_bytes) ||
+      host.total_bytes <= 0
+    ) {
+      return null;
+    }
+    return (container.used_bytes / host.total_bytes) * PERCENT_SCALE;
+  };
+  const containerMemoryPercent = getContainerMemoryPercent();
 
   const storageLabel = (item: StorageMetric): string => {
     switch (item.kind) {
@@ -441,56 +465,65 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
         </FormSurface>
 
         {snapshot && (
-          <Box>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
-              {t("systemHealth.overview.server")}
-            </Typography>
-            <FormSurface testId="system-health-resource-overview" sx={{ py: 0.5 }}>
-              {renderOverviewItem(
-                "host-memory",
-                t("systemHealth.overview.hostMemory"),
-                snapshot.host_memory,
-                percentUsed(snapshot.host_memory.used_percent),
-                renderHostMemory(snapshot.host_memory)
-              )}
-              <Divider />
-              {renderOverviewItem(
-                "system-load",
-                t("systemHealth.overview.systemLoad"),
-                snapshot.system_load,
-                null,
-                renderSystemLoad(snapshot.system_load)
-              )}
-              <Divider />
-              {renderOverviewItem(
-                "cpu-temperature",
-                t("systemHealth.metrics.cpuTemperature"),
-                snapshot.cpu_temperature,
-                snapshot.cpu_temperature.current_millidegrees === null
-                  ? null
-                  : formatMillidegrees(snapshot.cpu_temperature.current_millidegrees),
-                renderCpuTemperature(snapshot.cpu_temperature)
-              )}
-              <Divider />
-              {renderOverviewItem(
-                "container-memory",
-                t("systemHealth.overview.containerMemory"),
-                snapshot.container_memory,
-                snapshot.container_memory.limit_state === "unlimited" && snapshot.container_memory.used_bytes !== null
-                  ? t("systemHealth.overview.bytesUsed", { used: formatFileSize(snapshot.container_memory.used_bytes) })
-                  : snapshot.container_memory.used_bytes !== null && snapshot.container_memory.used_percent !== null
-                    ? t("systemHealth.overview.memoryUsed", {
-                        used: formatFileSize(snapshot.container_memory.used_bytes),
-                        percent: formatLocalizedNumber(snapshot.container_memory.used_percent, { maximumFractionDigits: 1 }),
-                      })
-                    : null,
-                renderContainerMemory(snapshot.container_memory),
-                snapshot.container_memory.limit_state === "unlimited" ? { status: t("systemHealth.overview.noLimit") } : {}
-              )}
-              {snapshot.application_storage.length > 0 && <Divider />}
-              {renderStorageRows(snapshot.application_storage)}
-            </FormSurface>
-          </Box>
+          <>
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {t("systemHealth.overview.server")}
+              </Typography>
+              <FormSurface testId="system-health-resource-overview" sx={{ py: 0.5 }}>
+                {renderOverviewItem(
+                  "host-memory",
+                  t("systemHealth.overview.hostMemory"),
+                  snapshot.host_memory,
+                  percentUsed(snapshot.host_memory.used_percent),
+                  renderHostMemory(snapshot.host_memory)
+                )}
+                <Divider />
+                {renderOverviewItem(
+                  "system-load",
+                  t("systemHealth.overview.systemLoad"),
+                  snapshot.system_load,
+                  snapshot.system_load.normalized_5m === null
+                    ? null
+                    : formatLocalizedNumber(snapshot.system_load.normalized_5m, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+                  renderSystemLoad(snapshot.system_load)
+                )}
+                <Divider />
+                {renderOverviewItem(
+                  "cpu-temperature",
+                  t("systemHealth.metrics.cpuTemperature"),
+                  snapshot.cpu_temperature,
+                  snapshot.cpu_temperature.current_millidegrees === null
+                    ? null
+                    : formatMillidegrees(snapshot.cpu_temperature.current_millidegrees),
+                  renderCpuTemperature(snapshot.cpu_temperature)
+                )}
+              </FormSurface>
+            </Box>
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {t("systemHealth.overview.container")}
+              </Typography>
+              <FormSurface testId="system-health-container-overview" sx={{ py: 0.5 }}>
+                {renderOverviewItem(
+                  "container-memory",
+                  t("systemHealth.overview.containerMemory"),
+                  snapshot.container_memory,
+                  snapshot.container_memory.used_bytes === null
+                    ? null
+                    : containerMemoryPercent !== null
+                      ? t("systemHealth.overview.memoryUsed", {
+                          used: formatFileSize(snapshot.container_memory.used_bytes),
+                          percent: formatLocalizedNumber(containerMemoryPercent, { maximumFractionDigits: 1 }),
+                        })
+                      : t("systemHealth.overview.bytesUsed", { used: formatFileSize(snapshot.container_memory.used_bytes) }),
+                  renderContainerMemory(snapshot.container_memory)
+                )}
+                {snapshot.application_storage.length > 0 && <Divider />}
+                {renderStorageRows(snapshot.application_storage)}
+              </FormSurface>
+            </Box>
+          </>
         )}
 
         {connectionStorage.length > 0 && (

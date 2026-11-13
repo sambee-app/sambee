@@ -2,11 +2,11 @@
 title = "Monitor System Health"
 +++
 
-Use **Settings** > **Administration** > **Health Monitoring** to control who sees the resource-health indicator and to configure alert thresholds for memory, normalized system load, CPU temperature, and storage free space.
+Use **Settings** > **Administration** > **Health Monitoring** to control who sees System health and to configure alert thresholds for memory, load average (normalized), CPU temperature, and storage free space.
 
 System health monitoring is a live resource-health view, not an external availability alert system. If the backend container stops, it cannot report its own status; keep external uptime monitoring for outage alerts.
 
-The **System Health** dialog opens with a compact overview. Each reading expands to show its capacity, thresholds, source, and sample age without repeating the current value. **Server** includes **Container application data** and **Container temporary storage**; **Connection storage** shows drive and connection types separately from their names. **Server load** shows the status of the normalized 5-minute load, not CPU usage. **Container memory** excludes file cache and includes all processes in the container, not Sambee alone; **No limit set** means that percentage alerts cannot be evaluated.
+The **System Health** dialog opens with a compact overview. Each reading expands to show its capacity, thresholds, source, and sample age. **Server** shows host memory, load, and CPU temperature. **Load average (normalized)** shows the normalized 5-minute average on the right, not CPU usage. **Container** groups **Memory**, **Storage: application data**, and **Storage: temporary data**. Container memory excludes file cache and includes all processes in the container, not Sambee alone. Its percentage uses the container limit when set, or total host memory when no limit is set and a current host reading is available. The details identify the basis; host-based percentages do not trigger container alerts. **Connection storage** shows drive and connection types separately from their names.
 
 ## Visibility and Audience
 
@@ -28,7 +28,7 @@ Sambee does not collect or display host or container CPU usage percentages. All 
 | --- | --- | --- | --- |
 | Host memory | `85.0%` used | `95.0%` used | Calculated from `/host/proc/meminfo` `MemAvailable`. Enters Warning or Error after 60 sustained seconds; recovers after 60 sustained seconds with a `5.0` percentage-point margin. |
 | Container memory without file cache | `85.0%` of limit | `95.0%` of limit | Calculated from the container's cgroup (`memory.current - (file - shmem)`). Includes shared and kernel memory. Uses the same 60-second entry and `5.0` percentage-point recovery rules when a finite container memory limit is set. |
-| Normalized system load | `0.75` | `0.90` | Displays normalized 1-, 5-, and 15-minute load divided by logical CPU count from `/host/proc/cpuinfo` (never raw load). Evaluates only the 5-minute value; enters on the first 5-second sample and recovers after two samples with a `0.10` margin. |
+| Load average (normalized) | `0.75` | `0.90` | Displays normalized 1-, 5-, and 15-minute load divided by logical CPU count from `/host/proc/cpuinfo` (never raw load). Evaluates only the 5-minute value; enters on the first 5-second sample and recovers after two samples with a `0.10` margin. |
 | CPU temperature | Same-source high limit | Same-source critical limit | Enters Error immediately and Warning after two 5-second samples. Uses valid same-source hardware or kernel hysteresis on Automatic limits, or a `2.0 °C` recovery margin across two samples when hysteresis is absent or overridden. |
 | Available storage space | `10.0%` available | `5.0%` available | Enters Warning or Error on one reading (`0` available bytes enters Error immediately). Recovers after two consecutive readings with a `2.0` percentage-point margin. |
 
@@ -36,13 +36,13 @@ When Warning and Error thresholds are equal, Error takes precedence at the share
 
 ## Container Memory vs. Host Memory
 
-Container memory is always reported separately from physical-host memory and never substitutes host RAM as a container limit:
+Container memory is always reported separately from physical-host memory. Total host memory is a display reference when no container limit is set, not an alert limit:
 
 - Sambee reads only its own container cgroup (`/sys/fs/cgroup/memory.max`, `memory.current`, and `memory.stat`, with cgroup v1 fallback). Standard Docker private cgroup namespaces (`0::/`) are supported without walking parent cgroups.
 - Usage excludes both active and inactive file cache. This cache-excluded reading is not cAdvisor's working set.
 - Shared memory and tmpfs remain included, as do kernel allocations. The row details show excluded file cache separately.
 - The reading includes all processes in that cgroup. In a shared development container, this can include editors and other tools.
-- When `memory.max` is `"max"` (no container limit configured), Sambee displays used bytes and **No limit set** as informational without percentage alerts.
+- When `memory.max` is `"max"` (no container limit configured), Sambee displays used bytes and the percentage of total host memory. If host memory is missing or old, it shows bytes only. The details state that no container limit is set and percentage alerts are disabled.
 - If cgroup files or required cache counters cannot be read or parsed, container memory reports **Unknown** with the collection error rather than guessing usage or claiming unlimited memory.
 
 [cAdvisor](https://github.com/google/cadvisor/blob/master/lib/container/libcontainer/handler.go#L820) reports separate memory values on cgroup v2: total charged memory from `memory.current`, working set from `max(0, memory.current - inactive_file)`, and RSS from `memory.stat` `anon`. The Linux [Docker stats](https://docs.docker.com/reference/cli/docker/container/stats/) display also subtracts inactive file cache, not all file cache. These values measure different parts of memory usage.

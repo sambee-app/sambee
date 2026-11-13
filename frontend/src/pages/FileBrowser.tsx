@@ -4242,7 +4242,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                   severity: systemHealth.severity,
                   headline: systemHealth.headline,
                   onOpen: () => {
-                    setSystemHealthRestoreFocusEl(null);
+                    setSystemHealthRestoreFocusEl(quickBarPane.listContainerEl);
                     setSystemHealthDialogOpen(true);
                   },
                 }}
