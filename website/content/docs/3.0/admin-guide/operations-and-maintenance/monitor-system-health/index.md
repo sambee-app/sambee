@@ -93,4 +93,3 @@ Application-level RAM storage does not prevent operating-system swap or crash du
 - **Temperature limits are not available**: Some processors and board device trees expose current temperature without `temp1_max`, `temp1_crit`, or passive cooling trips. Set manual Warning and Error overrides in **Settings** > **Administration** > **Health Monitoring** to evaluate alerts in Sambee without changing host thermal policy.
 - **Old data (`> 15s` for host, `> 180s` for storage)**: Check whether the backend host or remote storage mount is stalled or unreachable, then select **Retry** in the System Health dialog.
 - **Update Companion to show drive space**: Install the latest Companion version on the paired desktop device.
-

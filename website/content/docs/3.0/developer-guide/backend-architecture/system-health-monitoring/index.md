@@ -35,4 +35,3 @@ System health monitoring combines a process-owned backend host sampler, an on-re
 - `useSystemHealthMonitoring` polls metrics every 15 seconds while the browser tab is visible (5 seconds while `SystemHealthDialog` is open). Collecting checks use these same intervals, without early retries. Metric requests stop when monitoring is disabled or forbidden (`403`).
 - The existing polling loop checks display policy when 60 seconds have elapsed since the previous policy request. Opening the health dialog, returning to a visible tab, or a local settings change also requests a policy check. The dialog has no manual retry action. Disabled and unauthorized users make policy requests only, not snapshot or Companion capacity requests. No separate policy timer is used.
 - Hidden tabs and signed-out browsers start no monitoring requests. Browser metric state is cleared on `authSession` sign-out or identity change.
-

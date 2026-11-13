@@ -45,4 +45,3 @@ Storage entries show free space and its percentage. On SMB shares and Windows lo
 - Low storage space: Delete unneeded files or choose another destination before starting uploads, copies, or archive extractions.
 - **Update Companion to show drive space**: Install the current Companion release from **Settings** > **Local Drives**; file browsing continues to work while Companion is older.
 - Old or unavailable backend data: Sambee retries automatically. If the backend remains unreachable, check your network connection or contact your administrator.
-
