@@ -17,6 +17,7 @@ import type {
   AdvancedSystemSettings,
   CompanionDownloadMetadata,
   Connection,
+  HealthMonitoringSettings,
   NetworkSettings,
   OidcAdminConfigurationRead,
   SmbSettings,
@@ -33,6 +34,7 @@ export const SETTINGS_DATA_CACHE_KEYS = {
   adminSystem: "settings-data/admin-system",
   directoryIndexBackend: "settings-data/directory-index/backend",
   directoryIndexCompanion: "settings-data/directory-index/companion",
+  adminHealthMonitoring: "settings-data/admin-health-monitoring",
   adminSmb: "settings-data/admin-smb",
   adminNetwork: "settings-data/admin-network",
   adminAuthentication: "settings-data/admin-authentication",
@@ -125,6 +127,10 @@ export async function loadSmbSettingsData(): Promise<SmbSettings> {
   return api.getSmbSettings();
 }
 
+export async function loadHealthMonitoringSettingsData(): Promise<HealthMonitoringSettings> {
+  return api.getHealthMonitoringSettings();
+}
+
 export async function loadAboutSettingsData(): Promise<AboutSettings> {
   return api.getAboutSettings();
 }
@@ -204,6 +210,8 @@ export function prefetchSettingsDataForItem(item: SettingsNavItem) {
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminSystem, loadAdvancedSettingsData);
     case "admin-smb":
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminSmb, loadSmbSettingsData);
+    case "admin-health-monitoring":
+      return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminHealthMonitoring, loadHealthMonitoringSettingsData);
     case "admin-about":
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminAbout, loadAboutSettingsData);
     case "admin-network":

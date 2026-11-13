@@ -379,4 +379,71 @@ describe("HamburgerMenu", () => {
     expect(screen.getByText("Settings")).toBeInTheDocument();
     expect(screen.getByText("Logout")).toBeInTheDocument();
   });
+
+  test("places System health directly below Settings and above Documentation when visible, and hides it when disabled", () => {
+    const onOpenHealth = vi.fn();
+    const { rerender } = render(
+      <SambeeThemeProvider>
+        <BrowserRouter>
+          <HamburgerMenu
+            open={true}
+            onClose={mockOnClose}
+            connections={mockConnections}
+            selectedConnectionId="1"
+            onConnectionChange={mockOnConnectionChange}
+            onNavigateToRoot={mockOnNavigateToRoot}
+            onOpenDocumentation={mockOnOpenDocumentation}
+            onOpenSettings={mockOnOpenSettings}
+            systemHealth={{
+              visible: true,
+              severity: "warning",
+              headline: "One storage volume has low free space.",
+              onOpen: onOpenHealth,
+            }}
+            onLogout={mockOnLogout}
+          />
+        </BrowserRouter>
+      </SambeeThemeProvider>
+    );
+
+    const menuItems = screen.getAllByRole("button");
+    const settingsIndex = menuItems.findIndex((item) => item.textContent?.includes("Settings"));
+    const healthIndex = menuItems.findIndex((item) => item.textContent?.includes("System health"));
+    const documentationIndex = menuItems.findIndex((item) => item.textContent?.includes("Documentation"));
+
+    expect(settingsIndex).toBeGreaterThan(-1);
+    expect(healthIndex).toBe(settingsIndex + 1);
+    expect(documentationIndex).toBe(healthIndex + 1);
+    expect(screen.getByText("Warning")).toBeInTheDocument();
+
+    fireEvent.click(menuItems[healthIndex]!);
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+    expect(onOpenHealth).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <SambeeThemeProvider>
+        <BrowserRouter>
+          <HamburgerMenu
+            open={true}
+            onClose={mockOnClose}
+            connections={mockConnections}
+            selectedConnectionId="1"
+            onConnectionChange={mockOnConnectionChange}
+            onNavigateToRoot={mockOnNavigateToRoot}
+            onOpenDocumentation={mockOnOpenDocumentation}
+            onOpenSettings={mockOnOpenSettings}
+            systemHealth={{
+              visible: false,
+              severity: "ok",
+              headline: "",
+              onOpen: onOpenHealth,
+            }}
+            onLogout={mockOnLogout}
+          />
+        </BrowserRouter>
+      </SambeeThemeProvider>
+    );
+
+    expect(screen.queryByText("System health")).not.toBeInTheDocument();
+  });
 });

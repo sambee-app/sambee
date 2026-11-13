@@ -16,6 +16,8 @@ export const SETTINGS_PAGE_LOADERS = {
   "admin-file-search": () => import("../../pages/FileSearchSettings").then((module) => ({ default: module.FileSearchSettings })),
   "admin-directory-search": () =>
     import("../../pages/DirectorySearchSettings").then((module) => ({ default: module.DirectorySearchSettings })),
+  "admin-health-monitoring": () =>
+    import("../../pages/HealthMonitoringSettings").then((module) => ({ default: module.HealthMonitoringSettings })),
   "admin-system": () => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })),
   "admin-image-viewer": () => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })),
   "admin-pdf-viewer": () => import("../../pages/AdvancedSettings").then((module) => ({ default: module.AdvancedSettings })),

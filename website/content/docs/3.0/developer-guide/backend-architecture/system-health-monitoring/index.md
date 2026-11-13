@@ -1,0 +1,38 @@
++++
+title = "System Health Monitoring"
++++
+
+System health monitoring combines a process-owned backend host sampler, an on-read storage capacity coordinator, a Companion local-drive capacity cache, and a frontend state hook that merges visible sources in RAM.
+
+ Keep `/api/health` in `backend/app/main.py` unchanged as the lightweight Docker container liveness check. Resource health lives under `/api/health-monitoring/*` and `/api/admin/settings/health-monitoring`.
+
+## Sampling and Storage Architecture
+
+- **Host sampler (`5s` interval, `15s` stale threshold)**: `HealthMonitoringCoordinator` starts and stops in FastAPI `lifespan`. Every 5 seconds on a worker thread, it samples `/host/proc/meminfo` (`MemAvailable`), `/host/proc/loadavg` normalized by logical CPU count from `/host/proc/cpuinfo` (exposing normalized 1-, 5-, and 15-minute values only and evaluating the 5-minute value), `/host/sys` CPU thermal candidates (`coretemp`, `k10temp`, and verified Raspberry Pi `cpu-thermal`), and container memory from `/sys/fs/cgroup`. It performs zero SQLite queries and zero storage capacity probes inside the 5-second loop.
+- **Container memory accounting**: `used_bytes` and percentage alerts exclude file cache: `memory.current - (file - shmem)` on cgroup v2. `cache_bytes` is the excluded `file - shmem`. Shared memory, tmpfs, and kernel allocations remain included. Cgroup v1 uses `memory.usage_in_bytes`, `total_cache`, and `total_shmem`; hierarchical counters avoid mixing parent and child scopes. Missing, malformed, or inconsistent counters produce Unknown rather than a guessed value. The API retains `working_set_bytes = max(0, current - inactive_file)` for compatibility, but the overview and thresholds use `used_bytes`. All readings cover the container, not only Sambee.
+- **On-read storage coordinator (`60s` interval, `180s` stale threshold)**: Snapshot requests (`GET /api/health-monitoring/snapshot`) accept at most two `connection_id` query parameters (`422` when more than two are supplied), filter connections with `can_view_connection` before scheduling probes or computing summaries, return current RAM state immediately, and schedule non-blocking background probes only when an entry is missing or at least 60 seconds old and not in flight or retry backoff.
+- **Concurrency and rate bounds**: Backend storage probes are staggered (`150 ms`), capped at two concurrent worker slots per process, rate-limited per user for new SMB triggers (`4` per `60` seconds), and stored in a `32`-entry bounded SMB LRU cache invalidated on connection edits, deletions, or SMB policy changes. Admission evicts only entries without a check in flight. If every entry is busy, the response reports Unknown with a capacity-wait message, without scheduling a task or consuming a trigger token.
+- **Probe admission**: An event-loop-owned `asyncio.BoundedSemaphore` controls backend worker slots. A cancelled probe that has not started a worker clears its in-flight flag and releases any acquired slot. Once a worker starts, its completion callback owns slot release, including after a timeout or cancellation.
+- **CPU summary selection**: All candidate paths use the same severity ordering: Error, Warning, Unknown, OK, then Informational. A failed package cannot be hidden by a healthy package; missing optional limits do not by themselves make a successful reading Unknown.
+
+## Non-Aborting SMB and Companion Capacity Probes
+
+- **Backend SMB (`SMBBackend.get_volume_capacity`)**: Queries `smbclient.stat_volume()` over `SMBConnectionPool.get_connection()`. On timeout or request cancellation, it calls `retain_connection_until_future_complete()` and keeps both its 2-probe slot and per-connection `in_flight` flag owned until the executor thread exits (`add_done_callback`). Unlike mutating file operations, it never calls `invalidate_connection_cache(..., abort=True)` and never disconnects active file reads, writes, moves, or archive streams sharing the pooled connection.
+- **Connection changes**: A mismatched credential/path fingerprint hides the old reading. The coordinator retains the old entry while its worker is in flight and returns an uncached Unknown result for the current context. Once the worker exits, a later snapshot can replace the entry and schedule the new context.
+- **Companion local drives (`GET /api/drives/capacity`)**: `drives.rs` populates an in-memory `DRIVE_ROOT_MAP` during `enumerate_drives()` (re-enumerating at most once on an unknown drive ID) and shares a `#[cfg(unix)]` `libc::statvfs` helper across Linux and macOS alongside Windows `GetDiskFreeSpaceExW`. `DriveCapacityCoordinator` moves both the 2-probe `OwnedSemaphorePermit` and the `DriveInFlightGuard` into `tokio::task::spawn_blocking` so a wedged network or removable mount retains its slot until the OS thread exits without spawning duplicate threads. Virtual drives reporting zero total blocks map to `unsupported` rather than zero free space.
+
+## Settings, Validation, and Support Report Redaction
+
+- Numeric thresholds are persisted and transmitted as exact scaled integers matching `IntegerSystemSettingDefinition`: tenths of a percent (`1..1000` for memory, `0..999` for available space), hundredths (`>= 1` up to `MAX_WIRE_INTEGER`) for normalized 5-minute load, and integer millidegrees in `100`-millidegree (`0.1 °C`) steps for CPU overrides. Inputs with fractional excess precision or wrong types are rejected without rounding.
+- Per-source CPU overrides use discriminated `StrictSettingUpdate` variants (`cpu_temp_warning_override` and `cpu_temp_error_override`) carrying `{ source_id, value_millidegrees }`. Only currently discovered CPU sources or existing persisted override rows (`health_monitoring.cpu_temp_override.<sha256>`) are accepted so arbitrary keys cannot create unbounded database rows.
+- The settings page uses `useSystemSettingPersistence` for per-field save state, deadlines, cancellation, and response matching. A small adapter gives each CPU source and threshold a separate field key. Ordinary save responses update only the confirmed field. CPU saves trigger a separate, cancellable metadata read that updates only CPU details and preserves other drafts and confirmed thresholds. A failed metadata read reports that the save succeeded and offers Retry without repeating the write.
+- `build_public_support_report_read()` exports `[ui_configuration.health_monitoring]` and aliases every persisted CPU `source_id` via `PublicSupportReportAliases` (`cpu-thermal-source-N`) without including raw sysfs paths or live metric readings.
+
+## RAM-Only and Browser Lifecycle Rules
+
+- All `/api/health-monitoring/*` and Companion `/api/drives/capacity` responses send `Cache-Control: no-store`.
+- Neither the backend nor the frontend writes metric samples to SQLite, `localStorage`, `sessionStorage`, or log payloads; backend logs record only high-level severity transitions.
+- `useSystemHealthMonitoring` polls metrics every 15 seconds while the browser tab is visible (5 seconds while `SystemHealthDialog` is open). Collecting checks use these same intervals, without early retries. Metric requests stop when monitoring is disabled or forbidden (`403`).
+- The existing polling loop checks display policy when 60 seconds have elapsed since the previous policy request. Opening the health dialog, returning to a visible tab, or a local settings change also requests a policy check. The dialog has no manual retry action. Disabled and unauthorized users make policy requests only, not snapshot or Companion capacity requests. No separate policy timer is used.
+- Hidden tabs and signed-out browsers start no monitoring requests. Browser metric state is cleared on `authSession` sign-out or identity change.
+

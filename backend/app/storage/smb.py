@@ -3,6 +3,7 @@ import logging
 import stat
 import uuid
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import PurePosixPath, PureWindowsPath
 from time import monotonic
@@ -44,7 +45,18 @@ SMB_FILE_CLOSE_TIMEOUT_SECONDS = 5.0
 SMB_WRITE_FILE_TIMEOUT_SECONDS = 120.0
 SMB_EXISTS_TIMEOUT_SECONDS = 10.0
 SMB_DELETE_TIMEOUT_SECONDS = 120.0
+SMB_VOLUME_CAPACITY_TIMEOUT_SECONDS = 10.0
 SMB_FILETIME_TICKS_PER_SECOND = 10_000_000
+
+
+@dataclass(frozen=True)
+class SMBVolumeCapacity:
+    """Volume capacity counters returned by an SMB filesystem metadata query."""
+
+    total_bytes: int
+    caller_available_bytes: int
+    actual_available_bytes: int
+
 
 BlockingResultT = TypeVar("BlockingResultT")
 _MOVE_CLEANUP_TASKS: set[asyncio.Task[None]] = set()
@@ -2187,3 +2199,77 @@ class SMBBackend(StorageBackend):
                 (monotonic() - started_at) * 1000,
                 committed,
             )
+
+    async def get_volume_capacity(
+        self,
+        *,
+        timeout_seconds: float = SMB_VOLUME_CAPACITY_TIMEOUT_SECONDS,
+        on_worker_exit: Callable[[], None] | None = None,
+    ) -> SMBVolumeCapacity:
+        """Query SMB volume capacity without scanning directories or aborting shared transports on timeout."""
+
+        smb_path = self._build_smb_path("")
+        worker_started = False
+
+        try:
+            pool = await get_connection_pool()
+            async with pool.get_connection(
+                host=self.host,
+                port=self.port,
+                username=self.username,
+                password=self.password,
+                share_name=self.share_name,
+                connection_cache=self._connection_cache,
+            ):
+                loop = asyncio.get_running_loop()
+                diagnostics = pool.connection_diagnostics(self._connection_cache)
+
+                def _stat_volume() -> SMBVolumeCapacity:
+                    volume = smbclient.stat_volume(smb_path, **self._smb_auth_kwargs())
+                    return SMBVolumeCapacity(
+                        total_bytes=int(volume.total_size),
+                        caller_available_bytes=int(volume.caller_available_size),
+                        actual_available_bytes=int(volume.actual_available_size),
+                    )
+
+                operation_future = loop.run_in_executor(None, _stat_volume)
+                worker_started = True
+                if on_worker_exit is not None:
+                    operation_future.add_done_callback(lambda _completed: on_worker_exit())
+
+                try:
+                    result = await self._wait_for_blocking_smb_operation(
+                        operation_future,
+                        operation_name="stat volume capacity",
+                        smb_path=smb_path,
+                        timeout_seconds=timeout_seconds,
+                        diagnostics=diagnostics,
+                    )
+                except asyncio.TimeoutError as error:
+                    await pool.retain_connection_until_future_complete(self._connection_cache, operation_future)
+                    logger.warning(
+                        "SMB capacity probe timed out; shared transport remains active until worker exits.",
+                        extra={
+                            **pool.connection_diagnostics(self._connection_cache),
+                            "event": "smb_capacity_probe_timeout",
+                            "operation": "stat_volume_capacity",
+                            "stage": "operation",
+                            "duration_ms": timeout_seconds * 1000,
+                        },
+                    )
+                    raise SMBOperationTimeout("SMB storage capacity check timed out. Shared connection remains active.") from error
+                except asyncio.CancelledError:
+                    await pool.retain_connection_until_future_complete(self._connection_cache, operation_future)
+                    raise
+
+                if pool.generation_aborting(self._connection_cache):
+                    raise SMBConnectionRetired("SMB connection changed during capacity check. Retry on the next refresh.")
+                return result
+        except Exception as error:
+            translated = translate_smb_target_error(error, smb_path)
+            if translated is not error:
+                raise translated from error
+            raise
+        finally:
+            if not worker_started and on_worker_exit is not None:
+                on_worker_exit()

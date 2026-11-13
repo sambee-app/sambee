@@ -38,6 +38,7 @@ export const SETTINGS_ROUTE_BY_CATEGORY: Record<SettingsCategory, string> = {
   "admin-smb": "/settings/admin/smb",
   "admin-file-search": "/settings/admin/file-search",
   "admin-directory-search": "/settings/admin/directory-search",
+  "admin-health-monitoring": "/settings/admin/health-monitoring",
   "admin-system": "/settings/admin/system",
   "admin-image-viewer": "/settings/admin/image-viewer",
   "admin-pdf-viewer": "/settings/admin/pdf-viewer",
@@ -163,6 +164,15 @@ export const SETTINGS_CATEGORY_META: Record<SettingsCategory, SettingsCategoryMe
     },
     descriptionKey: "settings.categories.adminDirectorySearch.description",
     route: SETTINGS_ROUTE_BY_CATEGORY["admin-directory-search"],
+    section: "administration",
+    adminOnly: true,
+  },
+  "admin-health-monitoring": {
+    get label() {
+      return translate("settings.categories.adminHealthMonitoring.label");
+    },
+    descriptionKey: "settings.categories.adminHealthMonitoring.description",
+    route: SETTINGS_ROUTE_BY_CATEGORY["admin-health-monitoring"],
     section: "administration",
     adminOnly: true,
   },

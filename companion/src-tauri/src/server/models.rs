@@ -489,7 +489,7 @@ pub struct ActivationResolution {
 }
 
 /// A mounted drive / volume visible to the companion.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DriveInfo {
     pub id: String,
     pub name: String,
@@ -667,4 +667,53 @@ pub struct DirectorySearchResult {
     pub monitoring_state: Option<String>,
     pub retry_after_ms: Option<u64>,
     pub scan_progress: Option<ScanProgress>,
+}
+
+/// Availability state for a Companion local-drive capacity reading.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveCapacityAvailability {
+    Available,
+    Collecting,
+    Unsupported,
+    PermissionDenied,
+    Offline,
+    Timeout,
+    Stale,
+    Invalid,
+    Unavailable,
+}
+
+/// Space accounting semantics reported by the underlying operating system.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DriveSpaceSemantics {
+    PosixUnprivilegedBlocks,
+    CallerQuota,
+}
+
+/// Cached or unavailable capacity snapshot for one exposed Companion drive.
+#[derive(Debug, Clone, Serialize)]
+pub struct DriveCapacityItem {
+    pub id: String,
+    pub name: String,
+    pub drive_type: DriveType,
+    pub availability: DriveCapacityAvailability,
+    pub semantics: DriveSpaceSemantics,
+    pub available_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actual_free_bytes: Option<u64>,
+    pub sampled_at: Option<DateTime<Utc>>,
+    pub age_seconds: Option<f64>,
+    pub is_stale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Immediate non-blocking local-drive capacity snapshot returned by `GET /api/drives/capacity`.
+#[derive(Debug, Clone, Serialize)]
+pub struct DriveCapacityListing {
+    pub generated_at: DateTime<Utc>,
+    pub items: Vec<DriveCapacityItem>,
 }

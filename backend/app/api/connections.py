@@ -30,6 +30,7 @@ from app.services.connection_access import (
 )
 from app.services.directory_cache import get_directory_cache_manager
 from app.services.directory_monitor import get_monitor
+from app.services.health_monitoring import get_health_monitoring_coordinator
 from app.storage.smb import SMBBackend
 from app.storage.smb_pool import retire_smb_connection_context
 
@@ -318,6 +319,7 @@ async def update_connection(
         )
 
     connection_key = str(connection.id)
+    get_health_monitoring_coordinator().invalidate_smb_connection(connection.id)
     await retire_smb_connection_context(connection_key, "connection updated")
     await asyncio.gather(
         get_directory_cache_manager().remove_cache_async(connection_key),
@@ -343,6 +345,7 @@ async def delete_connection(
     session.commit()
 
     connection_key = str(connection.id)
+    get_health_monitoring_coordinator().invalidate_smb_connection(connection.id)
     await retire_smb_connection_context(connection_key, "connection deleted")
     await asyncio.gather(
         get_directory_cache_manager().remove_cache_async(connection_key),

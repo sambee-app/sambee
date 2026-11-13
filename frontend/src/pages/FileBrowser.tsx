@@ -44,6 +44,7 @@ import { SecondaryActionStrip } from "../components/FileBrowser/SecondaryActionS
 import { StatusBar } from "../components/FileBrowser/StatusBar";
 import { useBrowserCommandsProvider } from "../components/FileBrowser/search";
 import { useFileSearchProvider } from "../components/FileBrowser/search/useFileSearchProvider";
+import { SystemHealthDialog } from "../components/HealthMonitoring/SystemHealthDialog";
 import { KeyboardShortcutsHelp } from "../components/KeyboardShortcutsHelp";
 import HamburgerMenu from "../components/Mobile/HamburgerMenu";
 import { MobileSettingsDrawer } from "../components/Mobile/MobileSettingsDrawer";
@@ -56,6 +57,7 @@ import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, COPY_MOVE_SHORTCUTS, PANE_SHORTCUT
 import { useCompanion } from "../hooks/useCompanion";
 import { type KeyboardShortcut, useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { type ViewerLeaveGuard, WorkspaceNavigationGuard } from "../hooks/useRoutedViewerEditing";
+import { useSystemHealthMonitoring } from "../hooks/useSystemHealthMonitoring";
 import { signOutCurrentBrowser } from "../services/accountSession";
 import { authSession } from "../services/authSession";
 import { markBackendAvailable, useBackendAvailability } from "../services/backendAvailability";
@@ -475,6 +477,9 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const [connections, setConnections] = useState<Connection[]>(() => initialRecoverySnapshotRef.current?.connections ?? []);
   const [loadingConnections, setLoadingConnections] = useState(() => initialRecoverySnapshotRef.current === null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const mobileMenuTriggerRef = React.useRef<HTMLElement | null>(null);
+  const [systemHealthDialogOpen, setSystemHealthDialogOpen] = useState(false);
+  const [systemHealthRestoreFocusEl, setSystemHealthRestoreFocusEl] = useState<HTMLElement | null>(null);
   const settingsOpen = Boolean(currentRoute.settings) && !useCompactLayout;
   const mobileSettingsOpen = Boolean(currentRoute.settings) && useCompactLayout;
   const settingsInitialCategory =
@@ -849,12 +854,31 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const quickBarPane = quickBarPaneId === "right" && isDualMode ? rightPane : leftPane;
   const quickBarOtherPane = quickBarPaneId === "right" && isDualMode ? leftPane : rightPane;
   const quickBarInputRef = quickBarPane.searchInputRef;
+  const activeHealthConnections = useMemo(
+    () => (isDualMode ? [leftPane.connectionId, rightPane.connectionId] : [leftPane.connectionId]),
+    [isDualMode, leftPane.connectionId, rightPane.connectionId]
+  );
+  const systemHealth = useSystemHealthMonitoring({
+    authenticated: true,
+    activeConnectionIds: activeHealthConnections,
+    dialogOpen: systemHealthDialogOpen,
+    companionStatus: companion.status,
+    companionLifecycleStatus,
+  });
+
+  useEffect(() => {
+    if (!systemHealth.visible && systemHealthDialogOpen) {
+      setSystemHealthDialogOpen(false);
+    }
+  }, [systemHealth.visible, systemHealthDialogOpen]);
+
   const viewerOverlayOpen = Boolean(leftPane.viewInfo || rightPane.viewInfo);
   const browserOverlayOpen =
     settingsOpen ||
     mobileSettingsOpen ||
     drawerOpen ||
     showHelp ||
+    systemHealthDialogOpen ||
     viewerOverlayOpen ||
     leftPane.deleteDialogOpen ||
     leftPane.renameDialogOpen ||
@@ -1169,6 +1193,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       mobileSettingsOpen ||
       drawerOpen ||
       showHelp ||
+      systemHealthDialogOpen ||
       viewerOverlayOpen ||
       activePane.deleteDialogOpen ||
       activePane.renameDialogOpen ||
@@ -1196,6 +1221,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     mobileSettingsOpen,
     settingsOpen,
     showHelp,
+    systemHealthDialogOpen,
     viewerOverlayOpen,
   ]);
   const handleUnavailableShortcut = useCallback(
@@ -4176,6 +4202,15 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
           }}
           onOpenDocumentation={handleOpenDocumentation}
           onOpenSettings={handleOpenSettings}
+          systemHealth={{
+            visible: systemHealth.visible,
+            severity: systemHealth.severity,
+            headline: systemHealth.headline,
+            onOpen: () => {
+              setSystemHealthRestoreFocusEl(mobileMenuTriggerRef.current);
+              setSystemHealthDialogOpen(true);
+            },
+          }}
           onLogout={handleLogout}
         />
         <AppBar position="static" elevation={useCompactLayout ? undefined : 0} sx={mobileSafeAreaAppBarSx}>
@@ -4183,7 +4218,12 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
             {useCompactLayout ? (
               <MobileToolbar
                 currentDirectoryName={currentDirectoryName}
-                onOpenMenu={() => setDrawerOpen(true)}
+                onOpenMenu={() => {
+                  if (document.activeElement instanceof HTMLElement) {
+                    mobileMenuTriggerRef.current = document.activeElement;
+                  }
+                  setDrawerOpen(true);
+                }}
                 onNavigateUp={activePane.handleNavigateUp}
                 canNavigateUp={canNavigateUp}
               />
@@ -4197,6 +4237,15 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                 onOpenHelp={() => setShowHelp(true)}
                 onOpenDocumentation={handleOpenDocumentation}
                 onOpenSettings={handleOpenSettings}
+                systemHealth={{
+                  visible: systemHealth.visible,
+                  severity: systemHealth.severity,
+                  headline: systemHealth.headline,
+                  onOpen: () => {
+                    setSystemHealthRestoreFocusEl(null);
+                    setSystemHealthDialogOpen(true);
+                  },
+                }}
                 onBlurToFileList={() => quickBarPane.listContainerEl?.focus()}
                 searchQueryValue={quickBarQueryValue}
                 onSearchQueryValueChange={handleQuickBarQueryValueChange}
@@ -4469,6 +4518,12 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
           onClose={() => setShowHelp(false)}
           shortcuts={browserShortcuts}
           title={t("keyboardShortcutsHelp.titles.fileBrowser")}
+        />
+        <SystemHealthDialog
+          open={systemHealthDialogOpen && systemHealth.visible}
+          onClose={() => setSystemHealthDialogOpen(false)}
+          health={systemHealth}
+          restoreFocusEl={systemHealthRestoreFocusEl}
         />
         <NameInputDialog
           open={archiveCreateContext !== null}

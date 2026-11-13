@@ -589,6 +589,16 @@ pub async fn list_drives() -> Json<Vec<DriveInfo>> {
     Json(drives::enumerate_drives())
 }
 
+/// `GET /api/drives/capacity` — return non-blocking cached capacity for exposed local drives.
+pub async fn list_drives_capacity(State(state): State<Arc<AppState>>) -> Response {
+    let listing = state.drive_capacity.snapshot();
+    let mut response = axum::response::IntoResponse::into_response(Json(listing));
+    response
+        .headers_mut()
+        .insert(axum::http::header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 // ─── Browse ──────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]

@@ -16,6 +16,11 @@ from app.core.security import (
 from app.core.system_setting_definitions import DirectoryIndexPolicyScope
 from app.db.database import get_immediate_session, get_session
 from app.models.companion_settings import SettingsGrantBinding, SettingsGrantRead, SettingsGrantRedeem, SettingsMetadata, SettingsReceipt
+from app.models.health_monitoring import (
+    HealthMonitoringSettingsRead,
+    HealthMonitoringSettingsUpdate,
+    HealthMonitoringSettingsUpdateResult,
+)
 from app.models.system_settings import (
     AboutSettingsRead,
     AdvancedSystemSettingsRead,
@@ -249,5 +254,34 @@ async def put_network_settings(
     set_user(current_user.username)
     try:
         return update_network_settings(payload, updated_by_user_id=current_user.id, session=session)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/settings/health-monitoring", response_model=HealthMonitoringSettingsRead)
+async def get_health_monitoring_settings(
+    current_user: User = Depends(require_capability(Capability.ACCESS_ADMIN_SETTINGS)),
+    session: Session = Depends(get_session),
+) -> HealthMonitoringSettingsRead:
+    from app.services.health_monitoring_settings import build_health_monitoring_settings_read
+
+    set_user(current_user.username)
+    try:
+        return build_health_monitoring_settings_read(session)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.put("/settings/health-monitoring", response_model=HealthMonitoringSettingsUpdateResult)
+async def put_health_monitoring_settings(
+    payload: HealthMonitoringSettingsUpdate,
+    session: Session = Depends(get_immediate_session),
+    current_user: User = Depends(require_capability(Capability.ACCESS_ADMIN_SETTINGS)),
+) -> HealthMonitoringSettingsUpdateResult:
+    from app.services.health_monitoring_settings import update_health_monitoring_settings
+
+    set_user(current_user.username)
+    try:
+        return update_health_monitoring_settings(payload, updated_by_user_id=current_user.id, session=session)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

@@ -40,6 +40,7 @@ describe("settingsNavigation", () => {
           "admin-authentication",
           "admin-directory-search",
           "admin-file-search",
+          "admin-health-monitoring",
           "admin-image-viewer",
           "admin-network",
           "admin-pdf-viewer",
@@ -64,6 +65,7 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryByPath("/settings/admin/smb")).toBe("admin-smb");
     expect(getSettingsCategoryByPath("/settings/admin/file-search")).toBe("admin-file-search");
     expect(getSettingsCategoryByPath("/settings/admin/directory-search")).toBe("admin-directory-search");
+    expect(getSettingsCategoryByPath("/settings/admin/health-monitoring")).toBe("admin-health-monitoring");
     expect(getSettingsCategoryByPath("/settings/admin/system")).toBe("admin-system");
     expect(getSettingsCategoryByPath("/settings/admin/image-viewer")).toBe("admin-image-viewer");
     expect(getSettingsCategoryByPath("/settings/admin/pdf-viewer")).toBe("admin-pdf-viewer");

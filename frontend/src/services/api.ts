@@ -39,6 +39,10 @@ import type {
   FileInfo,
   FileSearchSettingsRead,
   FileSearchSettingsUpdate,
+  HealthMonitoringClientPolicy,
+  HealthMonitoringSettings,
+  HealthMonitoringSettingsUpdate,
+  HealthMonitoringSnapshot,
   LocalActivationResolution,
   LocalLinkTargetListing,
   NetworkSettings,
@@ -1107,6 +1111,45 @@ class ApiService {
     const response = options
       ? await this.api.put<NetworkSettingsUpdate>("/admin/settings/network", payload, options)
       : await this.api.put<NetworkSettingsUpdate>("/admin/settings/network", payload);
+    return response.data;
+  }
+
+  async getHealthMonitoringSettings(options?: { signal?: AbortSignal }): Promise<HealthMonitoringSettings> {
+    const response = options
+      ? await this.api.get<HealthMonitoringSettings>("/admin/settings/health-monitoring", options)
+      : await this.api.get<HealthMonitoringSettings>("/admin/settings/health-monitoring");
+    return response.data;
+  }
+
+  async updateHealthMonitoringSettings(
+    payload: HealthMonitoringSettingsUpdate,
+    options?: { signal?: AbortSignal }
+  ): Promise<HealthMonitoringSettingsUpdate> {
+    const response = options
+      ? await this.api.put<HealthMonitoringSettingsUpdate>("/admin/settings/health-monitoring", payload, options)
+      : await this.api.put<HealthMonitoringSettingsUpdate>("/admin/settings/health-monitoring", payload);
+    return response.data;
+  }
+
+  async getHealthMonitoringClientPolicy(options?: { signal?: AbortSignal }): Promise<HealthMonitoringClientPolicy> {
+    const response = await this.api.get<HealthMonitoringClientPolicy>("/health-monitoring/policy", {
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
+    return response.data;
+  }
+
+  async getHealthMonitoringSnapshot(
+    connectionIds: readonly string[],
+    options?: { signal?: AbortSignal }
+  ): Promise<HealthMonitoringSnapshot> {
+    const params = new URLSearchParams();
+    for (const id of connectionIds.slice(0, 2)) {
+      params.append("connection_id", id);
+    }
+    const response = await this.api.get<HealthMonitoringSnapshot>("/health-monitoring/snapshot", {
+      params,
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
     return response.data;
   }
 

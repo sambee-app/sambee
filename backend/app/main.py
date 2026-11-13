@@ -28,6 +28,7 @@ from app.api import (
     browser,
     companion,
     connections,
+    health_monitoring,
     logs,
     system_settings,
     themes,
@@ -352,6 +353,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         start_archive_operation_monitor()
         logger.info("Archive operation monitor started")
 
+        from app.services.health_monitoring import start_health_monitoring
+
+        await start_health_monitoring()
+        logger.info("Health monitoring started")
+
     except ConfigurationError as e:
         log_error(logger, f"Configuration error: {e}")
         log_error(logger, "Application startup failed. Exiting.")
@@ -384,6 +390,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Archive operation monitor stopped")
     except Exception as e:
         log_error(logger, f"Error stopping archive operation monitor: {e}")
+
+    try:
+        from app.services.health_monitoring import stop_health_monitoring
+
+        logger.info("Stopping health monitoring...")
+        await stop_health_monitoring()
+        logger.info("Health monitoring stopped")
+    except Exception as e:
+        log_error(logger, f"Error stopping health monitoring: {e}")
 
     # Stop directory caches (CHANGE_NOTIFY watchers + rescan tasks)
     try:
@@ -516,6 +531,7 @@ app.include_router(browser.router, prefix="/api/browse", tags=["browse"])
 app.include_router(viewer.router, prefix="/api/viewer", tags=["viewer"])
 app.include_router(archive_operations.v2_router, prefix="/api/archive", tags=["archive"])
 app.include_router(companion.router, prefix="/api/companion", tags=["companion"])
+app.include_router(health_monitoring.router, prefix="/api/health-monitoring", tags=["health-monitoring"])
 app.include_router(logs.router, prefix="/api/logs", tags=["logs"])
 app.include_router(websocket.router, prefix="/api", tags=["websocket"])
 
