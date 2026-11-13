@@ -94,7 +94,7 @@ const baseSnapshot: HealthMonitoringSnapshot = {
     action: null,
   },
   cpu_temperature: {
-    severity: "unknown",
+    severity: "informational",
     availability: "unsupported",
     source_id: null,
     label: null,
@@ -244,6 +244,57 @@ describe("System Health Monitoring UI and Hook", () => {
   it("filters active SMB connection IDs to at most two deduplicated non-local IDs", () => {
     expect(extractActiveSmbConnectionIds(["local-drive:root", "smb-a", "smb-a", "smb-b", "smb-c"])).toEqual(["smb-a", "smb-b"]);
   });
+
+  it.each(["unsupported", "not_mounted"] as const)("shows optional CPU temperature as informational (%s)", async (availability) => {
+    await act(async () => {
+      render(
+        <SambeeThemeProvider>
+          <SystemHealthDialog
+            open
+            onClose={vi.fn()}
+            health={{
+              ...baseHealth,
+              severity: "ok",
+              snapshot: {
+                ...baseSnapshot,
+                cpu_temperature: { ...baseSnapshot.cpu_temperature, availability },
+              },
+            }}
+          />
+        </SambeeThemeProvider>
+      );
+    });
+    const row = screen.getByRole("button", { name: /CPU temperature/ });
+    expect(within(row).getByTestId("InfoOutlinedIcon")).toBeInTheDocument();
+    expect(within(row).queryByTestId("HelpOutlineOutlinedIcon")).not.toBeInTheDocument();
+    expect(screen.getByText("No issues found")).toBeInTheDocument();
+  });
+
+  it.each(["permission_denied", "invalid", "stale", "unavailable"] as const)(
+    "keeps a question mark for required CPU data failures (%s)",
+    async (availability) => {
+      await act(async () => {
+        render(
+          <SambeeThemeProvider>
+            <SystemHealthDialog
+              open
+              onClose={vi.fn()}
+              health={{
+                ...baseHealth,
+                severity: "unknown",
+                snapshot: {
+                  ...baseSnapshot,
+                  cpu_temperature: { ...baseSnapshot.cpu_temperature, severity: "unknown", availability },
+                },
+              }}
+            />
+          </SambeeThemeProvider>
+        );
+      });
+      expect(within(screen.getByRole("button", { name: /CPU temperature/ })).getByTestId("HelpOutlineOutlinedIcon")).toBeInTheDocument();
+      expect(screen.getByText("Some checks are unavailable")).toBeInTheDocument();
+    }
+  );
 
   it("groups storage by purpose, separates connection types from names, and expands only the selected metric", async () => {
     const health: SystemHealthViewState = {
@@ -707,6 +758,87 @@ describe("System Health Monitoring UI and Hook", () => {
     });
 
     expect(document.activeElement).toBe(sambeeMenuButton);
+  });
+
+  describe("optional Companion and required drive data", () => {
+    beforeEach(() => {
+      vi.mocked(api.getHealthMonitoringClientPolicy).mockReset().mockResolvedValue({
+        enabled: true,
+        permitted: true,
+        thresholds: baseSnapshot.thresholds,
+        summary_poll_seconds: 15,
+        dialog_poll_seconds: 5,
+        host_stale_seconds: 15,
+        storage_stale_seconds: 180,
+      });
+      vi.mocked(api.getHealthMonitoringSnapshot)
+        .mockReset()
+        .mockResolvedValue({ ...baseSnapshot, smb_storage: [] });
+      vi.mocked(companionService.getDrivesCapacity).mockReset().mockResolvedValue({
+        generated_at: baseSnapshot.generated_at,
+        items: [],
+      });
+    });
+
+    it.each(["unavailable", "unpaired", "pending_local_approval", "detecting"] as const)(
+      "shows an informational Local drives row without blocking healthy checks when Companion is %s",
+      async (companionStatus) => {
+        function HealthDialog() {
+          const health = useSystemHealthMonitoring({
+            authenticated: true,
+            activeConnectionIds: [],
+            dialogOpen: true,
+            companionStatus,
+            companionLifecycleStatus: null,
+          });
+          return <SystemHealthDialog open onClose={vi.fn()} health={health} />;
+        }
+        await act(async () => {
+          render(
+            <SambeeThemeProvider>
+              <HealthDialog />
+            </SambeeThemeProvider>
+          );
+        });
+
+        await waitFor(() => expect(screen.getByText("No issues found")).toBeInTheDocument());
+        const row = screen.getByRole("button", { name: /Local drives/ });
+        expect(within(row).getByTestId("InfoOutlinedIcon")).toBeInTheDocument();
+        expect(within(row).queryByTestId("HelpOutlineOutlinedIcon")).not.toBeInTheDocument();
+        expect(within(row).getByText("Check Companion in Settings > Local Drives.")).toBeInTheDocument();
+        expect(companionService.getDrivesCapacity).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each(["pairing", "authentication", "capacity"] as const)("keeps %s failures as required missing data", async (failure) => {
+      if (failure === "capacity") {
+        vi.mocked(companionService.getDrivesCapacity).mockRejectedValue(new Error("Companion unreachable"));
+      }
+      const { result } = renderHook(() =>
+        useSystemHealthMonitoring({
+          authenticated: true,
+          activeConnectionIds: [],
+          dialogOpen: false,
+          companionStatus: failure === "pairing" ? "needs_repair" : "paired",
+          companionLifecycleStatus: failure === "authentication" ? "auth_failed" : null,
+        })
+      );
+      await waitFor(() => {
+        expect(result.current.visible).toBe(true);
+        expect(result.current.snapshot).not.toBeNull();
+        expect(result.current.localDrives[0]?.severity).toBe("unknown");
+      });
+      expect(result.current.severity).toBe("unknown");
+
+      await act(async () => {
+        render(
+          <SambeeThemeProvider>
+            <SystemHealthDialog open onClose={vi.fn()} health={result.current} />
+          </SambeeThemeProvider>
+        );
+      });
+      expect(within(screen.getByRole("button", { name: /Local drives/ })).getByTestId("HelpOutlineOutlinedIcon")).toBeInTheDocument();
+    });
   });
 
   it("handles older Companion 404 compatibility, evaluates local-drive thresholds, and writes nothing to browser storage", async () => {

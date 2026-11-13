@@ -27,6 +27,7 @@ The desktop toolbar icon combines a monitor-and-pulse symbol with a status badge
 - Exclamation mark in a triangle (**Warning**): At least one monitored resource reached its warning threshold.
 - Exclamation mark in an octagon (**Error**): At least one monitored resource reached its error threshold or ran out of free space.
 - Question mark in a circle (**Unknown**): No warning or error is active, and at least one required check is still collecting, unreachable, or showing old data.
+- Letter **i** in a circle (**Informational**): The check is not required or has no applicable alert limits, for example CPU temperature without a supported sensor or container memory without a limit. It does not prevent an **OK** result.
 
 ## What Storage Is Checked
 
@@ -36,7 +37,7 @@ Sambee checks free space only for locations active in your current browser:
 - The SMB connection open in the current pane (or both panes in dual-pane mode, without duplicates). Saved SMB connections that are not open are not queried.
 - Local drives exposed by your paired Companion app on desktop.
 
-**Storage: application data** and **Storage: temporary data** appear under **Container**. A shared filesystem uses one combined row. Drives and connections appear under **Connection storage**, with **Local drive** or **SMB connection** shown separately from the name. If Companion cannot provide drive information, a single **Local drives** row shows its status.
+**Storage: application data** and **Storage: temporary data** appear under **Container**. A shared filesystem uses one combined row. Drives and connections appear under **Connection storage**, with **Local drive** or **SMB connection** shown separately from the name. If Companion cannot provide drive information, a single **Local drives** row shows its status. When Companion is not connected or paired, this row is informational and does not prevent an **OK** result. Pairing errors and failed capacity checks still show **Unknown**.
 
 Storage entries show free space and its percentage. On SMB shares and Windows local drives, this value includes enforced user quotas.
 

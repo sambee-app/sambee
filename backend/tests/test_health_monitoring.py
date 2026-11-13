@@ -134,6 +134,47 @@ def _clean_health_coordinator_and_settings_cache(session: Session):
     system_settings_store._cache.clear()
 
 
+@pytest.mark.parametrize("sys_mounted", [False, True])
+def test_optional_host_sources_are_informational_and_do_not_block_health(tmp_path: Path, sys_mounted: bool) -> None:
+    clock = FakeClock()
+    memory = HostMemoryCollector(meminfo_path=tmp_path / "meminfo")
+    load = SystemLoadCollector(loadavg_path=tmp_path / "loadavg", cpuinfo_path=tmp_path / "cpuinfo")
+    sys_root = tmp_path / "sys"
+    if sys_mounted:
+        sys_root.mkdir()
+    cpu = CpuTemperatureCollector(sys_root=sys_root)
+
+    memory.sample(warning_tenths=850, error_tenths=950, now_monotonic=clock.mono, now_utc=clock.utc)
+    load.sample(warning_hundredths=75, error_hundredths=90, now_monotonic=clock.mono, now_utc=clock.utc)
+    cpu.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
+    memory_read = memory.read(warning_tenths=850, error_tenths=950, now_monotonic=clock.mono)
+    load_read = load.read(warning_hundredths=75, error_hundredths=90, now_monotonic=clock.mono)
+    cpu_read = cpu.read_summary(overrides={}, now_monotonic=clock.mono)
+
+    for metric, required in (memory_read, load_read, cpu_read):
+        assert metric.severity == HealthSeverity.INFORMATIONAL
+        assert required is False
+    assert cpu_read[0].availability == (MetricAvailability.UNSUPPORTED if sys_mounted else MetricAvailability.NOT_MOUNTED)
+    summary = _compute_summary(
+        host_memory=memory_read,
+        system_load=load_read,
+        cpu_temperature=cpu_read,
+        container_memory=(
+            ContainerMemoryMetricRead(
+                severity=HealthSeverity.OK,
+                availability=MetricAvailability.AVAILABLE,
+                source="container",
+                limit_state=ContainerMemoryLimitState.FINITE,
+            ),
+            True,
+        ),
+        application_storage=[],
+        smb_storage=[],
+    )
+    assert summary.severity.value == HealthSeverity.OK.value
+    assert summary.incomplete_coverage
+
+
 def test_system_load_normalization_5m_evaluation_and_no_raw_load_exposed(tmp_path: Path) -> None:
     clock = FakeClock()
     loadavg = tmp_path / "loadavg"

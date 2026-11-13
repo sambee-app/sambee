@@ -490,7 +490,7 @@ class HostMemoryCollector:
             )
             return (
                 MemoryMetricRead(
-                    severity=HealthSeverity.UNKNOWN,
+                    severity=HealthSeverity.UNKNOWN if required else HealthSeverity.INFORMATIONAL,
                     availability=availability,
                     source=source,
                     warning_tenths_percent=warning_tenths,
@@ -738,7 +738,7 @@ class SystemLoadCollector:
             )
             return (
                 SystemLoadMetricRead(
-                    severity=HealthSeverity.UNKNOWN,
+                    severity=HealthSeverity.UNKNOWN if required else HealthSeverity.INFORMATIONAL,
                     availability=availability,
                     source=source,
                     warning_hundredths=warning_hundredths,
@@ -1677,7 +1677,7 @@ class CpuTemperatureCollector:
             )
             return (
                 CpuTemperatureSummaryRead(
-                    severity=HealthSeverity.UNKNOWN,
+                    severity=HealthSeverity.UNKNOWN if required else HealthSeverity.INFORMATIONAL,
                     availability=availability,
                     source=base_source,
                     incomplete_coverage=True,

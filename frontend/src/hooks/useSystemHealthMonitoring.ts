@@ -419,49 +419,47 @@ export function useSystemHealthMonitoring({
   const thresholds = snapshot?.thresholds ?? policy?.thresholds ?? DEFAULT_THRESHOLDS;
 
   const evaluatedLocalDrives: StorageMetric[] = useMemo(() => {
+    let placeholder: Pick<StorageMetric, "id" | "severity" | "availability" | "message" | "action"> | null = null;
     if (companionUpdateRequired) {
-      return [
-        {
-          id: "companion-update-required",
-          kind: "local_drive",
-          label: t("systemHealth.overview.localDrives"),
-          is_placeholder: true,
-          source: "Companion localhost:21549",
-          semantics: "posix_unprivileged_blocks",
-          severity: "unknown",
-          availability: "unsupported",
-          available_bytes: null,
-          total_bytes: null,
-          available_tenths_percent: null,
-          available_percent: null,
-          warning_tenths_percent: thresholds.available_space_warning_tenths_percent,
-          error_tenths_percent: thresholds.available_space_error_tenths_percent,
-          recovery_pending: false,
-          sampled_at: null,
-          age_seconds: null,
-          is_stale: false,
-          message: t("systemHealth.metrics.updateCompanion"),
-          action: t("systemHealth.metrics.updateCompanion"),
-        },
-      ];
-    }
-
-    if (
+      placeholder = {
+        id: "companion-update-required",
+        severity: "unknown",
+        availability: "unsupported",
+        message: t("systemHealth.metrics.updateCompanion"),
+        action: t("systemHealth.metrics.updateCompanion"),
+      };
+    } else if (
       companionStatus === "needs_repair" ||
       companionLifecycleStatus === "renewal_required" ||
       companionLifecycleStatus === "auth_failed" ||
       (companionFetchError && rawLocalDrives.length === 0)
     ) {
+      placeholder = {
+        id: "companion-unavailable",
+        severity: "unknown",
+        availability: "unavailable",
+        message: companionFetchError ?? t("systemHealth.metrics.pairingLost"),
+        action: t("systemHealth.metrics.pairingLost"),
+      };
+    } else if (companionStatus !== "paired") {
+      placeholder = {
+        id: "companion-not-connected",
+        severity: "informational",
+        availability: "unsupported",
+        message: t("systemHealth.overview.localDriveHelp"),
+        action: t("systemHealth.overview.localDriveHelp"),
+      };
+    }
+
+    if (placeholder) {
       return [
         {
-          id: "companion-unavailable",
+          ...placeholder,
           kind: "local_drive",
           label: t("systemHealth.overview.localDrives"),
           is_placeholder: true,
           source: "Companion localhost:21549",
           semantics: "posix_unprivileged_blocks",
-          severity: "unknown",
-          availability: "unavailable",
           available_bytes: null,
           total_bytes: null,
           available_tenths_percent: null,
@@ -472,8 +470,6 @@ export function useSystemHealthMonitoring({
           sampled_at: null,
           age_seconds: null,
           is_stale: false,
-          message: companionFetchError ?? t("systemHealth.metrics.pairingLost"),
-          action: t("systemHealth.metrics.pairingLost"),
         },
       ];
     }
@@ -622,15 +618,15 @@ export function useSystemHealthMonitoring({
     const localErrors = evaluatedLocalDrives.filter((d) => d.severity === "error");
     const localWarnings = evaluatedLocalDrives.filter((d) => d.severity === "warning");
     const localUnknowns = evaluatedLocalDrives.filter((d) => d.severity === "unknown");
-    const localUnsupported = evaluatedLocalDrives.filter((d) => d.availability === "unsupported" && d.severity === "informational");
+    const localOptional = evaluatedLocalDrives.filter((d) => d.severity === "informational");
 
     if (companionUpdateRequired) {
       notes.push(t("systemHealth.metrics.updateCompanion"));
     } else if (localUnknowns.length > 0) {
       notes.push(t("systemHealth.summary.localDriveUnknownHeadline"));
     }
-    if (localUnsupported.length > 0) {
-      notes.push(`${localUnsupported.map((d) => d.label).join(", ")}: ${t("systemHealth.statuses.notAvailable")}`);
+    if (localOptional.length > 0) {
+      notes.push(`${localOptional.map((d) => d.label).join(", ")}: ${t("systemHealth.statuses.notAvailable")}`);
     }
     if (backendUnavailable) {
       notes.unshift(t("systemHealth.summary.backendUnavailableHeadline"));
