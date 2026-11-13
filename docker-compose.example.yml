@@ -4,32 +4,15 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/app/data
+
       # Optional: Mount config.toml if you want to customize settings by uncommenting the line below
       # - ./config.toml:/app/config.toml:ro
+
       # Optional: Read-only Linux host mounts for host memory, normalized load, and CPU temperature monitoring
-      # - type: bind
-      #   source: /proc/meminfo
-      #   target: /host/proc/meminfo
-      #   read_only: true
-      #   bind:
-      #     create_host_path: false
-      # - type: bind
-      #   source: /proc/loadavg
-      #   target: /host/proc/loadavg
-      #   read_only: true
-      #   bind:
-      #     create_host_path: false
-      # - type: bind
-      #   source: /proc/cpuinfo
-      #   target: /host/proc/cpuinfo
-      #   read_only: true
-      #   bind:
-      #     create_host_path: false
-      # - type: bind
-      #   source: /sys
-      #   target: /host/sys
-      #   read_only: true
-      #   bind:
-      #     create_host_path: false
+      # - /proc/meminfo:/host/proc/meminfo:ro
+      # - /proc/loadavg:/host/proc/loadavg:ro
+      # - /proc/cpuinfo:/host/proc/cpuinfo:ro
+      # - /sys:/host/sys:ro
+
     ports:
       - 8000:8000

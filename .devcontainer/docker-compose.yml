@@ -6,6 +6,10 @@ services:
       target: devcontainer
     volumes:
       - ..:/workspace:cached
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
+      - /proc/cpuinfo:/host/proc/cpuinfo:ro
+      - /sys:/host/sys:ro
       - vscode-extensions:/home/vscode/.vscode-server/extensions
       - vscode-extensions-insiders:/home/vscode/.vscode-server-insiders/extensions
       - node_modules:/workspace/frontend/node_modules
