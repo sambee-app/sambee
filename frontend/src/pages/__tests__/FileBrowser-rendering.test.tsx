@@ -4,7 +4,7 @@ import { createMockAuthToken } from "../../test/fixtures/users";
  * Tests for basic rendering, loading states, errors, and empty states
  */
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileBrowserAlerts } from "../../components/FileBrowser/FileBrowserAlerts";
@@ -23,6 +23,7 @@ import {
   createTimeoutError,
   setupSuccessfulApiMocks,
 } from "../../test/helpers";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { mockConnections, mockDirectoryListing, renderBrowser, renderBrowserAndFlush } from "./FileBrowser.test.utils";
 

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { NavigateFunction } from "react-router-dom";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import { logger } from "../../services/logger";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { requireTestValue } from "../../test/helpers/assertions";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import FileBrowser from "../FileBrowser";
 

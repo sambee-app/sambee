@@ -20,11 +20,12 @@
  * - Resolves connection name from connections list
  */
 
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OperationNotificationProvider } from "../../components/OperationNotifications";
 import { createMockConnection } from "../../test/fixtures/connections";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import type { Connection, FileEntry } from "../../types";
 import { FileType } from "../../types";
 import { physicalLocation } from "../FileBrowser/contentProviders";
@@ -521,8 +522,9 @@ describe("FileBrowserPane", () => {
       vi.useFakeTimers();
     });
 
-    afterEach(() => {
+    afterEach(async () => {
       cleanup();
+      await act(() => vi.runOnlyPendingTimersAsync());
       vi.useRealTimers();
     });
 
@@ -576,7 +578,9 @@ describe("FileBrowserPane", () => {
       const pane = createMockPane({ navigationPending: true });
       const { unmount } = render(<FileBrowserPane {...defaultProps({ pane })} />);
 
-      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      // jsdom also queues an immediate task when a style sheet is attached.
+      act(() => vi.advanceTimersByTime(0));
+      expect(vi.getTimerCount()).toBe(1);
       unmount();
       expect(vi.getTimerCount()).toBe(0);
     });

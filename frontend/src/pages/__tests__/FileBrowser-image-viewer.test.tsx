@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import type { MockedObject } from "vitest";
@@ -9,6 +9,7 @@ import { authSession } from "../../services/authSession";
 import { createMockConnection } from "../../test/fixtures/connections";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { requireTestValue } from "../../test/helpers/assertions";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType } from "../../types";
 import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";

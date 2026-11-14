@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import { clearCachedAsyncData, getCachedAsyncData, primeCachedAsyncData } from "
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { uninitializedTestCallback } from "../../test/helpers/assertions";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import type { OidcAdminConfigurationRead, OidcReviewedPolicy, OidcTestedIdentity, RedactedOidcConfiguration } from "../../types";
 import { AuthenticationSettings } from "../AuthenticationSettings";
 

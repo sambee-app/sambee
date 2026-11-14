@@ -75,6 +75,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
+    "@emotion/cache": "^11.14.0",
     "@playwright/test": "^1.65.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
