@@ -183,15 +183,16 @@ const OverwriteConflictDialog: React.FC<OverwriteConflictDialogProps> = ({
   );
 
   const focusInitialControl = useCallback(() => {
-    if (!shouldFocusInitialControlRef.current) return;
-    shouldFocusInitialControlRef.current = false;
-    if (!hasAvailableResolution) return;
-    if (safeDefaultResolution === "rename") {
-      targetNameRef.current?.focus();
-      return;
+    if (!open || isSubmittingOrPending || !shouldFocusInitialControlRef.current || !hasAvailableResolution) return;
+    const initialControl =
+      safeDefaultResolution === "rename"
+        ? targetNameRef.current
+        : resolutionGroupRef.current?.querySelector<HTMLInputElement>(`input[value="${safeDefaultResolution}"]`);
+    initialControl?.focus();
+    if (initialControl === document.activeElement) {
+      shouldFocusInitialControlRef.current = false;
     }
-    resolutionGroupRef.current?.querySelector<HTMLInputElement>(`input[value="${safeDefaultResolution}"]`)?.focus();
-  }, [hasAvailableResolution, safeDefaultResolution]);
+  }, [hasAvailableResolution, isSubmittingOrPending, open, safeDefaultResolution]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -212,6 +213,7 @@ const OverwriteConflictDialog: React.FC<OverwriteConflictDialogProps> = ({
     shouldFocusRenameInputRef.current = safeDefaultResolution === "rename";
   }, [dialogStateIdentity, existingTargetName, open, safeDefaultResolution]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Each conflict replaces the controls and needs a new focus request.
   useEffect(() => {
     if (!open || isSubmittingOrPending || !shouldFocusInitialControlRef.current) {
       return;
@@ -224,7 +226,7 @@ const OverwriteConflictDialog: React.FC<OverwriteConflictDialogProps> = ({
       focusInitialControl();
     });
     return () => cancelAnimationFrame(frameId);
-  }, [focusInitialControl, isSubmittingOrPending, open]);
+  }, [dialogStateIdentity, focusInitialControl, isSubmittingOrPending, open]);
 
   useEffect(() => {
     if (!open || !ownerIsSubmitting) {
