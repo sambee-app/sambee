@@ -59,6 +59,7 @@ interface ResponsiveDialogShellProps {
   disableAutoFocus?: boolean;
   disableEnforceFocus?: boolean;
   disableRestoreFocus?: boolean;
+  restoreFocusEl?: HTMLElement | null;
   onTransitionEntered?: () => void;
   onTransitionExited?: () => void;
 }
@@ -93,6 +94,7 @@ export function ResponsiveDialogShell({
   disableAutoFocus = false,
   disableEnforceFocus = false,
   disableRestoreFocus = false,
+  restoreFocusEl = null,
   onTransitionEntered,
   onTransitionExited,
 }: ResponsiveDialogShellProps) {
@@ -117,8 +119,12 @@ export function ResponsiveDialogShell({
   ) : null;
 
   useEffect(() => {
-    if (!disableRestoreFocus && open && !wasOpenRef.current && document.activeElement instanceof HTMLElement) {
-      triggerElementRef.current = document.activeElement;
+    if (!disableRestoreFocus && open && !wasOpenRef.current) {
+      if (restoreFocusEl) {
+        triggerElementRef.current = restoreFocusEl;
+      } else if (document.activeElement instanceof HTMLElement) {
+        triggerElementRef.current = document.activeElement;
+      }
     }
 
     if (!disableRestoreFocus && !open && wasOpenRef.current) {
@@ -133,7 +139,7 @@ export function ResponsiveDialogShell({
     }
 
     wasOpenRef.current = open;
-  }, [disableRestoreFocus, open]);
+  }, [disableRestoreFocus, open, restoreFocusEl]);
 
   const handleRequestClose = () => {
     if (!disableClose) {
@@ -180,7 +186,7 @@ export function ResponsiveDialogShell({
           onKeyDown={handleShellKeyDown}
           disableAutoFocus={disableAutoFocus}
           disableEnforceFocus={disableEnforceFocus}
-          disableRestoreFocus={disableRestoreFocus}
+          disableRestoreFocus={disableRestoreFocus || Boolean(restoreFocusEl)}
           sx={{ zIndex: (currentTheme) => currentTheme.zIndex.modal + dialogZIndexOffset }}
           slotProps={{
             transition: { onEntered: onTransitionEntered, onExited: onTransitionExited },
@@ -291,7 +297,7 @@ export function ResponsiveDialogShell({
         fullWidth={fullWidth}
         disableAutoFocus={disableAutoFocus}
         disableEnforceFocus={disableEnforceFocus}
-        disableRestoreFocus={disableRestoreFocus}
+        disableRestoreFocus={disableRestoreFocus || Boolean(restoreFocusEl)}
         slotProps={{
           paper: {
             ref: paperRef,

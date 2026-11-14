@@ -11,6 +11,7 @@ pub mod directory_index;
 mod directory_manager;
 pub mod directory_policy;
 mod directory_traversal;
+pub mod drive_capacity;
 pub mod drives;
 pub mod edit_locks;
 pub mod errors;
@@ -65,6 +66,7 @@ pub struct AppState {
     pub watcher: DirectoryWatcher,
     pub directory_indexes: Arc<LocalDirectoryManager>,
     pub directory_policy: Arc<directory_policy::DirectoryPolicyState>,
+    pub drive_capacity: Arc<drive_capacity::DriveCapacityCoordinator>,
 }
 
 /// Start the local HTTP API server.
@@ -124,6 +126,7 @@ async fn run_server(
         watcher: DirectoryWatcher::new(),
         directory_indexes,
         directory_policy,
+        drive_capacity: drive_capacity::DriveCapacityCoordinator::new(),
     });
 
     let app = build_router(state);
@@ -183,6 +186,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/pair/current", axum::routing::delete(handlers::delete_current_pairing))
         .route("/api/localization", axum::routing::post(handlers::sync_localization))
         .route("/api/drives", axum::routing::get(handlers::list_drives))
+        .route("/api/drives/capacity", axum::routing::get(handlers::list_drives_capacity))
         .route("/api/browse/{drive}/list", axum::routing::get(handlers::browse_list))
         .route(
             "/api/browse/{drive}/archive/v2/list",

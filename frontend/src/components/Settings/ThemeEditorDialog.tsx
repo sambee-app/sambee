@@ -33,7 +33,7 @@ import {
 import type { ThemeConfig } from "../../theme/types";
 import { adminDialogActionButtonSx, adminDialogActionGroupSx, adminDialogSplitActionRowSx } from "../Admin/dialogActionStyles";
 import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
-import { FormFieldLabel, FormGroup, FormRow, FormSurface, formOutlinedControlSx } from "../Form/FormLayout";
+import { FormFieldLabel, FormGroup, FormRow, FormSurface, formAccordionSummarySx, formOutlinedControlSx } from "../Form/FormLayout";
 import { settingsPrimaryButtonSx, settingsUtilityButtonSx } from "./settingsButtonStyles";
 
 interface ThemeEditorDialogProps {
@@ -313,15 +313,7 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
               "&:has(.MuiAccordionSummary-root.Mui-focusVisible)::before": { opacity: 0, transition: "none" },
             }}
           >
-            <AccordionSummary
-              expandIcon={<ExpandMoreIcon />}
-              sx={{
-                width: (theme) => `calc(100% + ${theme.spacing(2)})`,
-                mx: -1,
-                px: 1,
-                "&.Mui-focusVisible": { bgcolor: "transparent", boxShadow: (theme) => `inset 0 0 0 2px ${theme.palette.primary.main}` },
-              }}
-            >
+            <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={formAccordionSummarySx}>
               <Typography variant="subtitle1">{section}</Typography>
             </AccordionSummary>
             <AccordionDetails sx={{ p: 0 }}>

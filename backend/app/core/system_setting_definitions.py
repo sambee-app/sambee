@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, POLICY_FIELDS
+from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, MAX_WIRE_INTEGER, POLICY_FIELDS
 
 
 class SystemSettingKey(StrEnum):
@@ -46,6 +46,14 @@ class SystemSettingKey(StrEnum):
     FILE_SEARCH_RESULT_LIMIT = "file_search.result_limit"
     FILE_SEARCH_EXCLUDED_CATEGORIES = "file_search.excluded_categories"
     FILE_SEARCH_EXCLUDED_EXTENSIONS = "file_search.excluded_extensions"
+    HEALTH_MONITORING_ENABLED = "health_monitoring.enabled"
+    HEALTH_MONITORING_AUDIENCE = "health_monitoring.audience"
+    HEALTH_MONITORING_MEMORY_WARNING_TENTHS_PERCENT = "health_monitoring.memory_warning_tenths_percent"
+    HEALTH_MONITORING_MEMORY_ERROR_TENTHS_PERCENT = "health_monitoring.memory_error_tenths_percent"
+    HEALTH_MONITORING_LOAD_WARNING_HUNDREDTHS = "health_monitoring.load_warning_hundredths"
+    HEALTH_MONITORING_LOAD_ERROR_HUNDREDTHS = "health_monitoring.load_error_hundredths"
+    HEALTH_MONITORING_AVAILABLE_SPACE_WARNING_TENTHS_PERCENT = "health_monitoring.available_space_warning_tenths_percent"
+    HEALTH_MONITORING_AVAILABLE_SPACE_ERROR_TENTHS_PERCENT = "health_monitoring.available_space_error_tenths_percent"
 
 
 class SystemSettingSource(StrEnum):
@@ -60,6 +68,32 @@ class ImageConversionPreference(StrEnum):
 
 
 DEFAULT_IMAGE_CONVERSION_PREFERENCE = ImageConversionPreference.SPEED
+
+
+class HealthMonitoringAudience(StrEnum):
+    ADMINS = "admins"
+    EDITORS = "editors"
+    BOTH = "both"
+
+
+DEFAULT_HEALTH_MONITORING_ENABLED = True
+DEFAULT_HEALTH_MONITORING_AUDIENCE = HealthMonitoringAudience.ADMINS
+HEALTH_MONITORING_CPU_OVERRIDE_KEY_PREFIX = "health_monitoring.cpu_temp_override."
+HEALTH_MONITORING_SETTING_KEYS = {
+    "memory_warning_tenths_percent": SystemSettingKey.HEALTH_MONITORING_MEMORY_WARNING_TENTHS_PERCENT,
+    "memory_error_tenths_percent": SystemSettingKey.HEALTH_MONITORING_MEMORY_ERROR_TENTHS_PERCENT,
+    "load_warning_hundredths": SystemSettingKey.HEALTH_MONITORING_LOAD_WARNING_HUNDREDTHS,
+    "load_error_hundredths": SystemSettingKey.HEALTH_MONITORING_LOAD_ERROR_HUNDREDTHS,
+    "available_space_warning_tenths_percent": SystemSettingKey.HEALTH_MONITORING_AVAILABLE_SPACE_WARNING_TENTHS_PERCENT,
+    "available_space_error_tenths_percent": SystemSettingKey.HEALTH_MONITORING_AVAILABLE_SPACE_ERROR_TENTHS_PERCENT,
+}
+HEALTH_MONITORING_ALL_SETTING_KEYS = frozenset(
+    {
+        SystemSettingKey.HEALTH_MONITORING_ENABLED,
+        SystemSettingKey.HEALTH_MONITORING_AUDIENCE,
+        *HEALTH_MONITORING_SETTING_KEYS.values(),
+    }
+)
 
 
 class DirectoryIndexPolicyScope(StrEnum):
@@ -260,6 +294,66 @@ SYSTEM_SETTING_DEFINITIONS: dict[SystemSettingKey, IntegerSystemSettingDefinitio
         min_value=4 * 1024 * 1024,
         max_value=1024 * 1024 * 1024,
         step=1024 * 1024,
+    ),
+    SystemSettingKey.HEALTH_MONITORING_MEMORY_WARNING_TENTHS_PERCENT: IntegerSystemSettingDefinition(
+        key=SystemSettingKey.HEALTH_MONITORING_MEMORY_WARNING_TENTHS_PERCENT,
+        config_attr=None,
+        label="Memory warning threshold",
+        description="Trigger a memory warning at or above this used percentage for 60 seconds (tenths of a percent).",
+        default_value=850,
+        min_value=1,
+        max_value=1000,
+        step=1,
+    ),
+    SystemSettingKey.HEALTH_MONITORING_MEMORY_ERROR_TENTHS_PERCENT: IntegerSystemSettingDefinition(
+        key=SystemSettingKey.HEALTH_MONITORING_MEMORY_ERROR_TENTHS_PERCENT,
+        config_attr=None,
+        label="Memory error threshold",
+        description="Trigger a memory error at or above this used percentage for 60 seconds (tenths of a percent).",
+        default_value=950,
+        min_value=1,
+        max_value=1000,
+        step=1,
+    ),
+    SystemSettingKey.HEALTH_MONITORING_LOAD_WARNING_HUNDREDTHS: IntegerSystemSettingDefinition(
+        key=SystemSettingKey.HEALTH_MONITORING_LOAD_WARNING_HUNDREDTHS,
+        config_attr=None,
+        label="Normalized 5-minute load warning threshold",
+        description="Trigger a system-load warning when normalized 5-minute load is at or above this value (hundredths).",
+        default_value=75,
+        min_value=1,
+        max_value=MAX_WIRE_INTEGER,
+        step=1,
+    ),
+    SystemSettingKey.HEALTH_MONITORING_LOAD_ERROR_HUNDREDTHS: IntegerSystemSettingDefinition(
+        key=SystemSettingKey.HEALTH_MONITORING_LOAD_ERROR_HUNDREDTHS,
+        config_attr=None,
+        label="Normalized 5-minute load error threshold",
+        description="Trigger a system-load error when normalized 5-minute load is at or above this value (hundredths).",
+        default_value=90,
+        min_value=1,
+        max_value=MAX_WIRE_INTEGER,
+        step=1,
+    ),
+    SystemSettingKey.HEALTH_MONITORING_AVAILABLE_SPACE_WARNING_TENTHS_PERCENT: IntegerSystemSettingDefinition(
+        key=SystemSettingKey.HEALTH_MONITORING_AVAILABLE_SPACE_WARNING_TENTHS_PERCENT,
+        config_attr=None,
+        label="Available-space warning threshold",
+        description="Trigger a storage warning at or below this available percentage (tenths of a percent).",
+        default_value=100,
+        min_value=0,
+        max_value=999,
+        step=1,
+    ),
+    SystemSettingKey.HEALTH_MONITORING_AVAILABLE_SPACE_ERROR_TENTHS_PERCENT: IntegerSystemSettingDefinition(
+        key=SystemSettingKey.HEALTH_MONITORING_AVAILABLE_SPACE_ERROR_TENTHS_PERCENT,
+        config_attr=None,
+        label="Available-space error threshold",
+        description="Trigger a storage error at or below this available percentage or when zero bytes remain (tenths of a percent).",
+        default_value=50,
+        min_value=0,
+        max_value=999,
+        step=1,
     ),
 }
 

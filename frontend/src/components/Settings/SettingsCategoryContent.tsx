@@ -16,6 +16,7 @@ const ConnectionsSettings = lazy(SETTINGS_PAGE_LOADERS.connections);
 const FileBrowserSettings = lazy(SETTINGS_PAGE_LOADERS["file-browser"]);
 const FileSearchSettings = lazy(SETTINGS_PAGE_LOADERS["admin-file-search"]);
 const DirectorySearchSettings = lazy(SETTINGS_PAGE_LOADERS["admin-directory-search"]);
+const HealthMonitoringSettings = lazy(SETTINGS_PAGE_LOADERS["admin-health-monitoring"]);
 const LocalDrivesSettings = lazy(SETTINGS_PAGE_LOADERS["local-drives"]);
 const NetworkSettings = lazy(SETTINGS_PAGE_LOADERS["admin-network"]);
 const AppearanceSettings = lazy(SETTINGS_PAGE_LOADERS.appearance);
@@ -101,6 +102,8 @@ function SettingsCategoryPage({
       return isAdmin ? <FileSearchSettings /> : null;
     case "admin-directory-search":
       return isAdmin ? <DirectorySearchSettings dialogSafeHeader={dialogSafeHeader} /> : null;
+    case "admin-health-monitoring":
+      return isAdmin ? <HealthMonitoringSettings dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-system":
       return isAdmin ? <AdvancedSettings dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-image-viewer":

@@ -1,7 +1,7 @@
 import { Box, Typography } from "@mui/material";
 import type React from "react";
 import { SambeeLogo } from "../SambeeLogo";
-import { DesktopToolbarActions } from "./DesktopToolbarActions";
+import { DesktopToolbarActions, type ToolbarSystemHealthAction } from "./DesktopToolbarActions";
 import type { SearchProvider } from "./search/types";
 import type { UnifiedSearchBarModeOption } from "./UnifiedSearchBar";
 import { UnifiedSearchBar } from "./UnifiedSearchBar";
@@ -15,6 +15,7 @@ interface DesktopToolbarProps {
   onOpenHelp: () => void;
   onOpenDocumentation: () => void;
   onOpenSettings: () => void;
+  systemHealth?: ToolbarSystemHealthAction;
   /** Called when ESC is pressed on controls or when menus close, to focus file list */
   onBlurToFileList?: () => void;
   searchQueryValue?: string;
@@ -40,6 +41,7 @@ export function DesktopToolbar({
   onOpenHelp,
   onOpenDocumentation,
   onOpenSettings,
+  systemHealth,
   onBlurToFileList,
   searchQueryValue,
   onSearchQueryValueChange,
@@ -88,6 +90,7 @@ export function DesktopToolbar({
           onOpenHelp={onOpenHelp}
           onOpenDocumentation={onOpenDocumentation}
           onOpenSettings={onOpenSettings}
+          systemHealth={systemHealth}
           onEscape={onBlurToFileList}
           disableTabFocus={disableTabFocus}
         />

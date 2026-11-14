@@ -8,6 +8,7 @@ import {
   InfoOutlined as InfoOutlinedIcon,
   ManageAccounts as ManageAccountsIcon,
   ManageSearch as ManageSearchIcon,
+  MonitorHeartOutlined as MonitorHeartIcon,
   Palette as PaletteIcon,
   PictureAsPdfOutlined as PdfIcon,
   PeopleAlt as PeopleAltIcon,
@@ -138,6 +139,8 @@ function renderCategoryIcon(item: SettingsNavItem, iconGlyphSx?: SxProps<Theme>)
       return <ManageSearchIcon sx={iconGlyphSx} />;
     case "admin-directory-search":
       return <FolderIcon sx={iconGlyphSx} />;
+    case "admin-health-monitoring":
+      return <MonitorHeartIcon sx={iconGlyphSx} />;
     case "admin-system":
       return <TuneIcon sx={iconGlyphSx} />;
     case "admin-image-viewer":

@@ -3,17 +3,19 @@
 ## Basic System Health Monitoring
 
 - Monitor the health of the backend's host
-   - In the main file list UI, only show an indicator icon with 3 states: OK, warning, error
-   - Clicking the indicator icon opens a dialog with details
+   - In the main file list UI, show an indicator icon with 3 states: OK, warning, error
+      - Place it to the right of the settings (gear) icon, same color and size as the gear icon
+   - Selecting/clicking the indicator icon opens a dialog with details
    - Add a new settings category Administration > Health Monitoring with the settings:
       - Enable health monitoring (default: yes)
       - Show health info to: admins, editors, both
    - Metrics to monitor (depending on feasibility):
-      - CPU/system temperature (detect overheating)
+      - CPU/system temperature (goal: detect overheating)
       - CPU usage in %
       - Linux system load
       - Memory usage in %
       - Free disk space in %
+      - Others?
    - Don't store metrics on disk; keep data in RAM only.
 
 ## Viewers

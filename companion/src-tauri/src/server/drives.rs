@@ -4,15 +4,13 @@
 //! physical drives, removable media, network mounts, and virtual drives
 //! (Google Drive, OneDrive, Dropbox, etc.).
 
-#[cfg(test)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 
 use log::warn;
 
-use super::models::{DriveInfo, DriveType};
+use super::models::{DriveCapacityAvailability, DriveInfo, DriveSpaceSemantics, DriveType};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(super) struct VolumeEvidence {
@@ -90,7 +88,6 @@ fn mount_field(value: &str) -> String {
 
 #[cfg(target_os = "linux")]
 pub(super) fn volume_evidence(root: &Path) -> std::io::Result<VolumeEvidence> {
-    use std::os::unix::ffi::OsStrExt;
     std::fs::metadata(root)?;
     let mounts = std::fs::read_to_string("/proc/self/mountinfo")?;
     let mut selected = None;
@@ -134,11 +131,7 @@ pub(super) fn volume_evidence(root: &Path) -> std::io::Result<VolumeEvidence> {
         }
     }
     let class = linux_storage_class(&filesystem, &device, property("ID_BUS").as_deref());
-    let name = std::ffi::CString::new(root.as_os_str().as_bytes())?;
-    let mut statistics: libc::statvfs = unsafe { std::mem::zeroed() };
-    let capacity = (unsafe { libc::statvfs(name.as_ptr(), &mut statistics) } == 0)
-        .then(|| u64::try_from(u128::from(statistics.f_blocks) * u128::from(statistics.f_frsize)).ok())
-        .flatten();
+    let capacity = unix_statvfs_bytes(root).ok().map(|(total, _avail)| total);
     Ok(VolumeEvidence {
         class,
         volume,
@@ -357,6 +350,201 @@ const EXCLUDED_FS_TYPES: &[&str] = &[
 
 /// Mount points to exclude (always system paths).
 const EXCLUDED_MOUNT_POINTS: &[&str] = &["/proc", "/sys", "/dev", "/run", "/snap", "/boot/efi"];
+
+#[derive(Clone, Debug, Default)]
+struct DriveRootRegistry {
+    populated: bool,
+    entries: HashMap<String, (PathBuf, DriveType)>,
+    ordered: Vec<(DriveInfo, PathBuf)>,
+}
+
+static DRIVE_ROOT_MAP: OnceLock<Mutex<DriveRootRegistry>> = OnceLock::new();
+
+fn drive_root_registry() -> &'static Mutex<DriveRootRegistry> {
+    DRIVE_ROOT_MAP.get_or_init(|| Mutex::new(DriveRootRegistry::default()))
+}
+
+fn store_enumerated_drives(discovered: Vec<(DriveInfo, PathBuf)>) -> Vec<DriveInfo> {
+    let mut entries = HashMap::with_capacity(discovered.len());
+    let mut drives = Vec::with_capacity(discovered.len());
+    for (info, root) in &discovered {
+        entries.insert(info.id.clone(), (root.clone(), info.drive_type));
+        drives.push(info.clone());
+    }
+    if let Ok(mut guard) = drive_root_registry().lock() {
+        guard.populated = true;
+        guard.entries = entries;
+        guard.ordered = discovered;
+    }
+    drives
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FilesystemCapacityResult {
+    Available {
+        total_bytes: u64,
+        available_bytes: u64,
+        actual_free_bytes: Option<u64>,
+        semantics: DriveSpaceSemantics,
+    },
+    Failed {
+        availability: DriveCapacityAvailability,
+        message: String,
+    },
+}
+
+#[cfg(unix)]
+fn unix_statvfs_bytes(root: &Path) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let name = std::ffi::CString::new(root.as_os_str().as_bytes())
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "Drive path contains an interior NUL byte."))?;
+    let mut statistics: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(name.as_ptr(), &mut statistics) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let fragment_size = if statistics.f_frsize > 0 {
+        u128::from(statistics.f_frsize)
+    } else {
+        u128::from(statistics.f_bsize)
+    };
+    let total_u128 = u128::from(statistics.f_blocks).saturating_mul(fragment_size);
+    let avail_u128 = u128::from(statistics.f_bavail).saturating_mul(fragment_size);
+    let total_bytes = u64::try_from(total_u128)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Total filesystem capacity overflowed u64."))?;
+    let available_bytes = u64::try_from(avail_u128)
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Available filesystem capacity overflowed u64."))?;
+    Ok((total_bytes, available_bytes))
+}
+
+fn classify_capacity_io_error(
+    error: &std::io::Error,
+    drive_type: DriveType,
+    default_semantics: DriveSpaceSemantics,
+) -> FilesystemCapacityResult {
+    let _ = default_semantics;
+    let availability = match error.kind() {
+        std::io::ErrorKind::PermissionDenied => DriveCapacityAvailability::PermissionDenied,
+        std::io::ErrorKind::TimedOut => DriveCapacityAvailability::Timeout,
+        std::io::ErrorKind::Unsupported => DriveCapacityAvailability::Unsupported,
+        std::io::ErrorKind::InvalidData => DriveCapacityAvailability::Invalid,
+        _ => {
+            if drive_type == DriveType::Virtual {
+                DriveCapacityAvailability::Unsupported
+            } else {
+                #[cfg(unix)]
+                {
+                    match error.raw_os_error() {
+                        Some(code)
+                            if code == libc::ENETUNREACH
+                                || code == libc::EHOSTUNREACH
+                                || code == libc::EHOSTDOWN
+                                || code == libc::ENOTCONN
+                                || code == libc::ECONNREFUSED =>
+                        {
+                            DriveCapacityAvailability::Offline
+                        }
+                        Some(code) if code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS => {
+                            DriveCapacityAvailability::Unsupported
+                        }
+                        _ => DriveCapacityAvailability::Unavailable,
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    DriveCapacityAvailability::Unavailable
+                }
+            }
+        }
+    };
+
+    let message = match availability {
+        DriveCapacityAvailability::PermissionDenied => "Access denied while reading drive capacity.".to_string(),
+        DriveCapacityAvailability::Timeout => "Drive capacity check timed out.".to_string(),
+        DriveCapacityAvailability::Offline => "Network or remote drive is unreachable.".to_string(),
+        DriveCapacityAvailability::Unsupported => "Capacity is not available for this drive.".to_string(),
+        DriveCapacityAvailability::Invalid => "Drive reported invalid capacity counters.".to_string(),
+        _ => "Drive capacity could not be read.".to_string(),
+    };
+    FilesystemCapacityResult::Failed { availability, message }
+}
+
+#[cfg(unix)]
+pub fn query_filesystem_capacity(root: &Path, drive_type: DriveType) -> FilesystemCapacityResult {
+    match unix_statvfs_bytes(root) {
+        Ok((total_bytes, raw_available_bytes)) => {
+            if total_bytes == 0 {
+                return FilesystemCapacityResult::Failed {
+                    availability: DriveCapacityAvailability::Unsupported,
+                    message: if drive_type == DriveType::Virtual {
+                        "Capacity is not available for this virtual drive.".to_string()
+                    } else {
+                        "Filesystem does not report capacity counters.".to_string()
+                    },
+                };
+            }
+            FilesystemCapacityResult::Available {
+                total_bytes,
+                available_bytes: raw_available_bytes.min(total_bytes),
+                actual_free_bytes: None,
+                semantics: DriveSpaceSemantics::PosixUnprivilegedBlocks,
+            }
+        }
+        Err(error) => classify_capacity_io_error(&error, drive_type, DriveSpaceSemantics::PosixUnprivilegedBlocks),
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn query_filesystem_capacity(root: &Path, drive_type: DriveType) -> FilesystemCapacityResult {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide_path: Vec<u16> = root.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut caller_available: u64 = 0;
+    let mut total_bytes: u64 = 0;
+    let mut total_free: u64 = 0;
+    let call_result = unsafe {
+        GetDiskFreeSpaceExW(
+            PCWSTR(wide_path.as_ptr()),
+            Some(&mut caller_available),
+            Some(&mut total_bytes),
+            Some(&mut total_free),
+        )
+    };
+    if let Err(win_error) = call_result {
+        let io_error = std::io::Error::from(win_error);
+        return classify_capacity_io_error(&io_error, drive_type, DriveSpaceSemantics::CallerQuota);
+    }
+    if total_bytes == 0 {
+        return FilesystemCapacityResult::Failed {
+            availability: DriveCapacityAvailability::Unsupported,
+            message: if drive_type == DriveType::Virtual {
+                "Capacity is not available for this virtual drive.".to_string()
+            } else {
+                "Drive does not report capacity counters.".to_string()
+            },
+        };
+    }
+    FilesystemCapacityResult::Available {
+        total_bytes,
+        available_bytes: caller_available.min(total_bytes),
+        actual_free_bytes: Some(total_free),
+        semantics: DriveSpaceSemantics::CallerQuota,
+    }
+}
+
+pub const fn platform_space_semantics() -> DriveSpaceSemantics {
+    #[cfg(target_os = "windows")]
+    {
+        DriveSpaceSemantics::CallerQuota
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        DriveSpaceSemantics::PosixUnprivilegedBlocks
+    }
+}
+
 #[cfg(test)]
 static TEST_DRIVE_PATHS: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
 
@@ -369,19 +557,30 @@ pub fn register_test_drive_path(drive_id: String, path: PathBuf) {
         .insert(drive_id, path);
 }
 
-/// Enumerate all accessible drives/volumes on the current platform.
+/// Enumerate all accessible drives/volumes on the current platform and update the in-memory root map.
 pub fn enumerate_drives() -> Vec<DriveInfo> {
-    let drives = enumerate_platform_drives();
+    let discovered = enumerate_platform_drives_with_roots();
+    let drives = store_enumerated_drives(discovered);
     if drives.is_empty() {
         warn!("No drives found during enumeration");
     }
     drives
 }
 
-/// Resolve a drive ID to its root filesystem path.
-///
-/// Returns `None` if the drive ID is unknown.
-pub fn resolve_drive_path(drive_id: &str) -> Option<PathBuf> {
+/// Return cached drives and their root paths, enumerating once only when the cache has never been populated.
+pub fn cached_drives_with_roots() -> Vec<(DriveInfo, PathBuf)> {
+    if let Ok(guard) = drive_root_registry().lock() {
+        if guard.populated {
+            return guard.ordered.clone();
+        }
+    }
+    let discovered = enumerate_platform_drives_with_roots();
+    let _ = store_enumerated_drives(discovered.clone());
+    discovered
+}
+
+/// Resolve a drive ID to its root path and classified drive type, re-enumerating at most once on a cache miss.
+pub fn resolve_drive_entry(drive_id: &str) -> Option<(PathBuf, DriveType)> {
     #[cfg(test)]
     if let Some(path) = TEST_DRIVE_PATHS
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -389,11 +588,27 @@ pub fn resolve_drive_path(drive_id: &str) -> Option<PathBuf> {
         .expect("test drive registry lock should not be poisoned")
         .get(drive_id)
     {
-        return Some(path.clone());
+        return Some((path.clone(), DriveType::Fixed));
     }
-    let drives = enumerate_platform_drives();
-    // The drive ID encodes the mount point — decode it back
-    drives.iter().find(|_d| _d.id == drive_id).map(|_| drive_id_to_path(drive_id))
+
+    if let Ok(guard) = drive_root_registry().lock() {
+        if let Some(found) = guard.entries.get(drive_id) {
+            return Some(found.clone());
+        }
+    }
+
+    let _ = enumerate_drives();
+    drive_root_registry()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.entries.get(drive_id).cloned())
+}
+
+/// Resolve a drive ID to its root filesystem path.
+///
+/// Returns `None` if the drive ID is unknown.
+pub fn resolve_drive_path(drive_id: &str) -> Option<PathBuf> {
+    resolve_drive_entry(drive_id).map(|(path, _drive_type)| path)
 }
 
 /// Map a canonical filesystem path to the most-specific exposed drive.
@@ -405,8 +620,7 @@ pub fn drive_for_path(path: &Path) -> Option<(String, PathBuf)> {
     let canonical_path = std::fs::canonicalize(path).ok()?;
     let mut best_match: Option<(String, PathBuf, usize)> = None;
 
-    for drive in enumerate_platform_drives() {
-        let root = drive_id_to_path(&drive.id);
+    for (drive, root) in cached_drives_with_roots() {
         let canonical_root = match std::fs::canonicalize(&root) {
             Ok(root) => root,
             Err(_) => continue,
@@ -422,33 +636,6 @@ pub fn drive_for_path(path: &Path) -> Option<(String, PathBuf)> {
     }
 
     best_match.map(|(drive_id, relative, _)| (drive_id, relative))
-}
-
-/// Convert a drive ID back to its filesystem path.
-fn drive_id_to_path(drive_id: &str) -> PathBuf {
-    // On Windows, drive IDs are lowercase letter: "c" -> "C:\\"
-    #[cfg(target_os = "windows")]
-    {
-        if drive_id.len() == 1 && drive_id.chars().next().unwrap().is_ascii_alphabetic() {
-            return PathBuf::from(format!("{}:\\", drive_id.to_uppercase()));
-        }
-    }
-
-    // On Unix, drive IDs are URL-safe slugs of mount points:
-    // "root" -> "/"
-    // "home" -> "/home"
-    // "volumes-my-drive" -> "/Volumes/My Drive" (macOS)
-    // We store the mapping during enumeration and look it up.
-    // For robustness, re-enumerate and match by ID.
-    let drives = enumerate_platform_drives();
-    for drive in &drives {
-        if drive.id == drive_id {
-            // Extract from name or re-derive
-            return path_from_drive_id_internal(drive_id);
-        }
-    }
-    // Fallback: treat as literal path
-    PathBuf::from(format!("/{drive_id}"))
 }
 
 /// Derive a stable, URL-safe ID from a mount point path.
@@ -473,60 +660,15 @@ fn path_to_drive_id(path: &Path) -> String {
     path_str.trim_start_matches('/').to_lowercase().replace([' ', '/'], "-")
 }
 
-/// Reverse a drive ID slug back to a filesystem path.
-fn path_from_drive_id_internal(drive_id: &str) -> PathBuf {
-    if drive_id == "root" {
-        return PathBuf::from("/");
-    }
-
-    // Re-enumerate to find the actual path
-    // This is a fallback — normally resolve_drive_path is used
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(content) = std::fs::read_to_string("/proc/mounts") {
-            for line in content.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let mount_point = parts[1];
-                    let id = path_to_drive_id(Path::new(mount_point));
-                    if id == drive_id {
-                        return PathBuf::from(mount_point);
-                    }
-                }
-            }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(entries) = std::fs::read_dir("/Volumes") {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let id = path_to_drive_id(&path);
-                if id == drive_id {
-                    return path;
-                }
-            }
-        }
-        // Check root
-        if drive_id == "root" {
-            return PathBuf::from("/");
-        }
-    }
-
-    // Fallback
-    PathBuf::from(format!("/{}", drive_id.replace('-', "/")))
-}
-
 // ─── Linux implementation ────────────────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
-fn enumerate_platform_drives() -> Vec<DriveInfo> {
+fn enumerate_platform_drives_with_roots() -> Vec<(DriveInfo, PathBuf)> {
     let content = match std::fs::read_to_string("/proc/mounts") {
         Ok(c) => c,
         Err(e) => {
             warn!("Failed to read /proc/mounts: {e}");
-            return vec![default_root_drive()];
+            return vec![(default_root_drive(), PathBuf::from("/"))];
         }
     };
 
@@ -540,7 +682,7 @@ fn enumerate_platform_drives() -> Vec<DriveInfo> {
         }
 
         let _device = parts[0];
-        let mount_point = parts[1];
+        let mount_point = mount_field(parts[1]);
         let fs_type = parts[2];
 
         // Skip excluded filesystem types
@@ -553,22 +695,23 @@ fn enumerate_platform_drives() -> Vec<DriveInfo> {
             continue;
         }
 
-        let id = path_to_drive_id(Path::new(mount_point));
+        let mount_path = PathBuf::from(&mount_point);
+        let id = path_to_drive_id(&mount_path);
         if !seen_ids.insert(id.clone()) {
             continue; // Skip duplicate mount points
         }
 
-        let drive_type = classify_linux_drive(fs_type, mount_point);
-        let name = derive_drive_name(mount_point, &drive_type);
+        let drive_type = classify_linux_drive(fs_type, &mount_point);
+        let name = derive_drive_name(&mount_point, &drive_type);
 
-        drives.push(DriveInfo { id, name, drive_type });
+        drives.push((DriveInfo { id, name, drive_type }, mount_path));
     }
 
     if drives.is_empty() {
-        drives.push(default_root_drive());
+        drives.push((default_root_drive(), PathBuf::from("/")));
     }
 
-    drives.sort_by(|a, b| a.name.cmp(&b.name));
+    drives.sort_by(|a, b| a.0.name.cmp(&b.0.name));
     drives
 }
 
@@ -588,15 +731,15 @@ fn classify_linux_drive(fs_type: &str, mount_point: &str) -> DriveType {
 // ─── macOS implementation ────────────────────────────────────────────────────
 
 #[cfg(target_os = "macos")]
-fn enumerate_platform_drives() -> Vec<DriveInfo> {
-    let mut drives = vec![];
-
-    // Add root volume
-    drives.push(DriveInfo {
-        id: "root".to_string(),
-        name: "Macintosh HD".to_string(),
-        drive_type: DriveType::Fixed,
-    });
+fn enumerate_platform_drives_with_roots() -> Vec<(DriveInfo, PathBuf)> {
+    let mut drives = vec![(
+        DriveInfo {
+            id: "root".to_string(),
+            name: "Macintosh HD".to_string(),
+            drive_type: DriveType::Fixed,
+        },
+        PathBuf::from("/"),
+    )];
 
     // Enumerate /Volumes
     if let Ok(entries) = std::fs::read_dir("/Volumes") {
@@ -612,7 +755,7 @@ fn enumerate_platform_drives() -> Vec<DriveInfo> {
             let id = path_to_drive_id(&path);
             let drive_type = classify_macos_drive(&path, &name);
 
-            drives.push(DriveInfo { id, name, drive_type });
+            drives.push((DriveInfo { id, name, drive_type }, path));
         }
     }
 
@@ -644,7 +787,7 @@ fn classify_macos_drive(path: &Path, name: &str) -> DriveType {
 // ─── Windows implementation ──────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
-fn enumerate_platform_drives() -> Vec<DriveInfo> {
+fn enumerate_platform_drives_with_roots() -> Vec<(DriveInfo, PathBuf)> {
     use windows::Win32::Storage::FileSystem::{GetLogicalDriveStringsW, GetVolumeInformationW};
 
     let mut buffer = [0u16; 512];
@@ -663,8 +806,9 @@ fn enumerate_platform_drives() -> Vec<DriveInfo> {
         if end > start {
             let drive_str = String::from_utf16_lossy(&buffer[start..end]);
             let drive_wide: Vec<u16> = drive_str.encode_utf16().chain(std::iter::once(0)).collect();
+            let root_path = PathBuf::from(&drive_str);
 
-            let drive_type = volume_evidence(Path::new(&drive_str))
+            let drive_type = volume_evidence(&root_path)
                 .map(|evidence| evidence.class)
                 .unwrap_or(DriveType::Unknown);
 
@@ -702,7 +846,7 @@ fn enumerate_platform_drives() -> Vec<DriveInfo> {
 
             let id = letter[..1].to_lowercase();
 
-            drives.push(DriveInfo { id, name, drive_type });
+            drives.push((DriveInfo { id, name, drive_type }, root_path));
         }
 
         start = end + 1;

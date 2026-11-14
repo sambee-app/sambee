@@ -22,6 +22,7 @@ from app.core.directory_index_contract import (
 )
 from app.core.system_setting_definitions import (
     DIRECTORY_INDEX_ALL_SETTING_KEYS,
+    HEALTH_MONITORING_ALL_SETTING_KEYS,
     DirectoryIndexPolicyScope,
     ImageConversionPreference,
     SystemSettingKey,
@@ -200,6 +201,7 @@ class AdvancedSystemSettingUpdate(StrictSettingUpdate):
             self.field not in SYSTEM_SETTING_DEFINITIONS
             or self.field is SystemSettingKey.SMB_READ_CHUNK_SIZE_BYTES
             or self.field in DIRECTORY_INDEX_ALL_SETTING_KEYS
+            or self.field in HEALTH_MONITORING_ALL_SETTING_KEYS
         ):
             raise ValueError("Field is not an editable advanced system setting")
         return self

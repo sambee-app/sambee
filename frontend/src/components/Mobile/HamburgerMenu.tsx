@@ -16,10 +16,19 @@ import {
   Typography,
 } from "@mui/material";
 import type React from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
 import { mobileNavigationDrawerTypographySx, SAFE_AREA_INSET } from "../../theme/mobileShell";
-import type { Connection } from "../../types";
+import type { AggregateHealthSeverity, Connection } from "../../types";
+import { HealthStatusIcon } from "../HealthMonitoring/HealthStatusIcon";
+
+export interface MobileMenuSystemHealthItem {
+  visible: boolean;
+  severity: AggregateHealthSeverity;
+  headline: string;
+  onOpen: () => void;
+}
 
 interface HamburgerMenuProps {
   open: boolean;
@@ -30,6 +39,7 @@ interface HamburgerMenuProps {
   onNavigateToRoot: () => void;
   onOpenDocumentation: () => void;
   onOpenSettings: () => void;
+  systemHealth?: MobileMenuSystemHealthItem;
   onLogout: () => void;
 }
 
@@ -42,9 +52,17 @@ const HamburgerMenu: React.FC<HamburgerMenuProps> = ({
   onNavigateToRoot,
   onOpenDocumentation,
   onOpenSettings,
+  systemHealth,
   onLogout,
 }) => {
   const { t } = useTranslation();
+  const [suppressRestoreFocus, setSuppressRestoreFocus] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setSuppressRestoreFocus(false);
+    }
+  }, [open]);
 
   const handleConnectionChange = (connectionId: string) => {
     onConnectionChange(connectionId);
@@ -52,12 +70,14 @@ const HamburgerMenu: React.FC<HamburgerMenuProps> = ({
   };
 
   const selectedConnection = connections.find((c) => c.id === selectedConnectionId);
+  const statusText = systemHealth ? t(`systemHealth.statuses.${systemHealth.severity}`) : "";
 
   return (
     <Drawer
       anchor="left"
       open={open}
       onClose={onClose}
+      disableRestoreFocus={suppressRestoreFocus}
       slotProps={{
         paper: {
           sx: [
@@ -148,6 +168,27 @@ const HamburgerMenu: React.FC<HamburgerMenuProps> = ({
             <ListItemText primary={t("common.labels.settings")} />
           </ListItemButton>
         </ListItem>
+
+        {systemHealth?.visible && (
+          <ListItem disablePadding>
+            <ListItemButton
+              onClick={() => {
+                setSuppressRestoreFocus(true);
+                onClose();
+                systemHealth.onOpen();
+              }}
+              aria-label={t("fileBrowser.chrome.mobileMenu.openSystemHealthAriaLabel", {
+                status: statusText,
+                headline: systemHealth.headline,
+              })}
+            >
+              <ListItemIcon>
+                <HealthStatusIcon status={systemHealth.severity} />
+              </ListItemIcon>
+              <ListItemText primary={t("fileBrowser.chrome.mobileMenu.systemHealth")} secondary={statusText} />
+            </ListItemButton>
+          </ListItem>
+        )}
 
         <ListItem disablePadding>
           <ListItemButton

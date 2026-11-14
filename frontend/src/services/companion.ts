@@ -13,7 +13,7 @@
  */
 
 import axios, { type AxiosInstance } from "axios";
-import { isApiError } from "../types";
+import { type CompanionDriveCapacityListing, isApiError } from "../types";
 import { COMPANION_SETTINGS_VERSION, type CompanionSettingsStatus } from "../types/companionSettings";
 import { companionSession } from "./companionSession";
 import { notifyCompanionSettingsChanged } from "./companionSettingsEvents";
@@ -42,6 +42,12 @@ export function isCompanionAuthSignatureMismatch(error: unknown): boolean {
 export function isCompanionPairingMissing(error: unknown): boolean {
   if (!isApiError(error) || error.response?.status !== 403) return false;
   return error.response.data?.code === COMPANION_PAIRING_NOT_FOUND_CODE || error.response.data?.detail === "Not paired with this origin";
+}
+
+export function isCompanionCapacityUnsupported(error: unknown): boolean {
+  if (!isApiError(error)) return false;
+  const status = error.response?.status;
+  return status === 404 || status === 405 || status === 501;
 }
 
 export function getCompanionAuthProtocolStatus(health: CompanionHealthResponse): CompanionAuthProtocolStatus {
@@ -206,6 +212,7 @@ class CompanionService {
     this.unpairCurrentOrigin = this.unpairCurrentOrigin.bind(this);
     this.testPairing = this.testPairing.bind(this);
     this.getDrives = this.getDrives.bind(this);
+    this.getDrivesCapacity = this.getDrivesCapacity.bind(this);
     this.listDirectory = this.listDirectory.bind(this);
     this.getFileInfo = this.getFileInfo.bind(this);
     this.createArchive = this.createArchive.bind(this);
@@ -367,6 +374,18 @@ class CompanionService {
   async getDrives(): Promise<DriveInfo[]> {
     const headers = await this.buildAuthHeaders("GET", "/drives");
     const response = await this.client.get<DriveInfo[]>("/drives", { headers });
+    return response.data;
+  }
+
+  /**
+   * Read cached non-blocking capacity counters for exposed local drives.
+   */
+  async getDrivesCapacity(options?: { signal?: AbortSignal }): Promise<CompanionDriveCapacityListing> {
+    const headers = await this.buildAuthHeaders("GET", "/drives/capacity");
+    const response = await this.client.get<CompanionDriveCapacityListing>("/drives/capacity", {
+      headers,
+      ...(options?.signal ? { signal: options.signal } : {}),
+    });
     return response.data;
   }
 

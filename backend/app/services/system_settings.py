@@ -205,6 +205,12 @@ class SystemSettingsStore:
             self.warm_cache()
         return self._cache.get(key.value)
 
+    def get_overrides_by_prefix(self, prefix: str) -> dict[str, str]:
+        with self._lock:
+            if not self._loaded:
+                self.warm_cache()
+            return {key: value for key, value in self._cache.items() if key.startswith(prefix)}
+
     def refresh_from_session(self, session: Session) -> None:
         with self._lock:
             self._cache, self._loaded = _read_overrides_from_session(session)
@@ -778,6 +784,10 @@ def build_public_support_report_read(session: Session) -> PublicSupportReportRea
     lines.append("")
     _append_smb_settings_report(lines)
     lines.append("")
+    from app.services.health_monitoring_settings import append_health_monitoring_settings_report
+
+    append_health_monitoring_settings_report(lines, session, aliases)
+    lines.append("")
     _append_network_settings_report(lines, session, aliases)
     lines.append("")
     _append_authentication_report(lines, session, aliases)
@@ -851,8 +861,10 @@ def smb_policy_will_change(payload: SmbSettingsUpdate, session: Session) -> bool
 async def retire_smb_runtime_policy() -> None:
     """Immediately retire SMB caches that could retain the previous policy."""
 
+    from app.services.health_monitoring import get_health_monitoring_coordinator
     from app.storage.smb_pool import retire_all_smb_connection_contexts
 
+    get_health_monitoring_coordinator().invalidate_all_smb_connections()
     await retire_all_smb_connection_contexts("SMB policy updated")
 
 

@@ -1,6 +1,7 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { createTheme } from "@mui/material/styles";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ConflictInfo, FileType } from "../../../types";
 import OverwriteConflictDialog from "../OverwriteConflictDialog";
 import { OVERWRITE_CONFLICT_STRINGS as S } from "../overwriteConflictStrings";
@@ -27,6 +28,10 @@ const conflict: ConflictInfo = {
 };
 
 describe("OverwriteConflictDialog", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   const defaultProps = {
     open: true,
     conflict,
@@ -194,6 +199,35 @@ describe("OverwriteConflictDialog", () => {
     expect(overwriteRadio).toHaveFocus();
   });
 
+  it.each([false, true])(
+    "focuses the next conflict without waiting for a transition (opening finished: %s)",
+    async (transitionFinished) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+      const nextConflict: ConflictInfo = {
+        incoming_file: { ...conflict.incoming_file, path: "source/next-report.txt" },
+        existing_file: { ...conflict.existing_file, path: "target/next-report.txt" },
+      };
+      const { rerender } = render(<OverwriteConflictDialog {...defaultProps} />);
+
+      await act(async () => vi.advanceTimersToNextFrame());
+      if (transitionFinished) {
+        await act(() => vi.advanceTimersByTimeAsync(createTheme().transitions.duration.enteringScreen));
+      }
+      const overwriteRadio = screen.getByRole("radio", { name: S.BUTTON_OVERWRITE });
+      act(() => overwriteRadio.focus());
+      fireEvent.click(overwriteRadio);
+      expect(overwriteRadio).toBeChecked();
+      expect(overwriteRadio).toHaveFocus();
+
+      rerender(<OverwriteConflictDialog {...defaultProps} conflict={nextConflict} />);
+      await act(async () => vi.advanceTimersToNextFrame());
+
+      const skipRadio = screen.getByRole("radio", { name: S.BUTTON_SKIP });
+      expect(skipRadio).toBeChecked();
+      expect(skipRadio).toHaveFocus();
+    }
+  );
+
   it("focuses the safe resolution after the next conflict's pending state clears", async () => {
     const nextConflict: ConflictInfo = {
       incoming_file: { ...conflict.incoming_file, path: "source/pending-report.txt" },
@@ -207,6 +241,22 @@ describe("OverwriteConflictDialog", () => {
     rerender(<OverwriteConflictDialog {...defaultProps} conflict={nextConflict} isSubmitting={false} />);
 
     await waitFor(() => expect(screen.getByRole("radio", { name: S.BUTTON_SKIP })).toHaveFocus());
+  });
+
+  it("defers initial focus until submission clears after the opening transition", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    const { rerender } = render(<OverwriteConflictDialog {...defaultProps} isSubmitting />);
+
+    await act(() => vi.advanceTimersByTimeAsync(createTheme().transitions.duration.enteringScreen));
+    const skipRadio = screen.getByRole("radio", { name: S.BUTTON_SKIP });
+    expect(skipRadio).toBeDisabled();
+    expect(skipRadio).not.toHaveFocus();
+
+    rerender(<OverwriteConflictDialog {...defaultProps} isSubmitting={false} />);
+    await act(async () => vi.advanceTimersToNextFrame());
+
+    expect(skipRadio).toBeEnabled();
+    expect(skipRadio).toHaveFocus();
   });
 
   it("shows the bulk-choice control for Overwrite only older", async () => {

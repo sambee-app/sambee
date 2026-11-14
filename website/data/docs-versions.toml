@@ -75,3 +75,10 @@ label = "2.1"
 visible = true
 status = "preview"
 searchable = false
+
+[[versions]]
+slug = "3.0"
+label = "3.0"
+visible = true
+status = "preview"
+searchable = false
