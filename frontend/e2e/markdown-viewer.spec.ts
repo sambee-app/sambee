@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { StoredTheme } from "../src/services/api";
+import type { HealthMonitoringClientPolicy } from "../src/types/healthMonitoring";
 import { editableDefinition } from "../src/theme/themeDefinition";
 import { builtInThemes } from "../src/theme/themes";
 import { MARKDOWN_HEADING_ID_PREFIX } from "../src/utils/markdownHeadingLinks";
@@ -43,6 +44,15 @@ const MIN_TEXT_CONTRAST_RATIO = 4.5;
 const CACHE_PROOF_ORIGIN = "http://localhost:3000";
 const CACHE_PROOF_ASSET_MAX_AGE_SECONDS = 31_536_000;
 const PRODUCTION_ASSET_CONTENT_TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".woff2": "font/woff2" };
+const DISABLED_HEALTH_MONITORING_POLICY: HealthMonitoringClientPolicy = {
+  enabled: false,
+  permitted: false,
+  thresholds: null,
+  summary_poll_seconds: 15,
+  dialog_poll_seconds: 5,
+  host_stale_seconds: 15,
+  storage_stale_seconds: 180,
+};
 const SYNTAX_PUBLICATION_FIXTURES = [
   { name: "dense", blocks: 1, lines: DENSE_SYNTAX_LINE_COUNT },
   { name: "near-safeguard", blocks: 1, lines: 11_111 },
@@ -131,6 +141,11 @@ function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH,
         role: userRole,
         is_active: true,
       });
+      return;
+    }
+
+    if (pathname === "/api/health-monitoring/policy" && request.method() === "GET") {
+      await fulfillJson(route, DISABLED_HEALTH_MONITORING_POLICY);
       return;
     }
 
