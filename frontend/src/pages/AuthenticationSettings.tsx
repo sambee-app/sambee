@@ -43,6 +43,7 @@ import { settingsPrimaryButtonSx, settingsUtilityButtonSx } from "../components/
 import { loadAuthenticationSettingsData, SETTINGS_DATA_CACHE_KEYS } from "../components/Settings/settingsDataSources";
 import { clearCachedAsyncData, getCachedAsyncData, primeCachedAsyncData } from "../hooks/useCachedAsyncData";
 import { useRemoveLocationFragment } from "../hooks/useRemoveLocationFragment";
+import { useRestoreFocusAfterPending } from "../hooks/useRestoreFocusAfterPending";
 import api from "../services/api";
 import { clearAuthConfigCache } from "../services/authConfig";
 import { authSession } from "../services/authSession";
@@ -318,6 +319,7 @@ export function AuthenticationSettings() {
   const [mappingErrors, setMappingErrors] = useState<Record<string, string>>({});
   const [reviewPending, setReviewPending] = useState(false);
   const [busy, setBusy] = useState(true);
+  const rememberActionFocus = useRestoreFocusAfterPending(busy);
   const [error, setError] = useState("");
   const [testError, setTestError] = useState("");
   const [notice, setNotice] = useState("");
@@ -659,6 +661,7 @@ export function AuthenticationSettings() {
 
   const startTest = async (candidateToTest: OidcConfigurationCandidate = effectiveCandidate, clientSecretToTest = clientSecret) => {
     if (finalizationUnresolved) return;
+    rememberActionFocus();
     setBusy(true);
     setError("");
     setConfigurationActionError("");
@@ -679,6 +682,7 @@ export function AuthenticationSettings() {
 
   const activate = async () => {
     if (finalizationUnresolved || !testedIdentity || replacementPlanInvalid || !testedIdentityCanActivate) return;
+    rememberActionFocus();
     setBusy(true);
     setError("");
     setReviewActionError("");
@@ -783,6 +787,7 @@ export function AuthenticationSettings() {
 
   const cancelTestFlow = async () => {
     if (finalizationUnresolved || !testedIdentity) return;
+    rememberActionFocus();
     setBusy(true);
     setError("");
     setReviewActionError("");
@@ -827,6 +832,7 @@ export function AuthenticationSettings() {
     const activeConfiguration = configuration?.configuration;
     if (!activeConfiguration) return;
     const passwordlessCount = configuration.active_passwordless_user_count;
+    rememberActionFocus();
     setBusy(true);
     setError("");
     try {
@@ -865,6 +871,7 @@ export function AuthenticationSettings() {
       await setPasswordOnly();
       return;
     }
+    rememberActionFocus();
     setBusy(true);
     setError("");
     try {

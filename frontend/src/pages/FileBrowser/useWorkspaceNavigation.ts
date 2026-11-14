@@ -104,9 +104,9 @@ export function useWorkspaceNavigation({
   });
 
   const navigateRoute = useCallback(
-    (next: BrowseRouteState, options?: { replace?: boolean; flushSync?: boolean }) => {
+    (next: BrowseRouteState, options?: { replace?: boolean; flushSync?: boolean; force?: boolean }) => {
       const url = serializeBrowseRoute(next);
-      if (url === location.pathname + location.search) return;
+      if (!options?.force && url === location.pathname + location.search) return;
       void navigate(
         { pathname: url.split("?")[0], search: url.includes("?") ? url.slice(url.indexOf("?")) : "", hash: location.hash },
         { replace: options?.replace, flushSync: options?.flushSync, state }
@@ -284,7 +284,11 @@ export function useWorkspaceNavigation({
       if (!target) return;
       startTransition(() => {
         setViewerRequestRevision((revision) => revision + 1);
-        navigateRoute({ ...route, viewer: { file: target, paneId, viewerId: "image", mode: "view" }, settings: undefined });
+        // A rapid reversal can target the rendered URL before the previous move commits.
+        navigateRoute(
+          { ...route, viewer: { file: target, paneId, viewerId: "image", mode: "view" }, settings: undefined },
+          { force: true }
+        );
       });
     },
     changeMode: (mode: "view" | "edit", replace = false) => {

@@ -107,6 +107,7 @@ const openOidcConfiguration = async (user: ReturnType<typeof userEvent.setup> = 
 
 describe("Authentication settings", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -1328,12 +1329,13 @@ describe("Authentication settings", () => {
 
   it("shows the OIDC test validation error returned by the API", async () => {
     const user = userEvent.setup();
-    const writeText = vi.fn().mockRejectedValue(new Error("Clipboard unavailable"));
-    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-    vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Active Provider")));
-    vi.mocked(api.startOidcTest).mockRejectedValue({
-      response: { status: 400, data: { detail: "OIDC discovery issuer does not exactly match configuration" } },
+    let rejectTest: (reason: unknown) => void = uninitializedTestCallback;
+    const testResult = new Promise<Awaited<ReturnType<typeof api.startOidcTest>>>((_resolve, reject) => {
+      rejectTest = reject;
     });
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("Clipboard unavailable"));
+    vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Active Provider")));
+    vi.mocked(api.startOidcTest).mockReturnValue(testResult);
     window.location.hash = "";
     renderSettings();
 
@@ -1343,6 +1345,13 @@ describe("Authentication settings", () => {
 
     const connectAndTestButton = await screen.findByRole("button", { name: "Connect and test" });
     await user.click(connectAndTestButton);
+    await waitFor(() => expect(connectAndTestButton).toBeDisabled());
+    await act(async () => {
+      connectAndTestButton.blur();
+      rejectTest({
+        response: { status: 400, data: { detail: "OIDC discovery issuer does not exactly match configuration" } },
+      });
+    });
 
     const testErrorTitle = await screen.findByText("Connection test failed");
     const testError = testErrorTitle.closest('[role="alert"]');
@@ -1350,7 +1359,7 @@ describe("Authentication settings", () => {
     expect(testError).toHaveTextContent("Connection test failed");
     expect(testError).toHaveTextContent("OIDC discovery issuer does not exactly match configuration");
     expect(testError).toHaveAttribute("data-testid", "oidc-configuration-test-error");
-    expect(connectAndTestButton).toHaveFocus();
+    await waitFor(() => expect(connectAndTestButton).toHaveFocus());
     expect(
       testError.compareDocumentPosition(screen.getByTestId("responsive-form-dialog-desktop-actions")) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();

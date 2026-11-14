@@ -11,7 +11,7 @@
  */
 
 import axios from "axios";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isLocalAbortError } from "../services/backendAvailability";
 import { error as logError, logger, info as logInfo } from "../services/logger";
 import { PreviewUnavailableError } from "../services/previewPolicy";
@@ -376,7 +376,11 @@ export const useCachedImageGallery = ({
   const inFlightRequestsRef = useRef<Map<number, InFlightImageRequest>>(committedSessionResources.inFlightRequests);
   const desiredPreloadIndexesRef = useRef<Set<number>>(new Set());
   const currentIndexRef = useRef(currentIndex);
-  currentIndexRef.current = currentIndex;
+  const onIndexChangeRef = useRef(onIndexChange);
+  useLayoutEffect(() => {
+    currentIndexRef.current = currentIndex;
+    onIndexChangeRef.current = onIndexChange;
+  }, [currentIndex, onIndexChange]);
   const preloadRangeRef = useRef(preloadRange);
   preloadRangeRef.current = preloadRange;
   const galleryIdentityRef = useRef(galleryIdentity);
@@ -397,23 +401,24 @@ export const useCachedImageGallery = ({
 
   const setCurrentIndex = useCallback<React.Dispatch<React.SetStateAction<number>>>(
     (value) => {
+      const nextIndexValue = typeof value === "function" ? value(currentIndexRef.current) : value;
+      const clampedIndex = clamp(nextIndexValue, 0, Math.max(images.length - 1, 0));
+      if (currentIndexRef.current === clampedIndex) return;
+      currentIndexRef.current = clampedIndex;
+
       setSessionView((prev) => {
         const baseSession =
           prev.galleryIdentity === galleryIdentity && prev.generation === pendingSessionGeneration
             ? prev
             : createGallerySessionView(galleryIdentity, pendingSessionGeneration, safeInitialIndex);
-        const nextIndexValue = typeof value === "function" ? value(baseSession.index) : value;
-        const clampedIndex = clamp(nextIndexValue, 0, Math.max(images.length - 1, 0));
-
-        if (baseSession.index === clampedIndex) {
-          return prev === baseSession ? prev : baseSession;
-        }
 
         return {
           ...baseSession,
           index: clampedIndex,
         };
       });
+      // History records input events, not commits that React can combine or replay.
+      onIndexChangeRef.current?.(clampedIndex);
     },
     [galleryIdentity, images.length, pendingSessionGeneration, safeInitialIndex]
   );
@@ -477,14 +482,6 @@ export const useCachedImageGallery = ({
       };
     });
   }, [galleryIdentity, pendingSessionGeneration, pendingSessionResources, safeInitialIndex, selectionKey]);
-
-  const notifyIndexChange = useEffectEvent((index: number) => {
-    if (index !== safeInitialIndex) onIndexChange?.(index);
-  });
-
-  useEffect(() => {
-    notifyIndexChange(currentIndex);
-  }, [currentIndex]);
 
   // Show spinner only after delay to avoid flicker on fast image loads
   useEffect(() => {
