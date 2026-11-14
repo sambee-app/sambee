@@ -7,7 +7,7 @@
 
 import { createTheme, ThemeProvider } from "@mui/material";
 import CssBaseline from "@mui/material/CssBaseline";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import type { ReactElement } from "react";
@@ -17,6 +17,7 @@ import { expect } from "vitest";
 import FileBrowser from "../pages/FileBrowser";
 import Login from "../pages/Login";
 import { server } from "./mocks/server";
+import { renderWithStyles as render } from "./utils/renderWithStyles";
 
 const theme = createTheme({
   palette: {

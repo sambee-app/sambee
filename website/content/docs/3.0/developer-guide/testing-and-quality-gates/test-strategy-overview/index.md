@@ -43,6 +43,10 @@ If an error-path test must emit an expected diagnostic, mock that specific messa
 
 ### Frontend jsdom Fixtures
 
+Use `renderWithStyles` from `frontend/src/test/utils/renderWithStyles.tsx` for styled components. The shared browser, component, and integration render helpers already use it. It gives each render a separate Emotion cache, uses CSS rule insertion instead of a style element for each rule, and removes its style sheets after React Testing Library cleanup. The wrapper also keeps the cache through `rerender` and Strict Mode.
+
+The default Emotion cache retains generated styles after components unmount. In large test files, thousands of retained style sheets can make CSS queries, focus changes, and menus slow enough to exceed the test timeout. Do not remove style elements without resetting their cache: later renders can then omit required CSS.
+
 Wrap direct `focus()` and `blur()` calls in `act`. Use asynchronous `act` when focus starts asynchronous component work, such as a MUI ripple.
 
 Before restoring real timers, unmount the test components and flush pending timers inside asynchronous `act`:
@@ -55,11 +59,15 @@ vi.useRealTimers();
 
 In jsdom 31, focus cleanup uses a rendering timer. If a test discards that timer, later animation frames in the same test file can stop running.
 
+Style-sheet insertion also queues an immediate task in jsdom. In tests that count pending timers, run zero-delay tasks before checking the component's delayed timer. Do not run that delayed timer before checking that unmount cancels it.
+
 Attach elements to the document before testing computed styles. Compare resolved CSS values rather than source formatting; for example, `160ms` can resolve to `0.16s`, and an inherited unitless line height can resolve to pixels.
 
 jsdom has no layout engine for container queries. Tests of desktop-only controls must set up the required display state explicitly. Use Playwright to verify the actual responsive layout.
 
 ### Frontend Asynchronous Regression Tests
+
+Treat a timeout as the first failure to investigate. Vitest can continue a timed-out test body while the next test runs. Late Testing Library work can then change the shared `act` environment and cause warnings in the next test. Fix the timeout's cause; do not suppress those warnings or force the `act` environment flag.
 
 Control request completion with deferred promises when a test covers pending controls or failure recovery. Complete the request inside `act`, and wait for the focus or enabled state that the test requires. An error notice's presence does not prove that focus has recovered. Test focus loss while a control is disabled, including fallback to a modal container, rather than relying on an immediate mock response.
 

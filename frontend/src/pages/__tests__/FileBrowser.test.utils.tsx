@@ -4,9 +4,10 @@
  *          FileBrowser-interactions.test.tsx, FileBrowser-viewer.test.tsx
  */
 
-import { act, render } from "@testing-library/react";
+import { act } from "@testing-library/react";
 import { createMemoryRouter, Outlet, RouterProvider, useLocation } from "react-router-dom";
 import { LocalePreferencesProvider } from "../../i18n/LocalePreferencesProvider";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import FileBrowser from "../FileBrowser";
 

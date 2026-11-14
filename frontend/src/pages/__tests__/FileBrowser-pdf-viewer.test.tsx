@@ -6,7 +6,7 @@ import { requireTestValue } from "../../test/helpers/assertions";
  * Tests for PDF file viewing workflows
  */
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useRef } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -14,6 +14,7 @@ import type { MockedObject } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import apiService from "../../services/api";
 import { authSession } from "../../services/authSession";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType } from "../../types";
 import FileBrowser from "../FileBrowser";

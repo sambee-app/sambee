@@ -1,4 +1,4 @@
-import { act, render as renderBase, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
@@ -12,6 +12,7 @@ import {
 import { setRegionalLocalePreference } from "../../i18n";
 import { createMockAdminUser, createMockAdminUserList } from "../../test/fixtures/users";
 import { requireTestElement, requireTestValue } from "../../test/helpers/assertions";
+import { renderWithStyles as renderBase } from "../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../theme";
 import type { AdminUserCreateResult, AdminUserPasswordResetResult } from "../../types";
 import { USER_DIRECTORY_VISIBLE_COLUMNS_STORAGE_KEY, UserManagementSettings } from "../UserManagementSettings";
