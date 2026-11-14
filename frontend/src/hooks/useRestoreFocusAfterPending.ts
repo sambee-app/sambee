@@ -10,7 +10,12 @@ export function useRestoreFocusAfterPending(pending: boolean): () => void {
       const target = focusTarget.current;
       focusTarget.current = null;
 
-      if (document.activeElement === document.body && target?.isConnected && !target.matches(":disabled")) {
+      const activeElement = document.activeElement;
+      const focusFellBack =
+        activeElement === document.body ||
+        (activeElement instanceof HTMLElement && activeElement.tabIndex === -1 && target !== null && activeElement.contains(target));
+
+      if (focusFellBack && target?.isConnected && !target.matches(":disabled")) {
         target.focus();
       }
     }

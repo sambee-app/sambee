@@ -150,6 +150,33 @@ describe("useCachedImageGallery", () => {
     expect(onIndexChange).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    [1, 2],
+    [1, 0],
+  ])("reports each rapid local move to %s then %s before React commits", async (first, second) => {
+    vi.mocked(apiService.getImageBlob).mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
+    const onIndexChange = vi.fn();
+    const images = ["/0.jpg", "/1.jpg", "/2.jpg"];
+    const { result } = renderHook(() =>
+      useCachedImageGallery({
+        connectionId: "conn-1",
+        images,
+        onIndexChange,
+        loadImageBlob: loadMockImageBlob,
+        preloadRange: 0,
+      })
+    );
+
+    await act(async () => {
+      result.current.setCurrentIndex(first);
+      result.current.setCurrentIndex(second);
+      result.current.setCurrentIndex(second);
+    });
+
+    expect(result.current.currentIndex).toBe(second);
+    expect(onIndexChange.mock.calls).toEqual([[first], [second]]);
+  });
+
   it("waits for native image decoding before marking the current image ready", async () => {
     vi.mocked(apiService.getImageBlob).mockResolvedValue(new Blob(["image"], { type: "image/jpeg" }));
 

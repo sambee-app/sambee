@@ -82,8 +82,11 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
                     </button>
                   </div>
                 ) : null}
-                <button type="button" onClick={() => setCurrentIndex(currentIndex + 1)}>
+                <button type="button" onClick={() => setCurrentIndex((index) => index + 1)}>
                   Next image
+                </button>
+                <button type="button" onClick={() => setCurrentIndex((index) => index - 1)}>
+                  Previous image
                 </button>
                 <button type="button" onClick={onClose}>
                   Close image
@@ -217,33 +220,51 @@ describe("Browser - Image View Integration", () => {
     await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
   });
 
-  it("keeps distinct history entries for rapid gallery moves", async () => {
-    mockedApi.listDirectory.mockResolvedValue({
-      path: "/",
-      total: 3,
-      items: ["one.jpg", "two.jpg", "three.jpg"].map((name) => ({
-        name,
-        path: name,
-        type: FileType.FILE,
-        mime_type: "image/jpeg",
-        size: 10,
-        is_readable: true,
-        is_hidden: false,
-      })),
-    });
-    const { router } = await renderBrowser();
-    fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
-    await screen.findByTestId("image-view");
-    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
-    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "two.jpg"));
-    await act(() => router.navigate(-1));
-    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "three.jpg"));
-    await act(() => router.navigate(-1));
-    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "one.jpg"));
-    await act(() => router.navigate(2));
-    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "two.jpg"));
-  });
+  it.each(["separate events", "batched events", "batched reversal"])(
+    "keeps distinct history entries for rapid gallery moves in %s",
+    async (timing) => {
+      mockedApi.listDirectory.mockResolvedValue({
+        path: "/",
+        total: 3,
+        items: ["one.jpg", "two.jpg", "three.jpg"].map((name) => ({
+          name,
+          path: name,
+          type: FileType.FILE,
+          mime_type: "image/jpeg",
+          size: 10,
+          is_readable: true,
+          is_hidden: false,
+        })),
+      });
+      const { router } = await renderBrowser();
+      fireEvent.click(await screen.findByRole("button", { name: /: one\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
+      await screen.findByTestId("image-view");
+      const moveTwice = () => {
+        fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+        fireEvent.click(screen.getByRole("button", { name: timing === "batched reversal" ? "Previous image" : "Next image" }));
+      };
+      if (timing !== "separate events") {
+        act(moveTwice);
+      } else {
+        moveTwice();
+      }
+      const expectSelection = async (filename: string) => {
+        await waitFor(() => {
+          expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", filename);
+          expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", filename);
+          expect(new URLSearchParams(router.state.location.search).get("file")).toBe(`smb/test-server-1/${filename}`);
+        });
+      };
+      const finalFilename = timing === "batched reversal" ? "one.jpg" : "two.jpg";
+      await expectSelection(finalFilename);
+      await act(() => router.navigate(-1));
+      await expectSelection("three.jpg");
+      await act(() => router.navigate(-1));
+      await expectSelection("one.jpg");
+      await act(() => router.navigate(2));
+      await expectSelection(finalFilename);
+    }
+  );
 
   it("shows the selected image error and retries without retaining the previous filename", async () => {
     mockedApi.listDirectory.mockResolvedValue({

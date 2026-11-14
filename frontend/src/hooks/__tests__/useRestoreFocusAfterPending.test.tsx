@@ -17,8 +17,13 @@ describe("useRestoreFocusAfterPending", () => {
     elements.length = 0;
   });
 
-  it("restores a temporarily disabled control when focus falls back to the document body", () => {
+  it.each(["body", "container"])("restores a temporarily disabled control when focus falls back to its %s", (fallback) => {
     const control = createButton();
+    const container = document.createElement("div");
+    container.tabIndex = -1;
+    document.body.append(container);
+    elements.push(container);
+    container.append(control);
     control.focus();
     const { result, rerender } = renderHook(({ pending }) => useRestoreFocusAfterPending(pending), {
       initialProps: { pending: false },
@@ -28,6 +33,7 @@ describe("useRestoreFocusAfterPending", () => {
     rerender({ pending: true });
     control.disabled = true;
     control.blur();
+    if (fallback === "container") container.focus();
     control.disabled = false;
     rerender({ pending: false });
 
