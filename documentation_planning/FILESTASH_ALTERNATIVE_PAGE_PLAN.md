@@ -124,13 +124,18 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 | **3. Documentation & Legal Pages** (`/docs/...`, `/imprint/`, `/privacy-policy/`) | `layouts/docs/*` + `docs.css`; `layouts/_default/standalone.html` + `standalone.css` | **Reference reading shells**: Three-column versioned docs reader (`1320px`) and single-column legal prose shell. |
 
 **Shared Brand DNA ("Recognizably Sambee"):**
-- **Surfaces & rules**: Warm architectural paper (`#fbf9f4` `page`, `#f5f3ee` `low`, `#f0eee9` `mid`, `#eae8e3` `high`) and warm obsidian dark mode (`#1b1c19` `page`, `#24231f` `low`, `#2b2925` `mid`) framed inside the `1131px` `.ledger-shell` side rails (`1px` `rule-soft` internal hairlines, `2px` `rule-strong` section boundaries, `0px` sharp corners everywhere).
-- **Typography trio**: `Newsreader` (display headings), `Work Sans` (body prose), and `Space Grotesk` (uppercase tracked eyebrows, telemetry badges, indices, and buttons), applying **strictly one `type-*` semantic utility per text element** (`website/content/docs/0.7/website-dev-guide/site-systems/typography-usage-and-boundaries/index.md`).
-- **Shared UI primitives**: `.btn` variants (`buttons.css`), Material Symbols icons, `partials/components/button-kind-class.html`, `partials/components/responsive-image.html`, and a shared `partials/components/link-href.html`.
+- **Surfaces & rules**: Warm architectural paper (`#fbf9f4` `page`, `#f5f3ee` `low`, `#f0eee9` `mid`, `#eae8e3` `high`) and warm obsidian dark mode (`#1b1c19` `page`, `#24231f` `low`, `#2b2925` `mid`) framed inside the `1131px` `.ledger-shell` side rails and `.site-gutter` horizontal padding (`1px` `rule-soft` internal hairlines, `2px` `rule-strong` section boundaries via a shared `.ledger-section` border-collapse rule, `0px` sharp corners everywhere).
+- **Typography trio & explicit recipe map**: `Newsreader` (display headings), `Work Sans` (body prose), and `Space Grotesk` (uppercase tracked eyebrows, telemetry badges, indices, and buttons), applying **strictly one `type-*` semantic utility per text element** (`website/content/docs/0.7/website-dev-guide/site-systems/typography-usage-and-boundaries/index.md`):
+  - **Page `H1`**: `type-hero type-color-ink` sized to the shared non-homepage page-title scale (`2.5rem` mobile → `3rem` `md` → `3.4rem` `lg`, matching `docs.css` and `standalone.css`), preceded by the shared `.page-kicker` (`48px × 2px` `.ui-bg-primary` lead rule + `type-label-eyebrow`).
+  - **Section `H2`s**: `type-section-title type-color-ink` (or `type-title-xl type-color-ink` in compact split panels), preserving Sambee's responsive italic `Newsreader` section-heading voice instead of falling back to `base.css`'s unscaled `3rem` roman `h2`.
+  - **Card, chapter, and FAQ headings (`H3` / `<summary>`)**: `type-title-md` or `type-title-md-tight` (`Newsreader` 700, `1.5rem`).
+  - **Eyebrows, subnav items, and matrix group headers**: `type-label-eyebrow`, `type-label-eyebrow-strong`, `type-label-strong`, and `type-label-sm`.
+  - **Body copy & square list markers**: `type-copy` (`Work Sans`), pairing `<ul>` items outside `.content` with `.ui-list-dot-item` (`6×6px` sharp square dot from `shared.css`: `ui-color-primary` for Sambee lists, `type-color-muted` for neutral Filestash lists) because Tailwind Preflight removes default list markers.
+- **Shared UI primitives**: `.btn` variants (`buttons.css` via `partials/components/button-kind-class.html`: `primary`, `secondary`, `link`), outlined Material Symbols (`font-variation-settings: 'FILL' 0, 'wght' 400..450, 'GRAD' 0, 'opsz' 24`), `partials/components/responsive-image.html`, promoted `partials/components/theme-aware-image.html` + `partials/components/link-href.html`, underlined prose links matching `.content a`, shared hover helpers (`.ui-hover-surface-low`, `.type-hover-ink`), and visible `0px`-radius `:focus-visible` outlines.
 
 **Deliberate Structural Differences from the Homepage:**
 - Zero reuse of `partials/home/*` section templates (`hero.html`, `problem-value.html`, `benefits.html`, `features.html`, `deployment.html` stay untouched and exclusive to `/`).
-- **Asymmetric `7:5` hero** with a compact editorial `Newsreader` scale (`2.5rem` mobile → `3.35rem` desktop, roman `type-copy` lead) paired beside a structured **Executive Scorecard** instead of a giant single-column `4.5rem` billboard + italic subhead.
+- **Asymmetric `7:5` hero** using the compact `2.5rem` → `3rem` → `3.4rem` page-title `H1` scale and roman `type-copy` lead paired beside a structured **Executive Scorecard**, instead of the homepage's single-column `4.5rem` (`text-7xl`) billboard + italic `type-hero-subtitle`.
 - **Sticky sub-header wayfinding bar** and **2-column / `4:8` editorial splits** instead of repeating the homepage's 3-column card grids.
 
 ---
@@ -140,18 +145,18 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 1. **3-Second Above-the-Fold Clarity (F-Pattern Asymmetric Hero)**
    High-intent search visitors (`"filestash alternative"`) want immediate confirmation of fit and proof. The left `7` columns state the core contrast and primary action; the right `5` columns (`surface-low`) render a 5-row **Executive Scorecard** (`License`, `SSO & Roles`, `SMB Security`, `Supply Chain`, `Container Footprint`) that technical buyers can scan in three seconds without scrolling.
 2. **Non-Linear Wayfinding (Sticky Dossier Subnav)**
-   Different evaluators care about different sections (CISOs jump to Security, sysadmins to Matrix or Test Drive, team leads to Fit). A slim `surface-mid` anchor bar sticks directly beneath the global header (`top: var(--header-height); z-index: 20`), scrolls horizontally with hidden scrollbars on small screens, and pairs with `scroll-margin-top: calc(var(--header-height) + var(--marketing-subnav-height) + 1rem)` on every section target so headings are never clipped.
+   Different evaluators care about different sections (CISOs jump to Security, sysadmins to Matrix or Test Drive, team leads to Fit). A slim `surface-mid` anchor bar sticks directly beneath the global header (`top: var(--header-height); z-index: 20`), scrolls horizontally with hidden scrollbars on small screens, and reuses `.ui-hover-surface-low` + `.type-hover-ink` on links. Because `base.css` already sets `html { scroll-padding-top: var(--header-height); }` (measured dynamically by `navigation.js`) and root `scroll-padding-top` adds to target `scroll-margin-top`, section targets set `scroll-margin-top: calc(var(--marketing-subnav-height) + 1rem)` so `--header-height` is never counted twice.
 3. **Trust-First Qualification Before Deep Claims**
    Placing the **2-Column "Honest Fit" Split** (`Switch to Sambee if...` vs. `Keep Filestash if...`) directly above the Comparison Matrix disarms skepticism early. Telling S3/FTP/Dropbox users upfront to stay with Filestash makes every SMB, security, and desktop-editing claim below immediately credible.
 4. **Accessible, Mobile-Native Comparison Matrix UX**
-   - **Visual hierarchy**: Category group rows (`surface-mid`, `type-label-eyebrow-strong`) break the 15 rows into five digestible blocks (`Licensing & Identity`, `Security & Supply Chain`, `SMB & Local Storage`, `File Management & Editing`, `Operations & Cloud Breadth`). The Sambee column uses a subtle `surface-low` tint and a `2px` top primary-gold rule so the eye tracks Sambee effortlessly.
-   - **WCAG 1.4.1 dual coding (never color alone)**: Every cell pairs a distinct Material Symbol (`check_circle`, `lock`, `remove`) with an explicit bold verdict phrase (`Free for unlimited users`, `Paid plans only`, `Not supported`) plus concise technical context.
+   - **Visual hierarchy**: Table column headers use `surface-high` + `type-label-strong` (matching `content.css` table headers), while category group rows (`surface-mid`, `type-label-eyebrow-strong`) break the rows into five digestible blocks (`Licensing & Identity`, `Security & Supply Chain`, `SMB & Local Storage`, `File Management & Editing`, `Operations & Cloud Breadth`). The Sambee column uses a subtle `surface-low` tint and a `2px` top primary-gold rule so the eye tracks Sambee effortlessly.
+   - **WCAG 1.4.1 dual coding & warm semantic palette (never color alone)**: Every cell pairs one of four outlined Material Symbols (`font-variation-settings: 'FILL' 0, 'wght' 425, 'GRAD' 0, 'opsz' 24`) mapped to existing theme tokens—`check_circle` (`--color-clr-status-tip` / `.ui-color-primary`), `lock` (`--color-clr-status-warning`), and `info` / `remove` (`.type-color-muted`)—with an explicit bold verdict phrase (`Free for unlimited users`, `Paid plans only`, `Not supported`) plus concise technical context.
    - **Zero horizontal pinch-zooming on mobile**: On `md+` (`>= 768px`), the matrix renders as a semantic table with a sticky header row beneath the subnav. Below `md`, CSS grid/block rules stack each capability into a clean 2-row comparison card (`Capability` header → labeled `SAMBEE` row vs. `FILESTASH` row) so `360px` phones have zero horizontal overflow.
 5. **Reading Ergonomics & Visual Cadence (`60–70ch` Measure + Mid-Page Visual Break)**
-   Instead of six cramped equal-height cards, the six deep-dive pillars render as **`4:8` Editorial Split Chapters**: left rail with `01 //`–`06 //` index, `Newsreader` heading, and a `surface-mid` **`ui-current-primary-inset` takeaway callout**; right column with `max-w-[65ch]` `Work Sans` copy and structured bullet points. Halfway through (between Chapters `03` and `04`), a full-width **Visual Proof & Architecture Contrast Band** breaks text fatigue with a dual-pane screenshot and a 1-container vs. 2-container SVG diagram.
+   Instead of six cramped equal-height cards, the six deep-dive pillars render as **`4:8` Editorial Split Chapters**: left rail with `01 //`–`06 //` index, `Newsreader` `type-title-md-tight` heading, and a `surface-mid` **`ui-current-primary-inset` takeaway callout**; right column with `max-w-[65ch]` `Work Sans` `type-copy` prose and `.ui-list-dot-item` square-dot bullet points. Halfway through (between Chapters `03` and `04`), a full-width **Visual Proof & Architecture Contrast Band** breaks text fatigue with a dual-pane screenshot and a 1-container vs. 2-container SVG diagram.
 6. **Low-Friction Conversion & Progressive-Disclosure FAQ**
-   - **Test-drive terminal split (`5:7` grid)**: Pairs three zero-risk assurances (`No migration`, `Runs beside Filestash on port 8000`, `Direct SMB2/SMB3 access`) and dual CTAs beside a labeled `docker-compose.yml` code panel with one-click copy.
-   - **Native `<details>/<summary>` accordion FAQ**: Uses semantic HTML5 disclosure elements (first item `open` by default) for zero-JS keyboard accessibility, screen-reader `aria-expanded` support, `44×44px` minimum tap targets, and `prefers-reduced-motion: reduce` compliance.
+   - **Test-drive terminal split (`5:7` grid)**: Pairs three zero-risk assurances (`No migration`, `Runs beside Filestash on port 8000`, `Direct SMB2/SMB3 access`) and dual CTAs beside a flush `docker-compose.yml` header strip + highlighted code panel with one-click copy.
+   - **Native `<details>/<summary>` accordion FAQ**: Uses semantic HTML5 disclosure elements (first item `open` by default), hides the native WebKit marker (`list-style: none` + `::-webkit-details-marker { display: none; }`, matching `.docs-sidebar-version-trigger` in `docs.css`), applies `.ui-hover-surface-low` and a visible `1px`/`2px` `0px`-radius `:focus-visible` outline, maintains `44×44px` minimum tap targets, and honors `prefers-reduced-motion: reduce`.
 
 ---
 
@@ -164,17 +169,20 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 | Page data | `../website/data/filestash_alternative.yaml` | Holds all structured page content; future competitor pages (`filebrowser_alternative.yaml`, etc.) reuse the exact same schema. |
 | Generic layout | `../website/themes/sambee/layouts/_default/comparison.html` | Resolves `$pageData := index hugo.Data .Params.data_key`, emits `FAQPage` JSON-LD via `{{ define "head" }}`, and renders `<div class="marketing-shell" data-pagefind-body>`. |
 | Marketing partials | `../website/themes/sambee/layouts/partials/marketing/` | `hero-split.html`, `subnav.html`, `fit-split.html`, `matrix.html`, `chapter-list.html`, `visual-proof.html`, `test-drive.html`, `faq.html`. |
-| Shared link helper | `../website/themes/sambee/layouts/partials/components/link-href.html` | Promoted from `partials/home/link-href.html` (which delegates to it) so both homepage and marketing pages resolve structured `target: { type: docs, book, section, page }` links via `docs/page-url.html`. |
-| Marketing styles | `../website/themes/sambee/assets/css/marketing.css` | Imported in `main.css` after `homepage.css`. Owns `.marketing-shell`, `.marketing-section`, split grids, responsive matrix, and accordion FAQ styles without touching `homepage.css`. |
+| Shared link & image helpers | `../website/themes/sambee/layouts/partials/components/{link-href,theme-aware-image}.html` | `link-href.html` promoted from `partials/home/link-href.html` (preserving `target.type` in `anchor`, `docs`, `url`, with `book`/`section`/`page` fields on `docs` targets). `theme-aware-image.html` extracted from `partials/home/ui-screenshot.html` to wrap `responsive-image.html` for light + `dark_src` switching. |
+| Shared CSS primitives | `../website/themes/sambee/assets/css/shared.css` | Promote `.ledger-section` (`2px` `rule-strong` top/bottom borders + `-2px` adjacent section-border collapse), `.page-kicker` / `.page-kicker-rule` (`48px × 2px` `.ui-bg-primary` bar), and `.ui-theme-preview` / `.ui-device-preview-image` so `homepage.css` and `marketing.css` never duplicate shared shell rules. |
+| Marketing styles | `../website/themes/sambee/assets/css/marketing.css` | Imported in `main.css` after `homepage.css`. Consumes `.ledger-shell`, `.ledger-section`, `.site-gutter`, and shared `type-*`/`ui-*` utilities; owns only marketing-specific split grids, sticky subnav, responsive matrix, SVG dark-mode variables, and accordion FAQ styles. |
 | `<head>` extension | `../website/themes/sambee/layouts/_default/baseof.html` | Add optional `{{ block "head" . }}{{ end }}` inside `<head>` so marketing templates can emit safe `dict ... \| jsonify` JSON-LD without polluting `<body>`. |
-| Footer discovery | `../website/themes/sambee/layouts/partials/essentials/footer.html` & `footer.css` | Keep `.site-footer-legal` (`aria-label="Legal links"`) strictly for `Imprint` and `Privacy Policy`; add a separate `<nav class="site-footer-compare" aria-label="Comparisons">` fed from `params.toml` (`[[footer.comparisons]]`). |
+| Footer discovery | `../website/themes/sambee/layouts/partials/essentials/footer.html` & `footer.css` | Keep `<nav class="site-footer-legal" aria-label="Legal links">` strictly for `Imprint` and `Privacy Policy`; group `<nav class="site-footer-compare" aria-label="Comparisons">` (`[[footer.comparisons]]` in `params.toml`) beside it inside a right-aligned `.site-footer-nav-group` wrapper separated by a `1px` `rule-soft` divider on `md+`, preserving `.site-footer-inner`'s 3-column grid (`minmax(0,1fr)_auto_minmax(0,1fr)`). |
 | CTA & output checks | `../website/scripts/validate-homepage-ctas.py` & `../website/tests/` | Extend link validation to verify `data-marketing-link` anchors/routes in `/filestash-alternative/index.html`, and add Python built-output tests in `website/tests/`. |
 
 **Critical Codebase Contracts to Preserve During Implementation:**
 1. **No duplicate `| Sambee` in `<title>`**: `partials/essentials/head.html:49` automatically formats non-home titles as `printf "%s | %s" $resolvedPage.Title site.Title`. Set front-matter `title = "Filestash Alternative for SMB Shares & Local Drives"` so `<title>`, `og:title`, and `twitter:title` render `Filestash Alternative for SMB Shares & Local Drives | Sambee` once.
-2. **Flush footer border & Pagefind indexing**: `baseof.html:50` applies `site-main--home` (`pb-0`) only when `.IsHome` is `true`. In `marketing.css`, define `.site-main:has(.marketing-shell) { @apply pb-0; }` (matching `.site-main:has(.standalone-shell)` in `standalone.css`) and collapse adjacent `.marketing-section` `2px` borders so the final section meets `.site-footer` cleanly with zero `pb-12` gap. Putting `data-pagefind-body` on `.marketing-shell` indexes the page under `page_kind:site`.
-3. **Code-block highlighting & copy button**: `assets/css/code.css` and `COPY_BUTTON_SELECTOR` in `assets/js/main.js:5` require a `.content` ancestor around `.highlight` / `pre`. In `partials/marketing/test-drive.html`, render the YAML string with `{{ transform.Highlight $section.code "yaml" }}` inside `<div class="content marketing-code-surface">` so syntax colors, dark-mode borders, and the copy button work out of the box.
-4. **Git LFS + WebP validation gate**: `.github/workflows/website-deploy.yml` runs `npm run images:validate` (`scripts/validate-webp-assets.py`) before `hugo` and tracks `website/assets/images/**` via Git LFS (`.gitattributes`). Launch Phase 1 using existing theme-aware assets (`images/home/sambee-screenshot.png`, `sambee-screenshot-dark.png`, `companion-screenshot.png`) plus an inline theme-aware SVG architecture diagram; when adding custom screenshots later, commit pre-generated `_*w.webp` files from `python3 scripts/generate-webp.py`.
+2. **CTA button `kind` contract**: `partials/components/button-kind-class.html` accepts only `"primary"` (`btn-bg-secondary`), `"secondary"` (`btn-outline-secondary`), and `"link"` (`btn-link-secondary`). All bordered outline CTAs in `filestash_alternative.yaml` must use `kind: secondary` (never `kind: outline`).
+3. **Flush footer border & Pagefind indexing**: `baseof.html:50` applies `site-main--home` (`pb-0`) only when `.IsHome` is `true`. Define `.site-main:has(.marketing-shell) { @apply pb-0; }` (matching `.site-main:has(.standalone-shell)` in `standalone.css`) and apply the shared `.ledger-section` `-2px` collapse rules so the final section meets `.site-footer` cleanly with zero `pb-12` gap. Putting `data-pagefind-body` on `.marketing-shell` indexes the page under `page_kind:site`.
+4. **Code-block highlighting, flush header strip & copy button**: `assets/css/code.css` and `COPY_BUTTON_SELECTOR` in `assets/js/main.js:5` require a `.content` ancestor around `.highlight` / `pre`, and `.content .highlight` applies `margin: 1.25rem 0`. In `partials/marketing/test-drive.html`, render `{{ transform.Highlight $section.code "yaml" }}` inside `<div class="content marketing-code-surface">` and reset `.marketing-code-surface .highlight { margin: 0; border-top: 0; }` beneath the `1px`-bordered `docker-compose.yml` header strip so syntax colors, dark-mode borders, flush framing, and the copy button work cleanly.
+5. **Dark-mode CSS variables in inline SVGs**: In `generated-theme.css`, `--color-clr-*` variables stay at their light-mode hex values when `<html class="dark">` is active (`--color-clr-darkmode-*` are separate variables). Bind inline SVG strokes and fills to component-scoped bridge custom properties swapped under `.dark` (matching `.search-modal` in `search.css`) or `currentColor` + shared `.ui-color-*` / `.type-color-*` classes.
+6. **Git LFS + WebP validation gate**: `.github/workflows/website-deploy.yml` runs `npm run images:validate` (`scripts/validate-webp-assets.py`) before `hugo` and tracks `website/assets/images/**` via Git LFS (`.gitattributes`). Launch Phase 1 using existing theme-aware assets (`images/home/sambee-screenshot.png`, `sambee-screenshot-dark.png`) via `partials/components/theme-aware-image.html` plus an inline theme-aware SVG architecture diagram; when adding custom screenshots later, commit pre-generated `_*w.webp` files from `python3 scripts/generate-webp.py`.
 
 ---
 
@@ -187,16 +195,16 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 ### Band 0: Asymmetric `7:5` Split Hero (`partials/marketing/hero-split.html`)
 
 **Left Column (`7 cols`, `surface-page`):**
-- **Eyebrow**: `COMPARE // FILESTASH ALTERNATIVE`
-- **H1 (`Newsreader` 800, editorial scale)**: `Stop using a cloud adapter to manage your SMB shares.`
-- **Lead (`Work Sans` roman `type-copy`, `max-w-[60ch]`)**: `Filestash connects to 25 protocols at surface depth—and locks OIDC single sign-on, audit logs, and early security patches behind monthly subscriptions. Sambee is purpose-built for SMB shares and local drives, with defense-in-depth security, dual-pane navigation, native desktop app editing, and free SSO under the MIT license.`
+- **Eyebrow (`.page-kicker` with `48px × 2px` `.ui-bg-primary` bar + `type-label-eyebrow ui-color-primary`)**: `COMPARE // FILESTASH ALTERNATIVE`
+- **H1 (`type-hero type-color-ink`, `2.5rem` → `3rem` `md` → `3.4rem` `lg`)**: `Stop using a cloud adapter to manage your SMB shares.`
+- **Lead (`Work Sans` roman `type-copy type-color-muted`, `max-w-[60ch]`)**: `Filestash connects to 25 protocols at surface depth—and locks OIDC single sign-on, audit logs, and early security patches behind monthly subscriptions. Sambee is purpose-built for SMB shares and local drives, with defense-in-depth security, dual-pane navigation, native desktop app editing, and free SSO under the MIT license.`
 - **Actions**:
   - **Primary CTA (`kind: primary`)**: `Deploy with Docker` → `target: { type: docs, book: admin-guide, section: installation-and-deployment, page: deploy-sambee-with-docker }`
-  - **Secondary CTA (`kind: outline`)**: `Jump to Comparison Matrix ↓` → `target: { type: anchor, id: comparison }`
+  - **Secondary CTA (`kind: secondary`)**: `Jump to Comparison Matrix ↓` → `target: { type: anchor, id: comparison }`
 
 **Right Column (`5 cols`, `surface-low`, left `1px` `rule-soft` divider on `lg+` — Executive Scorecard):**
-- **Panel Header**: `AT A GLANCE // SAMBEE ADVANTAGE` (`type-label-eyebrow-strong`)
-- **5 Telemetry Rows** (each separated by `1px` `rule-soft`):
+- **Panel Header**: `AT A GLANCE // SAMBEE ADVANTAGE` (`type-label-eyebrow-strong type-color-accent`)
+- **5 Telemetry Rows** (each separated by `1px` `rule-soft`; label in `type-label-xs type-color-muted`, value in `type-copy type-color-ink`):
   1. `LICENSE & COST` → **MIT Open Source — $0 forever, unlimited users** *(vs. AGPLv3 + $50–$290/mo tiers)*
   2. `IDENTITY & ACCESS` → **Free OIDC SSO + IdP group roles** *(vs. paywalled SSO & RBAC)*
   3. `SMB SECURITY` → **Kerberos + signing + SMB3 encryption** *(vs. NTLM/Guest only)*
@@ -207,8 +215,8 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 
 ### Band 1: Sticky Dossier Sub-Navigation (`partials/marketing/subnav.html`)
 
-- **Surface**: `surface-mid`, sticky below `.nav-header`, `2px` bottom `rule-strong`
-- **Anchor Items (`type-label-sm`)**:
+- **Surface**: `surface-mid`, sticky below `.nav-header` (`top: var(--header-height); z-index: 20`), `2px` bottom `rule-strong`; target sections use `scroll-margin-top: calc(var(--marketing-subnav-height) + 1rem)`
+- **Anchor Items (`type-label-sm type-color-muted ui-transition-color type-hover-ink ui-hover-surface-low`, visible `0px`-radius `:focus-visible` outline)**:
   - `01 // Honest Fit` (`#fit`)
   - `02 // Matrix` (`#comparison`)
   - `03 // Security & Depth` (`#pillars`)
@@ -220,18 +228,18 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 
 ### Band 2 (`#fit`): Upfront "Honest Fit" 2-Column Decision Ledger (`partials/marketing/fit-split.html`)
 
-- **Eyebrow**: `01 // HONEST FIT`
-- **H2**: `Choose the Right Tool for Your Infrastructure`
-- **Intro**: `Filestash and Sambee solve different architectural problems. Here is the honest breakdown before you read a single feature row.`
+- **Eyebrow (`type-label-eyebrow type-color-accent eyebrow-stack`)**: `01 // HONEST FIT`
+- **H2 (`type-section-title type-color-ink`)**: `Choose the Right Tool for Your Infrastructure`
+- **Intro (`type-copy type-color-muted`)**: `Filestash and Sambee solve different architectural problems. Here is the honest breakdown before you read a single feature row.`
 
-#### Left Card (`surface-page`, `2px` top primary-gold accent rule): `Switch to Sambee if you want...`
+#### Left Card (`surface-page`, `2px` top primary-gold accent rule, `H3` in `type-title-md type-color-ink`, `<ul>` items with `.ui-list-dot-item .ui-color-primary`): `Switch to Sambee if you want...`
 - Purpose-built speed and security for **Windows File Servers, TrueNAS, Synology, Unraid, Samba, and local PC drives**.
 - **Defense-in-depth security** (Kerberos, SMB3 encryption, revocable sessions, Cosign + SBOM verification) with **zero enterprise paywalls**.
 - **Dual-pane file management (`Ctrl+B`)**, `Ctrl+K` millisecond folder jumps, streaming ZIP folders, and dedicated mobile touch controls.
 - **Native desktop editing** in Word, Excel, Photoshop, or LibreOffice without running a separate Collabora/WOPI server.
 - **Free OIDC single sign-on**, group-based roles, and **MIT licensing** with zero per-seat fees.
 
-#### Right Card (`surface-low`, neutral `rule-soft` framing): `Keep Filestash if you need...`
+#### Right Card (`surface-low`, neutral `rule-soft` framing, `H3` in `type-title-md type-color-ink`, `<ul>` items with `.ui-list-dot-item .type-color-muted`): `Keep Filestash if you need...`
 - One browser portal for **S3, Backblaze B2, MinIO, FTP/SFTP, Dropbox, Google Drive, or Git**.
 - Outbound protocol gateways that re-expose backend storage as **SFTP, WebDAV, S3, or MCP servers**.
 - Public, anonymous share links for external guests who do not have accounts on your network.
@@ -240,10 +248,10 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 
 ### Band 3 (`#comparison`): Grouped Comparison Matrix (`partials/marketing/matrix.html`)
 
-- **Eyebrow**: `02 // ARCHITECTURE, SECURITY & LICENSING`
-- **H2**: `Sambee vs. Filestash at a Glance`
-- **Intro**: `How a dedicated SMB and local-drive workspace compares to a general-purpose multi-protocol portal.`
-- **Responsive UX**: Sticky 3-column header on `md+` (`Capability` | `Sambee` tinted `surface-low` with top gold bar | `Filestash`); stacked per-capability cards on `< md`; every cell dual-coded with icon + bold status phrase + detail.
+- **Eyebrow (`type-label-eyebrow type-color-accent eyebrow-stack`)**: `02 // ARCHITECTURE, SECURITY & LICENSING`
+- **H2 (`type-section-title type-color-ink`)**: `Sambee vs. Filestash at a Glance`
+- **Intro (`type-copy type-color-muted`)**: `How a dedicated SMB and local-drive workspace compares to a general-purpose multi-protocol portal.`
+- **Responsive UX**: Sticky 3-column `surface-high` `thead` (`type-label-strong`) on `md+` (`Capability` | `Sambee` tinted `surface-low` with top gold bar | `Filestash`); `surface-mid` group rows (`type-label-eyebrow-strong`); stacked per-capability cards on `< md`; every cell dual-coded with an outlined Material Symbol (`check_circle` → `--color-clr-status-tip` / `.ui-color-primary`, `lock` → `--color-clr-status-warning`, `info` & `remove` → `.type-color-muted`) + bold status phrase + detail.
 
 | Capability | Sambee | Filestash (Self-Hosted) |
 |---|---|---|
@@ -276,7 +284,7 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 
 ### Band 4 (`#pillars`, Part A): Deep-Dive Editorial Chapters `01`–`03` (`4:8` Split Rows)
 
-*(Each chapter uses a `4`-column left summary rail with a `ui-current-primary-inset` callout box and an `8`-column right detail list capped at `65ch`.)*
+*(Each chapter uses a `4`-column left summary rail—`type-label-eyebrow-strong type-color-accent` index, `type-title-md-tight type-color-ink` `H3`, and a `surface-mid` `ui-current-primary-inset` `type-label-sm type-color-ink` callout box—and an `8`-column right detail column capped at `65ch` with `type-copy` lead and `.ui-list-dot-item .ui-color-primary` square-dot points.)*
 
 #### Chapter `01 // LICENSING & IDENTITY`
 - **Title**: `Zero "SSO Tax." Permissive MIT Open Source.`
@@ -314,13 +322,14 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 
 *(Breaks reading rhythm halfway through the chapters with visual evidence on `surface-low`.)*
 
-- **Eyebrow**: `04 // ARCHITECTURAL CONTRAST`
-- **H2**: `One Hardened Container vs. Heavy Browser Office Stacks`
+- **Eyebrow (`type-label-eyebrow type-color-accent eyebrow-stack`)**: `04 // ARCHITECTURAL CONTRAST`
+- **H2 (`type-section-title type-color-ink`)**: `One Hardened Container vs. Heavy Browser Office Stacks`
 - **Visual 1 — Inline Theme-Aware SVG Architecture Comparison (`2-column diagram`)**:
+  - Uses `.marketing-arch-diagram` CSS custom properties swapped under `.dark` (never raw light-only `--color-clr-*` attributes directly on SVG nodes):
   - **Sambee Stack**: `Browser` → `Sambee (1 Non-Root Container, Cosign Verified)` → `SMB2/SMB3 Share (Kerberos + Signing + Encryption + CHANGE_NOTIFY)` + optional `127.0.0.1 Origin-Paired Companion → Native Word / Excel / Photoshop`.
   - **Typical Filestash Stack**: `Browser` → `Filestash (:latest)` + `Collabora WOPI Container (root startup curl, multi-GB RAM, query-string session tokens)` → `NTLM-only SMB Plugin` + `$50–$290/mo SSO & Security Paywall`.
 - **Visual 2 — Theme-Aware Workspace Preview**:
-  - Reuses `components/responsive-image.html` (light + dark variants) with a concise caption bar highlighting dual-pane navigation, the `Ctrl+K` Quick Bar, and top-bar System Health status.
+  - Reuses the promoted `partials/components/theme-aware-image.html` (which wraps `components/responsive-image.html` for light + `dark_src` variants and `.ui-device-preview-image` elevation) with a concise `type-label-xs type-color-muted` caption bar highlighting dual-pane navigation, the `Ctrl+K` Quick Bar, and top-bar System Health status.
 
 ---
 
@@ -359,19 +368,19 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 
 - **Surface**: `surface-low`
 - **Left Column (`5 cols` — Pitch, Assurances & Dual CTAs)**:
-  - **Eyebrow**: `05 // ZERO MIGRATION`
-  - **H2**: `Test Sambee Beside Filestash in 5 Minutes`
-  - **Body**: `Sambee works directly with the files and folders already on your SMB server. Keep Filestash running on port 8334, start Sambee on port 8000, connect the same share, and compare them side by side.`
-  - **3 Assurance Bullets**:
+  - **Eyebrow (`type-label-eyebrow type-color-accent eyebrow-stack`)**: `05 // ZERO MIGRATION`
+  - **H2 (`type-title-xl type-color-ink`)**: `Test Sambee Beside Filestash in 5 Minutes`
+  - **Body (`type-copy type-color-muted`)**: `Sambee works directly with the files and folders already on your SMB server. Keep Filestash running on port 8334, start Sambee on port 8000, connect the same share, and compare them side by side.`
+  - **3 Assurance Bullets (`<ul>` with `.ui-list-dot-item .ui-color-primary`, text in `type-copy type-color-ink`)**:
     - `No file import, syncing, or proprietary storage format`
     - `Honors your existing Windows or Linux/POSIX share permissions`
     - `Remove the container anytime with zero changes left on your share`
   - **Actions**:
     - **Primary CTA (`kind: primary`)**: `Read the Docker Deployment Guide` → `target: { type: docs, book: admin-guide, section: installation-and-deployment, page: deploy-sambee-with-docker }`
-    - **Secondary CTA (`kind: outline`)**: `Explore Sambee on GitHub` → `href: "https://github.com/sambee-app/sambee"`
+    - **Secondary CTA (`kind: secondary`)**: `Explore Sambee on GitHub` → `href: "https://github.com/sambee-app/sambee"`
 - **Right Column (`7 cols` — Highlighted Code Panel inside `.content`)**:
-  - **Header Strip (`surface-mid`, `type-label-sm`)**: `docker-compose.yml`
-  - **Code (`transform.Highlight $code "yaml"` inside `.content` for theme colors + copy button)**:
+  - **Header Strip (`surface-mid`, `1px` `rule-soft` / dark `rule-strong` border, `type-label-sm type-color-ink`)**: `docker-compose.yml`
+  - **Code (`transform.Highlight $code "yaml"` inside `<div class="content marketing-code-surface">` with `.highlight { margin: 0; border-top: 0; }` for flush framing + theme colors + copy button)**:
     ```yaml
     services:
       sambee:
@@ -387,9 +396,9 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 
 ### Band 8 (`#faq`): Interactive `<details>` Accordion FAQ (`partials/marketing/faq.html` + `FAQPage` JSON-LD)
 
-- **Eyebrow**: `06 // TECHNICAL FAQ`
-- **H2**: `Common Questions from Filestash Evaluators`
-- **Interaction**: Native `<details class="marketing-faq-item">` + `<summary>` rows (`first` item `open` by default; `+`/`−` indicator; `44px+` touch target).
+- **Eyebrow (`type-label-eyebrow type-color-accent eyebrow-stack`)**: `06 // TECHNICAL FAQ`
+- **H2 (`type-section-title type-color-ink`)**: `Common Questions from Filestash Evaluators`
+- **Interaction**: Native `<details class="marketing-faq-item">` + `<summary class="type-title-md-tight type-color-ink ui-hover-surface-low">` rows (`first` item `open` by default; `list-style: none` + `::-webkit-details-marker { display: none; }`; `+`/`−` indicator; visible `0px`-radius `:focus-visible` outline; `44px+` touch target; answer prose in `type-copy type-color-muted` with underlined accent links matching `.content a`).
 
 1. **Is OIDC single sign-on really free in Sambee?**
    Yes. Sambee is licensed under the MIT license with no paid tiers or seat limits. OIDC authentication, group-based role assignment (`Administrator`, `Editor`, `Viewer`), and all SMB security features are completely free for personal and commercial deployments.
@@ -416,9 +425,9 @@ The homepage (`https://sambee.net/`) must remain visually unique. Visitors movin
 To keep initial launch fast while honoring `sambee.net`'s Git LFS + WebP pipeline (`../website/scripts/generate-webp.py` and `../website/scripts/validate-webp-assets.py`):
 
 1. **Inline Theme-Aware Architecture Contrast SVG (Phase 1 Launch Asset — Zero LFS Overhead)**:
-   - Crisp geometric ledger diagram using CSS custom properties (`var(--color-clr-surface-page)`, `var(--color-clr-rule-strong)`, `var(--color-clr-primary)`, plus `.dark` tokens) so light and dark mode switch instantaneously with zero network requests.
+   - Crisp geometric ledger diagram bound to `.marketing-arch-diagram` bridge custom properties (`--arch-surface`, `--arch-rule`, `--arch-accent`, `--arch-ink`, `--arch-muted`) that map `--color-clr-*` in light mode and `--color-clr-darkmode-*` under `.dark` (because `--color-clr-*` tokens themselves do not mutate in dark mode), switching instantaneously with zero network requests.
 2. **Workspace UI Preview (Phase 1 Reuse → Phase 3 Custom Capture)**:
-   - Phase 1 reuses existing `images/home/sambee-screenshot.png` and `images/home/sambee-screenshot-dark.png` via `partials/components/responsive-image.html` (all WebP derivatives already committed in Git LFS).
+   - Phase 1 reuses existing `images/home/sambee-screenshot.png` and `images/home/sambee-screenshot-dark.png` via the promoted `partials/components/theme-aware-image.html` wrapper around `partials/components/responsive-image.html` (all WebP derivatives already committed in Git LFS).
    - Optional Phase 3 upgrade: capture a dedicated dual-pane SMB + `.zip`/local-drive screenshot with the `Ctrl+K` Quick Bar open (`images/marketing/dual-pane-quickbar.png` + `-dark.png`), run `npm run images:generate`, and commit the source PNGs and `generated/*w.webp` files via Git LFS.
 
 ---
@@ -426,16 +435,18 @@ To keep initial launch fast while honoring `sambee.net`'s Git LFS + WebP pipelin
 ## 6. Phased Implementation Plan
 
 1. **Phase 1 — Shared Primitives & Tech Marketing Layout System**
-   - Promote `partials/home/link-href.html` to `partials/components/link-href.html` (keeping `partials/home/link-href.html` as a 1-line wrapper so `home.html` and `homepage.css` remain untouched).
+   - Promote `partials/home/link-href.html` to `partials/components/link-href.html` (preserving `target.type` in `anchor`, `docs`, `url`, with `partials/home/link-href.html` kept as a 1-line delegating wrapper) and extract `partials/components/theme-aware-image.html` from `partials/home/ui-screenshot.html`.
+   - Promote shared shell/visual helpers into `assets/css/shared.css`: `.ledger-section` (`2px` `rule-strong` section framing + `-2px` adjacent border collapse), `.page-kicker` / `.page-kicker-rule` (`48px × 2px` `.ui-bg-primary` lead rule), and `.ui-theme-preview` / `.ui-device-preview-image`.
    - Add optional `{{ block "head" . }}{{ end }}` to `layouts/_default/baseof.html`.
    - Create `layouts/_default/comparison.html` (`data_key`-driven, emitting `FAQPage` JSON-LD via `dict ... | jsonify` in `{{ define "head" }}` and wrapping sections in `<div class="marketing-shell" data-pagefind-body>`).
-   - Create `partials/marketing/{hero-split,subnav,fit-split,matrix,chapter-list,visual-proof,test-drive,faq}.html` adhering strictly to the single-`type-*`-utility rule and wrapping highlighted YAML in `.content` for `code.css` + `main.js` copy-button support.
-   - Add `assets/css/marketing.css` (including `.site-main:has(.marketing-shell) { @apply pb-0; }`, `2px` section-border collapsing, sticky subnav offsets, mobile-stacked comparison cards below `md`, `4:8` editorial chapters, and `<details>` FAQ styles) and import it in `assets/css/main.css`.
+   - Create `partials/marketing/{hero-split,subnav,fit-split,matrix,chapter-list,visual-proof,test-drive,faq}.html` adhering strictly to the single-`type-*`-utility rule, `.ui-list-dot-item` square list markers, outlined Material Symbols with warm semantic status tokens, and `<div class="content marketing-code-surface">` YAML highlighting.
+   - Add `assets/css/marketing.css` (`.site-main:has(.marketing-shell) { @apply pb-0; }`, non-double-counted `scroll-margin-top: calc(var(--marketing-subnav-height) + 1rem)`, mobile-stacked comparison cards below `md`, `4:8` editorial chapters, flush `.marketing-code-surface .highlight` reset, dark-mode SVG bridge variables, and WebKit-marker-free `<details>` FAQ styles) and import it in `assets/css/main.css`.
 2. **Phase 2 — Filestash Page Data, Content Bundle & Footer Navigation**
-   - Create `website/data/filestash_alternative.yaml` with structured `target` CTA links and all copy from Section 4.
+   - Create `website/data/filestash_alternative.yaml` with structured `target` CTA links (`kind: primary` and `kind: secondary`) and all copy from Section 4.
    - Create `website/content/filestash-alternative/index.md` (`title = "Filestash Alternative for SMB Shares & Local Drives"` without `| Sambee`, `description`, `layout = "comparison"`, `data_key = "filestash_alternative"`).
-   - Configure `[[footer.comparisons]]` in `config/_default/params.toml` and render a dedicated `<nav class="site-footer-compare" aria-label="Comparisons">` in `partials/essentials/footer.html` + `assets/css/footer.css` (separate from `aria-label="Legal links"`).
-3. **Phase 3 — Automated CTA & Built-Output Validation**
+   - Configure `[[footer.comparisons]]` in `config/_default/params.toml` and group `<nav class="site-footer-compare" aria-label="Comparisons">` beside `<nav class="site-footer-legal" aria-label="Legal links">` inside `.site-footer-nav-group` in `partials/essentials/footer.html` + `assets/css/footer.css` so `.site-footer-inner` preserves its 3-column layout on `md+`.
+3. **Phase 3 — Automated CTA, Built-Output & Visual Design-System Validation**
    - Extend CTA validation (`scripts/validate-homepage-ctas.py` or a generalized site CTA check wired into `scripts/build-website.py`) to verify `/filestash-alternative/index.html` links and in-page `#comparison` / subnav anchors.
-   - Add built-output tests in `website/tests/` verifying `/filestash-alternative/index.html` `<title>` (no duplicate `| Sambee`), canonical tag, `sitemap.xml` entry, `data-pagefind-body`, valid `FAQPage` JSON-LD, and highlighted YAML copy container.
+   - Add built-output tests in `website/tests/` verifying `/filestash-alternative/index.html` `<title>` (no duplicate `| Sambee`), canonical tag, `sitemap.xml` entry, `data-pagefind-body`, valid `FAQPage` JSON-LD, `btn-outline-secondary` on secondary CTAs, and highlighted YAML copy container.
    - Run `cd website && npm run images:validate && npm run build` and `python3 -m unittest discover -s website/tests` to verify production output end-to-end.
+   - Visually verify `/filestash-alternative/` in both light and dark modes at `360px` mobile and `1280px` desktop viewports (checking italic `Newsreader` section headings, `6×6px` square list dots, theme-aware screenshot and SVG switching, sticky subnav jump alignment, flush `docker-compose.yml` code panel, `<summary>` focus states, and 3-column footer alignment).
