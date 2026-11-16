@@ -117,9 +117,8 @@ The intentional trade-off is that the end of a title can be covered while the cl
 
 ## 3. Labels and Location Information
 
-- Use the current folder name as the tab label.
+- Use the current folder name as the tab label, including inside archives.
 - At a connection or drive root, use the connection or drive name.
-- In an archive, use the current archive-folder name, or the archive name at its root.
 - Do not append parent paths or connection suffixes to visible labels, even when names match. Repeated context consumes scarce width; show it in the full accessible name and hover tooltip instead.
 - Allow exact duplicate locations. They can hold different selections and scroll positions.
 - Shorten long labels with a trailing ellipsis without changing their accessible names. The close overlay may cover that ellipsis while visible.
