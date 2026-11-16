@@ -25,6 +25,7 @@ This change does not add document tabs. File viewers and editors keep their exis
 - Restore tab locations and order after a reload in the same browser session.
 - Correct URL, browser-history, viewer, operation, and real-time-update behavior.
 - Equal support for SMB connections, local drives, and supported archive locations.
+- Platform-aware shortcut matching in the shared shortcut hook, so tab shortcuts and existing Option+letter shortcuts work on macOS and on non-US keyboard layouts.
 - Updated shortcut help and directly related published documentation.
 
 ### Defer
@@ -138,7 +139,7 @@ Place the add button immediately after the tabs when they fit. On overflow, keep
 
 Use one compact icon-only control per pane with no visible text label or wide container padding. Reserve only its applicable hit-target width; do not allocate another toolbar-sized section.
 
-Its accessible label is "New tab". Its tooltip includes the configured shortcut.
+Its accessible label is "New tab". Its tooltip includes the configured shortcut for the current platform (see Platform-Aware Shortcut Matching).
 
 On activation:
 
@@ -251,8 +252,8 @@ Apply the following policy in single-pane, dual-pane, and touch-friendly layouts
 |---|---|---|
 | Active visible file-list container | Left | Select the preceding tab in that pane. |
 | Active visible file-list container | Right | Select the following tab in that pane. |
-| Active visible file-list container | Alt+Plus | Create and select a tab at the current location. |
-| Active visible file-list container | Alt+Minus | Close the selected tab, subject to the last-tab rule. |
+| Active visible file-list container | Alt+Plus (Windows/Linux), Control+Plus (macOS) | Create and select a tab at the current location. |
+| Active visible file-list container | Alt+Minus (Windows/Linux), Control+Minus (macOS) | Close the selected tab, subject to the last-tab rule. |
 | File list in dual-pane mode | Tab | Preserve the existing pane-switch action. |
 | File list | Up/Down, Home/End, Page Up/Down, Enter | Preserve existing file navigation and activation. |
 | Existing parent-directory shortcut | Existing key | Preserve parent navigation. |
@@ -278,7 +279,52 @@ The shared shortcut hook currently prevents defaults before calling a matched ha
 
 Handle plain Left/Right at the file-list surface, using centralized shortcut definitions and the existing scope rules. Do not register an unrestricted document-level arrow shortcut. Use the same focus contract for the new lifecycle bindings; change shared infrastructure only if a focused integration test proves it necessary.
 
-Support plus symbols that require Shift and the numeric keypad. Check AltGraph and macOS Option behavior explicitly. Do not mistake text entry for a shortcut, and do not claim a platform binding works before verifying it.
+Support plus symbols that require Shift and the numeric keypad. Do not mistake text entry for a shortcut, and do not claim a platform binding works before verifying it on that platform.
+
+### Platform-Aware Shortcut Matching
+
+#### Problem
+
+The shared shortcut hook ([useKeyboardShortcuts.ts](../frontend/src/hooks/useKeyboardShortcuts.ts)) matches the main key through `event.key`, the produced character. On macOS, the Option key changes the produced character: Option+Z produces `Ω`, and Option+Minus produces `–`. Therefore, no Option shortcut with a character key can match on macOS today.
+
+This affects the new tab shortcuts and these existing shortcuts:
+
+| Existing shortcut | Definition | Used in |
+|---|---|---|
+| Alt+C: toggle case-sensitive search | `CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_CASE_SENSITIVE` | Text editor, Markdown editor |
+| Alt+W: toggle whole-word search | `CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WHOLE_WORD` | Text editor, Markdown editor |
+| Alt+R: toggle regular-expression search | `CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_REGULAR_EXPRESSION` | Text editor, Markdown editor |
+| Alt+Z: toggle word wrap | `CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WORD_WRAP` | Text editor, Markdown editor |
+| Ctrl+Alt+T: insert table | `MARKDOWN_EDITOR_SHORTCUTS.INSERT_TABLE` | Markdown editor |
+| Ctrl+Alt+H: insert thematic break | `MARKDOWN_EDITOR_SHORTCUTS.INSERT_THEMATIC_BREAK` | Markdown editor |
+| Ctrl+Alt+T: open location in a new browser tab | `BROWSER_SHORTCUTS.OPEN_LOCATION_IN_NEW_TAB` | File browser |
+
+Option does not change named keys. Ctrl+Alt+Enter, Alt+F5, Alt+F9, and Alt+Left/Right are not affected.
+
+The hook accepts Control or Cmd for `ctrl` shortcuts. On macOS, Ctrl+Alt+T and Ctrl+Alt+H therefore work as Control+Option+T and Control+Option+H. macOS reserves Cmd+Option+H for "Hide Others", so do not document the Cmd variant for that shortcut.
+
+Do not match on `event.code` (the physical key) in general. Physical positions differ between layouts; for example, Plus, Minus, Z, and Y are on different keys on a German keyboard. Shortcuts must follow the character that the user sees on the key.
+
+#### Decisions
+
+1. **Option+letter shortcuts keep Option on macOS.** This matches the shortcuts that macOS users know from VS Code (for example Option+Z for word wrap). Match through `event.key` first. On macOS only, if Option is held, `event.key` does not match, and the shortcut key is a single ASCII letter, compare `event.keyCode` with that letter's upper-case code (65–90). Browsers derive `keyCode` for letters from the active layout, so the German Z/Y swap stays correct. CodeMirror uses the same fallback ([@codemirror/view](../frontend/node_modules/@codemirror/view/dist/index.js)).
+1. **Tab shortcuts use Control on macOS.** Windows/Linux: Alt+Plus and Alt+Minus. macOS: Control+Plus and Control+Minus. Match only through `event.key`. Do not use a `keyCode` fallback for punctuation, because browsers fabricate punctuation key codes on macOS and Linux, and they differ between layouts. Control does not change the produced character on macOS. Browser zoom on macOS uses Cmd, so Control+Plus and Control+Minus do not conflict with it. These shortcuts must require Control without Cmd on macOS.
+
+#### Hook Changes
+
+- Add a small platform helper in `frontend/src/utils/` that detects Apple platforms through `navigator.userAgentData?.platform`, with `navigator.platform` as the fallback. Read it once and allow tests to override it. Do not spread platform checks through components.
+- Add one optional field to the shortcut definition that replaces Alt with Control on macOS. Only the new tab shortcuts set it. Do not change the meaning of existing `ctrl`, `alt`, or `shift` fields.
+- Resolve the effective modifiers and the key-match rule in one helper. Use this helper in `matchesShortcut` and in `formatShortcut`, so matching, tooltips, and the help dialog cannot disagree.
+- Apply the `keyCode` letter fallback only to macOS, only when Option is held, and only to ASCII-letter shortcut keys. Keep the existing modifier exclusion rules.
+- Ignore events with `event.isComposing` in the hook for all shortcuts. Composition keystrokes, including Escape that cancels composition, belong to the input method editor.
+- Keep AltGraph text entry safe. On Windows, AltGraph reports Ctrl+Alt, which the hook already rejects for Alt-only shortcuts. Do not weaken that rule.
+- Show platform-correct labels: "Option" instead of "Alt" for Option shortcuts on macOS, and "Control" for the tab shortcuts on macOS. Do not change the existing Ctrl label behavior as part of this work.
+- Generate labels for case alternatives such as `["c", "C"]` as one upper-case letter. Show the Plus and Minus keys as "Plus" and "Minus" to avoid ambiguous labels such as "Alt++".
+- Remove the hard-coded `label` values of the seven affected shortcuts after the generated labels match the decided presentation.
+
+#### Known Trade-Off
+
+On some macOS layouts, users type letters with Option, for example Option+Z for `ż` on the Polish layout. Where an Option+letter shortcut is active, the shortcut takes the key press instead of the character. VS Code on macOS behaves the same way. The find-popover buttons remain alternatives for the find toggles. Word wrap, insert table, and insert thematic break have no pointer alternative today; do not add one as part of this feature. Mention the trade-off in the shortcut documentation.
 
 ### Accessibility
 
@@ -522,27 +568,39 @@ Depends on A and the selected-session interface from B.
 
 Acceptance gate: component tests prove pointer behavior, focus destination, single-tab protection, and close-overlay state. Browser measurements prove compact widths, stable geometry, safe hit regions, and native overflow access.
 
-### D. Add Commands and File-List Shortcuts
+### D. Make Shortcut Matching Platform-Aware
 
-Depends on A and C.
+No dependencies. This package fixes existing macOS shortcuts, so it can ship before the tab feature.
 
-- Define tab shortcuts centrally with localized labels and help text.
+- Implement the hook changes in Platform-Aware Shortcut Matching.
+- Add the platform helper and the optional macOS Control-for-Alt field.
+- Drive matching and labels from one modifier-resolution helper.
+- Remove the hard-coded labels of the seven affected shortcuts.
+- Update the 3.0 developer and user shortcut documentation for the existing Option+letter shortcuts, including the known trade-off (see section 15).
+
+Acceptance gate: hook tests cover macOS and Windows/Linux for matching and labels. Existing shortcut, editor, and viewer tests pass. A real-Mac check confirms the seven existing shortcuts with US and German layouts.
+
+### E. Add Commands and File-List Shortcuts
+
+Depends on A, C, and D.
+
+- Define tab shortcuts centrally with localized labels and help text. Set the macOS Control-for-Alt field on the create and close shortcuts.
 - Handle plain Left/Right only at the eligible file-list surface.
 - Add create, close, and undo commands without repeat-triggered lifecycle actions.
 - Add discoverable command-surface alternatives and file-list instructions.
 
 Acceptance gate: shortcuts operate in empty, loading, failed, and populated lists and do not consume events in other surfaces.
 
-### E. Validate UI and Update Published Docs
+### F. Validate UI and Update Published Docs
 
-Depends on B, C, and D.
+Depends on B, C, D, and E.
 
 - Complete the regression matrix below.
 - Measure horizontal space use in narrow dual panes with short and long titles.
 - Check close-overlay contrast, pointer focus, touch gestures, zoom, and supported themes.
-- Update in-app help and user/developer docs at the earliest applicable feature version.
-- Use version inheritance and the docs editor for any published structural changes.
-- State the unusual file-list arrow behavior and non-focusable controls clearly.
+- Update in-app help and the 3.0 user/developer docs listed in section 15.
+- Use the docs editor to copy inherited pages into 3.0 before editing them.
+- State the unusual file-list arrow behavior, the platform-specific tab shortcuts, and non-focusable controls clearly.
 
 Acceptance gate: no unresolved regressions in changed behavior and no unsupported accessibility claims.
 
@@ -571,6 +629,18 @@ Acceptance gate: no unresolved regressions in changed behavior and no unsupporte
 - Verify repeat behavior differs correctly between traversal and lifecycle actions.
 - Verify breadcrumb activation restores file-list focus even when navigation fails.
 - Verify keyboard commands provide every tab action without a focusable tab bar.
+
+### Shortcut Matching Tests
+
+Add these to the existing [useKeyboardShortcuts.test.ts](../frontend/src/hooks/__tests__/useKeyboardShortcuts.test.ts), with the platform helper overridden per case:
+
+- macOS: Option+letter matches when `event.key` is the changed character (for example `Ω`) and `event.keyCode` is the letter's code.
+- macOS: the `keyCode` fallback does not apply without Option, to punctuation or digits, or to shortcuts without `alt`.
+- macOS: tab shortcuts match Control+Plus and Control+Minus, and do not match Option+Plus, Option+Minus, Cmd+Plus, or Cmd+Minus.
+- Windows/Linux: tab shortcuts match Alt+Plus and Alt+Minus by character, including Shift-produced Plus and numeric-keypad Plus/Minus. Existing matching does not change.
+- Windows: AltGraph (Ctrl+Alt) text entry does not trigger Alt-only shortcuts.
+- All platforms: events with `isComposing` do not trigger shortcuts.
+- Labels: macOS shows "Option" and "Control" where decided; Windows/Linux labels for the seven affected shortcuts are unchanged; case alternatives show one upper-case letter; Plus and Minus show as words.
 
 ### Tab-Bar Layout and Pointer Tests
 
@@ -620,7 +690,8 @@ Check:
 - Selected-tab reveal that does not reset the strip unnecessarily.
 - Mouse down/up focus behavior, touch scrolling, and selected-header visibility.
 - Screen-reader announcements and keyboard command access.
-- Real keyboard behavior for plus and Option/Alt combinations on supported platforms.
+- Real keyboard behavior on a Mac with US and German layouts: Control+Plus/Minus for tabs, and Option+C, W, R, Z, Control+Option+T, and Control+Option+H for the existing editor and browser shortcuts. Test Safari and one Chromium browser.
+- Real keyboard behavior on Windows or Linux with US and German layouts: Alt+Plus/Minus, including the numeric keypad, and AltGraph text entry in inputs.
 
 Use mocked storage contracts for local-drive parity where a safe local fixture is not available. Do not browse another connection to complete manual validation.
 
@@ -629,7 +700,7 @@ Use mocked storage contracts for local-drive parity where a safe local fixture i
 Run the smallest relevant test set first from `frontend/`, for example:
 
 ```bash
-npm test -- src/pages/__tests__/useFileBrowserPane.test.tsx src/pages/__tests__/FileBrowserPane.test.tsx src/pages/__tests__/FileBrowser-navigation.test.tsx src/pages/__tests__/FileBrowser-url-routing.test.tsx src/pages/__tests__/FileBrowser-interactions.test.tsx src/pages/__tests__/FileBrowser-websocket-behavior.test.tsx src/config/__tests__/keyboardShortcuts.test.ts
+npm test -- src/pages/__tests__/useFileBrowserPane.test.tsx src/pages/__tests__/FileBrowserPane.test.tsx src/pages/__tests__/FileBrowser-navigation.test.tsx src/pages/__tests__/FileBrowser-url-routing.test.tsx src/pages/__tests__/FileBrowser-interactions.test.tsx src/pages/__tests__/FileBrowser-websocket-behavior.test.tsx src/config/__tests__/keyboardShortcuts.test.ts src/hooks/__tests__/useKeyboardShortcuts.test.ts
 npm run typecheck
 npm run lint
 ```
@@ -654,22 +725,20 @@ The three-tab example is a minimum capacity check with short labels, not a rule 
 
 ## 15. Published Documentation Work
 
-The implementation must update the resolved documentation pages for:
+Update published documentation in version 3.0 only, the current working version. Do not edit earlier versions.
 
-- Browsing and navigation: tabs, overlaid close controls, touch visibility, native overflow access, state retention, and last-tab protection.
-- Keyboard navigation and shortcuts: Left/Right while the file list owns focus; create, close, and command alternatives.
-- Dual-pane mode: independent selected tabs, active-pane actions, and hidden-pane retention.
-- Frontend architecture: session/runtime ownership, operation identity, route history, and subscription scope.
+Most target pages are inherited into 3.0 through `inherit.md` files. Before editing such a page, use the [docs editor tool](../website/content/docs/0.9/website-dev-guide/authoring-and-tooling/docs-editor-tool/index.md) to copy the resolved source page into 3.0, then edit the 3.0 copy. Read the resolved 3.0 Docs Style Guide first and apply its user-guide content test and Author and AI Review check.
 
-Current base pages include:
+| Page in 3.0 | Current resolved source | Required changes |
+|---|---|---|
+| User guide: keyboard navigation and shortcuts | [2.0](../website/content/docs/2.0/user-guide/find-and-browse-files/keyboard-navigation-and-shortcuts/index.md) | Tabs: Left/Right while the file list owns focus; create and close with Alt+Plus/Minus on Windows/Linux and Control+Plus/Minus on macOS; command alternatives. Existing shortcuts (package D): show macOS keys for Option+C, W, R, Z, and Control+Option+T, H, and state the Option-letter typing trade-off briefly. Remove the obsolete Ctrl+Alt+F entry; no such shortcut exists in the code. |
+| User guide: dual-pane mode | [2.0](../website/content/docs/2.0/user-guide/find-and-browse-files/dual-pane-mode/index.md) | Independent selected tabs per pane, active-pane actions, and hidden-pane retention. |
+| User guide: browsing and navigation content | Resolve when implementing | Tabs, overlaid close controls, touch visibility, native overflow access, state retention, and last-tab protection. Put this on the existing page that best covers browsing; do not create a new page unless no page fits. |
+| Developer guide: frontend overview | [0.7](../website/content/docs/0.7/developer-guide/frontend-architecture/frontend-overview/index.md) | Tab-session and runtime ownership, operation identity, route history, and subscription scope. |
+| Developer guide: keyboard shortcuts and command model | [2.0](../website/content/docs/2.0/developer-guide/frontend-architecture/keyboard-shortcuts-and-command-model/index.md) | Platform-aware modifier resolution, the macOS Control-for-Alt field, the letter-only `keyCode` fallback, composition handling, generated labels, and the tab shortcuts' file-list focus contract. Remove the obsolete Ctrl+Alt+F references in the quick-bar and browser-shortcut sections. |
+| Developer guide: settings, dialog, and keyboard-isolation conventions | [3.0](../website/content/docs/3.0/developer-guide/frontend-architecture/settings-form-dialog-pattern/index.md) | Read before changing dialogs or shortcut isolation. Update only if the shortcut isolation rules change. |
 
-- [Keyboard navigation and shortcuts](../website/content/docs/0.7/user-guide/find-and-browse-files/keyboard-navigation-and-shortcuts/index.md)
-- [Dual-pane mode](../website/content/docs/0.7/user-guide/find-and-browse-files/dual-pane-mode/index.md)
-- [Frontend overview](../website/content/docs/0.7/developer-guide/frontend-architecture/frontend-overview/index.md)
-- [Keyboard shortcuts and command model](../website/content/docs/0.7/developer-guide/frontend-architecture/keyboard-shortcuts-and-command-model/index.md)
-- [Settings, dialog, and keyboard-isolation conventions](../website/content/docs/3.0/developer-guide/frontend-architecture/settings-form-dialog-pattern/index.md)
-
-Resolve inheritance before editing. New feature copy belongs at its introduction version, not automatically in the base pages linked above.
+Package D fixes existing shortcuts. Its documentation changes can ship before the tab feature; keep tab content out of the published pages until the tab feature is ready.
 
 Keep this planning document outside published user documentation. Do not present the feature as available until the implementation is ready.
 
@@ -685,6 +754,7 @@ The feature is complete when:
 - Tab and breadcrumb controls never become the intended keyboard-focus destination.
 - Left/Right switch tabs only while the file list owns focus, including empty and failed lists.
 - Every keyboard tab action is available without focusing the strip.
+- Tab shortcuts and the seven existing Option+letter shortcuts work on macOS and on US and German layouts, and labels show the platform-correct keys.
 - Selection and scroll survive repeated switches between identical locations.
 - No stale read, operation result, history entry, or recovery snapshot updates the wrong tab.
 - Hidden tabs do not cause unbounded caches or additional live subscriptions.
