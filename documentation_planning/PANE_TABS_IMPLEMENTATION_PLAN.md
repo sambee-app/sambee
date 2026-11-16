@@ -2,23 +2,13 @@
 
 ## Status and Purpose
 
-This is a proposed implementation plan, not documentation of a released feature. It replaces the earlier chat proposals where they differ.
+This is a proposed implementation plan, not documentation of a released feature.
 
 The feature adds independent folder tabs to each Sambee pane. Users can keep several browsing positions open without losing their selections or scroll positions.
 
+Horizontal space is a primary design constraint, especially in dual-pane mode. Use compact titles and controls so each pane can show several useful tabs. Scroll when needed instead of spending width on separate icon slots, repeated location details, or navigation buttons.
+
 This change does not add document tabs. File viewers and editors keep their existing workspace behavior.
-
-## Required Changes to the Earlier Proposal
-
-The following requirements take priority over the earlier recommendations:
-
-- The tab bar and all its controls must stay out of keyboard focus navigation.
-- Breadcrumbs must also stay out of keyboard focus navigation, in both single-pane and dual-pane layouts.
-- Unmodified Left and Right switch tabs while the file list has keyboard focus.
-- Keyboard focus stays in the file list after a tab switch.
-- There is no keyboard mode that moves focus into the tab bar.
-
-Do not implement roving tab focus, tab-header Home/End navigation, or an Enter action on a focused tab header. Those behaviors belong to the earlier proposal and are no longer applicable.
 
 ## 1. Scope
 
@@ -29,8 +19,8 @@ Do not implement roving tab focus, tab-header Home/End navigation, or an Enter a
 - Independent browsing state for tabs at different or identical locations.
 - A non-focusable tab bar above non-focusable breadcrumbs.
 - Mouse, touch, and file-list keyboard operation.
+- Compact content-sized tabs with close controls overlaid on their titles.
 - Horizontal overflow with an always-visible add button.
-- Open a folder in a new tab.
 - Undo the most recent tab close.
 - Restore tab locations and order after a reload in the same browser session.
 - Correct URL, browser-history, viewer, operation, and real-time-update behavior.
@@ -58,7 +48,7 @@ Shared connection, pane, view, and sort controls
 
 LEFT PANE                               RIGHT PANE
 +-----------------------------------+   +-----------------------------------+
-| [Images] [Test x] [Reports]     [+] |   | [Demo] [Exports x]             [+] |
+| [Images][Test][Reports]       [+] |   | [Demo][Exports]                [+] |
 +-----------------------------------+   +-----------------------------------+
 | Demo / Test                       |   | Demo / Exports                    |
 +-----------------------------------+   +-----------------------------------+
@@ -70,7 +60,9 @@ LEFT PANE                               RIGHT PANE
 Shared file-operation controls and existing per-pane status information
 ```
 
-In the diagram, `x` represents the close icon. Use the existing icon library rather than a text character in the interface.
+The diagram omits close icons because they do not have their own layout space. Each visible close icon overlays the trailing end of its tab title. The add button immediately follows the tabs when they fit; the diagram's space before it is not a required spacer.
+
+Do not add folder icons, connection badges, tab numbers, or persistent status icons to individual headers. Keep location details in breadcrumbs and hover tooltips, and loading/error details in the existing content surfaces.
 
 ### Selection, Active Pane, and Focus
 
@@ -86,36 +78,58 @@ Both panes always have a selected tab. Only one visible pane is active.
 
 Do not rely only on yellow to identify the selected tab. A selected tab must remain clear in the inactive pane and in all supported themes.
 
-### Geometry
+### Compact Geometry
 
 Use a single tab row even when only one tab exists. Do not hide the bar or change its height when tabs are created or closed.
 
-Use these as initial design targets, then reuse the nearest suitable theme tokens:
+Tab width follows the title plus small symmetric padding, clamped to a compact range. The close button must not participate in width calculation. Do not assign equal widths or stretch tabs to fill unused space.
+
+Use these as initial design targets, then reuse the nearest suitable theme tokens. Minimum widths are interaction safety limits, not preferred widths:
 
 | Element | Mouse layout | Touch-friendly layout |
 |---|---:|---:|
 | Tab-bar height | 36 px | 48 px |
-| Tab minimum width | 112 px | 144 px |
-| Tab maximum width | 224 px | 240 px |
+| Minimum width of a closable tab | 56 px | 88 px |
+| Tab maximum width | 160 px | 160 px |
+| Title padding at each inline edge | 6 px | 6 px |
+| Gap between tabs | 0 px | 0 px |
 | Add and close target | At least 24 by 24 px | At least 44 by 44 px |
 
-Define any new sizes centrally. Do not scatter literal dimensions through components.
+The touch minimum leaves at least 44 px of unobstructed tab-selection width beside the 44 px close target. The two hit regions must not overlap. The mouse minimum similarly leaves at least 24 px for selection beside the close target.
 
-Reserve close-button space in closable tabs. Showing the icon must not move the label or change the tab width.
+The only remaining tab needs no close target and may use a smaller content-sized width, subject to the applicable selection-target minimum.
+
+Clamp the maximum tab width to the available strip width as well. A selected tab must fit completely beside the add control at supported pane widths. When space is tight, show fewer tabs, not smaller hit targets.
+
+Define new dimensions centrally. Do not scatter literal dimensions through components.
+
+### Close Overlay, Not a Reserved Slot
+
+- Position the close control absolutely at the inline end of the tab, centered vertically.
+- Lay out the title across the tab's normal inner width. Do not add a close column, extra title padding, or a permanent blank suffix for the button.
+- When the control is visible, cover only the title beneath its hit region with an opaque surface matching that tab's current background.
+- Use a short fade at the overlay's inner edge to soften the text cutoff without making the close icon translucent.
+- Match selected, unselected, hover, and theme backgrounds. Do not leave text visible through the icon.
+- Showing or hiding the overlay must not change tab widths, label layout, neighboring positions, or strip scroll offset.
+- Keep the button's hit target larger than the glyph. Do not reduce the touch target to save title space.
+
+The intentional trade-off is that the end of a title can be covered while the close control is visible. Preserve the leading part of the title; use the full accessible name, hover tooltip, and selected tab's breadcrumbs for the complete location.
 
 ## 3. Labels and Location Information
 
 - Use the current folder name as the tab label.
 - At a connection or drive root, use the connection or drive name.
 - In an archive, use the current archive-folder name, or the archive name at its root.
-- When different locations have matching labels, add the shortest useful parent or connection suffix within that pane.
+- Do not append parent paths or connection suffixes to visible labels, even when names match. Repeated context consumes scarce width; show it in the full accessible name and hover tooltip instead.
 - Allow exact duplicate locations. They can hold different selections and scroll positions.
-- Shorten long labels visually without changing their accessible names.
+- Shorten long labels with a trailing ellipsis without changing their accessible names. The close overlay may cover that ellipsis while visible.
 - Use existing grapheme-aware identifier helpers where shortening is required. Preserve Unicode names and bidirectional text.
 - Show the complete connection and path in a hover tooltip. Do not make the header focusable to expose the tooltip.
 - Keep breadcrumbs available below the tab bar so touch users can inspect and navigate the selected location.
 
-Tab labels follow the committed location. If navigation is pending, show pending state without presenting old files as the contents of a new location.
+Matching visible names are allowed. Users can select a tab to inspect its breadcrumbs without losing that tab's saved browsing state. Do not add another title row or widen all tabs to distinguish an occasional collision.
+
+Tab labels follow the committed location. If navigation is pending, show pending state in the existing content area without presenting old files as the contents of a new location. Do not reserve a spinner or error-icon slot in each header.
 
 ## 4. Creating Tabs
 
@@ -123,7 +137,9 @@ Tab labels follow the committed location. If navigation is pending, show pending
 
 Place the add button immediately after the tabs when they fit. On overflow, keep it at the right edge outside the scrollable strip.
 
-Its label is "New tab". Its tooltip includes the configured shortcut.
+Use one compact icon-only control per pane with no visible text label or wide container padding. Reserve only its applicable hit-target width; do not allocate another toolbar-sized section.
+
+Its accessible label is "New tab". Its tooltip includes the configured shortcut.
 
 On activation:
 
@@ -141,14 +157,6 @@ Start at the top with no selected files. Focus the first available row through t
 
 A tab may share cached immutable listing data, but its selection, focus, history, and pagination state must remain independent.
 
-### Open in New Tab
-
-Add "Open in new tab" to the existing action menu for eligible folders. Use the current action-policy mechanism rather than a separate menu implementation.
-
-The new tab opens to the right, becomes selected, and receives file-list focus. Use the same behavior for supported folders inside archives.
-
-Do not add this folder action to ordinary files. Keep existing viewer actions and Ctrl-click selection behavior.
-
 ## 5. Selecting Tabs
 
 Clicking or tapping a tab:
@@ -165,15 +173,25 @@ Do not activate a tab on hover. Do not use delayed hover switching.
 
 If the selected tab is activated again, keep its state unchanged and return focus to its file list.
 
+The close overlay owns only its own hit region. The remaining title area selects the tab. A tap on an always-visible close target closes the tab directly; it must not select the tab first or require a second tap.
+
 ## 6. Closing Tabs and Undo
 
 ### Close Controls
 
-In mouse layouts, show the close icon on the selected tab and on other tabs during hover. In touch-friendly layouts, show it on every closable tab.
+On fine-pointer devices with reliable hover, show the close overlay only on the hovered tab, including when that tab is selected. Hide it when the pointer leaves so the title can use the full width.
+
+On touch devices, devices without reliable hover, and when touch-friendly controls are enabled, always show the close overlay on every closable tab, selected or not. Do not require a hover, long press, or first selection to reveal it. Prefer this behavior on mixed-input devices that support touch.
+
+Always-visible touch controls intentionally cover part of the title; they do not get a reserved slot or cause all touch tabs to become wide. Preserve the safe selection and close targets defined in Compact Geometry.
 
 Use the label "Close <tab name> tab", with enough location information to distinguish otherwise identical targets.
 
-The close control must not also activate the surrounding tab. Do not nest interactive buttons.
+Use the existing close icon. The close control must not also activate the surrounding tab. Render selection and close as sibling controls within a positioned wrapper; do not nest interactive buttons.
+
+Activate close on a completed click or tap, not on pointer down. A swipe or scrollbar drag must never close a tab. Hidden mouse overlays must not intercept clicks through an invisible hit region.
+
+Clip the overlay to its own tab and the strip viewport. Do not let a close control cover the next tab or the add button. Do not offer a partially clipped close target at a viewport edge: reveal the tab by scrolling or selecting its exposed title before allowing pointer close.
 
 ### Selection Rules
 
@@ -216,13 +234,14 @@ Closing a folder tab does not delete files. Do not add a confirmation dialog for
 
 Apply the following policy in single-pane, dual-pane, and touch-friendly layouts:
 
-- No tab-strip wrapper, tab header, close button, add button, or overflow button enters sequential keyboard focus navigation.
+- No tab-strip wrapper, scroll container, tab header, close button, or add button enters sequential keyboard focus navigation.
 - No breadcrumb root or ancestor control enters sequential keyboard focus navigation.
 - Do not programmatically focus these controls during create, select, close, resize, or restoration.
 - Give native pointer controls `tabIndex={-1}` and prevent pointer activation from leaving focus there.
 - Retain native control semantics, accessible names, and assistive-technology activation. Do not hide the controls with `aria-hidden`.
 - After tab or breadcrumb activation, explicitly focus the relevant file list after the state change commits.
 - Do not use blanket touch-event cancellation. Preserve scrolling, taps, and synthesized activation.
+- Keep strip-scrolling gestures from moving focus out of the file list.
 - Keep selected and current breadcrumb text noninteractive.
 
 `tabIndex={-1}` alone is not sufficient: native buttons can still receive focus on pointer activation. Test the final focused element after both mouse and touch activation.
@@ -268,6 +287,8 @@ This is an intentional departure from the conventional focusable WAI-ARIA tabs p
 
 Use a named group of native selection buttons with `aria-pressed` for the pointer tab strip, rather than claiming the full `tablist`/`tab` keyboard interaction model. Associate the visible content and selected location with stable labels.
 
+Keep full location names on selection and close controls even when a title is shortened or covered by its close overlay. Do not use the covered text fragment as the accessible name. The fade and overlay background are decorative.
+
 Give the file list localized instructions that explain Left/Right tab switching and the create/close shortcuts. Announce selected tab name and position, for example "Test, tab 2 of 4", without reading the whole directory on every switch.
 
 Expose New tab, Close tab, Undo close tab, Previous tab, and Next tab in the existing keyboard-accessible command surface. This also provides a path for users whose assistive technology or keyboard layout reserves an arrow or Alt combination.
@@ -278,15 +299,32 @@ Do not claim full accessibility compliance from attributes alone. Validate scree
 
 ## 8. Overflow and Responsive Behavior
 
-- Keep one horizontally scrollable row. Do not wrap or shrink tabs below the agreed readable minimum.
-- Keep the add control outside the scrolling region.
-- Provide non-focusable pointer scroll controls when the mouse layout overflows.
-- Support horizontal trackpad scrolling and touch swipes without activating tabs accidentally.
+### Width Budget and Scrolling
+
+The add button is the only persistent control outside the strip. All remaining horizontal space belongs to tabs. Do not reserve space for previous/next buttons, an overflow menu, a tab count, or empty toolbar margins.
+
+- Use compact content-sized tabs, then scroll when their combined width exceeds the strip.
+- Do not compress every tab to force all tabs into view. Keep the interaction minimums and readable leading text.
+- Support horizontal trackpad movement, Shift+wheel, and native touch scrolling.
+- Keep a thin native horizontal scrollbar available in mouse layouts when content overflows, so scrolling does not require a trackpad or a special gesture. It must not consume horizontal tab space.
+- Keep overall tab-bar height stable if a platform scrollbar needs vertical space. Account for it within the bar's sizing rather than changing file-list height as overflow appears.
+- Use subtle, noninteractive edge fades only at edges where tabs are clipped. They must not block title selection, close targets, or the scrollbar.
+- Do not add custom wheel translation, drag-scrolling behavior, or overlay arrow controls in the first version. Prefer native scrolling and the existing file-list keyboard path.
+
+The strip scroll container itself stays out of sequential keyboard navigation, including browsers that otherwise make overflow containers focusable automatically.
+
+### Reveal and Clipping Rules
+
 - Reveal the selected tab on selection, creation, close, pane resize, and layout changes.
-- Preserve file-list focus when scrolling the strip.
+- Scroll only as far as needed to expose the selected tab; do not center it or reset the strip to the start.
+- On programmatic reveal, expose both the tab-selection area and the complete close target, if present.
+- Manual scrolling may move the selected header out of view. Do not snap back until a selection or layout action requires a reveal.
+- Preserve file-list focus and selection while scrolling the strip.
+- Keep the add button fully visible and separate from the scrollable content.
 - Do not let the tab strip cause page-level horizontal overflow.
-- Constrain long labels with flex sizing and the existing identifier conventions.
 - Preserve both panes' tab collections when a narrow viewport hides one pane.
+
+Use one layout structure for mouse and touch. Change close visibility, target sizes, and scrollbar presentation through the existing input-capability mechanisms, not separate tab-bar implementations.
 
 Use existing input-capability and touch-layout preferences. Do not assume a narrow viewport always means touch input.
 
@@ -472,13 +510,18 @@ Depends on A and the selected-session interface from B.
 
 - Add a small controlled pane-tab-bar component.
 - Place it above the existing breadcrumbs.
-- Implement labels, close visibility, add placement, overflow, and touch targets.
+- Implement content-sized widths, compact caps, zero inter-tab gaps, and location details outside the visible titles.
+- Render close buttons as absolute overlays with matching backgrounds and fades, not reserved layout slots.
+- Implement hover-only mouse close controls and always-visible touch close controls, including mixed-input handling.
+- Keep the add button as the only fixed-width control outside the strip.
+- Use native horizontal scrolling and scrollbar access without dedicated arrow-button columns.
+- Handle clipped close targets and reveal selected tabs without resetting manual strip position unnecessarily.
 - Apply the non-focusable control policy and explicit file-list focus restoration.
 - Make breadcrumbs non-focusable in every layout.
 - Remove obsolete breadcrumb-specific focus options and Escape handling only after checking all dependent callers.
 - Do not remove the broader pane `disableTabFocus` behavior where other controls still use it.
 
-Acceptance gate: component tests prove pointer behavior, focus destination, single-tab protection, and overflow controls.
+Acceptance gate: component tests prove pointer behavior, focus destination, single-tab protection, and close-overlay state. Browser measurements prove compact widths, stable geometry, safe hit regions, and native overflow access.
 
 ### D. Add Commands and File-List Shortcuts
 
@@ -487,7 +530,6 @@ Depends on A and C.
 - Define tab shortcuts centrally with localized labels and help text.
 - Handle plain Left/Right only at the eligible file-list surface.
 - Add create, close, and undo commands without repeat-triggered lifecycle actions.
-- Add Open in new tab through the existing folder action policy.
 - Add discoverable command-surface alternatives and file-list instructions.
 
 Acceptance gate: shortcuts operate in empty, loading, failed, and populated lists and do not consume events in other surfaces.
@@ -497,7 +539,8 @@ Acceptance gate: shortcuts operate in empty, loading, failed, and populated list
 Depends on B, C, and D.
 
 - Complete the regression matrix below.
-- Check real browser layout, pointer focus, touch gestures, zoom, and supported themes.
+- Measure horizontal space use in narrow dual panes with short and long titles.
+- Check close-overlay contrast, pointer focus, touch gestures, zoom, and supported themes.
 - Update in-app help and user/developer docs at the earliest applicable feature version.
 - Use version inheritance and the docs editor for any published structural changes.
 - State the unusual file-list arrow behavior and non-focusable controls clearly.
@@ -530,6 +573,22 @@ Acceptance gate: no unresolved regressions in changed behavior and no unsupporte
 - Verify breadcrumb activation restores file-list focus even when navigation fails.
 - Verify keyboard commands provide every tab action without a focusable tab bar.
 
+### Tab-Bar Layout and Pointer Tests
+
+- Verify close overlays are not part of tab-width calculation and no close-specific title padding or blank slot remains.
+- Verify hovering does not change any tab's width, title layout, neighboring position, or strip scroll offset.
+- Verify touch and mixed-input layouts show close overlays on every closable tab without a reveal gesture.
+- Verify hidden mouse overlays cannot close a tab through an invisible hit region.
+- Verify selection and close are separate actions and one close tap never selects the target tab first.
+- Verify a swipe, scrollbar drag, or cancelled pointer gesture cannot select or close a tab.
+- Verify overlays cover underlying title text cleanly in selected, unselected, and hovered states across themes.
+- Verify overlays cannot cover adjacent tabs or the add control, and clipped close targets are not actionable.
+- Verify full accessible names survive truncation, duplicate visible names, and title coverage.
+- Verify only the add button consumes fixed horizontal space outside the strip.
+- Verify native scrollbar access works with a mouse without adding scroll-arrow columns.
+
+Use component tests for state and event behavior. Use real browser measurements for layout and hit regions; DOM-only tests do not establish that the space-saving design works.
+
 ### Integration Tests
 
 - Reload a matching session and follow a different explicit link.
@@ -553,8 +612,13 @@ Check:
 
 - Single and dual panes at wide and narrow widths.
 - Long, duplicate, Unicode, and bidirectional labels.
-- Enough tabs to overflow both panes.
-- Browser zoom and touch-friendly targets.
+- Short names that should produce narrow content-sized tabs, without minimum widths becoming the default.
+- Enough tabs to overflow both panes, with the add button as the only fixed external control.
+- Mouse hover transitions with identical before/after header widths and positions.
+- Always-visible touch close overlays with no reserved title slot.
+- Browser zoom and nonoverlapping touch selection/close targets.
+- Native horizontal scrollbar use, touch swipes, and partial tabs at both edges.
+- Selected-tab reveal that does not reset the strip unnecessarily.
 - Mouse down/up focus behavior, touch scrolling, and selected-header visibility.
 - Screen-reader announcements and keyboard command access.
 - Real keyboard behavior for plus and Option/Alt combinations on supported platforms.
@@ -575,11 +639,25 @@ Add the actual new tab test paths to the same test invocation. Include the exist
 
 No application tests are required for creating this planning document alone. Validate its local references and formatting.
 
+### Measurable Geometry Checks
+
+Run these checks at the current app font and representative narrow pane widths:
+
+- A closable tab with a short title uses the content-derived width or safety floor, not the 160 px cap.
+- Showing a mouse close overlay changes its tab's bounding width and neighboring positions by 0 CSS px.
+- A touch tab provides at least 44 by 44 px for selection outside the close target and at least 44 by 44 px for close.
+- A mouse tab provides at least 24 by 24 px for selection outside the close target and at least 24 by 24 px for close.
+- Combined fixed horizontal space outside the strip equals only the add control and any actual border, with no hidden scroll-button or spacer allocation.
+- Three short closable titles fit in a 360 px pane in touch mode at the proposed minimums: three 88 px tabs plus the 44 px add target use 308 px before borders.
+- When the titles are longer, overflow preserves the same target sizes and keeps the selected tab and add control fully usable.
+
+The three-tab example is a minimum capacity check with short labels, not a rule to assign every tab an 88 px width. If theme metrics require adjustments, record the measured values and preserve the capacity and hit-target requirements rather than silently widening all tabs.
+
 ## 15. Published Documentation Work
 
 The implementation must update the resolved documentation pages for:
 
-- Browsing and navigation: tabs, state retention, overflow, and last-tab protection.
+- Browsing and navigation: tabs, overlaid close controls, touch visibility, native overflow access, state retention, and last-tab protection.
 - Keyboard navigation and shortcuts: Left/Right while the file list owns focus; create, close, and command alternatives.
 - Dual-pane mode: independent selected tabs, active-pane actions, and hidden-pane retention.
 - Frontend architecture: session/runtime ownership, operation identity, route history, and subscription scope.
@@ -601,6 +679,10 @@ Keep this planning document outside published user documentation. Do not present
 The feature is complete when:
 
 - Each pane retains at least one independent tab.
+- Compact content-sized tabs use the agreed horizontal budget instead of wide default widths, extra icons, or repeated path suffixes.
+- Close controls overlay titles without a reserved slot or hover-induced layout shift.
+- Touch and mixed-input devices expose close directly, with separate safe selection and close targets.
+- Only the add control takes fixed space outside the strip; native scrolling makes overflow usable without navigation-button columns.
 - Tab and breadcrumb controls never become the intended keyboard-focus destination.
 - Left/Right switch tabs only while the file list owns focus, including empty and failed lists.
 - Every keyboard tab action is available without focusing the strip.
