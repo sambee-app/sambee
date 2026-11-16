@@ -1,0 +1,52 @@
+{{/* Purpose: Renders 4:8 editorial deep-dive chapters with a left summary rail and square-dot detail list. */}}
+{{ $section := .section }}
+{{ if and $section $section.enabled }}
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell ledger-section marketing-section{{ if $section.id }} marketing-anchor-target{{ end }}">
+  {{ if $section.title }}
+  <div class="site-gutter marketing-section-header">
+    {{ with $section.eyebrow }}
+    <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
+    {{ end }}
+    <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
+    {{ with $section.intro }}
+    <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+    {{ end }}
+  </div>
+  {{ else }}
+  {{ with $section.sr_title }}
+  <h2 class="visually-hidden">{{ . }}</h2>
+  {{ end }}
+  {{ end }}
+
+  <div class="marketing-chapters">
+    {{ range $chapter := $section.chapters }}
+    <article class="site-gutter marketing-chapter">
+      <div class="marketing-chapter-grid">
+        <div class="marketing-chapter-rail">
+          {{ with $chapter.index }}
+          <span class="type-label-eyebrow-strong type-color-accent eyebrow-stack">{{ . }}</span>
+          {{ end }}
+          <h3 class="marketing-chapter-title type-title-md-tight type-color-ink">{{ $chapter.title }}</h3>
+          {{ with $chapter.callout }}
+          <div class="marketing-chapter-callout ui-bg-surface-mid ui-current-primary-inset type-label-sm type-color-ink">{{ . }}</div>
+          {{ end }}
+        </div>
+
+        <div class="marketing-chapter-body">
+          {{ with $chapter.lead }}
+          <p class="marketing-chapter-lead marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+          {{ end }}
+          {{ with $chapter.points }}
+          <ul class="marketing-list marketing-chapter-points">
+            {{ range . }}
+            <li class="ui-list-dot-item ui-color-primary type-copy"><span class="marketing-prose type-color-ink">{{ . | markdownify }}</span></li>
+            {{ end }}
+          </ul>
+          {{ end }}
+        </div>
+      </div>
+    </article>
+    {{ end }}
+  </div>
+</section>
+{{ end }}

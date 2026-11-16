@@ -1,0 +1,52 @@
+{{/* Purpose: Renders data-driven technical marketing and comparison pages outside the docs tree. */}}
+{{ define "head" }}
+{{- $dataKey := .Params.data_key | default "" -}}
+{{- $pageData := cond (ne $dataKey "") (index hugo.Data $dataKey) nil -}}
+{{- if $pageData -}}
+  {{- with $pageData.faq -}}
+    {{- if and .enabled .items -}}
+      {{- $entities := slice -}}
+      {{- range .items -}}
+        {{- $plainAnswer := .answer | markdownify | plainify | htmlUnescape | strings.TrimSpace -}}
+        {{- $entities = $entities | append (dict
+          "@type" "Question"
+          "name" .question
+          "acceptedAnswer" (dict
+            "@type" "Answer"
+            "text" $plainAnswer
+          )
+        ) -}}
+      {{- end -}}
+      {{- $schema := dict
+        "@context" "https://schema.org"
+        "@type" "FAQPage"
+        "mainEntity" $entities
+      -}}
+  <script type="application/ld+json">{{ $schema | jsonify | safeJS }}</script>
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{ end }}
+
+{{ define "main" }}
+{{- $dataKey := .Params.data_key | default "" -}}
+{{- if not $dataKey -}}
+  {{- errorf "Comparison page %q is missing required front-matter parameter data_key." .File.Path -}}
+{{- end -}}
+{{- $pageData := index hugo.Data $dataKey -}}
+{{- if not $pageData -}}
+  {{- errorf "Comparison page %q references missing hugo.Data.%s." .File.Path $dataKey -}}
+{{- end -}}
+
+<div class="marketing-shell" data-pagefind-body>
+  {{ partial "marketing/hero-split.html" (dict "hero" $pageData.hero) }}
+  {{ partial "marketing/subnav.html" (dict "subnav" $pageData.subnav) }}
+  {{ partial "marketing/fit-split.html" (dict "section" $pageData.fit) }}
+  {{ partial "marketing/matrix.html" (dict "section" $pageData.matrix) }}
+  {{ partial "marketing/chapter-list.html" (dict "section" $pageData.pillars_part_a) }}
+  {{ partial "marketing/visual-proof.html" (dict "section" $pageData.architecture) }}
+  {{ partial "marketing/chapter-list.html" (dict "section" $pageData.pillars_part_b) }}
+  {{ partial "marketing/test-drive.html" (dict "section" $pageData.test_drive) }}
+  {{ partial "marketing/faq.html" (dict "section" $pageData.faq) }}
+</div>
+{{ end }}

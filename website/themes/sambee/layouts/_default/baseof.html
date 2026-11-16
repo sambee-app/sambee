@@ -42,6 +42,7 @@
   {{ else }}
   {{ partial "essentials/style.html" . }}
   {{ end }}
+  {{ block "head" . }}{{ end }}
 </head>
 <body{{ if $pagefindIgnore }} data-pagefind-ignore{{ end }}>
   {{ if not hugo.IsProduction }}

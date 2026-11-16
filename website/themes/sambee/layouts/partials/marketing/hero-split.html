@@ -1,0 +1,50 @@
+{{/* Purpose: Renders the asymmetric 7:5 comparison hero with an Executive Scorecard panel. */}}
+{{ $hero := .hero }}
+{{ if and $hero $hero.enabled }}
+<section class="shell-section ledger-shell ledger-section marketing-hero">
+  <div class="marketing-hero-grid">
+    <div class="site-gutter marketing-hero-copy">
+      {{ with $hero.kicker }}
+      <span class="page-kicker type-label-eyebrow ui-color-primary">
+        <span class="page-kicker-rule ui-bg-primary" aria-hidden="true"></span>
+        {{ . }}
+      </span>
+      {{ end }}
+      <h1 class="marketing-hero-title type-hero type-color-ink">{{ $hero.title }}</h1>
+      {{ with $hero.lead }}
+      <p class="marketing-hero-lead marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+      {{ end }}
+      {{ with $hero.ctas }}
+      <div class="marketing-actions">
+        {{ range $cta := . }}
+        {{ $ctaClass := partial "components/button-kind-class.html" (dict "kind" $cta.kind) }}
+        {{ $ctaHref := partial "components/link-href.html" (dict "link" $cta) }}
+        {{ $isExternal := or (hasPrefix $ctaHref "http://") (hasPrefix $ctaHref "https://") }}
+        {{ if $ctaHref }}
+        <a class="btn marketing-cta {{ $ctaClass }}" href="{{ $ctaHref }}"{{ if $isExternal }} target="_blank" rel="noopener"{{ end }}{{ with $cta.id }} data-marketing-link="{{ . }}"{{ end }}>{{ $cta.label }}</a>
+        {{ end }}
+        {{ end }}
+      </div>
+      {{ end }}
+    </div>
+
+    {{ with $hero.scorecard }}
+    <aside class="site-gutter marketing-scorecard ledger-surface-low" aria-label="{{ .aria_label | default "Executive scorecard" }}">
+      <div class="marketing-scorecard-header">
+        <span class="type-label-eyebrow-strong type-color-accent">{{ .header }}</span>
+      </div>
+      <dl class="marketing-scorecard-list">
+        {{ range .rows }}
+        <div class="marketing-scorecard-row">
+          <dt class="marketing-scorecard-label type-label-xs type-color-muted">{{ .label }}</dt>
+          <dd class="marketing-scorecard-value marketing-prose type-copy type-color-ink">
+            <strong>{{ .value | markdownify }}</strong>{{ with .contrast }} <span class="marketing-scorecard-contrast type-color-muted">{{ . | markdownify }}</span>{{ end }}
+          </dd>
+        </div>
+        {{ end }}
+      </dl>
+    </aside>
+    {{ end }}
+  </div>
+</section>
+{{ end }}

@@ -1,0 +1,43 @@
+{{/* Purpose: Render a responsive light/dark screenshot pair that switches automatically with the active site theme. */}}
+{{- $src := .Src | default .src | default "" -}}
+{{- $darkSrc := .DarkSrc | default .dark_src | default "" -}}
+{{- $alt := .Alt | default .alt | default "" -}}
+{{- $wrapperClass := .WrapperClass | default "" -}}
+{{- $imageClass := .Class | default "" -}}
+{{- $loading := .Loading | default "lazy" -}}
+{{- $fetchPriority := .FetchPriority | default "" -}}
+{{- $sizes := .Sizes | default "100vw" -}}
+{{- $widths := .Widths -}}
+
+{{- if $src -}}
+{{- $lightClasses := delimit ( complement (slice "") (slice "ui-device-preview-image" "ui-theme-preview-image" "ui-theme-preview-image--light" $imageClass) ) " " -}}
+{{- $darkClasses := delimit ( complement (slice "") (slice "ui-device-preview-image" "ui-theme-preview-image" "ui-theme-preview-image--dark" $imageClass) ) " " -}}
+<div class="ui-theme-preview{{ if $darkSrc }} ui-theme-preview--theme-aware{{ end }}{{ with $wrapperClass }} {{ . }}{{ end }}">
+  {{- $lightArgs := dict
+    "Src" $src
+    "Alt" $alt
+    "Class" $lightClasses
+    "Loading" $loading
+    "FetchPriority" $fetchPriority
+    "Sizes" $sizes
+  -}}
+  {{- if $widths -}}
+    {{- $lightArgs = merge $lightArgs (dict "Widths" $widths) -}}
+  {{- end -}}
+  {{ partial "components/responsive-image.html" $lightArgs }}
+  {{- with $darkSrc -}}
+    {{- $darkArgs := dict
+      "Src" .
+      "Alt" $alt
+      "Class" $darkClasses
+      "Loading" $loading
+      "FetchPriority" $fetchPriority
+      "Sizes" $sizes
+    -}}
+    {{- if $widths -}}
+      {{- $darkArgs = merge $darkArgs (dict "Widths" $widths) -}}
+    {{- end -}}
+    {{ partial "components/responsive-image.html" $darkArgs }}
+  {{- end -}}
+</div>
+{{- end -}}

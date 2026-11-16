@@ -1,0 +1,18 @@
+{{/* Purpose: Renders the sticky section jump bar directly beneath the global site header. */}}
+{{ $subnav := .subnav }}
+{{ if and $subnav $subnav.enabled }}
+<nav class="shell-section ledger-shell marketing-subnav ledger-surface-mid" aria-label="{{ $subnav.aria_label | default "Page sections" }}">
+  <div class="site-gutter marketing-subnav-inner">
+    <ul class="marketing-subnav-list">
+      {{ range $item := $subnav.items }}
+      {{ $href := partial "components/link-href.html" (dict "link" $item) }}
+      {{ if $href }}
+      <li class="marketing-subnav-item">
+        <a class="marketing-subnav-link type-label-sm type-color-muted ui-transition-color type-hover-ink ui-hover-surface-low" href="{{ $href }}"{{ with $item.id }} data-marketing-link="{{ . }}"{{ end }}>{{ $item.label }}</a>
+      </li>
+      {{ end }}
+      {{ end }}
+    </ul>
+  </div>
+</nav>
+{{ end }}

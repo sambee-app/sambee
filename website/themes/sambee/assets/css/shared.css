@@ -40,11 +40,39 @@ Layout Shells
   @apply px-5 md:px-8;
 }
 
+.ledger-section {
+  --ledger-section-divider-width: 2px;
+  border-top: var(--ledger-section-divider-width) solid var(--color-clr-rule-strong);
+  border-bottom: var(--ledger-section-divider-width) solid var(--color-clr-rule-strong);
+
+  .dark & {
+    border-top-color: var(--color-clr-darkmode-rule-strong);
+    border-bottom-color: var(--color-clr-darkmode-rule-strong);
+  }
+}
+
+.site-main > [data-pagefind-body] > .ledger-section:first-child,
+.ledger-section + .ledger-section {
+  margin-top: calc(var(--ledger-section-divider-width) * -1);
+}
+
+.site-main > [data-pagefind-body] > .ledger-section:last-child {
+  margin-bottom: calc(var(--ledger-section-divider-width) * -1);
+}
+
 /*
 ==============================
 Eyebrow Helpers
 ==============================
 */
+
+.page-kicker {
+  @apply inline-flex items-center gap-3;
+}
+
+.page-kicker-rule {
+  @apply block h-[2px] w-12 shrink-0;
+}
 
 .eyebrow-stack {
   display: block;
@@ -495,11 +523,48 @@ Surface Helpers
   @apply bg-clr-surface-low dark:bg-clr-darkmode-surface-low;
 }
 
+.ledger-surface-mid {
+  @apply bg-clr-surface-mid dark:bg-clr-darkmode-surface-mid;
+}
+
 .ledger-surface-high {
   @apply bg-clr-surface-high dark:bg-clr-darkmode-surface-high;
 }
 
 .ledger-surface-ink {
   @apply bg-clr-surface-inverse text-white dark:bg-clr-darkmode-surface-inverse dark:text-clr-darkmode-surface-page;
+}
+
+/*
+==============================
+Device & Theme-Aware Previews
+==============================
+*/
+
+.ui-device-preview-image {
+  --ui-device-preview-shadow-primary: rgb(0 0 0 / 0.14);
+  --ui-device-preview-shadow-secondary: rgb(0 0 0 / 0.08);
+  filter: drop-shadow(0 8px 12px var(--ui-device-preview-shadow-primary)) drop-shadow(0 3px 4px var(--ui-device-preview-shadow-secondary));
+
+  .dark & {
+    --ui-device-preview-shadow-primary: rgb(0 0 0 / 0.28);
+    --ui-device-preview-shadow-secondary: rgb(0 0 0 / 0.18);
+  }
+}
+
+.ui-theme-preview-image {
+  @apply block w-full max-w-full;
+}
+
+.ui-theme-preview--theme-aware .ui-theme-preview-image--dark {
+  display: none;
+}
+
+.dark .ui-theme-preview--theme-aware .ui-theme-preview-image--light {
+  display: none;
+}
+
+.dark .ui-theme-preview--theme-aware .ui-theme-preview-image--dark {
+  display: block;
 }
 

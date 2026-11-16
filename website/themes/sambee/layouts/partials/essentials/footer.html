@@ -1,7 +1,8 @@
-{{/* Purpose: Renders the simplified shared footer with copyright, repository, and legal links. */}}
+{{/* Purpose: Renders the simplified shared footer with copyright, repository, comparison, and legal links. */}}
 {{ $linksParams := site.Params.links | default dict }}
 {{ $footerParams := site.Params.footer | default dict }}
 {{ $githubURL := index $linksParams "github_url" | default "" }}
+{{ $comparisons := index $footerParams "comparisons" | default slice }}
 {{ $imprintURL := index $footerParams "imprint_url" | default "#" }}
 {{ $privacyURL := index $footerParams "privacy_url" | default "#" }}
 {{ $imprintExternal := or (hasPrefix $imprintURL "http://") (hasPrefix $imprintURL "https://") }}
@@ -17,9 +18,20 @@
       </a>
     </div>
     {{ end }}
-    <nav class="site-footer-legal" aria-label="Legal links">
-      <a class="site-footer-link type-label-eyebrow type-color-accent ui-hover-weight-strong" href="{{ $imprintURL }}"{{ if $imprintExternal }} target="_blank" rel="noopener"{{ end }}>Imprint</a>
-      <a class="site-footer-link type-label-eyebrow type-color-accent ui-hover-weight-strong" href="{{ $privacyURL }}"{{ if $privacyExternal }} target="_blank" rel="noopener"{{ end }}>Privacy Policy</a>
-    </nav>
+    <div class="site-footer-nav-group">
+      {{ with $comparisons }}
+      <nav class="site-footer-compare" aria-label="Comparisons">
+        {{ range . }}
+        {{ $compURL := .url | default "#" }}
+        {{ $compExternal := or (hasPrefix $compURL "http://") (hasPrefix $compURL "https://") }}
+        <a class="site-footer-link type-label-eyebrow type-color-accent ui-hover-weight-strong" href="{{ $compURL }}"{{ if $compExternal }} target="_blank" rel="noopener"{{ end }}>{{ .label }}</a>
+        {{ end }}
+      </nav>
+      {{ end }}
+      <nav class="site-footer-legal" aria-label="Legal links">
+        <a class="site-footer-link type-label-eyebrow type-color-accent ui-hover-weight-strong" href="{{ $imprintURL }}"{{ if $imprintExternal }} target="_blank" rel="noopener"{{ end }}>Imprint</a>
+        <a class="site-footer-link type-label-eyebrow type-color-accent ui-hover-weight-strong" href="{{ $privacyURL }}"{{ if $privacyExternal }} target="_blank" rel="noopener"{{ end }}>Privacy Policy</a>
+      </nav>
+    </div>
   </div>
 </footer>

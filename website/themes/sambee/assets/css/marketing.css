@@ -1,0 +1,805 @@
+/* Purpose: Styles technical marketing and comparison pages outside the docs and homepage shells. */
+
+/*
+==============================
+Shell & Sticky Subnav Offsets
+==============================
+*/
+
+.site-main:has(.marketing-shell) {
+  @apply pb-0;
+}
+
+.marketing-shell {
+  --marketing-subnav-height: 2.875rem;
+  --marketing-page-title-size-sm: 2.5rem;
+  --marketing-page-title-size-md: 3rem;
+  --marketing-page-title-size-lg: 3.4rem;
+}
+
+/* html already sets scroll-padding-top: var(--header-height) in base.css, so add only the subnav height plus breathing room. */
+.marketing-anchor-target {
+  scroll-margin-top: calc(var(--marketing-subnav-height) + 1rem);
+}
+
+.marketing-subnav + .ledger-section {
+  margin-top: -2px;
+}
+
+/*
+==============================
+Inline Code, Prose Links & Focus States
+==============================
+*/
+
+.marketing-shell code:not(pre code) {
+  background-color: var(--color-clr-code-inline-background);
+  color: var(--color-clr-text-dark);
+  font-size: var(--code-font-size);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--color-clr-rule-soft);
+}
+
+:where(html.dark, .dark) .marketing-shell code:not(pre code) {
+  background-color: color-mix(in oklab, var(--color-clr-darkmode-surface-high) 72%, var(--color-clr-darkmode-text-dark) 28%);
+  color: var(--color-clr-darkmode-text-dark);
+  border-color: var(--color-clr-darkmode-rule-soft);
+}
+
+.marketing-prose a {
+  @apply font-medium text-clr-action-text dark:text-clr-darkmode-action-text;
+  text-decoration-line: underline;
+  text-decoration-color: currentColor;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.marketing-prose a:hover,
+.marketing-prose a:focus-visible {
+  text-decoration-thickness: 2px;
+}
+
+.marketing-shell a:focus-visible {
+  outline: 2px solid var(--color-clr-primary);
+  outline-offset: 2px;
+
+  .dark & {
+    outline-color: var(--color-clr-darkmode-primary);
+  }
+}
+
+/*
+==============================
+Shared Section Headers, Lists & Actions
+==============================
+*/
+
+.marketing-section-header {
+  @apply border-b border-clr-rule-soft py-7 dark:border-clr-darkmode-rule-soft md:py-10;
+}
+
+.marketing-section-title {
+  @apply m-0;
+}
+
+.marketing-section-intro {
+  @apply mt-3 mb-0 max-w-[65ch];
+}
+
+.marketing-list {
+  @apply m-0 flex list-none flex-col gap-3.5 p-0;
+}
+
+.marketing-list > li {
+  @apply m-0;
+}
+
+.marketing-list .ui-list-dot-item::before {
+  top: 0.575rem;
+}
+
+.marketing-actions {
+  @apply mt-7 flex flex-wrap gap-3 md:mt-8;
+}
+
+.marketing-cta {
+  @apply min-h-[2.875rem] w-full justify-center px-6 py-3 sm:w-auto;
+}
+
+/*
+==============================
+Band 0: Asymmetric 7:5 Split Hero
+==============================
+*/
+
+.marketing-hero-grid {
+  @apply grid grid-cols-1 lg:grid-cols-12;
+}
+
+.marketing-hero-copy {
+  @apply py-8 md:py-10 lg:col-span-7 lg:py-12 lg:pr-10;
+}
+
+.marketing-hero-title {
+  @apply mt-4 mb-0;
+  font-size: var(--marketing-page-title-size-sm);
+
+  @media (min-width: theme(--breakpoint-md)) {
+    font-size: var(--marketing-page-title-size-md);
+  }
+
+  @media (min-width: theme(--breakpoint-lg)) {
+    font-size: var(--marketing-page-title-size-lg);
+  }
+}
+
+.marketing-hero-lead {
+  @apply mt-5 mb-0 max-w-[60ch];
+}
+
+.marketing-scorecard {
+  @apply border-t border-clr-rule-soft py-7 dark:border-clr-darkmode-rule-soft md:py-9 lg:col-span-5 lg:border-t-0 lg:border-l lg:py-10;
+}
+
+.marketing-scorecard-header {
+  @apply border-b border-clr-rule-soft pb-3.5 dark:border-clr-darkmode-rule-soft;
+}
+
+.marketing-scorecard-list {
+  @apply m-0 flex flex-col;
+}
+
+.marketing-scorecard-row {
+  @apply border-b border-clr-rule-soft py-3.5 dark:border-clr-darkmode-rule-soft;
+}
+
+.marketing-scorecard-row:last-child {
+  @apply border-b-0 pb-0;
+}
+
+.marketing-scorecard-label {
+  @apply m-0 block;
+}
+
+.marketing-scorecard-value {
+  @apply mt-1 mb-0;
+}
+
+.marketing-scorecard-contrast {
+  font-size: 0.875rem;
+}
+
+/*
+==============================
+Band 1: Sticky Dossier Sub-Navigation
+==============================
+*/
+
+.marketing-subnav {
+  position: sticky;
+  top: var(--header-height);
+  z-index: 20;
+  border-top: 0;
+  border-bottom: 2px solid var(--color-clr-rule-strong);
+
+  .dark & {
+    border-bottom-color: var(--color-clr-darkmode-rule-strong);
+  }
+}
+
+.marketing-subnav-inner {
+  @apply overflow-x-auto px-0 md:px-8;
+  scrollbar-width: none;
+}
+
+.marketing-subnav-inner::-webkit-scrollbar {
+  display: none;
+}
+
+.marketing-subnav-list {
+  @apply m-0 flex min-w-max list-none items-stretch p-0;
+}
+
+.marketing-subnav-item {
+  @apply m-0 border-r border-clr-rule-soft dark:border-clr-darkmode-rule-soft;
+}
+
+.marketing-subnav-item:first-child {
+  @media (min-width: theme(--breakpoint-md)) {
+    @apply border-l border-clr-rule-soft dark:border-clr-darkmode-rule-soft;
+  }
+}
+
+.marketing-subnav-link {
+  @apply inline-flex min-h-[2.75rem] items-center px-4 py-2 whitespace-nowrap;
+}
+
+.marketing-subnav-link:focus-visible {
+  outline: 2px solid var(--color-clr-primary);
+  outline-offset: -2px;
+
+  .dark & {
+    outline-color: var(--color-clr-darkmode-primary);
+  }
+}
+
+/*
+==============================
+Band 2: Honest Fit 2-Column Split
+==============================
+*/
+
+.marketing-fit-grid {
+  @apply grid grid-cols-1 md:grid-cols-2;
+}
+
+.marketing-fit-card {
+  @apply py-7 md:py-9;
+}
+
+.marketing-fit-card--sambee {
+  @apply border-b border-clr-rule-soft dark:border-clr-darkmode-rule-soft md:border-r md:border-b-0;
+  box-shadow: inset 0 2px 0 var(--color-clr-primary);
+
+  .dark & {
+    box-shadow: inset 0 2px 0 var(--color-clr-darkmode-primary);
+  }
+}
+
+.marketing-fit-title {
+  @apply mt-0 mb-5;
+}
+
+/*
+==============================
+Band 3: Grouped Comparison Matrix
+==============================
+*/
+
+.marketing-matrix-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.marketing-matrix-icon {
+  flex-shrink: 0;
+  font-size: 1.25rem;
+  line-height: 1;
+  margin-top: 0.175rem;
+  font-variation-settings: 'FILL' 0, 'wght' 425, 'GRAD' 0, 'opsz' 24;
+}
+
+.marketing-matrix-icon--positive {
+  color: var(--color-clr-status-tip);
+
+  .dark & {
+    color: var(--color-clr-darkmode-status-tip);
+  }
+}
+
+.marketing-matrix-icon--locked {
+  color: var(--color-clr-status-warning);
+
+  .dark & {
+    color: var(--color-clr-darkmode-status-warning);
+  }
+}
+
+.marketing-matrix-icon--neutral {
+  color: var(--color-clr-text-light);
+
+  .dark & {
+    color: var(--color-clr-darkmode-text-light);
+  }
+}
+
+.marketing-matrix-cell-inner {
+  @apply flex items-start gap-2.5;
+}
+
+.marketing-matrix-text {
+  @apply min-w-0;
+}
+
+@media (min-width: theme(--breakpoint-md)) {
+  .marketing-matrix-col-header {
+    position: sticky;
+    top: calc(var(--header-height) + var(--marketing-subnav-height));
+    z-index: 10;
+    text-align: left;
+    padding: 0.875rem 1.25rem;
+    background-color: var(--color-clr-surface-high);
+    border-bottom: 1px solid var(--color-clr-rule-strong);
+    border-right: 1px solid var(--color-clr-rule-soft);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-high);
+      border-bottom-color: var(--color-clr-darkmode-rule-strong);
+      border-right-color: var(--color-clr-darkmode-rule-soft);
+    }
+
+    @media (min-width: theme(--breakpoint-lg)) {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  .marketing-matrix-col-header:last-child {
+    border-right: 0;
+  }
+
+  .marketing-matrix-col-header--capability {
+    width: 28%;
+  }
+
+  .marketing-matrix-col-header--sambee,
+  .marketing-matrix-col-header--competitor {
+    width: 36%;
+  }
+
+  .marketing-matrix-col-header--sambee {
+    box-shadow: inset 0 2px 0 var(--color-clr-primary);
+
+    .dark & {
+      box-shadow: inset 0 2px 0 var(--color-clr-darkmode-primary);
+    }
+  }
+
+  .marketing-matrix-group-header {
+    text-align: left;
+    padding: 0.75rem 1.25rem;
+    background-color: var(--color-clr-surface-mid);
+    border-bottom: 1px solid var(--color-clr-rule-soft);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-mid);
+      border-bottom-color: var(--color-clr-darkmode-rule-soft);
+    }
+
+    @media (min-width: theme(--breakpoint-lg)) {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  .marketing-matrix-capability,
+  .marketing-matrix-cell {
+    vertical-align: top;
+    text-align: left;
+    padding: 0.95rem 1.25rem;
+    border-bottom: 1px solid var(--color-clr-rule-soft);
+    border-right: 1px solid var(--color-clr-rule-soft);
+
+    .dark & {
+      border-bottom-color: var(--color-clr-darkmode-rule-soft);
+      border-right-color: var(--color-clr-darkmode-rule-soft);
+    }
+
+    @media (min-width: theme(--breakpoint-lg)) {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  .marketing-matrix-cell:last-child {
+    border-right: 0;
+  }
+
+  .marketing-matrix-capability {
+    font-weight: 600;
+    background-color: var(--color-clr-surface-page);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-page);
+    }
+  }
+
+  .marketing-matrix-cell--sambee {
+    background-color: var(--color-clr-surface-low);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-low);
+    }
+  }
+
+  .marketing-matrix-cell--competitor {
+    background-color: var(--color-clr-surface-page);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-page);
+    }
+  }
+
+  .marketing-matrix-group:last-child .marketing-matrix-row:last-child > th,
+  .marketing-matrix-group:last-child .marketing-matrix-row:last-child > td {
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: calc(theme(--breakpoint-md) - 0.02px)) {
+  .marketing-matrix-table,
+  .marketing-matrix-group,
+  .marketing-matrix-group-row,
+  .marketing-matrix-row,
+  .marketing-matrix-capability,
+  .marketing-matrix-cell {
+    display: block;
+    width: 100%;
+  }
+
+  .marketing-matrix-thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .marketing-matrix-group-header {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.75rem 1.25rem;
+    background-color: var(--color-clr-surface-mid);
+    border-bottom: 1px solid var(--color-clr-rule-soft);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-mid);
+      border-bottom-color: var(--color-clr-darkmode-rule-soft);
+    }
+  }
+
+  .marketing-matrix-row {
+    border-bottom: 2px solid var(--color-clr-rule-strong);
+
+    .dark & {
+      border-bottom-color: var(--color-clr-darkmode-rule-strong);
+    }
+  }
+
+  .marketing-matrix-group:last-child .marketing-matrix-row:last-child {
+    border-bottom: 0;
+  }
+
+  .marketing-matrix-capability {
+    text-align: left;
+    font-weight: 700;
+    padding: 0.8rem 1.25rem;
+    background-color: var(--color-clr-surface-high);
+    border-bottom: 1px solid var(--color-clr-rule-soft);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-high);
+      border-bottom-color: var(--color-clr-darkmode-rule-soft);
+    }
+  }
+
+  .marketing-matrix-cell {
+    padding: 0.85rem 1.25rem;
+  }
+
+  .marketing-matrix-cell--sambee {
+    background-color: var(--color-clr-surface-low);
+    border-bottom: 1px solid var(--color-clr-rule-soft);
+    box-shadow: inset 2px 0 0 var(--color-clr-primary);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-low);
+      border-bottom-color: var(--color-clr-darkmode-rule-soft);
+      box-shadow: inset 2px 0 0 var(--color-clr-darkmode-primary);
+    }
+  }
+
+  .marketing-matrix-cell--competitor {
+    background-color: var(--color-clr-surface-page);
+
+    .dark & {
+      background-color: var(--color-clr-darkmode-surface-page);
+    }
+  }
+
+  .marketing-matrix-cell::before {
+    content: attr(data-column-label);
+    display: block;
+    margin-bottom: 0.35rem;
+    font-family: var(--font-tertiary);
+    font-size: var(--font-size-label-xs);
+    font-weight: 700;
+    letter-spacing: var(--tracking-label-strong);
+    text-transform: uppercase;
+  }
+
+  .marketing-matrix-cell--sambee::before {
+    color: var(--color-clr-action-text);
+
+    .dark & {
+      color: var(--color-clr-darkmode-action-text);
+    }
+  }
+
+  .marketing-matrix-cell--competitor::before {
+    color: var(--color-clr-text-light);
+
+    .dark & {
+      color: var(--color-clr-darkmode-text-light);
+    }
+  }
+}
+
+/*
+==============================
+Bands 4 & 6: 4:8 Editorial Chapters
+==============================
+*/
+
+.marketing-chapter {
+  @apply border-b border-clr-rule-soft py-8 dark:border-clr-darkmode-rule-soft md:py-11;
+}
+
+.marketing-chapter:last-child {
+  @apply border-b-0;
+}
+
+.marketing-chapter-grid {
+  @apply grid grid-cols-1 gap-6 lg:grid-cols-12 lg:gap-12;
+}
+
+.marketing-chapter-rail {
+  @apply flex flex-col items-start lg:col-span-4;
+}
+
+.marketing-chapter-title {
+  @apply m-0;
+}
+
+.marketing-chapter-callout {
+  @apply mt-4 px-3.5 py-2.5;
+}
+
+.marketing-chapter-body {
+  @apply max-w-[65ch] lg:col-span-8 lg:border-l lg:border-clr-rule-soft lg:pl-10 dark:lg:border-clr-darkmode-rule-soft;
+}
+
+.marketing-chapter-lead {
+  @apply m-0;
+}
+
+.marketing-chapter-points {
+  @apply mt-5;
+}
+
+/*
+==============================
+Band 5: Visual Proof & Architecture Contrast
+==============================
+*/
+
+.marketing-visual-proof-body {
+  @apply flex flex-col gap-8 py-8 md:gap-10 md:py-10;
+}
+
+.marketing-arch-diagram {
+  --arch-surface-page: var(--color-clr-surface-page);
+  --arch-surface-low: var(--color-clr-surface-low);
+  --arch-surface-mid: var(--color-clr-surface-mid);
+  --arch-rule-soft: var(--color-clr-rule-soft);
+  --arch-rule-strong: var(--color-clr-rule-strong);
+  --arch-accent: var(--color-clr-action-text);
+  --arch-accent-fill: var(--color-clr-action-fill);
+  --arch-accent-contrast: var(--color-clr-action-fill-text);
+  --arch-ink: var(--color-clr-text-dark);
+  --arch-muted: var(--color-clr-text-light);
+  --arch-warning: var(--color-clr-status-warning);
+  @apply grid grid-cols-1 gap-6 lg:grid-cols-2;
+
+  .dark & {
+    --arch-surface-page: var(--color-clr-darkmode-surface-page);
+    --arch-surface-low: var(--color-clr-darkmode-surface-low);
+    --arch-surface-mid: var(--color-clr-darkmode-surface-mid);
+    --arch-rule-soft: var(--color-clr-darkmode-rule-soft);
+    --arch-rule-strong: var(--color-clr-darkmode-rule-strong);
+    --arch-accent: var(--color-clr-darkmode-action-text);
+    --arch-accent-fill: var(--color-clr-darkmode-action-fill);
+    --arch-accent-contrast: var(--color-clr-darkmode-action-fill-text);
+    --arch-ink: var(--color-clr-darkmode-text-dark);
+    --arch-muted: var(--color-clr-darkmode-text-light);
+    --arch-warning: var(--color-clr-darkmode-status-warning);
+  }
+}
+
+.marketing-arch-panel {
+  @apply border border-clr-rule-soft bg-clr-surface-page dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-page;
+}
+
+.marketing-arch-panel--sambee {
+  box-shadow: inset 0 2px 0 var(--color-clr-primary);
+
+  .dark & {
+    box-shadow: inset 0 2px 0 var(--color-clr-darkmode-primary);
+  }
+}
+
+.marketing-arch-panel-header {
+  @apply border-b border-clr-rule-soft bg-clr-surface-mid px-4 py-3 dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-mid;
+}
+
+.marketing-arch-svg {
+  @apply block h-auto w-full;
+}
+
+.marketing-workspace-preview {
+  @apply m-0 border border-clr-rule-soft bg-clr-surface-page dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-page;
+}
+
+.marketing-workspace-preview-frame {
+  @apply bg-clr-surface-mid/60 p-4 dark:bg-clr-darkmode-surface-mid/60 md:p-8;
+}
+
+.marketing-workspace-caption {
+  @apply block border-t border-clr-rule-soft px-4 py-3 dark:border-clr-darkmode-rule-soft md:px-6;
+}
+
+/*
+==============================
+Band 7: 5:7 Terminal Test-Drive Split
+==============================
+*/
+
+.marketing-test-drive-grid {
+  @apply grid grid-cols-1 gap-8 py-8 md:py-12 lg:grid-cols-12 lg:items-center lg:gap-10;
+}
+
+.marketing-test-drive-copy {
+  @apply lg:col-span-5;
+}
+
+.marketing-test-drive-title {
+  @apply m-0;
+}
+
+.marketing-test-drive-lead {
+  @apply mt-4 mb-0;
+}
+
+.marketing-test-drive-list {
+  @apply mt-5;
+}
+
+.marketing-code-panel {
+  @apply min-w-0 lg:col-span-7;
+}
+
+.marketing-code-header {
+  @apply flex items-center justify-between border border-clr-rule-soft bg-clr-surface-mid px-4 py-2.5 dark:border-clr-darkmode-rule-strong dark:bg-clr-darkmode-surface-mid;
+}
+
+.marketing-code-filename {
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+.content.marketing-code-surface .highlight,
+.content.marketing-code-surface pre,
+html.dark .content.marketing-code-surface .highlight,
+html.dark .content.marketing-code-surface pre {
+  margin: 0;
+  border-top: 0;
+}
+
+.marketing-code-surface .code-copy-btn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--color-clr-primary);
+  outline-offset: 2px;
+
+  .dark & {
+    outline-color: var(--color-clr-darkmode-primary);
+  }
+}
+
+/*
+==============================
+Band 8: Interactive Accordion FAQ
+==============================
+*/
+
+.marketing-faq-item {
+  @apply border-b border-clr-rule-soft dark:border-clr-darkmode-rule-soft;
+}
+
+.marketing-faq-item:last-child {
+  @apply border-b-0;
+}
+
+.marketing-faq-summary {
+  list-style: none;
+  @apply flex min-h-[3.25rem] cursor-pointer items-center justify-between gap-5 py-4 md:py-5;
+}
+
+.marketing-faq-summary::-webkit-details-marker {
+  display: none;
+}
+
+.marketing-faq-summary:focus {
+  outline: none;
+}
+
+.marketing-faq-summary:focus-visible {
+  outline: 2px solid var(--color-clr-primary);
+  outline-offset: -2px;
+
+  .dark & {
+    outline-color: var(--color-clr-darkmode-primary);
+  }
+}
+
+.marketing-faq-question {
+  @apply min-w-0;
+}
+
+.marketing-faq-indicator {
+  position: relative;
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  color: var(--color-clr-action-text);
+
+  .dark & {
+    color: var(--color-clr-darkmode-action-text);
+  }
+}
+
+.marketing-faq-indicator::before,
+.marketing-faq-indicator::after {
+  content: "";
+  position: absolute;
+  background-color: currentColor;
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+
+.marketing-faq-indicator::before {
+  top: 50%;
+  left: 0.125rem;
+  right: 0.125rem;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.marketing-faq-indicator::after {
+  left: 50%;
+  top: 0.125rem;
+  bottom: 0.125rem;
+  width: 2px;
+  transform: translateX(-50%);
+}
+
+.marketing-faq-item[open] .marketing-faq-indicator::after {
+  opacity: 0;
+  transform: translateX(-50%) scaleY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing-faq-indicator::before,
+  .marketing-faq-indicator::after {
+    transition: none;
+  }
+}
+
+.marketing-faq-answer {
+  @apply pb-6;
+}
+
+.marketing-faq-answer-inner {
+  @apply max-w-[68ch];
+}
+
+.marketing-faq-answer-inner p {
+  margin: 0;
+}
+
+.marketing-faq-answer-inner p + p {
+  margin-top: 0.75rem;
+}

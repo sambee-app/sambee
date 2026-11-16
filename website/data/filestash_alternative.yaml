@@ -1,0 +1,486 @@
+meta:
+  slug: filestash-alternative
+  competitor: Filestash
+
+hero:
+  enabled: true
+  kicker: "COMPARE // FILESTASH ALTERNATIVE"
+  title: Stop using a cloud adapter to manage your SMB shares.
+  lead: >-
+    Filestash connects to 25 protocols at surface depth—and locks OIDC single sign-on, audit logs, and early security patches behind monthly subscriptions. Sambee is purpose-built for SMB shares and local drives, with defense-in-depth security, dual-pane navigation, native desktop app editing, and free SSO under the MIT license.
+  ctas:
+    - id: hero-deploy-docker
+      label: Deploy with Docker
+      kind: primary
+      target:
+        type: docs
+        book: admin-guide
+        section: installation-and-deployment
+        page: deploy-sambee-with-docker
+    - id: hero-jump-matrix
+      label: "Jump to Comparison Matrix ↓"
+      kind: secondary
+      target:
+        type: anchor
+        id: comparison
+  scorecard:
+    aria_label: Sambee vs. Filestash executive scorecard
+    header: "AT A GLANCE // SAMBEE ADVANTAGE"
+    rows:
+      - label: LICENSE & COST
+        value: MIT Open Source — $0 forever, unlimited users
+        contrast: "(vs. AGPLv3 + $50–$290/mo tiers)"
+      - label: IDENTITY & ACCESS
+        value: Free OIDC SSO + IdP group roles
+        contrast: "(vs. paywalled SSO & RBAC)"
+      - label: SMB SECURITY
+        value: Kerberos + signing + SMB3 encryption
+        contrast: "(vs. NTLM/Guest only)"
+      - label: SUPPLY CHAIN
+        value: Cosign-signed, SBOM + weekly Trivy scans
+        contrast: "(vs. unsigned `:latest` Compose)"
+      - label: EDITING & FOOTPRINT
+        value: Native desktop apps in 1 container
+        contrast: "(vs. heavy Collabora WOPI sidecar)"
+
+subnav:
+  enabled: true
+  aria_label: Comparison sections
+  items:
+    - id: subnav-fit
+      label: "01 // Honest Fit"
+      target:
+        type: anchor
+        id: fit
+    - id: subnav-matrix
+      label: "02 // Matrix"
+      target:
+        type: anchor
+        id: comparison
+    - id: subnav-pillars
+      label: "03 // Security & Depth"
+      target:
+        type: anchor
+        id: pillars
+    - id: subnav-architecture
+      label: "04 // Architecture"
+      target:
+        type: anchor
+        id: architecture
+    - id: subnav-test-drive
+      label: "05 // 5-Min Test Drive"
+      target:
+        type: anchor
+        id: test-drive
+    - id: subnav-faq
+      label: "06 // FAQ"
+      target:
+        type: anchor
+        id: faq
+
+fit:
+  enabled: true
+  id: fit
+  eyebrow: "01 // HONEST FIT"
+  title: Choose the Right Tool for Your Infrastructure
+  intro: >-
+    Filestash and Sambee solve different architectural problems. Here is the honest breakdown before you read a single feature row.
+  sambee:
+    title: Switch to Sambee if you want...
+    items:
+      - Purpose-built speed and security for **Windows File Servers, TrueNAS, Synology, Unraid, Samba, and local PC drives**.
+      - "**Defense-in-depth security** (Kerberos, SMB3 encryption, revocable sessions, Cosign + SBOM verification) with **zero enterprise paywalls**."
+      - "**Dual-pane file management (`Ctrl+B`)**, `Ctrl+K` millisecond folder jumps, streaming ZIP folders, and dedicated mobile touch controls."
+      - "**Native desktop editing** in Word, Excel, Photoshop, or LibreOffice without running a separate Collabora/WOPI server."
+      - "**Free OIDC single sign-on**, group-based roles, and **MIT licensing** with zero per-seat fees."
+  competitor:
+    title: Keep Filestash if you need...
+    items:
+      - One browser portal for **S3, Backblaze B2, MinIO, FTP/SFTP, Dropbox, Google Drive, or Git**.
+      - Outbound protocol gateways that re-expose backend storage as **SFTP, WebDAV, S3, or MCP servers**.
+      - Public, anonymous share links for external guests who do not have accounts on your network.
+
+matrix:
+  enabled: true
+  id: comparison
+  eyebrow: "02 // ARCHITECTURE, SECURITY & LICENSING"
+  title: Sambee vs. Filestash at a Glance
+  caption: Capability comparison between Sambee and self-hosted Filestash
+  intro: >-
+    How a dedicated SMB and local-drive workspace compares to a general-purpose multi-protocol portal.
+  columns:
+    capability: Capability
+    sambee: Sambee
+    competitor: Filestash (Self-Hosted)
+  groups:
+    - title: Licensing & Identity
+      rows:
+        - capability: Open-Source License
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: MIT
+            detail: "— permissive, 100% open source"
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: AGPLv3
+            detail: "— open-core + commercial tiers"
+        - capability: OIDC Single Sign-On (Keycloak, Authentik, Authelia, Okta)
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Free for unlimited users
+          competitor:
+            icon: lock
+            tone: locked
+            verdict: Paid plans only
+            detail: "($50–$290+/mo)"
+        - capability: Role Assignment from IdP Groups
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Included free
+            detail: "(`Administrator`, `Editor`, `Viewer`)"
+          competitor:
+            icon: lock
+            tone: locked
+            verdict: Paid RBAC tiers only
+
+    - title: Security & Supply Chain
+      rows:
+        - capability: Security Updates & Audit Trail
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Immediate patches + JSONL auth audit trail for all
+          competitor:
+            icon: lock
+            tone: locked
+            verdict: Early Security Patches & Audit Journal paywalled
+        - capability: SMB Authentication & Wire Security
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Kerberos + NTLM
+            detail: "(with **Kerberos-only** mode), mandatory signing, **SMB3 encryption**"
+          competitor:
+            icon: remove
+            tone: neutral
+            verdict: NTLM / Guest only
+            detail: "(no Kerberos; no signing/encryption controls)"
+        - capability: Session & Credential Hygiene
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: "Short-lived RAM tokens + revocable `HttpOnly` sessions"
+            detail: "; zero URL tokens; log redaction"
+          competitor:
+            icon: remove
+            tone: neutral
+            verdict: 1-week stateless cookie holding SMB password
+            detail: "; no per-session revoke; token in WOPI URLs"
+        - capability: Reverse-Proxy & Brute-Force Protection
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Trusted Proxy CIDR allowlist
+            detail: '\+ per-IP & per-username rate limits'
+          competitor:
+            icon: remove
+            tone: neutral
+            verdict: "Trusts any `X-Forwarded-For` header"
+            detail: "; single global rate limiter"
+        - capability: Container & Supply-Chain Integrity
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Cosign-signed, SBOM + provenance
+            detail: ", `--require-hashes`, `pip` removed, weekly **Trivy** scans"
+          competitor:
+            icon: remove
+            tone: neutral
+            verdict: "Floating `:latest` + `CANARY=true`"
+            detail: "; root Collabora startup `curl`; no public CI/SBOM/signing"
+
+    - title: SMB & Local Storage Depth
+      rows:
+        - capability: Live SMB Folder Refresh
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Real-time
+            detail: "via SMB2/SMB3 `CHANGE_NOTIFY` + WebSockets"
+          competitor:
+            icon: remove
+            tone: neutral
+            verdict: Not supported
+        - capability: Directory Search & Navigation
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: "Instant SQLite-indexed Quick Bar (`Ctrl+K`)"
+            detail: '\+ history'
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: Live recursive network walk
+            detail: "by default (crawler plugin optional)"
+        - capability: Local Workstation Drives
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: "Yes"
+            detail: "— origin-paired Companion (`127.0.0.1` HMAC API)"
+          competitor:
+            icon: remove
+            tone: neutral
+            verdict: "No"
+            detail: "— server-mounted paths only"
+
+    - title: File Management, Viewing & Editing
+      rows:
+        - capability: File Browser Layout
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: "Dual-pane (`Ctrl+B`)"
+            detail: "and single-pane commander UI"
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: Single-pane
+            detail: "web portal only"
+        - capability: Copy & Move Across Locations
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Toolbar, shortcuts & touch multi-select
+            detail: "across SMB and local drives"
+          competitor:
+            icon: remove
+            tone: neutral
+            verdict: Drag-and-drop oriented
+            detail: "; no cross-share SMB move"
+        - capability: ZIP Archive Handling
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Instant virtual folders
+            detail: "— browse, preview & stream-extract"
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: Basic plugin support
+        - capability: Graphics, Image & PDF Viewers
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Hardened on-the-fly conversion
+            detail: "(`PSD`, `AI`, `EPS`, `HEIC`, `JXL`, `TIFF`, `EXR`, CMYK/encrypted `PDF`)"
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: Standard browser/image transcoding
+        - capability: Markdown Editing
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Rendered viewer + WYSIWYG table editing
+            detail: '\+ PDF print'
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: Plain/basic editor plugin
+        - capability: Office & Creative App Editing
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: Open in native desktop Word, Excel, Photoshop, LibreOffice
+            detail: "(`Ctrl+Enter`) with locks & recovery"
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: Browser Office only
+            detail: "via separate heavy `collabora/code` WOPI container"
+
+    - title: Operations & Protocol Breadth
+      rows:
+        - capability: Deployment Footprint & Health
+          sambee:
+            icon: check_circle
+            tone: positive
+            verdict: 1 lightweight container
+            detail: '\+ built-in **System Health Monitoring**'
+          competitor:
+            icon: info
+            tone: neutral
+            verdict: 2 containers
+            detail: "in default Compose (`filestash` + `collabora/code`)"
+        - capability: S3, FTP, Dropbox, Google Drive & Gateways
+          sambee:
+            icon: remove
+            tone: neutral
+            verdict: Not supported
+            detail: "(focused exclusively on SMB & local drives)"
+          competitor:
+            icon: check_circle
+            tone: positive
+            verdict: 25+ cloud/file protocols + SFTP/WebDAV/MCP gateways
+
+pillars_part_a:
+  enabled: true
+  id: pillars
+  eyebrow: "03 // SECURITY & STORAGE DEPTH"
+  title: Six Architectural Reasons Teams Switch to Sambee
+  intro: >-
+    Depth beats breadth. Every difference below comes from fundamental licensing, security, and storage-engine design—not cosmetic UI preferences.
+  chapters:
+    - index: "01 // LICENSING & IDENTITY"
+      title: 'Zero "SSO Tax." Permissive MIT Open Source.'
+      callout: "MIT License • $0 OIDC • Unlimited seats"
+      lead: >-
+        Identity should never sit behind a monthly paywall. Filestash restricts OpenID Connect (OIDC), RBAC, proxy authentication, custom branding, and environment-variable configuration to commercial subscriptions.
+      points:
+        - "**Free OIDC for every provider**: Connect Keycloak, Authentik, Authelia, Okta, OneLogin, or any standard OIDC provider at `$0`."
+        - "**Group-driven role mapping**: Assign `Administrator`, `Editor`, and `Viewer` roles automatically from identity-provider groups."
+        - "**Safe staged rollout**: Run OIDC alongside local passwords during setup, then switch to passwordless **OIDC-only** sign-in when verified."
+        - "**Multi-layer theming included**: Customize personal and site-wide UI themes with the built-in RGBA theme editor."
+
+    - index: "02 // SECURITY & SUPPLY CHAIN"
+      title: Defense-in-Depth Security—Never an Enterprise Upsell.
+      callout: "Kerberos + SMB3 encryption • Revocable sessions • Cosign + SBOM"
+      lead: >-
+        A browser file gateway sits directly in front of your most sensitive storage. While Filestash gates Early Security Patches and Audit Journals behind paid plans—and stores user SMB passwords inside stateless cookies reused in WOPI URLs—Sambee builds enterprise-grade security into every release.
+      points:
+        - "**Strong SMB wire security**: Enforce **Kerberos-only** authentication (blocking NTLM fallback), require **SMB message signing** on every connection, and enable **SMB3 transport encryption** across untrusted networks."
+        - "**Revocable sessions & zero URL token leaks**: Browsers hold only short-lived in-memory API tokens and `HttpOnly` cookies; users and admins can revoke individual sessions immediately; Companion exchanges one-time tokens in JSON bodies (never query strings); and logs automatically redact secrets."
+        - "**Anti-spoofing & brute-force limits**: Sambee ignores `X-Forwarded-For` unless the request originates from your configured **Trusted Reverse Proxy CIDRs**, and enforces per-IP and case-folded per-username rate limits."
+        - "**Verifiable software supply chain**: Digest-pinned base images, `--require-hashes` lockfiles, removed `pip` runtime tooling, non-root execution, weekly **Trivy** + multi-ecosystem dependency audits, **Cosign image signatures**, and published **SBOM + provenance bundles**."
+        - "**Sandboxed viewers & desktop pairing**: Active `HTML`/`SVG` content never executes in the viewer, ImageMagick runs with network delegates disabled and strict memory/pixel caps, and Companion requires **dual numeric-code approval of the exact browser origin** plus per-request **HMAC signatures** over `127.0.0.1`."
+
+    - index: "03 // STORAGE DEPTH"
+      title: First-Class SMB2/SMB3 Meets Your Local Drives.
+      callout: "Real-time CHANGE_NOTIFY • Millisecond SQLite jump • Local PC disks"
+      lead: >-
+        When a portal funnels 25 backends through one minimal interface, every protocol gets reduced to basic list, read, and write calls. Sambee focuses exclusively on SMB shares and local drives so both feel instantaneous.
+      points:
+        - "**Event-driven directory freshness**: Sambee subscribes to **SMB2/SMB3 `CHANGE_NOTIFY`** events so open browser tabs and directory caches update in real time without wasteful polling."
+        - "**Millisecond directory jumps (`Ctrl+K`)**: Jump straight to any folder across tens of thousands of directories, backed by a resilient **SQLite directory index** and personal history."
+        - "**Local workstation drives in the same tab**: Pair the optional **Sambee Companion** app on Windows, macOS, or Linux to browse local disks, resolve `.lnk` shortcuts and symlinks, and transfer folders directly between your PC and your NAS."
+
+architecture:
+  enabled: true
+  id: architecture
+  eyebrow: "04 // ARCHITECTURAL CONTRAST"
+  title: One Hardened Container vs. Heavy Browser Office Stacks
+  intro: >-
+    Sambee keeps its server footprint small and auditable while letting desktop users edit files in real installed applications.
+  diagram_aria_label: Architectural comparison between Sambee's single-container stack and Filestash's portal plus Collabora WOPI stack
+  sambee_stack_label: "SAMBEE STACK // 1 HARDENED CONTAINER"
+  competitor_stack_label: "TYPICAL FILESTASH STACK // PORTAL + WOPI SIDECAR"
+  preview_image:
+    src: images/home/sambee-screenshot.png
+    dark_src: images/home/sambee-screenshot-dark.png
+    alt: Sambee dual-pane browser workspace showing SMB share navigation and file management controls
+  preview_caption: "SAMBEE WORKSPACE // DUAL-PANE NAVIGATION (CTRL+B), INSTANT QUICK BAR JUMPS (CTRL+K), AND BUILT-IN SYSTEM HEALTH"
+
+pillars_part_b:
+  enabled: true
+  sr_title: File Management Ergonomics, Native Editing, and Operations
+  chapters:
+    - index: "04 // ERGONOMICS"
+      title: A Commander Workspace on Desktop. A Native Feel on Mobile.
+      callout: "Ctrl+B dual-pane • Zero-extract ZIPs • Native mobile share"
+      lead: >-
+        Consumer "Dropbox-like" portals break down during serious file management. Sambee gives keyboard power users and mobile touch users controls built for each device.
+      points:
+        - "**Dual-pane mode (`Ctrl+B`)**: View two folders side by side, sync pane locations (`Ctrl+Left` / `Ctrl+Right`), and copy or move batches across SMB shares and local drives with **overwrite** or **replace-if-newer** conflict handling."
+        - "**Instant streaming ZIP folders**: Step inside `.zip` archives like ordinary folders, preview files inside archives immediately, or stream-extract directly across shares without temporary disk bloat."
+        - "**Purpose-built mobile UX**: Long-press or tap for multi-selection, run transfers from a thumb-friendly bottom bar, swipe rapidly through images and PDFs, and share files through your phone's **native OS share sheet**."
+
+    - index: "05 // VIEWERS & EDITING"
+      title: Fast Browser Viewers. Real Desktop Apps When You Need Them.
+      callout: "PSD/AI/HEIC/PDF previews • Ctrl+Enter native apps • Edit locks"
+      lead: >-
+        Running a multi-gigabyte Collabora server just to edit a Word file wastes RAM, breaks behind reverse proxies, and still cannot open Photoshop, Illustrator, or specialized desktop formats.
+      points:
+        - "**Broad in-browser previews & editors**: Inspect photos and pro graphics (**PSD, AI, EPS, TIFF, HEIC, JPEG XL, AVIF, EXR, HDR**), search encrypted or CMYK **PDFs**, edit code in **CodeMirror**, and edit **Markdown** with live **WYSIWYG table editing**."
+        - "**Native desktop editing (`Ctrl+Enter`)**: Open `.docx`, `.xlsx`, `.psd`, or any file in **Microsoft Word, Excel, LibreOffice, Adobe Photoshop**, or any installed desktop app via Sambee Companion."
+        - "**Protected round-trip saving**: Sambee acquires a server-side **edit lock**, detects concurrent server edits before upload, recovers unsaved work after interruptions, and writes saved changes straight back to the share."
+
+    - index: "06 // OPERATIONS"
+      title: Built for the Admin Maintaining the Server at 2 AM.
+      callout: "Auto-saved settings • Live cgroup & thermal health • Clean logs"
+      lead: >-
+        Sambee stays lightweight on small home servers and predictable in enterprise environments.
+      points:
+        - "**Single-container simplicity**: Deploy `ghcr.io/sambee-app/sambee:stable` with one `/app/data` volume and zero external database or WOPI dependencies."
+        - "**Zero Save-button friction**: UI configuration changes apply automatically with clear visual feedback, and authentication audit trails export cleanly as JSON Lines (`sambee-audit.jsonl`)."
+        - "**Built-in System Health Monitoring**: Inspect host RAM, cache-excluded container cgroup memory, normalized CPU load, hardware CPU package temperatures (Intel, AMD, Raspberry Pi), and free storage space across SMB shares and local drives right from the top bar."
+
+test_drive:
+  enabled: true
+  id: test-drive
+  eyebrow: "05 // ZERO MIGRATION"
+  title: Test Sambee Beside Filestash in 5 Minutes
+  body: >-
+    Sambee works directly with the files and folders already on your SMB server. Keep Filestash running on port 8334, start Sambee on port 8000, connect the same share, and compare them side by side.
+  assurances:
+    - No file import, syncing, or proprietary storage format
+    - Honors your existing Windows or Linux/POSIX share permissions
+    - Remove the container anytime with zero changes left on your share
+  ctas:
+    - id: test-drive-deploy-guide
+      label: Read the Docker Deployment Guide
+      kind: primary
+      target:
+        type: docs
+        book: admin-guide
+        section: installation-and-deployment
+        page: deploy-sambee-with-docker
+    - id: test-drive-github
+      label: Explore Sambee on GitHub
+      kind: secondary
+      href: https://github.com/sambee-app/sambee
+  code_filename: docker-compose.yml
+  code_lang: yaml
+  code: |
+    services:
+      sambee:
+        image: ghcr.io/sambee-app/sambee:stable
+        restart: unless-stopped
+        volumes:
+          - ./data:/app/data
+        ports:
+          - 8000:8000
+
+faq:
+  enabled: true
+  id: faq
+  eyebrow: "06 // TECHNICAL FAQ"
+  title: Common Questions from Filestash Evaluators
+  items:
+    - question: Is OIDC single sign-on really free in Sambee?
+      answer: >-
+        Yes. Sambee is licensed under the MIT license with no paid tiers or seat limits. OIDC authentication, group-based role assignment (`Administrator`, `Editor`, `Viewer`), and all SMB security features are completely free for personal and commercial deployments.
+
+    - question: Do I have to migrate or import my files from Filestash?
+      answer: >-
+        No. Sambee connects directly to your existing Windows File Server, NAS, or Samba shares over SMB2/SMB3. Your folder hierarchy, filenames, and POSIX/Windows permissions remain untouched. You can run Sambee and Filestash against the same share at the same time during evaluation.
+
+    - question: How do users edit Office documents if Sambee does not bundle Collabora or OnlyOffice?
+      answer: >-
+        On desktop computers, users pair the optional **Sambee Companion** app and press `Ctrl+Enter` (or right-click **Open in companion app**) to open `.docx`, `.xlsx`, `.pptx`, `.psd`, or any other file in their real installed desktop applications. Sambee locks the file on the SMB share, checks for conflicts, and uploads saved edits straight back to the source folder. For Markdown, code, and plain text, Sambee includes fast built-in browser editors.
+
+    - question: Do phones and tablets need the Companion app?
+      answer: >-
+        No. Mobile phones, tablets, and browser-only workstations connect directly to Sambee over HTTPS with zero client installation. Companion is optional and used only on desktop machines that want local-drive browsing or native desktop app launching.
+
+    - question: How does Sambee's security architecture compare to Filestash?
+      answer: >-
+        Sambee never puts security behind a commercial tier. Every deployment gets OIDC single sign-on, Kerberos-capable SMB authentication, mandatory SMB message signing, optional SMB3 encryption, revocable server-side sessions without credentials stored in cookies or URLs, explicit Trusted Reverse Proxy CIDR checks, per-IP and per-username brute-force limits, Cosign-signed container images with published SBOM and provenance bundles, and weekly Trivy + dependency vulnerability scans.
+
+    - question: Why doesn't Sambee support S3, FTP, or Google Drive?
+      answer: >-
+        Focus. Multi-protocol portals limit every storage backend to a lowest-common-denominator feature set. By focusing on **SMB2/SMB3 shares and local drives**, Sambee delivers Kerberos authentication, SMB3 encryption, real-time `CHANGE_NOTIFY` updates, instant SQLite folder search, cross-backend streaming ZIP operations, and native desktop save-back workflows.

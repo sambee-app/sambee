@@ -9,6 +9,10 @@ github_url = "https://github.com/sambee-app/sambee"
 imprint_url = "/imprint/"
 privacy_url = "/privacy-policy/"
 
+[[footer.comparisons]]
+label = "Filestash Alternative"
+url = "/filestash-alternative/"
+
 [search]
 enable = true
 show_image = false
