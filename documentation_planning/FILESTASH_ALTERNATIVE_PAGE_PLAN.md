@@ -109,33 +109,72 @@ Every point below comes from Filestash's architecture, license model, `docker-co
 
 ---
 
-## 3. Website Architecture & Integration Plan (`sambee.net`)
+## 3. Design System & Website Integration Architecture (`sambee.net`)
 
-### 3.1 Route and File Locations
+### 3.1 Three Distinct Page Families: Recognizably Related, Never Cloned
 
-The page lives outside `/docs/` so it never participates in versioned documentation navigation or inheritance:
+The homepage (`https://sambee.net/`) must remain visually unique. Visitors moving from `/` to `/filestash-alternative/` (or landing directly from search) should immediately recognize Sambee's architectural brand identity without seeing a recycled homepage layout.
 
-| Concern | Planned Path | Notes |
+`sambee.net` therefore separates its templates into three clear page families:
+
+| Page Family | Templates & Styles | Visual Posture & Role |
 |---|---|---|
-| Public URL | `https://sambee.net/filestash-alternative/` | High-intent, exact-match SEO slug |
-| Content entry | `../website/content/filestash-alternative/index.md` | Front matter (`title`, `description`, `layout = "filestash-alternative"`) |
-| Structured page data | `../website/data/filestash_alternative.yaml` | Keeps hero, comparison rows, battlegrounds, code block, and FAQs maintainable |
-| Page template | `../website/themes/sambee/layouts/_default/filestash-alternative.html` | Composes ledger sections matching `../website/themes/sambee/layouts/home.html` |
-| Styles | `../website/themes/sambee/assets/css/comparison.css` (imported in `main.css`) | Reuses `.home-section`, `.ledger-shell`, and shared `type-*` utilities; adds responsive comparison-matrix styles |
-| Internal discovery | `../website/themes/sambee/layouts/partials/essentials/footer.html` | Add a clean footer link (`Filestash Alternative`) while keeping the top navbar minimal |
-| CTA validation | `../website/scripts/validate-homepage-ctas.py` (or `validate-marketing-ctas.py`) | Extend link validation so broken docs/internal links on marketing pages fail the build |
+| **1. Flagship Homepage** (`/` — Unique) | `layouts/home.html`, `partials/home/*`, `assets/css/homepage.css` | **Panoramic brand showcase**: Full-width `4.5rem` (`text-7xl`) billboard hero, 3-card problem row, full-bleed UI preview, 3×2 benefit cards with decorative trails, 10-group feature catalog, 6-card format grid. Exclusive to `/`. |
+| **2. Tech Marketing & Comparison Pages** (`/filestash-alternative/`, future alternatives & solution pages) | `layouts/_default/comparison.html`, `partials/marketing/*`, `assets/css/marketing.css` | **Editorial technical dossier**: Asymmetric `7:5` split hero with an Executive Scorecard panel, sticky section jump bar, upfront 2-column Honest Fit split, sticky-header comparison matrix, `4:8` editorial deep-dive chapters broken by an architecture diagram band, `5:7` terminal test-drive split, and `<details>` accordion FAQ. |
+| **3. Documentation & Legal Pages** (`/docs/...`, `/imprint/`, `/privacy-policy/`) | `layouts/docs/*` + `docs.css`; `layouts/_default/standalone.html` + `standalone.css` | **Reference reading shells**: Three-column versioned docs reader (`1320px`) and single-column legal prose shell. |
 
-### 3.2 Why Custom Ledger Layout Beats `standalone.html`
+**Shared Brand DNA ("Recognizably Sambee"):**
+- **Surfaces & rules**: Warm architectural paper (`#fbf9f4` `page`, `#f5f3ee` `low`, `#f0eee9` `mid`, `#eae8e3` `high`) and warm obsidian dark mode (`#1b1c19` `page`, `#24231f` `low`, `#2b2925` `mid`) framed inside the `1131px` `.ledger-shell` side rails (`1px` `rule-soft` internal hairlines, `2px` `rule-strong` section boundaries, `0px` sharp corners everywhere).
+- **Typography trio**: `Newsreader` (display headings), `Work Sans` (body prose), and `Space Grotesk` (uppercase tracked eyebrows, telemetry badges, indices, and buttons), applying **strictly one `type-*` semantic utility per text element** (`website/content/docs/0.7/website-dev-guide/site-systems/typography-usage-and-boundaries/index.md`).
+- **Shared UI primitives**: `.btn` variants (`buttons.css`), Material Symbols icons, `partials/components/button-kind-class.html`, `partials/components/responsive-image.html`, and a shared `partials/components/link-href.html`.
 
-- `../website/themes/sambee/layouts/_default/standalone.html` renders a single narrow prose column designed for legal pages (`/imprint/`, `/privacy-policy/`).
-- High-converting competitor pages need visual rhythm: full-width ledger dividers, 3-column value cards, a sticky-header comparison matrix, side-by-side "Stay with Filestash / Switch to Sambee" decision cards, and an interactive/copyable Docker Compose block.
-- Using a data-driven Hugo template on top of the existing `ledger-shell` and `type-*` typography system preserves visual consistency with `https://sambee.net/` while keeping `validate-docs-content.py`, `sitemap.xml`, `head.html` Open Graph metadata, and Pagefind search working out of the box.
+**Deliberate Structural Differences from the Homepage:**
+- Zero reuse of `partials/home/*` section templates (`hero.html`, `problem-value.html`, `benefits.html`, `features.html`, `deployment.html` stay untouched and exclusive to `/`).
+- **Asymmetric `7:5` hero** with a compact editorial `Newsreader` scale (`2.5rem` mobile → `3.35rem` desktop, roman `type-copy` lead) paired beside a structured **Executive Scorecard** instead of a giant single-column `4.5rem` billboard + italic subhead.
+- **Sticky sub-header wayfinding bar** and **2-column / `4:8` editorial splits** instead of repeating the homepage's 3-column card grids.
 
-### 3.3 Metadata & Structured Data
+---
 
-- **HTML `<title>`**: `Filestash Alternative for SMB Shares & Local Drives | Sambee`
-- **`<meta name="description">`**: `Need a self-hosted Filestash alternative? Sambee delivers fast dual-pane SMB2/SMB3 and local drive management, native desktop app editing, and free OIDC SSO under the MIT license.`
-- **JSON-LD `FAQPage` schema**: Emit structured FAQ metadata in the page template for rich search-engine results on pricing, OIDC, migration, and Office editing questions.
+### 3.2 Web Design Best Practices Applied
+
+1. **3-Second Above-the-Fold Clarity (F-Pattern Asymmetric Hero)**
+   High-intent search visitors (`"filestash alternative"`) want immediate confirmation of fit and proof. The left `7` columns state the core contrast and primary action; the right `5` columns (`surface-low`) render a 5-row **Executive Scorecard** (`License`, `SSO & Roles`, `SMB Security`, `Supply Chain`, `Container Footprint`) that technical buyers can scan in three seconds without scrolling.
+2. **Non-Linear Wayfinding (Sticky Dossier Subnav)**
+   Different evaluators care about different sections (CISOs jump to Security, sysadmins to Matrix or Test Drive, team leads to Fit). A slim `surface-mid` anchor bar sticks directly beneath the global header (`top: var(--header-height); z-index: 20`), scrolls horizontally with hidden scrollbars on small screens, and pairs with `scroll-margin-top: calc(var(--header-height) + var(--marketing-subnav-height) + 1rem)` on every section target so headings are never clipped.
+3. **Trust-First Qualification Before Deep Claims**
+   Placing the **2-Column "Honest Fit" Split** (`Switch to Sambee if...` vs. `Keep Filestash if...`) directly above the Comparison Matrix disarms skepticism early. Telling S3/FTP/Dropbox users upfront to stay with Filestash makes every SMB, security, and desktop-editing claim below immediately credible.
+4. **Accessible, Mobile-Native Comparison Matrix UX**
+   - **Visual hierarchy**: Category group rows (`surface-mid`, `type-label-eyebrow-strong`) break the 15 rows into five digestible blocks (`Licensing & Identity`, `Security & Supply Chain`, `SMB & Local Storage`, `File Management & Editing`, `Operations & Cloud Breadth`). The Sambee column uses a subtle `surface-low` tint and a `2px` top primary-gold rule so the eye tracks Sambee effortlessly.
+   - **WCAG 1.4.1 dual coding (never color alone)**: Every cell pairs a distinct Material Symbol (`check_circle`, `lock`, `remove`) with an explicit bold verdict phrase (`Free for unlimited users`, `Paid plans only`, `Not supported`) plus concise technical context.
+   - **Zero horizontal pinch-zooming on mobile**: On `md+` (`>= 768px`), the matrix renders as a semantic table with a sticky header row beneath the subnav. Below `md`, CSS grid/block rules stack each capability into a clean 2-row comparison card (`Capability` header → labeled `SAMBEE` row vs. `FILESTASH` row) so `360px` phones have zero horizontal overflow.
+5. **Reading Ergonomics & Visual Cadence (`60–70ch` Measure + Mid-Page Visual Break)**
+   Instead of six cramped equal-height cards, the six deep-dive pillars render as **`4:8` Editorial Split Chapters**: left rail with `01 //`–`06 //` index, `Newsreader` heading, and a `surface-mid` **`ui-current-primary-inset` takeaway callout**; right column with `max-w-[65ch]` `Work Sans` copy and structured bullet points. Halfway through (between Chapters `03` and `04`), a full-width **Visual Proof & Architecture Contrast Band** breaks text fatigue with a dual-pane screenshot and a 1-container vs. 2-container SVG diagram.
+6. **Low-Friction Conversion & Progressive-Disclosure FAQ**
+   - **Test-drive terminal split (`5:7` grid)**: Pairs three zero-risk assurances (`No migration`, `Runs beside Filestash on port 8000`, `Direct SMB2/SMB3 access`) and dual CTAs beside a labeled `docker-compose.yml` code panel with one-click copy.
+   - **Native `<details>/<summary>` accordion FAQ**: Uses semantic HTML5 disclosure elements (first item `open` by default) for zero-JS keyboard accessibility, screen-reader `aria-expanded` support, `44×44px` minimum tap targets, and `prefers-reduced-motion: reduce` compliance.
+
+---
+
+### 3.3 Hugo File Map & Exact Technical Integration Contracts
+
+| Concern | Planned Path | Integration Contract |
+|---|---|---|
+| Public URL | `https://sambee.net/filestash-alternative/` | Top-level page bundle outside `content/docs/`; unaffected by `validate-docs-content.py` and `validate-docs-output.py`. |
+| Content bundle | `../website/content/filestash-alternative/index.md` | TOML front matter: `title` (**without** `\| Sambee`), `description`, `layout = "comparison"`, `data_key = "filestash_alternative"`. |
+| Page data | `../website/data/filestash_alternative.yaml` | Holds all structured page content; future competitor pages (`filebrowser_alternative.yaml`, etc.) reuse the exact same schema. |
+| Generic layout | `../website/themes/sambee/layouts/_default/comparison.html` | Resolves `$pageData := index hugo.Data .Params.data_key`, emits `FAQPage` JSON-LD via `{{ define "head" }}`, and renders `<div class="marketing-shell" data-pagefind-body>`. |
+| Marketing partials | `../website/themes/sambee/layouts/partials/marketing/` | `hero-split.html`, `subnav.html`, `fit-split.html`, `matrix.html`, `chapter-list.html`, `visual-proof.html`, `test-drive.html`, `faq.html`. |
+| Shared link helper | `../website/themes/sambee/layouts/partials/components/link-href.html` | Promoted from `partials/home/link-href.html` (which delegates to it) so both homepage and marketing pages resolve structured `target: { type: docs, book, section, page }` links via `docs/page-url.html`. |
+| Marketing styles | `../website/themes/sambee/assets/css/marketing.css` | Imported in `main.css` after `homepage.css`. Owns `.marketing-shell`, `.marketing-section`, split grids, responsive matrix, and accordion FAQ styles without touching `homepage.css`. |
+| `<head>` extension | `../website/themes/sambee/layouts/_default/baseof.html` | Add optional `{{ block "head" . }}{{ end }}` inside `<head>` so marketing templates can emit safe `dict ... \| jsonify` JSON-LD without polluting `<body>`. |
+| Footer discovery | `../website/themes/sambee/layouts/partials/essentials/footer.html` & `footer.css` | Keep `.site-footer-legal` (`aria-label="Legal links"`) strictly for `Imprint` and `Privacy Policy`; add a separate `<nav class="site-footer-compare" aria-label="Comparisons">` fed from `params.toml` (`[[footer.comparisons]]`). |
+| CTA & output checks | `../website/scripts/validate-homepage-ctas.py` & `../website/tests/` | Extend link validation to verify `data-marketing-link` anchors/routes in `/filestash-alternative/index.html`, and add Python built-output tests in `website/tests/`. |
+
+**Critical Codebase Contracts to Preserve During Implementation:**
+1. **No duplicate `| Sambee` in `<title>`**: `partials/essentials/head.html:49` automatically formats non-home titles as `printf "%s | %s" $resolvedPage.Title site.Title`. Set front-matter `title = "Filestash Alternative for SMB Shares & Local Drives"` so `<title>`, `og:title`, and `twitter:title` render `Filestash Alternative for SMB Shares & Local Drives | Sambee` once.
+2. **Flush footer border & Pagefind indexing**: `baseof.html:50` applies `site-main--home` (`pb-0`) only when `.IsHome` is `true`. In `marketing.css`, define `.site-main:has(.marketing-shell) { @apply pb-0; }` (matching `.site-main:has(.standalone-shell)` in `standalone.css`) and collapse adjacent `.marketing-section` `2px` borders so the final section meets `.site-footer` cleanly with zero `pb-12` gap. Putting `data-pagefind-body` on `.marketing-shell` indexes the page under `page_kind:site`.
+3. **Code-block highlighting & copy button**: `assets/css/code.css` and `COPY_BUTTON_SELECTOR` in `assets/js/main.js:5` require a `.content` ancestor around `.highlight` / `pre`. In `partials/marketing/test-drive.html`, render the YAML string with `{{ transform.Highlight $section.code "yaml" }}` inside `<div class="content marketing-code-surface">` so syntax colors, dark-mode borders, and the copy button work out of the box.
+4. **Git LFS + WebP validation gate**: `.github/workflows/website-deploy.yml` runs `npm run images:validate` (`scripts/validate-webp-assets.py`) before `hugo` and tracks `website/assets/images/**` via Git LFS (`.gitattributes`). Launch Phase 1 using existing theme-aware assets (`images/home/sambee-screenshot.png`, `sambee-screenshot-dark.png`, `companion-screenshot.png`) plus an inline theme-aware SVG architecture diagram; when adding custom screenshots later, commit pre-generated `_*w.webp` files from `python3 scripts/generate-webp.py`.
 
 ---
 
@@ -145,169 +184,212 @@ The page lives outside `/docs/` so it never participates in versioned documentat
 
 ---
 
-### Section 1: Hero (`ledger-shell`)
+### Band 0: Asymmetric `7:5` Split Hero (`partials/marketing/hero-split.html`)
 
-- **Eyebrow**: `SAMBEE VS. FILESTASH // SELF-HOSTED FILE WORKSPACE`
-- **H1**: `Stop using a cloud adapter to manage your SMB shares.`
-- **Subtitle**: `Filestash connects to 25 protocols at surface depth—and locks OIDC single sign-on, audit logs, and early security patches behind monthly subscriptions. Sambee is purpose-built for SMB shares and local drives, with defense-in-depth security, dual-pane navigation, native desktop app editing, and free SSO under the MIT license.`
-- **Primary CTA**: `Deploy with Docker` → `/docs/admin-guide/installation-and-deployment/deploy-sambee-with-docker/`
-- **Secondary CTA**: `Compare Feature by Feature ↓` → `#comparison`
-- **Technical Proof Bar**:
-  - `MIT License`
-  - `$0 OIDC Single Sign-On`
-  - `SMB2 / SMB3 + Kerberos + Encryption`
-  - `Cosign + SBOM Verified`
-  - `Single Docker Container`
+**Left Column (`7 cols`, `surface-page`):**
+- **Eyebrow**: `COMPARE // FILESTASH ALTERNATIVE`
+- **H1 (`Newsreader` 800, editorial scale)**: `Stop using a cloud adapter to manage your SMB shares.`
+- **Lead (`Work Sans` roman `type-copy`, `max-w-[60ch]`)**: `Filestash connects to 25 protocols at surface depth—and locks OIDC single sign-on, audit logs, and early security patches behind monthly subscriptions. Sambee is purpose-built for SMB shares and local drives, with defense-in-depth security, dual-pane navigation, native desktop app editing, and free SSO under the MIT license.`
+- **Actions**:
+  - **Primary CTA (`kind: primary`)**: `Deploy with Docker` → `target: { type: docs, book: admin-guide, section: installation-and-deployment, page: deploy-sambee-with-docker }`
+  - **Secondary CTA (`kind: outline`)**: `Jump to Comparison Matrix ↓` → `target: { type: anchor, id: comparison }`
 
----
-
-### Section 2: Three Structural Advantages (3-Column Ledger Cards)
-
-#### Card 1
-- **Eyebrow**: `No Security Tax`
-- **Icon**: `verified_user`
-- **Title**: `Enterprise identity & security at $0`
-- **Body**: `Filestash charges $50 to $290+ per month for OIDC, RBAC, audit logs, and early security patches. Sambee includes OIDC single sign-on, revocable sessions, Cosign-signed images, and unlimited users for free under the MIT license.`
-
-#### Card 2
-- **Eyebrow**: `Purpose-Built Depth`
-- **Icon**: `dns`
-- **Title**: `True SMB2/SMB3 + local drives`
-- **Body**: `Filestash treats SMB as one of 25 generic plugins—NTLM only, with live network crawls for search. Sambee delivers Kerberos, SMB3 encryption, real-time CHANGE_NOTIFY updates, millisecond folder jump, and local PC drive access.`
-
-#### Card 3
-- **Eyebrow**: `Real Desktop Apps`
-- **Icon**: `laptop_windows`
-- **Title**: `Edit in Word or Photoshop—no WOPI container`
-- **Body**: `Filestash ships a heavy Collabora container that struggles behind reverse proxies and cannot open creative files. Sambee runs in one container and opens files in your installed desktop apps, saving changes right back to your share.`
+**Right Column (`5 cols`, `surface-low`, left `1px` `rule-soft` divider on `lg+` — Executive Scorecard):**
+- **Panel Header**: `AT A GLANCE // SAMBEE ADVANTAGE` (`type-label-eyebrow-strong`)
+- **5 Telemetry Rows** (each separated by `1px` `rule-soft`):
+  1. `LICENSE & COST` → **MIT Open Source — $0 forever, unlimited users** *(vs. AGPLv3 + $50–$290/mo tiers)*
+  2. `IDENTITY & ACCESS` → **Free OIDC SSO + IdP group roles** *(vs. paywalled SSO & RBAC)*
+  3. `SMB SECURITY` → **Kerberos + signing + SMB3 encryption** *(vs. NTLM/Guest only)*
+  4. `SUPPLY CHAIN` → **Cosign-signed, SBOM + weekly Trivy scans** *(vs. unsigned `:latest` Compose)*
+  5. `EDITING & FOOTPRINT` → **Native desktop apps in 1 container** *(vs. heavy Collabora WOPI sidecar)*
 
 ---
 
-### Section 3: Side-by-Side Comparison Matrix (`#comparison`)
+### Band 1: Sticky Dossier Sub-Navigation (`partials/marketing/subnav.html`)
 
-- **Eyebrow**: `Architecture, Security & Licensing`
-- **H2**: `Sambee vs. Filestash at a Glance`
-- **Intro**: `A factual look at how a security-first SMB and local-drive workspace compares to a general-purpose multi-protocol portal.`
-
-| Category | Sambee | Filestash (Self-Hosted) |
-|---|---|---|
-| ***Licensing & Identity*** | | |
-| **Open-Source License** | **MIT** (permissive, 100% open source) | **AGPLv3** open-core + paid commercial tiers |
-| **OIDC Single Sign-On (Keycloak, Authentik, Authelia, Okta)** | **Free for unlimited users** | **Paid plans only** ($50–$290+/mo) |
-| **Role Assignment from IdP Groups** | **Included free** (`Administrator`, `Editor`, `Viewer`) | **Paid RBAC tiers only** |
-| ***Security & Supply Chain*** | | |
-| **Security Updates & Audit Trail** | **Immediate patches + JSONL auth audit trail for all users** | **Early Security Patches & Audit Journal gated to paid plans** |
-| **SMB Authentication & Wire Security** | **Kerberos + NTLM** (with **Kerberos-only** option), mandatory signing, **SMB3 encryption** | **NTLM / Guest only** (no Kerberos; no signing/encryption controls) |
-| **Session & Credential Hygiene** | **Short-lived in-memory tokens + revocable `HttpOnly` sessions**; zero tokens in URLs; log redaction | **1-week stateless cookie carrying SMB password**; no per-session revocation; token passed in WOPI URLs |
-| **Reverse-Proxy & Brute-Force Protection** | **Explicit Trusted Proxy CIDR allowlist** + per-IP & per-username rate limits | Trusts any `X-Forwarded-For` header; single shared global rate limiter |
-| **Container & Supply-Chain Integrity** | **Cosign-signed images, SBOM + provenance**, `--require-hashes`, `pip` removed, weekly **Trivy** scans | Floating `:latest` + `CANARY=true` in default Compose; root Collabora startup `curl`; no public CI/SBOM/signing |
-| ***SMB & Local Storage Depth*** | | |
-| **Live SMB Folder Refresh** | **Real-time** via SMB2/SMB3 `CHANGE_NOTIFY` + WebSockets | **Not supported** |
-| **Directory Search & Navigation** | **Instant SQLite-indexed Quick Bar (`Ctrl+K`)** + history | Live recursive network walk by default (crawler requires extra plugin) |
-| **Local Workstation Drives** | **Yes** (origin-paired Companion with HMAC-signed `127.0.0.1` API) | **No** (server-mounted paths only) |
-| ***File Management, Viewing & Editing*** | | |
-| **File Browser Layout** | **Dual-pane (`Ctrl+B`)** and single-pane commander workspace | Single-pane web portal only |
-| **Copy & Move Across Locations** | **Toolbar, keyboard shortcuts & touch multi-select** across SMB and local drives | Drag-and-drop oriented; no cross-share SMB move |
-| **ZIP Archive Handling** | **Instant virtual folders** (browse, preview & stream-extract without full unpack) | Basic plugin support |
-| **Graphics, Image & PDF Viewers** | **Hardened on-the-fly conversion** (`PSD`, `AI`, `EPS`, `HEIC`, `JXL`, `TIFF`, `EXR`, CMYK/encrypted `PDF`) | Standard browser/image transcoding |
-| **Markdown Editing** | **Rendered viewer + WYSIWYG table editing** + multi-page PDF print | Plain/basic editor plugin |
-| **Office & Creative App Editing** | **Open in native desktop Word, Excel, Photoshop, LibreOffice** (`Ctrl+Enter`) with locks & conflict recovery | Browser Office only via separate heavy `collabora/code` WOPI container |
-| ***Operations & Protocol Breadth*** | | |
-| **Deployment Footprint & Health** | **1 lightweight container** + built-in live **System Health Monitoring** | 2 containers in default Compose (`filestash` + `collabora/code`) |
-| **S3, FTP, Dropbox, Google Drive & Gateways** | **Not supported** (focused on SMB & local drives) | **25+ cloud/file protocols + SFTP/WebDAV/MCP gateways** |
+- **Surface**: `surface-mid`, sticky below `.nav-header`, `2px` bottom `rule-strong`
+- **Anchor Items (`type-label-sm`)**:
+  - `01 // Honest Fit` (`#fit`)
+  - `02 // Matrix` (`#comparison`)
+  - `03 // Security & Depth` (`#pillars`)
+  - `04 // Architecture` (`#architecture`)
+  - `05 // 5-Min Test Drive` (`#test-drive`)
+  - `06 // FAQ` (`#faq`)
 
 ---
 
-### Section 4: Six Deep-Dive Battlegrounds (Ledger Feature Grid)
+### Band 2 (`#fit`): Upfront "Honest Fit" 2-Column Decision Ledger (`partials/marketing/fit-split.html`)
 
-*(Six items `01` through `06` match the 3×2 / 2×3 card rhythm of `website/data/homepage.yaml`.)*
-
-#### `01 // LICENSING & IDENTITY` — Zero "SSO Tax." Permissive MIT Open Source.
-Identity should never sit behind a monthly paywall. Filestash restricts OpenID Connect (OIDC), RBAC, proxy authentication, custom branding, and environment-variable configuration to commercial subscriptions.
-
-Sambee ships every feature under the **MIT license**:
-- Connect **Keycloak, Authentik, Authelia, Okta, OneLogin**, or any standard OIDC provider at **$0**.
-- Map identity-provider groups directly to **Administrator, Editor, and Viewer** roles.
-- Roll out OIDC safely alongside local passwords, then switch to passwordless **OIDC-only** sign-in when ready.
-- Customize personal and site-wide UI themes with the built-in RGBA theme editor.
-
-#### `02 // SECURITY & SUPPLY CHAIN` — Defense-in-Depth Security—Never an Enterprise Upsell
-A self-hosted file gateway sits right in front of your most sensitive storage. While Filestash gates **Early Security Patches**, **Enhanced Security**, and **Audit Journals** behind paid plans—and stores user SMB passwords inside stateless cookies reused in WOPI URLs—Sambee builds enterprise-grade security into every release:
-- **Strong SMB wire security**: Enforce **Kerberos-only** authentication (blocking NTLM fallback), require **SMB message signing** on every connection, and enable **SMB3 transport encryption** across untrusted networks.
-- **Revocable sessions & zero URL token leaks**: Browsers hold only short-lived in-memory API tokens and `HttpOnly` cookies; users and admins can revoke individual sessions instantly; Companion exchanges one-time tokens in JSON bodies (never query strings); and logs automatically redact secrets.
-- **Anti-spoofing & brute-force controls**: Sambee ignores `X-Forwarded-For` unless the request comes from your configured **Trusted Reverse Proxy CIDRs**, and enforces per-IP and case-folded per-username authentication rate limits.
-- **Verifiable software supply chain**: Every production image uses digest-pinned base images, `--require-hashes` lockfiles, removed `pip` runtime tooling, non-root execution, weekly **Trivy** + multi-ecosystem dependency audits, **Cosign signatures**, and published **SBOM + provenance bundles**.
-- **Hardened viewers & desktop trust**: Active `HTML`/`SVG` content never executes in the viewer, ImageMagick runs with network delegates disabled and strict memory/pixel caps, and Sambee Companion requires **dual numeric-code approval of the exact browser origin** plus per-request **HMAC signatures** over `127.0.0.1`.
-
-#### `03 // STORAGE DEPTH` — First-Class SMB2/SMB3 and Local Drives
-When a tool supports 25 backends through one minimal interface, every protocol gets reduced to basic `list`, `read`, and `write` calls. Sambee focuses exclusively on **SMB shares** and **local drives** so both feel instantaneous and reliable:
-- **Event-driven freshness**: Sambee subscribes to **SMB2/SMB3 `CHANGE_NOTIFY`** events. When a coworker or script adds, renames, or edits files on the server, open browser tabs and directory caches update without wasteful polling.
-- **Millisecond directory jumps**: Press `Ctrl+K` to jump straight to any folder on huge shares, backed by a resilient **SQLite directory index** and personal navigation history.
-- **Local drives in the same tab**: Install the optional **Sambee Companion** app on Windows, macOS, or Linux to access local disks, resolve Windows `.lnk` shortcuts and symlinks, and transfer folders directly between your PC and your NAS.
-
-#### `04 // ERGONOMICS` — A Commander Workspace on Desktop. A Native Feel on Mobile.
-Consumer "Dropbox-like" web portals fall apart during real file management. Sambee gives power users and mobile users tools designed for each screen:
-- **Dual-pane mode (`Ctrl+B`)**: View two directories side by side, match pane locations (`Ctrl+Left` / `Ctrl+Right`), and copy or move batches across SMB shares and local drives with **overwrite** or **replace-if-newer** conflict rules.
-- **Instant streaming ZIP folders**: Step inside `.zip` archives as if they were normal directories. Preview images, PDFs, or text inside an archive immediately, or stream-extract files directly to another share without temporary disk bloat.
-- **Built for phones and tablets**: Long-press or tap to select multiple items, run actions from a thumb-friendly bottom bar, swipe rapidly through photo sets or PDF pages, and send files to any mobile app through your phone's **native share sheet**.
-
-#### `05 // VIEWERS & EDITING` — Skip Collabora Headaches. Use Your Real Apps.
-Running a multi-gigabyte Collabora/WOPI server just to fix a typo in a Word document wastes RAM, breaks behind reverse proxies, and still cannot open Photoshop, Illustrator, or specialized desktop files.
-
-Sambee solves viewing and editing cleanly:
-- **Instant in-browser viewers**: Browse large photo folders, inspect professional graphics (**PSD, AI, EPS, TIFF, HEIC, JPEG XL, AVIF, EXR, HDR**), search inside encrypted or CMYK **PDFs**, edit code in **CodeMirror**, and edit **Markdown** with live **WYSIWYG table editing**.
-- **Native desktop app editing (`Ctrl+Enter`)**: Open any file directly in **Microsoft Word, Excel, PowerPoint, LibreOffice, Adobe Photoshop**, or any app installed on your computer via Sambee Companion.
-- **Protected round-trip saving**: Sambee places an **edit lock** on the SMB file, watches your session, detects server-side conflicts before upload, recovers unsaved work after interruptions, and writes your saved changes straight back to the share.
-
-#### `06 // OPERATIONS` — One Lightweight Container with Built-In Health Monitoring
-Sambee respects the person maintaining the server:
-- **Single container**: Deploy `ghcr.io/sambee-app/sambee:stable` with one persistent `/app/data` volume and zero sidecar databases or WOPI servers.
-- **Frictionless administration**: Settings apply automatically without easy-to-forget Save buttons, and authentication/OIDC audit events export cleanly as JSON Lines (`sambee-audit.jsonl`).
-- **Live System Health in the UI**: Monitor host RAM, cache-excluded container cgroup memory, normalized CPU load, hardware CPU package temperatures (Intel, AMD, Raspberry Pi), and free space across connected SMB shares and local drives directly from Sambee's top bar.
-
----
-
-### Section 5: Radical Honesty Decision Block (2-Column Split)
-
-- **Eyebrow**: `Clear Fit`
+- **Eyebrow**: `01 // HONEST FIT`
 - **H2**: `Choose the Right Tool for Your Infrastructure`
+- **Intro**: `Filestash and Sambee solve different architectural problems. Here is the honest breakdown before you read a single feature row.`
 
-#### Column A: `Keep Filestash if you need...`
-- One browser portal for **S3, Backblaze B2, MinIO, FTP/SFTP, Dropbox, Google Drive, or Git**.
-- Protocol gateways that re-expose backend storage as **SFTP, WebDAV, S3, or MCP servers**.
-- Public, anonymous share links for external clients who do not have user accounts on your network.
-
-#### Column B: `Switch to Sambee if you want...`
+#### Left Card (`surface-page`, `2px` top primary-gold accent rule): `Switch to Sambee if you want...`
 - Purpose-built speed and security for **Windows File Servers, TrueNAS, Synology, Unraid, Samba, and local PC drives**.
-- **Dual-pane file management**, `Ctrl+K` instant folder navigation, streaming ZIP archives, and polished mobile controls.
-- **Native desktop editing** in Word, Excel, Photoshop, or LibreOffice without operating a Collabora/WOPI stack.
+- **Defense-in-depth security** (Kerberos, SMB3 encryption, revocable sessions, Cosign + SBOM verification) with **zero enterprise paywalls**.
+- **Dual-pane file management (`Ctrl+B`)**, `Ctrl+K` millisecond folder jumps, streaming ZIP folders, and dedicated mobile touch controls.
+- **Native desktop editing** in Word, Excel, Photoshop, or LibreOffice without running a separate Collabora/WOPI server.
 - **Free OIDC single sign-on**, group-based roles, and **MIT licensing** with zero per-seat fees.
 
----
-
-### Section 6: Zero-Risk 5-Minute Side-by-Side Test Drive
-
-- **Eyebrow**: `Zero Migration`
-- **H2**: `Test Sambee Beside Filestash in 5 Minutes`
-- **Body**: `Sambee works directly with the files and folders already on your SMB server. It creates no proprietary file store, moves no data, and changes nothing on your share. Keep Filestash running on port 8334, start Sambee on port 8000, connect the same SMB share, and feel the difference immediately.`
-
-```yaml
-services:
-  sambee:
-    image: ghcr.io/sambee-app/sambee:stable
-    restart: unless-stopped
-    volumes:
-      - ./data:/app/data
-    ports:
-      - 8000:8000
-```
-
-- **Primary CTA**: `Read the Docker Deployment Guide` → `/docs/admin-guide/installation-and-deployment/deploy-sambee-with-docker/`
-- **Secondary CTA**: `Explore Sambee on GitHub` → `https://github.com/sambee-app/sambee`
+#### Right Card (`surface-low`, neutral `rule-soft` framing): `Keep Filestash if you need...`
+- One browser portal for **S3, Backblaze B2, MinIO, FTP/SFTP, Dropbox, Google Drive, or Git**.
+- Outbound protocol gateways that re-expose backend storage as **SFTP, WebDAV, S3, or MCP servers**.
+- Public, anonymous share links for external guests who do not have accounts on your network.
 
 ---
 
-### Section 7: Technical FAQ (`FAQPage` Schema)
+### Band 3 (`#comparison`): Grouped Comparison Matrix (`partials/marketing/matrix.html`)
+
+- **Eyebrow**: `02 // ARCHITECTURE, SECURITY & LICENSING`
+- **H2**: `Sambee vs. Filestash at a Glance`
+- **Intro**: `How a dedicated SMB and local-drive workspace compares to a general-purpose multi-protocol portal.`
+- **Responsive UX**: Sticky 3-column header on `md+` (`Capability` | `Sambee` tinted `surface-low` with top gold bar | `Filestash`); stacked per-capability cards on `< md`; every cell dual-coded with icon + bold status phrase + detail.
+
+| Capability | Sambee | Filestash (Self-Hosted) |
+|---|---|---|
+| ***Group 1: Licensing & Identity*** | | |
+| **Open-Source License** | `[check_circle]` **MIT** — permissive, 100% open source | `[info]` **AGPLv3** — open-core + commercial tiers |
+| **OIDC Single Sign-On (Keycloak, Authentik, Authelia, Okta)** | `[check_circle]` **Free for unlimited users** | `[lock]` **Paid plans only** ($50–$290+/mo) |
+| **Role Assignment from IdP Groups** | `[check_circle]` **Included free** (`Administrator`, `Editor`, `Viewer`) | `[lock]` **Paid RBAC tiers only** |
+| ***Group 2: Security & Supply Chain*** | | |
+| **Security Updates & Audit Trail** | `[check_circle]` **Immediate patches + JSONL auth audit trail for all** | `[lock]` **Early Security Patches & Audit Journal paywalled** |
+| **SMB Authentication & Wire Security** | `[check_circle]` **Kerberos + NTLM** (with **Kerberos-only** mode), mandatory signing, **SMB3 encryption** | `[remove]` **NTLM / Guest only** (no Kerberos; no signing/encryption controls) |
+| **Session & Credential Hygiene** | `[check_circle]` **Short-lived RAM tokens + revocable `HttpOnly` sessions**; zero URL tokens; log redaction | `[remove]` **1-week stateless cookie holding SMB password**; no per-session revoke; token in WOPI URLs |
+| **Reverse-Proxy & Brute-Force Protection** | `[check_circle]` **Trusted Proxy CIDR allowlist** + per-IP & per-username rate limits | `[remove]` **Trusts any `X-Forwarded-For` header**; single global rate limiter |
+| **Container & Supply-Chain Integrity** | `[check_circle]` **Cosign-signed, SBOM + provenance**, `--require-hashes`, `pip` removed, weekly **Trivy** scans | `[remove]` **Floating `:latest` + `CANARY=true`**; root Collabora startup `curl`; no public CI/SBOM/signing |
+| ***Group 3: SMB & Local Storage Depth*** | | |
+| **Live SMB Folder Refresh** | `[check_circle]` **Real-time** via SMB2/SMB3 `CHANGE_NOTIFY` + WebSockets | `[remove]` **Not supported** |
+| **Directory Search & Navigation** | `[check_circle]` **Instant SQLite-indexed Quick Bar (`Ctrl+K`)** + history | `[info]` **Live recursive network walk** by default (crawler plugin optional) |
+| **Local Workstation Drives** | `[check_circle]` **Yes** — origin-paired Companion (`127.0.0.1` HMAC API) | `[remove]` **No** — server-mounted paths only |
+| ***Group 4: File Management, Viewing & Editing*** | | |
+| **File Browser Layout** | `[check_circle]` **Dual-pane (`Ctrl+B`)** and single-pane commander UI | `[info]` **Single-pane** web portal only |
+| **Copy & Move Across Locations** | `[check_circle]` **Toolbar, shortcuts & touch multi-select** across SMB and local drives | `[remove]` **Drag-and-drop oriented**; no cross-share SMB move |
+| **ZIP Archive Handling** | `[check_circle]` **Instant virtual folders** — browse, preview & stream-extract | `[info]` **Basic plugin support** |
+| **Graphics, Image & PDF Viewers** | `[check_circle]` **Hardened on-the-fly conversion** (`PSD`, `AI`, `EPS`, `HEIC`, `JXL`, `TIFF`, `EXR`, CMYK/encrypted `PDF`) | `[info]` **Standard browser/image transcoding** |
+| **Markdown Editing** | `[check_circle]` **Rendered viewer + WYSIWYG table editing** + PDF print | `[info]` **Plain/basic editor plugin** |
+| **Office & Creative App Editing** | `[check_circle]` **Open in native desktop Word, Excel, Photoshop, LibreOffice** (`Ctrl+Enter`) with locks & recovery | `[info]` **Browser Office only** via separate heavy `collabora/code` WOPI container |
+| ***Group 5: Operations & Protocol Breadth*** | | |
+| **Deployment Footprint & Health** | `[check_circle]` **1 lightweight container** + built-in **System Health Monitoring** | `[info]` **2 containers** in default Compose (`filestash` + `collabora/code`) |
+| **S3, FTP, Dropbox, Google Drive & Gateways** | `[remove]` **Not supported** (focused exclusively on SMB & local drives) | `[check_circle]` **25+ cloud/file protocols + SFTP/WebDAV/MCP gateways** |
+
+---
+
+### Band 4 (`#pillars`, Part A): Deep-Dive Editorial Chapters `01`–`03` (`4:8` Split Rows)
+
+*(Each chapter uses a `4`-column left summary rail with a `ui-current-primary-inset` callout box and an `8`-column right detail list capped at `65ch`.)*
+
+#### Chapter `01 // LICENSING & IDENTITY`
+- **Title**: `Zero "SSO Tax." Permissive MIT Open Source.`
+- **Left Rail Callout**: `MIT License • $0 OIDC • Unlimited seats`
+- **Lead**: `Identity should never sit behind a monthly paywall. Filestash restricts OpenID Connect (OIDC), RBAC, proxy authentication, custom branding, and environment-variable configuration to commercial subscriptions.`
+- **Points**:
+  - **Free OIDC for every provider**: Connect Keycloak, Authentik, Authelia, Okta, OneLogin, or any standard OIDC provider at `$0`.
+  - **Group-driven role mapping**: Assign `Administrator`, `Editor`, and `Viewer` roles automatically from identity-provider groups.
+  - **Safe staged rollout**: Run OIDC alongside local passwords during setup, then switch to passwordless **OIDC-only** sign-in when verified.
+  - **Multi-layer theming included**: Customize personal and site-wide UI themes with the built-in RGBA theme editor.
+
+#### Chapter `02 // SECURITY & SUPPLY CHAIN`
+- **Title**: `Defense-in-Depth Security—Never an Enterprise Upsell.`
+- **Left Rail Callout**: `Kerberos + SMB3 encryption • Revocable sessions • Cosign + SBOM`
+- **Lead**: `A browser file gateway sits directly in front of your most sensitive storage. While Filestash gates Early Security Patches and Audit Journals behind paid plans—and stores user SMB passwords inside stateless cookies reused in WOPI URLs—Sambee builds enterprise-grade security into every release.`
+- **Points**:
+  - **Strong SMB wire security**: Enforce **Kerberos-only** authentication (blocking NTLM fallback), require **SMB message signing** on every connection, and enable **SMB3 transport encryption** across untrusted networks.
+  - **Revocable sessions & zero URL token leaks**: Browsers hold only short-lived in-memory API tokens and `HttpOnly` cookies; users and admins can revoke individual sessions immediately; Companion exchanges one-time tokens in JSON bodies (never query strings); and logs automatically redact secrets.
+  - **Anti-spoofing & brute-force limits**: Sambee ignores `X-Forwarded-For` unless the request originates from your configured **Trusted Reverse Proxy CIDRs**, and enforces per-IP and case-folded per-username rate limits.
+  - **Verifiable software supply chain**: Digest-pinned base images, `--require-hashes` lockfiles, removed `pip` runtime tooling, non-root execution, weekly **Trivy** + multi-ecosystem dependency audits, **Cosign image signatures**, and published **SBOM + provenance bundles**.
+  - **Sandboxed viewers & desktop pairing**: Active `HTML`/`SVG` content never executes in the viewer, ImageMagick runs with network delegates disabled and strict memory/pixel caps, and Companion requires **dual numeric-code approval of the exact browser origin** plus per-request **HMAC signatures** over `127.0.0.1`.
+
+#### Chapter `03 // STORAGE DEPTH`
+- **Title**: `First-Class SMB2/SMB3 Meets Your Local Drives.`
+- **Left Rail Callout**: `Real-time CHANGE_NOTIFY • Millisecond SQLite jump • Local PC disks`
+- **Lead**: `When a portal funnels 25 backends through one minimal interface, every protocol gets reduced to basic list, read, and write calls. Sambee focuses exclusively on SMB shares and local drives so both feel instantaneous.`
+- **Points**:
+  - **Event-driven directory freshness**: Sambee subscribes to **SMB2/SMB3 `CHANGE_NOTIFY`** events so open browser tabs and directory caches update in real time without wasteful polling.
+  - **Millisecond directory jumps (`Ctrl+K`)**: Jump straight to any folder across tens of thousands of directories, backed by a resilient **SQLite directory index** and personal history.
+  - **Local workstation drives in the same tab**: Pair the optional **Sambee Companion** app on Windows, macOS, or Linux to browse local disks, resolve `.lnk` shortcuts and symlinks, and transfer folders directly between your PC and your NAS.
+
+---
+
+### Band 5 (`#architecture`): Mid-Page Visual Proof & Architecture Contrast Band (`partials/marketing/visual-proof.html`)
+
+*(Breaks reading rhythm halfway through the chapters with visual evidence on `surface-low`.)*
+
+- **Eyebrow**: `04 // ARCHITECTURAL CONTRAST`
+- **H2**: `One Hardened Container vs. Heavy Browser Office Stacks`
+- **Visual 1 — Inline Theme-Aware SVG Architecture Comparison (`2-column diagram`)**:
+  - **Sambee Stack**: `Browser` → `Sambee (1 Non-Root Container, Cosign Verified)` → `SMB2/SMB3 Share (Kerberos + Signing + Encryption + CHANGE_NOTIFY)` + optional `127.0.0.1 Origin-Paired Companion → Native Word / Excel / Photoshop`.
+  - **Typical Filestash Stack**: `Browser` → `Filestash (:latest)` + `Collabora WOPI Container (root startup curl, multi-GB RAM, query-string session tokens)` → `NTLM-only SMB Plugin` + `$50–$290/mo SSO & Security Paywall`.
+- **Visual 2 — Theme-Aware Workspace Preview**:
+  - Reuses `components/responsive-image.html` (light + dark variants) with a concise caption bar highlighting dual-pane navigation, the `Ctrl+K` Quick Bar, and top-bar System Health status.
+
+---
+
+### Band 6 (`#pillars`, Part B): Deep-Dive Editorial Chapters `04`–`06` (`4:8` Split Rows)
+
+#### Chapter `04 // ERGONOMICS`
+- **Title**: `A Commander Workspace on Desktop. A Native Feel on Mobile.`
+- **Left Rail Callout**: `Ctrl+B dual-pane • Zero-extract ZIPs • Native mobile share`
+- **Lead**: `Consumer "Dropbox-like" portals break down during serious file management. Sambee gives keyboard power users and mobile touch users controls built for each device.`
+- **Points**:
+  - **Dual-pane mode (`Ctrl+B`)**: View two folders side by side, sync pane locations (`Ctrl+Left` / `Ctrl+Right`), and copy or move batches across SMB shares and local drives with **overwrite** or **replace-if-newer** conflict handling.
+  - **Instant streaming ZIP folders**: Step inside `.zip` archives like ordinary folders, preview files inside archives immediately, or stream-extract directly across shares without temporary disk bloat.
+  - **Purpose-built mobile UX**: Long-press or tap for multi-selection, run transfers from a thumb-friendly bottom bar, swipe rapidly through images and PDFs, and share files through your phone's **native OS share sheet**.
+
+#### Chapter `05 // VIEWERS & EDITING`
+- **Title**: `Fast Browser Viewers. Real Desktop Apps When You Need Them.`
+- **Left Rail Callout**: `PSD/AI/HEIC/PDF previews • Ctrl+Enter native apps • Edit locks`
+- **Lead**: `Running a multi-gigabyte Collabora server just to edit a Word file wastes RAM, breaks behind reverse proxies, and still cannot open Photoshop, Illustrator, or specialized desktop formats.`
+- **Points**:
+  - **Broad in-browser previews & editors**: Inspect photos and pro graphics (**PSD, AI, EPS, TIFF, HEIC, JPEG XL, AVIF, EXR, HDR**), search encrypted or CMYK **PDFs**, edit code in **CodeMirror**, and edit **Markdown** with live **WYSIWYG table editing**.
+  - **Native desktop editing (`Ctrl+Enter`)**: Open `.docx`, `.xlsx`, `.psd`, or any file in **Microsoft Word, Excel, LibreOffice, Adobe Photoshop**, or any installed desktop app via Sambee Companion.
+  - **Protected round-trip saving**: Sambee acquires a server-side **edit lock**, detects concurrent server edits before upload, recovers unsaved work after interruptions, and writes saved changes straight back to the share.
+
+#### Chapter `06 // OPERATIONS`
+- **Title**: `Built for the Admin Maintaining the Server at 2 AM.`
+- **Left Rail Callout**: `Auto-saved settings • Live cgroup & thermal health • Clean logs`
+- **Lead**: `Sambee stays lightweight on small home servers and predictable in enterprise environments.`
+- **Points**:
+  - **Single-container simplicity**: Deploy `ghcr.io/sambee-app/sambee:stable` with one `/app/data` volume and zero external database or WOPI dependencies.
+  - **Zero Save-button friction**: UI configuration changes apply automatically with clear visual feedback, and authentication audit trails export cleanly as JSON Lines (`sambee-audit.jsonl`).
+  - **Built-in System Health Monitoring**: Inspect host RAM, cache-excluded container cgroup memory, normalized CPU load, hardware CPU package temperatures (Intel, AMD, Raspberry Pi), and free storage space across SMB shares and local drives right from the top bar.
+
+---
+
+### Band 7 (`#test-drive`): `5:7` Terminal Test-Drive Split (`partials/marketing/test-drive.html`)
+
+- **Surface**: `surface-low`
+- **Left Column (`5 cols` — Pitch, Assurances & Dual CTAs)**:
+  - **Eyebrow**: `05 // ZERO MIGRATION`
+  - **H2**: `Test Sambee Beside Filestash in 5 Minutes`
+  - **Body**: `Sambee works directly with the files and folders already on your SMB server. Keep Filestash running on port 8334, start Sambee on port 8000, connect the same share, and compare them side by side.`
+  - **3 Assurance Bullets**:
+    - `No file import, syncing, or proprietary storage format`
+    - `Honors your existing Windows or Linux/POSIX share permissions`
+    - `Remove the container anytime with zero changes left on your share`
+  - **Actions**:
+    - **Primary CTA (`kind: primary`)**: `Read the Docker Deployment Guide` → `target: { type: docs, book: admin-guide, section: installation-and-deployment, page: deploy-sambee-with-docker }`
+    - **Secondary CTA (`kind: outline`)**: `Explore Sambee on GitHub` → `href: "https://github.com/sambee-app/sambee"`
+- **Right Column (`7 cols` — Highlighted Code Panel inside `.content`)**:
+  - **Header Strip (`surface-mid`, `type-label-sm`)**: `docker-compose.yml`
+  - **Code (`transform.Highlight $code "yaml"` inside `.content` for theme colors + copy button)**:
+    ```yaml
+    services:
+      sambee:
+        image: ghcr.io/sambee-app/sambee:stable
+        restart: unless-stopped
+        volumes:
+          - ./data:/app/data
+        ports:
+          - 8000:8000
+    ```
+
+---
+
+### Band 8 (`#faq`): Interactive `<details>` Accordion FAQ (`partials/marketing/faq.html` + `FAQPage` JSON-LD)
+
+- **Eyebrow**: `06 // TECHNICAL FAQ`
+- **H2**: `Common Questions from Filestash Evaluators`
+- **Interaction**: Native `<details class="marketing-faq-item">` + `<summary>` rows (`first` item `open` by default; `+`/`−` indicator; `44px+` touch target).
 
 1. **Is OIDC single sign-on really free in Sambee?**
    Yes. Sambee is licensed under the MIT license with no paid tiers or seat limits. OIDC authentication, group-based role assignment (`Administrator`, `Editor`, `Viewer`), and all SMB security features are completely free for personal and commercial deployments.
@@ -331,29 +413,29 @@ services:
 
 ## 5. Visual & Media Plan
 
-To make the page visually decisive and aligned with `sambee.net`'s responsive WebP workflow (`../website/scripts/generate-webp.py`):
+To keep initial launch fast while honoring `sambee.net`'s Git LFS + WebP pipeline (`../website/scripts/generate-webp.py` and `../website/scripts/validate-webp-assets.py`):
 
-1. **Hero / Feature Proof Screenshot** (Light + Dark WebP sets):
-   - Capture Sambee in **dual-pane mode** showing an SMB share on the left and either an open `.zip` archive or local drive on the right, with the `Ctrl+K` Quick Bar overlay open.
-2. **Architecture Contrast Diagram** (Inline theme-aware SVG):
-   - Left: **Sambee** — `Browser` → `1 Lightweight Sambee Container` → `SMB2/SMB3 Share (Kerberos + Encryption + CHANGE_NOTIFY)` + optional `Companion → Native Word / Photoshop`.
-   - Right: **Typical Filestash Stack** — `Browser` → `Filestash Container` + `Heavy Collabora WOPI Container` → `NTLM-only SMB Plugin` + `$50–$290/mo SSO Paywall`.
-3. **3-Step Native Desktop Editing Callout**:
-   - Reuse or pair alongside `../website/assets/images/home/companion-screenshot.png` to show the **Done Editing — Hold to Upload** workflow and conflict protection.
+1. **Inline Theme-Aware Architecture Contrast SVG (Phase 1 Launch Asset — Zero LFS Overhead)**:
+   - Crisp geometric ledger diagram using CSS custom properties (`var(--color-clr-surface-page)`, `var(--color-clr-rule-strong)`, `var(--color-clr-primary)`, plus `.dark` tokens) so light and dark mode switch instantaneously with zero network requests.
+2. **Workspace UI Preview (Phase 1 Reuse → Phase 3 Custom Capture)**:
+   - Phase 1 reuses existing `images/home/sambee-screenshot.png` and `images/home/sambee-screenshot-dark.png` via `partials/components/responsive-image.html` (all WebP derivatives already committed in Git LFS).
+   - Optional Phase 3 upgrade: capture a dedicated dual-pane SMB + `.zip`/local-drive screenshot with the `Ctrl+K` Quick Bar open (`images/marketing/dual-pane-quickbar.png` + `-dark.png`), run `npm run images:generate`, and commit the source PNGs and `generated/*w.webp` files via Git LFS.
 
 ---
 
 ## 6. Phased Implementation Plan
 
-1. **Phase 1 — Data & Layout Scaffolding**
-   - Create `website/data/filestash_alternative.yaml` with the structured copy from Section 4.
-   - Create `website/themes/sambee/layouts/_default/filestash-alternative.html` reusing homepage partials where identical (`hero`, `problem-value`, `benefits`, `deployment`) plus two reusable partials (`comparison/matrix.html` and `comparison/decision-split.html`) so future competitor pages (for example, `filebrowser-alternative` or `nextcloud-smb-alternative`) can be launched from YAML alone.
-   - Add `website/themes/sambee/assets/css/comparison.css` and import it in `website/themes/sambee/assets/css/main.css`.
-2. **Phase 2 — Content Route, SEO Schema & Footer Link**
-   - Create `website/content/filestash-alternative/index.md` referencing the layout, SEO title, and meta description.
-   - Emit `FAQPage` JSON-LD in the page template.
-   - Add a `Filestash Alternative` link to `website/themes/sambee/layouts/partials/essentials/footer.html` (configured via `params.toml` or menu).
-3. **Phase 3 — Visual Assets & Build Validation**
-   - Generate light/dark screenshots if new captures are added and run `website/scripts/generate-webp.py`.
-   - Extend CTA link checking so all `/filestash-alternative/` CTAs are verified against built docs routes during `npm run build`.
-   - Run `cd website && npm run build` and `pytest` in `website/tests/` to verify HTML output, Pagefind indexing, redirects, and zero broken links.
+1. **Phase 1 — Shared Primitives & Tech Marketing Layout System**
+   - Promote `partials/home/link-href.html` to `partials/components/link-href.html` (keeping `partials/home/link-href.html` as a 1-line wrapper so `home.html` and `homepage.css` remain untouched).
+   - Add optional `{{ block "head" . }}{{ end }}` to `layouts/_default/baseof.html`.
+   - Create `layouts/_default/comparison.html` (`data_key`-driven, emitting `FAQPage` JSON-LD via `dict ... | jsonify` in `{{ define "head" }}` and wrapping sections in `<div class="marketing-shell" data-pagefind-body>`).
+   - Create `partials/marketing/{hero-split,subnav,fit-split,matrix,chapter-list,visual-proof,test-drive,faq}.html` adhering strictly to the single-`type-*`-utility rule and wrapping highlighted YAML in `.content` for `code.css` + `main.js` copy-button support.
+   - Add `assets/css/marketing.css` (including `.site-main:has(.marketing-shell) { @apply pb-0; }`, `2px` section-border collapsing, sticky subnav offsets, mobile-stacked comparison cards below `md`, `4:8` editorial chapters, and `<details>` FAQ styles) and import it in `assets/css/main.css`.
+2. **Phase 2 — Filestash Page Data, Content Bundle & Footer Navigation**
+   - Create `website/data/filestash_alternative.yaml` with structured `target` CTA links and all copy from Section 4.
+   - Create `website/content/filestash-alternative/index.md` (`title = "Filestash Alternative for SMB Shares & Local Drives"` without `| Sambee`, `description`, `layout = "comparison"`, `data_key = "filestash_alternative"`).
+   - Configure `[[footer.comparisons]]` in `config/_default/params.toml` and render a dedicated `<nav class="site-footer-compare" aria-label="Comparisons">` in `partials/essentials/footer.html` + `assets/css/footer.css` (separate from `aria-label="Legal links"`).
+3. **Phase 3 — Automated CTA & Built-Output Validation**
+   - Extend CTA validation (`scripts/validate-homepage-ctas.py` or a generalized site CTA check wired into `scripts/build-website.py`) to verify `/filestash-alternative/index.html` links and in-page `#comparison` / subnav anchors.
+   - Add built-output tests in `website/tests/` verifying `/filestash-alternative/index.html` `<title>` (no duplicate `| Sambee`), canonical tag, `sitemap.xml` entry, `data-pagefind-body`, valid `FAQPage` JSON-LD, and highlighted YAML copy container.
+   - Run `cd website && npm run images:validate && npm run build` and `python3 -m unittest discover -s website/tests` to verify production output end-to-end.
