@@ -1,8 +1,8 @@
-{{/* Purpose: Renders the 5:7 zero-migration test-drive split with highlighted Docker Compose configuration. */}}
+{{/* Purpose: Renders the balanced 7:5 zero-migration test-drive split with highlighted Docker Compose configuration. */}}
 {{ $section := .section }}
 {{ if and $section $section.enabled }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell ledger-section marketing-section marketing-test-drive ledger-surface-low marketing-anchor-target">
-  <div class="site-gutter marketing-test-drive-grid">
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--low marketing-anchor-target">
+  <div class="marketing-frame marketing-test-drive-grid">
     <div class="marketing-test-drive-copy">
       {{ with $section.eyebrow }}
       <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>

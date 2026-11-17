@@ -1,14 +1,11 @@
-{{/* Purpose: Renders the asymmetric 7:5 comparison hero with an Executive Scorecard panel. */}}
+{{/* Purpose: Renders the open editorial comparison hero with a 4-column horizontal key-facts strip. */}}
 {{ $hero := .hero }}
 {{ if and $hero $hero.enabled }}
-<section class="shell-section ledger-shell ledger-section marketing-hero">
-  <div class="marketing-hero-grid">
-    <div class="site-gutter marketing-hero-copy">
+<section class="marketing-band marketing-band--hero">
+  <div class="marketing-frame">
+    <div class="marketing-hero-copy">
       {{ with $hero.kicker }}
-      <span class="page-kicker type-label-eyebrow ui-color-primary">
-        <span class="page-kicker-rule ui-bg-primary" aria-hidden="true"></span>
-        {{ . }}
-      </span>
+      <span class="marketing-kicker type-label-eyebrow type-color-accent">{{ . }}</span>
       {{ end }}
       <h1 class="marketing-hero-title type-hero type-color-ink">{{ $hero.title }}</h1>
       {{ with $hero.lead }}
@@ -29,16 +26,16 @@
     </div>
 
     {{ with $hero.scorecard }}
-    <aside class="site-gutter marketing-scorecard ledger-surface-low" aria-label="{{ .aria_label | default "Executive scorecard" }}">
-      <div class="marketing-scorecard-header">
-        <span class="type-label-eyebrow-strong type-color-accent">{{ .header }}</span>
-      </div>
-      <dl class="marketing-scorecard-list">
-        {{ range .rows }}
-        <div class="marketing-scorecard-row">
-          <dt class="marketing-scorecard-label type-label-xs type-color-muted">{{ .label }}</dt>
-          <dd class="marketing-scorecard-value marketing-prose type-copy type-color-ink">
-            <strong>{{ .value | markdownify }}</strong>{{ with .contrast }} <span class="marketing-scorecard-contrast type-color-muted">{{ . | markdownify }}</span>{{ end }}
+    <aside class="marketing-scorecard" aria-label="{{ .aria_label | default "Key differences" }}">
+      <dl class="marketing-scorecard-grid">
+        {{ range $index, $row := .rows }}
+        <div class="marketing-scorecard-item{{ if eq $index 0 }} marketing-scorecard-item--accent{{ end }}">
+          <dt class="marketing-scorecard-label type-label-xs type-color-muted">{{ $row.label }}</dt>
+          <dd class="marketing-scorecard-value type-copy">
+            <strong class="marketing-scorecard-verdict marketing-prose type-color-ink">{{ $row.value | markdownify }}</strong>
+            {{- with $row.contrast }}
+            <span class="marketing-scorecard-contrast marketing-prose type-color-muted">{{ . | markdownify }}</span>
+            {{- end }}
           </dd>
         </div>
         {{ end }}

@@ -1,60 +1,62 @@
-{{/* Purpose: Renders the grouped WCAG 1.4.1 dual-coded comparison matrix with mobile card stacking. */}}
+{{/* Purpose: Renders the open horizontal-rule WCAG 1.4.1 dual-coded comparison matrix with mobile card stacking. */}}
 {{ $section := .section }}
 {{ if and $section $section.enabled }}
 {{ $sambeeCol := $section.columns.sambee | default "Sambee" }}
 {{ $competitorCol := $section.columns.competitor | default "Competitor" }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell ledger-section marketing-section marketing-anchor-target">
-  <div class="site-gutter marketing-section-header">
-    {{ with $section.eyebrow }}
-    <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
-    {{ end }}
-    <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
-    {{ with $section.intro }}
-    <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
-    {{ end }}
-  </div>
-
-  <div class="marketing-matrix-wrap">
-    <table class="marketing-matrix-table">
-      <caption class="visually-hidden">{{ $section.caption | default $section.title }}</caption>
-      <thead class="marketing-matrix-thead">
-        <tr>
-          <th scope="col" class="marketing-matrix-col-header marketing-matrix-col-header--capability type-label-strong type-color-ink">{{ $section.columns.capability | default "Capability" }}</th>
-          <th scope="col" class="marketing-matrix-col-header marketing-matrix-col-header--sambee type-label-strong type-color-ink">{{ $sambeeCol }}</th>
-          <th scope="col" class="marketing-matrix-col-header marketing-matrix-col-header--competitor type-label-strong type-color-ink">{{ $competitorCol }}</th>
-        </tr>
-      </thead>
-      {{ range $group := $section.groups }}
-      <tbody class="marketing-matrix-group">
-        <tr class="marketing-matrix-group-row">
-          <th colspan="3" scope="colgroup" class="marketing-matrix-group-header type-label-eyebrow-strong type-color-accent">{{ $group.title }}</th>
-        </tr>
-        {{ range $row := $group.rows }}
-        <tr class="marketing-matrix-row">
-          <th scope="row" class="marketing-matrix-capability type-copy type-color-ink">
-            <span class="marketing-matrix-capability-label">{{ $row.capability | markdownify }}</span>
-          </th>
-          <td class="marketing-matrix-cell marketing-matrix-cell--sambee" data-column-label="{{ $sambeeCol }}">
-            <div class="marketing-matrix-cell-inner">
-              <span class="material-symbols-outlined marketing-matrix-icon marketing-matrix-icon--{{ $row.sambee.tone | default "neutral" }}" aria-hidden="true">{{ $row.sambee.icon }}</span>
-              <span class="marketing-matrix-text marketing-prose type-copy type-color-ink">
-                <strong class="marketing-matrix-verdict">{{ $row.sambee.verdict | markdownify }}</strong>{{- with $row.sambee.detail -}}{{- if not (or (hasPrefix . ";") (hasPrefix . ",") (hasPrefix . ":")) }} {{ end -}}<span class="type-color-muted">{{ . | markdownify }}</span>{{- end -}}
-              </span>
-            </div>
-          </td>
-          <td class="marketing-matrix-cell marketing-matrix-cell--competitor" data-column-label="{{ $competitorCol }}">
-            <div class="marketing-matrix-cell-inner">
-              <span class="material-symbols-outlined marketing-matrix-icon marketing-matrix-icon--{{ $row.competitor.tone | default "neutral" }}" aria-hidden="true">{{ $row.competitor.icon }}</span>
-              <span class="marketing-matrix-text marketing-prose type-copy type-color-ink">
-                <strong class="marketing-matrix-verdict">{{ $row.competitor.verdict | markdownify }}</strong>{{- with $row.competitor.detail -}}{{- if not (or (hasPrefix . ";") (hasPrefix . ",") (hasPrefix . ":")) }} {{ end -}}<span class="type-color-muted">{{ . | markdownify }}</span>{{- end -}}
-              </span>
-            </div>
-          </td>
-        </tr>
-        {{ end }}
-      </tbody>
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-anchor-target">
+  <div class="marketing-frame">
+    <div class="marketing-section-header">
+      {{ with $section.eyebrow }}
+      <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
       {{ end }}
-    </table>
+      <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
+      {{ with $section.intro }}
+      <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+      {{ end }}
+    </div>
+
+    <div class="marketing-matrix-wrap">
+      <table class="marketing-matrix-table">
+        <caption class="visually-hidden">{{ $section.caption | default $section.title }}</caption>
+        <thead class="marketing-matrix-thead">
+          <tr>
+            <th scope="col" class="marketing-matrix-col-header marketing-matrix-col-header--capability type-label-strong type-color-ink">{{ $section.columns.capability | default "Capability" }}</th>
+            <th scope="col" class="marketing-matrix-col-header marketing-matrix-col-header--sambee type-label-strong type-color-ink">{{ $sambeeCol }}</th>
+            <th scope="col" class="marketing-matrix-col-header marketing-matrix-col-header--competitor type-label-strong type-color-ink">{{ $competitorCol }}</th>
+          </tr>
+        </thead>
+        {{ range $group := $section.groups }}
+        <tbody class="marketing-matrix-group">
+          <tr class="marketing-matrix-group-row">
+            <th colspan="3" scope="colgroup" class="marketing-matrix-group-header type-label-eyebrow-strong type-color-accent">{{ $group.title }}</th>
+          </tr>
+          {{ range $row := $group.rows }}
+          <tr class="marketing-matrix-row">
+            <th scope="row" class="marketing-matrix-capability type-copy type-color-ink">
+              <span class="marketing-matrix-capability-label">{{ $row.capability | markdownify }}</span>
+            </th>
+            <td class="marketing-matrix-cell marketing-matrix-cell--sambee" data-column-label="{{ $sambeeCol }}">
+              <div class="marketing-matrix-cell-inner">
+                <span class="material-symbols-outlined marketing-matrix-icon marketing-matrix-icon--{{ $row.sambee.tone | default "neutral" }}" aria-hidden="true">{{ $row.sambee.icon }}</span>
+                <span class="marketing-matrix-text marketing-prose type-copy type-color-ink">
+                  <strong class="marketing-matrix-verdict">{{ $row.sambee.verdict | markdownify }}</strong>{{- with $row.sambee.detail -}}{{- if not (or (hasPrefix . ";") (hasPrefix . ",") (hasPrefix . ":")) }} {{ end -}}<span class="type-color-muted">{{ . | markdownify }}</span>{{- end -}}
+                </span>
+              </div>
+            </td>
+            <td class="marketing-matrix-cell marketing-matrix-cell--competitor" data-column-label="{{ $competitorCol }}">
+              <div class="marketing-matrix-cell-inner">
+                <span class="material-symbols-outlined marketing-matrix-icon marketing-matrix-icon--{{ $row.competitor.tone | default "neutral" }}" aria-hidden="true">{{ $row.competitor.icon }}</span>
+                <span class="marketing-matrix-text marketing-prose type-copy type-color-ink">
+                  <strong class="marketing-matrix-verdict">{{ $row.competitor.verdict | markdownify }}</strong>{{- with $row.competitor.detail -}}{{- if not (or (hasPrefix . ";") (hasPrefix . ",") (hasPrefix . ":")) }} {{ end -}}<span class="type-color-muted">{{ . | markdownify }}</span>{{- end -}}
+                </span>
+              </div>
+            </td>
+          </tr>
+          {{ end }}
+        </tbody>
+        {{ end }}
+      </table>
+    </div>
   </div>
 </section>
 {{ end }}

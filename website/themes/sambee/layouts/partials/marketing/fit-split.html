@@ -1,39 +1,41 @@
-{{/* Purpose: Renders the upfront 2-column Honest Fit qualification ledger. */}}
+{{/* Purpose: Renders two freestanding qualification cards separated by open canvas whitespace. */}}
 {{ $section := .section }}
 {{ if and $section $section.enabled }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell ledger-section marketing-section marketing-anchor-target">
-  <div class="site-gutter marketing-section-header">
-    {{ with $section.eyebrow }}
-    <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
-    {{ end }}
-    <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
-    {{ with $section.intro }}
-    <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
-    {{ end }}
-  </div>
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--low marketing-anchor-target">
+  <div class="marketing-frame">
+    <div class="marketing-section-header">
+      {{ with $section.eyebrow }}
+      <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
+      {{ end }}
+      <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
+      {{ with $section.intro }}
+      <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+      {{ end }}
+    </div>
 
-  <div class="marketing-fit-grid">
-    {{ with $section.sambee }}
-    <article class="site-gutter marketing-fit-card marketing-fit-card--sambee ledger-surface-page">
-      <h3 class="marketing-fit-title type-title-md type-color-ink">{{ .title }}</h3>
-      <ul class="marketing-list">
-        {{ range .items }}
-        <li class="ui-list-dot-item ui-color-primary type-copy"><span class="marketing-prose type-color-ink">{{ . | markdownify }}</span></li>
-        {{ end }}
-      </ul>
-    </article>
-    {{ end }}
+    <div class="marketing-fit-grid">
+      {{ with $section.sambee }}
+      <article class="marketing-fit-card marketing-fit-card--sambee">
+        <h3 class="marketing-fit-title type-title-md type-color-ink">{{ .title }}</h3>
+        <ul class="marketing-list">
+          {{ range .items }}
+          <li class="ui-list-dot-item ui-color-primary type-copy"><span class="marketing-prose type-color-ink">{{ . | markdownify }}</span></li>
+          {{ end }}
+        </ul>
+      </article>
+      {{ end }}
 
-    {{ with $section.competitor }}
-    <article class="site-gutter marketing-fit-card marketing-fit-card--competitor ledger-surface-low">
-      <h3 class="marketing-fit-title type-title-md type-color-ink">{{ .title }}</h3>
-      <ul class="marketing-list">
-        {{ range .items }}
-        <li class="ui-list-dot-item type-color-muted type-copy"><span class="marketing-prose type-color-muted">{{ . | markdownify }}</span></li>
-        {{ end }}
-      </ul>
-    </article>
-    {{ end }}
+      {{ with $section.competitor }}
+      <article class="marketing-fit-card marketing-fit-card--competitor">
+        <h3 class="marketing-fit-title type-title-md type-color-ink">{{ .title }}</h3>
+        <ul class="marketing-list">
+          {{ range .items }}
+          <li class="ui-list-dot-item type-color-muted type-copy"><span class="marketing-prose type-color-muted">{{ . | markdownify }}</span></li>
+          {{ end }}
+        </ul>
+      </article>
+      {{ end }}
+    </div>
   </div>
 </section>
 {{ end }}

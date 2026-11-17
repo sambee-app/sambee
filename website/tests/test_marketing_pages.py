@@ -76,6 +76,7 @@ class MarketingHTMLInspector(HTMLParser):
         self.nav_labels: dict[str, str] = {}
         self.has_marketing_code_surface = False
         self.has_highlighted_yaml = False
+        self.body_images: list[str] = []
         self._inside_code_surface_depth = 0
 
     @property
@@ -108,6 +109,9 @@ class MarketingHTMLInspector(HTMLParser):
 
         if tag == "body" and "data-pagefind-ignore" in attr_map:
             self.body_ignored = True
+
+        if tag == "img" and not self._in_head:
+            self.body_images.append(attr_map.get("src", ""))
 
         if "marketing-shell" in classes and "data-pagefind-body" in attr_map:
             self.has_marketing_pagefind_body = True
@@ -245,10 +249,7 @@ class FilestashAlternativeBuildTests(unittest.TestCase):
             self.assertIsNone(re.search(r"<[a-zA-Z][^>]*>", answer["text"]))
 
     def test_cta_button_variants_and_code_highlight_surface(self) -> None:
-        self.assertIn(
-            "btn-bg-secondary",
-            self.inspector.marketing_links["hero-deploy-docker"]["class"],
-        )
+        self.assertNotIn("hero-deploy-docker", self.inspector.marketing_links)
         self.assertIn(
             "btn-outline-secondary",
             self.inspector.marketing_links["hero-jump-matrix"]["class"],
@@ -264,6 +265,10 @@ class FilestashAlternativeBuildTests(unittest.TestCase):
         self.assertTrue(self.inspector.has_marketing_code_surface)
         self.assertTrue(self.inspector.has_highlighted_yaml)
         self.assertIn("ghcr.io/sambee-app/sambee:stable", self.page_html)
+        self.assertIn("marketing-band", self.page_html)
+        self.assertIn("marketing-frame", self.page_html)
+        self.assertEqual(self.inspector.body_images, [])
+        self.assertNotIn("ledger-shell", self.page_html)
         self.assertNotRegex(
             self.page_html,
             r'class="marketing-matrix-text[^"]*"[^>]*>[\s\S]*?<ul>',
@@ -281,7 +286,7 @@ class FilestashAlternativeBuildTests(unittest.TestCase):
     def test_cta_validator_passes_on_production_build(self) -> None:
         errors, count = CTA_VALIDATOR.validate_site_ctas(self.build_dir)
         self.assertEqual(errors, [])
-        self.assertGreaterEqual(count, 14)
+        self.assertGreaterEqual(count, 13)
 
 
 class MarketingCTAValidatorUnitTests(unittest.TestCase):

@@ -1,135 +1,103 @@
-{{/* Purpose: Breaks editorial chapters with a theme-aware architecture contrast SVG and workspace UI preview. */}}
+{{/* Purpose: Renders the clean theme-aware side-by-side system topology block diagrams. */}}
 {{ $section := .section }}
 {{ if and $section $section.enabled }}
-{{ $previewImage := $section.preview_image | default dict }}
-{{ $previewSrc := index $previewImage "src" | default "" }}
-{{ $darkPreviewSrc := index $previewImage "dark_src" | default "" }}
-{{ $previewAlt := index $previewImage "alt" | default "Sambee workspace interface preview" }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell ledger-section marketing-section marketing-visual-proof ledger-surface-low marketing-anchor-target">
-  <div class="site-gutter marketing-section-header">
-    {{ with $section.eyebrow }}
-    <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
-    {{ end }}
-    <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
-    {{ with $section.intro }}
-    <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
-    {{ end }}
-  </div>
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-anchor-target">
+  <div class="marketing-frame">
+    <div class="marketing-section-header">
+      {{ with $section.eyebrow }}
+      <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
+      {{ end }}
+      <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
+      {{ with $section.intro }}
+      <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+      {{ end }}
+    </div>
 
-  <div class="site-gutter marketing-visual-proof-body">
     <div class="marketing-arch-diagram" role="group" aria-label="{{ $section.diagram_aria_label | default "Architecture comparison between Sambee and Filestash" }}">
       <div class="marketing-arch-panel marketing-arch-panel--sambee">
         <div class="marketing-arch-panel-header">
-          <span class="type-label-eyebrow-strong type-color-accent">{{ $section.sambee_stack_label | default "SAMBEE STACK // 1 HARDENED CONTAINER" }}</span>
+          <span class="type-label-eyebrow-strong type-color-accent">{{ $section.sambee_stack_label | default "SAMBEE — 1 HARDENED CONTAINER" }}</span>
         </div>
-        <svg class="marketing-arch-svg" viewBox="0 0 520 356" role="img" aria-labelledby="sambee-arch-title sambee-arch-desc">
-          <title id="sambee-arch-title">Sambee single-container architecture</title>
-          <desc id="sambee-arch-desc">Browser connects over HTTPS with revocable sessions to one non-root Cosign-verified Sambee container, which speaks SMB2 and SMB3 with Kerberos, signing, encryption, and live CHANGE_NOTIFY, plus an optional 127.0.0.1 origin-paired Companion for local drives and native Word, Excel, and Photoshop editing.</desc>
+        <div class="marketing-arch-svg-wrap">
+          <svg class="marketing-arch-svg" viewBox="0 0 460 288" role="img" aria-labelledby="sambee-arch-title sambee-arch-desc">
+            <title id="sambee-arch-title">Sambee single-container architecture</title>
+            <desc id="sambee-arch-desc">Browser connects over HTTPS with revocable sessions to one non-root Cosign-verified Sambee container, which speaks SMB2 and SMB3 with Kerberos, encryption, and live notifications, plus an optional local 127.0.0.1 Companion for workstation drives and native desktop apps.</desc>
 
-          <rect x="24" y="18" width="472" height="58" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
-          <text x="42" y="42" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="12" font-weight="700" letter-spacing="1.4">BROWSER WORKSPACE (HTTPS)</text>
-          <text x="42" y="61" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="12">Short-lived RAM token • Revocable HttpOnly session • Zero URL tokens</text>
+            <rect x="16" y="12" width="428" height="56" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
+            <text x="32" y="35" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="11.5" font-weight="700" letter-spacing="1.2">BROWSER WORKSPACE (HTTPS)</text>
+            <text x="32" y="54" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="12">Revocable HttpOnly session • Short-lived RAM token</text>
 
-          <line x1="260" y1="76" x2="260" y2="104" stroke="var(--arch-accent)" stroke-width="2" />
-          <polygon points="254,99 266,99 260,107" fill="var(--arch-accent)" />
+            <line x1="230" y1="68" x2="230" y2="98" stroke="var(--arch-accent)" stroke-width="1.75" />
+            <polygon points="225,94 235,94 230,102" fill="var(--arch-accent)" />
 
-          <rect x="24" y="108" width="472" height="72" fill="var(--arch-surface-mid)" stroke="var(--arch-accent)" stroke-width="2" />
-          <rect x="384" y="120" width="98" height="20" fill="var(--arch-accent-fill)" />
-          <text x="433" y="134" text-anchor="middle" fill="var(--arch-accent-contrast)" font-family="var(--font-tertiary)" font-size="10" font-weight="700" letter-spacing="1">MIT • $0 SSO</text>
-          <text x="42" y="135" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="13" font-weight="700" letter-spacing="0.6">SAMBEE (1 NON-ROOT CONTAINER)</text>
-          <text x="42" y="154" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="12">Cosign-signed + SBOM • Weekly Trivy • Free OIDC &amp; IdP roles</text>
-          <text x="42" y="170" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">Trusted Proxy CIDR check • Built-in viewers &amp; System Health</text>
+            <rect x="16" y="104" width="428" height="64" fill="var(--arch-surface-mid)" stroke="var(--arch-accent)" stroke-width="2" />
+            <rect x="338" y="116" width="90" height="20" fill="var(--arch-accent-fill)" />
+            <text x="383" y="130" text-anchor="middle" fill="var(--arch-accent-contrast)" font-family="var(--font-tertiary)" font-size="9.5" font-weight="700" letter-spacing="0.9">MIT • $0 SSO</text>
+            <text x="32" y="130" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="12" font-weight="700" letter-spacing="0.6">SAMBEE (1 NON-ROOT CONTAINER)</text>
+            <text x="32" y="151" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="12">Free OIDC • Cosign + SBOM • Built-in viewers</text>
 
-          <path d="M136 180 V212 M384 180 V212" fill="none" stroke="var(--arch-rule-strong)" stroke-width="1.5" />
-          <polygon points="131,207 141,207 136,214" fill="var(--arch-rule-strong)" />
-          <polygon points="379,207 389,207 384,214" fill="var(--arch-rule-strong)" />
+            <line x1="118" y1="168" x2="118" y2="200" stroke="var(--arch-rule-strong)" stroke-width="1.5" />
+            <polygon points="113,196 123,196 118,204" fill="var(--arch-rule-strong)" />
+            <line x1="342" y1="168" x2="342" y2="200" stroke="var(--arch-rule-strong)" stroke-width="1.5" stroke-dasharray="4 3" />
+            <polygon points="337,196 347,196 342,204" fill="var(--arch-rule-strong)" />
 
-          <rect x="24" y="216" width="224" height="122" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
-          <rect x="24" y="216" width="224" height="3" fill="var(--arch-accent)" />
-          <text x="38" y="239" fill="var(--arch-accent)" font-family="var(--font-tertiary)" font-size="10.5" font-weight="700" letter-spacing="1.3">FIRST-CLASS SMB2 / SMB3</text>
-          <text x="38" y="259" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="16" font-weight="700">NAS &amp; File Servers</text>
-          <text x="38" y="281" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11">• Kerberos + mandatory signing</text>
-          <text x="38" y="299" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11">• SMB3 encryption + CHANGE_NOTIFY</text>
-          <text x="38" y="317" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11">• Millisecond SQLite folder index</text>
+            <rect x="16" y="206" width="204" height="70" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
+            <rect x="16" y="206" width="204" height="3" fill="var(--arch-accent)" />
+            <text x="30" y="234" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="15.5" font-weight="700">SMB2 / SMB3 Shares</text>
+            <text x="30" y="256" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">Kerberos, SMB3 &amp; live watch</text>
 
-          <rect x="272" y="216" width="224" height="122" fill="var(--arch-surface-page)" stroke="var(--arch-rule-strong)" stroke-width="1" stroke-dasharray="5 3" />
-          <text x="286" y="239" fill="var(--arch-accent)" font-family="var(--font-tertiary)" font-size="10.5" font-weight="700" letter-spacing="1.3">OPTIONAL DESKTOP BRIDGE</text>
-          <text x="286" y="259" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="16" font-weight="700">127.0.0.1 Companion</text>
-          <text x="286" y="281" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11">• Exact-origin code + HMAC API</text>
-          <text x="286" y="299" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11">• Local PC workstation drives</text>
-          <text x="286" y="317" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11">• Native Word, Excel &amp; Photoshop</text>
-        </svg>
+            <rect x="240" y="206" width="204" height="70" fill="var(--arch-surface-page)" stroke="var(--arch-rule-strong)" stroke-width="1" stroke-dasharray="5 3" />
+            <text x="254" y="234" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="15.5" font-weight="700">Optional Companion</text>
+            <text x="254" y="256" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">Local drives &amp; desktop apps</text>
+          </svg>
+        </div>
       </div>
 
       <div class="marketing-arch-panel marketing-arch-panel--competitor">
         <div class="marketing-arch-panel-header">
-          <span class="type-label-eyebrow-strong type-color-muted">{{ $section.competitor_stack_label | default "TYPICAL FILESTASH STACK // PORTAL + WOPI SIDECAR" }}</span>
+          <span class="type-label-eyebrow-strong type-color-muted">{{ $section.competitor_stack_label | default "TYPICAL FILESTASH — PORTAL + WOPI SIDECAR" }}</span>
         </div>
-        <svg class="marketing-arch-svg" viewBox="0 0 520 356" role="img" aria-labelledby="filestash-arch-title filestash-arch-desc">
-          <title id="filestash-arch-title">Typical Filestash two-container stack</title>
-          <desc id="filestash-arch-desc">Browser holds a 1-week stateless SMB password cookie and connects to floating latest Filestash plus a heavy root-startup Collabora WOPI container receiving query-string session tokens, backed by an NTLM-only SMB plugin and a $50 to $290 per month SSO and security paywall.</desc>
+        <div class="marketing-arch-svg-wrap">
+          <svg class="marketing-arch-svg" viewBox="0 0 460 288" role="img" aria-labelledby="filestash-arch-title filestash-arch-desc">
+            <title id="filestash-arch-title">Typical Filestash two-container stack</title>
+            <desc id="filestash-arch-desc">Browser holds a 1-week stateless SMB password cookie and connects to floating latest Filestash plus a heavy root-startup Collabora WOPI container, backed by an NTLM-only SMB plugin and a monthly SSO and audit paywall.</desc>
 
-          <rect x="24" y="18" width="472" height="58" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
-          <text x="42" y="42" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="12" font-weight="700" letter-spacing="1.4">SINGLE-PANE WEB PORTAL</text>
-          <text x="42" y="61" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="12">1-week stateless cookie embeds SMB password • No individual revoke</text>
+            <rect x="16" y="12" width="428" height="56" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
+            <text x="32" y="35" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="11.5" font-weight="700" letter-spacing="1.2">SINGLE-PANE WEB PORTAL</text>
+            <text x="32" y="54" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="12">1-week stateless cookie embeds SMB password</text>
 
-          <path d="M136 76 V104 M384 76 V104" fill="none" stroke="var(--arch-rule-strong)" stroke-width="1.5" />
-          <polygon points="131,99 141,99 136,106" fill="var(--arch-rule-strong)" />
-          <polygon points="379,99 389,99 384,106" fill="var(--arch-rule-strong)" />
+            <line x1="111" y1="68" x2="111" y2="98" stroke="var(--arch-rule-strong)" stroke-width="1.5" />
+            <polygon points="106,94 116,94 111,102" fill="var(--arch-rule-strong)" />
+            <line x1="349" y1="68" x2="349" y2="98" stroke="var(--arch-rule-strong)" stroke-width="1.5" />
+            <polygon points="344,94 354,94 349,102" fill="var(--arch-rule-strong)" />
 
-          <rect x="24" y="108" width="212" height="82" fill="var(--arch-surface-mid)" stroke="var(--arch-rule-strong)" stroke-width="1" />
-          <text x="38" y="130" fill="var(--arch-muted)" font-family="var(--font-tertiary)" font-size="10.5" font-weight="700" letter-spacing="1.2">CONTAINER 1</text>
-          <text x="38" y="149" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="12.5" font-weight="700">Filestash (:latest)</text>
-          <text x="38" y="167" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">CANARY=true • No SBOM/signing</text>
-          <text x="38" y="182" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">Trusts any X-Forwarded-For</text>
+            <rect x="16" y="104" width="190" height="64" fill="var(--arch-surface-mid)" stroke="var(--arch-rule-strong)" stroke-width="1" />
+            <text x="30" y="130" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="12" font-weight="700">Filestash (:latest)</text>
+            <text x="30" y="151" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">Unsigned • No public SBOM</text>
 
-          <line x1="236" y1="149" x2="284" y2="149" stroke="var(--arch-warning)" stroke-width="1.5" />
-          <text x="260" y="142" text-anchor="middle" fill="var(--arch-muted)" font-family="var(--font-tertiary)" font-size="9.5" font-weight="700">WOPI URL</text>
+            <line x1="206" y1="136" x2="254" y2="136" stroke="var(--arch-warning)" stroke-width="1.75" />
+            <text x="230" y="128" text-anchor="middle" fill="var(--arch-muted)" font-family="var(--font-tertiary)" font-size="9" font-weight="700" letter-spacing="0.6">WOPI URL</text>
 
-          <rect x="284" y="108" width="212" height="82" fill="var(--arch-surface-mid)" stroke="var(--arch-rule-strong)" stroke-width="1" />
-          <rect x="284" y="108" width="212" height="3" fill="var(--arch-warning)" />
-          <text x="298" y="130" fill="var(--arch-muted)" font-family="var(--font-tertiary)" font-size="10.5" font-weight="700" letter-spacing="1.2">CONTAINER 2 (HEAVY)</text>
-          <text x="298" y="149" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="12.5" font-weight="700">Collabora WOPI</text>
-          <text x="298" y="167" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">Root startup curl • Multi-GB RAM</text>
-          <text x="298" y="182" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">?access_token=... in query string</text>
+            <rect x="254" y="104" width="190" height="64" fill="var(--arch-surface-mid)" stroke="var(--arch-rule-strong)" stroke-width="1" />
+            <rect x="254" y="104" width="190" height="3" fill="var(--arch-warning)" />
+            <text x="268" y="130" fill="var(--arch-ink)" font-family="var(--font-tertiary)" font-size="12" font-weight="700">Collabora Sidecar</text>
+            <text x="268" y="151" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">Root startup • Multi-GB RAM</text>
 
-          <line x1="130" y1="190" x2="130" y2="214" stroke="var(--arch-rule-strong)" stroke-width="1.5" />
-          <polygon points="125,209 135,209 130,216" fill="var(--arch-rule-strong)" />
+            <line x1="111" y1="168" x2="111" y2="200" stroke="var(--arch-rule-strong)" stroke-width="1.5" />
+            <polygon points="106,196 116,196 111,204" fill="var(--arch-rule-strong)" />
 
-          <rect x="24" y="216" width="212" height="122" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
-          <text x="38" y="239" fill="var(--arch-muted)" font-family="var(--font-tertiary)" font-size="10.5" font-weight="700" letter-spacing="1.2">8-METHOD ADAPTER</text>
-          <text x="38" y="259" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="16" font-weight="700">NTLM-Only SMB Plugin</text>
-          <text x="38" y="281" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">• No Kerberos or signing policy</text>
-          <text x="38" y="299" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">• No live CHANGE_NOTIFY watch</text>
-          <text x="38" y="317" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">• No local workstation drives</text>
+            <rect x="16" y="206" width="190" height="70" fill="var(--arch-surface-page)" stroke="var(--arch-rule-soft)" stroke-width="1" />
+            <text x="30" y="234" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="15.5" font-weight="700">Thin SMB Plugin</text>
+            <text x="30" y="256" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">NTLM/Guest • No live watch</text>
 
-          <rect x="284" y="216" width="212" height="122" fill="var(--arch-surface-page)" stroke="var(--arch-rule-strong)" stroke-width="1" />
-          <rect x="284" y="216" width="212" height="3" fill="var(--arch-warning)" />
-          <text x="298" y="239" fill="var(--arch-muted)" font-family="var(--font-tertiary)" font-size="10.5" font-weight="700" letter-spacing="1.2">RECURRING SUBSCRIPTION</text>
-          <text x="298" y="259" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="16" font-weight="700">$50–$290+/mo Paywall</text>
-          <text x="298" y="281" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">• OIDC / SAML / LDAP SSO</text>
-          <text x="298" y="299" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">• RBAC, proxy auth &amp; env config</text>
-          <text x="298" y="317" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">• Audit journal &amp; early patches</text>
-        </svg>
+            <rect x="254" y="206" width="190" height="70" fill="var(--arch-surface-page)" stroke="var(--arch-rule-strong)" stroke-width="1" />
+            <rect x="254" y="206" width="190" height="3" fill="var(--arch-warning)" />
+            <text x="268" y="234" fill="var(--arch-ink)" font-family="var(--font-secondary)" font-size="15.5" font-weight="700">$50–$290+/mo Tier</text>
+            <text x="268" y="256" fill="var(--arch-muted)" font-family="var(--font-primary)" font-size="11.5">SSO, RBAC &amp; audit paywalled</text>
+          </svg>
+        </div>
       </div>
     </div>
-
-    {{ if $previewSrc }}
-    <figure class="marketing-workspace-preview">
-      {{ partial "components/theme-aware-image.html" (dict
-        "Src" $previewSrc
-        "DarkSrc" $darkPreviewSrc
-        "Alt" $previewAlt
-        "WrapperClass" "marketing-workspace-preview-frame"
-        "Class" "marketing-workspace-preview-image"
-        "Loading" "lazy"
-        "Sizes" "(min-width: 1131px) 1067px, 100vw"
-      ) }}
-      {{ with $section.preview_caption }}
-      <figcaption class="marketing-workspace-caption type-label-xs type-color-muted">{{ . }}</figcaption>
-      {{ end }}
-    </figure>
-    {{ end }}
   </div>
 </section>
 {{ end }}

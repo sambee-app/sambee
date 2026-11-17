@@ -38,13 +38,13 @@ In practice:
 
 ## Site Page Families
 
-`sambee.net` separates templates and stylesheets into three page families that share brand tokens, layout rails (`.ledger-shell`, `.ledger-section`, `.site-gutter` in `shared.css`), and `type-*` typography utilities without cloning layouts across page types:
+`sambee.net` separates templates and stylesheets into three page families that share brand tokens, global header and footer chrome, and `type-*` typography utilities without cloning layouts across page types:
 
-- **Homepage (`/`)**: Uses `layouts/home.html`, `partials/home/*`, `assets/css/homepage.css`, and `data/homepage.yaml`. These section partials are exclusive to `/`.
-- **Comparison and marketing pages (`/<slug>/`)**: Use a page bundle at `content/<slug>/index.md` (`layout = "comparison"`, `data_key = "<key>"`) backed by structured data in `data/<key>.yaml`, rendered through `layouts/_default/comparison.html`, `partials/marketing/*`, and `assets/css/marketing.css`. Comparison pages emit `FAQPage` JSON-LD through the `{{ block "head" . }}` slot in `layouts/_default/baseof.html`, expose `data-pagefind-body` under `page_kind:site`, surface in the footer via `[[footer.comparisons]]` in `config/_default/params.toml`, and mark CTAs and subnav jump links with `data-marketing-link` for build-time validation.
+- **Homepage (`/`)**: Uses `layouts/home.html`, `partials/home/*`, `assets/css/homepage.css`, and `data/homepage.yaml` on the boxed `.ledger-shell` / `.home-section` rails. These section partials are exclusive to `/`.
+- **Comparison and marketing pages (`/<slug>/`)**: Use a page bundle at `content/<slug>/index.md` (`layout = "comparison"`, `data_key = "<key>"`) backed by structured data in `data/<key>.yaml`, rendered through `layouts/_default/comparison.html`, `partials/marketing/*`, and `assets/css/marketing.css` using open full-bleed `.marketing-band` surfaces and centered `.marketing-frame` containers. Comparison pages emit `FAQPage` JSON-LD through the `{{ block "head" . }}` slot in `layouts/_default/baseof.html`, expose `data-pagefind-body` under `page_kind:site`, surface in the footer via `[[footer.comparisons]]` in `config/_default/params.toml`, and mark CTAs and subnav jump links with `data-marketing-link` for build-time validation.
 - **Documentation and standalone prose pages (`/docs/...`, `/imprint/`, `/privacy-policy/`)**: Versioned docs use `layouts/docs/*` and `assets/css/docs.css`; single-column legal and reference pages outside `/docs/` use `layouts/_default/standalone.html` and `assets/css/standalone.css`.
 
-Shared link and media helpers live in `partials/components/` (including `link-href.html`, `button-kind-class.html`, `responsive-image.html`, and `theme-aware-image.html`).
+Shared link and media helpers live in `partials/components/` (including `link-href.html`, `button-kind-class.html`, `responsive-image.html`, and `theme-aware-image.html`), and shared layout and typography utilities live in `assets/css/shared.css`.
 
 ## How Docs Routing Works
 

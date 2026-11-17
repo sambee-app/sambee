@@ -18,7 +18,6 @@ EXPECTED_LINKS = frozenset(
 
 EXPECTED_FILESTASH_MARKETING_LINKS = frozenset(
     {
-        "hero-deploy-docker",
         "hero-jump-matrix",
         "subnav-fit",
         "subnav-matrix",

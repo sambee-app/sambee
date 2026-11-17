@@ -2,7 +2,7 @@
 
 /*
 ==============================
-Shell & Sticky Subnav Offsets
+Shell, Open Bands & Frames
 ==============================
 */
 
@@ -11,10 +11,10 @@ Shell & Sticky Subnav Offsets
 }
 
 .marketing-shell {
-  --marketing-subnav-height: 2.875rem;
+  --marketing-subnav-height: 3rem;
   --marketing-page-title-size-sm: 2.5rem;
-  --marketing-page-title-size-md: 3rem;
-  --marketing-page-title-size-lg: 3.4rem;
+  --marketing-page-title-size-md: 3.1rem;
+  --marketing-page-title-size-lg: 3.5rem;
 }
 
 /* html already sets scroll-padding-top: var(--header-height) in base.css, so add only the subnav height plus breathing room. */
@@ -22,8 +22,28 @@ Shell & Sticky Subnav Offsets
   scroll-margin-top: calc(var(--marketing-subnav-height) + 1rem);
 }
 
-.marketing-subnav + .ledger-section {
-  margin-top: -2px;
+.marketing-band {
+  @apply border-b border-clr-rule-soft bg-clr-surface-page py-14 dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-page md:py-20 lg:py-24;
+}
+
+.marketing-band--low {
+  @apply bg-clr-surface-low dark:bg-clr-darkmode-surface-low;
+}
+
+.marketing-band--hero {
+  @apply py-0;
+}
+
+.marketing-band--last {
+  @apply border-b-0;
+}
+
+.marketing-frame {
+  @apply mx-auto w-full max-w-[1080px] px-6 md:px-10;
+}
+
+.marketing-frame--narrow {
+  @apply max-w-[48rem];
 }
 
 /*
@@ -38,14 +58,13 @@ Inline Code, Prose Links & Focus States
   font-size: var(--code-font-size);
   font-weight: 400;
   overflow-wrap: anywhere;
-  padding: 0.1rem 0.35rem;
-  border: 1px solid var(--color-clr-rule-soft);
+  padding: 0.12rem 0.35rem;
+  border: 0;
 }
 
 :where(html.dark, .dark) .marketing-shell code:not(pre code) {
-  background-color: color-mix(in oklab, var(--color-clr-darkmode-surface-high) 72%, var(--color-clr-darkmode-text-dark) 28%);
+  background-color: color-mix(in oklab, var(--color-clr-darkmode-surface-high) 78%, var(--color-clr-darkmode-text-dark) 22%);
   color: var(--color-clr-darkmode-text-dark);
-  border-color: var(--color-clr-darkmode-rule-soft);
 }
 
 .marketing-prose a {
@@ -77,7 +96,11 @@ Shared Section Headers, Lists & Actions
 */
 
 .marketing-section-header {
-  @apply border-b border-clr-rule-soft py-7 dark:border-clr-darkmode-rule-soft md:py-10;
+  @apply mb-10 md:mb-14;
+}
+
+.marketing-section-header--faq {
+  @apply mb-8 md:mb-10;
 }
 
 .marketing-section-title {
@@ -85,11 +108,11 @@ Shared Section Headers, Lists & Actions
 }
 
 .marketing-section-intro {
-  @apply mt-3 mb-0 max-w-[65ch];
+  @apply mt-4 mb-0;
 }
 
 .marketing-list {
-  @apply m-0 flex list-none flex-col gap-3.5 p-0;
+  @apply m-0 flex list-none flex-col gap-4 p-0;
 }
 
 .marketing-list > li {
@@ -101,29 +124,29 @@ Shared Section Headers, Lists & Actions
 }
 
 .marketing-actions {
-  @apply mt-7 flex flex-wrap gap-3 md:mt-8;
+  @apply mt-8 flex flex-wrap items-center gap-4;
 }
 
 .marketing-cta {
-  @apply min-h-[2.875rem] w-full justify-center px-6 py-3 sm:w-auto;
+  @apply min-h-[2.875rem] w-full justify-center px-5 py-3 sm:w-auto;
 }
 
 /*
 ==============================
-Band 0: Asymmetric 7:5 Split Hero
+Band 0: Open Editorial Hero & Key-Facts Strip
 ==============================
 */
 
-.marketing-hero-grid {
-  @apply grid grid-cols-1 lg:grid-cols-12;
+.marketing-kicker {
+  @apply block;
 }
 
 .marketing-hero-copy {
-  @apply py-8 md:py-10 lg:col-span-7 lg:py-12 lg:pr-10;
+  @apply pt-12 pb-10 md:pt-16 md:pb-14 lg:pt-20 lg:pb-16;
 }
 
 .marketing-hero-title {
-  @apply mt-4 mb-0;
+  @apply mt-3.5 mb-0;
   font-size: var(--marketing-page-title-size-sm);
 
   @media (min-width: theme(--breakpoint-md)) {
@@ -136,27 +159,28 @@ Band 0: Asymmetric 7:5 Split Hero
 }
 
 .marketing-hero-lead {
-  @apply mt-5 mb-0 max-w-[60ch];
+  @apply mt-5 mb-0;
+
+  @media (min-width: theme(--breakpoint-md)) {
+    font-size: var(--text-title-sm);
+    line-height: 1.6;
+  }
 }
 
 .marketing-scorecard {
-  @apply border-t border-clr-rule-soft py-7 dark:border-clr-darkmode-rule-soft md:py-9 lg:col-span-5 lg:border-t-0 lg:border-l lg:py-10;
+  @apply pb-12 md:pb-16 lg:pb-20;
 }
 
-.marketing-scorecard-header {
-  @apply border-b border-clr-rule-soft pb-3.5 dark:border-clr-darkmode-rule-soft;
+.marketing-scorecard-grid {
+  @apply m-0 grid grid-cols-1 gap-x-8 gap-y-7 sm:grid-cols-2 lg:grid-cols-4;
 }
 
-.marketing-scorecard-list {
-  @apply m-0 flex flex-col;
+.marketing-scorecard-item {
+  @apply border-t border-clr-rule-strong pt-4 dark:border-clr-darkmode-rule-strong;
 }
 
-.marketing-scorecard-row {
-  @apply border-b border-clr-rule-soft py-3.5 dark:border-clr-darkmode-rule-soft;
-}
-
-.marketing-scorecard-row:last-child {
-  @apply border-b-0 pb-0;
+.marketing-scorecard-item--accent {
+  @apply border-t-2 border-clr-primary dark:border-clr-darkmode-primary;
 }
 
 .marketing-scorecard-label {
@@ -164,16 +188,24 @@ Band 0: Asymmetric 7:5 Split Hero
 }
 
 .marketing-scorecard-value {
-  @apply mt-1 mb-0;
+  @apply mt-1.5 mb-0 block;
+}
+
+.marketing-scorecard-verdict {
+  @apply block;
 }
 
 .marketing-scorecard-contrast {
-  font-size: 0.875rem;
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-copy-sm);
+  line-height: 1.45;
 }
 
 /*
 ==============================
-Band 1: Sticky Dossier Sub-Navigation
+Band 1: Minimal Sticky Wayfinding Bar
 ==============================
 */
 
@@ -181,16 +213,11 @@ Band 1: Sticky Dossier Sub-Navigation
   position: sticky;
   top: var(--header-height);
   z-index: 20;
-  border-top: 0;
-  border-bottom: 2px solid var(--color-clr-rule-strong);
-
-  .dark & {
-    border-bottom-color: var(--color-clr-darkmode-rule-strong);
-  }
+  @apply border-b border-clr-rule-soft bg-clr-surface-page dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-page;
 }
 
 .marketing-subnav-inner {
-  @apply overflow-x-auto px-0 md:px-8;
+  @apply overflow-x-auto;
   scrollbar-width: none;
 }
 
@@ -199,21 +226,24 @@ Band 1: Sticky Dossier Sub-Navigation
 }
 
 .marketing-subnav-list {
-  @apply m-0 flex min-w-max list-none items-stretch p-0;
+  @apply m-0 flex min-w-max list-none items-center gap-6 p-0 md:gap-9;
 }
 
 .marketing-subnav-item {
-  @apply m-0 border-r border-clr-rule-soft dark:border-clr-darkmode-rule-soft;
-}
-
-.marketing-subnav-item:first-child {
-  @media (min-width: theme(--breakpoint-md)) {
-    @apply border-l border-clr-rule-soft dark:border-clr-darkmode-rule-soft;
-  }
+  @apply m-0;
 }
 
 .marketing-subnav-link {
-  @apply inline-flex min-h-[2.75rem] items-center px-4 py-2 whitespace-nowrap;
+  @apply inline-flex min-h-[3rem] items-center py-2 whitespace-nowrap;
+}
+
+.marketing-subnav-link:hover,
+.marketing-subnav-link:focus-visible {
+  box-shadow: inset 0 -2px 0 var(--color-clr-primary);
+
+  .dark & {
+    box-shadow: inset 0 -2px 0 var(--color-clr-darkmode-primary);
+  }
 }
 
 .marketing-subnav-link:focus-visible {
@@ -227,20 +257,20 @@ Band 1: Sticky Dossier Sub-Navigation
 
 /*
 ==============================
-Band 2: Honest Fit 2-Column Split
+Band 2: Freestanding Qualification Cards
 ==============================
 */
 
 .marketing-fit-grid {
-  @apply grid grid-cols-1 md:grid-cols-2;
+  @apply grid grid-cols-1 gap-8 md:grid-cols-2 lg:gap-12;
 }
 
 .marketing-fit-card {
-  @apply py-7 md:py-9;
+  @apply border border-clr-rule-soft p-7 dark:border-clr-darkmode-rule-soft md:p-10 lg:p-12;
 }
 
 .marketing-fit-card--sambee {
-  @apply border-b border-clr-rule-soft dark:border-clr-darkmode-rule-soft md:border-r md:border-b-0;
+  @apply bg-clr-surface-page dark:bg-clr-darkmode-surface-page;
   box-shadow: inset 0 2px 0 var(--color-clr-primary);
 
   .dark & {
@@ -248,13 +278,17 @@ Band 2: Honest Fit 2-Column Split
   }
 }
 
+.marketing-fit-card--competitor {
+  @apply bg-transparent;
+}
+
 .marketing-fit-title {
-  @apply mt-0 mb-5;
+  @apply mt-0 mb-6;
 }
 
 /*
 ==============================
-Band 3: Grouped Comparison Matrix
+Band 3: Open Horizontal-Rule Comparison Matrix
 ==============================
 */
 
@@ -273,10 +307,10 @@ Band 3: Grouped Comparison Matrix
 }
 
 .marketing-matrix-icon--positive {
-  color: var(--color-clr-status-tip);
+  color: #2e7d32;
 
   .dark & {
-    color: var(--color-clr-darkmode-status-tip);
+    color: #81c784;
   }
 }
 
@@ -285,6 +319,22 @@ Band 3: Grouped Comparison Matrix
 
   .dark & {
     color: var(--color-clr-darkmode-status-warning);
+  }
+}
+
+.marketing-matrix-icon--limited {
+  color: var(--color-clr-status-info);
+
+  .dark & {
+    color: var(--color-clr-darkmode-status-info);
+  }
+}
+
+.marketing-matrix-icon--negative {
+  color: var(--color-clr-status-danger);
+
+  .dark & {
+    color: var(--color-clr-darkmode-status-danger);
   }
 }
 
@@ -310,15 +360,13 @@ Band 3: Grouped Comparison Matrix
     top: calc(var(--header-height) + var(--marketing-subnav-height));
     z-index: 10;
     text-align: left;
-    padding: 0.875rem 1.25rem;
-    background-color: var(--color-clr-surface-high);
-    border-bottom: 1px solid var(--color-clr-rule-strong);
-    border-right: 1px solid var(--color-clr-rule-soft);
+    padding: 1rem 1.25rem;
+    background-color: var(--color-clr-surface-page);
+    border-bottom: 2px solid var(--color-clr-rule-strong);
 
     .dark & {
-      background-color: var(--color-clr-darkmode-surface-high);
+      background-color: var(--color-clr-darkmode-surface-page);
       border-bottom-color: var(--color-clr-darkmode-rule-strong);
-      border-right-color: var(--color-clr-darkmode-rule-soft);
     }
 
     @media (min-width: theme(--breakpoint-lg)) {
@@ -326,54 +374,53 @@ Band 3: Grouped Comparison Matrix
     }
   }
 
-  .marketing-matrix-col-header:last-child {
-    border-right: 0;
-  }
-
   .marketing-matrix-col-header--capability {
-    width: 28%;
+    width: 30%;
   }
 
   .marketing-matrix-col-header--sambee,
   .marketing-matrix-col-header--competitor {
-    width: 36%;
+    width: 35%;
   }
 
   .marketing-matrix-col-header--sambee {
+    background-color: var(--color-clr-surface-low);
     box-shadow: inset 0 2px 0 var(--color-clr-primary);
 
     .dark & {
+      background-color: var(--color-clr-darkmode-surface-low);
       box-shadow: inset 0 2px 0 var(--color-clr-darkmode-primary);
     }
   }
 
   .marketing-matrix-group-header {
     text-align: left;
-    padding: 0.75rem 1.25rem;
-    background-color: var(--color-clr-surface-mid);
-    border-bottom: 1px solid var(--color-clr-rule-soft);
+    padding: 2rem 1.25rem 0.75rem;
+    background-color: transparent;
+    border-bottom: 1px solid var(--color-clr-rule-strong);
 
     .dark & {
-      background-color: var(--color-clr-darkmode-surface-mid);
-      border-bottom-color: var(--color-clr-darkmode-rule-soft);
+      border-bottom-color: var(--color-clr-darkmode-rule-strong);
     }
 
     @media (min-width: theme(--breakpoint-lg)) {
       padding-inline: 1.5rem;
     }
+  }
+
+  .marketing-matrix-group:first-of-type .marketing-matrix-group-header {
+    padding-top: 1.25rem;
   }
 
   .marketing-matrix-capability,
   .marketing-matrix-cell {
     vertical-align: top;
     text-align: left;
-    padding: 0.95rem 1.25rem;
+    padding: 1.15rem 1.25rem;
     border-bottom: 1px solid var(--color-clr-rule-soft);
-    border-right: 1px solid var(--color-clr-rule-soft);
 
     .dark & {
       border-bottom-color: var(--color-clr-darkmode-rule-soft);
-      border-right-color: var(--color-clr-darkmode-rule-soft);
     }
 
     @media (min-width: theme(--breakpoint-lg)) {
@@ -381,17 +428,9 @@ Band 3: Grouped Comparison Matrix
     }
   }
 
-  .marketing-matrix-cell:last-child {
-    border-right: 0;
-  }
-
   .marketing-matrix-capability {
     font-weight: 600;
-    background-color: var(--color-clr-surface-page);
-
-    .dark & {
-      background-color: var(--color-clr-darkmode-surface-page);
-    }
+    background-color: transparent;
   }
 
   .marketing-matrix-cell--sambee {
@@ -403,16 +442,7 @@ Band 3: Grouped Comparison Matrix
   }
 
   .marketing-matrix-cell--competitor {
-    background-color: var(--color-clr-surface-page);
-
-    .dark & {
-      background-color: var(--color-clr-darkmode-surface-page);
-    }
-  }
-
-  .marketing-matrix-group:last-child .marketing-matrix-row:last-child > th,
-  .marketing-matrix-group:last-child .marketing-matrix-row:last-child > td {
-    border-bottom: 0;
+    background-color: transparent;
   }
 }
 
@@ -443,7 +473,31 @@ Band 3: Grouped Comparison Matrix
     display: block;
     width: 100%;
     text-align: left;
-    padding: 0.75rem 1.25rem;
+    padding: 1.5rem 0 0.65rem;
+    background-color: transparent;
+  }
+
+  .marketing-matrix-group:first-of-type .marketing-matrix-group-header {
+    padding-top: 0;
+  }
+
+  .marketing-matrix-row {
+    margin-bottom: 1rem;
+    border: 1px solid var(--color-clr-rule-soft);
+
+    .dark & {
+      border-color: var(--color-clr-darkmode-rule-soft);
+    }
+  }
+
+  .marketing-matrix-group:last-child .marketing-matrix-row:last-child {
+    margin-bottom: 0;
+  }
+
+  .marketing-matrix-capability {
+    text-align: left;
+    font-weight: 700;
+    padding: 0.85rem 1.15rem;
     background-color: var(--color-clr-surface-mid);
     border-bottom: 1px solid var(--color-clr-rule-soft);
 
@@ -453,33 +507,8 @@ Band 3: Grouped Comparison Matrix
     }
   }
 
-  .marketing-matrix-row {
-    border-bottom: 2px solid var(--color-clr-rule-strong);
-
-    .dark & {
-      border-bottom-color: var(--color-clr-darkmode-rule-strong);
-    }
-  }
-
-  .marketing-matrix-group:last-child .marketing-matrix-row:last-child {
-    border-bottom: 0;
-  }
-
-  .marketing-matrix-capability {
-    text-align: left;
-    font-weight: 700;
-    padding: 0.8rem 1.25rem;
-    background-color: var(--color-clr-surface-high);
-    border-bottom: 1px solid var(--color-clr-rule-soft);
-
-    .dark & {
-      background-color: var(--color-clr-darkmode-surface-high);
-      border-bottom-color: var(--color-clr-darkmode-rule-soft);
-    }
-  }
-
   .marketing-matrix-cell {
-    padding: 0.85rem 1.25rem;
+    padding: 0.9rem 1.15rem;
   }
 
   .marketing-matrix-cell--sambee {
@@ -532,55 +561,35 @@ Band 3: Grouped Comparison Matrix
 
 /*
 ==============================
-Bands 4 & 6: 4:8 Editorial Chapters
+Band 4: Open 2x2 Architectural Pillars
 ==============================
 */
 
-.marketing-chapter {
-  @apply border-b border-clr-rule-soft py-8 dark:border-clr-darkmode-rule-soft md:py-11;
+.marketing-pillars-grid {
+  @apply grid grid-cols-1 gap-x-12 gap-y-12 md:grid-cols-2 lg:gap-x-16 lg:gap-y-16;
 }
 
-.marketing-chapter:last-child {
-  @apply border-b-0;
+.marketing-pillar {
+  @apply border-t border-clr-rule-strong pt-7 dark:border-clr-darkmode-rule-strong;
 }
 
-.marketing-chapter-grid {
-  @apply grid grid-cols-1 gap-6 lg:grid-cols-12 lg:gap-12;
-}
-
-.marketing-chapter-rail {
-  @apply flex flex-col items-start lg:col-span-4;
-}
-
-.marketing-chapter-title {
+.marketing-pillar-title {
   @apply m-0;
 }
 
-.marketing-chapter-callout {
-  @apply mt-4 px-3.5 py-2.5;
+.marketing-pillar-lead {
+  @apply mt-3.5 mb-0;
 }
 
-.marketing-chapter-body {
-  @apply max-w-[65ch] lg:col-span-8 lg:border-l lg:border-clr-rule-soft lg:pl-10 dark:lg:border-clr-darkmode-rule-soft;
-}
-
-.marketing-chapter-lead {
-  @apply m-0;
-}
-
-.marketing-chapter-points {
+.marketing-pillar-points {
   @apply mt-5;
 }
 
 /*
 ==============================
-Band 5: Visual Proof & Architecture Contrast
+Band 5: Topology Block Diagrams
 ==============================
 */
-
-.marketing-visual-proof-body {
-  @apply flex flex-col gap-8 py-8 md:gap-10 md:py-10;
-}
 
 .marketing-arch-diagram {
   --arch-surface-page: var(--color-clr-surface-page);
@@ -594,7 +603,7 @@ Band 5: Visual Proof & Architecture Contrast
   --arch-ink: var(--color-clr-text-dark);
   --arch-muted: var(--color-clr-text-light);
   --arch-warning: var(--color-clr-status-warning);
-  @apply grid grid-cols-1 gap-6 lg:grid-cols-2;
+  @apply grid grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-12;
 
   .dark & {
     --arch-surface-page: var(--color-clr-darkmode-surface-page);
@@ -612,7 +621,7 @@ Band 5: Visual Proof & Architecture Contrast
 }
 
 .marketing-arch-panel {
-  @apply border border-clr-rule-soft bg-clr-surface-page dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-page;
+  @apply border border-clr-rule-soft bg-clr-surface-low dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-low;
 }
 
 .marketing-arch-panel--sambee {
@@ -624,37 +633,29 @@ Band 5: Visual Proof & Architecture Contrast
 }
 
 .marketing-arch-panel-header {
-  @apply border-b border-clr-rule-soft bg-clr-surface-mid px-4 py-3 dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-mid;
+  @apply border-b border-clr-rule-soft px-5 py-3.5 dark:border-clr-darkmode-rule-soft md:px-6;
+}
+
+.marketing-arch-svg-wrap {
+  @apply p-4 md:p-6;
 }
 
 .marketing-arch-svg {
   @apply block h-auto w-full;
 }
 
-.marketing-workspace-preview {
-  @apply m-0 border border-clr-rule-soft bg-clr-surface-page dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-page;
-}
-
-.marketing-workspace-preview-frame {
-  @apply bg-clr-surface-mid/60 p-4 dark:bg-clr-darkmode-surface-mid/60 md:p-8;
-}
-
-.marketing-workspace-caption {
-  @apply block border-t border-clr-rule-soft px-4 py-3 dark:border-clr-darkmode-rule-soft md:px-6;
-}
-
 /*
 ==============================
-Band 7: 5:7 Terminal Test-Drive Split
+Band 6: 7:5 Terminal Test-Drive Split
 ==============================
 */
 
 .marketing-test-drive-grid {
-  @apply grid grid-cols-1 gap-8 py-8 md:py-12 lg:grid-cols-12 lg:items-center lg:gap-10;
+  @apply grid grid-cols-1 gap-10 lg:grid-cols-12 lg:items-center lg:gap-14;
 }
 
 .marketing-test-drive-copy {
-  @apply lg:col-span-5;
+  @apply lg:col-span-7;
 }
 
 .marketing-test-drive-title {
@@ -666,11 +667,11 @@ Band 7: 5:7 Terminal Test-Drive Split
 }
 
 .marketing-test-drive-list {
-  @apply mt-5;
+  @apply mt-6;
 }
 
 .marketing-code-panel {
-  @apply min-w-0 lg:col-span-7;
+  @apply min-w-0 lg:col-span-5;
 }
 
 .marketing-code-header {
@@ -702,21 +703,21 @@ html.dark .content.marketing-code-surface pre {
 
 /*
 ==============================
-Band 8: Interactive Accordion FAQ
+Band 7: Narrow-Measure Centered Accordion FAQ
 ==============================
 */
+
+.marketing-faq-list {
+  @apply border-t border-clr-rule-soft dark:border-clr-darkmode-rule-soft;
+}
 
 .marketing-faq-item {
   @apply border-b border-clr-rule-soft dark:border-clr-darkmode-rule-soft;
 }
 
-.marketing-faq-item:last-child {
-  @apply border-b-0;
-}
-
 .marketing-faq-summary {
   list-style: none;
-  @apply flex min-h-[3.25rem] cursor-pointer items-center justify-between gap-5 py-4 md:py-5;
+  @apply flex min-h-[3.5rem] cursor-pointer items-center justify-between gap-6 py-5 md:py-6;
 }
 
 .marketing-faq-summary::-webkit-details-marker {
@@ -793,7 +794,7 @@ Band 8: Interactive Accordion FAQ
 }
 
 .marketing-faq-answer-inner {
-  @apply max-w-[68ch];
+  @apply w-full;
 }
 
 .marketing-faq-answer-inner p {
