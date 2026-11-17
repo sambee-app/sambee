@@ -109,4 +109,12 @@ cd website
 npm run dev
 ```
 
-Use the **Website: Start Dev Server** VS Code task for local checks. The development pipeline writes to `website/public-dev/`, separate from production output in `website/public/`. The authoring loop updates inherited anchors and WebP assets automatically. Use `npm run dev:with-search` when you need continuous Pagefind index updates during editing.
+Use the **Website: Start Dev Server** VS Code task for local checks. The development pipeline writes to `website/public-dev/`, separate from production output in `website/public/`. The authoring loop updates inherited anchors and WebP assets automatically.
+
+Normal startup validates source docs, renders Hugo, generates redirects, and checks homepage and marketing links. It skips minification, garbage collection, search indexing, and full docs output validation.
+
+- Use `npm run dev:with-search` for an initial search index and continuous index updates.
+- Use `npm run dev:search` for a one-time development build and search index. After further edits, that index can be stale.
+- Use `npm run dev:check` for the complete development build, including search indexing and output validation.
+
+Normal preparation removes any old local search index so it cannot return stale results. The search dialog explains how to enable local search. Development indexing defaults to four worker threads; set `RAYON_NUM_THREADS` to use a different limit. Production builds keep the full validation pipeline and do not set a thread limit.

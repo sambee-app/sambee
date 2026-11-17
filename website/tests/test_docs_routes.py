@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -59,6 +62,174 @@ class HugoDocsRouteTests(unittest.TestCase):
         target = root / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
+
+    def test_navigation_cache_preserves_routes_and_refreshes_during_watch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            self.write(
+                root,
+                "hugo.toml",
+                """baseURL = "https://example.org/"
+ignoreFiles = ["(^|/)inherit\\\\.md$", "(^|/)_inherit\\\\.md$"]
+[[module.mounts]]
+source = "content"
+target = "content"
+[[module.mounts]]
+source = ".generated/content"
+target = "content"
+""",
+            )
+            for name in ["docs", "icons"]:
+                shutil.copytree(
+                    WEBSITE / f"themes/sambee/layouts/partials/{name}",
+                    root / f"layouts/partials/{name}",
+                )
+            layout = """{{ $data := partial "docs/render-data.html" . }}
+{{ if $data.docsContext.book }}
+{{ range slice "sidebar" "drawer" }}
+{{ partial "docs/nav-tree.html" (dict "page" $data.page "version" $data.docsContext.version "book" $data.docsContext.book "navData" (index (index hugo.Data "docs-nav") $data.docsContext.version) "mode" .) }}
+{{ end }}
+{{ $nav := partial "docs/sequential-nav-data.html" . }}
+<script id="sequence">{{ dict "previous" $nav.previous "next" $nav.next | jsonify | safeJS }}</script>
+<article>{{ $data.effectivePage.Title }} {{ $data.effectivePage.Content }}</article>
+{{ end }}"""
+            for name in ["index.html", "_default/list.html", "_default/single.html"]:
+                self.write(root, f"layouts/{name}", layout)
+            versions = """current = "2.0"
+[[versions]]
+slug = "1.0"
+searchable = true
+[[versions]]
+slug = "2.0"
+searchable = true
+"""
+            self.write(root, "data/docs-versions.toml", versions)
+            nav = """books = ["guide"]
+[[sections.guide.items]]
+slug = "start"
+title = "Getting Started"
+[pages.guide.start]
+items = ["alpha", "beta"]
+"""
+            for version in ["1.0", "2.0"]:
+                self.write(root, f"data/docs-nav/{version}.toml", nav)
+                self.write(
+                    root,
+                    f"content/docs/{version}/guide/_index.md",
+                    '+++\ntitle="Guide"\n+++\n',
+                )
+                self.write(
+                    root,
+                    f"content/docs/{version}/guide/start/_index.md",
+                    '+++\ntitle="Start"\n+++\n',
+                )
+                self.write(
+                    root,
+                    f"content/docs/{version}/guide/start/beta/index.md",
+                    f'+++\ntitle="Beta {version}"\n+++\n',
+                )
+            alpha_source = "content/docs/1.0/guide/start/alpha/index.md"
+            self.write(root, alpha_source, '+++\ntitle="Alpha"\n+++\nOriginal body\n')
+            self.write(root, "content/docs/2.0/guide/start/alpha/inherit.md", "")
+            materializer = load_script("materialize-inherited-docs")
+            materializer.DOCS_CONTENT_DIR = root / "content/docs"
+            materializer.GENERATED_CONTENT_DIR = root / ".generated/content/docs"
+            materializer.DOCS_VERSIONS_FILE = root / "data/docs-versions.toml"
+            materializer.main()
+            stable = root / "public/docs/guide/start/alpha/index.html"
+            explicit = root / "public/docs/2.0/guide/start/alpha/index.html"
+            beta = root / "public/docs/guide/start/beta/index.html"
+
+            def wait_for_text(paths: list[Path], text: str) -> None:
+                deadline = time.monotonic() + COMMAND_TIMEOUT
+                while time.monotonic() < deadline:
+                    if all(
+                        path.exists() and text in path.read_text() for path in paths
+                    ):
+                        return
+                    if process.poll() is not None:
+                        break
+                    time.sleep(0.05)
+                log.seek(0)
+                self.fail(
+                    f"Watch build did not produce {text!r} in {paths}:\n{log.read()}"
+                )
+
+            def sequence(path: Path) -> dict:
+                match = re.search(
+                    r'<script id="sequence">(.*?)</script>', path.read_text(), re.DOTALL
+                )
+                self.assertIsNotNone(match)
+                assert match is not None
+                return json.loads(match.group(1))
+
+            with tempfile.TemporaryFile(mode="w+") as log:
+                process = subprocess.Popen(
+                    ["hugo", "--watch", "--environment", "development"],
+                    cwd=root,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                try:
+                    wait_for_text([stable, explicit, beta], "Alpha")
+                    for page, prefix in [(stable, "/docs/"), (explicit, "/docs/2.0/")]:
+                        html = page.read_text()
+                        self.assertEqual(
+                            re.findall(r"docs-sidebar-link-current[^>]*>([^<]+)", html),
+                            ["Alpha", "Alpha"],
+                        )
+                        self.assertIn('id="docs-sidebar-book-sidebar-', html)
+                        self.assertIn('id="docs-sidebar-book-drawer-', html)
+                        self.assertEqual(
+                            sequence(page)["next"]["url"], prefix + "guide/start/beta/"
+                        )
+                    self.write(
+                        root,
+                        alpha_source,
+                        '+++\ntitle="Alpha Revised"\n+++\nChanged inherited body\n',
+                    )
+                    wait_for_text([stable, explicit, beta], "Alpha Revised")
+                    wait_for_text([stable, explicit], "Changed inherited body")
+                    self.write(
+                        root,
+                        "data/docs-nav/2.0.toml",
+                        nav.replace("Getting Started", "Revised Section").replace(
+                            '["alpha", "beta"]', '["beta", "alpha"]'
+                        ),
+                    )
+                    wait_for_text([stable, explicit, beta], "Revised Section")
+                    self.assertFalse(sequence(stable)["next"])
+                    self.assertEqual(
+                        sequence(stable)["previous"]["url"], "/docs/guide/start/beta/"
+                    )
+                    self.write(
+                        root,
+                        "content/docs/2.0/guide/start/alpha/index.md",
+                        '+++\ntitle="Alpha Override"\n+++\nOverride body\n',
+                    )
+                    (root / "content/docs/2.0/guide/start/alpha/inherit.md").unlink()
+                    materializer.main()
+                    wait_for_text([stable, explicit, beta], "Alpha Override")
+                    self.write(
+                        root,
+                        "data/docs-versions.toml",
+                        versions.replace('current = "2.0"', 'current = "1.0"'),
+                    )
+                    materializer.main()
+                    wait_for_text([stable, beta], "Beta 1.0")
+                    wait_for_text([explicit], "Alpha Override")
+                    self.assertEqual(
+                        sequence(explicit)["previous"]["url"],
+                        "/docs/2.0/guide/start/beta/",
+                    )
+                finally:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=COMMAND_TIMEOUT)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=COMMAND_TIMEOUT)
 
     def test_consecutive_current_versions_keep_explicit_routes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

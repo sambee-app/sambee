@@ -42,12 +42,16 @@ function runPagefind() {
    isIndexing = true;
    shouldReindex = false;
 
-   const child = spawn("npx", ["pagefind", "--site", siteOutputRoot, "--quiet"], {
+   const child = spawn(process.execPath, ["scripts/build-search.js", "--development", "--site", siteOutputRoot, "--quiet"], {
       cwd: siteRoot,
       stdio: ["ignore", "inherit", "inherit"],
    });
 
-   child.on("exit", (code) => {
+   child.on("error", (error) => {
+      console.error(`[pagefind] Could not start search indexing: ${error.message}`);
+   });
+
+   child.on("close", (code) => {
       isIndexing = false;
 
       if (code === 0) {

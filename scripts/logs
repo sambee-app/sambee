@@ -85,8 +85,8 @@ if [ "$FOLLOW" = true ]; then
 else
     # Show current status
     echo -e "${GREEN}━━━ SERVER STATUS${NC}"
-    if pgrep -f "uvicorn.*app.main:app" > /dev/null; then
-        BACKEND_PID=$(pgrep -f "uvicorn.*app.main:app")
+    if pgrep -f "uvicorn.*app.main:app|/workspace/scripts/run-backend-dev.py" > /dev/null; then
+        BACKEND_PID=$(pgrep -f "uvicorn.*app.main:app|/workspace/scripts/run-backend-dev.py")
         echo -e "${GREEN}✅ Backend running (PID: $BACKEND_PID)${NC}"
     else
         echo -e "${RED}❌ Backend not running${NC}"
