@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -165,6 +166,11 @@ class FilestashAlternativeBuildTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._tempdir = tempfile.TemporaryDirectory()
         cls.build_dir = Path(cls._tempdir.name) / "public"
+        build_env = os.environ.copy()
+        node_bin = WEBSITE_DIR / "node_modules" / ".bin"
+        build_env["PATH"] = os.pathsep.join(
+            [str(node_bin), build_env.get("PATH", "")]
+        ).rstrip(os.pathsep)
         commands = [
             ["python3", "scripts/materialize-inherited-docs.py"],
             [
@@ -187,6 +193,7 @@ class FilestashAlternativeBuildTests(unittest.TestCase):
                 text=True,
                 timeout=BUILD_TIMEOUT,
                 check=False,
+                env=build_env,
             )
             if result.returncode != 0:
                 cls._tempdir.cleanup()
