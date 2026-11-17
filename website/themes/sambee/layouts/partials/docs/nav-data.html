@@ -17,7 +17,9 @@
     {{ $bookPage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "preferStable" false)) }}
     {{ $bookURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "preferStable" $preferStable) }}
     {{ $bookTitle := humanize $bookSlug }}
+    {{ $hasBookPage := false }}
     {{ with $bookPage }}
+      {{ $hasBookPage = true }}
       {{ $effective := partialCached "docs/effective-page.html" . .RelPermalink }}
       {{ $bookTitle = $effective.page.Title }}
       {{ $items = $items | append (dict
@@ -35,7 +37,9 @@
       {{ $sectionTitle := .title | default (humanize $sectionSlug) }}
       {{ $sectionPage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" false)) }}
       {{ $sectionURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" $preferStable) }}
+      {{ $hasSectionPage := false }}
       {{ with $sectionPage }}
+        {{ $hasSectionPage = true }}
         {{ $items = $items | append (dict
           "key" (printf "%s|section|%s|%s|" $version $bookSlug $sectionSlug)
           "kind" "section" "title" $sectionTitle "context" $bookTitle "url" $sectionURL
@@ -62,12 +66,12 @@
       {{ end }}
       {{ $sections = $sections | append (dict
         "slug" $sectionSlug "title" $sectionTitle "url" $sectionURL
-        "hasPage" (ne $sectionPage nil) "pages" $pages
+        "hasPage" $hasSectionPage "pages" $pages
       ) }}
     {{ end }}
     {{ $books = $books | append (dict
       "slug" $bookSlug "title" $bookTitle "url" $bookURL
-      "hasPage" (ne $bookPage nil) "sections" $sections
+      "hasPage" $hasBookPage "sections" $sections
     ) }}
   {{ end }}
 {{ end }}

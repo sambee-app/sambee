@@ -104,7 +104,17 @@ slug = "2.0"
 searchable = true
 """
             self.write(root, "data/docs-versions.toml", versions)
-            nav = """books = ["guide"]
+            nav = """books = ["structural", "guide"]
+[[sections.structural.items]]
+slug = "topics"
+title = "Topics"
+[pages.structural.topics]
+items = ["reference"]
+[[sections.guide.items]]
+slug = "view-and-edit-files"
+title = "View and Edit Files"
+[pages.guide.view-and-edit-files]
+items = ["viewer"]
 [[sections.guide.items]]
 slug = "start"
 title = "Getting Started"
@@ -113,6 +123,15 @@ items = ["alpha", "beta"]
 """
             for version in ["1.0", "2.0"]:
                 self.write(root, f"data/docs-nav/{version}.toml", nav)
+                for page in [
+                    "structural/topics/reference",
+                    "guide/view-and-edit-files/viewer",
+                ]:
+                    self.write(
+                        root,
+                        f"content/docs/{version}/{page}/index.md",
+                        '+++\ntitle="Reference"\n+++\n',
+                    )
                 self.write(
                     root,
                     f"content/docs/{version}/guide/_index.md",
@@ -181,6 +200,13 @@ items = ["alpha", "beta"]
                         )
                         self.assertIn('id="docs-sidebar-book-sidebar-', html)
                         self.assertIn('id="docs-sidebar-book-drawer-', html)
+                        for href in re.findall(r'href="([^"]+)"', html):
+                            self.assertTrue(
+                                (
+                                    root / "public" / href.lstrip("/") / "index.html"
+                                ).is_file(),
+                                f"Navigation must not link to a structural branch: {href}",
+                            )
                         self.assertEqual(
                             sequence(page)["next"]["url"], prefix + "guide/start/beta/"
                         )
