@@ -1,4 +1,5 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { createTheme } from "@mui/material";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -108,6 +109,7 @@ const openOidcConfiguration = async (user: ReturnType<typeof userEvent.setup> = 
 
 describe("Authentication settings", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1365,6 +1367,49 @@ describe("Authentication settings", () => {
       testError.compareDocumentPosition(screen.getByTestId("responsive-form-dialog-desktop-actions")) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(screen.queryByText("The redirect URI could not be copied.")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("restores action focus when the opening transition ends during an OIDC test (mobile: %s)", async (mobile) => {
+    const theme = createTheme();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: mobile && query === theme.breakpoints.down("sm").replace("@media ", ""),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    let rejectTest: (reason: unknown) => void = uninitializedTestCallback;
+    vi.mocked(api.getOidcConfiguration).mockResolvedValue(response(configuration("Active Provider")));
+    vi.mocked(api.startOidcTest).mockReturnValue(
+      new Promise((_resolve, reject) => {
+        rejectTest = reject;
+      })
+    );
+    window.location.hash = "";
+    renderSettings();
+    const configure = await screen.findByRole("button", { name: "Configure OIDC" });
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"] });
+    fireEvent.click(configure);
+    const connectAndTest = screen.getByRole("button", { name: "Connect and test" });
+    expect(screen.getByTestId(`responsive-form-dialog-${mobile ? "mobile" : "desktop"}-actions`)).toContainElement(connectAndTest);
+    act(() => connectAndTest.focus());
+    fireEvent.click(connectAndTest);
+    expect(connectAndTest).toBeDisabled();
+    await act(async () => {
+      connectAndTest.blur();
+      await vi.advanceTimersByTimeAsync(theme.transitions.duration.enteringScreen);
+    });
+
+    expect(screen.getByRole("textbox", { name: "Provider name" })).not.toHaveFocus();
+    await act(async () => rejectTest({ response: { status: 400, data: { detail: "Provider unavailable" } } }));
+
+    expect(screen.getByTestId("oidc-configuration-test-error")).toHaveTextContent("Provider unavailable");
+    expect(connectAndTest).toBeEnabled();
+    expect(connectAndTest).toHaveFocus();
   });
 
   it("omits the redirect URI copy action when the Clipboard API is unavailable", async () => {
