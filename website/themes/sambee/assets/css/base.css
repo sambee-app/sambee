@@ -48,6 +48,7 @@ That avoids fighting the browser's native scroll restoration during refresh.
 */
 html {
   font-size: var(--text-size-base);
+  scrollbar-gutter: stable;
   scroll-padding-top: var(--header-height);
 }
 

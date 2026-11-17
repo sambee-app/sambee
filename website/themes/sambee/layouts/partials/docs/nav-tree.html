@@ -5,22 +5,16 @@
 {{ $book := .book }}
 {{ $navData := .navData }}
 {{ $mode := .mode | default "sidebar" }}
+{{ $navigation := partialCached "docs/nav-data.html" (dict "version" $version "preferStable" $pageContext.isCurrentRoute) $version $pageContext.isCurrentRoute }}
 
 {{ if and $navData $book }}
   <div class="docs-nav-tree docs-nav-tree--{{ $mode }}">
-    {{ range $bookSlug := $navData.books }}
+    {{ range $navigation.books }}
+      {{ $bookSlug := .slug }}
       {{ $isCurrentBook := eq $bookSlug $book }}
-      {{ $currentBookSourcePage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "preferStable" false)) }}
-      {{ $currentBookURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "preferStable" $pageContext.isCurrentRoute) }}
-      {{ $bookTitle := humanize $bookSlug }}
-      {{ with $currentBookSourcePage }}
-        {{ $bookEffectiveData := partial "docs/effective-page.html" . }}
-        {{ $bookTitle = $bookEffectiveData.page.Title }}
-      {{ end }}
-      {{ $bookSections := slice }}
-      {{ with index $navData.sections $bookSlug }}
-        {{ $bookSections = .items | default slice }}
-      {{ end }}
+      {{ $currentBookURL := .url }}
+      {{ $bookTitle := .title }}
+      {{ $bookSections := .sections }}
       {{ $hasSections := gt (len $bookSections) 0 }}
       {{ $bookChildrenId := printf "docs-sidebar-book-%s-%s-%s" $mode $version $bookSlug }}
       {{ $bookTitleClass := "docs-sidebar-title" }}
@@ -29,7 +23,7 @@
       {{ end }}
       <div class="docs-sidebar-book{{ if $isCurrentBook }} docs-sidebar-book-current{{ end }}{{ if $hasSections }} docs-sidebar-book-has-children{{ end }}">
         <div class="docs-sidebar-title-row">
-          {{ with $currentBookSourcePage }}
+          {{ if .hasPage }}
           <a class="{{ $bookTitleClass }} type-title-sm-tight type-color-ink ui-transition-color ui-hover-primary" href="{{ $currentBookURL }}">
             <span class="docs-sidebar-title-label">{{ $bookTitle }}</span>
           </a>
@@ -54,26 +48,14 @@
           {{ range $sectionEntry := $bookSections }}
           {{ $sectionSlug := $sectionEntry.slug }}
           {{ $sectionTitle := $sectionEntry.title | default (humanize $sectionSlug) }}
-          {{ $sectionSourcePage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" false)) }}
-          {{ $sectionURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" $pageContext.isCurrentRoute) }}
-          {{ $pageSlugs := slice }}
-          {{ with index $navData.pages $bookSlug }}
-            {{ with index . $sectionSlug }}
-              {{ $pageSlugs = .items | default slice }}
-            {{ end }}
-          {{ end }}
-          {{ $sectionPages := slice }}
-          {{ range $pageSlug := $pageSlugs }}
-            {{ with site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "page" $pageSlug "preferStable" false)) }}
-              {{ $sectionPages = $sectionPages | append . }}
-            {{ end }}
-          {{ end }}
+          {{ $sectionURL := .url }}
+          {{ $sectionPages := .pages }}
           {{ $hasPages := gt (len $sectionPages) 0 }}
           {{ $isCurrentSection := and $isCurrentBook (eq $sectionSlug $pageContext.section) }}
           {{ $sectionChildrenId := printf "%s-%s" $bookChildrenId $sectionSlug }}
           <section class="docs-nav-group">
             <div class="docs-nav-group-row">
-              {{ if $sectionSourcePage }}
+              {{ if .hasPage }}
                 {{ if and $isCurrentSection (not $pageContext.page) }}
                 <span class="docs-nav-group-link type-docs-nav type-color-ink ui-current-primary-inset"{{ if $hasPages }} data-docs-section-trigger="true" aria-controls="{{ $sectionChildrenId }}" aria-expanded="{{ if $isCurrentSection }}true{{ else }}false{{ end }}" role="button" tabindex="0"{{ end }}>{{ $sectionTitle }}</span>
                 {{ else }}
@@ -96,15 +78,13 @@
             {{ if $hasPages }}
             <ul id="{{ $sectionChildrenId }}" class="docs-nav-list"{{ if not $isCurrentSection }} hidden{{ end }}>
               {{ range $sectionPages }}
-                {{ $navPageContext := partial "docs/context.html" . }}
-                {{ $navEffectiveData := partial "docs/effective-page.html" . }}
-                {{ $navTitle := $navEffectiveData.page.Title }}
-                {{ $isCurrentPage := and (eq $navPageContext.section $pageContext.section) (eq $navPageContext.page $pageContext.page) }}
+                {{ $navTitle := .title }}
+                {{ $isCurrentPage := and (eq $sectionSlug $pageContext.section) (eq .slug $pageContext.page) }}
                 <li>
                   {{ if $isCurrentPage }}
                   <span class="docs-sidebar-link docs-sidebar-link-current type-docs-nav type-color-ink ui-current-primary-inset">{{ $navTitle }}</span>
                   {{ else }}
-                  <a class="docs-sidebar-link type-docs-nav type-color-muted ui-transition-color type-hover-ink ui-hover-surface-mid" href="{{ partial "docs/page-url.html" (dict "pageObject" . "preferStable" $pageContext.isCurrentRoute) }}">{{ $navTitle }}</a>
+                  <a class="docs-sidebar-link type-docs-nav type-color-muted ui-transition-color type-hover-ink ui-hover-surface-mid" href="{{ .url }}">{{ $navTitle }}</a>
                   {{ end }}
                 </li>
               {{ end }}

@@ -1,7 +1,7 @@
 {{/* Purpose: Renders the narrow-measure centered technical FAQ using native <details> and <summary> elements. */}}
 {{ $section := .section }}
 {{ if and $section $section.enabled }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--last marketing-anchor-target">
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell marketing-band marketing-band--last marketing-anchor-target">
   <div class="marketing-frame marketing-frame--narrow">
     <div class="marketing-section-header marketing-section-header--faq">
       {{ with $section.eyebrow }}

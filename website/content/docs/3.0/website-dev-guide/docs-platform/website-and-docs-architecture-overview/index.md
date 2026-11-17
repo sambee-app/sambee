@@ -38,10 +38,10 @@ In practice:
 
 ## Site Page Families
 
-`sambee.net` separates templates and stylesheets into three page families that share brand tokens, global header and footer chrome, and `type-*` typography utilities without cloning layouts across page types:
+`sambee.net` separates templates and stylesheets into three page families that share brand tokens, layout rails (`.ledger-shell` and `.shell-section` in `shared.css`), global header and footer chrome, and `type-*` typography utilities without cloning section layouts across page types:
 
-- **Homepage (`/`)**: Uses `layouts/home.html`, `partials/home/*`, `assets/css/homepage.css`, and `data/homepage.yaml` on the boxed `.ledger-shell` / `.home-section` rails. These section partials are exclusive to `/`.
-- **Comparison and marketing pages (`/<slug>/`)**: Use a page bundle at `content/<slug>/index.md` (`layout = "comparison"`, `data_key = "<key>"`) backed by structured data in `data/<key>.yaml`, rendered through `layouts/_default/comparison.html`, `partials/marketing/*`, and `assets/css/marketing.css` using open full-bleed `.marketing-band` surfaces and centered `.marketing-frame` containers. Comparison pages emit `FAQPage` JSON-LD through the `{{ block "head" . }}` slot in `layouts/_default/baseof.html`, expose `data-pagefind-body` under `page_kind:site`, surface in the footer via `[[footer.comparisons]]` in `config/_default/params.toml`, and mark CTAs and subnav jump links with `data-marketing-link` for build-time validation.
+- **Homepage (`/`)**: Uses `layouts/home.html`, `partials/home/*`, `assets/css/homepage.css`, and `data/homepage.yaml`. These section partials are exclusive to `/`.
+- **Comparison and marketing pages (`/<slug>/`)**: Use a page bundle at `content/<slug>/index.md` (`layout = "comparison"`, `data_key = "<key>"`) backed by structured data in `data/<key>.yaml`, rendered through `layouts/_default/comparison.html`, `partials/marketing/*`, and `assets/css/marketing.css` inside the shared `.ledger-shell` / `.shell-section` main content container. Comparison pages emit `FAQPage` JSON-LD through the `{{ block "head" . }}` slot in `layouts/_default/baseof.html`, expose `data-pagefind-body` under `page_kind:site`, surface in the footer via `[[footer.comparisons]]` in `config/_default/params.toml`, and mark CTAs and subnav jump links with `data-marketing-link` for build-time validation.
 - **Documentation and standalone prose pages (`/docs/...`, `/imprint/`, `/privacy-policy/`)**: Versioned docs use `layouts/docs/*` and `assets/css/docs.css`; single-column legal and reference pages outside `/docs/` use `layouts/_default/standalone.html` and `assets/css/standalone.css`.
 
 Shared link and media helpers live in `partials/components/` (including `link-href.html`, `button-kind-class.html`, `responsive-image.html`, and `theme-aware-image.html`), and shared layout and typography utilities live in `assets/css/shared.css`.
@@ -109,4 +109,12 @@ cd website
 npm run dev
 ```
 
-Use the **Website: Start Dev Server** VS Code task for local checks. The development pipeline writes to `website/public-dev/`, separate from production output in `website/public/`. The authoring loop updates inherited anchors and WebP assets automatically. Use `npm run dev:with-search` when you need continuous Pagefind index updates during editing.
+Use the **Website: Start Dev Server** VS Code task for local checks. The development pipeline writes to `website/public-dev/`, separate from production output in `website/public/`. The authoring loop updates inherited anchors and WebP assets automatically.
+
+Normal startup validates source docs, renders Hugo, generates redirects, and checks homepage and marketing links. It skips minification, garbage collection, search indexing, and full docs output validation.
+
+- Use `npm run dev:with-search` for an initial search index and continuous index updates.
+- Use `npm run dev:search` for a one-time development build and search index. After further edits, that index can be stale.
+- Use `npm run dev:check` for the complete development build, including search indexing and output validation.
+
+Normal preparation removes any old local search index so it cannot return stale results. The search dialog explains how to enable local search. Development indexing defaults to four worker threads; set `RAYON_NUM_THREADS` to use a different limit. Production builds keep the full validation pipeline and do not set a thread limit.

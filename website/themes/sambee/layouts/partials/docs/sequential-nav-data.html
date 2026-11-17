@@ -5,80 +5,14 @@
 {{ $currentBook := $docsContext.book }}
 {{ $currentSection := $docsContext.section }}
 {{ $currentPageSlug := $docsContext.page }}
-{{ $navData := index (index hugo.Data "docs-nav") $version }}
-{{ $docsVersions := (index hugo.Data "docs-versions").versions | default slice }}
-{{ $versionLabel := $version }}
-{{ $items := slice }}
-
-{{ with index (where $docsVersions "slug" $version) 0 }}
-  {{ $versionLabel = .label | default $version }}
-{{ end }}
-
-{{ if and $docsContext.isDocs $version $navData (or $docsContext.isBook $docsContext.isSection $docsContext.isPage) }}
-  {{ range $bookSlug := $navData.books }}
-    {{ $bookSourcePage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "preferStable" false)) }}
-    {{ $bookTitle := humanize $bookSlug }}
-    {{ with $bookSourcePage }}
-      {{ $bookEffectiveData := partial "docs/effective-page.html" . }}
-      {{ $bookTitle = $bookEffectiveData.page.Title }}
-      {{ $items = $items | append (dict
-        "key" (printf "%s|book|%s||" $version $bookSlug)
-        "kind" "book"
-        "title" $bookTitle
-        "context" (printf "Sambee %s" $versionLabel)
-        "url" (partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "preferStable" $docsContext.isCurrentRoute))
-      ) }}
-    {{ end }}
-
-    {{ $bookSections := slice }}
-    {{ with index $navData.sections $bookSlug }}
-      {{ $bookSections = .items | default slice }}
-    {{ end }}
-
-    {{ range $sectionEntry := $bookSections }}
-      {{ $sectionSlug := $sectionEntry.slug }}
-      {{ $sectionTitle := $sectionEntry.title | default (humanize $sectionSlug) }}
-      {{ $sectionSourcePage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" false)) }}
-      {{ with $sectionSourcePage }}
-        {{ $items = $items | append (dict
-          "key" (printf "%s|section|%s|%s|" $version $bookSlug $sectionSlug)
-          "kind" "section"
-          "title" $sectionTitle
-          "context" $bookTitle
-          "url" (partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" $docsContext.isCurrentRoute))
-        ) }}
-      {{ end }}
-
-      {{ $pageSlugs := slice }}
-      {{ with index $navData.pages $bookSlug }}
-        {{ with index . $sectionSlug }}
-          {{ $pageSlugs = .items | default slice }}
-        {{ end }}
-      {{ end }}
-
-      {{ range $pageSlug := $pageSlugs }}
-        {{ with site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "page" $pageSlug "preferStable" false)) }}
-          {{ $pageEffectiveData := partial "docs/effective-page.html" . }}
-          {{ $items = $items | append (dict
-            "key" (printf "%s|page|%s|%s|%s" $version $bookSlug $sectionSlug $pageSlug)
-            "kind" "page"
-            "title" $pageEffectiveData.page.Title
-            "context" $sectionTitle
-            "url" (partial "docs/page-url.html" (dict "pageObject" . "preferStable" $docsContext.isCurrentRoute))
-          ) }}
-        {{ end }}
-      {{ end }}
-    {{ end }}
-  {{ end }}
-{{ end }}
+{{ $navigation := partialCached "docs/nav-data.html" (dict "version" $version "preferStable" $docsContext.isCurrentRoute) $version $docsContext.isCurrentRoute }}
+{{ $items := $navigation.items }}
 
 {{ $currentKey := printf "%s|%s|%s|%s|%s" $version $docsContext.kind $currentBook $currentSection $currentPageSlug }}
 {{ $currentIndex := -1 }}
 
-{{ range $index, $item := $items }}
-  {{ if eq $item.key $currentKey }}
-    {{ $currentIndex = $index }}
-  {{ end }}
+{{ if isset $navigation.indices $currentKey }}
+  {{ $currentIndex = index $navigation.indices $currentKey }}
 {{ end }}
 
 {{ $current := false }}

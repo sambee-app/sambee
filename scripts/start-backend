@@ -7,13 +7,16 @@ if [ -f "/.dockerenv" ] || [ -n "$REMOTE_CONTAINERS" ] || [ -n "$CODESPACES" ]; 
 
     # Kill any existing uvicorn processes and clean up port
     echo "🔍 Checking for existing backend processes..."
-    if pgrep -f "uvicorn app.main:app" > /dev/null; then
+    BACKEND_PATTERN="uvicorn.*app.main:app|/workspace/scripts/run-backend-dev.py"
+    mapfile -t BACKEND_PIDS < <(pgrep -f "$BACKEND_PATTERN")
+    if [ "${#BACKEND_PIDS[@]}" -gt 0 ]; then
         echo "⚠️  Found existing uvicorn process. Stopping it..."
-        pkill -TERM -f "uvicorn app.main:app"
+        kill -TERM "${BACKEND_PIDS[@]}"
         sleep 2
         # Force kill if still running
-        if pgrep -f "uvicorn app.main:app" > /dev/null; then
-            pkill -KILL -f "uvicorn app.main:app"
+        mapfile -t BACKEND_PIDS < <(pgrep -f "$BACKEND_PATTERN")
+        if [ "${#BACKEND_PIDS[@]}" -gt 0 ]; then
+            kill -KILL "${BACKEND_PIDS[@]}"
             sleep 1
         fi
         echo "✅ Cleaned up existing processes"
@@ -48,7 +51,7 @@ if [ -f "/.dockerenv" ] || [ -n "$REMOTE_CONTAINERS" ] || [ -n "$CODESPACES" ]; 
     # Export PYTHONPATH for uvicorn's reload subprocess.
     export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}/workspace/backend"
 
-    "$BACKEND_PYTHON" -m uvicorn app.main:app --reload --reload-dir /workspace --reload-include "*.py" --reload-include "config.toml" --host 0.0.0.0 --port 8000 --no-proxy-headers
+    "$BACKEND_PYTHON" /workspace/scripts/run-backend-dev.py
 else
     echo "⚠️  Not in a devcontainer. Skipping backend start."
     echo "Please reopen in container: Ctrl+Shift+P → 'Dev Containers: Reopen in Container'"

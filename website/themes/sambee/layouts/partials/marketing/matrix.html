@@ -3,7 +3,7 @@
 {{ if and $section $section.enabled }}
 {{ $sambeeCol := $section.columns.sambee | default "Sambee" }}
 {{ $competitorCol := $section.columns.competitor | default "Competitor" }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-anchor-target">
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell marketing-band marketing-anchor-target">
   <div class="marketing-frame">
     <div class="marketing-section-header">
       {{ with $section.eyebrow }}

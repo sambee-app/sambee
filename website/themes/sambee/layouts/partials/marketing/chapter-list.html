@@ -1,7 +1,7 @@
 {{/* Purpose: Renders the open 2x2 top-ruled architectural pillars grid. */}}
 {{ $section := .section }}
 {{ if and $section $section.enabled }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--low{{ if $section.id }} marketing-anchor-target{{ end }}">
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell marketing-band marketing-band--low{{ if $section.id }} marketing-anchor-target{{ end }}">
   <div class="marketing-frame">
     {{ if $section.title }}
     <div class="marketing-section-header">
