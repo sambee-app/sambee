@@ -65,6 +65,8 @@ These assets shape the visible docs experience once the route and content have b
 
 - `website/themes/sambee/assets/css/`: shared theme CSS, including docs UI and typography
 
+The root document reserves vertical scrollbar space with `scrollbar-gutter: stable` in `base.css`. This keeps centered docs columns at the same width and horizontal position on short and long pages at the same viewport size.
+
 ## Requested Route Versus Effective Page
 
 The docs runtime keeps requested-path context separate from effective-content resolution.
