@@ -138,33 +138,6 @@ UI Screenshot
   @apply bg-clr-surface-low p-5 dark:bg-clr-darkmode-surface-low md:px-16 md:py-8;
 }
 
-.home-device-preview-image {
-  --home-device-preview-shadow-primary: rgb(0 0 0 / 0.14);
-  --home-device-preview-shadow-secondary: rgb(0 0 0 / 0.08);
-  filter: drop-shadow(0 8px 12px var(--home-device-preview-shadow-primary)) drop-shadow(0 3px 4px var(--home-device-preview-shadow-secondary));
-}
-
-.dark .home-device-preview-image {
-  --home-device-preview-shadow-primary: rgb(0 0 0 / 0.28);
-  --home-device-preview-shadow-secondary: rgb(0 0 0 / 0.18);
-}
-
-.home-ui-screenshot-image {
-  @apply block w-full max-w-full;
-}
-
-.home-ui-screenshot--theme-aware .home-ui-screenshot-image--dark {
-  display: none;
-}
-
-.dark .home-ui-screenshot--theme-aware .home-ui-screenshot-image--light {
-  display: none;
-}
-
-.dark .home-ui-screenshot--theme-aware .home-ui-screenshot-image--dark {
-  display: block;
-}
-
 /*
 ==============================
 Benefits
