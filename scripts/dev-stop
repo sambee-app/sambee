@@ -3,9 +3,10 @@
 echo "🛑 Stopping Sambee development servers..."
 
 # Stop backend
-if pgrep -f "uvicorn.*app.main:app" > /dev/null; then
+mapfile -t BACKEND_PIDS < <(pgrep -f "uvicorn.*app.main:app|/workspace/scripts/run-backend-dev.py")
+if [ "${#BACKEND_PIDS[@]}" -gt 0 ]; then
     echo "Stopping backend server..."
-    pkill -f "uvicorn.*app.main:app"
+    kill -TERM "${BACKEND_PIDS[@]}"
     echo "✅ Backend stopped"
 else
     echo "⚠️  Backend server is not running"

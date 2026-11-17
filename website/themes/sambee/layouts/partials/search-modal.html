@@ -207,7 +207,9 @@
       await pagefind.init();
       return pagefind;
     } catch (e) {
-      emptyState.innerHTML = '<p style="color: #666;">Search index not found.<br><small>Start the site with <code>./scripts/start-website</code> or run <code>npm run build:search</code>.</small></p>';
+      pagefind = null;
+      console.error('Could not load the search index. Rebuild the index and reload this page.', e);
+      showEmptyState('<p>Search is unavailable.<br><small>For local search, run <code>npm run dev:with-search</code> or <code>npm run dev:search</code> from the website directory, then reload this page. For deployment, run <code>npm run build:search</code>.</small></p>');
       return null;
     }
   }

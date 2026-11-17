@@ -275,7 +275,7 @@ class FilestashAlternativeBuildTests(unittest.TestCase):
         self.assertIn("marketing-band", self.page_html)
         self.assertIn("marketing-frame", self.page_html)
         self.assertEqual(self.inspector.body_images, [])
-        self.assertNotIn("ledger-shell", self.page_html)
+        self.assertIn("ledger-shell", self.page_html)
         self.assertNotRegex(
             self.page_html,
             r'class="marketing-matrix-text[^"]*"[^>]*>[\s\S]*?<ul>',

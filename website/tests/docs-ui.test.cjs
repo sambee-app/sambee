@@ -39,6 +39,31 @@ test('search breadcrumbs include the book for stable, versioned, and full URLs',
   assert.equal(context.getSearchResultPath('http://['), '');
 });
 
+test('unavailable search gives local recovery steps and can retry initialization', async () => {
+  const messages = [];
+  const errors = [];
+  let attempts = 0;
+  const index = { init: async () => { if (++attempts === 1) throw new Error('incomplete index'); } };
+  const context = {
+    pagefind: null,
+    loadIndex: async () => index,
+    showEmptyState: message => messages.push(message),
+    console: { error: (...args) => errors.push(args) },
+  };
+  vm.createContext(context);
+  const source = template.slice(template.indexOf('  async function loadPagefind()'), template.indexOf('  // Perform search'))
+    .replace("import('/pagefind/pagefind.js')", 'loadIndex()');
+  vm.runInContext(source, context);
+
+  assert.equal(await context.loadPagefind(), null);
+  assert.equal(context.pagefind, null);
+  assert.match(messages[0], /npm run dev:with-search/);
+  assert.match(messages[0], /npm run dev:search/);
+  assert.equal(errors.length, 1);
+  assert.equal(await context.loadPagefind(), index);
+  assert.equal(attempts, 2);
+});
+
 test('version menus focus the current option, navigate, and restore focus', () => {
   const context = {
     DOCS_VERSION_DROPDOWN_SELECTOR: '.docs-sidebar-version-control',

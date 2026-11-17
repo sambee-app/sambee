@@ -1,7 +1,7 @@
 {{/* Purpose: Renders two freestanding qualification cards separated by open canvas whitespace. */}}
 {{ $section := .section }}
 {{ if and $section $section.enabled }}
-<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--low marketing-anchor-target">
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="shell-section ledger-shell marketing-band marketing-band--low marketing-anchor-target">
   <div class="marketing-frame">
     <div class="marketing-section-header">
       {{ with $section.eyebrow }}

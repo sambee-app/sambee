@@ -1,0 +1,81 @@
+{{/* Purpose: Build shared navigation data without page-specific active state or view IDs. */}}
+{{ $version := .version }}
+{{ $preferStable := .preferStable }}
+{{ $navData := index (index hugo.Data "docs-nav") $version }}
+{{ $docsVersions := (index hugo.Data "docs-versions").versions | default slice }}
+{{ $versionLabel := $version }}
+{{ $books := slice }}
+{{ $items := slice }}
+{{ $indices := dict }}
+
+{{ with index (where $docsVersions "slug" $version) 0 }}
+  {{ $versionLabel = .label | default $version }}
+{{ end }}
+
+{{ with $navData }}
+  {{ range $bookSlug := .books }}
+    {{ $bookPage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "preferStable" false)) }}
+    {{ $bookURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "preferStable" $preferStable) }}
+    {{ $bookTitle := humanize $bookSlug }}
+    {{ $hasBookPage := false }}
+    {{ with $bookPage }}
+      {{ $hasBookPage = true }}
+      {{ $effective := partialCached "docs/effective-page.html" . .RelPermalink }}
+      {{ $bookTitle = $effective.page.Title }}
+      {{ $items = $items | append (dict
+        "key" (printf "%s|book|%s||" $version $bookSlug)
+        "kind" "book" "title" $bookTitle "context" (printf "Sambee %s" $versionLabel) "url" $bookURL
+      ) }}
+    {{ end }}
+    {{ $sections := slice }}
+    {{ $sectionEntries := slice }}
+    {{ with index $navData.sections $bookSlug }}
+      {{ $sectionEntries = .items | default slice }}
+    {{ end }}
+    {{ range $sectionEntries }}
+      {{ $sectionSlug := .slug }}
+      {{ $sectionTitle := .title | default (humanize $sectionSlug) }}
+      {{ $sectionPage := site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" false)) }}
+      {{ $sectionURL := partial "docs/page-url.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "preferStable" $preferStable) }}
+      {{ $hasSectionPage := false }}
+      {{ with $sectionPage }}
+        {{ $hasSectionPage = true }}
+        {{ $items = $items | append (dict
+          "key" (printf "%s|section|%s|%s|" $version $bookSlug $sectionSlug)
+          "kind" "section" "title" $sectionTitle "context" $bookTitle "url" $sectionURL
+        ) }}
+      {{ end }}
+      {{ $pages := slice }}
+      {{ $pageSlugs := slice }}
+      {{ with index $navData.pages $bookSlug }}
+        {{ with index . $sectionSlug }}
+          {{ $pageSlugs = .items | default slice }}
+        {{ end }}
+      {{ end }}
+      {{ range $pageSlug := $pageSlugs }}
+        {{ with site.GetPage (partial "docs/page-path.html" (dict "version" $version "book" $bookSlug "section" $sectionSlug "page" $pageSlug "preferStable" false)) }}
+          {{ $effective := partialCached "docs/effective-page.html" . .RelPermalink }}
+          {{ $item := dict
+            "key" (printf "%s|page|%s|%s|%s" $version $bookSlug $sectionSlug $pageSlug)
+            "slug" $pageSlug "kind" "page" "title" $effective.page.Title "context" $sectionTitle
+            "url" (partial "docs/page-url.html" (dict "pageObject" . "preferStable" $preferStable))
+          }}
+          {{ $pages = $pages | append $item }}
+          {{ $items = $items | append $item }}
+        {{ end }}
+      {{ end }}
+      {{ $sections = $sections | append (dict
+        "slug" $sectionSlug "title" $sectionTitle "url" $sectionURL
+        "hasPage" $hasSectionPage "pages" $pages
+      ) }}
+    {{ end }}
+    {{ $books = $books | append (dict
+      "slug" $bookSlug "title" $bookTitle "url" $bookURL
+      "hasPage" $hasBookPage "sections" $sections
+    ) }}
+  {{ end }}
+{{ end }}
+{{ range $index, $item := $items }}
+  {{ $indices = merge $indices (dict $item.key $index) }}
+{{ end }}
+{{ return (dict "books" $books "items" $items "indices" $indices) }}

@@ -13,8 +13,9 @@ log "   User: $(whoami)"
 log "="
 
 # Check if backend is already running
-if pgrep -f "uvicorn.*app.main:app" > /dev/null; then
-    BACKEND_PID=$(pgrep -f "uvicorn.*app.main:app")
+BACKEND_PATTERN="uvicorn.*app.main:app|/workspace/scripts/run-backend-dev.py"
+if pgrep -f "$BACKEND_PATTERN" > /dev/null; then
+    BACKEND_PID=$(pgrep -f "$BACKEND_PATTERN")
     log "⚠️  Backend server is already running (PID: $BACKEND_PID)"
 else
     log "Starting backend server..."
@@ -24,14 +25,15 @@ else
         log "Backend dependencies not found. Installing..."
         /workspace/scripts/setup-backend-venv
     fi
-    nohup "$BACKEND_PYTHON" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers > /tmp/backend.log 2>&1 &
+    export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}/workspace/backend"
+    nohup "$BACKEND_PYTHON" /workspace/scripts/run-backend-dev.py > /tmp/backend.log 2>&1 &
     BACKEND_PID=$!
     log "   Backend process started (PID: $BACKEND_PID)"
 
     # Wait for backend to actually start (max 10 seconds)
     for i in {1..20}; do
-        if pgrep -f "uvicorn.*app.main:app" > /dev/null; then
-            ACTUAL_PID=$(pgrep -f "uvicorn.*app.main:app")
+        if pgrep -f "$BACKEND_PATTERN" > /dev/null; then
+            ACTUAL_PID=$(pgrep -f "$BACKEND_PATTERN")
             log "✅ Backend started successfully (PID: $ACTUAL_PID)"
             break
         fi

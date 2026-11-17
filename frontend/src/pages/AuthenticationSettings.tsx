@@ -1083,7 +1083,7 @@ export function AuthenticationSettings() {
                     activeElement instanceof HTMLTextAreaElement ||
                     activeElement instanceof HTMLButtonElement ||
                     activeElement?.getAttribute("role") === "combobox";
-                  if (!testedIdentity && !testError && !userIsAlreadyInteracting) providerNameInputRef.current?.focus();
+                  if (!busy && !testedIdentity && !testError && !userIsAlreadyInteracting) providerNameInputRef.current?.focus();
                 }}
                 actions={
                   <Box sx={adminDialogEndActionRowSx}>
