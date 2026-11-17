@@ -6,25 +6,16 @@
 {{ $darkPreviewSrc := index $previewImage "dark_src" | default "" }}
 {{ $previewAlt := index $previewImage "alt" | default "Screenshot of the Sambee main web interface" }}
 {{ if $previewSrc }}
-<section class="shell-section ledger-shell home-section home-ui-screenshot{{ if $darkPreviewSrc }} home-ui-screenshot--theme-aware{{ end }}" aria-label="Sambee interface preview">
-  <div class="home-ui-screenshot-frame">
-    {{ partial "components/responsive-image.html" (dict
-      "Src" $previewSrc
-      "Alt" $previewAlt
-      "Class" "home-device-preview-image home-ui-screenshot-image home-ui-screenshot-image--light"
-      "Loading" "lazy"
-      "Sizes" "100vw"
-    ) }}
-    {{ with $darkPreviewSrc }}
-      {{ partial "components/responsive-image.html" (dict
-        "Src" .
-        "Alt" $previewAlt
-        "Class" "home-device-preview-image home-ui-screenshot-image home-ui-screenshot-image--dark"
-        "Loading" "lazy"
-        "Sizes" "100vw"
-      ) }}
-    {{ end }}
-  </div>
+<section class="shell-section ledger-shell home-section home-ui-screenshot" aria-label="Sambee interface preview">
+  {{ partial "components/theme-aware-image.html" (dict
+    "Src" $previewSrc
+    "DarkSrc" $darkPreviewSrc
+    "Alt" $previewAlt
+    "WrapperClass" "home-ui-screenshot-frame"
+    "Class" "home-ui-screenshot-image"
+    "Loading" "lazy"
+    "Sizes" "100vw"
+  ) }}
 </section>
 {{ end }}
 {{ end }}

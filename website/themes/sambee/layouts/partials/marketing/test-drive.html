@@ -1,0 +1,47 @@
+{{/* Purpose: Renders the balanced 7:5 zero-migration test-drive split with highlighted Docker Compose configuration. */}}
+{{ $section := .section }}
+{{ if and $section $section.enabled }}
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--low marketing-anchor-target">
+  <div class="marketing-frame marketing-test-drive-grid">
+    <div class="marketing-test-drive-copy">
+      {{ with $section.eyebrow }}
+      <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
+      {{ end }}
+      <h2 class="marketing-test-drive-title type-title-xl type-color-ink">{{ $section.title }}</h2>
+      {{ with $section.body }}
+      <p class="marketing-test-drive-lead marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+      {{ end }}
+      {{ with $section.assurances }}
+      <ul class="marketing-list marketing-test-drive-list">
+        {{ range . }}
+        <li class="ui-list-dot-item ui-color-primary type-copy"><span class="marketing-prose type-color-ink">{{ . | markdownify }}</span></li>
+        {{ end }}
+      </ul>
+      {{ end }}
+      {{ with $section.ctas }}
+      <div class="marketing-actions">
+        {{ range $cta := . }}
+        {{ $ctaClass := partial "components/button-kind-class.html" (dict "kind" $cta.kind) }}
+        {{ $ctaHref := partial "components/link-href.html" (dict "link" $cta) }}
+        {{ $isExternal := or (hasPrefix $ctaHref "http://") (hasPrefix $ctaHref "https://") }}
+        {{ if $ctaHref }}
+        <a class="btn marketing-cta {{ $ctaClass }}" href="{{ $ctaHref }}"{{ if $isExternal }} target="_blank" rel="noopener"{{ end }}{{ with $cta.id }} data-marketing-link="{{ . }}"{{ end }}>{{ $cta.label }}</a>
+        {{ end }}
+        {{ end }}
+      </div>
+      {{ end }}
+    </div>
+
+    {{ with $section.code }}
+    <div class="marketing-code-panel">
+      <div class="marketing-code-header">
+        <span class="marketing-code-filename type-label-sm type-color-ink">{{ $section.code_filename | default "docker-compose.yml" }}</span>
+      </div>
+      <div class="content marketing-code-surface">
+        {{ transform.Highlight (strings.TrimSpace .) ($section.code_lang | default "yaml") }}
+      </div>
+    </div>
+    {{ end }}
+  </div>
+</section>
+{{ end }}

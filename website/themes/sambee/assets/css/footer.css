@@ -24,6 +24,14 @@
 	@apply h-5 w-5;
 }
 
+.site-footer-nav-group {
+	@apply flex flex-col items-center gap-x-4 gap-y-2.5 md:flex-row md:flex-wrap md:justify-end;
+}
+
+.site-footer-compare {
+	@apply flex flex-wrap justify-center gap-x-4 gap-y-2 md:justify-end md:border-r md:border-clr-rule-soft md:pr-4 dark:md:border-clr-darkmode-rule-soft;
+}
+
 .site-footer-legal {
 	@apply flex flex-wrap justify-center gap-x-5 gap-y-2 md:justify-end;
 }

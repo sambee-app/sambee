@@ -1,0 +1,44 @@
+{{/* Purpose: Renders the open 2x2 top-ruled architectural pillars grid. */}}
+{{ $section := .section }}
+{{ if and $section $section.enabled }}
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--low{{ if $section.id }} marketing-anchor-target{{ end }}">
+  <div class="marketing-frame">
+    {{ if $section.title }}
+    <div class="marketing-section-header">
+      {{ with $section.eyebrow }}
+      <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
+      {{ end }}
+      <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
+      {{ with $section.intro }}
+      <p class="marketing-section-intro marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+      {{ end }}
+    </div>
+    {{ else }}
+    {{ with $section.sr_title }}
+    <h2 class="visually-hidden">{{ . }}</h2>
+    {{ end }}
+    {{ end }}
+
+    <div class="marketing-pillars-grid">
+      {{ range $chapter := $section.chapters }}
+      <article class="marketing-pillar">
+        {{ with (or $chapter.eyebrow $chapter.index) }}
+        <span class="type-label-eyebrow-strong type-color-accent eyebrow-stack">{{ . }}</span>
+        {{ end }}
+        <h3 class="marketing-pillar-title type-title-md-tight type-color-ink">{{ $chapter.title }}</h3>
+        {{ with $chapter.lead }}
+        <p class="marketing-pillar-lead marketing-prose type-copy type-color-muted">{{ . | markdownify }}</p>
+        {{ end }}
+        {{ with $chapter.points }}
+        <ul class="marketing-list marketing-pillar-points">
+          {{ range . }}
+          <li class="ui-list-dot-item ui-color-primary type-copy"><span class="marketing-prose type-color-ink">{{ . | markdownify }}</span></li>
+          {{ end }}
+        </ul>
+        {{ end }}
+      </article>
+      {{ end }}
+    </div>
+  </div>
+</section>
+{{ end }}

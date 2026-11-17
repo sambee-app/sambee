@@ -1,0 +1,28 @@
+{{/* Purpose: Renders the narrow-measure centered technical FAQ using native <details> and <summary> elements. */}}
+{{ $section := .section }}
+{{ if and $section $section.enabled }}
+<section{{ with $section.id }} id="{{ . }}"{{ end }} class="marketing-band marketing-band--last marketing-anchor-target">
+  <div class="marketing-frame marketing-frame--narrow">
+    <div class="marketing-section-header marketing-section-header--faq">
+      {{ with $section.eyebrow }}
+      <span class="type-label-eyebrow type-color-accent eyebrow-stack">{{ . }}</span>
+      {{ end }}
+      <h2 class="marketing-section-title type-section-title type-color-ink">{{ $section.title }}</h2>
+    </div>
+
+    <div class="marketing-faq-list">
+      {{ range $item := $section.items }}
+      <details class="marketing-faq-item">
+        <summary class="marketing-faq-summary type-title-md-tight type-color-ink ui-transition-color type-hover-accent">
+          <span class="marketing-faq-question">{{ $item.question }}</span>
+          <span class="marketing-faq-indicator" aria-hidden="true"></span>
+        </summary>
+        <div class="marketing-faq-answer">
+          <div class="marketing-faq-answer-inner marketing-prose type-copy type-color-muted">{{ $item.answer | markdownify }}</div>
+        </div>
+      </details>
+      {{ end }}
+    </div>
+  </div>
+</section>
+{{ end }}

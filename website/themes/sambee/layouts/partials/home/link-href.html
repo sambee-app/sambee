@@ -1,22 +1,2 @@
-{{/* Purpose: Resolve homepage links from structured docs targets, anchors, or direct href values. */}}
-{{- $link := .link | default . -}}
-{{- $href := $link.href | default "" -}}
-{{- if $href -}}
-  {{- $href -}}
-{{- else -}}
-  {{- $target := $link.target | default dict -}}
-  {{- $targetType := index $target "type" | default "" -}}
-  {{- if eq $targetType "anchor" -}}
-    {{- with index $target "id" -}}#{{ . }}{{- end -}}
-  {{- else if eq $targetType "docs" -}}
-    {{- $version := index $target "version" | default ((index hugo.Data "docs-versions").current | default "") -}}
-    {{- partial "docs/page-url.html" (dict
-      "version" $version
-      "book" (index $target "book" | default "")
-      "section" (index $target "section" | default "")
-      "page" (index $target "page" | default "")
-    ) -}}
-  {{- else if eq $targetType "url" -}}
-    {{- index $target "value" | default "" -}}
-  {{- end -}}
-{{- end -}}
+{{/* Purpose: Delegate homepage link resolution to the shared component link helper. */}}
+{{- partial "components/link-href.html" . -}}
