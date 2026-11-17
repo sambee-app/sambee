@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from uvicorn import Config
+from watchfiles import Change
 
 SCRIPT = Path(__file__).parents[2] / "scripts/run-backend-dev.py"
 SPEC = spec_from_file_location("run_backend_dev", SCRIPT)
@@ -18,7 +19,9 @@ SPEC.loader.exec_module(MODULE)
 CHANGE_TIMEOUT = 5
 
 
-def test_scoped_reload_keeps_python_and_atomic_config_updates(tmp_path: Path) -> None:
+@pytest.mark.parametrize("force_polling", ["false", "true"], ids=["native", "polling"])
+def test_scoped_reload_keeps_python_and_atomic_config_updates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, force_polling: str) -> None:
+    monkeypatch.setenv("WATCHFILES_FORCE_POLLING", force_polling)
     app = tmp_path / "backend/app"
     app.mkdir(parents=True)
     config_path = tmp_path / "config.toml"
@@ -64,6 +67,31 @@ def test_scoped_reload_keeps_python_and_atomic_config_updates(tmp_path: Path) ->
         expect_change(config_path)
         config_path.write_text("recreated")
         expect_change(config_path)
+        assert not reloader.failed
+    finally:
+        reloader.should_exit.set()
+        reloader.watcher.close()
+
+
+def test_new_directory_event_finds_sources_without_file_events(tmp_path: Path) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+    config = Config("app.main:app", reload=True, reload_dirs=[str(app)], reload_delay=0)
+    reloader = MODULE.BackendReload(config, lambda sockets: None, [], tmp_path / "config.toml")
+    nested = app / "nested"
+    package = nested / "package"
+    package.mkdir(parents=True)
+    source = package / "module.py"
+    source.write_text("VALUE = 1")
+    (package / "notes.txt").write_text("not Python")
+    cache = nested / "__pycache__"
+    cache.mkdir()
+    (cache / "ignored.py").write_text("ignored")
+    reloader.watcher.close()
+    reloader.watcher = (changes for changes in [{(Change.added, str(nested))}])
+
+    try:
+        assert reloader.should_restart() == [source]
         assert not reloader.failed
     finally:
         reloader.should_exit.set()

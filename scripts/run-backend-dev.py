@@ -10,7 +10,7 @@ from socket import socket
 
 from uvicorn import Config, Server
 from uvicorn.supervisors.basereload import BaseReload
-from watchfiles import PythonFilter, watch
+from watchfiles import Change, DefaultFilter, PythonFilter, watch
 
 ROOT = Path(__file__).resolve().parent.parent
 APP_DIRECTORY = ROOT / "backend" / "app"
@@ -34,9 +34,11 @@ class BackendReload(BaseReload):
         self.config_path = config_path
         self.config_signature = self.read_config_signature()
         self.failed = False
+        self.directory_filter = DefaultFilter()
+        self.python_filter = PythonFilter()
         self.watcher = watch(
             *config.reload_dirs,
-            watch_filter=PythonFilter(),
+            watch_filter=self.directory_filter,
             stop_event=self.should_exit,
             yield_on_timeout=True,
             rust_timeout=WATCH_TIMEOUT_MS,
@@ -50,10 +52,32 @@ class BackendReload(BaseReload):
             return None
         return stat.st_ino, stat.st_mtime_ns, stat.st_size
 
+    def read_directory_sources(self, directory: Path) -> set[Path]:
+        """Find sources created before native watches attach to a new directory."""
+        try:
+            entries = os.scandir(directory)
+        except (FileNotFoundError, NotADirectoryError):
+            return set()
+        paths: set[Path] = set()
+        with entries:
+            for entry in entries:
+                if not self.directory_filter(Change.added, entry.path):
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    paths.update(self.read_directory_sources(Path(entry.path)))
+                elif self.python_filter(Change.added, entry.path):
+                    paths.add(Path(entry.path))
+        return paths
+
     def should_restart(self) -> list[Path] | None:
         self.pause()
         try:
-            paths = {Path(path) for _, path in next(self.watcher)}
+            paths: set[Path] = set()
+            for change, path in next(self.watcher):
+                if change == Change.added and Path(path).is_dir():
+                    paths.update(self.read_directory_sources(Path(path)))
+                elif self.python_filter(change, path):
+                    paths.add(Path(path))
             signature = self.read_config_signature()
         except OSError:
             logger.exception("Backend reload monitoring failed. Correct file access and restart the backend dev task.")
