@@ -23,7 +23,7 @@ Shell, Open Bands & Frames
 }
 
 .marketing-band {
-  @apply border-b border-clr-rule-soft bg-clr-surface-page py-14 dark:border-clr-darkmode-rule-soft dark:bg-clr-darkmode-surface-page md:py-20 lg:py-24;
+  @apply border-b border-clr-rule-soft py-14 dark:border-clr-darkmode-rule-soft md:py-20 lg:py-24;
 }
 
 .marketing-band--low {
@@ -39,11 +39,11 @@ Shell, Open Bands & Frames
 }
 
 .marketing-frame {
-  @apply mx-auto w-full max-w-[1080px] px-6 md:px-10;
+  @apply w-full px-6 md:px-10 lg:px-14;
 }
 
 .marketing-frame--narrow {
-  @apply max-w-[48rem];
+  @apply mx-auto max-w-[52rem];
 }
 
 /*

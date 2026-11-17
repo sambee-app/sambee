@@ -1,7 +1,7 @@
 {{/* Purpose: Renders the minimal borderless sticky section wayfinding bar beneath the global header. */}}
 {{ $subnav := .subnav }}
 {{ if and $subnav $subnav.enabled }}
-<nav class="marketing-subnav" aria-label="{{ $subnav.aria_label | default "Page sections" }}">
+<nav class="shell-section ledger-shell marketing-subnav" aria-label="{{ $subnav.aria_label | default "Page sections" }}">
   <div class="marketing-frame marketing-subnav-inner">
     <ul class="marketing-subnav-list">
       {{ range $item := $subnav.items }}
