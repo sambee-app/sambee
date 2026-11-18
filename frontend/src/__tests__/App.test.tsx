@@ -43,17 +43,22 @@ vi.mock("../services/authSession", async (importOriginal) => {
       bootstrap: vi.fn().mockResolvedValue("idle"),
       subscribeToBootstrap: vi.fn(() => () => undefined),
       getAccessToken: () => null,
+      getState: vi.fn<typeof actual.authSession.getState>(() => "idle"),
       getIdentity: () => ({ epoch: 0, userId: null }),
       getUserId: () => null,
       hasUsableAccessToken: () => false,
+      subscribeToClear: vi.fn(() => () => undefined),
       subscribeToIdentity: vi.fn(() => () => undefined),
       requestRefresh: vi.fn().mockRejectedValue(new Error("No renewable session")),
       refreshIfNeeded: vi.fn().mockResolvedValue(undefined),
       setAuthenticated: vi.fn(),
       setReauthenticationHandler: vi.fn(),
+      beginNewLogin: vi.fn(),
+      completeLoginBootstrap: vi.fn(),
+      notifyNewLogin: vi.fn(),
       clear: vi.fn(),
       logout: vi.fn().mockResolvedValue(undefined),
-    },
+    } satisfies Pick<typeof actual.authSession, keyof typeof actual.authSession>,
   };
 });
 
