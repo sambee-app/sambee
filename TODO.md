@@ -1,25 +1,5 @@
 # TODO
 
-## Tab support inside panes
-
-- Goal: we want to support tabs in Sambee's panes.
-- Current state:
-   - Each pane has one tab. The tab's location is shown via a breadcrumb at the top of the pane.
-- Target state:
-   - Each pane can have 1...n tabs.
-   - In place of the current breadcrumbs, we place a tab bar.
-   - The breadcrumbs move down a bit, into the tab's area.
-   - Keyboard shortcuts:
-      - Alt+PLUS: create a new tab to the right of the current tab. Initial location of the new tab: same location as the current tab. the new tab gets the focus.
-      - Alt+MINUS: close the current tab, move the focus to the tab on the left. The last tab in a pane cannot be closed.
-   - Tab create/close with the mouse:
-      - Each tab gets an X on the right that is shown only on mouse hover.
-         - Open question: how to close a tab on touch devices?
-      - To the right of the rightmost tab (but always visible): a PLUS icon to create a new tab with the mouse.
-         - Open question: how to create a tab on touch devices?
-   - Tab navigation:
-      - Arrow left/right navigate to the next tab on the left or right, respectively.
-
 ## Viewers
 
 - Delete: add a delete function to all viewers.
