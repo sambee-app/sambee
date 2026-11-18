@@ -1,7 +1,7 @@
 import { isLocalDrive } from "../../services/backendRouter";
 import type { Connection } from "../../types";
 
-export function getConnectionById(connections: Connection[], connectionId: string): Connection | undefined {
+export function getConnectionById(connections: readonly Connection[], connectionId: string): Connection | undefined {
   return connections.find((connection) => connection.id === connectionId);
 }
 

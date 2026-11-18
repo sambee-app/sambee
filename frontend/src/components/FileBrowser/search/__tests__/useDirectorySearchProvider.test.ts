@@ -941,6 +941,67 @@ describe("getDirectoryResultPresentation", () => {
     expect(onUpdate.mock.lastCall?.[0][0]).toMatchObject({ icon: "recent-directory" });
   });
 
+  it.each(["connection-1", "local-C"])(
+    "suppresses empty interim updates before both sources settle and reports below-minimum hints for %s",
+    async (connectionId) => {
+      const onUpdate = vi.fn();
+      let finishIndex: ((response: Awaited<ReturnType<typeof api.searchDirectories>>) => void) | undefined;
+      let finishHistory: ((response: Awaited<ReturnType<typeof api.searchRecentDirectories>>) => void) | undefined;
+      vi.mocked(api.searchRecentDirectories)
+        .mockResolvedValueOnce({ result_limit: 10, results: [] })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishHistory = resolve;
+            })
+        );
+      vi.mocked(api.searchDirectories)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishIndex = resolve;
+            })
+        )
+        .mockResolvedValueOnce({ results: [], cache_state: "ready", total_matches: 0, directory_count: 10 });
+
+      const { result } = renderHook(() => useDirectorySearchProvider(connectionId, vi.fn()), { wrapper });
+      expect(result.current.getBelowMinimumMessage?.("")).toBeUndefined();
+      expect(result.current.getBelowMinimumMessage?.("r")).toBe("Type at least 2 characters to search");
+      expect(result.current.getBelowMinimumMessage?.(" / ")).toBe("Type at least 2 characters to search");
+      expect(result.current.getBelowMinimumMessage?.("re")).toBeUndefined();
+
+      let twoCharRequest: ReturnType<typeof result.current.fetchResults> | undefined;
+      await act(async () => {
+        twoCharRequest = result.current.fetchResults("reports", new AbortController().signal, onUpdate);
+        await Promise.resolve();
+      });
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      await act(async () => {
+        finishIndex?.({ results: ["Reports"], cache_state: "ready", total_matches: 1, directory_count: 10 });
+        await twoCharRequest;
+      });
+      expect(onUpdate).toHaveBeenCalledTimes(1);
+      expect(onUpdate).toHaveBeenCalledWith([expect.objectContaining({ value: "directory:Reports" })]);
+
+      onUpdate.mockClear();
+      let oneCharRequest: ReturnType<typeof result.current.fetchResults> | undefined;
+      await act(async () => {
+        oneCharRequest = result.current.fetchResults("r", new AbortController().signal, onUpdate);
+        await Promise.resolve();
+      });
+      // Status-only index poll for a 1-character query must not emit an empty update before history resolves.
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      await act(async () => {
+        finishHistory?.({ result_limit: 10, results: [] });
+        await oneCharRequest;
+      });
+      expect(onUpdate).toHaveBeenCalledTimes(1);
+      expect(onUpdate).toHaveBeenCalledWith([]);
+    }
+  );
+
   it("keeps history when index search fails and stops the status spinner", async () => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({
       result_limit: 10,

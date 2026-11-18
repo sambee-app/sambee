@@ -31,6 +31,7 @@ function isRecoveryPaneSnapshot(value: unknown): value is FileBrowserPaneRecover
 
   const snapshot = value as Partial<FileBrowserPaneRecoverySnapshot>;
   return (
+    (snapshot.tabId === undefined || (typeof snapshot.tabId === "string" && snapshot.tabId.length > 0)) &&
     typeof snapshot.connectionId === "string" &&
     typeof snapshot.path === "string" &&
     Array.isArray(snapshot.items) &&

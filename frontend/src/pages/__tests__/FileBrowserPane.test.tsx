@@ -81,10 +81,6 @@ vi.mock("../../components/FileBrowser/ViewModeSelector", () => ({
   ViewModeSelector: () => <div data-testid="view-mode-selector" />,
 }));
 
-vi.mock("../../components/FileBrowser/UnifiedSearchBar", () => ({
-  UnifiedSearchBar: () => <div data-testid="search-bar" />,
-}));
-
 vi.mock("../../components/FileBrowser/ConfirmDeleteDialog", () => ({
   __esModule: true,
   default: () => <div data-testid="delete-dialog" />,
@@ -141,6 +137,28 @@ const testFiles: FileEntry[] = [
  */
 function createMockPane(overrides: Partial<UseFileBrowserPaneReturn> = {}): UseFileBrowserPaneReturn {
   return {
+    // Pane tabs
+    tabs: [
+      {
+        id: "tab-1",
+        connectionId: TEST_CONNECTION_ID,
+        currentPath: "some/path",
+        archiveLocation: null,
+        sortBy: "name",
+        sortDirection: "asc",
+      },
+    ],
+    selectedTabId: "tab-1",
+    selectedTabIdRef: { current: "tab-1" },
+    tabRevealToken: 0,
+    createTab: vi.fn().mockReturnValue("tab-2"),
+    selectTab: vi.fn().mockReturnValue(true),
+    selectAdjacentTab: vi.fn().mockReturnValue("tab-1"),
+    closeTab: vi.fn().mockReturnValue({ closed: false }),
+    restoreClosedTab: vi.fn().mockReturnValue("tab-1"),
+    hydrateTabs: vi.fn(),
+    requestListFocus: vi.fn(),
+
     // Core state
     connectionId: TEST_CONNECTION_ID,
     setConnectionId: vi.fn(),
@@ -229,6 +247,7 @@ function createMockPane(overrides: Partial<UseFileBrowserPaneReturn> = {}): UseF
     filesRef: { current: testFiles },
     connectionIdRef: { current: TEST_CONNECTION_ID },
     currentPathRef: { current: "some/path" },
+    archiveLocationRef: { current: null },
 
     // Virtualizer (minimal mock)
     rowVirtualizer: {
@@ -307,7 +326,6 @@ function defaultProps(overrides: Partial<FileBrowserPaneProps> = {}): FileBrowse
     useCompactLayout: false,
     isUsingKeyboard: false,
     onPaneFocus: vi.fn(),
-    searchProvider: createMockPane().directorySearchProvider,
     ...overrides,
   };
 }
@@ -455,11 +473,6 @@ describe("FileBrowserPane", () => {
       expect(screen.queryByTestId("status-bar")).not.toBeInTheDocument();
     });
 
-    it("does not render search bar in desktop mode", () => {
-      render(<FileBrowserPane {...defaultProps()} />);
-      expect(screen.queryByTestId("search-bar")).not.toBeInTheDocument();
-    });
-
     it("shows a read-only chip for read-only connections", () => {
       const pane = createMockPane({ connectionId: "conn-2" });
       const connections = [testConnections[0], createMockConnection({ id: "conn-2", name: "Backup Server", access_mode: "read_only" })];
@@ -487,14 +500,13 @@ describe("FileBrowserPane", () => {
   // --------------------------------------------------------------------------
 
   describe("compact layout", () => {
-    it("renders search bar", () => {
+    it("renders folder tab bar directly above breadcrumbs without an inline search strip", () => {
       render(<FileBrowserPane {...defaultProps({ useCompactLayout: true })} />);
-      expect(screen.getByTestId("search-bar")).toBeInTheDocument();
-    });
+      const tabBar = screen.getByTestId("pane-tab-bar-left");
+      const breadcrumbs = screen.getByTestId("breadcrumbs");
 
-    it("does not render breadcrumbs", () => {
-      render(<FileBrowserPane {...defaultProps({ useCompactLayout: true })} />);
-      expect(screen.queryByTestId("breadcrumbs")).not.toBeInTheDocument();
+      expect(tabBar.compareDocumentPosition(breadcrumbs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.queryByPlaceholderText("Navigate to any directory")).not.toBeInTheDocument();
     });
 
     it("does not render view/sort controls", () => {

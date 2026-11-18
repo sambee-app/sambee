@@ -3,9 +3,9 @@
 //
 
 import { Breadcrumbs, Link, Typography } from "@mui/material";
+import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { createEscapeHandler } from "../../utils/keyboardUtils";
 import { truncateTextByGrapheme } from "../../utils/pathDisplay";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -31,10 +31,8 @@ interface BreadcrumbsNavigationProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   connectionName: string;
-  /** Called when ESC is pressed on a breadcrumb link */
-  onEscape?: () => void;
-  /** When true, render tab-index as -1 so breadcrumb links are skipped */
-  disableTabFocus?: boolean;
+  /** Restores keyboard focus to the owning file list if pointer/assistive activation focused a breadcrumb button. */
+  onRestoreListFocus?: () => void;
   /** When true, show status-bar background behind the breadcrumb text (active pane in dual mode) */
   showActiveIndicator?: boolean;
 }
@@ -279,14 +277,21 @@ export function BreadcrumbsNavigation({
   currentPath,
   onNavigate,
   connectionName,
-  onEscape,
-  disableTabFocus,
+  onRestoreListFocus,
   showActiveIndicator,
 }: BreadcrumbsNavigationProps) {
   const { t } = useTranslation();
   const pathParts = currentPath ? currentPath.split("/").filter(Boolean) : [];
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(800);
+
+  const preventPointerFocus = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
+
+  const handleBreadcrumbFocus = () => {
+    onRestoreListFocus?.();
+  };
 
   // Measure container width using ResizeObserver for responsive breadcrumbs.
   // Guard against zero-width measurements (e.g. JSDOM in tests) to preserve
@@ -322,6 +327,7 @@ export function BreadcrumbsNavigation({
   const handleBreadcrumbClick = (pathIndex: number) => {
     const newPath = pathParts.slice(0, pathIndex + 1).join("/");
     onNavigate(newPath);
+    onRestoreListFocus?.();
   };
 
   //
@@ -329,6 +335,7 @@ export function BreadcrumbsNavigation({
   //
   const handleRootClick = () => {
     onNavigate("");
+    onRestoreListFocus?.();
   };
 
   const activeIndicatorSx = showActiveIndicator
@@ -388,9 +395,10 @@ export function BreadcrumbsNavigation({
         <Link
           component="button"
           variant="caption"
+          onMouseDown={preventPointerFocus}
+          onFocus={handleBreadcrumbFocus}
           onClick={handleRootClick}
-          onKeyDown={createEscapeHandler(onEscape)}
-          tabIndex={disableTabFocus ? -1 : undefined}
+          tabIndex={-1}
           sx={{
             fontWeight: "regular",
             color: (theme) => theme.palette.statusBar?.textSecondary ?? theme.palette.text.secondary,
@@ -445,9 +453,10 @@ export function BreadcrumbsNavigation({
             key={fullPath}
             component="button"
             variant="caption"
+            onMouseDown={preventPointerFocus}
+            onFocus={handleBreadcrumbFocus}
             onClick={() => handleBreadcrumbClick(segment.pathIndex)}
-            onKeyDown={createEscapeHandler(onEscape)}
-            tabIndex={disableTabFocus ? -1 : undefined}
+            tabIndex={-1}
             aria-label={t("fileBrowser.chrome.breadcrumb.navigateTo", { path: segment.fullLabel })}
             title={segment.fullLabel}
             sx={{

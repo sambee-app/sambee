@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { SearchProvider, SearchResult, SearchSelectionBehavior, SearchStatusInfo } from "./types";
+import type { SearchProvider, SearchResult, SearchResultsUpdate, SearchSelectionBehavior, SearchStatusInfo } from "./types";
 
 interface SmartBrowserSearchProviderOptions {
   directoryProvider: SearchProvider;
@@ -69,11 +69,15 @@ export function useSmartBrowserSearchProvider({ directoryProvider, commandsProvi
   );
 
   const fetchResults = useCallback(
-    async (query: string, signal: AbortSignal): Promise<SearchResult[]> => {
+    async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate): Promise<SearchResult[]> => {
       if (query.startsWith(COMMAND_PREFIX)) {
         setIsCommandQuery(true);
         const commandQuery = query.slice(COMMAND_PREFIX.length).trimStart();
-        const commandResults = await commandsProvider.fetchResults(commandQuery, signal);
+        const commandResults = await commandsProvider.fetchResults(
+          commandQuery,
+          signal,
+          onUpdate ? (results) => onUpdate(prefixResults("command", results)) : undefined
+        );
         return prefixResults("command", commandResults);
       }
 
@@ -83,7 +87,11 @@ export function useSmartBrowserSearchProvider({ directoryProvider, commandsProvi
         return [];
       }
 
-      const directoryResults = await directoryProvider.fetchResults(query, signal);
+      const directoryResults = await directoryProvider.fetchResults(
+        query,
+        signal,
+        onUpdate ? (results) => onUpdate(prefixResults("directory", results)) : undefined
+      );
       return prefixResults("directory", directoryResults);
     },
     [commandsProvider, directoryProvider]

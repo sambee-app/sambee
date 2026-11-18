@@ -695,7 +695,17 @@ describe("System Health Monitoring UI and Hook", () => {
         <SambeeThemeProvider>
           <BrowserRouter>
             <MobileToolbar
-              currentDirectoryName="demo"
+              searchProvider={{
+                id: "navigate",
+                sourceKey: "demo",
+                placeholder: "Navigate",
+                minQueryLength: 0,
+                debounceMs: 150,
+                fetchResults: async () => [],
+                onSelect: () => undefined,
+                getStatusInfo: () => null,
+              }}
+              showSearch={false}
               onOpenMenu={() => {
                 if (document.activeElement instanceof HTMLElement) {
                   triggerRef.current = document.activeElement;

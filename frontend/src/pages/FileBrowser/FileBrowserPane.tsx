@@ -17,7 +17,7 @@
 import BlockOutlinedIcon from "@mui/icons-material/BlockOutlined";
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
 import { alpha, Box, Button, CircularProgress, LinearProgress, Typography, useTheme } from "@mui/material";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CompactBadge as Chip } from "../../components/CompactBadge";
 import { BreadcrumbsNavigation } from "../../components/FileBrowser/BreadcrumbsNavigation";
@@ -29,12 +29,17 @@ import ConfirmDeleteDialog from "../../components/FileBrowser/ConfirmDeleteDialo
 import CreateItemDialog from "../../components/FileBrowser/CreateItemDialog";
 import { FileBrowserAlerts } from "../../components/FileBrowser/FileBrowserAlerts";
 import { FileList } from "../../components/FileBrowser/FileList";
+import { PaneTabBar } from "../../components/FileBrowser/PaneTabBar";
 import RenameDialog from "../../components/FileBrowser/RenameDialog";
 import { STATUS_BAR_HEIGHT } from "../../components/FileBrowser/StatusBar";
-import type { SearchProvider } from "../../components/FileBrowser/search";
-import type { UnifiedSearchBarModeOption } from "../../components/FileBrowser/UnifiedSearchBar";
-import { UnifiedSearchBar } from "../../components/FileBrowser/UnifiedSearchBar";
 import { formatNoticeTarget, OperationNotifications } from "../../components/OperationNotifications";
+import { PANE_SHORTCUTS } from "../../config/keyboardShortcuts";
+import {
+  formatShortcut,
+  isEventInKeyboardShortcutScope,
+  KeyboardShortcutScopeContext,
+  matchesKeyboardShortcut,
+} from "../../hooks/useKeyboardShortcuts";
 import { DRAFT_RECOVERY_CHANGED_EVENT, getUnsavedDraftsForConnection } from "../../services/draftRecovery";
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
 import type { Connection, FileEntry } from "../../types";
@@ -42,6 +47,7 @@ import { FileType } from "../../types";
 import { isConnectionReadOnly } from "./access";
 import type { BrowserItem } from "./contentProviders";
 import type { FileOperationAction, FileOperationPolicyContext } from "./fileOperationActions";
+import { getPaneTabLabel } from "./tabSessions";
 import type { PaneId, PaneMode, UseFileBrowserPaneReturn } from "./types";
 
 const NAVIGATION_PROGRESS_DELAY_MS = 200;
@@ -70,6 +76,8 @@ export interface FileBrowserPaneProps {
   useCompactLayout: boolean;
   /** Whether touch-friendly file selection controls are available. */
   useTouchSelectionControls?: boolean;
+  /** Whether touch-sized tab controls and always-visible close overlays are active. */
+  useTouchTabControls?: boolean;
   /** Whether another page-owned surface currently owns interaction. */
   compactActionsDisabled?: boolean;
 
@@ -79,36 +87,22 @@ export interface FileBrowserPaneProps {
   /** Called when the user clicks on this pane to make it active. */
   onPaneFocus: () => void;
 
+  /** Pointer/command callback to select a tab in this pane. */
+  onSelectTab?: (tabId: string) => void;
+  /** Pointer callback to close a tab in this pane. */
+  onCloseTab?: (tabId: string) => void;
+  /** Pointer/keyboard callback to create a new tab in this pane. */
+  onCreateTab?: () => void;
+  /** Keyboard callback to close the selected tab (with last-tab protection announcement). */
+  onCloseSelectedTabFromKeyboard?: () => void;
+  /** Keyboard callback to switch to the preceding or following tab in this pane. */
+  onSelectAdjacentTab?: (direction: "previous" | "next") => void;
+  /** Restores focus to the workspace's active file list if focus strayed onto a non-focusable control. */
+  onRestoreActiveListFocus?: () => void;
+
   /** Remove interactive controls from Tab order (dual-pane mode uses Tab for pane switching). */
   disableTabFocus?: boolean;
 
-  /** Current quick-bar provider for the browser. */
-  searchProvider: SearchProvider;
-
-  /** Increments whenever the quick bar is explicitly reopened. */
-  searchActivationToken?: number;
-
-  /** Increments whenever visible quick-bar results should refresh without reopening. */
-  searchRefreshToken?: number;
-
-  /** Controlled query value for filter mode. */
-  searchQueryValue?: string;
-
-  /** Controlled query change handler for filter mode. */
-  onSearchQueryValueChange?: (value: string) => void;
-
-  /** Disable dropdown behavior for list-backed filter mode. */
-  disableSearchDropdown?: boolean;
-
-  /** Temporarily suppress the quick-bar dropdown while a higher-priority dialog is open. */
-  suppressSearchDropdown?: boolean;
-
-  /** Move focus from the search input into the file list. */
-  onSearchArrowDownToFileList?: () => void;
-  /** Explicit quick-bar mode options shown in the search bar. */
-  modeOptions?: UnifiedSearchBarModeOption[];
-  /** Whether keyboard shortcut hints are useful in the active input context. */
-  showKeyboardHints?: boolean;
   /** Builds creation actions for an immutable pane context. */
   getCompactCreateActions?: (context: FileOperationPolicyContext) => readonly FileOperationAction[];
   /** Builds row actions for an immutable item context. */
@@ -134,20 +128,17 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   connections,
   useCompactLayout,
   useTouchSelectionControls = useCompactLayout,
+  useTouchTabControls = false,
   compactActionsDisabled = false,
   isUsingKeyboard,
   onPaneFocus,
-  disableTabFocus,
-  searchProvider,
-  searchActivationToken,
-  searchRefreshToken,
-  searchQueryValue,
-  onSearchQueryValueChange,
-  disableSearchDropdown,
-  suppressSearchDropdown,
-  onSearchArrowDownToFileList,
-  showKeyboardHints,
-  modeOptions,
+  onSelectTab,
+  onCloseTab,
+  onCreateTab,
+  onCloseSelectedTabFromKeyboard,
+  onSelectAdjacentTab,
+  onRestoreActiveListFocus,
+  disableTabFocus: _disableTabFocus,
   getCompactCreateActions,
   getCompactItemActions,
   getCompactSelectionActions,
@@ -159,6 +150,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
 }) => {
   const theme = useTheme();
   const { t } = useTranslation();
+  const shortcutScope = useContext(KeyboardShortcutScopeContext);
   const isDualMode = paneMode === "dual";
   const [fileDragActive, setFileDragActive] = useState(false);
   const dragDepthRef = useRef(0);
@@ -217,7 +209,6 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
     createError,
     // Refs
     parentRef,
-    searchInputRef,
     listContainerRef,
     listContainerEl,
     // Virtualizer
@@ -277,18 +268,49 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   const connectionName = currentConnection?.name ?? "";
   const connectionIsReadOnly = isConnectionReadOnly(currentConnection);
   const [closingBrowserViewerPickerState, setClosingBrowserViewerPickerState] = React.useState<typeof browserViewerPickerState>(null);
-  const [selectionAnnouncement, setSelectionAnnouncement] = React.useState("");
+  const [liveAnnouncement, setLiveAnnouncement] = React.useState("");
   const previousSelectedCountRef = React.useRef(selectedFiles.size);
+  const previousAnnouncedTabIdRef = React.useRef<string>(pane.selectedTabId);
   const renderedBrowserViewerPickerState = browserViewerPickerState ?? closingBrowserViewerPickerState;
+  const listInstructionsId = `${paneId}-file-list-tab-instructions`;
+  const tabInstructionsText = useMemo(
+    () =>
+      t("fileBrowser.tabs.listInstructions", {
+        newTabShortcut: formatShortcut(PANE_SHORTCUTS.NEW_TAB),
+        closeTabShortcut: formatShortcut(PANE_SHORTCUTS.CLOSE_TAB),
+      }),
+    [t]
+  );
+
+  React.useEffect(() => {
+    if (previousAnnouncedTabIdRef.current === pane.selectedTabId) {
+      return;
+    }
+    previousAnnouncedTabIdRef.current = pane.selectedTabId;
+    const selectedIndex = pane.tabs.findIndex((candidate) => candidate.id === pane.selectedTabId);
+    const selectedTab = selectedIndex >= 0 ? pane.tabs[selectedIndex] : undefined;
+    if (!selectedTab) {
+      return;
+    }
+    const tabConnectionName = connections.find((conn) => conn.id === selectedTab.connectionId)?.name ?? selectedTab.connectionId;
+    const tabLabel = getPaneTabLabel(selectedTab, tabConnectionName);
+    setLiveAnnouncement(
+      t("fileBrowser.tabs.selectedAnnouncement", {
+        name: tabLabel,
+        index: selectedIndex + 1,
+        total: pane.tabs.length,
+      })
+    );
+  }, [connections, pane.selectedTabId, pane.tabs, t]);
 
   const handleCompactClearSelection = React.useCallback(() => {
     handleClearSelection();
   }, [handleClearSelection]);
   React.useEffect(() => {
     if (selectedFiles.size > 0) {
-      setSelectionAnnouncement(t("fileBrowser.compactActions.selectedCount", { count: selectedFiles.size }));
+      setLiveAnnouncement(t("fileBrowser.compactActions.selectedCount", { count: selectedFiles.size }));
     } else if (previousSelectedCountRef.current > 0) {
-      setSelectionAnnouncement(t("fileBrowser.compactActions.selectionCleared"));
+      setLiveAnnouncement(t("fileBrowser.compactActions.selectionCleared"));
     }
     previousSelectedCountRef.current = selectedFiles.size;
   }, [selectedFiles.size, t]);
@@ -480,23 +502,127 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
     }
   }, [listContainerEl, useCompactLayout]);
 
-  /** Navigate to a breadcrumb path segment. */
+  /** Navigate to a breadcrumb path segment and return focus to this pane's file list. */
   const handleBreadcrumbNavigate = React.useCallback(
     (path: string) => {
       if (archiveLocation) {
         if (path === archiveLocation.archivePath) {
           pane.navigateArchiveToPath("");
+          pane.requestListFocus();
           return;
         }
         const archivePrefix = `${archiveLocation.archivePath}/`;
         if (path.startsWith(archivePrefix)) {
           pane.navigateArchiveToPath(path.slice(archivePrefix.length));
+          pane.requestListFocus();
           return;
         }
       }
       pane.navigateToPath(path);
+      pane.requestListFocus();
     },
     [archiveLocation, pane]
+  );
+
+  const restoreOwnOrActiveListFocus = React.useCallback(() => {
+    if (onRestoreActiveListFocus) {
+      onRestoreActiveListFocus();
+      return;
+    }
+    listContainerEl?.focus({ preventScroll: true });
+  }, [listContainerEl, onRestoreActiveListFocus]);
+
+  const handleSelectTabClick = React.useCallback(
+    (tabId: string) => {
+      if (onSelectTab) {
+        onSelectTab(tabId);
+        return;
+      }
+      pane.selectTab(tabId, { focusList: true });
+    },
+    [onSelectTab, pane]
+  );
+
+  const handleCloseTabClick = React.useCallback(
+    (tabId: string) => {
+      if (onCloseTab) {
+        onCloseTab(tabId);
+        return;
+      }
+      pane.closeTab(tabId, { focusList: tabId === pane.selectedTabId });
+    },
+    [onCloseTab, pane]
+  );
+
+  const handleCreateTabClick = React.useCallback(() => {
+    if (onCreateTab) {
+      onCreateTab();
+      return;
+    }
+    pane.createTab({ focusList: true });
+  }, [onCreateTab, pane]);
+
+  const tabsBlocked =
+    compactActionsDisabled ||
+    Boolean(viewInfo) ||
+    Boolean(renderedBrowserViewerPickerState) ||
+    deleteDialogOpen ||
+    renameDialogOpen ||
+    createDialogOpen;
+
+  const handleListSurfaceKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!isActive || tabsBlocked) {
+        return;
+      }
+      const nativeEvent = event.nativeEvent;
+      if (!isEventInKeyboardShortcutScope(nativeEvent, shortcutScope)) {
+        return;
+      }
+      if (event.target !== event.currentTarget || document.activeElement !== listContainerEl) {
+        return;
+      }
+
+      if (matchesKeyboardShortcut(nativeEvent, PANE_SHORTCUTS.PREVIOUS_TAB)) {
+        event.preventDefault();
+        if (onSelectAdjacentTab) {
+          onSelectAdjacentTab("previous");
+        } else {
+          pane.selectAdjacentTab("previous", { focusList: true });
+        }
+        return;
+      }
+
+      if (matchesKeyboardShortcut(nativeEvent, PANE_SHORTCUTS.NEXT_TAB)) {
+        event.preventDefault();
+        if (onSelectAdjacentTab) {
+          onSelectAdjacentTab("next");
+        } else {
+          pane.selectAdjacentTab("next", { focusList: true });
+        }
+        return;
+      }
+
+      if (matchesKeyboardShortcut(nativeEvent, PANE_SHORTCUTS.NEW_TAB)) {
+        event.preventDefault();
+        if (!nativeEvent.repeat) {
+          handleCreateTabClick();
+        }
+        return;
+      }
+
+      if (matchesKeyboardShortcut(nativeEvent, PANE_SHORTCUTS.CLOSE_TAB)) {
+        event.preventDefault();
+        if (!nativeEvent.repeat) {
+          if (onCloseSelectedTabFromKeyboard) {
+            onCloseSelectedTabFromKeyboard();
+          } else {
+            pane.closeTab(pane.selectedTabId, { focusList: true });
+          }
+        }
+      }
+    },
+    [handleCreateTabClick, isActive, listContainerEl, onCloseSelectedTabFromKeyboard, onSelectAdjacentTab, pane, shortcutScope, tabsBlocked]
   );
 
   const breadcrumbPath = archiveLocation
@@ -560,78 +686,81 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
       <Box
         aria-live="polite"
         aria-atomic="true"
+        data-testid={`pane-tab-live-region-${paneId}`}
         sx={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}
       >
-        {selectionAnnouncement}
+        {liveAnnouncement}
       </Box>
-      {/* Breadcrumbs + View/Sort controls (desktop) */}
-      {!useCompactLayout && (
-        <Box
-          sx={{
-            mb: 2,
-            px: 2,
-            height: STATUS_BAR_HEIGHT,
-            boxSizing: "border-box",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          <BreadcrumbsNavigation
-            currentPath={breadcrumbPath}
-            connectionName={connectionName}
-            onNavigate={handleBreadcrumbNavigate}
-            onEscape={() => listContainerEl?.focus()}
-            disableTabFocus={disableTabFocus}
-            showActiveIndicator={isDualMode && isActive}
-          />
-          {connectionIsReadOnly && (
-            <Chip
-              size="small"
-              variant="outlined"
-              color="warning"
-              label={t("settings.connectionDialog.accessMode.readOnlyLabel")}
-              title={t("settings.connectionDialog.helpers.accessModeReadOnly")}
-              sx={{ ml: 1, flexShrink: 0 }}
-            />
-          )}
-          {pane.directoryMonitorError && (
-            <Button size="small" onClick={pane.handleRefresh} sx={{ ml: "auto" }}>
-              {t("common.actions.monitoringStopped")}
-            </Button>
-          )}
-        </Box>
-      )}
+      <Box
+        id={listInstructionsId}
+        sx={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}
+      >
+        {tabInstructionsText}
+      </Box>
 
-      {/* Search bar (mobile compact layout) */}
-      {useCompactLayout && (
-        <>
-          <UnifiedSearchBar
-            provider={searchProvider}
-            activationToken={searchActivationToken}
-            refreshToken={searchRefreshToken}
-            inputRef={searchInputRef}
-            useCompactLayout={useCompactLayout}
-            onBlurToFileList={() => listContainerEl?.focus()}
-            queryValue={searchQueryValue}
-            onQueryValueChange={onSearchQueryValueChange}
-            disableDropdown={disableSearchDropdown}
-            suppressDropdown={suppressSearchDropdown}
-            onArrowDownToFileList={onSearchArrowDownToFileList}
-            modeOptions={modeOptions}
-            showKeyboardHints={showKeyboardHints}
+      {/* Per-pane folder tab bar */}
+      <PaneTabBar
+        paneId={paneId}
+        paneMode={paneMode}
+        isActivePane={isActive}
+        tabs={pane.tabs}
+        selectedTabId={pane.selectedTabId}
+        tabRevealToken={pane.tabRevealToken}
+        connections={connections}
+        useTouchControls={useTouchTabControls}
+        disabled={tabsBlocked}
+        onSelectTab={handleSelectTabClick}
+        onCloseTab={handleCloseTabClick}
+        onCreateTab={handleCreateTabClick}
+        onRestoreFocus={restoreOwnOrActiveListFocus}
+      />
+
+      {/* Breadcrumbs row (available in all layouts below the tab bar) */}
+      <Box
+        sx={{
+          mb: useCompactLayout ? 0.5 : 1.5,
+          mt: 0.5,
+          px: 2,
+          minHeight: useCompactLayout ? 28 : STATUS_BAR_HEIGHT,
+          boxSizing: "border-box",
+          display: "flex",
+          alignItems: "center",
+        }}
+      >
+        <BreadcrumbsNavigation
+          currentPath={breadcrumbPath}
+          connectionName={connectionName}
+          onNavigate={handleBreadcrumbNavigate}
+          onRestoreListFocus={() => pane.requestListFocus()}
+          showActiveIndicator={isDualMode && isActive}
+        />
+        {!useCompactLayout && connectionIsReadOnly && (
+          <Chip
+            size="small"
+            variant="outlined"
+            color="warning"
+            label={t("settings.connectionDialog.accessMode.readOnlyLabel")}
+            title={t("settings.connectionDialog.helpers.accessModeReadOnly")}
+            sx={{ ml: 1, flexShrink: 0 }}
           />
-          {connectionIsReadOnly && (
-            <Box sx={{ px: 2, pb: 1 }}>
-              <Chip
-                size="small"
-                variant="outlined"
-                color="warning"
-                label={t("settings.connectionDialog.accessMode.readOnlyLabel")}
-                title={t("settings.connectionDialog.helpers.accessModeReadOnly")}
-              />
-            </Box>
-          )}
-        </>
+        )}
+        {!useCompactLayout && pane.directoryMonitorError && (
+          <Button size="small" onClick={pane.handleRefresh} sx={{ ml: "auto" }}>
+            {t("common.actions.monitoringStopped")}
+          </Button>
+        )}
+      </Box>
+
+      {useCompactLayout && connectionIsReadOnly && (
+        <Box sx={{ px: 2, pb: 1 }}>
+          <Chip
+            size="small"
+            variant="outlined"
+            color="warning"
+            label={t("settings.connectionDialog.accessMode.readOnlyLabel")}
+            title={t("settings.connectionDialog.helpers.accessModeReadOnly")}
+          />
+        </Box>
       )}
 
       {/* File list or loading indicator */}
@@ -643,20 +772,49 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
         </Box>
       )}
       {loading ? (
-        <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}>
+        <Box
+          ref={listContainerRef}
+          data-testid="file-list-container"
+          aria-describedby={listInstructionsId}
+          tabIndex={0}
+          onKeyDown={handleListSurfaceKeyDown}
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            p: 4,
+            flex: 1,
+            minHeight: 0,
+            "&:focus": { outline: "none" },
+          }}
+        >
           <CircularProgress />
         </Box>
       ) : pane.directoryUnavailable && pane.error ? (
-        <FileBrowserAlerts
-          error={pane.error}
-          companionPairingError={pane.companionPairingError}
-          onOpenLocalDrivesSettings={onOpenLocalDrivesSettings}
-          onReload={onReload}
-          onRetry={pane.handleRefresh}
-          loadingConnections={false}
-          connectionsCount={connections.length}
-          backendAvailabilityStatus="available"
-        />
+        <Box
+          ref={listContainerRef}
+          data-testid="file-list-container"
+          aria-describedby={listInstructionsId}
+          tabIndex={0}
+          onKeyDown={handleListSurfaceKeyDown}
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            overflow: "auto",
+            "&:focus": { outline: "none" },
+          }}
+        >
+          <FileBrowserAlerts
+            error={pane.error}
+            companionPairingError={pane.companionPairingError}
+            onOpenLocalDrivesSettings={onOpenLocalDrivesSettings}
+            onReload={onReload}
+            onRetry={pane.handleRefresh}
+            loadingConnections={false}
+            connectionsCount={connections.length}
+            backendAvailabilityStatus="available"
+          />
+        </Box>
       ) : (
         <Box
           aria-busy={navigationPending}
@@ -769,6 +927,8 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
             viewMode={viewMode}
             unsavedDraftPaths={unsavedDraftPaths}
             getCompactItemActions={getCompactItemActionsForFile}
+            ariaDescribedBy={listInstructionsId}
+            onKeyDown={handleListSurfaceKeyDown}
           />
         </Box>
       )}

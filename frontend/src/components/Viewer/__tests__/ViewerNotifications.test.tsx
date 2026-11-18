@@ -1,6 +1,8 @@
+import { Button } from "@mui/material";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "../../../i18n";
+import { renderWithStyles } from "../../../test/utils/renderWithStyles";
 import { formatNoticeTarget, NOTICE_DURATION_MS, OperationNotificationProvider } from "../../OperationNotifications";
 import { type ViewerNotice, ViewerNotifications } from "../ViewerNotifications";
 
@@ -100,6 +102,43 @@ describe("ViewerNotifications", () => {
     expect(retry).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("vertically centers notice content and action controls without forcing actions onto a second line", () => {
+    const undo = vi.fn();
+    renderWithStyles(
+      host([
+        {
+          id: "tab-undo",
+          message: "Tab closed",
+          severity: "info",
+          action: (
+            <Button size="small" color="inherit" onClick={undo}>
+              Undo
+            </Button>
+          ),
+        },
+      ])
+    );
+    const status = screen.getByRole("status");
+    const icon = status.querySelector(".MuiAlert-icon");
+    const message = status.querySelector(".MuiAlert-message");
+    const actions = status.querySelector(".MuiAlert-action");
+
+    expect(status).toHaveStyle({ alignItems: "center" });
+    expect(icon).toHaveStyle({ paddingTop: "0px", paddingBottom: "0px", alignItems: "center" });
+    expect(message).toHaveStyle({ minWidth: "0px", paddingTop: "4px", paddingBottom: "4px" });
+    expect(actions).toHaveStyle({
+      paddingTop: "0px",
+      paddingBottom: "0px",
+      alignItems: "center",
+      flexGrow: "0",
+      flexShrink: "0",
+      flexBasis: "auto",
+      marginLeft: "auto",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(undo).toHaveBeenCalledOnce();
   });
 
   it("removes resolved queued notices and preserves typing focus", () => {

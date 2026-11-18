@@ -38,6 +38,8 @@ interface FileListProps {
   viewMode: ViewMode;
   unsavedDraftPaths?: Set<string>;
   getCompactItemActions?: (file: FileEntry, index: number) => readonly CompactItemAction[];
+  ariaDescribedBy?: string;
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
 } //
 // FileList
 //
@@ -63,6 +65,8 @@ export const FileList = React.memo(
     viewMode,
     unsavedDraftPaths = new Set(),
     getCompactItemActions,
+    ariaDescribedBy,
+    onKeyDown,
   }: FileListProps) => {
     const { t } = useTranslation();
     const listElementRef = useRef<HTMLDivElement>(null);
@@ -104,7 +108,9 @@ export const FileList = React.memo(
           listContainerRef(node);
         }}
         data-testid="file-list-container"
+        aria-describedby={ariaDescribedBy}
         tabIndex={0}
+        onKeyDown={onKeyDown}
         onClick={(event) => {
           if (
             !useTouchSelectionControls &&

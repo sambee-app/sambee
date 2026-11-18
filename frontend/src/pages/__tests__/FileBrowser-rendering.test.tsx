@@ -363,7 +363,7 @@ describe("Browser Component - Rendering", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1/archive.zip");
 
       await screen.findByRole("button", { name: /file: inside\.txt/i });
-      expect(screen.getByText("archive.zip")).toBeInTheDocument();
+      expect(screen.getAllByText("archive.zip").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByRole("button", { name: "Navigate to parent directory" })).toBeEnabled();
     } finally {
       window.matchMedia = originalMatchMedia;

@@ -10,7 +10,7 @@ import { SEARCH_CONTRACT_VERSION } from "../search/recentHistory";
 import type { SearchProvider, SearchResultsUpdate } from "../search/types";
 import { useDirectorySearchProvider } from "../search/useDirectorySearchProvider";
 import { useFileSearchProvider } from "../search/useFileSearchProvider";
-import { UnifiedSearchBar } from "../UnifiedSearchBar";
+import { INTERIM_RESULTS_FALLBACK_MS, UnifiedSearchBar } from "../UnifiedSearchBar";
 
 const virtualizerSizeCache = new Map<string | number, number>();
 const virtualizerScrollToOffset = vi.fn();
@@ -642,10 +642,19 @@ describe("UnifiedSearchBar", () => {
     await setLocale("en");
   });
 
-  it("uses the compact mode label size", () => {
+  it("replaces the text mode pill with a compact icon trigger on mobile while keeping full mode labels in the menu", async () => {
+    const user = userEvent.setup();
     renderWithProvider(<UnifiedSearchBar provider={noResultsProvider} modeOptions={modeOptions} useCompactLayout />);
 
-    expect(screen.getByText("Navigate")).toHaveStyle({ fontSize: "14px" });
+    const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
+    expect(modeButton).toHaveAttribute("data-mode-id", "navigate");
+    expect(modeButton).toHaveStyle({ minWidth: "44px" });
+    expect(screen.queryByText("Navigate")).not.toBeInTheDocument();
+
+    await user.click(modeButton);
+    expect(await screen.findByRole("menuitem", { name: "Navigate" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "File Search" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Commands" })).toBeInTheDocument();
   });
 
   it("uses translated clear-search aria label", async () => {
@@ -824,6 +833,132 @@ describe("UnifiedSearchBar", () => {
     act(() => update?.([{ kind: "result", id: "new", value: "new", icon: "directory", primaryText: "New directory" }, selected]));
     await user.keyboard("{Enter}");
     expect(onSelect).toHaveBeenCalledWith("history", "associated-viewer");
+  });
+
+  it.each(["connection-1", "local-C"])(
+    "keeps visible directory results stable across slow incremental typing on %s and falls back on stalled index responses",
+    async (connectionId) => {
+      vi.useFakeTimers();
+      try {
+        let stallIndex = false;
+        let finishStalledIndex: (() => void) | undefined;
+        const indexedByQuery: Record<string, string[]> = {
+          do: ["Docs", "Docs/2025", "Docs/2026"],
+          doc: ["Docs", "Docs/2026"],
+        };
+        const history = {
+          ...browserHistoryService,
+          searchRecentDirectories: vi.fn(async (query: string) => {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            return {
+              result_limit: 10,
+              results:
+                query === "docs"
+                  ? [{ id: "recent-docs", connection_id: connectionId, path: "Docs", last_visited_at: "2026-01-01T00:00:00Z" }]
+                  : [],
+            };
+          }),
+          searchDirectories: vi.fn(async (_id: string, query: string) => {
+            if (stallIndex) {
+              await new Promise<void>((resolve) => {
+                finishStalledIndex = resolve;
+              });
+            } else {
+              await new Promise((resolve) => setTimeout(resolve, MOCK_INDEX_RESPONSE_MS));
+            }
+            const matches = indexedByQuery[query] ?? ["Docs", "Docs/Archive"];
+            return {
+              results: matches,
+              total_matches: matches.length,
+              directory_count: 1_000,
+              cache_state: "ready" as const,
+              search_contract_version: SEARCH_CONTRACT_VERSION,
+            };
+          }),
+        };
+        function Harness() {
+          const provider = useDirectorySearchProvider(connectionId, vi.fn(), { history });
+          return <UnifiedSearchBar provider={provider} />;
+        }
+        renderWithProvider(<Harness />);
+        const input = screen.getByRole("textbox");
+        act(() => input.focus());
+
+        // Single-character query with 0 recent matches: does not open a bodyless popup while loading, then shows 2-char hint.
+        fireEvent.change(input, { target: { value: "d" } });
+        expect(screen.queryByText(/navigate/)).not.toBeInTheDocument();
+        await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS + 5));
+        expect(screen.queryByText(/navigate/)).not.toBeInTheDocument();
+        await act(() => vi.advanceTimersByTimeAsync(MOCK_INDEX_RESPONSE_MS - 5));
+        expect(screen.getByText("Type at least 2 characters to search")).toBeInTheDocument();
+
+        // Typing 2nd character keeps the 2-char hint mounted while "do" debounces and loads, then transitions directly to 3 rows.
+        fireEvent.change(input, { target: { value: "do" } });
+        expect(screen.getByText("Type at least 2 characters to search")).toBeInTheDocument();
+        await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS + 10));
+        expect(screen.getByText("Type at least 2 characters to search")).toBeInTheDocument();
+        await act(() => vi.advanceTimersByTimeAsync(MOCK_INDEX_RESPONSE_MS));
+        const initialListbox = screen.getByRole("listbox");
+        expect(screen.getAllByRole("option")).toHaveLength(3);
+
+        // Typing 3rd character slowly: empty 5ms history response must NOT collapse the 3 visible rows before the 80ms index response.
+        fireEvent.change(input, { target: { value: "doc" } });
+        await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS + 10));
+        expect(screen.getByRole("listbox")).toBe(initialListbox);
+        expect(screen.getAllByRole("option")).toHaveLength(3);
+        await act(() => vi.advanceTimersByTimeAsync(MOCK_INDEX_RESPONSE_MS));
+        expect(screen.getByRole("listbox")).toBe(initialListbox);
+        expect(screen.getAllByRole("option")).toHaveLength(2);
+
+        // If the index stalls beyond INTERIM_RESULTS_FALLBACK_MS, non-empty interim history updates still publish before index completion.
+        stallIndex = true;
+        fireEvent.change(input, { target: { value: "docs" } });
+        await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS + 10));
+        expect(screen.getAllByRole("option")).toHaveLength(2);
+        await act(() => vi.advanceTimersByTimeAsync(INTERIM_RESULTS_FALLBACK_MS));
+        expect(screen.getAllByRole("option")).toHaveLength(1);
+        await act(async () => finishStalledIndex?.());
+        expect(screen.getAllByRole("option")).toHaveLength(2);
+      } finally {
+        cleanup();
+        vi.useRealTimers();
+      }
+    }
+  );
+
+  it("keeps empty-result feedback mounted without footer-only collapse across consecutive keystrokes", async () => {
+    vi.useFakeTimers();
+    try {
+      const provider: SearchProvider = {
+        ...footerProvider,
+        debounceMs: INPUT_DEBOUNCE_MS,
+        fetchResults: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          return [];
+        },
+      };
+      renderWithProvider(<UnifiedSearchBar provider={provider} />);
+      const input = screen.getByRole("textbox");
+      act(() => input.focus());
+
+      fireEvent.change(input, { target: { value: "xy" } });
+      expect(screen.queryByText("Keyboard shortcuts")).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS + 20));
+      expect(screen.queryByText("Keyboard shortcuts")).not.toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(20));
+      expect(screen.getByText('No results found for "xy"')).toBeInTheDocument();
+
+      // Next character keeps the settled no-results box mounted throughout debounce and request execution.
+      fireEvent.change(input, { target: { value: "xyz" } });
+      expect(screen.getByText('No results found for "xy"')).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(INPUT_DEBOUNCE_MS + 20));
+      expect(screen.getByText('No results found for "xy"')).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(20));
+      expect(screen.getByText('No results found for "xyz"')).toBeInTheDocument();
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
   });
 
   it("hides shortcut hints without hiding footer information", async () => {

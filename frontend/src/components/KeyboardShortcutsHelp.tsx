@@ -3,7 +3,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import { Box, IconButton, InputAdornment, Table, TableBody, TableCell, TableRow, TextField, Typography } from "@mui/material";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { KeyboardShortcut, ShortcutHelpGroup } from "../hooks/useKeyboardShortcuts";
+import { formatShortcut, type KeyboardShortcut, type ShortcutHelpGroup } from "../hooks/useKeyboardShortcuts";
 import { ResponsiveDialogShell } from "./Dialog/ResponsiveDialogShell";
 import {
   RESIZABLE_DIALOG_VIEWPORT_GUTTER_PX,
@@ -85,7 +85,7 @@ export const KeyboardShortcutsHelp: React.FC<KeyboardShortcutsHelpProps> = ({ op
 
     for (const shortcut of shortcuts) {
       const sectionId = shortcut.helpGroup ?? DEFAULT_SHORTCUT_HELP_GROUP;
-      const label = shortcut.label || shortcut.keys.toString();
+      const label = formatShortcut(shortcut);
       const sectionLabel = t(`keyboardShortcutsHelp.groups.${sectionId}`);
 
       if (

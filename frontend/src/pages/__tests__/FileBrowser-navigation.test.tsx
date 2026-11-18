@@ -366,8 +366,8 @@ describe("Browser Component - Navigation", () => {
     const user = userEvent.setup();
     await renderBrowserAndFlush("/browse/smb/test-server-1/Documents/Subfolder");
 
-    // Optimized: Use findByText
-    expect(await screen.findByText("Subfolder")).toBeInTheDocument();
+    // Optimized: Use findAllByText (shown in both tab header and breadcrumb)
+    expect((await screen.findAllByText("Subfolder")).length).toBeGreaterThanOrEqual(1);
 
     // Click on connection name breadcrumb (replaces "Root") - use getAllByText and filter to find the link, not the combobox
     const rootLinks = screen.getAllByText("Test Server 1");

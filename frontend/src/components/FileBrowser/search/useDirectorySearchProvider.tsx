@@ -67,6 +67,14 @@ function directoryFailure(error: unknown): { terminal: boolean; delay: number } 
 /** Minimum query length to trigger a directory search */
 const DIRECTORY_MIN_QUERY_LENGTH = 2;
 
+function normalizeDirectoryQuery(query: string): string {
+  return normalizeQuerySeparators(query).trim();
+}
+
+function isDirectoryIndexQuery(normalizedQuery: string): boolean {
+  return normalizedQuery.length >= DIRECTORY_MIN_QUERY_LENGTH;
+}
+
 const PATH_SEPARATOR = "/";
 const MAX_RECENT_DIRECTORY_RESULT_LIMIT = 50;
 const RECENT_DIRECTORY_PREFIX = "recent-directory:";
@@ -337,9 +345,9 @@ export function useDirectorySearchProvider(
   const fetchResults = useCallback(
     async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate): Promise<SearchResult[]> => {
       // Normalise backslashes to forward slashes for cross-directory search
-      const normalizedQuery = normalizeQuerySeparators(query).trim();
+      const normalizedQuery = normalizeDirectoryQuery(query);
       const terms = searchTerms(normalizedQuery);
-      const queryIndex = normalizedQuery.length >= DIRECTORY_MIN_QUERY_LENGTH;
+      const queryIndex = isDirectoryIndexQuery(normalizedQuery);
       activeIndexQueryRef.current = true;
       const generation = ++requestGenerationRef.current;
       const isCurrent = () =>
@@ -423,6 +431,15 @@ export function useDirectorySearchProvider(
         return ranked.filter((row) => row.kind === "group-header" || selectedCount++ < recentResponse.result_limit);
       };
 
+      let recentSettled = false;
+      let indexSettled = !queryIndex || terminalIndexRef.current;
+      const publishPartialResults = () => {
+        const merged = mergeResults();
+        if ((recentSettled && indexSettled) || merged.some((row) => row.kind === "result")) {
+          onUpdate?.(merged);
+        }
+      };
+
       const cachedHistory = recentResponseRef.current;
       const recentPromise =
         cachedHistory?.query === normalizedQuery && cachedHistory.limit === recentDirectoryResultLimit
@@ -430,14 +447,16 @@ export function useDirectorySearchProvider(
           : history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal);
       const recentRequest = recentPromise.then((response) => {
         if (!isCurrent()) return;
+        recentSettled = true;
         recentResponse = response;
         recentResponseRef.current = { query: normalizedQuery, limit: recentDirectoryResultLimit, response };
         recentDirectoriesRef.current = new Map(response.results.map((directory) => [directory.id, directory]));
-        onUpdate?.(mergeResults());
+        publishPartialResults();
       });
       const indexRequest = !terminalIndexRef.current
         ? history.searchDirectories(connectionId, queryIndex ? normalizedQuery : "", { includeDotDirectories, signal }).then((response) => {
             if (!isCurrent()) return;
+            indexSettled = true;
             directorySearchResult = queryIndex ? response : null;
             indexResultsRef.current = queryIndex ? { query: normalizedQuery, response } : null;
             indexResponseRef.current = response;
@@ -447,7 +466,9 @@ export function useDirectorySearchProvider(
             setLegacyIndex(terms.length > 1 && response.search_contract_version !== SEARCH_CONTRACT_VERSION);
             updateIndexStatus(response);
             setTotalMatches(response.total_matches);
-            onUpdate?.(mergeResults());
+            if (queryIndex) {
+              publishPartialResults();
+            }
           })
         : Promise.resolve();
       const [recentOutcome, indexOutcome] = await Promise.allSettled([recentRequest, indexRequest]);
@@ -660,6 +681,14 @@ export function useDirectorySearchProvider(
     [cacheState, directoryCount, t, totalMatches]
   );
 
+  const getBelowMinimumMessage = useCallback(
+    (query: string): string | undefined =>
+      query.length > 0 && !isDirectoryIndexQuery(normalizeDirectoryQuery(query))
+        ? t("fileBrowser.search.belowMinimum", { count: DIRECTORY_MIN_QUERY_LENGTH })
+        : undefined,
+    [t]
+  );
+
   return {
     id: "directory-search",
     sourceKey: `${connectionId}:${includeDotDirectories}:${recentDirectoryResultLimit}:${clientGeneration}:${sourceRevision}`,
@@ -668,6 +697,7 @@ export function useDirectorySearchProvider(
     placeholder: t("fileBrowser.search.placeholders.directory"),
     debounceMs: DIRECTORY_SEARCH_DEBOUNCE_MS,
     minQueryLength: 0,
+    getBelowMinimumMessage,
     fetchResults,
     onSelect,
     onRemoveSelected,
