@@ -1013,6 +1013,21 @@ export const EN_TRANSLATIONS = {
         switchPane: {
           title: "Switch Active Pane",
         },
+        newTab: {
+          title: "New Folder Tab",
+        },
+        closeTab: {
+          title: "Close Folder Tab",
+        },
+        undoCloseTab: {
+          title: "Undo Close Folder Tab",
+        },
+        previousTab: {
+          title: "Previous Folder Tab",
+        },
+        nextTab: {
+          title: "Next Folder Tab",
+        },
         copyToOtherPane: {
           title: "Copy To Other Pane",
         },
@@ -1177,6 +1192,10 @@ export const EN_TRANSLATIONS = {
       showCommands: "Show commands",
       showHelp: "Show keyboard shortcuts",
       switchActivePane: "Switch active pane",
+      previousTab: "Select previous folder tab",
+      nextTab: "Select next folder tab",
+      newTab: "New folder tab",
+      closeTab: "Close selected folder tab",
       openLocationInNewTab: "Open current location in new tab",
       matchLeftPaneLocation: "Set left pane to right pane location",
       matchRightPaneLocation: "Set right pane to left pane location",
@@ -1201,6 +1220,23 @@ export const EN_TRANSLATIONS = {
       selectItemsToMove: "Select one or more items to move.",
       sourceUnavailable: "This action can't be used with the selected item.",
       locationUnavailable: "Wait for the pane location to load. If loading fails, use Refresh or select another location.",
+      lastTabProtected: "Keep at least one tab open in each pane",
+    },
+    tabs: {
+      groupAriaLabel: "Folder tabs",
+      leftPaneGroupAriaLabel: "Left pane folder tabs",
+      rightPaneGroupAriaLabel: "Right pane folder tabs",
+      newTab: "New tab",
+      allTabsAriaLabel: "All tabs ({{total}})",
+      allTabsOverflowAriaLabel: "All tabs ({{total}}, {{hidden}} hidden)",
+      selectTabAriaLabel: "{{name}} — {{location}}",
+      closeTabAriaLabel: "Close {{name}} tab ({{location}})",
+      closedNotice: "Tab closed",
+      undo: "Undo",
+      selectedAnnouncement: "{{name}}, tab {{index}} of {{total}}",
+      listInstructions:
+        "Use Left and Right Arrow to switch folder tabs, {{newTabShortcut}} to open a new tab, and {{closeTabShortcut}} to close the selected tab.",
+      restorationUnavailableNotice: "Tab restoration after reload is unavailable in this browser session.",
     },
     chrome: {
       breadcrumb: {

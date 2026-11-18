@@ -173,7 +173,9 @@ export function useFileSearchProvider({
         );
       };
       const availableResponse: RecentFileSearchResponse = { results: [], result_limit: resultLimit };
-      if (terms.length > 0) onUpdate?.(mergeResults(availableResponse));
+      if (terms.length > 0 && currentCandidates.length > 0) {
+        onUpdate?.(mergeResults(availableResponse));
+      }
       try {
         const recentResponse = await history.searchRecentFiles(query, resultLimit, signal);
         if (!isCurrent()) return [];

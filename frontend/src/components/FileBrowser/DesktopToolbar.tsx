@@ -6,16 +6,12 @@ import type { SearchProvider } from "./search/types";
 import type { UnifiedSearchBarModeOption } from "./UnifiedSearchBar";
 import { UnifiedSearchBar } from "./UnifiedSearchBar";
 
-interface DesktopToolbarProps {
+export interface ToolbarQuickBarProps {
   searchProvider: SearchProvider;
   searchActivationToken?: number;
   searchRefreshToken?: number;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   showSearch: boolean;
-  onOpenHelp: () => void;
-  onOpenDocumentation: () => void;
-  onOpenSettings: () => void;
-  systemHealth?: ToolbarSystemHealthAction;
   /** Called when ESC is pressed on controls or when menus close, to focus file list */
   onBlurToFileList?: () => void;
   searchQueryValue?: string;
@@ -27,6 +23,13 @@ interface DesktopToolbarProps {
   disableTabFocus?: boolean;
   modeOptions?: UnifiedSearchBarModeOption[];
   showKeyboardHints?: boolean;
+}
+
+interface DesktopToolbarProps extends ToolbarQuickBarProps {
+  onOpenHelp: () => void;
+  onOpenDocumentation: () => void;
+  onOpenSettings: () => void;
+  systemHealth?: ToolbarSystemHealthAction;
 }
 
 //

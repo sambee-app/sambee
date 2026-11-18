@@ -49,6 +49,31 @@ export function shouldUseTouchSelectionControls(
   return useCompactLayout || preference === "always" || (preference === "auto" && hasCoarsePrimaryPointer);
 }
 
+/**
+ * Resolves whether pane tab headers should use touch-sized targets and always-visible close overlays.
+ * Uses input-capability signals and the user's touch-friendly preference rather than viewport width alone,
+ * preferring always-visible close controls on mixed-input devices that support touch.
+ */
+export function shouldUseTouchTabControls({
+  preference,
+  hasCoarseAnyPointer,
+  hasHoverNone,
+  maxTouchPoints = typeof navigator === "undefined" ? 0 : (navigator.maxTouchPoints ?? 0),
+}: {
+  preference: TouchFriendlyFileSelection;
+  hasCoarseAnyPointer: boolean;
+  hasHoverNone: boolean;
+  maxTouchPoints?: number;
+}): boolean {
+  if (preference === "always") {
+    return true;
+  }
+  if (preference === "never") {
+    return false;
+  }
+  return hasCoarseAnyPointer || hasHoverNone || maxTouchPoints > 0;
+}
+
 export function isQuickBarKeyboardEvidenceEvent(event: Pick<KeyboardEvent, "isComposing" | "isTrusted" | "key">): boolean {
   return event.isTrusted && !event.isComposing && !KEYBOARD_MODIFIER_KEYS.has(event.key);
 }

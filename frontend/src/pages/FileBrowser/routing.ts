@@ -101,7 +101,7 @@ const buildRoutePath = (path: string, virtualLocation?: VirtualRouteLocation | n
 export const buildBrowseRouteTarget = (
   connectionId: string,
   path: string,
-  connections: Pick<Connection, "id" | "slug">[],
+  connections: readonly Pick<Connection, "id" | "slug">[],
   virtualLocation?: VirtualRouteLocation | null
 ): BrowseRouteTarget | null => {
   if (!connectionId) {
@@ -133,7 +133,7 @@ export const buildBrowseRouteTarget = (
 
 export const resolveBrowseRouteTarget = (
   target: BrowseRouteTarget | null,
-  connections: Pick<Connection, "id" | "slug">[]
+  connections: readonly Pick<Connection, "id" | "slug">[]
 ): ResolvedBrowseRouteTarget | null => {
   if (!target) {
     return null;
@@ -159,7 +159,7 @@ export const resolveBrowseRouteTarget = (
 
 export const resolveBrowseRouteState = (
   state: BrowseRouteState,
-  connections: Pick<Connection, "id" | "slug">[]
+  connections: readonly Pick<Connection, "id" | "slug">[]
 ): ResolvedBrowseRouteState => {
   return {
     left: resolveBrowseRouteTarget(state.left, connections),

@@ -12,7 +12,10 @@ The implementation is deliberately split between shared page logic and per-pane 
 |---|---|
 | `pages/FileBrowser.tsx` | owns shared browser-level concerns such as active pane routing, URL sync, WebSocket lifecycle, and global shortcut registration |
 | `pages/FileBrowser/WorkspaceViewer.tsx` | subscribes to viewer route changes and owns the dynamic viewer host without rendering the directory workspace for image-only navigation |
-| `pages/FileBrowser/useFileBrowserPane.ts` | owns per-pane state such as connection and path, selection, sorting, filtering, dialogs, viewer state, incremental search, and directory refresh handling |
+| `pages/FileBrowser/useFileBrowserPane.ts` | owns one active pane runtime and keyed tab-session transitions: directory and archive loading, bounded listing retention, selection, sorting, dialogs, viewer origin, incremental search, and refresh handling |
+| `pages/FileBrowser/tabSessions.ts` | defines stable tab IDs, per-tab session state, neighbor-selection close rules, Undo records, and LRU eviction of inactive tab listings |
+| `pages/FileBrowser/tabSessionStorage.ts` | validates account-scoped `sessionStorage` workspace tab records, reload-versus-incoming-route precedence, and `sambeePaneTabs` router history metadata |
+| `components/FileBrowser/PaneTabBar.tsx` | renders proportionally shrinking folder tabs without horizontal scrolling, overlaid and middle-click close controls, the All Tabs overflow popover, and non-focusable bar controls |
 | `pages/FileBrowser/routing.ts` | parses and serializes typed directory, viewer, editor, and settings locations |
 | `pages/FileBrowser/useWorkspaceNavigation.ts` | resolves viewer targets and owns workspace navigation and safe overlay return entries |
 | `hooks/useRoutedViewerEditing.tsx` | connects the active editor's existing confirmation dialog to React Router navigation blocking |
@@ -97,7 +100,7 @@ SMB file-list subscriptions watch immediate children rather than the whole subtr
 
 ## Progressive Quick-Bar Results
 
-Publish usable history and loaded-file results without waiting for index requests. Publish selectable records before rendering rows, merge duplicate history/index results, and reject responses for obsolete queries or sources.
+Publish non-empty history and loaded-file updates immediately when no rows are visible yet. When settled rows are already visible, keep them mounted while the next query runs and commit the merged response in one update, falling back to non-empty interim rows only if a slower source exceeds `INTERIM_RESULTS_FALLBACK_MS`. Do not emit empty interim updates before all active sources settle, and do not keep the popup open with only the footer when no rows, status banner, or empty-state message are present. Keep settled empty-state feedback (`below-minimum` or `no-results`) mounted while a follow-up query is pending, and show the minimum-character hint when a one-character Navigate query has no matching recent directories. Publish selectable records before rendering rows, merge duplicate history/index results, and reject responses for obsolete queries or sources.
 
 Treat incomplete coverage separately from request failure. Background refresh requires `search_contract_version: 1` and must stop when the query, source, visibility, or search session changes, or on terminal failure. See [Directory-Index Consistency](../../backend-architecture/smb-change-notification-and-directory-freshness/#directory-index-consistency) for storage and freshness rules.
 
@@ -196,76 +199,23 @@ Use router navigation for all mounted-route URL writes, including authentication
 
 Keyboard behavior is part of the product contract, not just convenience.
 
-- pane switching, selection, copy, and move use centralized shortcut definitions
-- the quick bar supports smart navigation, command mode, and pane-local current-directory filtering
-- browser defaults that conflict with the product's navigation model are overridden intentionally
-- shortcuts are disabled when dialogs or viewer states would make them unsafe
+- Pane switching, selection, folder tabs, copy, and move use centralized shortcut definitions.
+- The quick bar supports smart directory navigation (`Ctrl+K`), File Search (`/`), and command mode (`Ctrl+P`).
+- Tab headers and breadcrumbs are intentionally non-focusable (`tabIndex={-1}` with pointer focus prevention and file-list focus restoration) so `Tab` stays dedicated to pane switching.
+- Shortcuts are disabled when dialogs or viewer states would make them unsafe.
 
 Changes here can easily affect power-user workflows, accessibility, and focus management all at once.
 
 Use [Keyboard Shortcuts and Command Model](../keyboard-shortcuts-and-command-model/) for the central registry, command-palette rules, and quick-bar interaction details. This page focuses on how those rules shape the file-browser architecture.
 
-## Pane-Local Current-Directory Filtering
+## Pane Tab Sessions, History, and Restoration
 
-Current-directory filtering is part of pane state, not just quick-bar UI state.
+Each pane runs a single active browsing engine (`useFileBrowserPane`) backed by an ordered `PaneTabCollection` (`tabSessions.ts`), rather than mounting separate components and effects for background tabs.
 
-The important design choice is that the quick bar only supplies the input shell. The actual filter value and filtered list live in `useFileBrowserPane`.
-
-- each pane owns its own `currentDirectoryFilter`
-- the pane computes `sortedAndFilteredFiles` from the normal sorted list plus the active filter text
-- the filtered list is the same list used by the virtualizer, keyboard navigation, viewer launch, selection helpers, and status bar
-- the active filter is considered scoped to the pane's current `connectionId + path`
-
-That arrangement is what makes the behavior consistent in both single-pane and dual-pane workflows.
-
-### Why the Filter Lives in the Pane Hook
-
-The filter is not modeled as a dropdown provider result set.
-
-- smart navigation is a navigation surface that benefits from dropdown results
-- command mode is a command surface that benefits from dropdown results
-- current-directory filtering is a local transformation of the pane's main file list
-
-Because the pane already owns the rendered list, focus state, virtualizer, and file actions, the filter belongs there as well.
-
-### User-Facing Behavior the Architecture Must Preserve
-
-The implemented flow is:
-
-1. `Ctrl+Alt+F` opens filter mode for the active pane.
-2. The shared input shows that pane's current filter value.
-3. Typing immediately filters the pane's main file list.
-4. `ArrowDown` from the input focuses the filtered file list.
-5. Arrow keys, `Home`, `End`, `PageUp`, `PageDown`, `Enter`, and file actions operate on the filtered visible list.
-6. Pressing `Ctrl+Alt+F` again returns focus to the same pane's filter input without clearing the term.
-
-Reset and persistence rules are equally important:
-
-- switching between smart navigation, command mode, and filter mode does not clear the active filter
-- changing directories clears the filter for the new path scope
-- changing the pane connection also clears the filter
-- dual-pane mode keeps filter state isolated per pane
-- browser recovery snapshots capture and restore the pane filter together with path, focused item, and selection state
-
-### Focus and Zero-Result Behavior
-
-Filtering changes focus semantics because it can remove rows from the visible list.
-
-- if the previously focused file still exists in the filtered list, focus stays on that file
-- if it disappears, focus clamps to the nearest valid visible item
-- if the filter produces zero visible files, focus remains in the filter input when possible
-
-That is why the pane hook owns both the filtered list and the focus-adjustment logic.
-
-### Status Bar Visibility
-
-The filter must remain visible even when the quick bar is no longer in filter mode.
-
-- the desktop status bar renders the active filter term whenever the pane has a non-empty filter
-- the status bar uses the filtered visible list for item counts and file metadata
-- this keeps the active filter visible while the user switches to smart navigation or command mode
-
-The status bar indicator is part of the product contract, not just decorative UI. It is the persistent signal that the pane is still filtered.
+- **State boundary and committed route refs:** A `TabSessionState` owns committed location (`connectionId`, `currentPath`, `archiveLocation`), retained listing freshness and archive paging cursors, multi-select paths, focused item identity, scroll offset, sort settings, per-tab navigation history, and local errors. The active pane runtime owns DOM refs, virtualizer bindings, abort controllers, timers, live subscriptions, and committed focus tokens, and exposes read-only synchronous refs (`connectionIdRef`, `currentPathRef`, `archiveLocationRef`) so route getters and Undo always serialize from the committed destination session rather than render-lagged location state.
+- **Bounded retention and async safety:** Inactive tab listings share the pane's cache ceiling (evicting oldest inactive item arrays while preserving lightweight location, selection, focus, and scroll metadata for reload on activation). Selecting a tab never resets its listing fetch timestamp. Every async completion checks the originating tab ID, location, and request generation so stale reads from switched or closed tabs are dropped.
+- **URL, Back/Forward, and session restoration:** Only the selected left and visible right locations appear in the URL. Tab create, select, close, and Undo replace the current router entry (`replace: true`)—including when the visible URL is unchanged but `location.state.sambeePaneTabs` differs—preserving unrelated caller state, query parameters, and hashes so router state stays authoritative for duplicate-tab Back/Forward transitions (with an internal location-key map only as a fallback when router state has no tab metadata). On Back/Forward, Sambee selects the recorded tab when it still exists in that pane or falls back to the pane's selected tab without creating extra tabs. Session storage (`tabSessionStorage.ts`) validates persisted `userScope`: authentication clears remove account-owned records (`userScope !== null`) while keeping anonymous records (`userScope === null`) across anonymous startup refresh `401` responses; explicit sign-out/session reset clears all records, and restoration rejects mismatched user scopes.
+- **Operations and live subscriptions:** Operations capture source tab identity, source handles, and destination location at start; switching or closing tabs afterward does not retarget an active operation, and completion refreshes or invalidates the captured locations. Live WebSocket directory subscriptions cover only visible selected locations, while `directory_changed` events invalidate matching retained sessions and unmonitored hidden tabs revalidate with `preserveVisibleContent` on activation.
 
 ## Selection, Copy, and Move
 

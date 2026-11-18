@@ -2055,7 +2055,7 @@ describe("Browser Component - Interactions", () => {
       const virtualList = await screen.findByTestId("virtual-list");
       await user.click(virtualList);
       await user.keyboard("{Enter}");
-      await screen.findByText("temp.zip");
+      await screen.findAllByText("temp.zip");
       await user.keyboard("{Backspace}");
 
       await waitFor(() => {
@@ -2767,7 +2767,7 @@ describe("Browser Component - Interactions", () => {
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     });
 
-    it("searches recent directories and shows no-results for single-character quick nav input", async () => {
+    it("searches recent directories and shows the minimum-character hint when a single-character quick nav query has no recent match", async () => {
       const user = userEvent.setup();
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
@@ -2780,7 +2780,8 @@ describe("Browser Component - Interactions", () => {
       const quickBarInput = await screen.findByPlaceholderText("Navigate to any directory");
       await user.type(quickBarInput, "e");
 
-      expect(await screen.findByText(/No results found for/i)).toHaveTextContent("e");
+      expect(await screen.findByText("Type at least 2 characters to search")).toBeInTheDocument();
+      expect(screen.queryByText(/No results found for/i)).not.toBeInTheDocument();
       expect(api.searchRecentDirectories).toHaveBeenCalledWith("e", 50, expect.any(AbortSignal));
     });
 

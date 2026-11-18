@@ -109,9 +109,6 @@ export function getSecondaryActionStripStyle(theme: Theme) {
     color: colors.textColor,
     borderBottom: 1,
     borderColor: colors.borderColor,
-    boxShadow: theme.shadows[2],
-    position: "relative",
-    zIndex: 1,
   };
 }
 

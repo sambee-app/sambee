@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, COPY_MOVE_SHORTCUTS, PANE_SHORTCUTS, VIEWER_SHORTCUTS } from "../keyboardShortcuts";
+import { formatShortcut } from "../../hooks/useKeyboardShortcuts";
+import {
+  BROWSER_SHORTCUTS,
+  CODEMIRROR_EDITOR_SHORTCUTS,
+  COMMON_SHORTCUTS,
+  COPY_MOVE_SHORTCUTS,
+  MARKDOWN_EDITOR_SHORTCUTS,
+  PANE_SHORTCUTS,
+  VIEWER_SHORTCUTS,
+} from "../keyboardShortcuts";
 
 describe("Keyboard Shortcuts Configuration", () => {
   describe("COMMON_SHORTCUTS", () => {
@@ -72,9 +81,19 @@ describe("Keyboard Shortcuts Configuration", () => {
         expect(shortcut.id, `${key} missing id`).toBeDefined();
         expect(shortcut.keys, `${key} missing keys`).toBeDefined();
         expect(shortcut.description, `${key} missing description`).toBeDefined();
-        expect(shortcut.label, `${key} missing label`).toBeDefined();
+        expect(formatShortcut(shortcut), `${key} missing formatted label`).toBeTruthy();
         expect(shortcut.helpGroup, `${key} missing helpGroup`).toBeDefined();
       }
+    });
+
+    it("omits hard-coded labels on platform-aware Option+letter shortcuts", () => {
+      expect("label" in CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_CASE_SENSITIVE).toBe(false);
+      expect("label" in CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WHOLE_WORD).toBe(false);
+      expect("label" in CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_REGULAR_EXPRESSION).toBe(false);
+      expect("label" in CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WORD_WRAP).toBe(false);
+      expect("label" in MARKDOWN_EDITOR_SHORTCUTS.INSERT_TABLE).toBe(false);
+      expect("label" in MARKDOWN_EDITOR_SHORTCUTS.INSERT_THEMATIC_BREAK).toBe(false);
+      expect("label" in BROWSER_SHORTCUTS.OPEN_LOCATION_IN_NEW_TAB).toBe(false);
     });
 
     it("should have unique IDs", () => {
@@ -101,7 +120,7 @@ describe("Keyboard Shortcuts Configuration", () => {
         expect(shortcut.id, `${key} missing id`).toBeDefined();
         expect(shortcut.keys, `${key} missing keys`).toBeDefined();
         expect(shortcut.description, `${key} missing description`).toBeDefined();
-        expect(shortcut.label, `${key} missing label`).toBeDefined();
+        expect(formatShortcut(shortcut), `${key} missing formatted label`).toBeTruthy();
         expect(shortcut.helpGroup, `${key} missing helpGroup`).toBeDefined();
       }
     });

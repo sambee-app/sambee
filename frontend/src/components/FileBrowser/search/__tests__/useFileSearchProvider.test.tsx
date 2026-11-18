@@ -63,6 +63,51 @@ describe("useFileSearchProvider", () => {
     });
   });
 
+  it("does not publish an empty pre-history update when no loaded directory files match", async () => {
+    let finishHistory!: (response: Awaited<ReturnType<typeof api.searchRecentFiles>>) => void;
+    vi.mocked(api.searchRecentFiles).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishHistory = resolve;
+        })
+    );
+    const { result } = renderHook(
+      () =>
+        useFileSearchProvider({
+          connectionId: "connection-1",
+          currentPath: "Reports",
+          files,
+          connectionName: "Reports server",
+          resultLimit: 10,
+          getConnectionName: () => "Reports server",
+          onOpenCurrentFile: vi.fn(),
+          onOpenRecentFile: vi.fn(),
+        }),
+      { wrapper }
+    );
+    const onUpdate = vi.fn();
+    let pending!: ReturnType<typeof result.current.fetchResults>;
+    act(() => {
+      pending = result.current.fetchResults("archive", new AbortController().signal, onUpdate);
+    });
+    expect(onUpdate).not.toHaveBeenCalled();
+    await act(async () => {
+      finishHistory({
+        result_limit: 10,
+        results: [
+          {
+            id: "recent-archive",
+            connection_id: "connection-1",
+            path: "Archives/archive.zip",
+            file_name: "archive.zip",
+            last_opened_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+      expect(await pending).toEqual([expect.objectContaining({ value: "recent:recent-archive" })]);
+    });
+  });
+
   it("does not let an older history completion replace a newer selection map", async () => {
     let finishOld!: (response: Awaited<ReturnType<typeof api.searchRecentFiles>>) => void;
     vi.mocked(api.searchRecentFiles).mockImplementationOnce(

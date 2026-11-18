@@ -19,6 +19,7 @@ import type {
   VirtualContentProviderId,
   VirtualItemHandle,
 } from "./contentProviders";
+import type { PaneTabCollection, PaneTabSummary, TabSessionState } from "./tabSessions";
 
 export type SortField = "name" | "size" | "modified" | "type";
 
@@ -46,6 +47,7 @@ export interface ViewInfo {
   images?: string[];
   currentIndex?: number;
   sessionId: string;
+  originTabId?: string;
 }
 
 export interface BrowserViewerPickerState {
@@ -88,6 +90,7 @@ export interface DirectoryChange {
 }
 
 export interface FileBrowserPaneRecoverySnapshot {
+  tabId?: string;
   connectionId: string;
   path: string;
   archiveLocation?: ArchiveLocation | null;
@@ -189,10 +192,41 @@ export interface UseFileBrowserPaneConfig {
   /** Called when an incoming route resolves to a canonical existing location. */
   onResolveRouteLocation?: (path: string, archiveLocation: ArchiveLocation | null) => void;
   onOpenViewer?: (info: ViewInfo) => void;
+
+  /** Reports whether another visible pane currently holds a live subscription for this physical directory. */
+  isLocationMonitoredElsewhere?: (connectionId: string, path: string) => boolean;
+
+  /** Called when tab create, select, close, or undo changes the pane's selected tab session. */
+  onTabSessionChange?: (event: {
+    selectedTabId: string;
+    connectionId: string;
+    currentPath: string;
+    archiveLocation: ArchiveLocation | null;
+    selectionChanged: boolean;
+  }) => void;
+
+  /** Optional cap override on retained listings for inactive tabs in this pane. */
+  maxInactiveRetainedTabListings?: number;
 }
 
 /** Everything returned by useFileBrowserPane for use by the parent and pane component. */
 export interface UseFileBrowserPaneReturn {
+  // ── Pane Tabs ───────────────────────────────────────────────────────────
+  tabs: PaneTabSummary[];
+  selectedTabId: string;
+  selectedTabIdRef: React.MutableRefObject<string>;
+  tabRevealToken: number;
+  createTab: (options?: { focusList?: boolean; notifyRoute?: boolean }) => string | null;
+  selectTab: (tabId: string, options?: { focusList?: boolean; notifyRoute?: boolean }) => boolean;
+  selectAdjacentTab: (direction: "previous" | "next", options?: { focusList?: boolean }) => string;
+  closeTab: (
+    tabId: string,
+    options?: { focusList?: boolean; notifyRoute?: boolean }
+  ) => { closed: boolean; closedSession?: TabSessionState; closedIndex?: number; selectionChanged?: boolean };
+  restoreClosedTab: (session: TabSessionState, insertionIndex: number, options?: { focusList?: boolean; notifyRoute?: boolean }) => string;
+  hydrateTabs: (collection: PaneTabCollection, options?: { focusList?: boolean }) => void;
+  requestListFocus: () => void;
+
   // ── Core State ──────────────────────────────────────────────────────────
   connectionId: string;
   setConnectionId: React.Dispatch<React.SetStateAction<string>>;
@@ -240,7 +274,7 @@ export interface UseFileBrowserPaneReturn {
   /** Clear all selections. */
   handleClearSelection: () => void;
   /** Removes canonical paths after a successful source-mutating operation. */
-  removeSelectedPaths: (paths: readonly string[]) => void;
+  removeSelectedPaths: (paths: readonly string[], targetTabId?: string) => void;
   /** Select one file without requiring list focus. */
   selectItem: (file: FileEntry, index: number) => void;
   /** Toggle one file without requiring list focus. */
@@ -289,6 +323,8 @@ export interface UseFileBrowserPaneReturn {
   connectionIdRef: React.MutableRefObject<string>;
   /** Always-current mirror of currentPath for async/WebSocket callbacks. */
   currentPathRef: React.MutableRefObject<string>;
+  /** Read-only mirror of committed archiveLocation for synchronous route serialization. */
+  archiveLocationRef: React.RefObject<ArchiveLocation | null>;
 
   // ── Virtualizer ────────────────────────────────────────────────────────
   rowVirtualizer: Virtualizer<HTMLDivElement, Element>;
@@ -363,7 +399,7 @@ export interface UseFileBrowserPaneReturn {
   /** Seed directory contents and cache from already-known data for a matching connection/path. */
   seedDirectorySnapshot: (connectionId: string, path: string, items: FileEntry[]) => void;
   /** Apply route-driven state from the browser location without triggering navigation again. */
-  applyLocation: (connectionId: string, path: string, routeSyncToken?: number) => void;
+  applyLocation: (connectionId: string, path: string, routeSyncToken?: number, options?: { targetTabId?: string | null }) => void;
   /** Capture the current pane UI state for suspend/resume recovery. */
   captureRecoverySnapshot: () => FileBrowserPaneRecoverySnapshot | null;
   /** Restore a previously captured pane UI state without re-running bootstrap logic. */

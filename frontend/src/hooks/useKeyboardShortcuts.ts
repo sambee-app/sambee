@@ -1,4 +1,5 @@
 import { createContext, useContext, useId, useLayoutEffect } from "react";
+import { isApplePlatform } from "../utils/platform";
 
 export const KeyboardShortcutScopeContext = createContext<string | null>(null);
 export const KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE = "data-keyboard-shortcut-scope";
@@ -26,6 +27,21 @@ function getKeyboardShortcutScope(target: EventTarget | null): string | null {
   return target instanceof Element
     ? (target.closest(`[${KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE}]`)?.getAttribute(KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE) ?? null)
     : null;
+}
+
+/**
+ * Checks whether a keyboard event belongs to the given shortcut scope and is not
+ * intercepted by a nested modal/dialog scope or an active IME composition.
+ */
+export function isEventInKeyboardShortcutScope(event: KeyboardEvent, scope: string | null): boolean {
+  if (event.defaultPrevented || event.isComposing) {
+    return false;
+  }
+  const activeScope = getActiveKeyboardShortcutScope();
+  if (activeScope !== null && activeScope !== scope) {
+    return false;
+  }
+  return (getKeyboardShortcutScope(event.target) ?? getKeyboardShortcutScope(document.activeElement) ?? activeScope) === scope;
 }
 
 const INTERACTIVE_SHORTCUT_BLOCK_SELECTOR = [
@@ -71,6 +87,8 @@ export interface KeyboardShortcut {
   shift?: boolean;
   /** Requires Alt/Option modifier key */
   alt?: boolean;
+  /** Replaces Alt with physical Control (without Cmd) on Apple platforms */
+  macControlForAlt?: boolean;
   /** Allow when input field has focus (default: false) */
   allowInInput?: boolean;
   /** Allow when focus is inside the given interactive input surface */
@@ -93,6 +111,143 @@ export interface UseKeyboardShortcutsConfig {
   active?: boolean;
 }
 
+const ASCII_LETTER_PATTERN = /^[a-zA-Z]$/;
+
+interface ResolvedShortcutRules {
+  /** Accepts Ctrl or Meta (standard cross-platform Ctrl/Cmd behavior) */
+  ctrlOrMeta: boolean;
+  /** Requires physical Control without Meta (macOS Control-for-Alt replacement) */
+  controlOnly: boolean;
+  /** Requires Shift */
+  shift: boolean;
+  /** Requires Alt/Option */
+  alt: boolean;
+  /** Allows matching ASCII-letter keys via event.keyCode when Option alters event.key on macOS */
+  allowMacOptionLetterFallback: boolean;
+  /** Display labels for required modifiers in canonical order */
+  modifierLabels: string[];
+  /** Normalized array of main keys */
+  keys: string[];
+}
+
+function isAsciiLetter(key: string): boolean {
+  return ASCII_LETTER_PATTERN.test(key);
+}
+
+/**
+ * Resolves platform-aware modifier requirements, display labels, and key-matching rules
+ * from a single helper so matching, tooltips, and help tables always agree.
+ */
+function resolveShortcutRules(
+  shortcut: Pick<KeyboardShortcut, "keys" | "ctrl" | "shift" | "alt" | "macControlForAlt">
+): ResolvedShortcutRules {
+  const isApple = isApplePlatform();
+  const keys = Array.isArray(shortcut.keys) ? shortcut.keys : [shortcut.keys];
+  const useMacControlForAlt = isApple && Boolean(shortcut.alt) && Boolean(shortcut.macControlForAlt) && !shortcut.ctrl;
+  const ctrlOrMeta = Boolean(shortcut.ctrl);
+  const controlOnly = useMacControlForAlt;
+  const shift = Boolean(shortcut.shift);
+  const alt = Boolean(shortcut.alt) && !useMacControlForAlt;
+  const modifierLabels: string[] = [];
+
+  if (ctrlOrMeta) {
+    modifierLabels.push("Ctrl");
+  } else if (controlOnly) {
+    modifierLabels.push("Control");
+  }
+  if (shift) {
+    modifierLabels.push("Shift");
+  }
+  if (alt) {
+    modifierLabels.push(isApple ? "Option" : "Alt");
+  }
+
+  return {
+    ctrlOrMeta,
+    controlOnly,
+    shift,
+    alt,
+    allowMacOptionLetterFallback: isApple && alt,
+    modifierLabels,
+    keys,
+  };
+}
+
+function matchesShortcutKey(event: KeyboardEvent, rules: ResolvedShortcutRules): boolean {
+  if (rules.keys.some((key) => event.key === key)) {
+    return true;
+  }
+
+  if (!rules.allowMacOptionLetterFallback || !event.altKey) {
+    return false;
+  }
+
+  return rules.keys.some((key) => isAsciiLetter(key) && event.keyCode === key.toUpperCase().charCodeAt(0));
+}
+
+/**
+ * Checks whether a KeyboardEvent satisfies a shortcut definition's key and modifier rules.
+ */
+export function matchesKeyboardShortcut(
+  event: KeyboardEvent,
+  shortcut: Pick<KeyboardShortcut, "keys" | "ctrl" | "shift" | "alt" | "macControlForAlt">
+): boolean {
+  if (event.isComposing) {
+    return false;
+  }
+  const rules = resolveShortcutRules(shortcut);
+
+  if (rules.ctrlOrMeta && !(event.ctrlKey || event.metaKey)) return false;
+  if (rules.controlOnly && (!event.ctrlKey || event.metaKey)) return false;
+  if (rules.shift && !event.shiftKey) return false;
+  if (rules.alt && !event.altKey) return false;
+
+  if (!matchesShortcutKey(event, rules)) return false;
+
+  const isPrintableChar = rules.keys.some((key) => key.length === 1);
+  if (!rules.ctrlOrMeta && !rules.controlOnly && (event.ctrlKey || event.metaKey)) return false;
+  if (!rules.shift && event.shiftKey && !isPrintableChar) return false;
+  if (!rules.alt && event.altKey) return false;
+
+  return true;
+}
+
+/**
+ * Collapses case-alternative ASCII letter pairs (such as `["c", "C"]`) into a single
+ * upper-case letter while preserving non-paired keys and single-key definitions.
+ */
+function collapseCaseAlternativeKeys(keys: readonly string[]): string[] {
+  const seenLetters = new Map<string, Set<string>>();
+  for (const key of keys) {
+    if (isAsciiLetter(key)) {
+      const upper = key.toUpperCase();
+      let variants = seenLetters.get(upper);
+      if (!variants) {
+        variants = new Set();
+        seenLetters.set(upper, variants);
+      }
+      variants.add(key);
+    }
+  }
+
+  const emittedCollapsedLetters = new Set<string>();
+  const collapsed: string[] = [];
+  for (const key of keys) {
+    if (isAsciiLetter(key)) {
+      const upper = key.toUpperCase();
+      if ((seenLetters.get(upper)?.size ?? 0) > 1) {
+        if (!emittedCollapsedLetters.has(upper)) {
+          emittedCollapsedLetters.add(upper);
+          collapsed.push(upper);
+        }
+        continue;
+      }
+    }
+    collapsed.push(key);
+  }
+  return collapsed;
+}
+
 /**
  * Format key for display (capitalize, handle special keys)
  */
@@ -105,6 +260,8 @@ const formatKey = (key: string): string => {
     PageDown: "Page Down",
     PageUp: "Page Up",
     Escape: "Esc",
+    "+": "Plus",
+    "-": "Minus",
   };
 
   return specialKeys[key] || key;
@@ -113,27 +270,16 @@ const formatKey = (key: string): string => {
 /**
  * Format shortcut for display in tooltips
  */
-export const formatShortcut = (shortcut: KeyboardShortcut): string => {
+export const formatShortcut = (
+  shortcut: Pick<KeyboardShortcut, "keys" | "label" | "ctrl" | "shift" | "alt" | "macControlForAlt">
+): string => {
   // Use provided label if available
   if (shortcut.label) return shortcut.label;
 
-  const keys: string[] = [];
+  const rules = resolveShortcutRules(shortcut);
+  const formattedMainKeys = collapseCaseAlternativeKeys(rules.keys).map(formatKey).join(" / ");
 
-  if (shortcut.ctrl) {
-    keys.push("Ctrl");
-  }
-  if (shortcut.shift) {
-    keys.push("Shift");
-  }
-  if (shortcut.alt) {
-    keys.push("Alt");
-  }
-
-  const mainKeys = Array.isArray(shortcut.keys) ? shortcut.keys : [shortcut.keys];
-  const formattedMainKeys = mainKeys.map(formatKey).join(" / ");
-  keys.push(formattedMainKeys);
-
-  return keys.join("+");
+  return [...rules.modifierLabels, formattedMainKeys].join("+");
 };
 
 /**
@@ -141,7 +287,7 @@ export const formatShortcut = (shortcut: KeyboardShortcut): string => {
  * Accepts a partial shortcut definition (handler not required for tooltip display)
  */
 export const withShortcut = (shortcut: Omit<KeyboardShortcut, "handler" | "enabled">): string => {
-  return `${shortcut.description} (${formatShortcut(shortcut as KeyboardShortcut)})`;
+  return `${shortcut.description} (${formatShortcut(shortcut)})`;
 };
 
 /**
@@ -196,10 +342,7 @@ export const useKeyboardShortcuts = ({ shortcuts, inputSelector = "input, textar
     const sortedShortcuts = [...shortcuts].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      const activeScope = getActiveKeyboardShortcutScope();
-      if (activeScope !== null && activeScope !== scope) return;
-      if ((getKeyboardShortcutScope(event.target) ?? getKeyboardShortcutScope(document.activeElement) ?? activeScope) !== scope) return;
+      if (!isEventInKeyboardShortcutScope(event, scope)) return;
 
       // Check if any interactive control has focus
       let activeElement = document.activeElement;
@@ -225,27 +368,7 @@ export const useKeyboardShortcuts = ({ shortcuts, inputSelector = "input, textar
           if (!isAllowedInputSurface) return false;
         }
 
-        // Check modifier keys
-        if (shortcut.ctrl && !(event.ctrlKey || event.metaKey)) return false;
-        if (shortcut.shift && !event.shiftKey) return false;
-        if (shortcut.alt && !event.altKey) return false;
-
-        // Check if key matches first
-        const keys = Array.isArray(shortcut.keys) ? shortcut.keys : [shortcut.keys];
-        const keyMatches = keys.some((key) => event.key === key);
-
-        if (!keyMatches) return false;
-
-        // Check if no modifiers should be pressed
-        // For printable characters (length 1), ignore shift key differences due to keyboard layouts
-        // E.g., "/" requires Shift on German keyboard but not on US keyboard
-        const isPrintableChar = keys.some((key) => key.length === 1);
-
-        if (!shortcut.ctrl && (event.ctrlKey || event.metaKey)) return false;
-        if (!shortcut.shift && event.shiftKey && !isPrintableChar) return false;
-        if (!shortcut.alt && event.altKey) return false;
-
-        return true;
+        return matchesKeyboardShortcut(event, shortcut);
       };
 
       for (const shortcut of sortedShortcuts) {

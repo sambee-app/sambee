@@ -312,7 +312,6 @@ export const CODEMIRROR_EDITOR_SHORTCUTS = {
     get description() {
       return translate("viewer.edit.toggleCaseSensitive");
     },
-    label: "Alt+C",
     helpGroup: "editing",
   },
   TOGGLE_WHOLE_WORD: {
@@ -323,7 +322,6 @@ export const CODEMIRROR_EDITOR_SHORTCUTS = {
     get description() {
       return translate("viewer.edit.toggleWholeWord");
     },
-    label: "Alt+W",
     helpGroup: "editing",
   },
   TOGGLE_REGULAR_EXPRESSION: {
@@ -334,7 +332,6 @@ export const CODEMIRROR_EDITOR_SHORTCUTS = {
     get description() {
       return translate("viewer.edit.toggleRegularExpression");
     },
-    label: "Alt+R",
     helpGroup: "editing",
   },
   TOGGLE_WORD_WRAP: {
@@ -345,7 +342,6 @@ export const CODEMIRROR_EDITOR_SHORTCUTS = {
     get description() {
       return translate("viewer.edit.toggleWordWrap");
     },
-    label: "Alt+Z",
     helpGroup: "editing",
   },
 } as const satisfies Record<string, ShortcutDefinition>;
@@ -393,7 +389,6 @@ export const MARKDOWN_EDITOR_SHORTCUTS = {
     get description() {
       return translate("viewer.shortcuts.insertTable");
     },
-    label: "Ctrl+Alt+T",
     helpGroup: "editing",
   },
   INSERT_THEMATIC_BREAK: {
@@ -405,7 +400,6 @@ export const MARKDOWN_EDITOR_SHORTCUTS = {
     get description() {
       return translate("viewer.shortcuts.insertThematicBreak");
     },
-    label: "Ctrl+Alt+H",
     helpGroup: "editing",
   },
   INLINE_CODE: {
@@ -456,7 +450,6 @@ export const BROWSER_SHORTCUTS = {
     get description() {
       return translate("fileBrowser.shortcuts.openLocationInNewTab");
     },
-    label: "Ctrl+Alt+T",
     helpGroup: "navigation",
   },
   //
@@ -827,6 +820,44 @@ export const PANE_SHORTCUTS = {
       return translate("fileBrowser.shortcuts.switchActivePane");
     },
     label: "Tab",
+    helpGroup: "panes",
+  },
+  PREVIOUS_TAB: {
+    id: "previous-pane-tab",
+    keys: "ArrowLeft",
+    get description() {
+      return translate("fileBrowser.shortcuts.previousTab");
+    },
+    label: "Left",
+    helpGroup: "panes",
+  },
+  NEXT_TAB: {
+    id: "next-pane-tab",
+    keys: "ArrowRight",
+    get description() {
+      return translate("fileBrowser.shortcuts.nextTab");
+    },
+    label: "Right",
+    helpGroup: "panes",
+  },
+  NEW_TAB: {
+    id: "new-pane-tab",
+    keys: "+",
+    alt: true,
+    macControlForAlt: true,
+    get description() {
+      return translate("fileBrowser.shortcuts.newTab");
+    },
+    helpGroup: "panes",
+  },
+  CLOSE_TAB: {
+    id: "close-pane-tab",
+    keys: "-",
+    alt: true,
+    macControlForAlt: true,
+    get description() {
+      return translate("fileBrowser.shortcuts.closeTab");
+    },
     helpGroup: "panes",
   },
 } as const satisfies Record<string, ShortcutDefinition>;

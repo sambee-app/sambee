@@ -1,7 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { createTheme } from "@mui/material/styles";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { createMockConnection } from "../../../test/fixtures/connections";
+import { renderWithStyles as render } from "../../../test/utils/renderWithStyles";
+import { getSecondaryActionStripStyle } from "../../../theme/commonStyles";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import { SecondaryActionStrip } from "../SecondaryActionStrip";
 
@@ -62,7 +65,9 @@ describe("SecondaryActionStrip", () => {
       </SambeeThemeProvider>
     );
 
-    const stripRoot = container.firstElementChild;
+    const stripRoot = container.firstElementChild as Element;
+    expect(getSecondaryActionStripStyle(createTheme())).not.toHaveProperty("boxShadow");
+    expect(["", "none", "currentcolor none"]).toContain(window.getComputedStyle(stripRoot).boxShadow);
     const connectionTriggerContent = screen.getByRole("combobox", { name: "Select connection" }).firstElementChild;
     const dualPaneToggle = screen.getByRole("button", { name: "Toggle dual-pane view" });
     const viewModeTriggerContent = screen.getByRole("button", { name: "View mode options" }).firstElementChild;

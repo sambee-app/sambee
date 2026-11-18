@@ -1,0 +1,34 @@
++++
+title = "Dual-Pane Mode"
++++
+
+Sambee's dual-pane mode shows the contents of two directories next to each other. This layout was popularized by Norton Commander and later Total Commander. It makes it easier to move or copy files between directories and to compare two directories visually.
+
+## Work in Dual-Pane Mode
+
+To switch between single-pane and dual-pane mode:
+
+- Press <kbd>Ctrl</kbd> + <kbd>B</kbd> to switch from single-pane to dual-pane mode and back.
+
+Use <kbd>Tab</kbd> to move focus between the panes. To focus a specific pane, use **Focus Left Pane** or **Focus Right Pane** in command search (<kbd>Ctrl</kbd> + <kbd>P</kbd>). **Focus Right Pane** also opens dual-pane mode if only one pane is visible.
+
+Each pane keeps its own folder tabs and selected tab. Shared toolbar actions, keyboard shortcuts, and quick-bar navigation apply to the active pane's selected tab without changing the other pane. When you return to single-pane mode or narrow the browser window, Sambee keeps the right pane's tabs in memory for the current session and restores them when dual-pane mode reopens. See [Open Connections and Browse Folders](../connect-to-an-smb-share/#keep-multiple-folders-open-with-tabs).
+
+## Match Pane Locations
+
+Use these commands to show the same connection and directory in both panes:
+
+- Press <kbd>Ctrl</kbd> + <kbd>Left</kbd> to set the left pane to the right pane's location.
+- Press <kbd>Ctrl</kbd> + <kbd>Right</kbd> to set the right pane to the left pane's location.
+
+The direction selects the pane to change, regardless of which pane is active. The active pane and keyboard focus stay unchanged. These commands copy only the location, including archive subdirectories. They don't copy or move files, selections, or pane preferences. Both locations must finish loading first. If they already match, nothing changes. Use browser Back to restore the previous locations.
+
+To open the active pane's location in a separate browser tab, press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd> on Windows or Linux, or <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>T</kbd> on macOS. The new browser tab opens in single-pane mode, while the original browser tab stays unchanged.
+
+All three commands are also available through command search (<kbd>Ctrl</kbd> + <kbd>P</kbd>).
+
+## Requirements
+
+Use [Copy and Move Files](../../organize-and-transfer-files/copy-and-move-files/) for transfers, or [Work with ZIP Archives](../../organize-and-transfer-files/work-with-zip-archives/) for extraction.
+
+- Dual-pane mode is currently a desktop-only feature (i.e., not available on mobile due to screen size limitations).

@@ -1,6 +1,7 @@
 import type { ParseKeys } from "i18next";
-import type { KeyboardShortcut } from "../hooks/useKeyboardShortcuts";
+import { formatShortcut, type KeyboardShortcut } from "../hooks/useKeyboardShortcuts";
 import { translate } from "../i18n";
+import { BROWSER_SHORTCUTS, PANE_SHORTCUTS } from "./keyboardShortcuts";
 
 export interface BrowserCommandContext {
   isDualMode: boolean;
@@ -20,9 +21,18 @@ export interface BrowserCommandContext {
   canMoveToOtherPane: boolean;
   canOpenLocationInNewTab: boolean;
   canMatchPaneLocations: boolean;
+  canCreateTab?: boolean;
+  canCloseTab?: boolean;
+  canUndoCloseTab?: boolean;
+  canSwitchTab?: boolean;
   openLocationInNewTab: () => void;
   matchLeftPaneLocation: () => void;
   matchRightPaneLocation: () => void;
+  createTab?: () => void;
+  closeTab?: () => void;
+  undoCloseTab?: () => void;
+  previousTab?: () => void;
+  nextTab?: () => void;
   openQuickNav: () => void;
   openFileSearch: () => void;
   openCommandMode: () => void;
@@ -69,7 +79,7 @@ interface BrowserCommandTemplate {
   descriptionKey?: ParseKeys;
   keywords?: string[];
   defaultShortcutIds?: string[];
-  shortcutLabel?: string;
+  shortcutLabel?: string | (() => string);
   selectionFocusTarget?: "file-list" | "quick-bar" | "none";
   isEnabled: (context: BrowserCommandContext) => boolean;
   run: (context: BrowserCommandContext) => void;
@@ -142,7 +152,7 @@ const BROWSER_COMMANDS = [
     categoryKey: "fileBrowser.commands.categories.navigation",
     keywords: ["open", "location", "folder", "directory", "tab"],
     defaultShortcutIds: ["open-location-in-new-tab"],
-    shortcutLabel: "Ctrl+Alt+T",
+    shortcutLabel: () => formatShortcut(BROWSER_SHORTCUTS.OPEN_LOCATION_IN_NEW_TAB),
     isEnabled: (context) => context.canOpenLocationInNewTab,
     run: (context) => context.openLocationInNewTab(),
   }),
@@ -303,6 +313,55 @@ const BROWSER_COMMANDS = [
     run: (context) => context.switchPane(),
   }),
   createCommand({
+    id: "browser.newTab",
+    titleKey: "fileBrowser.commands.items.newTab.title",
+    categoryKey: "fileBrowser.commands.categories.panes",
+    keywords: ["new", "create", "add", "folder", "tab", "pane"],
+    defaultShortcutIds: ["new-pane-tab"],
+    shortcutLabel: () => formatShortcut(PANE_SHORTCUTS.NEW_TAB),
+    isEnabled: (context) =>
+      Boolean(context.canCreateTab ?? context.connectionSelected) && !context.settingsOpen && !context.mobileSettingsOpen,
+    run: (context) => context.createTab?.(),
+  }),
+  createCommand({
+    id: "browser.closeTab",
+    titleKey: "fileBrowser.commands.items.closeTab.title",
+    categoryKey: "fileBrowser.commands.categories.panes",
+    keywords: ["close", "remove", "folder", "tab", "pane"],
+    defaultShortcutIds: ["close-pane-tab"],
+    shortcutLabel: () => formatShortcut(PANE_SHORTCUTS.CLOSE_TAB),
+    isEnabled: (context) => Boolean(context.canCloseTab) && !context.settingsOpen && !context.mobileSettingsOpen,
+    run: (context) => context.closeTab?.(),
+  }),
+  createCommand({
+    id: "browser.undoCloseTab",
+    titleKey: "fileBrowser.commands.items.undoCloseTab.title",
+    categoryKey: "fileBrowser.commands.categories.panes",
+    keywords: ["undo", "reopen", "restore", "closed", "folder", "tab", "pane"],
+    isEnabled: (context) => Boolean(context.canUndoCloseTab) && !context.settingsOpen && !context.mobileSettingsOpen,
+    run: (context) => context.undoCloseTab?.(),
+  }),
+  createCommand({
+    id: "browser.previousTab",
+    titleKey: "fileBrowser.commands.items.previousTab.title",
+    categoryKey: "fileBrowser.commands.categories.panes",
+    keywords: ["previous", "preceding", "left", "folder", "tab", "pane"],
+    defaultShortcutIds: ["previous-pane-tab"],
+    shortcutLabel: PANE_SHORTCUTS.PREVIOUS_TAB.label,
+    isEnabled: (context) => Boolean(context.canSwitchTab) && !context.settingsOpen && !context.mobileSettingsOpen,
+    run: (context) => context.previousTab?.(),
+  }),
+  createCommand({
+    id: "browser.nextTab",
+    titleKey: "fileBrowser.commands.items.nextTab.title",
+    categoryKey: "fileBrowser.commands.categories.panes",
+    keywords: ["next", "following", "right", "folder", "tab", "pane"],
+    defaultShortcutIds: ["next-pane-tab"],
+    shortcutLabel: PANE_SHORTCUTS.NEXT_TAB.label,
+    isEnabled: (context) => Boolean(context.canSwitchTab) && !context.settingsOpen && !context.mobileSettingsOpen,
+    run: (context) => context.nextTab?.(),
+  }),
+  createCommand({
     id: "browser.copyToOtherPane",
     titleKey: "fileBrowser.commands.items.copyToOtherPane.title",
     categoryKey: "fileBrowser.commands.categories.panes",
@@ -363,7 +422,7 @@ function localizeCommand(definition: BrowserCommandTemplate): BrowserCommandDefi
     description: definition.descriptionKey ? translate(definition.descriptionKey) : undefined,
     keywords: definition.keywords,
     defaultShortcutIds: definition.defaultShortcutIds,
-    shortcutLabel: definition.shortcutLabel,
+    shortcutLabel: typeof definition.shortcutLabel === "function" ? definition.shortcutLabel() : definition.shortcutLabel,
     selectionFocusTarget: definition.selectionFocusTarget,
     isEnabled: definition.isEnabled,
     run: definition.run,
@@ -379,7 +438,7 @@ export type BrowserCommand = BrowserCommandDefinition;
 export function toShortcutMap(shortcuts: KeyboardShortcut[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const shortcut of shortcuts) {
-    map.set(shortcut.id, shortcut.label ?? shortcut.keys.toString());
+    map.set(shortcut.id, formatShortcut(shortcut));
   }
   return map;
 }

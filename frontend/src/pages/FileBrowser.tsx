@@ -27,7 +27,7 @@ import { ArchiveExtractDialog, type ArchiveExtractionScope } from "../components
 import { ArchiveOperationProgress } from "../components/FileBrowser/ArchiveOperationProgress";
 import type { CompactItemAction } from "../components/FileBrowser/CompactItemActionsMenu";
 import CopyMoveDialog, { type CopyMoveMode } from "../components/FileBrowser/CopyMoveDialog";
-import { DesktopToolbar } from "../components/FileBrowser/DesktopToolbar";
+import { DesktopToolbar, type ToolbarQuickBarProps } from "../components/FileBrowser/DesktopToolbar";
 import { DialogOperationContext } from "../components/FileBrowser/DialogOperationContext";
 import type { CompanionLifecycleStatus } from "../components/FileBrowser/FileBrowserAlerts";
 import { FileBrowserAlerts, FileBrowserStatus } from "../components/FileBrowser/FileBrowserAlerts";
@@ -138,18 +138,30 @@ import {
   readSelectedConnectionIdPreference,
   setFileBrowserPaneModePreference,
   shouldUseTouchSelectionControls,
+  shouldUseTouchTabControls,
   useQuickBarKeyboardHints,
   useQuickBarShortcutHintVisibilityPreference,
   useTouchFriendlyFileSelectionPreference,
 } from "./FileBrowser/preferences";
 import {
   type BrowseRouteState,
+  type BrowseRouteTarget,
   buildBrowseRouteTarget,
   parseBrowseRoute,
   resolveBrowseRouteState,
   serializeBrowseRoute,
   VIEWER_QUERY_KEYS,
 } from "./FileBrowser/routing";
+import {
+  getWorkspaceBrowseIdentity,
+  loadPaneTabsSessionStorage,
+  type PaneTabHistoryMetadata,
+  readPaneTabHistoryState,
+  resolveRestoredWorkspaceTabs,
+  savePaneTabsSessionStorage,
+  withPaneTabHistoryState,
+} from "./FileBrowser/tabSessionStorage";
+import type { ClosedPaneTabRecord } from "./FileBrowser/tabSessions";
 import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, ViewInfo, VirtualRouteLocation } from "./FileBrowser/types";
 import { ACTIVE_PANE_QUERY_KEY, ACTIVE_PANE_STORAGE_KEY, RIGHT_PANE_QUERY_KEY } from "./FileBrowser/types";
 import { useBrowserDownload } from "./FileBrowser/useBrowserDownload";
@@ -441,10 +453,20 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const theme = useTheme();
   const { t } = useTranslation();
   const initialRecoverySnapshotRef = React.useRef(loadBrowserRecoverySnapshot(location.pathname + actualLocation.search));
+  const initialPaneTabsSessionRef = React.useRef<ReturnType<typeof loadPaneTabsSessionStorage> | null>(null);
+  if (initialPaneTabsSessionRef.current === null) {
+    initialPaneTabsSessionRef.current = loadPaneTabsSessionStorage();
+  }
+  const hasHydratedPaneTabsRef = React.useRef(false);
+  const unresolvedTabTargetsRef = React.useRef<Map<string, BrowseRouteTarget>>(new Map());
   const hasHydratedRecoverySnapshotRef = React.useRef(false);
   const hasStartedInitialConnectionLoadRef = React.useRef(false);
   const [recoveryPhase, setRecoveryPhase] = useState<RecoveryPhase>(() =>
     initialRecoverySnapshotRef.current === null ? "ready" : "pending"
+  );
+  const [closedTabRecord, setClosedTabRecord] = useState<ClosedPaneTabRecord | null>(null);
+  const [tabStorageUnavailableNotice, setTabStorageUnavailableNotice] = useState<boolean>(
+    () => initialPaneTabsSessionRef.current?.notifyUnavailable ?? false
   );
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -454,9 +476,16 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   // Detect screen size and input method for responsive behavior
   const useCompactLayout = useMediaQuery(theme.breakpoints.down("sm"));
   const hasCoarsePrimaryPointer = useMediaQuery("(pointer: coarse)");
+  const hasCoarseAnyPointer = useMediaQuery("(any-pointer: coarse)");
+  const hasHoverNone = useMediaQuery("(hover: none)");
   const [quickBarShortcutHintVisibility] = useQuickBarShortcutHintVisibilityPreference();
   const [touchFriendlyFileSelection] = useTouchFriendlyFileSelectionPreference();
   const useTouchSelectionControls = shouldUseTouchSelectionControls(touchFriendlyFileSelection, useCompactLayout, hasCoarsePrimaryPointer);
+  const useTouchTabControls = shouldUseTouchTabControls({
+    preference: touchFriendlyFileSelection,
+    hasCoarseAnyPointer,
+    hasHoverNone,
+  });
   const showQuickBarKeyboardHints = useQuickBarKeyboardHints(quickBarShortcutHintVisibility, useCompactLayout);
 
   // Use explicit layout density rather than pointer heuristics so row sizing stays stable.
@@ -556,10 +585,11 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const [copyMoveMode, setCopyMoveMode] = useState<CopyMoveMode>("copy");
   const [copyMoveItems, setCopyMoveItems] = useState<BrowserItem[]>([]);
   const [copyMoveSourcePaneId, setCopyMoveSourcePaneId] = useState<PaneId>("left");
+  const [copyMoveSourceTabId, setCopyMoveSourceTabId] = useState<string>("");
+  const [copyMoveSourceLocation, setCopyMoveSourceLocation] = useState<ContentLocation | null>(null);
   const [copyMoveDestination, setCopyMoveDestination] = useState<ContentLocation | null>(null);
   const [copyMoveDestinationLabel, setCopyMoveDestinationLabel] = useState("");
   const [copyMoveSameDirectory, setCopyMoveSameDirectory] = useState(false);
-  const [copyMoveDestinationPaneId, setCopyMoveDestinationPaneId] = useState<PaneId>("right");
   const [copyMoveProcessing, setCopyMoveProcessing] = useState(false);
   const [copyMoveProgress, setCopyMoveProgress] = useState<{ current: number; total: number } | undefined>();
   const [copyMoveTransferProgress, setCopyMoveTransferProgress] = useState<{
@@ -690,7 +720,26 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const rightVirtualLocationNavigateRef = React.useRef<(location: VirtualRouteLocation | null) => void>(() => undefined);
   const leftRouteLocationResolveRef = React.useRef<(path: string, archiveLocation: ArchiveLocation | null) => void>(() => undefined);
   const rightRouteLocationResolveRef = React.useRef<(path: string, archiveLocation: ArchiveLocation | null) => void>(() => undefined);
+  const leftTabSessionChangeRef = React.useRef<
+    (event: {
+      selectedTabId: string;
+      connectionId: string;
+      currentPath: string;
+      archiveLocation: ArchiveLocation | null;
+      selectionChanged: boolean;
+    }) => void
+  >(() => undefined);
+  const rightTabSessionChangeRef = React.useRef<
+    (event: {
+      selectedTabId: string;
+      connectionId: string;
+      currentPath: string;
+      archiveLocation: ArchiveLocation | null;
+      selectionChanged: boolean;
+    }) => void
+  >(() => undefined);
   const pendingPaneFocusRef = React.useRef<PaneId | null>(null);
+  const tabHistoryByLocationKeyRef = React.useRef<Map<string, PaneTabHistoryMetadata>>(new Map());
   const routeSyncTokenRef = React.useRef(0);
   const openViewerRef = React.useRef<(paneId: PaneId, info: ViewInfo) => void>(() => undefined);
   const workspaceRef = React.useRef<WorkspaceViewerHandle | null>(null);
@@ -733,6 +782,13 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     onNavigateVirtualLocation: (location) => leftVirtualLocationNavigateRef.current(location),
     onResolveRouteLocation: (path, archiveLocation) => leftRouteLocationResolveRef.current(path, archiveLocation),
     onOpenViewer: (info) => openViewerRef.current("left", info),
+    isLocationMonitoredElsewhere: (connectionId, path) =>
+      Boolean(
+        isDualModeRef.current &&
+          rightPaneRef.current.monitoredLocation?.connectionId === connectionId &&
+          rightPaneRef.current.monitoredLocation.path === path
+      ),
+    onTabSessionChange: (event) => leftTabSessionChangeRef.current(event),
   });
 
   // Right pane — always instantiated (React hooks rule: no conditional hooks),
@@ -754,6 +810,9 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     onNavigateVirtualLocation: (location) => rightVirtualLocationNavigateRef.current(location),
     onResolveRouteLocation: (path, archiveLocation) => rightRouteLocationResolveRef.current(path, archiveLocation),
     onOpenViewer: (info) => openViewerRef.current("right", info),
+    isLocationMonitoredElsewhere: (connectionId, path) =>
+      Boolean(leftPaneRef.current.monitoredLocation?.connectionId === connectionId && leftPaneRef.current.monitoredLocation.path === path),
+    onTabSessionChange: (event) => rightTabSessionChangeRef.current(event),
   });
   const leftPaneRef = React.useRef(leftPane);
   const rightPaneRef = React.useRef(rightPane);
@@ -1315,12 +1374,24 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
 
     hasHydratedRecoverySnapshotRef.current = true;
 
+    const savedTabsRecord = initialPaneTabsSessionRef.current?.record ?? null;
+    if (savedTabsRecord && !hasHydratedPaneTabsRef.current) {
+      hasHydratedPaneTabsRef.current = true;
+      const mergedRecoveryConnections = mergeConnections(snapshot.connections, companion.drives);
+      const restoredTabs = resolveRestoredWorkspaceTabs(savedTabsRecord, currentRoute, mergedRecoveryConnections);
+      unresolvedTabTargetsRef.current = restoredTabs.unresolvedTargets;
+      leftPane.hydrateTabs(restoredTabs.left, { focusList: false });
+      if (restoredTabs.right) {
+        rightPane.hydrateTabs(restoredTabs.right, { focusList: false });
+      }
+    }
+
     if (snapshot.routeUrl === getLocation().pathname + getLocation().search) {
       if (snapshot.left) leftPane.restoreRecoverySnapshot(snapshot.left);
       if (snapshot.right) rightPane.restoreRecoverySnapshot(snapshot.right);
     }
     setRecoveryPhase("ready");
-  }, [getLocation, leftPane, rightPane]);
+  }, [companion.drives, currentRoute, getLocation, leftPane, rightPane]);
 
   useEffect(() => {
     restoreInitialRecoverySnapshot();
@@ -1388,7 +1459,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   // ──────────────────────────────────────────────────────────────────────────
 
   const navigateToBrowseState = useCallback(
-    (nextRoute: BrowseRouteState, options?: { replace?: boolean }) => {
+    (nextRoute: BrowseRouteState, options?: { replace?: boolean; tabMetadata?: PaneTabHistoryMetadata }) => {
       const actualLocation = getLocation();
       const actualRoute = parseBrowseRoute({ ...params, path: params["*"], searchParams: new URLSearchParams(actualLocation.search) });
       const nextUrl = serializeBrowseRoute({
@@ -1398,14 +1469,33 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
           ? { viewer: nextRoute.viewer ?? actualRoute.viewer, settings: nextRoute.settings ?? currentRoute.settings }
           : {}),
       });
+      const nextMeta = options?.tabMetadata ?? {
+        leftTabId: leftPane.selectedTabIdRef.current,
+        rightTabId: nextRoute.right ? rightPane.selectedTabIdRef.current : null,
+      };
       const currentUrl = actualLocation.pathname + actualLocation.search;
       if (currentUrl === nextUrl) {
+        if (options?.replace) {
+          const existingMeta = readPaneTabHistoryState(actualLocation.state);
+          const metaMatches =
+            existingMeta !== null && existingMeta.leftTabId === nextMeta.leftTabId && existingMeta.rightTabId === nextMeta.rightTabId;
+          tabHistoryByLocationKeyRef.current.set(actualLocation.key, nextMeta);
+          if (!metaMatches) {
+            navigate(nextUrl + actualLocation.hash, {
+              replace: true,
+              state: withPaneTabHistoryState(actualLocation.state, nextMeta),
+            });
+          }
+        }
         return;
       }
 
-      navigate(nextUrl + actualLocation.hash, { replace: options?.replace ?? false, state: actualLocation.state });
+      navigate(nextUrl + actualLocation.hash, {
+        replace: options?.replace ?? false,
+        state: withPaneTabHistoryState(actualLocation.state, nextMeta),
+      });
     },
-    [currentRoute, getLocation, navigate, params]
+    [currentRoute, getLocation, leftPane.selectedTabIdRef, navigate, params, rightPane.selectedTabIdRef]
   );
 
   const getCurrentLeftTarget = useCallback(() => {
@@ -1413,9 +1503,9 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       leftPane.connectionIdRef.current,
       leftPane.currentPathRef.current,
       allConnections,
-      toVirtualRouteLocation(leftPane.archiveLocation)
+      toVirtualRouteLocation(leftPane.archiveLocationRef.current)
     );
-  }, [allConnections, leftPane]);
+  }, [allConnections, leftPane.archiveLocationRef, leftPane.connectionIdRef, leftPane.currentPathRef]);
 
   const getCurrentRightTarget = useCallback(() => {
     if (paneMode !== "dual") {
@@ -1426,9 +1516,9 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       rightPane.connectionIdRef.current,
       rightPane.currentPathRef.current,
       allConnections,
-      toVirtualRouteLocation(rightPane.archiveLocation)
+      toVirtualRouteLocation(rightPane.archiveLocationRef.current)
     );
-  }, [allConnections, paneMode, rightPane]);
+  }, [allConnections, paneMode, rightPane.archiveLocationRef, rightPane.connectionIdRef, rightPane.currentPathRef]);
 
   const getSettledPaneTarget = useCallback(
     (paneId: PaneId) => {
@@ -1654,6 +1744,59 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   leftRouteLocationResolveRef.current = resolveLeftRouteLocation;
   rightRouteLocationResolveRef.current = resolveRightRouteLocation;
 
+  leftTabSessionChangeRef.current = ({ selectedTabId, connectionId, currentPath, archiveLocation }) => {
+    const leftTarget =
+      buildBrowseRouteTarget(connectionId, currentPath, allConnections, toVirtualRouteLocation(archiveLocation)) ??
+      unresolvedTabTargetsRef.current.get(selectedTabId) ??
+      getCurrentLeftTarget();
+    if (!leftTarget) {
+      return;
+    }
+    const rightTarget = getCurrentRightTarget();
+    navigateToBrowseState(
+      {
+        left: leftTarget,
+        right: rightTarget,
+        activePaneId: rightTarget ? activePaneId : "left",
+      },
+      {
+        replace: true,
+        tabMetadata: {
+          leftTabId: selectedTabId,
+          rightTabId: rightTarget ? rightPane.selectedTabIdRef.current : null,
+        },
+      }
+    );
+  };
+
+  rightTabSessionChangeRef.current = ({ selectedTabId, connectionId, currentPath, archiveLocation }) => {
+    if (paneMode !== "dual") {
+      return;
+    }
+    const leftTarget = getCurrentLeftTarget();
+    const rightTarget =
+      buildBrowseRouteTarget(connectionId, currentPath, allConnections, toVirtualRouteLocation(archiveLocation)) ??
+      unresolvedTabTargetsRef.current.get(selectedTabId) ??
+      getCurrentRightTarget();
+    if (!leftTarget || !rightTarget) {
+      return;
+    }
+    navigateToBrowseState(
+      {
+        left: leftTarget,
+        right: rightTarget,
+        activePaneId,
+      },
+      {
+        replace: true,
+        tabMetadata: {
+          leftTabId: leftPane.selectedTabIdRef.current,
+          rightTabId: selectedTabId,
+        },
+      }
+    );
+  };
+
   const leftApplyLocation = leftPane.applyLocation;
   const rightApplyLocation = rightPane.applyLocation;
   const leftListContainerEl = leftPane.listContainerEl;
@@ -1698,6 +1841,52 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         return;
       }
 
+      const savedTabsRecord = initialPaneTabsSessionRef.current?.record ?? null;
+      if (savedTabsRecord) {
+        const merged = mergeConnections(loadedConnections, companion.drives);
+        const restored = resolveRestoredWorkspaceTabs(
+          savedTabsRecord,
+          { left: currentRoute.left, right: currentRoute.right, activePaneId: currentRoute.activePaneId },
+          merged
+        );
+        const restoredLeftSelected = restored.left.sessions.get(restored.left.selectedTabId);
+        const leftTarget = restoredLeftSelected
+          ? buildBrowseRouteTarget(
+              restoredLeftSelected.connectionId,
+              restoredLeftSelected.currentPath,
+              merged,
+              toVirtualRouteLocation(restoredLeftSelected.archiveLocation)
+            )
+          : null;
+        const restoredRightSelected = restored.right ? restored.right.sessions.get(restored.right.selectedTabId) : undefined;
+        const rightTarget =
+          restored.paneMode === "dual" && restoredRightSelected
+            ? buildBrowseRouteTarget(
+                restoredRightSelected.connectionId,
+                restoredRightSelected.currentPath,
+                merged,
+                toVirtualRouteLocation(restoredRightSelected.archiveLocation)
+              )
+            : null;
+        if (leftTarget) {
+          navigateToBrowseState(
+            {
+              left: leftTarget,
+              right: rightTarget,
+              activePaneId: rightTarget ? restored.activePaneId : "left",
+            },
+            {
+              replace: true,
+              tabMetadata: {
+                leftTabId: restored.left.selectedTabId,
+                rightTabId: rightTarget && restored.right ? restored.right.selectedTabId : null,
+              },
+            }
+          );
+          return;
+        }
+      }
+
       const savedConnectionId = persistedSelectedConnectionId ?? readSelectedConnectionIdPreference();
       const autoSelectedConnectionId =
         savedConnectionId &&
@@ -1716,7 +1905,16 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         );
       }
     },
-    [companion.drives, currentRoute.left, currentRoute.right, navigate, navigateToBrowseState, params.targetId, params.targetType]
+    [
+      companion.drives,
+      currentRoute.activePaneId,
+      currentRoute.left,
+      currentRoute.right,
+      navigate,
+      navigateToBrowseState,
+      params.targetId,
+      params.targetType,
+    ]
   );
 
   /**
@@ -1803,30 +2001,100 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     void loadConnections(initialLoadMode);
   }, []);
 
+  const syncResolvedRoute = React.useEffectEvent(
+    (nextResolvedRoute: typeof resolvedRoute, applyLeft: typeof leftApplyLocation, applyRight: typeof rightApplyLocation) => {
+      if (!hasHydratedPaneTabsRef.current) {
+        hasHydratedPaneTabsRef.current = true;
+        const savedTabsRecord = initialPaneTabsSessionRef.current?.record ?? null;
+        if (savedTabsRecord) {
+          const restoredTabs = resolveRestoredWorkspaceTabs(savedTabsRecord, currentRoute, allConnections);
+          unresolvedTabTargetsRef.current = restoredTabs.unresolvedTargets;
+          leftPaneRef.current.hydrateTabs(restoredTabs.left, { focusList: false });
+          if (restoredTabs.right) {
+            rightPaneRef.current.hydrateTabs(restoredTabs.right, { focusList: false });
+          }
+        }
+      }
+
+      const routeSyncToken = routeSyncTokenRef.current + 1;
+      routeSyncTokenRef.current = routeSyncToken;
+      const latestLocation = getLocation();
+      const historyTabMeta =
+        readPaneTabHistoryState(latestLocation.state) ?? tabHistoryByLocationKeyRef.current.get(latestLocation.key) ?? null;
+
+      if (nextResolvedRoute.left || !leftPaneRef.current.connectionIdRef.current.startsWith("missing-smb:")) {
+        applyLeft(nextResolvedRoute.left?.connectionId ?? "", nextResolvedRoute.left?.path ?? "", routeSyncToken, {
+          targetTabId: historyTabMeta?.leftTabId,
+        });
+      }
+      if (nextResolvedRoute.right) {
+        applyRight(nextResolvedRoute.right.connectionId, nextResolvedRoute.right.path, routeSyncToken, {
+          targetTabId: historyTabMeta?.rightTabId,
+        });
+      }
+
+      const nextPaneMode: PaneMode = nextResolvedRoute.right ? "dual" : "single";
+      const nextActivePaneId: PaneId = nextResolvedRoute.right ? nextResolvedRoute.activePaneId : "left";
+
+      setPaneMode((currentPaneMode) => (currentPaneMode === nextPaneMode ? currentPaneMode : nextPaneMode));
+      setActivePaneId((currentActivePaneId) => (currentActivePaneId === nextActivePaneId ? currentActivePaneId : nextActivePaneId));
+
+      setFileBrowserPaneModePreference(nextPaneMode);
+      localStorage.setItem(ACTIVE_PANE_STORAGE_KEY, nextActivePaneId);
+
+      if (nextResolvedRoute.left) {
+        tabHistoryByLocationKeyRef.current.set(latestLocation.key, {
+          leftTabId: leftPaneRef.current.selectedTabIdRef.current,
+          rightTabId: nextResolvedRoute.right ? rightPaneRef.current.selectedTabIdRef.current : null,
+        });
+      }
+
+      if (pendingPaneFocusRef.current !== nextActivePaneId) {
+        pendingPaneFocusRef.current = null;
+      }
+    }
+  );
+
   useEffect(() => {
     if (loadingConnections || recoveryPhase !== "ready") {
       return;
     }
 
-    const routeSyncToken = routeSyncTokenRef.current + 1;
-    routeSyncTokenRef.current = routeSyncToken;
-
-    leftApplyLocation(resolvedRoute.left?.connectionId ?? "", resolvedRoute.left?.path ?? "", routeSyncToken);
-    rightApplyLocation(resolvedRoute.right?.connectionId ?? "", resolvedRoute.right?.path ?? "", routeSyncToken);
-
-    const nextPaneMode: PaneMode = resolvedRoute.right ? "dual" : "single";
-    const nextActivePaneId: PaneId = resolvedRoute.right ? resolvedRoute.activePaneId : "left";
-
-    setPaneMode((currentPaneMode) => (currentPaneMode === nextPaneMode ? currentPaneMode : nextPaneMode));
-    setActivePaneId((currentActivePaneId) => (currentActivePaneId === nextActivePaneId ? currentActivePaneId : nextActivePaneId));
-
-    setFileBrowserPaneModePreference(nextPaneMode);
-    localStorage.setItem(ACTIVE_PANE_STORAGE_KEY, nextActivePaneId);
-
-    if (pendingPaneFocusRef.current !== nextActivePaneId) {
-      pendingPaneFocusRef.current = null;
-    }
+    syncResolvedRoute(resolvedRoute, leftApplyLocation, rightApplyLocation);
   }, [leftApplyLocation, loadingConnections, recoveryPhase, resolvedRoute, rightApplyLocation]);
+
+  // Persist minimal pane-tab collections and order to sessionStorage for same-session reloads
+  useEffect(() => {
+    if (loadingConnections || recoveryPhase !== "ready" || !currentRoute.left) {
+      return;
+    }
+
+    const saveResult = savePaneTabsSessionStorage({
+      workspaceRouteIdentity: getWorkspaceBrowseIdentity(currentRoute),
+      paneMode,
+      activePaneId,
+      leftTabs: leftPane.tabs,
+      leftSelectedTabId: leftPane.selectedTabId,
+      rightTabs: rightPane.tabs,
+      rightSelectedTabId: rightPane.selectedTabId,
+      connections: allConnections,
+      fallbackTargets: unresolvedTabTargetsRef.current,
+    });
+    if (saveResult.notifyUnavailable) {
+      setTabStorageUnavailableNotice(true);
+    }
+  }, [
+    activePaneId,
+    allConnections,
+    currentRoute,
+    leftPane.selectedTabId,
+    leftPane.tabs,
+    loadingConnections,
+    paneMode,
+    recoveryPhase,
+    rightPane.selectedTabId,
+    rightPane.tabs,
+  ]);
 
   useEffect(() => {
     if (pendingPaneFocusRef.current !== activePaneId) {
@@ -2318,7 +2586,20 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   // Dual-Pane Handlers
   // ──────────────────────────────────────────────────────────────────────────
 
-  /** Toggle between single and dual-pane mode. */
+  const getRetainedRightPaneTarget = useCallback(() => {
+    const retainedConnId = rightPane.connectionIdRef.current;
+    if (!retainedConnId) {
+      return null;
+    }
+    return buildBrowseRouteTarget(
+      retainedConnId,
+      rightPane.currentPathRef.current,
+      allConnections,
+      toVirtualRouteLocation(rightPane.archiveLocationRef.current)
+    );
+  }, [allConnections, rightPane.archiveLocationRef, rightPane.connectionIdRef, rightPane.currentPathRef]);
+
+  /** Toggle between single and dual-pane mode while preserving retained right-pane tabs. */
   const handleToggleDualPane = useCallback(() => {
     const leftTarget = getCurrentLeftTarget();
     if (!leftTarget) {
@@ -2326,27 +2607,58 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     }
 
     if (!resolvedRoute.right) {
-      seedRightPaneFromLeftIfSameDirectory();
+      const retainedRightTarget = getRetainedRightPaneTarget();
+      if (!retainedRightTarget) {
+        seedRightPaneFromLeftIfSameDirectory();
+      }
       pendingPaneFocusRef.current = "right";
-      navigateToBrowseState({
-        left: leftTarget,
-        right: buildBrowseRouteTarget(
+      const rightTarget =
+        retainedRightTarget ??
+        buildBrowseRouteTarget(
           leftPane.connectionIdRef.current,
           leftPane.currentPathRef.current,
           allConnections,
-          toVirtualRouteLocation(leftPane.archiveLocation)
-        ),
-        activePaneId: "right",
-      });
+          toVirtualRouteLocation(leftPane.archiveLocationRef.current)
+        );
+      navigateToBrowseState(
+        {
+          left: leftTarget,
+          right: rightTarget,
+          activePaneId: "right",
+        },
+        {
+          tabMetadata: {
+            leftTabId: leftPane.selectedTabIdRef.current,
+            rightTabId: rightPane.selectedTabIdRef.current,
+          },
+        }
+      );
     } else {
       pendingPaneFocusRef.current = "left";
-      navigateToBrowseState({
-        left: leftTarget,
-        right: null,
-        activePaneId: "left",
-      });
+      navigateToBrowseState(
+        {
+          left: leftTarget,
+          right: null,
+          activePaneId: "left",
+        },
+        {
+          tabMetadata: {
+            leftTabId: leftPane.selectedTabIdRef.current,
+            rightTabId: null,
+          },
+        }
+      );
     }
-  }, [allConnections, getCurrentLeftTarget, leftPane, navigateToBrowseState, resolvedRoute.right, seedRightPaneFromLeftIfSameDirectory]);
+  }, [
+    allConnections,
+    getCurrentLeftTarget,
+    getRetainedRightPaneTarget,
+    leftPane,
+    navigateToBrowseState,
+    resolvedRoute.right,
+    rightPane.selectedTabIdRef,
+    seedRightPaneFromLeftIfSameDirectory,
+  ]);
 
   /** Switch focus to the other pane (Tab in dual mode). */
   const handleSwitchPane = useCallback(() => {
@@ -2374,17 +2686,31 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     }
 
     if (paneMode === "single") {
-      seedRightPaneFromLeftIfSameDirectory();
-      navigateToBrowseState({
-        left: leftTarget,
-        right: buildBrowseRouteTarget(
+      const retainedRightTarget = getRetainedRightPaneTarget();
+      if (!retainedRightTarget) {
+        seedRightPaneFromLeftIfSameDirectory();
+      }
+      const rightTarget =
+        retainedRightTarget ??
+        buildBrowseRouteTarget(
           leftPane.connectionIdRef.current,
           leftPane.currentPathRef.current,
           allConnections,
-          toVirtualRouteLocation(leftPane.archiveLocation)
-        ),
-        activePaneId: "right",
-      });
+          toVirtualRouteLocation(leftPane.archiveLocationRef.current)
+        );
+      navigateToBrowseState(
+        {
+          left: leftTarget,
+          right: rightTarget,
+          activePaneId: "right",
+        },
+        {
+          tabMetadata: {
+            leftTabId: leftPane.selectedTabIdRef.current,
+            rightTabId: rightPane.selectedTabIdRef.current,
+          },
+        }
+      );
     } else {
       replaceActivePaneInRoute("right");
     }
@@ -2392,6 +2718,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   }, [
     allConnections,
     getCurrentLeftTarget,
+    getRetainedRightPaneTarget,
     leftPane,
     navigateToBrowseState,
     paneMode,
@@ -2399,6 +2726,255 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     rightPane,
     seedRightPaneFromLeftIfSameDirectory,
   ]);
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Pane Tab Workspace Handlers
+  // ──────────────────────────────────────────────────────────────────────────
+
+  const restoreActiveListFocus = useCallback(() => {
+    const targetPane = effectiveActivePaneIdRef.current === "right" ? rightPaneRef.current : leftPaneRef.current;
+    targetPane.listContainerEl?.focus({ preventScroll: true });
+  }, []);
+
+  const handleSelectPaneTab = useCallback(
+    (paneId: PaneId, tabId: string) => {
+      if (browserOverlayOpen) return;
+      const targetPane = paneId === "right" ? rightPane : leftPane;
+      const shouldMakeActive = isDualModeRef.current && effectiveActivePaneIdRef.current !== paneId;
+      if (shouldMakeActive) {
+        setActivePaneId(paneId);
+      }
+      targetPane.selectTab(tabId, { focusList: true, notifyRoute: false });
+
+      const leftTarget = getCurrentLeftTarget();
+      const rightTarget = paneMode === "dual" ? getCurrentRightTarget() : null;
+      if (leftTarget) {
+        navigateToBrowseState(
+          {
+            left: leftTarget,
+            right: rightTarget,
+            activePaneId: rightTarget ? (isDualModeRef.current ? paneId : activePaneId) : "left",
+          },
+          {
+            replace: true,
+            tabMetadata: {
+              leftTabId: leftPane.selectedTabIdRef.current,
+              rightTabId: rightTarget ? rightPane.selectedTabIdRef.current : null,
+            },
+          }
+        );
+      }
+    },
+    [activePaneId, browserOverlayOpen, getCurrentLeftTarget, getCurrentRightTarget, leftPane, navigateToBrowseState, paneMode, rightPane]
+  );
+
+  const handleCreatePaneTab = useCallback(
+    (paneId: PaneId) => {
+      if (browserOverlayOpen) return;
+      const targetPane = paneId === "right" ? rightPane : leftPane;
+      if (!targetPane.connectionIdRef.current) return;
+      if (isDualModeRef.current && effectiveActivePaneIdRef.current !== paneId) {
+        setActivePaneId(paneId);
+      }
+      const createdId = targetPane.createTab({ focusList: true, notifyRoute: false });
+      if (!createdId) return;
+
+      const leftTarget = getCurrentLeftTarget();
+      const rightTarget = paneMode === "dual" ? getCurrentRightTarget() : null;
+      if (leftTarget) {
+        navigateToBrowseState(
+          {
+            left: leftTarget,
+            right: rightTarget,
+            activePaneId: rightTarget ? (isDualModeRef.current ? paneId : activePaneId) : "left",
+          },
+          {
+            replace: true,
+            tabMetadata: {
+              leftTabId: leftPane.selectedTabIdRef.current,
+              rightTabId: rightTarget ? rightPane.selectedTabIdRef.current : null,
+            },
+          }
+        );
+      }
+    },
+    [activePaneId, browserOverlayOpen, getCurrentLeftTarget, getCurrentRightTarget, leftPane, navigateToBrowseState, paneMode, rightPane]
+  );
+
+  const handleClosePaneTab = useCallback(
+    (paneId: PaneId, tabId: string, options?: { fromKeyboard?: boolean }) => {
+      if (browserOverlayOpen) return;
+      const targetPane = paneId === "right" ? rightPane : leftPane;
+      if (targetPane.tabs.length <= 1) {
+        if (options?.fromKeyboard) {
+          setUnavailableShortcutNotice((current) => ({
+            id: (current?.id ?? 0) + 1,
+            message: t("fileBrowser.unavailableShortcuts.lastTabProtected"),
+          }));
+        }
+        return;
+      }
+
+      const closingSelected = tabId === targetPane.selectedTabIdRef.current;
+      const result = targetPane.closeTab(tabId, {
+        focusList: closingSelected,
+        notifyRoute: false,
+      });
+      if (!result.closed || !result.closedSession || result.closedIndex === undefined) {
+        return;
+      }
+
+      setClosedTabRecord((previous) => ({
+        paneId,
+        insertionIndex: result.closedIndex!,
+        session: result.closedSession!,
+        occurrence: (previous?.occurrence ?? 0) + 1,
+      }));
+
+      if (!closingSelected) {
+        // Closing a background tab must not make an inactive pane active or steal focus from the active pane.
+        restoreActiveListFocus();
+        return;
+      }
+
+      if (isDualModeRef.current && effectiveActivePaneIdRef.current !== paneId) {
+        setActivePaneId(paneId);
+      }
+
+      const nextSelectedId = targetPane.selectedTabIdRef.current;
+      const leftTarget =
+        getCurrentLeftTarget() ?? (paneId === "left" ? (unresolvedTabTargetsRef.current.get(nextSelectedId) ?? null) : null);
+      const rightTarget =
+        paneMode === "dual"
+          ? (getCurrentRightTarget() ?? (paneId === "right" ? (unresolvedTabTargetsRef.current.get(nextSelectedId) ?? null) : null))
+          : null;
+      if (leftTarget) {
+        navigateToBrowseState(
+          {
+            left: leftTarget,
+            right: rightTarget,
+            activePaneId: rightTarget ? (isDualModeRef.current ? paneId : activePaneId) : "left",
+          },
+          {
+            replace: true,
+            tabMetadata: {
+              leftTabId: leftPane.selectedTabIdRef.current,
+              rightTabId: rightTarget ? rightPane.selectedTabIdRef.current : null,
+            },
+          }
+        );
+      }
+    },
+    [
+      activePaneId,
+      browserOverlayOpen,
+      getCurrentLeftTarget,
+      getCurrentRightTarget,
+      leftPane,
+      navigateToBrowseState,
+      paneMode,
+      restoreActiveListFocus,
+      rightPane,
+      t,
+    ]
+  );
+
+  const handleSelectAdjacentPaneTab = useCallback(
+    (paneId: PaneId, direction: "previous" | "next") => {
+      if (browserOverlayOpen) return;
+      const targetPane = paneId === "right" ? rightPane : leftPane;
+      targetPane.selectAdjacentTab(direction, { focusList: true });
+    },
+    [browserOverlayOpen, leftPane, rightPane]
+  );
+
+  const handleUndoCloseTab = useCallback(() => {
+    if (!closedTabRecord || browserOverlayOpen) {
+      return;
+    }
+
+    const record = closedTabRecord;
+    setClosedTabRecord(null);
+
+    const targetPane = record.paneId === "right" ? rightPane : leftPane;
+    const revealHiddenRightPane = record.paneId === "right" && paneMode === "single" && !useCompactLayout;
+    const restoredTabId = targetPane.restoreClosedTab(record.session, record.insertionIndex, { focusList: true, notifyRoute: false });
+
+    const leftTarget =
+      getCurrentLeftTarget() ?? (record.paneId === "left" ? (unresolvedTabTargetsRef.current.get(restoredTabId) ?? null) : null);
+    const rightTarget =
+      revealHiddenRightPane || paneMode === "dual"
+        ? (buildBrowseRouteTarget(
+            rightPane.connectionIdRef.current,
+            rightPane.currentPathRef.current,
+            allConnections,
+            toVirtualRouteLocation(rightPane.archiveLocationRef.current)
+          ) ?? (record.paneId === "right" ? (unresolvedTabTargetsRef.current.get(restoredTabId) ?? null) : null))
+        : null;
+
+    if (revealHiddenRightPane) {
+      setPaneMode("dual");
+      setActivePaneId("right");
+      pendingPaneFocusRef.current = "right";
+    } else if (paneMode === "dual") {
+      setActivePaneId(record.paneId);
+      pendingPaneFocusRef.current = record.paneId;
+    }
+
+    if (leftTarget) {
+      navigateToBrowseState(
+        {
+          left: leftTarget,
+          right: rightTarget,
+          activePaneId: rightTarget ? record.paneId : "left",
+        },
+        {
+          replace: true,
+          tabMetadata: {
+            leftTabId: leftPane.selectedTabIdRef.current,
+            rightTabId: rightTarget ? rightPane.selectedTabIdRef.current : null,
+          },
+        }
+      );
+    }
+  }, [
+    allConnections,
+    browserOverlayOpen,
+    closedTabRecord,
+    getCurrentLeftTarget,
+    leftPane,
+    navigateToBrowseState,
+    paneMode,
+    rightPane,
+    useCompactLayout,
+  ]);
+
+  const refreshCapturedContentLocation = useCallback(
+    (location: ContentLocation | null) => {
+      if (!location) {
+        return;
+      }
+      const physicalDir =
+        location.kind === "physical"
+          ? { connectionId: location.connectionId, path: location.path }
+          : { connectionId: location.connectionId, path: parentPath(location.source.path) };
+
+      for (const candidatePane of [leftPane, rightPane]) {
+        const activeMatches =
+          candidatePane.connectionIdRef.current === physicalDir.connectionId &&
+          candidatePane.currentPathRef.current === physicalDir.path &&
+          (location.kind === "physical"
+            ? candidatePane.archiveLocationRef.current === null
+            : candidatePane.archiveLocationRef.current?.archivePath === location.source.path);
+        if (activeMatches) {
+          void candidatePane.reloadCurrentLocation({ forceRefresh: true });
+        } else {
+          candidatePane.handleDirectoryChanged(physicalDir, { invalidateOnly: true });
+        }
+      }
+    },
+    [leftPane, rightPane]
+  );
 
   // ──────────────────────────────────────────────────────────────────────────
   // Copy / Move Handlers
@@ -2429,12 +3005,13 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       setCopyMoveMode(mode);
       setCopyMoveItems([...items]);
       setCopyMoveSourcePaneId(sourcePaneId);
+      setCopyMoveSourceTabId(sourcePane.selectedTabIdRef.current);
+      setCopyMoveSourceLocation(sourcePane.currentLocation);
       setCopyMoveDestination(destination);
       setCopyMoveDestinationLabel(
         getLocationDisplayName(destination, (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId)
       );
       setCopyMoveSameDirectory(areSameContentLocations(sourcePane.currentLocation, destination));
-      setCopyMoveDestinationPaneId(capturedDestination.paneId);
       setCopyMoveError(null);
       setCopyMoveWarning(null);
       setCopyMoveProgress(undefined);
@@ -2640,9 +3217,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         copyMoveAbortControllerRef.current = null;
       }
       const sourcePane = copyMoveSourcePaneId === "left" ? leftPane : rightPane;
-      const destinationPane = copyMoveDestinationPaneId === "left" ? leftPane : rightPane;
-      void destinationPane.reloadCurrentLocation({ forceRefresh: true });
-      void sourcePane.reloadCurrentLocation({ forceRefresh: true });
+      refreshCapturedContentLocation(copyMoveDestination);
+      refreshCapturedContentLocation(copyMoveSourceLocation);
       if (operationCancelled) {
         setConflictInfo(null);
         setCopyMoveError(null);
@@ -2661,18 +3237,23 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       if (errors.length === 0 && warnings.length === 0) {
         setCopyMoveDialogOpen(false);
         if (copyMoveMode === "move") {
-          sourcePane.removeSelectedPaths(copyMoveItems.map((item) => item.entry.path));
+          sourcePane.removeSelectedPaths(
+            copyMoveItems.map((item) => item.entry.path),
+            copyMoveSourceTabId || undefined
+          );
         }
       }
     },
     [
       contentOperationEnvironment,
       copyMoveDestination,
-      copyMoveDestinationPaneId,
       copyMoveItems,
       copyMoveMode,
+      copyMoveSourceLocation,
       copyMoveSourcePaneId,
+      copyMoveSourceTabId,
       leftPane,
+      refreshCapturedContentLocation,
       rightPane,
     ]
   );
@@ -2806,7 +3387,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       try {
         await execution.result;
         setArchiveCreateContext(null);
-        (archiveCreateContext.destinationPaneId === "right" ? rightPane : leftPane).handleRefresh();
+        refreshCapturedContentLocation(archiveCreateContext.destination);
       } catch (error: unknown) {
         const hasPartialArchiveOutput = isPartialContainerOutputError(error);
         if (execution.isCancellationRequested()) {
@@ -2818,7 +3399,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
           : getApiErrorMessage(error, t("fileBrowser.archive.errorGeneric"));
         setArchiveCreateError(detail);
         if (hasPartialArchiveOutput) {
-          (archiveCreateContext.destinationPaneId === "right" ? rightPane : leftPane).handleRefresh();
+          refreshCapturedContentLocation(archiveCreateContext.destination);
         }
         logger.error(
           "Archive creation failed",
@@ -2837,7 +3418,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         setIsCreatingArchive(false);
       }
     },
-    [archiveCreateContext, contentOperationEnvironment, leftPane, rightPane, t]
+    [archiveCreateContext, contentOperationEnvironment, refreshCapturedContentLocation, t]
   );
 
   const cancelArchiveCreation = useCallback(async () => {
@@ -2962,11 +3543,17 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       setIsExtractingArchive(false);
       setIsCancellingArchiveExtraction(false);
       setArchiveExtractionProgress(null);
-      const destinationPane = context.destinationPaneId === "right" ? rightPane : leftPane;
-      destinationPane.handleDirectoryChanged({
+      const changedDir = {
         connectionId: context.destinationParent.connectionId,
         path: context.destinationParent.path,
-      });
+      };
+      leftPane.handleDirectoryChanged(changedDir);
+      rightPane.handleDirectoryChanged(changedDir);
+      if (context.destination && context.destination.path !== context.destinationParent.path) {
+        const siblingDir = { connectionId: context.destination.connectionId, path: context.destination.path };
+        leftPane.handleDirectoryChanged(siblingDir);
+        rightPane.handleDirectoryChanged(siblingDir);
+      }
       setArchiveExtractionContext(null);
     },
     [leftPane, rightPane, t]
@@ -3499,9 +4086,19 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       canMoveToOtherPane: quickBarCanMoveToOtherPane,
       canOpenLocationInNewTab: canOpenQuickBarLocationInNewTab,
       canMatchPaneLocations,
+      canCreateTab: !browserOverlayOpen && quickBarPane.connectionId !== "",
+      canCloseTab: !browserOverlayOpen && quickBarPane.tabs.length > 1,
+      canUndoCloseTab: !browserOverlayOpen && closedTabRecord !== null,
+      canSwitchTab: !browserOverlayOpen && quickBarPane.tabs.length > 1,
       openLocationInNewTab: () => handleOpenLocationInNewTab(quickBarPaneId === "right" && isDualMode ? "right" : "left"),
       matchLeftPaneLocation: () => handleMatchPaneLocation("left"),
       matchRightPaneLocation: () => handleMatchPaneLocation("right"),
+      createTab: () => handleCreatePaneTab(quickBarPaneId === "right" && isDualMode ? "right" : "left"),
+      closeTab: () =>
+        handleClosePaneTab(quickBarPaneId === "right" && isDualMode ? "right" : "left", quickBarPane.selectedTabIdRef.current),
+      undoCloseTab: handleUndoCloseTab,
+      previousTab: () => handleSelectAdjacentPaneTab(quickBarPaneId === "right" && isDualMode ? "right" : "left", "previous"),
+      nextTab: () => handleSelectAdjacentPaneTab(quickBarPaneId === "right" && isDualMode ? "right" : "left", "next"),
       openQuickNav: () => openQuickBarMode("navigate"),
       openFileSearch: () => openQuickBarMode("file-search"),
       openCommandMode: () => openQuickBarMode("commands"),
@@ -3534,8 +4131,14 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     [
       canOpenQuickBarLocationInNewTab,
       canMatchPaneLocations,
+      browserOverlayOpen,
+      closedTabRecord,
       handleOpenLocationInNewTab,
       handleMatchPaneLocation,
+      handleCreatePaneTab,
+      handleClosePaneTab,
+      handleUndoCloseTab,
+      handleSelectAdjacentPaneTab,
       quickBarPaneId,
       handleCopyToOtherPane,
       handleCreateArchiveRequest,
@@ -3987,6 +4590,17 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     t,
   ]);
 
+  const helpShortcuts = useMemo<KeyboardShortcut[]>(
+    () => [
+      ...browserShortcuts,
+      { ...PANE_SHORTCUTS.PREVIOUS_TAB, handler: () => undefined },
+      { ...PANE_SHORTCUTS.NEXT_TAB, handler: () => undefined },
+      { ...PANE_SHORTCUTS.NEW_TAB, handler: () => undefined },
+      { ...PANE_SHORTCUTS.CLOSE_TAB, handler: () => undefined },
+    ],
+    [browserShortcuts]
+  );
+
   useKeyboardShortcuts({
     active: !showHelp && !viewerOverlayOpen && !archiveWorkflowDialogOpen,
     shortcuts: browserShortcuts,
@@ -4092,7 +4706,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                 leftConnId,
                 leftPane.currentPathRef.current,
                 availableConnections,
-                toVirtualRouteLocation(leftPane.archiveLocation)
+                toVirtualRouteLocation(leftPane.archiveLocationRef.current)
               ),
               right: null,
               activePaneId: "left",
@@ -4140,9 +4754,6 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   // ── Computed values for the active pane (used in toolbar / mobile) ────────
   const activeCurrentPath = activePane.currentPath;
   const activeArchiveLocation = activePane.archiveLocation;
-  const activeDisplayPath = activeArchiveLocation?.virtualPath || activeArchiveLocation?.archivePath || activeCurrentPath;
-  const pathParts = activeDisplayPath ? activeDisplayPath.split("/") : [];
-  const currentDirectoryName = (pathParts.length > 0 && pathParts[pathParts.length - 1]) || "Root";
   const canNavigateUp = activeArchiveLocation !== null || activeCurrentPath !== "";
 
   // Force single-pane on mobile
@@ -4215,54 +4826,66 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         />
         <AppBar position="static" elevation={useCompactLayout ? undefined : 0} sx={mobileSafeAreaAppBarSx}>
           <Toolbar sx={mobileSafeAreaToolbarSx}>
-            {useCompactLayout ? (
-              <MobileToolbar
-                currentDirectoryName={currentDirectoryName}
-                onOpenMenu={() => {
-                  if (document.activeElement instanceof HTMLElement) {
-                    mobileMenuTriggerRef.current = document.activeElement;
-                  }
-                  setDrawerOpen(true);
-                }}
-                onNavigateUp={activePane.handleNavigateUp}
-                canNavigateUp={canNavigateUp}
-              />
-            ) : (
-              <DesktopToolbar
-                searchProvider={quickBarProvider}
-                searchActivationToken={quickBarActivationToken}
-                searchRefreshToken={quickBarRefreshToken}
-                searchInputRef={quickBarPane.searchInputRef}
-                showSearch={activePane.connectionId !== ""}
-                onOpenHelp={() => setShowHelp(true)}
-                onOpenDocumentation={handleOpenDocumentation}
-                onOpenSettings={handleOpenSettings}
-                systemHealth={{
-                  visible: systemHealth.visible,
-                  severity: systemHealth.severity,
-                  headline: systemHealth.headline,
-                  onOpen: () => {
-                    setSystemHealthRestoreFocusEl(quickBarPane.listContainerEl);
-                    setSystemHealthDialogOpen(true);
-                  },
-                }}
-                onBlurToFileList={() => quickBarPane.listContainerEl?.focus()}
-                searchQueryValue={quickBarQueryValue}
-                onSearchQueryValueChange={handleQuickBarQueryValueChange}
-                disableSearchDropdown={false}
-                suppressSearchDropdown={suppressQuickBarDropdown}
-                onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
-                disableTabFocus={isDualMode}
-                modeOptions={quickBarModeOptions}
-                showKeyboardHints={showQuickBarKeyboardHints}
-              />
-            )}
-            <FileBrowserStatus
-              backendAvailabilityStatus={backendAvailability.status}
-              companionLifecycleStatus={companionLifecycleStatus}
-              onRetry={activePane.handleRefresh}
-              onOpenLocalDrivesSettings={openLocalDrivesSettings}
-            />
+            {(() => {
+              const toolbarQuickBarProps: ToolbarQuickBarProps = {
+                searchProvider: quickBarProvider,
+                searchActivationToken: quickBarActivationToken,
+                searchRefreshToken: quickBarRefreshToken,
+                searchInputRef: quickBarPane.searchInputRef,
+                showSearch: activePane.connectionId !== "",
+                onBlurToFileList: () => quickBarPane.listContainerEl?.focus(),
+                searchQueryValue: quickBarQueryValue,
+                onSearchQueryValueChange: handleQuickBarQueryValueChange,
+                disableSearchDropdown: false,
+                suppressSearchDropdown: suppressQuickBarDropdown,
+                onSearchArrowDownToFileList: handleQuickBarArrowDownToFileList,
+                disableTabFocus: isDualMode,
+                modeOptions: quickBarModeOptions,
+                showKeyboardHints: showQuickBarKeyboardHints,
+              };
+              const hasStatusControl = backendAvailability.status !== "available" || Boolean(companionLifecycleStatus);
+              const statusControl = hasStatusControl ? (
+                <FileBrowserStatus
+                  backendAvailabilityStatus={backendAvailability.status}
+                  companionLifecycleStatus={companionLifecycleStatus}
+                  onRetry={activePane.handleRefresh}
+                  onOpenLocalDrivesSettings={openLocalDrivesSettings}
+                />
+              ) : null;
+              return useCompactLayout ? (
+                <MobileToolbar
+                  {...toolbarQuickBarProps}
+                  onOpenMenu={() => {
+                    if (document.activeElement instanceof HTMLElement) {
+                      mobileMenuTriggerRef.current = document.activeElement;
+                    }
+                    setDrawerOpen(true);
+                  }}
+                  onNavigateUp={activePane.handleNavigateUp}
+                  canNavigateUp={canNavigateUp}
+                  statusAction={statusControl}
+                />
+              ) : (
+                <>
+                  <DesktopToolbar
+                    {...toolbarQuickBarProps}
+                    onOpenHelp={() => setShowHelp(true)}
+                    onOpenDocumentation={handleOpenDocumentation}
+                    onOpenSettings={handleOpenSettings}
+                    systemHealth={{
+                      visible: systemHealth.visible,
+                      severity: systemHealth.severity,
+                      headline: systemHealth.headline,
+                      onOpen: () => {
+                        setSystemHealthRestoreFocusEl(quickBarPane.listContainerEl);
+                        setSystemHealthDialogOpen(true);
+                      },
+                    }}
+                  />
+                  {statusControl}
+                </>
+              );
+            })()}
           </Toolbar>
         </AppBar>
         {/* Secondary action strip — view mode & sort controls for the active pane (desktop only) */}
@@ -4302,7 +4925,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
-            pt: 2,
+            pt: leftPane.connectionId ? 0 : 2,
             pb: { xs: SAFE_AREA_INSET.BOTTOM, sm: 0 },
             overflow: "hidden",
             overscrollBehaviorY: "contain",
@@ -4362,6 +4985,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                   connections={allConnections}
                   useCompactLayout={useCompactLayout}
                   useTouchSelectionControls={useTouchSelectionControls}
+                  useTouchTabControls={useTouchTabControls}
                   compactActionsDisabled={browserOverlayOpen}
                   isUsingKeyboard={isUsingKeyboard}
                   onPaneFocus={() => {
@@ -4369,17 +4993,15 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                       replaceActivePaneInRoute("left");
                     }
                   }}
+                  onSelectTab={(tabId) => handleSelectPaneTab("left", tabId)}
+                  onCloseTab={(tabId) => handleClosePaneTab("left", tabId)}
+                  onCreateTab={() => handleCreatePaneTab("left")}
+                  onCloseSelectedTabFromKeyboard={() =>
+                    handleClosePaneTab("left", leftPane.selectedTabIdRef.current, { fromKeyboard: true })
+                  }
+                  onSelectAdjacentTab={(direction) => handleSelectAdjacentPaneTab("left", direction)}
+                  onRestoreActiveListFocus={restoreActiveListFocus}
                   disableTabFocus={isDualMode}
-                  searchProvider={quickBarProvider}
-                  searchActivationToken={quickBarActivationToken}
-                  searchRefreshToken={quickBarRefreshToken}
-                  searchQueryValue={quickBarQueryValue}
-                  onSearchQueryValueChange={handleQuickBarQueryValueChange}
-                  disableSearchDropdown={false}
-                  suppressSearchDropdown={suppressQuickBarDropdown}
-                  onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
-                  showKeyboardHints={showQuickBarKeyboardHints}
-                  modeOptions={quickBarModeOptions}
                   getCompactCreateActions={buildCompactCreateActions}
                   getCompactItemActions={buildCompactItemActions}
                   getCompactSelectionActions={buildCompactSelectionActions}
@@ -4413,6 +5035,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                       connections={allConnections}
                       useCompactLayout={useCompactLayout}
                       useTouchSelectionControls={useTouchSelectionControls}
+                      useTouchTabControls={useTouchTabControls}
                       compactActionsDisabled={browserOverlayOpen}
                       isUsingKeyboard={isUsingKeyboard}
                       onPaneFocus={() => {
@@ -4420,17 +5043,15 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                           replaceActivePaneInRoute("right");
                         }
                       }}
+                      onSelectTab={(tabId) => handleSelectPaneTab("right", tabId)}
+                      onCloseTab={(tabId) => handleClosePaneTab("right", tabId)}
+                      onCreateTab={() => handleCreatePaneTab("right")}
+                      onCloseSelectedTabFromKeyboard={() =>
+                        handleClosePaneTab("right", rightPane.selectedTabIdRef.current, { fromKeyboard: true })
+                      }
+                      onSelectAdjacentTab={(direction) => handleSelectAdjacentPaneTab("right", direction)}
+                      onRestoreActiveListFocus={restoreActiveListFocus}
                       disableTabFocus={isDualMode}
-                      searchProvider={quickBarProvider}
-                      searchActivationToken={quickBarActivationToken}
-                      searchRefreshToken={quickBarRefreshToken}
-                      searchQueryValue={quickBarQueryValue}
-                      onSearchQueryValueChange={handleQuickBarQueryValueChange}
-                      disableSearchDropdown={false}
-                      suppressSearchDropdown={suppressQuickBarDropdown}
-                      onSearchArrowDownToFileList={handleQuickBarArrowDownToFileList}
-                      showKeyboardHints={showQuickBarKeyboardHints}
-                      modeOptions={quickBarModeOptions}
                       getCompactCreateActions={buildCompactCreateActions}
                       getCompactItemActions={buildCompactItemActions}
                       getCompactSelectionActions={buildCompactSelectionActions}
@@ -4516,7 +5137,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         <KeyboardShortcutsHelp
           open={showHelp}
           onClose={() => setShowHelp(false)}
-          shortcuts={browserShortcuts}
+          shortcuts={helpShortcuts}
           title={t("keyboardShortcutsHelp.titles.fileBrowser")}
         />
         <SystemHealthDialog
@@ -4668,6 +5289,51 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
               : []
           }
           onDismiss={() => setUnavailableShortcutNotice(null)}
+        />
+        <OperationNotifications
+          notices={
+            closedTabRecord
+              ? [
+                  {
+                    id: "tab-closed",
+                    occurrence: closedTabRecord.occurrence,
+                    message: t("fileBrowser.tabs.closedNotice"),
+                    severity: "info",
+                    duration: NOTICE_DURATION_MS.information,
+                    action: (
+                      <Button
+                        color="inherit"
+                        size="small"
+                        tabIndex={-1}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={handleUndoCloseTab}
+                      >
+                        {t("fileBrowser.tabs.undo")}
+                      </Button>
+                    ),
+                    onExpire: () => setClosedTabRecord(null),
+                    onDismiss: () => setClosedTabRecord(null),
+                  },
+                ]
+              : []
+          }
+          onDismiss={() => setClosedTabRecord(null)}
+        />
+        <OperationNotifications
+          notices={
+            tabStorageUnavailableNotice
+              ? [
+                  {
+                    id: "tab-storage-unavailable",
+                    message: t("fileBrowser.tabs.restorationUnavailableNotice"),
+                    severity: "info",
+                    duration: TRANSFER_NOTICE_AUTOHIDE_MS,
+                    onExpire: () => setTabStorageUnavailableNotice(false),
+                  },
+                ]
+              : []
+          }
+          onDismiss={() => setTabStorageUnavailableNotice(false)}
         />
         {/* Copy / Move Dialog (dual-pane F5/F6) */}
         <CopyMoveDialog

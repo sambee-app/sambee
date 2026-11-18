@@ -1,6 +1,8 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BROWSER_SHORTCUTS, CODEMIRROR_EDITOR_SHORTCUTS, MARKDOWN_EDITOR_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { requireTestValue } from "../../test/helpers/assertions";
+import { setApplePlatformForTesting } from "../../utils/platform";
 import type { KeyboardShortcut } from "../useKeyboardShortcuts";
 import { formatShortcut, useKeyboardShortcuts, withShortcut } from "../useKeyboardShortcuts";
 
@@ -9,10 +11,12 @@ describe("useKeyboardShortcuts", () => {
 
   beforeEach(() => {
     mockHandler = vi.fn();
+    setApplePlatformForTesting(false);
     vi.clearAllMocks();
   });
 
   afterEach(() => {
+    setApplePlatformForTesting(null);
     if (document.activeElement instanceof HTMLElement) {
       document.activeElement.blur();
     }
@@ -28,6 +32,8 @@ describe("useKeyboardShortcuts", () => {
       shiftKey?: boolean;
       altKey?: boolean;
       metaKey?: boolean;
+      keyCode?: number;
+      isComposing?: boolean;
     }
   ) => {
     const event = new KeyboardEvent("keydown", {
@@ -36,6 +42,8 @@ describe("useKeyboardShortcuts", () => {
       shiftKey: modifiers?.shiftKey ?? false,
       altKey: modifiers?.altKey ?? false,
       metaKey: modifiers?.metaKey ?? false,
+      keyCode: modifiers?.keyCode ?? 0,
+      isComposing: modifiers?.isComposing ?? false,
       bubbles: true,
       cancelable: true,
     });
@@ -815,9 +823,232 @@ describe("useKeyboardShortcuts", () => {
       removeEventListenerSpy.mockRestore();
     });
   });
+
+  describe("Platform-Aware Shortcut Matching", () => {
+    it("matches Option+letter on macOS when Option alters event.key and keyCode is the letter code", () => {
+      setApplePlatformForTesting(true);
+      const shortcuts: KeyboardShortcut[] = [
+        {
+          ...CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WORD_WRAP,
+          handler: mockHandler,
+        },
+      ];
+
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+
+      simulateKeyPress("Ω", { altKey: true, keyCode: "Z".charCodeAt(0) });
+      expect(mockHandler).toHaveBeenCalledTimes(1);
+    });
+
+    it("matches Control+Option+letter on macOS when Option alters event.key", () => {
+      setApplePlatformForTesting(true);
+      const shortcuts: KeyboardShortcut[] = [
+        {
+          ...MARKDOWN_EDITOR_SHORTCUTS.INSERT_TABLE,
+          handler: mockHandler,
+        },
+      ];
+
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+
+      simulateKeyPress("†", { ctrlKey: true, altKey: true, keyCode: "T".charCodeAt(0) });
+      expect(mockHandler).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not apply macOS keyCode fallback without Option, to punctuation/digits, or to non-alt shortcuts", () => {
+      setApplePlatformForTesting(true);
+      const plainLetterHandler = vi.fn();
+      const punctuationHandler = vi.fn();
+      const digitHandler = vi.fn();
+      const shortcuts: KeyboardShortcut[] = [
+        {
+          id: "plain-letter",
+          keys: ["z", "Z"],
+          description: "Plain letter",
+          handler: plainLetterHandler,
+        },
+        {
+          id: "alt-punctuation",
+          keys: "-",
+          alt: true,
+          description: "Alt minus",
+          handler: punctuationHandler,
+        },
+        {
+          id: "alt-digit",
+          keys: "1",
+          alt: true,
+          description: "Alt digit",
+          handler: digitHandler,
+        },
+      ];
+
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+
+      // Without Option, keyCode fallback must not match a different event.key
+      simulateKeyPress("Ω", { altKey: false, keyCode: "Z".charCodeAt(0) });
+      // Punctuation and digits must not use keyCode fallback even when Option is held
+      simulateKeyPress("–", { altKey: true, keyCode: "-".charCodeAt(0) });
+      simulateKeyPress("¡", { altKey: true, keyCode: "1".charCodeAt(0) });
+
+      expect(plainLetterHandler).not.toHaveBeenCalled();
+      expect(punctuationHandler).not.toHaveBeenCalled();
+      expect(digitHandler).not.toHaveBeenCalled();
+    });
+
+    it("matches macControlForAlt shortcuts on macOS with Control only, excluding Option and Cmd", () => {
+      setApplePlatformForTesting(true);
+      const newTabHandler = vi.fn();
+      const closeTabHandler = vi.fn();
+      const shortcuts: KeyboardShortcut[] = [
+        {
+          id: "new-tab",
+          keys: "+",
+          alt: true,
+          macControlForAlt: true,
+          description: "New tab",
+          handler: newTabHandler,
+        },
+        {
+          id: "close-tab",
+          keys: "-",
+          alt: true,
+          macControlForAlt: true,
+          description: "Close tab",
+          handler: closeTabHandler,
+        },
+      ];
+
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+
+      // Control+Plus (including Shift-produced + on US layout) and Control+Minus match
+      simulateKeyPress("+", { ctrlKey: true, shiftKey: true });
+      simulateKeyPress("+", { ctrlKey: true });
+      simulateKeyPress("-", { ctrlKey: true });
+      expect(newTabHandler).toHaveBeenCalledTimes(2);
+      expect(closeTabHandler).toHaveBeenCalledTimes(1);
+
+      // Option+Plus/Minus and Cmd+Plus/Minus must not match
+      simulateKeyPress("+", { altKey: true });
+      simulateKeyPress("±", { altKey: true, shiftKey: true });
+      simulateKeyPress("-", { altKey: true });
+      simulateKeyPress("+", { metaKey: true, shiftKey: true });
+      simulateKeyPress("-", { metaKey: true });
+      simulateKeyPress("+", { ctrlKey: true, metaKey: true });
+      simulateKeyPress("+", { ctrlKey: true, altKey: true });
+
+      expect(newTabHandler).toHaveBeenCalledTimes(2);
+      expect(closeTabHandler).toHaveBeenCalledTimes(1);
+    });
+
+    it("matches macControlForAlt shortcuts on Windows/Linux with Alt+Plus and Alt+Minus by character", () => {
+      setApplePlatformForTesting(false);
+      const newTabHandler = vi.fn();
+      const closeTabHandler = vi.fn();
+      const shortcuts: KeyboardShortcut[] = [
+        {
+          id: "new-tab",
+          keys: "+",
+          alt: true,
+          macControlForAlt: true,
+          description: "New tab",
+          handler: newTabHandler,
+        },
+        {
+          id: "close-tab",
+          keys: "-",
+          alt: true,
+          macControlForAlt: true,
+          description: "Close tab",
+          handler: closeTabHandler,
+        },
+      ];
+
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+
+      // Shift-produced Plus (US layout) and unshifted/numpad Plus and Minus
+      simulateKeyPress("+", { altKey: true, shiftKey: true });
+      simulateKeyPress("+", { altKey: true });
+      simulateKeyPress("-", { altKey: true });
+      expect(newTabHandler).toHaveBeenCalledTimes(2);
+      expect(closeTabHandler).toHaveBeenCalledTimes(1);
+
+      // Control+Plus/Minus must not match on Windows/Linux
+      simulateKeyPress("+", { ctrlKey: true });
+      simulateKeyPress("-", { ctrlKey: true });
+      expect(newTabHandler).toHaveBeenCalledTimes(2);
+      expect(closeTabHandler).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not trigger Alt-only shortcuts on Windows AltGraph (Ctrl+Alt) text entry", () => {
+      setApplePlatformForTesting(false);
+      const altLetterHandler = vi.fn();
+      const newTabHandler = vi.fn();
+      const shortcuts: KeyboardShortcut[] = [
+        {
+          ...CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WORD_WRAP,
+          handler: altLetterHandler,
+        },
+        {
+          id: "new-tab",
+          keys: "+",
+          alt: true,
+          macControlForAlt: true,
+          description: "New tab",
+          handler: newTabHandler,
+        },
+      ];
+
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+
+      // German layout AltGraph + "+" produces "~", or AltGraph with Ctrl+Alt on any key
+      simulateKeyPress("z", { ctrlKey: true, altKey: true });
+      simulateKeyPress("+", { ctrlKey: true, altKey: true });
+      simulateKeyPress("~", { ctrlKey: true, altKey: true });
+
+      expect(altLetterHandler).not.toHaveBeenCalled();
+      expect(newTabHandler).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])("ignores events with isComposing on all platforms (isApple: %s)", (isApple) => {
+      setApplePlatformForTesting(isApple);
+      const shortcuts: KeyboardShortcut[] = [
+        {
+          id: "escape",
+          keys: "Escape",
+          description: "Close",
+          allowInInput: true,
+          handler: mockHandler,
+        },
+        {
+          id: "plain-key",
+          keys: "a",
+          description: "Plain key",
+          handler: mockHandler,
+        },
+      ];
+
+      renderHook(() => useKeyboardShortcuts({ shortcuts }));
+
+      const escapeEvent = simulateKeyPress("Escape", { isComposing: true });
+      const letterEvent = simulateKeyPress("a", { isComposing: true });
+
+      expect(mockHandler).not.toHaveBeenCalled();
+      expect(escapeEvent.defaultPrevented).toBe(false);
+      expect(letterEvent.defaultPrevented).toBe(false);
+    });
+  });
 });
 
 describe("formatShortcut", () => {
+  beforeEach(() => {
+    setApplePlatformForTesting(false);
+  });
+
+  afterEach(() => {
+    setApplePlatformForTesting(null);
+  });
+
   it("should format single key", () => {
     const shortcut: KeyboardShortcut = {
       id: "test",
@@ -921,6 +1152,36 @@ describe("formatShortcut", () => {
         handler: vi.fn(),
       };
       expect(formatShortcut(shortcut)).toBe(expected);
+    }
+  });
+
+  it("formats case alternatives as one upper-case letter and Plus/Minus as words", () => {
+    expect(formatShortcut({ keys: ["c", "C"], alt: true })).toBe("Alt+C");
+    expect(formatShortcut({ keys: "+", alt: true, macControlForAlt: true })).toBe("Alt+Plus");
+    expect(formatShortcut({ keys: "-", alt: true, macControlForAlt: true })).toBe("Alt+Minus");
+  });
+
+  it("preserves Windows/Linux labels and generates Option/Control labels on macOS", () => {
+    const affectedShortcuts = [
+      { shortcut: CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_CASE_SENSITIVE, nonApple: "Alt+C", apple: "Option+C" },
+      { shortcut: CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WHOLE_WORD, nonApple: "Alt+W", apple: "Option+W" },
+      { shortcut: CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_REGULAR_EXPRESSION, nonApple: "Alt+R", apple: "Option+R" },
+      { shortcut: CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_WORD_WRAP, nonApple: "Alt+Z", apple: "Option+Z" },
+      { shortcut: MARKDOWN_EDITOR_SHORTCUTS.INSERT_TABLE, nonApple: "Ctrl+Alt+T", apple: "Ctrl+Option+T" },
+      { shortcut: MARKDOWN_EDITOR_SHORTCUTS.INSERT_THEMATIC_BREAK, nonApple: "Ctrl+Alt+H", apple: "Ctrl+Option+H" },
+      { shortcut: BROWSER_SHORTCUTS.OPEN_LOCATION_IN_NEW_TAB, nonApple: "Ctrl+Alt+T", apple: "Ctrl+Option+T" },
+      { shortcut: { keys: "+", alt: true, macControlForAlt: true }, nonApple: "Alt+Plus", apple: "Control+Plus" },
+      { shortcut: { keys: "-", alt: true, macControlForAlt: true }, nonApple: "Alt+Minus", apple: "Control+Minus" },
+    ];
+
+    setApplePlatformForTesting(false);
+    for (const { shortcut, nonApple } of affectedShortcuts) {
+      expect(formatShortcut(shortcut)).toBe(nonApple);
+    }
+
+    setApplePlatformForTesting(true);
+    for (const { shortcut, apple } of affectedShortcuts) {
+      expect(formatShortcut(shortcut)).toBe(apple);
     }
   });
 });
