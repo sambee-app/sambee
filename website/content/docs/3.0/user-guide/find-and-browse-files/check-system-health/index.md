@@ -15,7 +15,7 @@ Closing the dialog returns keyboard focus to the file list on desktop or to the 
 
 The dialog groups readings under **Server**, **Container**, and **Connection storage**. Connection storage warnings and errors appear first. Missing or old readings are marked separately; they do not mean that a resource is healthy.
 
-Readings update automatically every 5 seconds while the dialog is open and the browser tab is visible.
+Sambee updates the readings automatically while the tab is visible. If a check fails, Sambee retries and keeps its last reading until it gets too old. After your PC wakes, **Refreshing health checks** means Sambee is getting new readings. The previous status stays visible briefly; old values are not shown as current.
 
 Each reading has its own expandable row for capacity, check limits, and its data source. The current value appears only once.
 
@@ -26,7 +26,7 @@ The desktop toolbar icon combines a monitor-and-pulse symbol with a status badge
 - Checkmark in a circle (**OK**): Monitored checks are within their configured limits. The summary states if some checks are unavailable.
 - Exclamation mark in a triangle (**Warning**): At least one monitored resource reached its warning threshold.
 - Exclamation mark in an octagon (**Error**): At least one monitored resource reached its error threshold or ran out of free space.
-- Question mark in a circle (**Unknown**): No warning or error is active, and at least one required check is still collecting, unreachable, or showing old data.
+- Question mark in a circle (**Unknown**): No warning or error is active, and at least one required check did not return a current reading in time.
 - Letter **i** in a circle (**Informational**): The check is not required or has no applicable alert limits, for example CPU temperature without a supported sensor or container memory without a limit. It does not prevent an **OK** result.
 
 ## What Storage Is Checked
@@ -37,7 +37,7 @@ Sambee checks free space only for locations active in your current browser:
 - The SMB connection open in the current pane (or both panes in dual-pane mode, without duplicates). Saved SMB connections that are not open are not queried.
 - Local drives exposed by your paired Companion app on desktop.
 
-**Storage: application data** and **Storage: temporary data** appear under **Container**. A shared filesystem uses one combined row. Drives and connections appear under **Connection storage**, with **Local drive** or **SMB connection** shown separately from the name. If Companion cannot provide drive information, a single **Local drives** row shows its status. When Companion is not connected or paired, this row is informational and does not prevent an **OK** result. Pairing errors and failed capacity checks still show **Unknown**.
+**Storage: application data** and **Storage: temporary data** appear under **Container**. A shared filesystem uses one combined row. Drives and connections appear under **Connection storage**, with **Local drive** or **SMB connection** shown separately from the name. If Companion cannot provide drive information, a single **Local drives** row shows its status. If Companion is not paired, this row is informational. If Companion rejects an existing pairing or cannot provide a reading in time, the check shows **Unknown**.
 
 Storage entries show free space and its percentage. On SMB shares and Windows local drives, this value includes enforced user quotas.
 
@@ -45,4 +45,5 @@ Storage entries show free space and its percentage. On SMB shares and Windows lo
 
 - Low storage space: Delete unneeded files or choose another destination before starting uploads, copies, or archive extractions.
 - **Update Companion to show drive space**: Install the current Companion release from **Settings** > **Local Drives**; file browsing continues to work while Companion is older.
+- Companion cannot verify pairing: Go to **Settings** > **Local Drives** and pair again if needed.
 - Old or unavailable backend data: Sambee retries automatically. If the backend remains unreachable, check your network connection or contact your administrator.

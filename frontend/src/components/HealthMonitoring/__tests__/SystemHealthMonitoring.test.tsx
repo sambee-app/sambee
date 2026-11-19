@@ -31,19 +31,18 @@ vi.mock("../../../services/api", () => ({
   },
 }));
 
-vi.mock("../../../services/companion", () => ({
-  default: {
-    getDrivesCapacity: vi.fn(),
-  },
-  hasStoredSecret: vi.fn(() => true),
-  isCompanionAuthSignatureMismatch: vi.fn(() => false),
-  isCompanionCapacityUnsupported: vi.fn(
-    (err: unknown) => typeof err === "object" && err !== null && (err as { response?: { status?: number } }).response?.status === 404
-  ),
-  isCompanionPairingMissing: vi.fn(() => false),
-}));
+vi.mock(import("../../../services/companion"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    default: Object.assign(actual.default, { getDrivesCapacity: vi.fn() }),
+    hasStoredSecret: vi.fn(() => true),
+  };
+});
 
+import { HEALTH_RECOVERY_MS, HEALTH_REQUEST_TIMEOUT_MS } from "../../../hooks/healthPolling";
 import api from "../../../services/api";
+import { authSession } from "../../../services/authSession";
 import companionService from "../../../services/companion";
 
 const baseSnapshot: HealthMonitoringSnapshot = {
@@ -1013,10 +1012,7 @@ describe("System Health Monitoring UI and Hook", () => {
       expect(result.current.visible).toBe(false);
     });
 
-    it.each([
-      { dialogOpen: false, intervalMs: 15_000 },
-      { dialogOpen: true, intervalMs: 5_000 },
-    ])("uses the normal interval for collecting checks (dialog: $dialogOpen)", async ({ dialogOpen, intervalMs }) => {
+    it("retries a collecting check before the normal poll", async () => {
       vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(
         async (): Promise<HealthMonitoringSnapshot> => ({
           ...baseSnapshot,
@@ -1028,11 +1024,11 @@ describe("System Health Monitoring UI and Hook", () => {
           })),
         })
       );
-      renderHook(() => useSystemHealthMonitoring({ ...options, dialogOpen }));
+      renderHook(() => useSystemHealthMonitoring(options));
       await act(async () => {});
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(intervalMs - 1);
+        await vi.advanceTimersByTimeAsync(1_999);
       });
       expect(api.getHealthMonitoringSnapshot).toHaveBeenCalledTimes(1);
       await act(async () => {
@@ -1123,7 +1119,7 @@ describe("System Health Monitoring UI and Hook", () => {
       expect(api.getHealthMonitoringSnapshot).toHaveBeenCalledTimes(1);
     });
 
-    it("does not grant access when a policy recheck fails and retries on the next policy interval", async () => {
+    it("does not grant access when a policy recheck fails and retries promptly", async () => {
       vi.mocked(api.getHealthMonitoringClientPolicy)
         .mockResolvedValueOnce({ ...permittedPolicy, permitted: false, thresholds: null })
         .mockRejectedValueOnce(new Error("Backend unavailable"))
@@ -1139,10 +1135,285 @@ describe("System Health Monitoring UI and Hook", () => {
       expect(companionService.getDrivesCapacity).not.toHaveBeenCalled();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(60_000);
+        await vi.advanceTimersByTimeAsync(2_000);
       });
       expect(api.getHealthMonitoringClientPolicy).toHaveBeenCalledTimes(3);
       expect(result.current.visible).toBe(true);
+    });
+
+    const advance = async (ms: number) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    };
+
+    const freshSnapshot = (): HealthMonitoringSnapshot => {
+      const sample = <T,>(metric: T) => ({ ...metric, sampled_at: new Date().toISOString(), age_seconds: 0 });
+      return {
+        ...baseSnapshot,
+        host_memory: sample(baseSnapshot.host_memory),
+        system_load: sample(baseSnapshot.system_load),
+        container_memory: sample(baseSnapshot.container_memory),
+        application_storage: baseSnapshot.application_storage.map((metric) => sample({ ...metric, severity: "ok" })),
+        smb_storage: baseSnapshot.smb_storage.map((metric) => sample({ ...metric, severity: "ok" })),
+      };
+    };
+
+    const healthyCapacity = (): Awaited<ReturnType<typeof companionService.getDrivesCapacity>> => ({
+      generated_at: new Date().toISOString(),
+      items: [
+        {
+          id: "c",
+          name: "System",
+          drive_type: "fixed",
+          availability: "available",
+          semantics: "caller_quota",
+          available_bytes: 50,
+          total_bytes: 100,
+          sampled_at: new Date().toISOString(),
+          age_seconds: 0,
+          is_stale: false,
+        },
+      ],
+    });
+
+    it("waits for new paired-drive readings after monitoring is re-enabled", async () => {
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => freshSnapshot());
+      vi.mocked(companionService.getDrivesCapacity)
+        .mockImplementationOnce(async () => healthyCapacity())
+        .mockRejectedValueOnce(new Error("network"))
+        .mockImplementation(async () => healthyCapacity());
+      const { result } = renderHook(() => useSystemHealthMonitoring(options));
+      await act(async () => {});
+      expect(result.current.localDrives[0]?.label).toBe("System");
+
+      vi.mocked(api.getHealthMonitoringClientPolicy).mockResolvedValueOnce({ ...permittedPolicy, enabled: false });
+      await act(async () => {
+        publishHealthMonitoringSettingsChanged();
+      });
+      expect(result.current.visible).toBe(false);
+
+      await act(async () => {
+        publishHealthMonitoringSettingsChanged();
+      });
+      expect(result.current.visible).toBe(true);
+      expect(result.current.snapshot).not.toBeNull();
+      expect(result.current.severity).toBe("unknown");
+      expect(result.current.localDrives[0]).toMatchObject({ is_placeholder: true, severity: "unknown" });
+
+      await advance(2_000);
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.localDrives[0]?.label).toBe("System");
+    });
+
+    it("replaces the update prompt when a later capacity request succeeds", async () => {
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => freshSnapshot());
+      vi.mocked(companionService.getDrivesCapacity)
+        .mockRejectedValueOnce({ response: { status: 404, data: { detail: "Not Found" } } })
+        .mockImplementation(async () => healthyCapacity());
+      const { result, rerender } = renderHook((props) => useSystemHealthMonitoring(props), { initialProps: options });
+      await act(async () => {});
+      expect(result.current.companionUpdateRequired).toBe(true);
+      expect(result.current.localDrives[0]?.id).toBe("companion-update-required");
+
+      await act(async () => {
+        rerender({ ...options, activeConnectionIds: ["smb-2"] });
+      });
+      expect(companionService.getDrivesCapacity).toHaveBeenCalledTimes(2);
+      expect(result.current.companionUpdateRequired).toBe(false);
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.localDrives[0]?.label).toBe("System");
+    });
+
+    it("keeps a fresh storage warning during a failed poll and expires the warning during a sustained outage", async () => {
+      const snapshot = freshSnapshot();
+      snapshot.application_storage = snapshot.application_storage.map((metric) => ({ ...metric, severity: "warning", age_seconds: 160 }));
+      vi.mocked(api.getHealthMonitoringSnapshot).mockResolvedValueOnce(snapshot).mockRejectedValue(new Error("network"));
+      const { result } = renderHook(() => useSystemHealthMonitoring(options));
+      await act(async () => {});
+
+      await advance(15_000);
+      expect(result.current.severity).toBe("warning");
+      expect(result.current.retryNotes).toEqual([expect.stringContaining("Sambee will retry")]);
+      await advance(5_000);
+      expect(result.current.severity).toBe("unknown");
+      expect(result.current.snapshot?.application_storage[0]?.is_stale).toBe(true);
+
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => freshSnapshot());
+      await advance(10_000);
+      expect(result.current.severity).toBe("ok");
+    });
+
+    it("lets server polls finish while a Companion request stalls and ignores the late capacity response", async () => {
+      let finishCapacity!: (value: Awaited<ReturnType<typeof companionService.getDrivesCapacity>>) => void;
+      vi.mocked(companionService.getDrivesCapacity).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishCapacity = resolve;
+          })
+      );
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => freshSnapshot());
+      const { result } = renderHook(() => useSystemHealthMonitoring({ ...options, dialogOpen: true }));
+      await act(async () => {});
+      await advance(5_000);
+      expect(api.getHealthMonitoringSnapshot).toHaveBeenCalledTimes(2);
+      expect(companionService.getDrivesCapacity).toHaveBeenCalledTimes(1);
+      await advance(HEALTH_REQUEST_TIMEOUT_MS - 5_000 + 2_000);
+      expect(companionService.getDrivesCapacity).toHaveBeenCalledTimes(2);
+      expect(result.current.retryNotes).toEqual([]);
+      await act(async () => {
+        finishCapacity({
+          generated_at: baseSnapshot.generated_at,
+          items: [
+            {
+              id: "late",
+              name: "Late response",
+              drive_type: "fixed",
+              availability: "available",
+              semantics: "caller_quota",
+              available_bytes: 0,
+              total_bytes: 100,
+              sampled_at: baseSnapshot.generated_at,
+              age_seconds: 0,
+              is_stale: false,
+            },
+          ],
+        });
+      });
+      expect(result.current.localDrives).toEqual([]);
+    });
+
+    it.each([false, true])("avoids Unknown after a sleep gap (elapsed clock advances: %s)", async (elapsedAdvances) => {
+      const first = freshSnapshot();
+      vi.mocked(api.getHealthMonitoringSnapshot)
+        .mockResolvedValueOnce(first)
+        .mockResolvedValueOnce({
+          ...first,
+          summary: { ...first.summary, severity: "unknown" },
+          host_memory: { ...first.host_memory, availability: "stale", severity: "unknown", is_stale: true },
+        })
+        .mockImplementation(async () => freshSnapshot());
+      const { result } = renderHook(() => useSystemHealthMonitoring(options));
+      await act(async () => {});
+      await advance(1_000);
+      const elapsed = performance.now();
+      const clock = vi.spyOn(performance, "now");
+      if (elapsedAdvances) clock.mockReturnValue(elapsed + 300_000);
+      vi.setSystemTime(Date.now() + 300_000);
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.refreshing).toBe(true);
+      expect(result.current.snapshot?.host_memory.is_stale).toBe(true);
+      clock.mockRestore();
+      if (elapsedAdvances) {
+        const realElapsed = performance.now.bind(performance);
+        vi.spyOn(performance, "now").mockImplementation(() => realElapsed() + 300_000);
+      }
+      await advance(3_000);
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.refreshing).toBe(false);
+    });
+
+    it("refreshes before a current host sample can expire during normal operation", async () => {
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => {
+        const snapshot = freshSnapshot();
+        return { ...snapshot, host_memory: { ...snapshot.host_memory, age_seconds: 4 } };
+      });
+      const { result } = renderHook(() => useSystemHealthMonitoring(options));
+      await act(async () => {});
+      for (let second = 0; second < 20; second++) {
+        await advance(1_000);
+        expect(result.current.severity).toBe("ok");
+      }
+      expect(api.getHealthMonitoringSnapshot).toHaveBeenCalledTimes(3);
+    });
+
+    it("queues a refresh after a wake-up request finds a poll in progress", async () => {
+      let finish!: (value: HealthMonitoringSnapshot) => void;
+      vi.mocked(api.getHealthMonitoringSnapshot)
+        .mockImplementationOnce(async () => freshSnapshot())
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            })
+        )
+        .mockImplementation(async () => freshSnapshot());
+      const { result } = renderHook(() => useSystemHealthMonitoring({ ...options, dialogOpen: true }));
+      await act(async () => {});
+      await advance(5_000);
+      vi.setSystemTime(Date.now() + 60_000);
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(api.getHealthMonitoringSnapshot).toHaveBeenCalledTimes(2);
+      expect(result.current.refreshing).toBe(true);
+      const beforeWake = freshSnapshot();
+      await act(async () => {
+        finish({
+          ...beforeWake,
+          host_memory: { ...beforeWake.host_memory, availability: "stale", severity: "unknown", is_stale: true },
+        });
+      });
+      expect(api.getHealthMonitoringSnapshot).toHaveBeenCalledTimes(3);
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.refreshing).toBe(false);
+    });
+
+    it("keeps a temporary signature rejection retryable but reports a confirmed rejection", async () => {
+      const rejected = { response: { status: 403, data: { code: "companion_auth_signature_mismatch" } } };
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => freshSnapshot());
+      vi.mocked(companionService.getDrivesCapacity).mockRejectedValueOnce(rejected);
+      const { result } = renderHook(() => useSystemHealthMonitoring({ ...options, dialogOpen: true }));
+      await act(async () => {});
+      expect(companionService.getDrivesCapacity).toHaveBeenCalledTimes(2);
+      expect(result.current.severity).toBe("ok");
+      vi.mocked(companionService.getDrivesCapacity).mockRejectedValue(rejected);
+      await advance(5_000);
+      expect(result.current.severity).toBe("unknown");
+      expect(result.current.headline).toContain("Local Drives");
+    });
+
+    it("does not extend wake-up recovery while requests fail and resume events repeat", async () => {
+      vi.mocked(api.getHealthMonitoringSnapshot)
+        .mockImplementationOnce(async () => freshSnapshot())
+        .mockRejectedValue(new Error("offline"));
+      const { result } = renderHook(() => useSystemHealthMonitoring(options));
+      await act(async () => {});
+      vi.setSystemTime(Date.now() + 60_000);
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await advance(HEALTH_RECOVERY_MS - 1_000);
+      await act(async () => {
+        window.dispatchEvent(new Event("online"));
+      });
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.refreshing).toBe(true);
+      await advance(1_000);
+      expect(result.current.severity).toBe("unknown");
+      expect(result.current.refreshing).toBe(false);
+    });
+
+    it("discards a late snapshot after losing session access", async () => {
+      let finish!: (value: HealthMonitoringSnapshot) => void;
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+      const { result } = renderHook(() => useSystemHealthMonitoring(options));
+      await act(async () => {});
+      expect(result.current.visible).toBe(true);
+      await act(async () => {
+        authSession.clear();
+        finish(freshSnapshot());
+      });
+      expect(result.current.visible).toBe(false);
+      expect(result.current.snapshot).toBeNull();
     });
   });
 });
