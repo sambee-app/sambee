@@ -52,6 +52,13 @@ fn identity(file: &File) -> Result<NativeIdentity, IndexError> {
     Ok(identity_information(&information))
 }
 
+#[cfg(test)]
+pub(in super::super) fn test_file_id(path: &Path) -> Result<[u8; size_of::<u128>()], IndexError> {
+    let mut information = FILE_ID_INFO::default();
+    query(&File::open(path)?, FileIdInfo, &mut information)?;
+    Ok(information.FileId.Identifier)
+}
+
 fn identity_information(information: &FILE_ID_INFO) -> NativeIdentity {
     let bytes = information.FileId.Identifier;
     let mut low = [0; FILE_ID_HALF_BYTES];
@@ -105,6 +112,8 @@ fn native_path(file: &File) -> Result<PathBuf, IndexError> {
 
 fn open_directory(path: &Path, io: &super::NativeIo, share_mode: FILE_SHARE_MODE) -> Result<File, IndexError> {
     io.record_open();
+    #[cfg(test)]
+    io.record_open_target(|| super::NativeOpenTarget::Path(path.to_owned()));
     let file = OpenOptions::new()
         .read(true)
         .access_mode(FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0)
@@ -158,12 +167,15 @@ fn file_id_descriptor(file_id: &[u8; size_of::<u128>()], legacy: bool) -> Result
     })
 }
 
-fn open_directory_by_id(volume: &File, descriptor: &FILE_ID_DESCRIPTOR, io: &super::NativeIo) -> Result<File, IndexError> {
+fn open_directory_by_id(volume: &File, file_id: &[u8; size_of::<u128>()], legacy: bool, io: &super::NativeIo) -> Result<File, IndexError> {
+    let descriptor = file_id_descriptor(file_id, legacy)?;
     io.record_open();
+    #[cfg(test)]
+    io.record_open_target(|| super::NativeOpenTarget::FileId(*file_id));
     let handle = unsafe {
         OpenFileById(
             HANDLE(volume.as_raw_handle()),
-            descriptor,
+            &descriptor,
             FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0,
             SCAN_SHARE_MODE,
             None,
@@ -214,6 +226,8 @@ fn open_directory_relative(root: &File, relative: &str, io: &super::NativeIo) ->
     let mut handle = HANDLE::default();
     let mut completion = IO_STATUS_BLOCK::default();
     io.record_open();
+    #[cfg(test)]
+    io.record_open_target(|| super::NativeOpenTarget::Path(PathBuf::from(&text)));
     let status = unsafe {
         NtCreateFile(
             &mut handle,
@@ -588,8 +602,7 @@ impl NativeRoot {
             if unsupported.load(Ordering::Acquire) || (legacy && file_id[FILE_ID_HALF_BYTES..].iter().any(|byte| *byte != 0)) {
                 continue;
             }
-            let descriptor = file_id_descriptor(file_id, legacy)?;
-            match open_directory_by_id(last(&self.files)?, &descriptor, &self.io) {
+            match open_directory_by_id(last(&self.files)?, file_id, legacy, &self.io) {
                 Ok(file) => {
                     let current = identity(&file)?;
                     if current.device == self.identity.device && current.file_id() == expected_id && native_path(&file)? == expected_path {
@@ -892,10 +905,8 @@ mod tests {
         let root = NativeRoot::open_with_io(temporary.path(), io.clone()).unwrap();
         let expected = root.parent_identity("parent/child").unwrap();
         let file_id: [u8; size_of::<u128>()] = expected.file_id().try_into().unwrap();
-        let extended = file_id_descriptor(&file_id, false).unwrap();
-        let direct_available = open_directory_by_id(last(&root.files).unwrap(), &extended, &io).is_ok()
-            || (expected.mount == 0
-                && open_directory_by_id(last(&root.files).unwrap(), &file_id_descriptor(&file_id, true).unwrap(), &io).is_ok())
+        let direct_available = open_directory_by_id(last(&root.files).unwrap(), &file_id, false, &io).is_ok()
+            || (expected.mount == 0 && open_directory_by_id(last(&root.files).unwrap(), &file_id, true, &io).is_ok())
             || open_directory_relative(last(&root.files).unwrap(), "parent/child", &io).is_ok();
         let read = root.open_parent_for_scan_with_id("parent/child", &expected.file_id()).unwrap();
         assert_eq!(read.identity, expected);
