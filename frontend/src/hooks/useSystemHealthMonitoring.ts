@@ -286,7 +286,6 @@ export function useSystemHealthMonitoring({
     setCompanionRejected(false);
     setCompanionReady(false);
     setCompanionRetry(false);
-    setCompanionReady(false);
     setCompanionUpdateRequired(companionStatus === "update_required");
     driveTrackersRef.current.clear();
   }, [companionRevision, companionStatus, noLocalAccess]);
@@ -295,6 +294,8 @@ export function useSystemHealthMonitoring({
     const clearMetrics = (preserveRecovery = false) => {
       setBackendSample(null);
       setRawLocalDrives([]);
+      setCompanionReady(false);
+      setCompanionRejected(false);
       setBackendRetry(false);
       setCompanionRetry(false);
       setPolicyRetry(false);
@@ -454,6 +455,7 @@ export function useSystemHealthMonitoring({
           )
         );
         setCompanionRejected(false);
+        setCompanionUpdateRequired(false);
         setCompanionReady(true);
         const failed = listing.items.filter((metric) => !isReading(metric) && metric.availability !== "unsupported");
         setCompanionRetry(failed.length > 0);
@@ -472,6 +474,7 @@ export function useSystemHealthMonitoring({
           setCompanionRejected(!companionUnsupported);
           setCompanionUpdateRequired(companionUnsupported);
           setRawLocalDrives([]);
+          setCompanionReady(false);
           driveTrackersRef.current.clear();
           setCompanionRetry(false);
           setPendingRefresh((pending) => ({ ...pending, companion: false }));

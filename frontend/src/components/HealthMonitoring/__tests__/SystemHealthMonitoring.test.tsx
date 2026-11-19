@@ -1159,6 +1159,72 @@ describe("System Health Monitoring UI and Hook", () => {
       };
     };
 
+    const healthyCapacity = (): Awaited<ReturnType<typeof companionService.getDrivesCapacity>> => ({
+      generated_at: new Date().toISOString(),
+      items: [
+        {
+          id: "c",
+          name: "System",
+          drive_type: "fixed",
+          availability: "available",
+          semantics: "caller_quota",
+          available_bytes: 50,
+          total_bytes: 100,
+          sampled_at: new Date().toISOString(),
+          age_seconds: 0,
+          is_stale: false,
+        },
+      ],
+    });
+
+    it("waits for new paired-drive readings after monitoring is re-enabled", async () => {
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => freshSnapshot());
+      vi.mocked(companionService.getDrivesCapacity)
+        .mockImplementationOnce(async () => healthyCapacity())
+        .mockRejectedValueOnce(new Error("network"))
+        .mockImplementation(async () => healthyCapacity());
+      const { result } = renderHook(() => useSystemHealthMonitoring(options));
+      await act(async () => {});
+      expect(result.current.localDrives[0]?.label).toBe("System");
+
+      vi.mocked(api.getHealthMonitoringClientPolicy).mockResolvedValueOnce({ ...permittedPolicy, enabled: false });
+      await act(async () => {
+        publishHealthMonitoringSettingsChanged();
+      });
+      expect(result.current.visible).toBe(false);
+
+      await act(async () => {
+        publishHealthMonitoringSettingsChanged();
+      });
+      expect(result.current.visible).toBe(true);
+      expect(result.current.snapshot).not.toBeNull();
+      expect(result.current.severity).toBe("unknown");
+      expect(result.current.localDrives[0]).toMatchObject({ is_placeholder: true, severity: "unknown" });
+
+      await advance(2_000);
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.localDrives[0]?.label).toBe("System");
+    });
+
+    it("replaces the update prompt when a later capacity request succeeds", async () => {
+      vi.mocked(api.getHealthMonitoringSnapshot).mockImplementation(async () => freshSnapshot());
+      vi.mocked(companionService.getDrivesCapacity)
+        .mockRejectedValueOnce({ response: { status: 404, data: { detail: "Not Found" } } })
+        .mockImplementation(async () => healthyCapacity());
+      const { result, rerender } = renderHook((props) => useSystemHealthMonitoring(props), { initialProps: options });
+      await act(async () => {});
+      expect(result.current.companionUpdateRequired).toBe(true);
+      expect(result.current.localDrives[0]?.id).toBe("companion-update-required");
+
+      await act(async () => {
+        rerender({ ...options, activeConnectionIds: ["smb-2"] });
+      });
+      expect(companionService.getDrivesCapacity).toHaveBeenCalledTimes(2);
+      expect(result.current.companionUpdateRequired).toBe(false);
+      expect(result.current.severity).toBe("ok");
+      expect(result.current.localDrives[0]?.label).toBe("System");
+    });
+
     it("keeps a fresh storage warning during a failed poll and expires the warning during a sustained outage", async () => {
       const snapshot = freshSnapshot();
       snapshot.application_storage = snapshot.application_storage.map((metric) => ({ ...metric, severity: "warning", age_seconds: 160 }));
