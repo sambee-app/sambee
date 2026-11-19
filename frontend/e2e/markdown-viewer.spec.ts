@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CI_MARKDOWN_PRINT_MODES, markdownPrintCaseTitle } from "../scripts/ci-test-policy.mjs";
 import type { StoredTheme } from "../src/services/api";
 import type { HealthMonitoringClientPolicy } from "../src/types/healthMonitoring";
 import { editableDefinition } from "../src/theme/themeDefinition";
@@ -1381,8 +1382,8 @@ test.describe("production CI correctness", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires a normal production build");
   const markdown = "# CI preview\n\n[CI tail](#ci-tail)\n\nA &amp; B and &#x1F680;\n\n```javascript\nconst alpha = 1;\n```\n\n## CI tail\n\nLast paragraph.\n" + " ".repeat(INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS);
 
-  for (const mode of ["light", "dark"] as const) {
-    test(`Markdown print links in ${mode} mode`, async ({ page }, testInfo) => {
+  for (const mode of CI_MARKDOWN_PRINT_MODES) {
+    test(markdownPrintCaseTitle(mode), async ({ page }, testInfo) => {
       const initialMarkdown = "# Print links\n\n[**External** `code`](https://example.org/print) [Relative](child.md) [Heading](#target) [Rejected](javascript:void)\n\n## Target";
       await serveProductionAssets(page);
       await mockMarkdownViewerApi(page, { initialMarkdown, themeId: () => `sambee-${mode}` });

@@ -33,17 +33,27 @@ describe("CI resource and browser policy", () => {
     ]);
   });
 
+  it("requires light and dark Markdown print-link checks in each production engine", () => {
+    expect(expectedBrowserCases("production").filter((identity) => identity.includes("Markdown print links"))).toEqual([
+      "chromium: Markdown print links in light mode",
+      "chromium: Markdown print links in dark mode",
+      "firefox: Markdown print links in light mode",
+      "firefox: Markdown print links in dark mode",
+    ]);
+  });
+
   for (const mode of ["production", "development"] as const) {
     const passing = () =>
       expectedBrowserCases(mode).map((identity) => {
         const [engine, title] = identity.split(": ");
         return { engine, title, status: "passed", attempts: 1 };
       });
-    it(`requires the complete ${mode} engine/width matrix`, () => {
-      expect(passing()).toHaveLength(mode === "production" ? 16 : 4);
+    it(`requires the complete ${mode} browser matrix`, () => {
+      expect(passing()).toHaveLength(mode === "production" ? 20 : 4);
       expect(validateBrowserCases(mode, passing())).toEqual([]);
       expect(validateBrowserCases(mode, passing().slice(1))).not.toEqual([]);
       expect(validateBrowserCases(mode, [...passing(), passing()[0]!])).not.toEqual([]);
+      expect(validateBrowserCases(mode, [...passing(), { ...passing()[0]!, title: "Unknown case" }])).not.toEqual([]);
     });
     it.each(["skipped", "failed", "timedOut", "interrupted"])(`rejects ${mode} %s results`, (status) => {
       const cases = passing();
