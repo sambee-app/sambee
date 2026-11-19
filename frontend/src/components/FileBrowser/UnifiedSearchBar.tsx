@@ -50,7 +50,7 @@ import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRe
 import { flushSync } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { usePillButtonMenu } from "../../hooks/usePillButtonMenu";
-import { getSecondaryToolbarMenuPaperStyle, pillButtonStyle } from "../../theme/commonStyles";
+import { getSecondaryToolbarMenuPaperStyle } from "../../theme/commonStyles";
 import { PillButtonTooltip } from "./PillButtonTooltip";
 import {
   getQuickBarResultRowHeight,
@@ -74,21 +74,18 @@ const DROPDOWN_WIDTH_PX = 700;
 /** Number of items to jump with Page Up/Down */
 const PAGE_JUMP_SIZE = 10;
 
-/** Preserve touch comfort inside the 56 px mobile AppBar while tightening desktop density slightly. */
-const QUICK_BAR_SPACING = {
-  xs: { horizontal: 10, vertical: 8 },
-  sm: { horizontal: 8, vertical: 8 },
+const QUICK_BAR_COMPACT_CHROME = {
+  "--quick-bar-inset": "10px",
+  "--quick-bar-height": "44px",
 } as const;
 
-const INPUT_PADDING = {
-  xs: `${QUICK_BAR_SPACING.xs.vertical}px ${QUICK_BAR_SPACING.xs.horizontal}px`,
-  sm: `${QUICK_BAR_SPACING.sm.vertical}px ${QUICK_BAR_SPACING.sm.horizontal}px`,
+const QUICK_BAR_DESKTOP_CHROME = {
+  "--quick-bar-inset": "8px",
+  "--quick-bar-height": "38px",
 } as const;
 
-const HORIZONTAL_CHROME_SPACING = {
-  xs: `${QUICK_BAR_SPACING.xs.horizontal}px`,
-  sm: `${QUICK_BAR_SPACING.sm.horizontal}px`,
-} as const;
+const QUICK_BAR_INSET = "var(--quick-bar-inset)";
+const QUICK_BAR_HEIGHT = "var(--quick-bar-height)";
 
 function getQuickBarModeIcon(modeId: string): React.ReactElement {
   switch (modeId) {
@@ -101,30 +98,15 @@ function getQuickBarModeIcon(modeId: string): React.ReactElement {
   }
 }
 
-const QUICK_BAR_MODE_LABEL_SX = {
-  fontSize: "0.7rem",
-  fontWeight: 600,
-  lineHeight: 1.2,
-} as const;
-
 const QUICK_BAR_MODE_BUTTON_SX = {
-  ...pillButtonStyle,
-  minHeight: 28,
-  minWidth: "auto",
-  px: 0.75,
-  py: 0,
-  borderRadius: 2.5,
-  color: "text.secondary",
-} as const;
-
-const QUICK_BAR_COMPACT_MODE_BUTTON_SX = {
   position: "relative",
-  minWidth: 44,
-  minHeight: 38,
-  alignSelf: "stretch",
-  px: 0.75,
-  py: 0,
-  borderRadius: "4px 0 0 4px",
+  flexShrink: 0,
+  columnGap: 0.5,
+  minWidth: 0,
+  paddingBlock: 0,
+  paddingInline: QUICK_BAR_INSET,
+  borderStartEndRadius: 0,
+  borderEndEndRadius: 0,
   color: "text.secondary",
   "@media (hover: hover) and (pointer: fine)": {
     "&:hover": {
@@ -150,11 +132,9 @@ const QUICK_BAR_COMPACT_MODE_BUTTON_SX = {
 } as const;
 
 const QUICK_BAR_CLEAR_BUTTON_SX = {
-  minWidth: { xs: 44, sm: 26 },
-  minHeight: { xs: 44, sm: 26 },
-  width: { sm: 26 },
-  height: { sm: 26 },
-  p: { sm: 0.375 },
+  minHeight: QUICK_BAR_HEIGHT,
+  paddingBlock: 0,
+  paddingInline: QUICK_BAR_INSET,
 } as const;
 
 const QUICK_BAR_MODE_MENU_ITEM_SX = {
@@ -409,7 +389,7 @@ export function UnifiedSearchBar({
 
     return (
       <>
-        <PillButtonTooltip label={modeSelectorLabel}>
+        <PillButtonTooltip label={`${modeSelectorLabel}: ${provider.modeLabel}`}>
           <Button
             onClick={handleModeMenuClick}
             onKeyDown={handleModeTriggerKeyDown}
@@ -417,25 +397,16 @@ export function UnifiedSearchBar({
             size="small"
             tabIndex={disableTabFocus ? -1 : undefined}
             aria-label={modeSelectorLabel}
+            aria-description={provider.modeLabel}
             aria-controls={isModeMenuOpen ? "quick-bar-mode-menu" : undefined}
             aria-haspopup="true"
             aria-expanded={isModeMenuOpen ? "true" : undefined}
             data-mode-id={provider.modeId}
-            sx={useCompactLayout ? QUICK_BAR_COMPACT_MODE_BUTTON_SX : QUICK_BAR_MODE_BUTTON_SX}
+            sx={QUICK_BAR_MODE_BUTTON_SX}
           >
-            {useCompactLayout ? (
-              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0 }}>
-                {getQuickBarModeIcon(provider.modeId)}
-                <ArrowDropDownIcon aria-hidden="true" sx={{ fontSize: 16, ml: -0.25 }} />
-              </Box>
-            ) : (
-              <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.125, whiteSpace: "nowrap" }}>
-                <Typography variant="body2" sx={QUICK_BAR_MODE_LABEL_SX}>
-                  {provider.modeLabel}
-                </Typography>
-                <ArrowDropDownIcon aria-hidden="true" sx={{ fontSize: "1rem" }} />
-              </Box>
-            )}
+            {getQuickBarModeIcon(provider.modeId)}
+            {/* Trim the arrow's side bearings without changing the triangle's size. */}
+            <ArrowDropDownIcon aria-hidden="true" viewBox="3 0 18 24" sx={{ fontSize: 12, width: "0.75em" }} />
           </Button>
         </PillButtonTooltip>
         <Menu
@@ -501,7 +472,6 @@ export function UnifiedSearchBar({
     provider.modeId,
     provider.modeLabel,
     t,
-    useCompactLayout,
   ]);
 
   const endAdornment = useMemo(() => {
@@ -515,7 +485,8 @@ export function UnifiedSearchBar({
       <InputAdornment
         position="end"
         sx={{
-          ml: 0,
+          marginInlineStart: 0,
+          paddingInlineEnd: query ? 0 : QUICK_BAR_INSET,
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
@@ -532,11 +503,10 @@ export function UnifiedSearchBar({
                 setSearchError(false);
                 effectiveInputRef.current?.focus();
               }}
-              edge="end"
               sx={QUICK_BAR_CLEAR_BUTTON_SX}
               aria-label={t("common.search.clear")}
             >
-              <ClearIcon fontSize={useCompactLayout ? "medium" : "small"} />
+              <ClearIcon sx={{ fontSize: useCompactLayout ? 24 : 18 }} />
             </IconButton>
           ) : showShortcutBadge ? (
             kbdBadge
@@ -1302,27 +1272,17 @@ export function UnifiedSearchBar({
         >
           <Box
             sx={{
+              ...(useCompactLayout ? QUICK_BAR_COMPACT_CHROME : QUICK_BAR_DESKTOP_CHROME),
               display: "flex",
               alignItems: "stretch",
-              pl: useCompactLayout && modeSelector ? 0 : HORIZONTAL_CHROME_SPACING,
-              pr: HORIZONTAL_CHROME_SPACING,
+              minHeight: QUICK_BAR_HEIGHT,
               "&:focus-within": {
                 outline: (shellTheme) => `3px solid ${shellTheme.palette.appBar?.focus}`,
                 outlineOffset: "0",
               },
             }}
           >
-            {modeSelector ? (
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  flexShrink: 0,
-                }}
-              >
-                {modeSelector}
-              </Box>
-            ) : null}
+            {modeSelector}
             <TextField
               fullWidth
               size="small"
@@ -1340,22 +1300,21 @@ export function UnifiedSearchBar({
                 },
                 input: {
                   sx: {
-                    px: 0,
+                    flex: 1,
+                    paddingInline: 0,
+                    fontSize: useCompactLayout ? "16px" : "14px",
                   },
                   endAdornment,
                 },
               }}
               sx={{
                 flex: 1,
-                "& .MuiInputBase-root": {
-                  fontSize: { xs: "16px", sm: "14px" },
-                  pl: 0,
-                },
                 "& .MuiInputBase-root.Mui-focused": {
                   outline: "none",
                 },
                 "& .MuiInputBase-input": {
-                  padding: INPUT_PADDING,
+                  paddingBlock: 1,
+                  paddingInline: QUICK_BAR_INSET,
                   textOverflow: "ellipsis",
                 },
                 "& .MuiOutlinedInput-notchedOutline": {

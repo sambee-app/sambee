@@ -144,6 +144,10 @@ The file browser quick bar supports three dropdown-backed provider modes:
 - `Ctrl+P`: open command mode (`commands` mode)
 - typing `>` as the first character in smart navigation switches into command mode
 
+`UnifiedSearchBar` uses the same mode selector at every width. Its icon shows the current mode, and its menu shows the full mode names.
+Keep the visible content equally inset from both edges, whether the bar shows a shortcut hint, a clear button, or only text at the end. Use a denser bar on desktop and keep the mode and clear buttons at least 44 by 44 CSS pixels in the compact layout.
+Keep a gap between the mode icon and arrow. When centering the pair, measure from the visible shapes, not from the SVG boxes.
+
 The quick bar captures the pane that opened it. In dual-pane mode, the target pane stays fixed even if the other pane becomes active before selection.
 
 ## Current Browser-Level and File-List Shortcuts

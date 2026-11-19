@@ -1,8 +1,9 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { browserHistoryService } from "../../../services/browserHistoryService";
+import { renderWithStyles } from "../../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
 import { type FileEntry, FileType } from "../../../types";
 import { getQuickBarResultRowHeight, QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT, QUICK_BAR_RESULT_ITEM_HEIGHT } from "../QuickBarResultRow";
@@ -277,7 +278,7 @@ const modeOptions = [
 ];
 
 function renderWithProvider(component: React.ReactElement) {
-  return render(<SambeeThemeProvider>{component}</SambeeThemeProvider>);
+  return renderWithStyles(<SambeeThemeProvider>{component}</SambeeThemeProvider>);
 }
 
 describe("UnifiedSearchBar", () => {
@@ -642,13 +643,13 @@ describe("UnifiedSearchBar", () => {
     await setLocale("en");
   });
 
-  it("replaces the text mode pill with a compact icon trigger on mobile while keeping full mode labels in the menu", async () => {
+  it.each([false, true])("shows the mode icon and keeps full menu labels (compact layout: %s)", async (useCompactLayout) => {
     const user = userEvent.setup();
-    renderWithProvider(<UnifiedSearchBar provider={noResultsProvider} modeOptions={modeOptions} useCompactLayout />);
+    renderWithProvider(<UnifiedSearchBar provider={noResultsProvider} modeOptions={modeOptions} useCompactLayout={useCompactLayout} />);
 
     const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
-    expect(modeButton).toHaveAttribute("data-mode-id", "navigate");
-    expect(modeButton).toHaveStyle({ minWidth: "44px" });
+    expect(modeButton).toHaveAccessibleDescription("Navigate");
+    expect(within(modeButton).getByTestId("FolderOutlinedIcon")).toBeInTheDocument();
     expect(screen.queryByText("Navigate")).not.toBeInTheDocument();
 
     await user.click(modeButton);
@@ -1146,7 +1147,7 @@ describe("UnifiedSearchBar", () => {
 
     await user.hover(screen.getByRole("button", { name: "Switch quick bar mode" }));
 
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("Switch quick bar mode");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Switch quick bar mode: Navigate");
   });
 
   it("supports arrow navigation in the mode menu after clicking from File Search with typed input", async () => {

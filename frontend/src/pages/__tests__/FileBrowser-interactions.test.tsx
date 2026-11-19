@@ -2785,7 +2785,7 @@ describe("Browser Component - Interactions", () => {
       expect(api.searchRecentDirectories).toHaveBeenCalledWith("e", 50, expect.any(AbortSignal));
     });
 
-    it("always shows the current quick-bar mode pill", async () => {
+    it("keeps the quick-bar mode icon in sync with keyboard shortcuts and typing", async () => {
       const user = userEvent.setup();
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
@@ -2795,24 +2795,25 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{Control>}k{/Control}");
       await screen.findByPlaceholderText("Navigate to any directory");
-      expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("Navigate");
+      const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
+      expect(within(modeButton).getByTestId("FolderOutlinedIcon")).toBeInTheDocument();
 
       await user.keyboard("{Control>}p{/Control}");
 
       const commandInput = await screen.findByPlaceholderText("Run a command");
-      expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("Commands");
+      expect(within(modeButton).getByTestId("KeyboardCommandKeyIcon")).toBeInTheDocument();
 
       await user.type(commandInput, "f");
-      expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("Commands");
+      expect(within(modeButton).getByTestId("KeyboardCommandKeyIcon")).toBeInTheDocument();
 
       await user.click(screen.getByTestId("virtual-list"));
       await user.keyboard("/");
 
       const fileSearchInput = await screen.findByPlaceholderText("Search recent and current-directory files");
-      expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("File Search");
+      expect(within(modeButton).getByTestId("SearchIcon")).toBeInTheDocument();
 
       await user.type(fileSearchInput, "r");
-      expect(screen.getByRole("button", { name: "Switch quick bar mode" })).toHaveTextContent("File Search");
+      expect(within(modeButton).getByTestId("SearchIcon")).toBeInTheDocument();
     });
 
     it.each([
@@ -3147,7 +3148,7 @@ describe("Browser Component - Interactions", () => {
       },
       { shortcut: "/", source: "File Search", destination: "Navigate", placeholder: "Navigate to any directory" },
     ])(
-      "switches quick-bar modes from $source to $destination with the mode pill",
+      "switches quick-bar modes from $source to $destination with the mode menu",
       async ({ shortcut, source, destination, placeholder }) => {
         const user = userEvent.setup();
         await renderBrowserAndFlush("/browse/smb/test-server-1");
@@ -3156,14 +3157,14 @@ describe("Browser Component - Interactions", () => {
         await user.keyboard(shortcut);
 
         const modeButton = await screen.findByRole("button", { name: "Switch quick bar mode" });
-        expect(modeButton).toHaveTextContent(source);
+        expect(modeButton).toHaveAccessibleDescription(source);
 
         await user.click(modeButton);
         await user.click(await screen.findByRole("menuitem", { name: destination }));
 
         await waitFor(() => {
           expect(screen.getByPlaceholderText(placeholder)).toHaveFocus();
-          expect(modeButton).toHaveTextContent(destination);
+          expect(modeButton).toHaveAccessibleDescription(destination);
         });
         expect(screen.getByRole("button", { name: "File: readme.txt" })).toBeInTheDocument();
       }
