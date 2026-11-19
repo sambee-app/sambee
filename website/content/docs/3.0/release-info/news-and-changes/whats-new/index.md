@@ -18,7 +18,14 @@ Sambee now shows the system health status in the top-right corner. In the built-
 
 ### Improvements
 
+- The quick bar's mode (navigate/search/command) is now visualized with a pill button.
 - Fixed result menu flickering while typing in directory navigation mode.
+
+## Markdown Viewer
+
+### Improvements
+
+- Links in printed documents are now underlined and use the theme's link color instead of black.
 
 ## Security
 

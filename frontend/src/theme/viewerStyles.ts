@@ -8,6 +8,7 @@
 import { alpha, type Theme } from "@mui/material";
 import type { SystemStyleObject } from "@mui/system";
 import { resolveThemePalette, VIEWER_FALLBACKS } from "./palette";
+import { getDefaultTheme } from "./themes";
 import type { ThemeConfig } from "./types";
 
 //
@@ -135,6 +136,9 @@ export const MARKDOWN_PRINT_TYPOGRAPHY = {
   lowerHeadings: "11pt",
   codeAndTables: "9pt",
 } as const;
+// The print surface is white even when the viewer uses a dark theme.
+const MARKDOWN_PRINT_LINK_COLOR = resolveThemePalette(getDefaultTheme("light")).link.main;
+
 export const MARKDOWN_VIEWER_PRINT_STYLES = {
   "@media print": {
     "body:has([data-markdown-print-viewer])": { height: "auto !important", overflow: "visible !important" },
@@ -185,6 +189,11 @@ export const MARKDOWN_VIEWER_PRINT_STYLES = {
       backgroundColor: "transparent !important",
       boxShadow: "none !important",
       textShadow: "none !important",
+    },
+    "[data-markdown-print-viewer] [data-markdown-search-root] a[href]:not([href=''])": {
+      color: `${MARKDOWN_PRINT_LINK_COLOR} !important`,
+      textDecoration: "underline",
+      "& *": { color: "inherit !important" },
     },
     "[data-markdown-print-viewer] .MuiDialog-container, [data-markdown-print-viewer] .MuiDialog-paper, [data-markdown-print-viewer] [data-markdown-print-frame], [data-markdown-print-viewer] [data-testid='markdown-viewer-content']":
       {

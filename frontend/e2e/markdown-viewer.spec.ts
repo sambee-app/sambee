@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CI_MARKDOWN_PRINT_MODES, markdownPrintCaseTitle } from "../scripts/ci-test-policy.mjs";
 import type { StoredTheme } from "../src/services/api";
 import type { HealthMonitoringClientPolicy } from "../src/types/healthMonitoring";
 import { editableDefinition } from "../src/theme/themeDefinition";
@@ -1380,6 +1381,39 @@ const readCiProbe = (page: Page) => page.evaluate(() => {
 test.describe("production CI correctness", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires a normal production build");
   const markdown = "# CI preview\n\n[CI tail](#ci-tail)\n\nA &amp; B and &#x1F680;\n\n```javascript\nconst alpha = 1;\n```\n\n## CI tail\n\nLast paragraph.\n" + " ".repeat(INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS);
+
+  for (const mode of CI_MARKDOWN_PRINT_MODES) {
+    test(markdownPrintCaseTitle(mode), async ({ page }, testInfo) => {
+      const initialMarkdown = "# Print links\n\n[**External** `code`](https://example.org/print) [Relative](child.md) [Heading](#target) [Rejected](javascript:void)\n\n## Target";
+      await serveProductionAssets(page);
+      await mockMarkdownViewerApi(page, { initialMarkdown, themeId: () => `sambee-${mode}` });
+      await page.goto("/browse/smb/demo");
+      await page.getByRole("button", { name: "Later", exact: true }).click();
+      await page.getByRole("button", { name: `File: ${DEMO_PATH}`, exact: true }).click();
+      const root = page.locator('[data-markdown-search-root="true"]');
+      const external = root.getByRole("link", { name: "External code", exact: true });
+      const rejected = root.getByText("Rejected", { exact: true });
+
+      await expect(external).toHaveCSS("text-decoration-line", "none");
+      await page.emulateMedia({ media: "print" });
+      for (const link of [external, root.getByRole("link", { name: "Relative", exact: true }), root.getByRole("link", { name: "Heading", exact: true })]) {
+        await expect(link).toHaveCSS("color", "rgb(194, 68, 0)");
+        await expect(link).toHaveCSS("text-decoration-line", "underline");
+      }
+      await expect(external.locator("strong")).toHaveCSS("color", "rgb(194, 68, 0)");
+      await expect(external.locator("code")).toHaveCSS("color", "rgb(194, 68, 0)");
+      await expect(rejected).not.toHaveAttribute("href");
+      await expect(rejected).toHaveCSS("color", "rgb(0, 0, 0)");
+      await expect(rejected).toHaveCSS("text-decoration-line", "none");
+
+      if (testInfo.project.name === "chromium") {
+        const pdf = await page.pdf({ printBackground: false });
+        await testInfo.attach(`print-links-${mode}.pdf`, { body: pdf, contentType: "application/pdf" });
+      }
+      await page.emulateMedia({ media: "screen" });
+      await expect(external).toHaveCSS("text-decoration-line", "none");
+    });
+  }
 
   for (const width of [1543, 390]) {
     for (const scenario of ["real workers", "native contracts", "edit and save", "cancel and reopen"] as const) {
