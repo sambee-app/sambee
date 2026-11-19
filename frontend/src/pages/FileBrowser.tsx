@@ -931,6 +931,11 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     }
   }, [systemHealth.visible, systemHealthDialogOpen]);
 
+  const openSystemHealth = useCallback((restoreFocusEl: HTMLElement | null) => {
+    setSystemHealthRestoreFocusEl(restoreFocusEl);
+    setSystemHealthDialogOpen(true);
+  }, []);
+
   const viewerOverlayOpen = Boolean(leftPane.viewInfo || rightPane.viewInfo);
   const browserOverlayOpen =
     settingsOpen ||
@@ -4086,6 +4091,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       canMoveToOtherPane: quickBarCanMoveToOtherPane,
       canOpenLocationInNewTab: canOpenQuickBarLocationInNewTab,
       canMatchPaneLocations,
+      canOpenSystemHealth: systemHealth.visible && !browserOverlayOpen,
       canCreateTab: !browserOverlayOpen && quickBarPane.connectionId !== "",
       canCloseTab: !browserOverlayOpen && quickBarPane.tabs.length > 1,
       canUndoCloseTab: !browserOverlayOpen && closedTabRecord !== null,
@@ -4104,6 +4110,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       openCommandMode: () => openQuickBarMode("commands"),
       openSettings: handleOpenSettings,
       openConnectionsSettings,
+      openSystemHealth: () => openSystemHealth(quickBarPane.listContainerEl),
       openHelp: () => setShowHelp(true),
       refresh: quickBarPane.handleRefresh,
       navigateUp: quickBarPane.handleNavigateUpDirectory,
@@ -4154,8 +4161,10 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       isDualMode,
       mobileSettingsOpen,
       openConnectionsSettings,
+      openSystemHealth,
       openQuickBarMode,
       quickBarCanCopyToOtherPane,
+      systemHealth.visible,
       activePaneCanCreateArchive,
       archiveExtractionContext,
       quickBarCanMoveToOtherPane,
@@ -4817,10 +4826,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
             visible: systemHealth.visible,
             severity: systemHealth.severity,
             headline: systemHealth.headline,
-            onOpen: () => {
-              setSystemHealthRestoreFocusEl(mobileMenuTriggerRef.current);
-              setSystemHealthDialogOpen(true);
-            },
+            onOpen: () => openSystemHealth(mobileMenuTriggerRef.current),
           }}
           onLogout={handleLogout}
         />
@@ -4876,10 +4882,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                       visible: systemHealth.visible,
                       severity: systemHealth.severity,
                       headline: systemHealth.headline,
-                      onOpen: () => {
-                        setSystemHealthRestoreFocusEl(quickBarPane.listContainerEl);
-                        setSystemHealthDialogOpen(true);
-                      },
+                      onOpen: () => openSystemHealth(quickBarPane.listContainerEl),
                     }}
                   />
                   {statusControl}

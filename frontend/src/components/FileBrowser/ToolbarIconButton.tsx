@@ -1,4 +1,4 @@
-import { IconButton, Tooltip } from "@mui/material";
+import { IconButton, type SxProps, type Theme, Tooltip } from "@mui/material";
 import type React from "react";
 import { toolbarIconButtonSx } from "../../theme/commonStyles";
 
@@ -12,6 +12,7 @@ interface ToolbarIconButtonProps {
   ariaControls?: string;
   ariaExpanded?: boolean;
   ariaHaspopup?: React.AriaAttributes["aria-haspopup"];
+  sx?: Exclude<SxProps<Theme>, readonly unknown[]>;
   children: React.ReactNode;
 }
 
@@ -25,6 +26,7 @@ export function ToolbarIconButton({
   ariaControls,
   ariaExpanded,
   ariaHaspopup,
+  sx,
   children,
 }: ToolbarIconButtonProps) {
   return (
@@ -39,7 +41,7 @@ export function ToolbarIconButton({
         aria-controls={ariaControls}
         aria-expanded={ariaExpanded}
         aria-haspopup={ariaHaspopup}
-        sx={toolbarIconButtonSx}
+        sx={[toolbarIconButtonSx, sx ?? {}]}
       >
         {children}
       </IconButton>

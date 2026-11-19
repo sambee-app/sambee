@@ -1,5 +1,5 @@
 import SettingsIcon from "@mui/icons-material/Settings";
-import { Box } from "@mui/material";
+import { Box, useTheme } from "@mui/material";
 import { BROWSER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { withShortcut } from "../../hooks/useKeyboardShortcuts";
 import { translate } from "../../i18n";
@@ -39,6 +39,8 @@ export function DesktopToolbarActions({
   onEscape,
   disableTabFocus,
 }: DesktopToolbarActionsProps) {
+  const { healthIndicator } = useTheme().palette;
+  const healthPaint = systemHealth && systemHealth.severity !== "ok" ? healthIndicator?.[systemHealth.severity] : undefined;
   const healthStatusText = systemHealth ? translate(`systemHealth.statuses.${systemHealth.severity}`) : "";
   const healthLabel = systemHealth?.visible
     ? translate("fileBrowser.chrome.toolbar.systemHealthTooltip", {
@@ -72,6 +74,16 @@ export function DesktopToolbarActions({
           onClick={systemHealth.onOpen}
           onKeyDown={createEscapeHandler(onEscape)}
           tabIndex={disableTabFocus ? -1 : undefined}
+          sx={
+            healthPaint && {
+              bgcolor: healthPaint.background,
+              color: healthPaint.foreground,
+              "&:hover": {
+                bgcolor: healthPaint.hoverBackground,
+                "@media (hover: none)": { bgcolor: healthPaint.background },
+              },
+            }
+          }
         >
           <HealthMonitorIcon status={systemHealth.severity} />
         </ToolbarIconButton>

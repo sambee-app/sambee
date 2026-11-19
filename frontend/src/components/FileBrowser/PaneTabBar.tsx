@@ -5,7 +5,12 @@ import { alpha, Box, darken, lighten, Popover, Tooltip, useTheme } from "@mui/ma
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PANE_SHORTCUTS } from "../../config/keyboardShortcuts";
-import { KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE, useKeyboardShortcutScope, withShortcut } from "../../hooks/useKeyboardShortcuts";
+import {
+  formatShortcut,
+  KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE,
+  useKeyboardShortcutScope,
+  withShortcut,
+} from "../../hooks/useKeyboardShortcuts";
 import { getConnectionById } from "../../pages/FileBrowser/access";
 import { getPaneTabFullLocation, getPaneTabLabel, type PaneTabSummary } from "../../pages/FileBrowser/tabSessions";
 import type { PaneId, PaneMode } from "../../pages/FileBrowser/types";
@@ -15,6 +20,7 @@ import type { Connection } from "../../types";
 import { truncateTextByGrapheme } from "../../utils/pathDisplay";
 
 const FINE_POINTER_HOVER_MEDIA = "@media (hover: hover) and (pointer: fine)";
+const CLOSE_MENU_TAB_KEY = "Delete";
 
 export interface PaneTabBarProps {
   paneId: PaneId;
@@ -491,7 +497,7 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
           return;
         }
 
-        if (event.key === "Delete" && isClosable && !disabled && currentIdx >= 0) {
+        if (event.key === CLOSE_MENU_TAB_KEY && isClosable && !disabled && currentIdx >= 0) {
           const targetTab = tabs[currentIdx];
           if (targetTab) {
             event.preventDefault();
@@ -511,6 +517,12 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
       ...PANE_SHORTCUTS.NEW_TAB,
       description: t("fileBrowser.tabs.newTab"),
     });
+    const closeTabLabel = t("fileBrowser.tabs.closeTab");
+    const closeTabTooltip = withShortcut({ ...PANE_SHORTCUTS.CLOSE_TAB, description: closeTabLabel });
+    const closeBackgroundTabTooltip = t("fileBrowser.tabs.closeBackgroundTabTooltip", {
+      shortcut: formatShortcut(PANE_SHORTCUTS.CLOSE_TAB),
+    });
+    const closeMenuTabTooltip = t("fileBrowser.tabs.closeMenuTabTooltip", { shortcut: formatShortcut({ keys: CLOSE_MENU_TAB_KEY }) });
 
     const allTabsLabel =
       layout.hiddenCount > 0
@@ -825,77 +837,86 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
                           pointerEvents: "none",
                         }}
                       />
-                      <Box
-                        component="button"
-                        type="button"
-                        tabIndex={-1}
-                        aria-label={closeAriaLabel}
-                        disabled={disabled}
-                        onMouseDown={preventMouseFocus}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (event.detail > 0 && !showCloseOverlay) {
-                            return;
-                          }
-                          onCloseTab(tab.id);
-                        }}
-                        sx={{
-                          appearance: "none",
-                          border: 0,
-                          margin: 0,
-                          padding: 0,
-                          width: `${closeTargetPx}px`,
-                          minWidth: `${closeTargetPx}px`,
-                          height: "100%",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          bgcolor: tabCurrentBg,
-                          color: isSelected ? "text.primary" : "text.secondary",
-                          cursor: disabled ? "default" : "pointer",
-                          pointerEvents: showCloseOverlay ? "auto" : "none",
-                          ...(!useTouchControls && !disabled
-                            ? {
-                                [FINE_POINTER_HOVER_MEDIA]: {
-                                  "&:hover": {
-                                    color: "text.primary",
-                                  },
-                                  "&:hover .pane-tab-close-pill": {
-                                    bgcolor: colors.closePillHoverBg,
-                                  },
-                                },
-                              }
-                            : {}),
-                          ...(!disabled
-                            ? {
-                                "&:active": {
-                                  color: "text.primary",
-                                },
-                                "&:active .pane-tab-close-pill": {
-                                  bgcolor: colors.closePillHoverBg,
-                                },
-                              }
-                            : {}),
-                          "&:focus": {
-                            outline: "none",
-                          },
-                        }}
+                      <Tooltip
+                        title={showCloseOverlay ? (isSelected ? closeTabTooltip : closeBackgroundTabTooltip) : ""}
+                        describeChild
+                        disableFocusListener
+                        disableTouchListener
+                        disableInteractive
+                        enterDelay={400}
                       >
                         <Box
-                          component="span"
-                          className="pane-tab-close-pill"
+                          component="button"
+                          type="button"
+                          tabIndex={-1}
+                          aria-label={closeAriaLabel}
+                          disabled={disabled}
+                          onMouseDown={preventMouseFocus}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (event.detail > 0 && !showCloseOverlay) {
+                              return;
+                            }
+                            onCloseTab(tab.id);
+                          }}
                           sx={{
-                            width: `${closePillSizePx}px`,
-                            height: `${closePillSizePx}px`,
-                            borderRadius: "4px",
+                            appearance: "none",
+                            border: 0,
+                            margin: 0,
+                            padding: 0,
+                            width: `${closeTargetPx}px`,
+                            minWidth: `${closeTargetPx}px`,
+                            height: "100%",
                             display: "inline-flex",
                             alignItems: "center",
                             justifyContent: "center",
+                            bgcolor: tabCurrentBg,
+                            color: isSelected ? "text.primary" : "text.secondary",
+                            cursor: disabled ? "default" : "pointer",
+                            pointerEvents: showCloseOverlay ? "auto" : "none",
+                            ...(!useTouchControls && !disabled
+                              ? {
+                                  [FINE_POINTER_HOVER_MEDIA]: {
+                                    "&:hover": {
+                                      color: "text.primary",
+                                    },
+                                    "&:hover .pane-tab-close-pill": {
+                                      bgcolor: colors.closePillHoverBg,
+                                    },
+                                  },
+                                }
+                              : {}),
+                            ...(!disabled
+                              ? {
+                                  "&:active": {
+                                    color: "text.primary",
+                                  },
+                                  "&:active .pane-tab-close-pill": {
+                                    bgcolor: colors.closePillHoverBg,
+                                  },
+                                }
+                              : {}),
+                            "&:focus": {
+                              outline: "none",
+                            },
                           }}
                         >
-                          <CloseIcon aria-hidden="true" sx={{ fontSize: `${PANE_TAB_BAR.CLOSE_ICON_FONT_SIZE_PX}px` }} />
+                          <Box
+                            component="span"
+                            className="pane-tab-close-pill"
+                            sx={{
+                              width: `${closePillSizePx}px`,
+                              height: `${closePillSizePx}px`,
+                              borderRadius: "4px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <CloseIcon aria-hidden="true" sx={{ fontSize: `${PANE_TAB_BAR.CLOSE_ICON_FONT_SIZE_PX}px` }} />
+                          </Box>
                         </Box>
-                      </Box>
+                      </Tooltip>
                     </Box>
                   )}
                 </Box>
@@ -1123,68 +1144,77 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
                   </Box>
 
                   {isClosable && (
-                    <Box
-                      component="button"
-                      type="button"
-                      data-testid={`pane-tab-menu-close-${paneId}-${index}`}
-                      tabIndex={-1}
-                      aria-label={closeAriaLabel}
-                      onMouseDown={preventMouseFocus}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onCloseTab(tab.id);
-                      }}
-                      sx={{
-                        appearance: "none",
-                        border: 0,
-                        margin: 0,
-                        padding: 0,
-                        flex: `0 0 ${useTouchControls ? PANE_TAB_BAR.CONTROL_TARGET_TOUCH_PX : 34}px`,
-                        width: `${useTouchControls ? PANE_TAB_BAR.CONTROL_TARGET_TOUCH_PX : 34}px`,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        bgcolor: "transparent",
-                        color: "text.secondary",
-                        cursor: "pointer",
-                        ...(!useTouchControls
-                          ? {
-                              [FINE_POINTER_HOVER_MEDIA]: {
-                                "&:hover": {
-                                  color: "text.primary",
-                                },
-                                "&:hover .pane-tab-menu-close-pill": {
-                                  bgcolor: colors.closePillHoverBg,
-                                },
-                              },
-                            }
-                          : {}),
-                        "&:active": {
-                          color: "text.primary",
-                        },
-                        "&:active .pane-tab-menu-close-pill": {
-                          bgcolor: colors.closePillHoverBg,
-                        },
-                        "&:focus": {
-                          outline: "none",
-                        },
-                      }}
+                    <Tooltip
+                      title={closeMenuTabTooltip}
+                      describeChild
+                      disableFocusListener
+                      disableTouchListener
+                      disableInteractive
+                      enterDelay={400}
                     >
                       <Box
-                        component="span"
-                        className="pane-tab-menu-close-pill"
+                        component="button"
+                        type="button"
+                        data-testid={`pane-tab-menu-close-${paneId}-${index}`}
+                        tabIndex={-1}
+                        aria-label={closeAriaLabel}
+                        onMouseDown={preventMouseFocus}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onCloseTab(tab.id);
+                        }}
                         sx={{
-                          width: `${closePillSizePx}px`,
-                          height: `${closePillSizePx}px`,
-                          borderRadius: "4px",
+                          appearance: "none",
+                          border: 0,
+                          margin: 0,
+                          padding: 0,
+                          flex: `0 0 ${useTouchControls ? PANE_TAB_BAR.CONTROL_TARGET_TOUCH_PX : 34}px`,
+                          width: `${useTouchControls ? PANE_TAB_BAR.CONTROL_TARGET_TOUCH_PX : 34}px`,
                           display: "inline-flex",
                           alignItems: "center",
                           justifyContent: "center",
+                          bgcolor: "transparent",
+                          color: "text.secondary",
+                          cursor: "pointer",
+                          ...(!useTouchControls
+                            ? {
+                                [FINE_POINTER_HOVER_MEDIA]: {
+                                  "&:hover": {
+                                    color: "text.primary",
+                                  },
+                                  "&:hover .pane-tab-menu-close-pill": {
+                                    bgcolor: colors.closePillHoverBg,
+                                  },
+                                },
+                              }
+                            : {}),
+                          "&:active": {
+                            color: "text.primary",
+                          },
+                          "&:active .pane-tab-menu-close-pill": {
+                            bgcolor: colors.closePillHoverBg,
+                          },
+                          "&:focus": {
+                            outline: "none",
+                          },
                         }}
                       >
-                        <CloseIcon aria-hidden="true" sx={{ fontSize: `${PANE_TAB_BAR.CLOSE_ICON_FONT_SIZE_PX}px` }} />
+                        <Box
+                          component="span"
+                          className="pane-tab-menu-close-pill"
+                          sx={{
+                            width: `${closePillSizePx}px`,
+                            height: `${closePillSizePx}px`,
+                            borderRadius: "4px",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <CloseIcon aria-hidden="true" sx={{ fontSize: `${PANE_TAB_BAR.CLOSE_ICON_FONT_SIZE_PX}px` }} />
+                        </Box>
                       </Box>
-                    </Box>
+                    </Tooltip>
                   )}
                 </Box>
               );

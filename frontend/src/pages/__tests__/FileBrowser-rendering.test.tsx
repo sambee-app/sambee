@@ -159,7 +159,11 @@ describe("Browser Component - Rendering", () => {
     expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument();
   });
 
-  it.each(["Escape", "Close"])("returns focus to the file list after closing System health with %s", async (action) => {
+  it.each([
+    ["toolbar", "Escape"],
+    ["toolbar", "Close"],
+    ["command palette", "Escape"],
+  ])("returns focus to the file list after opening System Health from the %s and closing it with %s", async (source, action) => {
     const healthSpy = vi.spyOn(systemHealthMonitoring, "useSystemHealthMonitoring").mockReturnValue({
       visible: true,
       severity: "ok",
@@ -176,7 +180,14 @@ describe("Browser Component - Rendering", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1");
       const user = userEvent.setup();
       const healthButton = screen.getByRole("button", { name: /^System health:/ });
-      await user.click(healthButton);
+      if (source === "command palette") {
+        await user.keyboard("{Control>}p{/Control}");
+        await user.type(await screen.findByPlaceholderText("Run a command"), "system health");
+        await screen.findByText("Open System Health", { exact: true });
+        await user.keyboard("{Enter}");
+      } else {
+        await user.click(healthButton);
+      }
       expect(await screen.findByRole("dialog", { name: "System Health" })).toBeInTheDocument();
       if (action === "Escape") {
         await user.keyboard("{Escape}");

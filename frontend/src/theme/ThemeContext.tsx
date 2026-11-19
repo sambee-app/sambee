@@ -4,6 +4,7 @@ import api, { type StoredTheme } from "../services/api";
 import { authSession } from "../services/authSession";
 import { refreshCurrentUserSettings, useCurrentUserSetting } from "../services/userSettingsStore";
 import { COMPACT_LAYOUT_SIZE } from "./constants";
+import { resolveHealthIndicatorColors } from "./healthIndicatorColors";
 import {
   FORM_SURFACE_CSS_VARIABLE,
   getDarkChromeSurfaceColor,
@@ -161,7 +162,7 @@ export function SambeeThemeProvider({ children }: ThemeProviderProps) {
       };
     };
 
-    return createTheme({
+    const theme = createTheme({
       // Custom breakpoints: 768px is the mobile/desktop threshold
       breakpoints: {
         values: {
@@ -438,6 +439,8 @@ export function SambeeThemeProvider({ children }: ThemeProviderProps) {
         },
       },
     });
+    theme.palette.healthIndicator = resolveHealthIndicatorColors(currentTheme, theme.palette);
+    return theme;
   }, [currentTheme]);
 
   // Update meta theme-color when theme changes

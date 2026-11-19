@@ -45,6 +45,24 @@ function renderBar(overrides: Partial<PaneTabBarProps> = {}) {
 }
 
 describe("PaneTabBar", () => {
+  it.each([
+    [false, "Alt+Minus"],
+    [true, "Control+Minus"],
+  ])("shows the actual close shortcut without changing the close button's name (Apple: %s)", async (apple, shortcut) => {
+    setApplePlatformForTesting(apple);
+    try {
+      renderBar();
+      const tab = screen.getByTestId("pane-tab-item-left-0");
+      const close = within(tab).getByRole("button", { name: "Close Test tab (Demo:/Projects/Test)" });
+      fireEvent.pointerEnter(tab, { pointerType: "mouse" });
+      fireEvent.mouseOver(close);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(`Close tab (${shortcut})`);
+      expect(close).toHaveAccessibleName("Close Test tab (Demo:/Projects/Test)");
+    } finally {
+      setApplePlatformForTesting(null);
+    }
+  });
+
   it("resolves touch tab controls from input capabilities and preferences without treating narrow viewports as touch", () => {
     expect(shouldUseTouchTabControls({ preference: "auto", hasCoarseAnyPointer: false, hasHoverNone: false, maxTouchPoints: 0 })).toBe(
       false

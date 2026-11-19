@@ -21,6 +21,7 @@ export interface BrowserCommandContext {
   canMoveToOtherPane: boolean;
   canOpenLocationInNewTab: boolean;
   canMatchPaneLocations: boolean;
+  canOpenSystemHealth: boolean;
   canCreateTab?: boolean;
   canCloseTab?: boolean;
   canUndoCloseTab?: boolean;
@@ -38,6 +39,7 @@ export interface BrowserCommandContext {
   openCommandMode: () => void;
   openSettings: () => void;
   openConnectionsSettings: () => void;
+  openSystemHealth: () => void;
   openHelp: () => void;
   refresh: () => void;
   navigateUp: () => void;
@@ -400,6 +402,15 @@ const BROWSER_COMMANDS = [
     selectionFocusTarget: "none",
     isEnabled: () => true,
     run: (context) => context.openConnectionsSettings(),
+  }),
+  createCommand({
+    id: "browser.openSystemHealth",
+    titleKey: "fileBrowser.commands.items.openSystemHealth.title",
+    categoryKey: "fileBrowser.commands.categories.help",
+    keywords: ["health", "monitoring", "status", "storage", "server"],
+    selectionFocusTarget: "none",
+    isEnabled: (context) => context.canOpenSystemHealth,
+    run: (context) => context.openSystemHealth(),
   }),
   createCommand({
     id: "browser.showHelp",
