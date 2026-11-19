@@ -21,6 +21,7 @@ function createContext(): BrowserCommandContext {
     canMoveToOtherPane: true,
     canOpenLocationInNewTab: true,
     canMatchPaneLocations: true,
+    canOpenSystemHealth: false,
     openLocationInNewTab: () => {},
     matchLeftPaneLocation: () => {},
     matchRightPaneLocation: () => {},
@@ -29,6 +30,7 @@ function createContext(): BrowserCommandContext {
     openCommandMode: () => {},
     openSettings: () => {},
     openConnectionsSettings: () => {},
+    openSystemHealth: () => {},
     openHelp: () => {},
     refresh: () => {},
     navigateUp: () => {},
@@ -54,6 +56,20 @@ function createContext(): BrowserCommandContext {
 describe("browserCommands", () => {
   afterEach(async () => {
     await setLocale("en");
+  });
+
+  it("lists System Health only when available and lets the dialog take focus", () => {
+    const context = createContext();
+    const openSystemHealth = vi.fn();
+    const findCommand = (commandContext: BrowserCommandContext) =>
+      getEnabledBrowserCommands(commandContext).find((command) => command.id === "browser.openSystemHealth");
+
+    expect(findCommand(context)).toBeUndefined();
+    const availableContext = { ...context, canOpenSystemHealth: true, openSystemHealth };
+    const command = findCommand(availableContext);
+    expect(command).toMatchObject({ title: "Open System Health", selectionFocusTarget: "none" });
+    command?.run(availableContext);
+    expect(openSystemHealth).toHaveBeenCalledOnce();
   });
 
   it("localizes command titles and categories", async () => {

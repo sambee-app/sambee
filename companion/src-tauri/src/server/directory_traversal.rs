@@ -12,6 +12,8 @@ pub(super) const MOUNT_BOUNDARY_CAPABILITY_ERROR: &str =
 pub struct NativeIo {
     opens: AtomicU64,
     #[cfg(test)]
+    pub(super) open_targets: std::sync::Mutex<Option<Vec<NativeOpenTarget>>>,
+    #[cfg(test)]
     pub(super) read_gate: std::sync::Mutex<Option<std::sync::Arc<std::sync::Barrier>>>,
     #[cfg(all(test, target_os = "linux"))]
     pub(super) parent_read_gate: std::sync::Mutex<Option<std::sync::Arc<std::sync::Barrier>>>,
@@ -21,6 +23,14 @@ pub struct NativeIo {
     unknown_entry_checks: AtomicU64,
 }
 
+#[cfg(test)]
+#[derive(Debug)]
+pub(super) enum NativeOpenTarget {
+    Path(std::path::PathBuf),
+    #[cfg(windows)]
+    FileId([u8; size_of::<u128>()]),
+}
+
 impl NativeIo {
     pub fn opens(&self) -> u64 {
         self.opens.load(Ordering::Relaxed)
@@ -28,6 +38,13 @@ impl NativeIo {
 
     fn record_open(&self) {
         self.opens.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    fn record_open_target(&self, target: impl FnOnce() -> NativeOpenTarget) {
+        if let Some(targets) = self.open_targets.lock().unwrap().as_mut() {
+            targets.push(target());
+        }
     }
 }
 
@@ -479,6 +496,8 @@ mod platform {
     /// The returned file owns the successful descriptor. Every component is opened without following links.
     fn open_at(parent: libc::c_int, name: &CStr, io: &super::NativeIo) -> io::Result<File> {
         io.record_open();
+        #[cfg(test)]
+        io.record_open_target(|| super::NativeOpenTarget::Path(Path::new(std::ffi::OsStr::from_bytes(name.to_bytes())).to_owned()));
         let descriptor = unsafe { libc::openat(parent, name.as_ptr(), DIRECTORY_FLAGS) };
         if descriptor < 0 {
             return Err(io::Error::last_os_error());
@@ -832,6 +851,10 @@ mod platform {
                 let name = CString::new(if relative.is_empty() { "." } else { relative })
                     .map_err(|_| IndexError::Invalid("Directory name contains NUL."))?;
                 self.io.record_open();
+                #[cfg(test)]
+                self.io.record_open_target(|| {
+                    super::NativeOpenTarget::Path(Path::new(std::ffi::OsStr::from_bytes(name.to_bytes())).to_owned())
+                });
                 let error = match opener(self.file.as_raw_fd(), &name) {
                     Ok(file) => {
                         let current = identity(&file)?;
@@ -1150,6 +1173,8 @@ pub use platform::{NativeParent, NativeRoot};
 #[path = "directory_traversal_windows.rs"]
 mod windows_platform;
 
+#[cfg(all(test, windows))]
+pub(super) use windows_platform::test_file_id;
 #[cfg(windows)]
 pub use windows_platform::{NativeParent, NativeRoot};
 

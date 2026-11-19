@@ -1040,6 +1040,9 @@ export const EN_TRANSLATIONS = {
         openConnectionsSettings: {
           title: "Open Connections Settings",
         },
+        openSystemHealth: {
+          title: "Open System Health",
+        },
         showHelp: {
           title: "Show Keyboard Shortcuts",
         },
@@ -1231,6 +1234,9 @@ export const EN_TRANSLATIONS = {
       allTabsOverflowAriaLabel: "All tabs ({{total}}, {{hidden}} hidden)",
       selectTabAriaLabel: "{{name}} — {{location}}",
       closeTabAriaLabel: "Close {{name}} tab ({{location}})",
+      closeTab: "Close tab",
+      closeBackgroundTabTooltip: "Close tab ({{shortcut}} closes the selected tab)",
+      closeMenuTabTooltip: "Close tab ({{shortcut}} closes the focused tab)",
       closedNotice: "Tab closed",
       undo: "Undo",
       selectedAnnouncement: "{{name}}, tab {{index}} of {{total}}",

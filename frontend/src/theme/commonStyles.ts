@@ -189,7 +189,7 @@ export const secondaryStripButtonIconSx: SxProps<Theme> = {
   fontSize: "1.25rem",
 };
 
-export const toolbarIconButtonSx: SxProps<Theme> = {
+export const toolbarIconButtonSx = {
   minWidth: 44,
   minHeight: 44,
   "&:focus": {
@@ -202,7 +202,7 @@ export const toolbarIconButtonSx: SxProps<Theme> = {
   "& .MuiSvgIcon-root": {
     fontSize: "1.5rem",
   },
-};
+} satisfies SxProps<Theme>;
 
 export const fileOperationsToolbarSx: SxProps<Theme> = (theme) => ({
   px: 0.5,

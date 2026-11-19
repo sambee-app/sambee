@@ -5108,6 +5108,8 @@ mod tests {
 
     #[test]
     fn full_native_tree_does_not_open_regular_files() {
+        use super::super::directory_traversal::NativeOpenTarget;
+
         const FILES_PER_PARENT: usize = 32;
         const FILE_POPULATIONS: usize = 2;
         const PARENTS: [&str; 5] = ["", "shallow", "deep", "deep/deeper", "deep/deeper/leaf"];
@@ -5118,29 +5120,43 @@ mod tests {
         }
         let manager = LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(path.clone(), manager.storage_directory());
-        lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
-        lock(&source.observations).unwrap().scan_group_test_elapsed = Some(Duration::ZERO);
-        source.scan(&manager.budget).unwrap();
-        assert!(lock(&source.watcher).unwrap().is_none());
-        let before = source.io.opens();
-        source.scan(&manager.budget).unwrap();
-        let directory_only_opens = source.io.opens() - before;
-        assert!(directory_only_opens > 0);
+        let mut file_names = HashSet::new();
+        #[cfg(windows)]
+        let mut file_ids = HashMap::new();
         for population in 0..FILE_POPULATIONS {
             for parent in PARENTS {
                 for file in 0..FILES_PER_PARENT {
-                    std::fs::write(path.join(parent).join(format!("file-{population}-{file}")), b"file").unwrap();
+                    let name = std::ffi::OsString::from(format!("file-{population}-{file}"));
+                    let fixture = path.join(parent).join(&name);
+                    std::fs::write(&fixture, b"file").unwrap();
+                    #[cfg(windows)]
+                    file_ids.insert(super::super::directory_traversal::test_file_id(&fixture).unwrap(), fixture);
+                    file_names.insert(name);
                 }
             }
-            let before = source.io.opens();
+            lock(&source.status).unwrap().watcher_retry_at = Instant::now() + FAILURE_RETRY_MAX;
+            *lock(&source.io.open_targets).unwrap() = Some(Vec::new());
             source.scan(&manager.budget).unwrap();
             assert!(lock(&source.watcher).unwrap().is_none());
-            let populated_opens = source.io.opens() - before;
-            // Cached Windows capability probes can reduce later directory-open counts.
-            assert!(
-                populated_opens <= directory_only_opens,
-                "Adding regular files increased native opens: {populated_opens} > {directory_only_opens} (population {population})"
-            );
+            let targets = lock(&source.io.open_targets).unwrap().take().unwrap();
+            assert!(!targets.is_empty(), "Expected native open attempts (population {population})");
+            // Directory probes and fallbacks can vary between passes. Check the actual targets, including failed attempts.
+            for target in targets {
+                match target {
+                    NativeOpenTarget::Path(path) => {
+                        assert!(
+                            !path.file_name().is_some_and(|name| file_names.contains(name)),
+                            "Attempted to open a regular file by path: {path:?} (population {population})"
+                        );
+                    }
+                    #[cfg(windows)]
+                    NativeOpenTarget::FileId(id) => {
+                        if let Some(path) = file_ids.get(&id) {
+                            panic!("Attempted to open a regular file by ID: {path:?} (population {population})");
+                        }
+                    }
+                }
+            }
             let writer = lock(&source.writer).unwrap();
             let status = writer.as_ref().unwrap().status().unwrap();
             assert_eq!(status.directory_count, i64::try_from(PARENTS.len() - 1).unwrap());

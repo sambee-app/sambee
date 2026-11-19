@@ -1,3 +1,4 @@
+import { createTheme, ThemeProvider } from "@mui/material";
 import { act, cleanup, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
@@ -9,8 +10,13 @@ import {
   useSystemHealthMonitoring,
 } from "../../../hooks/useSystemHealthMonitoring";
 import { publishHealthMonitoringSettingsChanged } from "../../../services/healthMonitoringEvents";
+import { renderWithStyles } from "../../../test/utils/renderWithStyles";
+import { resolveHealthIndicatorColors } from "../../../theme/healthIndicatorColors";
+import { resolveThemePalette } from "../../../theme/palette";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
+import { getDefaultTheme } from "../../../theme/themes";
 import type { HealthMonitoringClientPolicy, HealthMonitoringSnapshot } from "../../../types";
+import { DesktopToolbarActions } from "../../FileBrowser/DesktopToolbarActions";
 import { MobileToolbar } from "../../FileBrowser/MobileToolbar";
 import HamburgerMenu from "../../Mobile/HamburgerMenu";
 import { HealthMonitorIcon } from "../HealthStatusIcon";
@@ -215,7 +221,7 @@ describe("System Health Monitoring UI and Hook", () => {
   });
 
   it("uses a common monitor symbol with distinct state badges and independent SVG masks", () => {
-    const { container } = render(
+    const { container } = renderWithStyles(
       <div>
         <HealthMonitorIcon status="ok" />
         <HealthMonitorIcon status="warning" />
@@ -234,10 +240,35 @@ describe("System Health Monitoring UI and Hook", () => {
     const maskIds = Array.from(container.querySelectorAll("mask"), (mask) => mask.id);
     expect(new Set(maskIds).size).toBe(10);
     for (const icon of icons) {
+      expect(icon.querySelector("g[stroke]")).toHaveAttribute("stroke", "currentColor");
+      expect(icon.querySelector("g[fill]:not([stroke])")).toHaveAttribute("fill", "currentColor");
       for (const layer of icon.querySelectorAll("g[mask]")) {
         const maskId = layer.getAttribute("mask")?.slice("url(#".length, -1);
         expect(Array.from(icon.querySelectorAll("mask"), (mask) => mask.id)).toContain(maskId);
       }
+    }
+  });
+
+  it.each(["unknown", "warning", "error", "ok"] as const)("puts the %s status color on the toolbar button, not the glyph", (severity) => {
+    const config = getDefaultTheme("light");
+    const theme = createTheme({ palette: resolveThemePalette(config) });
+    const colors = resolveHealthIndicatorColors(config, theme.palette);
+    theme.palette.healthIndicator = colors;
+    renderWithStyles(
+      <ThemeProvider theme={theme}>
+        <DesktopToolbarActions
+          onOpenHelp={vi.fn()}
+          onOpenDocumentation={vi.fn()}
+          onOpenSettings={vi.fn()}
+          systemHealth={{ visible: true, severity, headline: "Health test", onOpen: vi.fn() }}
+        />
+      </ThemeProvider>
+    );
+    const button = screen.getByRole("button", { name: /^System health:/ });
+    if (severity === "ok") {
+      expect(getComputedStyle(button).backgroundColor).toBe("rgba(0, 0, 0, 0)");
+    } else {
+      expect(button).toHaveStyle({ "background-color": colors[severity].background, color: colors[severity].foreground });
     }
   });
 
