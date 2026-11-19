@@ -34,4 +34,16 @@ describe("CompanionSession", () => {
     expect(listener).toHaveBeenCalledOnce();
     expect(session.getSnapshot()).toBe(firstSnapshot);
   });
+
+  it("invalidates old requests when a paired browser receives a replacement secret", () => {
+    const session = new CompanionSession();
+    try {
+      session.storeSecret("first-test-secret");
+      const before = session.getSnapshot();
+      session.storeSecret("replacement-test-secret");
+      expect(session.getSnapshot()).toMatchObject({ status: "paired", revision: before.revision + 1 });
+    } finally {
+      session.clearPairing();
+    }
+  });
 });

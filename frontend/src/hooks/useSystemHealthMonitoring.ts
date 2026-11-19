@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import type { CompanionLifecycleStatus } from "../components/FileBrowser/FileBrowserAlerts";
 import api from "../services/api";
@@ -6,10 +6,11 @@ import { authSession } from "../services/authSession";
 import { isLocalDrive } from "../services/backendRouter";
 import companionService, {
   hasStoredSecret,
-  isCompanionAuthSignatureMismatch,
   isCompanionCapacityUnsupported,
-  isCompanionPairingMissing,
+  isCompanionPairingRejected,
+  isCompanionTimestampRejected,
 } from "../services/companion";
+import { companionSession } from "../services/companionSession";
 import { subscribeHealthMonitoringSettingsChanged } from "../services/healthMonitoringEvents";
 import {
   type AggregateHealthSeverity,
@@ -22,11 +23,15 @@ import {
   type MetricAvailability,
   type StorageMetric,
 } from "../types";
+import { createHealthPoll, HEALTH_RECOVERY_MS, HEALTH_TICK_MS, healthRequest, isHealthPollingGap } from "./healthPolling";
 import type { CompanionStatus } from "./useCompanion";
 
 const SUMMARY_POLL_MS = 15_000;
 const DIALOG_POLL_MS = 5_000;
 const POLICY_REFRESH_MS = 60_000;
+const POLICY_MAX_AGE_MS = 120_000;
+const INITIAL_CHECK_MS = 15_000;
+const HOST_REFRESH_LEAD_MS = 2 * HEALTH_TICK_MS;
 const STORAGE_HYSTERESIS_TENTHS_PERCENT = 20;
 
 const DEFAULT_THRESHOLDS: HealthMonitoringThresholds = {
@@ -57,6 +62,9 @@ export interface SystemHealthViewState {
   snapshot: HealthMonitoringSnapshot | null;
   localDrives: StorageMetric[];
   companionUpdateRequired: boolean;
+  refreshing?: boolean;
+  checking?: boolean;
+  retryNotes?: string[];
 }
 
 interface UseSystemHealthMonitoringOptions {
@@ -166,6 +174,63 @@ export function extractActiveSmbConnectionIds(connectionIds: readonly string[]):
   return result;
 }
 
+type TimedMetric = {
+  availability: MetricAvailability;
+  is_stale: boolean;
+  age_seconds: number | null;
+  sampled_at: string | null;
+};
+
+function isReading(metric: TimedMetric) {
+  return metric.availability === "available" && !metric.is_stale;
+}
+
+function backendMetrics(snapshot: HealthMonitoringSnapshot) {
+  return [
+    snapshot.host_memory,
+    snapshot.system_load,
+    snapshot.cpu_temperature,
+    snapshot.container_memory,
+    ...snapshot.application_storage,
+    ...snapshot.smb_storage,
+  ];
+}
+
+function mapSnapshot(
+  snapshot: HealthMonitoringSnapshot,
+  map: <T extends TimedMetric>(metric: T, storage: boolean, previous?: T) => T,
+  previous?: HealthMonitoringSnapshot | null
+): HealthMonitoringSnapshot {
+  return {
+    ...snapshot,
+    host_memory: map(snapshot.host_memory, false, previous?.host_memory),
+    system_load: map(snapshot.system_load, false, previous?.system_load),
+    cpu_temperature: map(snapshot.cpu_temperature, false, previous?.cpu_temperature),
+    container_memory: map(snapshot.container_memory, false, previous?.container_memory),
+    application_storage: snapshot.application_storage.map((item) =>
+      map(
+        item,
+        true,
+        previous?.application_storage.find((value) => value.id === item.id)
+      )
+    ),
+    smb_storage: snapshot.smb_storage.map((item) =>
+      map(
+        item,
+        true,
+        previous?.smb_storage.find((value) => value.id === item.id)
+      )
+    ),
+  };
+}
+
+function isAccessDenied(error: unknown) {
+  return isApiError(error) && (error.response?.status === 401 || error.response?.status === 403);
+}
+
+const subscribeCompanion = (listener: () => void) => companionSession.subscribe(listener);
+const getCompanionRevision = () => companionSession.getSnapshot().revision;
+
 export function useSystemHealthMonitoring({
   authenticated,
   activeConnectionIds,
@@ -175,246 +240,346 @@ export function useSystemHealthMonitoring({
 }: UseSystemHealthMonitoringOptions): SystemHealthViewState {
   const { t } = useTranslation();
   const [policy, setPolicy] = useState<HealthMonitoringClientPolicy | null>(null);
-  const [snapshot, setSnapshot] = useState<HealthMonitoringSnapshot | null>(null);
-  const [backendUnavailable, setBackendUnavailable] = useState(false);
+  const [backendSample, setBackendSample] = useState<{ key: string; snapshot: HealthMonitoringSnapshot } | null>(null);
+  const [backendRetry, setBackendRetry] = useState(false);
+  const [companionRetry, setCompanionRetry] = useState(false);
+  const [policyRetry, setPolicyRetry] = useState(false);
   const [rawLocalDrives, setRawLocalDrives] = useState<CompanionDriveCapacityItem[]>([]);
   const [companionUpdateRequired, setCompanionUpdateRequired] = useState(false);
-  const [companionFetchError, setCompanionFetchError] = useState<string | null>(null);
-  const [pageVisible, setPageVisible] = useState(() => (typeof document === "undefined" ? true : document.visibilityState !== "hidden"));
-
-  const inFlightRef = useRef(false);
-  const lastPolicyCheckRef = useRef<number | null>(null);
-  const companionUnsupportedCachedRef = useRef(false);
+  const [companionRejected, setCompanionRejected] = useState(false);
+  const [companionReady, setCompanionReady] = useState(false);
+  const [now, setNow] = useState(() => performance.now());
+  const [checkingUntil, setCheckingUntil] = useState<number | null>(null);
+  const [recovery, setRecovery] = useState<{ startedAt: number; until: number; severity: AggregateHealthSeverity } | null>(null);
+  const [pendingRefresh, setPendingRefresh] = useState({ backend: false, companion: false });
+  const timings = useRef(new WeakMap<TimedMetric, { expiresAt: number; receivedAt: number }>()).current;
   const driveTrackersRef = useRef<Map<string, LocalDriveEvaluationTracker>>(new Map());
+  const companionRevision = useSyncExternalStore(subscribeCompanion, getCompanionRevision);
+  const lastSeverity = useRef<AggregateHealthSeverity>("unknown");
+  const pollControl = useRef<((policy: boolean) => void) | null>(null);
+  const readDialogOpen = useEffectEvent(() => dialogOpen);
 
   const smbConnectionIds = useMemo(() => extractActiveSmbConnectionIds(activeConnectionIds), [activeConnectionIds]);
   const smbIdsKey = smbConnectionIds.join(",");
-
-  useEffect(() => {
-    if (typeof document === "undefined") {
-      return undefined;
-    }
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "hidden") {
-        lastPolicyCheckRef.current = null;
-      }
-      setPageVisible(document.visibilityState !== "hidden");
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, []);
-
-  // Reset cached older-Companion detection if Companion reconnects or protocol changes
-  useEffect(() => {
-    if (companionStatus !== "paired") {
-      companionUnsupportedCachedRef.current = false;
-      if (companionStatus === "unavailable" || companionStatus === "unpaired" || companionStatus === "detecting") {
-        setRawLocalDrives([]);
-        setCompanionUpdateRequired(false);
-        setCompanionFetchError(null);
-      } else if (companionStatus === "update_required") {
-        setRawLocalDrives([]);
-        setCompanionUpdateRequired(true);
-        setCompanionFetchError(null);
-      }
-    }
-  }, [companionStatus]);
-
-  const clearAllRamState = useCallback(() => {
-    setSnapshot(null);
-    setBackendUnavailable(false);
-    setRawLocalDrives([]);
-    setCompanionUpdateRequired(false);
-    setCompanionFetchError(null);
-    driveTrackersRef.current.clear();
-  }, []);
-
   const policyRef = useRef<HealthMonitoringClientPolicy | null>(null);
+  const policyValidUntil = useRef(0);
+  const lastTick = useRef({ elapsed: performance.now(), wall: Date.now() });
+  const recoveryUntil = useRef(0);
+  const noLocalAccess =
+    companionStatus === "needs_repair" || companionLifecycleStatus === "renewal_required" || companionLifecycleStatus === "auth_failed";
+  const requiresCompanion = companionStatus === "paired";
 
-  const updatePolicy = useCallback((next: HealthMonitoringClientPolicy | null) => {
-    if (next === null) {
-      lastPolicyCheckRef.current = null;
+  const nextExpiry = useEffectEvent((at: number) => {
+    const metrics = [...(backendSample ? backendMetrics(backendSample.snapshot) : []), ...rawLocalDrives];
+    if (
+      [checkingUntil, recovery?.until, ...metrics.map((metric) => timings.get(metric)?.expiresAt)].some(
+        (time) => time != null && time > now && time <= at
+      )
+    ) {
+      setNow(at);
     }
-    policyRef.current = next;
-    setPolicy(next);
-  }, []);
+  });
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Pairing and access changes invalidate cached readings even if the UI status is unchanged.
+  useEffect(() => {
+    setRawLocalDrives([]);
+    setCompanionRejected(false);
+    setCompanionReady(false);
+    setCompanionRetry(false);
+    setCompanionReady(false);
+    setCompanionUpdateRequired(companionStatus === "update_required");
+    driveTrackersRef.current.clear();
+  }, [companionRevision, companionStatus, noLocalAccess]);
 
   useEffect(() => {
-    const unsubClear = authSession.subscribeToClear(() => {
+    const clearMetrics = (preserveRecovery = false) => {
+      setBackendSample(null);
+      setRawLocalDrives([]);
+      setBackendRetry(false);
+      setCompanionRetry(false);
+      setPolicyRetry(false);
+      setCheckingUntil(null);
+      driveTrackersRef.current.clear();
+      if (!preserveRecovery) {
+        setRecovery(null);
+        setPendingRefresh({ backend: false, companion: false });
+        lastSeverity.current = "unknown";
+        recoveryUntil.current = 0;
+      }
+    };
+    const updatePolicy = (next: HealthMonitoringClientPolicy | null) => {
+      policyRef.current = next;
+      setPolicy(next);
+    };
+    if (!authenticated) {
       updatePolicy(null);
-      clearAllRamState();
-    });
-    const unsubIdentity = authSession.subscribeToIdentity(() => {
+      policyValidUntil.current = 0;
+      clearMetrics();
+      return;
+    }
+
+    let disposed = false;
+    let sessionCleared = false;
+    let companionUnsupported = false;
+    let hostRefreshIn = Infinity;
+    const visible = () => !disposed && !sessionCleared && document.visibilityState !== "hidden";
+    const permitted = () =>
+      Boolean(policyRef.current?.enabled && policyRef.current.permitted && performance.now() < policyValidUntil.current);
+    const canRead = () => visible() && !policyPoll.running && permitted();
+    const interval = () => {
+      const currentPolicy = policyRef.current;
+      return readDialogOpen()
+        ? (currentPolicy?.dialog_poll_seconds ?? DIALOG_POLL_MS / 1000) * 1000
+        : (currentPolicy?.summary_poll_seconds ?? SUMMARY_POLL_MS / 1000) * 1000;
+    };
+    const limit = (storage: boolean) =>
+      storage ? (policyRef.current?.storage_stale_seconds ?? 180) * 1000 : (policyRef.current?.host_stale_seconds ?? 15) * 1000;
+    const retain = <T extends TimedMetric>(metric: T, storage: boolean, previous: T | undefined, at: number): T => {
+      if (isReading(metric)) {
+        const deadline = at + Math.max(0, limit(storage) - (metric.age_seconds ?? 0) * 1000);
+        const priorDeadline = previous && metric.sampled_at === previous.sampled_at ? timings.get(previous)?.expiresAt : undefined;
+        timings.set(metric, { expiresAt: Math.min(deadline, priorDeadline ?? deadline), receivedAt: at });
+      } else if (
+        metric.availability !== "unsupported" &&
+        metric.availability !== "permission_denied" &&
+        previous &&
+        (timings.get(previous)?.expiresAt ?? 0) > at
+      ) {
+        return previous;
+      }
+      return metric;
+    };
+    const deny = (preserveRecovery = false) => {
+      backendPoll.cancel();
+      localPoll.cancel();
+      clearMetrics(preserveRecovery);
+      policyValidUntil.current = 0;
       updatePolicy(null);
-      clearAllRamState();
+    };
+    const tickSources = () => {
+      const elapsed = performance.now();
+      backendPoll.tick(elapsed, canRead);
+      localPoll.tick(elapsed, canReadLocal);
+    };
+    const policyPoll = createHealthPoll(
+      async (signal) => {
+        try {
+          const next = await healthRequest(signal, () => api.getHealthMonitoringClientPolicy({ signal }));
+          signal.throwIfAborted();
+          const wasPermitted = Boolean(policyRef.current?.enabled && policyRef.current.permitted);
+          if (!next.enabled || !next.permitted) deny();
+          updatePolicy(next);
+          policyValidUntil.current = performance.now() + POLICY_MAX_AGE_MS;
+          setPolicyRetry(false);
+          if (!wasPermitted && next.enabled && next.permitted) {
+            setCheckingUntil(performance.now() + INITIAL_CHECK_MS);
+            backendPoll.refresh();
+            localPoll.refresh();
+          }
+          return "ok";
+        } catch (error) {
+          if (disposed || sessionCleared || (signal.aborted && signal.reason?.name !== "TimeoutError")) return "ok";
+          if (isAccessDenied(error)) {
+            deny();
+            return "ok";
+          }
+          setPolicyRetry(true);
+          return "retry";
+        }
+      },
+      () => POLICY_REFRESH_MS,
+      tickSources
+    );
+    const backendPoll = createHealthPoll(
+      async (signal) => {
+        try {
+          const next = await healthRequest(signal, () =>
+            api.getHealthMonitoringSnapshot(smbIdsKey ? smbIdsKey.split(",") : [], { signal })
+          );
+          signal.throwIfAborted();
+          const at = observeClock().elapsed;
+          if (!permitted()) return "ok";
+          setBackendSample((previous) => ({
+            key: smbIdsKey,
+            snapshot: mapSnapshot(next, (metric, storage, prior) => retain(metric, storage, prior, at), previous?.snapshot),
+          }));
+          const reported = backendMetrics(next);
+          // A host sample may already be several seconds old when it reaches the browser.
+          // Refresh before the oldest host reading expires, even in summary mode.
+          const hostRemaining = [next.host_memory, next.system_load, next.cpu_temperature, next.container_memory]
+            .filter((metric) => isReading(metric) && metric.severity !== "informational")
+            .map((metric) => limit(false) - (metric.age_seconds ?? 0) * 1000);
+          hostRefreshIn = Math.max(HEALTH_TICK_MS, Math.min(...hostRemaining) - HOST_REFRESH_LEAD_MS);
+          const failed = reported.filter((metric) => !isReading(metric) && metric.severity === "unknown");
+          setBackendRetry(failed.length > 0);
+          if (!failed.length) setPendingRefresh((pending) => ({ ...pending, backend: false }));
+          setNow(at);
+          if (failed.some((metric) => metric.availability === "collecting" || metric.availability === "stale")) return "collecting";
+          return failed.some((metric) => metric.availability !== "permission_denied") ? "retry" : "ok";
+        } catch (error) {
+          if (disposed || sessionCleared || (signal.aborted && signal.reason?.name !== "TimeoutError")) return "ok";
+          if (isAccessDenied(error)) {
+            deny();
+            policyPoll.cancel(performance.now() + POLICY_REFRESH_MS);
+            return "ok";
+          }
+          setBackendRetry(true);
+          setNow(observeClock().elapsed);
+          return "retry";
+        }
+      },
+      () => Math.min(interval(), hostRefreshIn)
+    );
+    const samePairing = () => companionRevision === getCompanionRevision() && hasStoredSecret();
+    const canReadLocal = () => canRead() && requiresCompanion && !noLocalAccess && !companionUnsupported && samePairing();
+    const localPoll = createHealthPoll(async (signal) => {
+      try {
+        const getCapacity = () => healthRequest(signal, () => companionService.getDrivesCapacity({ signal }));
+        const listing = await getCapacity().catch((error: unknown) => {
+          if (!isCompanionPairingRejected(error)) throw error;
+          return getCapacity();
+        });
+        signal.throwIfAborted();
+        if (!samePairing()) return "ok";
+        const at = observeClock().elapsed;
+        if (!permitted()) return "ok";
+        setRawLocalDrives((previous) =>
+          listing.items.map((metric) =>
+            retain(
+              metric,
+              true,
+              previous.find((item) => item.id === metric.id),
+              at
+            )
+          )
+        );
+        setCompanionRejected(false);
+        setCompanionReady(true);
+        const failed = listing.items.filter((metric) => !isReading(metric) && metric.availability !== "unsupported");
+        setCompanionRetry(failed.length > 0);
+        if (!failed.length) setPendingRefresh((pending) => ({ ...pending, companion: false }));
+        setNow(at);
+        if (failed.some((metric) => metric.availability === "collecting" || metric.availability === "stale")) return "collecting";
+        return failed.some((metric) => metric.availability !== "permission_denied") ? "retry" : "ok";
+      } catch (error) {
+        if (disposed || sessionCleared || (signal.aborted && signal.reason?.name !== "TimeoutError")) return "ok";
+        if (
+          isCompanionCapacityUnsupported(error) ||
+          isCompanionPairingRejected(error) ||
+          (isAccessDenied(error) && !isCompanionTimestampRejected(error))
+        ) {
+          companionUnsupported = isCompanionCapacityUnsupported(error);
+          setCompanionRejected(!companionUnsupported);
+          setCompanionUpdateRequired(companionUnsupported);
+          setRawLocalDrives([]);
+          driveTrackersRef.current.clear();
+          setCompanionRetry(false);
+          setPendingRefresh((pending) => ({ ...pending, companion: false }));
+          return "ok";
+        }
+        setCompanionRetry(true);
+        setNow(observeClock().elapsed);
+        return "retry";
+      }
+    }, interval);
+
+    const observeClock = () => {
+      const current = { elapsed: performance.now(), wall: Date.now() };
+      if (visible() && isHealthPollingGap(lastTick.current, current)) {
+        if (current.elapsed >= recoveryUntil.current && lastSeverity.current !== "unknown") {
+          recoveryUntil.current = current.elapsed + HEALTH_RECOVERY_MS;
+          setRecovery({ startedAt: current.elapsed, until: recoveryUntil.current, severity: lastSeverity.current });
+          setPendingRefresh({ backend: true, companion: requiresCompanion && !noLocalAccess && !companionUnsupported });
+          setNow(current.elapsed);
+        }
+        requestRefresh(true);
+      }
+      if (visible()) lastTick.current = current;
+      return current;
+    };
+    const tick = () => {
+      if (!visible()) return;
+      const current = observeClock();
+      if (policyRef.current?.permitted && current.elapsed >= policyValidUntil.current) deny(current.elapsed < recoveryUntil.current);
+      nextExpiry(current.elapsed);
+      policyPoll.tick(current.elapsed, visible);
+      tickSources();
+    };
+    const requestRefresh = (recheckPolicy: boolean) => {
+      if (!visible()) return;
+      if (recheckPolicy) policyPoll.refresh();
+      backendPoll.refresh();
+      localPoll.refresh();
+    };
+    const refresh = (recheckPolicy: boolean) => {
+      requestRefresh(recheckPolicy);
+      tick();
+    };
+    const onReturn = () => refresh(false);
+    const onVisibility = () => {
+      if (visible()) refresh(true);
+    };
+    const resetSession = () => {
+      sessionCleared = true;
+      policyPoll.cancel();
+      deny();
+    };
+    const bootstrap = () => {
+      sessionCleared = false;
+      refresh(true);
+    };
+    const unsubClear = authSession.subscribeToClear(resetSession);
+    const unsubIdentity = authSession.subscribeToIdentity((identity) => {
+      resetSession();
+      if (identity.userId !== null) bootstrap();
     });
+    const unsubBootstrap = authSession.subscribeToBootstrap(bootstrap);
+    const unsubSettings = subscribeHealthMonitoringSettingsChanged(() => refresh(true));
+    pollControl.current = refresh;
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onReturn);
+    window.addEventListener("online", onReturn);
+    window.addEventListener("pageshow", onReturn);
+    tick();
+    const timer = window.setInterval(tick, HEALTH_TICK_MS);
     return () => {
+      disposed = true;
+      pollControl.current = null;
+      window.clearInterval(timer);
+      policyPoll.cancel();
+      backendPoll.cancel();
+      localPoll.cancel();
       unsubClear();
       unsubIdentity();
-    };
-  }, [clearAllRamState, updatePolicy]);
-
-  useEffect(() => {
-    if (!authenticated) {
-      updatePolicy(null);
-      clearAllRamState();
-    }
-  }, [authenticated, clearAllRamState, updatePolicy]);
-
-  const loadPolicy = useCallback(async (): Promise<HealthMonitoringClientPolicy | null> => {
-    if (!authenticated) {
-      return null;
-    }
-    lastPolicyCheckRef.current = performance.now();
-    try {
-      const nextPolicy = await api.getHealthMonitoringClientPolicy();
-      updatePolicy(nextPolicy);
-      if (!nextPolicy.enabled || !nextPolicy.permitted) {
-        clearAllRamState();
-      }
-      return nextPolicy;
-    } catch (error) {
-      if (isApiError(error) && error.response?.status === 403) {
-        updatePolicy({
-          enabled: false,
-          permitted: false,
-          thresholds: null,
-          summary_poll_seconds: 15,
-          dialog_poll_seconds: 5,
-          host_stale_seconds: 15,
-          storage_stale_seconds: 180,
-        });
-        clearAllRamState();
-      } else if (isApiError(error) && error.response?.status === 401) {
-        updatePolicy(null);
-        clearAllRamState();
-      } else {
-        setBackendUnavailable(true);
-      }
-      return null;
-    }
-  }, [authenticated, clearAllRamState, updatePolicy]);
-
-  const pollOnce = useCallback(
-    async (options?: { recheckPolicy?: boolean }) => {
-      if (!authenticated || !pageVisible || inFlightRef.current) {
-        return;
-      }
-
-      inFlightRef.current = true;
-      try {
-        let activePolicy = policyRef.current;
-        if (
-          !activePolicy ||
-          options?.recheckPolicy ||
-          lastPolicyCheckRef.current === null ||
-          performance.now() - lastPolicyCheckRef.current >= POLICY_REFRESH_MS
-        ) {
-          activePolicy = await loadPolicy();
-        }
-        if (!activePolicy?.enabled || !activePolicy.permitted) {
-          return;
-        }
-
-        const currentSmbIds = smbIdsKey ? smbIdsKey.split(",") : [];
-        const snapshotPromise = api
-          .getHealthMonitoringSnapshot(currentSmbIds)
-          .then((nextSnapshot) => {
-            setSnapshot(nextSnapshot);
-            setBackendUnavailable(false);
-            return nextSnapshot;
-          })
-          .catch((error: unknown) => {
-            if (isApiError(error) && error.response?.status === 403) {
-              const prev = policyRef.current;
-              updatePolicy(
-                prev
-                  ? { ...prev, permitted: false, thresholds: null }
-                  : {
-                      enabled: false,
-                      permitted: false,
-                      thresholds: null,
-                      summary_poll_seconds: 15,
-                      dialog_poll_seconds: 5,
-                      host_stale_seconds: 15,
-                      storage_stale_seconds: 180,
-                    }
-              );
-              clearAllRamState();
-              return null;
-            }
-            setBackendUnavailable(true);
-            return null;
-          });
-
-        const shouldQueryCompanion = companionStatus === "paired" && hasStoredSecret();
-        const companionPromise = (async () => {
-          if (!shouldQueryCompanion) {
-            if (companionStatus === "update_required") {
-              setCompanionUpdateRequired(true);
-              setRawLocalDrives([]);
-            }
-            return null;
-          }
-          if (companionUnsupportedCachedRef.current) {
-            setCompanionUpdateRequired(true);
-            setCompanionFetchError(null);
-            return null;
-          }
-          try {
-            const listing = await companionService.getDrivesCapacity();
-            setRawLocalDrives(listing.items);
-            setCompanionUpdateRequired(false);
-            setCompanionFetchError(null);
-            return listing;
-          } catch (error) {
-            if (isCompanionCapacityUnsupported(error)) {
-              companionUnsupportedCachedRef.current = true;
-              setCompanionUpdateRequired(true);
-              setRawLocalDrives([]);
-              setCompanionFetchError(null);
-            } else if (isCompanionAuthSignatureMismatch(error) || isCompanionPairingMissing(error)) {
-              setCompanionFetchError(t("systemHealth.metrics.pairingLost"));
-            } else {
-              setCompanionFetchError(t("systemHealth.summary.localDriveUnknownHeadline"));
-            }
-            return null;
-          }
-        })();
-
-        await Promise.all([snapshotPromise, companionPromise]);
-      } finally {
-        inFlightRef.current = false;
-      }
-    },
-    [authenticated, clearAllRamState, companionStatus, loadPolicy, pageVisible, smbIdsKey, t, updatePolicy]
-  );
-
-  // Initial load & updates when panes, pairing, visibility, or dialog state change
-  useEffect(() => {
-    if (!authenticated || !pageVisible) {
-      return undefined;
-    }
-    void pollOnce({ recheckPolicy: dialogOpen || policyRef.current === null });
-    const unsubBootstrap = authSession.subscribeToBootstrap(() => {
-      void pollOnce({ recheckPolicy: true });
-    });
-    const intervalMs = dialogOpen ? DIALOG_POLL_MS : SUMMARY_POLL_MS;
-    const timer = window.setInterval(() => {
-      void pollOnce();
-    }, intervalMs);
-    return () => {
       unsubBootstrap();
-      window.clearInterval(timer);
+      unsubSettings();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onReturn);
+      window.removeEventListener("online", onReturn);
+      window.removeEventListener("pageshow", onReturn);
     };
-  }, [authenticated, dialogOpen, pageVisible, pollOnce]);
+  }, [authenticated, companionRevision, noLocalAccess, requiresCompanion, smbIdsKey, timings]);
 
-  // Re-check immediately when admin updates Health Monitoring settings
+  const previousDialog = useRef(dialogOpen);
   useEffect(() => {
-    return subscribeHealthMonitoringSettingsChanged(() => {
-      void pollOnce({ recheckPolicy: true });
-    });
-  }, [pollOnce]);
+    if (previousDialog.current !== dialogOpen) pollControl.current?.(dialogOpen);
+    previousDialog.current = dialogOpen;
+  }, [dialogOpen]);
+
+  const refreshing = recovery !== null && now < recovery.until && (pendingRefresh.backend || pendingRefresh.companion);
+  const checking = checkingUntil !== null && now < checkingUntil;
+  const expired = useCallback(
+    <T extends TimedMetric>(metric: T): T => {
+      const timing = timings.get(metric);
+      return isReading(metric) && timing && (timing.expiresAt <= now || timing.receivedAt < (recovery?.startedAt ?? 0))
+        ? { ...metric, availability: "stale", is_stale: true, severity: "unknown", recovery_pending: false }
+        : metric;
+    },
+    [now, recovery?.startedAt, timings]
+  );
+  const backendCurrent = backendSample?.key === smbIdsKey ? backendSample.snapshot : null;
+  const snapshot = useMemo(() => (backendCurrent ? mapSnapshot(backendCurrent, expired) : null), [backendCurrent, expired]);
+  const backendUnavailable = backendRetry && !snapshot;
 
   const thresholds = snapshot?.thresholds ?? policy?.thresholds ?? DEFAULT_THRESHOLDS;
 
@@ -432,14 +597,16 @@ export function useSystemHealthMonitoring({
       companionStatus === "needs_repair" ||
       companionLifecycleStatus === "renewal_required" ||
       companionLifecycleStatus === "auth_failed" ||
-      (companionFetchError && rawLocalDrives.length === 0)
+      companionRejected ||
+      companionStatus === "reconnecting" ||
+      (requiresCompanion && !companionReady)
     ) {
       placeholder = {
         id: "companion-unavailable",
         severity: "unknown",
-        availability: "unavailable",
-        message: companionFetchError ?? t("systemHealth.metrics.pairingLost"),
-        action: t("systemHealth.metrics.pairingLost"),
+        availability: companionRejected || noLocalAccess || !checking ? "unavailable" : "collecting",
+        message: companionRejected || noLocalAccess ? t("systemHealth.metrics.pairingLost") : t("systemHealth.summary.companionRetrying"),
+        action: companionRejected || noLocalAccess ? t("systemHealth.metrics.pairingLost") : null,
       };
     } else if (companionStatus !== "paired") {
       placeholder = {
@@ -474,7 +641,8 @@ export function useSystemHealthMonitoring({
       ];
     }
 
-    return rawLocalDrives.map((drive): StorageMetric => {
+    return rawLocalDrives.map((sample): StorageMetric => {
+      const drive = expired(sample);
       const warnTenths = thresholds.available_space_warning_tenths_percent;
       const errTenths = thresholds.available_space_error_tenths_percent;
       const sourceLabel = `Companion (${drive.drive_type})`;
@@ -512,8 +680,8 @@ export function useSystemHealthMonitoring({
           recovery_pending: false,
           sampled_at: drive.sampled_at,
           age_seconds: drive.age_seconds,
-          is_stale: Boolean(drive.is_stale || companionFetchError),
-          message: companionFetchError ?? drive.message ?? null,
+          is_stale: drive.is_stale,
+          message: drive.message ?? null,
           action: null,
         };
       }
@@ -542,31 +710,6 @@ export function useSystemHealthMonitoring({
       const availTenths = Math.floor((1000 * drive.available_bytes) / drive.total_bytes);
       const availPercent = Math.round((1000 * drive.available_bytes) / drive.total_bytes) / 10;
 
-      if (companionFetchError) {
-        return {
-          id: `local-drive-${drive.id}`,
-          kind: "local_drive",
-          label: drive.name,
-          source: sourceLabel,
-          semantics: drive.semantics,
-          severity: "unknown",
-          availability: "stale",
-          available_bytes: drive.available_bytes,
-          total_bytes: drive.total_bytes,
-          actual_free_bytes: drive.actual_free_bytes ?? null,
-          available_tenths_percent: availTenths,
-          available_percent: availPercent,
-          warning_tenths_percent: warnTenths,
-          error_tenths_percent: errTenths,
-          recovery_pending: false,
-          sampled_at: drive.sampled_at,
-          age_seconds: drive.age_seconds,
-          is_stale: true,
-          message: companionFetchError,
-          action: null,
-        };
-      }
-
       return {
         id: `local-drive-${drive.id}`,
         kind: "local_drive",
@@ -591,11 +734,16 @@ export function useSystemHealthMonitoring({
       };
     });
   }, [
-    companionFetchError,
+    expired,
+    checking,
+    companionRejected,
+    companionReady,
     companionLifecycleStatus,
     companionStatus,
     companionUpdateRequired,
     rawLocalDrives,
+    noLocalAccess,
+    requiresCompanion,
     t,
     thresholds.available_space_error_tenths_percent,
     thresholds.available_space_warning_tenths_percent,
@@ -632,7 +780,16 @@ export function useSystemHealthMonitoring({
       notes.unshift(t("systemHealth.summary.backendUnavailableHeadline"));
     }
 
-    const backendSeverity: AggregateHealthSeverity = backendUnavailable || !snapshot ? "unknown" : snapshot.summary.severity;
+    const observed = snapshot ? backendMetrics(snapshot) : [];
+    const backendSeverity: AggregateHealthSeverity = !snapshot
+      ? "unknown"
+      : observed.some((metric) => metric.severity === "error")
+        ? "error"
+        : observed.some((metric) => metric.severity === "warning")
+          ? "warning"
+          : observed.some((metric) => metric.severity === "unknown")
+            ? "unknown"
+            : "ok";
 
     let severity: AggregateHealthSeverity;
     if (backendSeverity === "error" || localErrors.length > 0) {
@@ -644,8 +801,19 @@ export function useSystemHealthMonitoring({
     } else {
       severity = "ok";
     }
+    if (refreshing && recovery && !companionRejected && !noLocalAccess && !companionUpdateRequired) {
+      if (
+        severity === "unknown" ||
+        (severity !== "error" && recovery.severity === "error") ||
+        (severity === "ok" && recovery.severity === "warning")
+      )
+        severity = recovery.severity;
+    }
 
     let headline = snapshot?.summary.headline ?? t("systemHealth.summary.neverUpdated");
+    if (snapshot && backendSeverity !== snapshot.summary.severity) {
+      headline = t(`systemHealth.overview.${backendSeverity}`);
+    }
     if (backendUnavailable && severity === "unknown") {
       headline = t("systemHealth.summary.backendUnavailableHeadline");
     } else if (severity === "error" && backendSeverity !== "error" && localErrors.length > 0) {
@@ -660,9 +828,13 @@ export function useSystemHealthMonitoring({
           : t("systemHealth.summary.localDriveWarningsHeadline", { count: localWarnings.length });
     } else if (severity === "unknown" && backendSeverity === "ok" && localUnknowns.length > 0) {
       headline = companionUpdateRequired ? t("systemHealth.metrics.updateCompanion") : t("systemHealth.summary.localDriveUnknownHeadline");
+      if (companionRejected || noLocalAccess) headline = t("systemHealth.metrics.pairingLost");
     }
+    if (refreshing && !companionRejected && !noLocalAccess) headline = t("systemHealth.summary.refreshing");
+    else if (severity === "unknown" && checking && !companionRejected && !noLocalAccess && !companionUpdateRequired)
+      headline = t("systemHealth.overview.checking");
 
-    const timestamps = [snapshot?.summary.last_updated_at ?? null, ...evaluatedLocalDrives.map((d) => d.sampled_at)].filter(
+    const timestamps = [...observed.map((metric) => metric.sampled_at), ...evaluatedLocalDrives.map((d) => d.sampled_at)].filter(
       (value): value is string => Boolean(value)
     );
     const lastUpdatedAt = timestamps.length > 0 ? (timestamps.sort().at(-1) ?? null) : null;
@@ -675,7 +847,24 @@ export function useSystemHealthMonitoring({
       coverageNotes: notes,
       lastUpdatedAt,
     };
-  }, [authenticated, backendUnavailable, companionUpdateRequired, evaluatedLocalDrives, policy, snapshot, t]);
+  }, [
+    authenticated,
+    backendUnavailable,
+    checking,
+    companionRejected,
+    companionUpdateRequired,
+    evaluatedLocalDrives,
+    noLocalAccess,
+    policy,
+    recovery,
+    refreshing,
+    snapshot,
+    t,
+  ]);
+
+  useEffect(() => {
+    lastSeverity.current = joined.severity;
+  }, [joined.severity]);
 
   return {
     visible: joined.visible,
@@ -688,5 +877,12 @@ export function useSystemHealthMonitoring({
     snapshot,
     localDrives: evaluatedLocalDrives,
     companionUpdateRequired,
+    refreshing,
+    checking: checking && joined.severity === "unknown" && !companionRejected && !noLocalAccess && !companionUpdateRequired,
+    retryNotes: [
+      ...(policyRetry ? [t("systemHealth.summary.policyRetrying")] : []),
+      ...(backendRetry ? [t("systemHealth.summary.backendRetrying")] : []),
+      ...(companionRetry || companionStatus === "reconnecting" ? [t("systemHealth.summary.companionRetrying")] : []),
+    ],
   };
 }

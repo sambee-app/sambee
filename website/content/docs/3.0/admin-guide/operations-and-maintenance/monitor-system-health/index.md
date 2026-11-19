@@ -79,7 +79,7 @@ Sambee reads filesystem metadata counters only (`statvfs` on Linux and macOS, `G
 - Timed-out SMB capacity probes retain worker ownership until thread exit without aborting shared pooled SMB connections used by active file transfers.
 - If all SMB cache entries have checks in progress, new volumes wait for capacity and show **Unknown**. Normal browser refreshes retry admission without creating duplicate probes. Connection changes hide readings from the old connection context while its check finishes.
 
-The browser refreshes health details every 5 seconds while the dialog is open, or every 15 seconds for the indicator alone. Initial storage results appear on a normal refresh; a check in progress does not cause faster polling.
+While the tab is visible, the browser normally refreshes health details every 5 seconds with the dialog open, or every 15 seconds for the indicator alone. It retries failed requests and checks in progress automatically. A temporary failure does not replace a current reading. After wake-up or a long pause, the browser keeps the last status for up to 20 seconds while it refreshes. It marks a required check **Unknown** if no current reading arrives in time.
 
 ## RAM-Only Storage Contract
 

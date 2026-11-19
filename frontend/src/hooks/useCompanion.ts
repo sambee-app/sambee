@@ -12,14 +12,22 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import companionService, { type DriveInfo, getCompanionAuthProtocolStatus, hasStoredSecret } from "../services/companion";
+import companionService, {
+  type DriveInfo,
+  getCompanionAuthProtocolStatus,
+  hasStoredSecret,
+  isCompanionPairingRejected,
+} from "../services/companion";
 import { companionSession } from "../services/companionSession";
 import { logger } from "../services/logger";
+import { healthRetryDelay } from "./healthPolling";
 
 /** Companion availability and pairing status. */
 export type CompanionStatus =
   /** Not running or unreachable. */
   | "unavailable"
+  /** A saved pairing could not be checked yet. */
+  | "reconnecting"
   /** Reachable but not yet paired. */
   | "unpaired"
   /** A pairing is in progress and waiting for local approval in the companion. */
@@ -69,6 +77,8 @@ export function useCompanion(): UseCompanionResult {
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(true);
   const initialDetectionStartedRef = useRef(false);
+  const detectionRef = useRef<Promise<void> | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
   const setDrivesIfChanged = useCallback((nextDrives: DriveInfo[]) => {
     setDrives((currentDrives) => (haveSameDrives(currentDrives, nextDrives) ? currentDrives : nextDrives));
   }, []);
@@ -76,75 +86,100 @@ export function useCompanion(): UseCompanionResult {
   /**
    * Probe the companion and, if paired, load drives.
    */
-  const detect = useCallback(async () => {
-    setLoading(true);
-    try {
-      const health = await companionService.checkHealth();
-
+  const detect = useCallback(() => {
+    if (detectionRef.current) return detectionRef.current;
+    const transientFailure = () => {
       if (!mountedRef.current) return;
+      const hasPairing = hasStoredSecret();
+      setStatus((current) => (current === "paired" && hasPairing ? current : hasPairing ? "reconnecting" : "unavailable"));
+      if (hasPairing) setRetryCount((count) => count + 1);
+    };
+    const probe = async () => {
+      setLoading(true);
+      try {
+        const health = await companionService.checkHealth();
 
-      if (!health) {
-        setStatus("unavailable");
-        setDrivesIfChanged([]);
-        return;
-      }
+        if (!mountedRef.current) return;
 
-      if (getCompanionAuthProtocolStatus(health) !== "compatible") {
-        setStatus("update_required");
-        setDrivesIfChanged([]);
-        return;
-      }
-
-      const storedSecret = hasStoredSecret();
-      const pairStatus = await companionService.getPairStatus();
-      const currentOriginPaired = pairStatus.status === "paired";
-
-      if (pairStatus.status === "pending_local_approval") {
-        setStatus("pending_local_approval");
-        setDrivesIfChanged([]);
-        return;
-      }
-
-      // Companion is reachable and the browser already has a shared secret.
-      // Even if the companion's health flag is stale, a successful authenticated
-      // drive fetch proves the pairing is still valid.
-      if (storedSecret && currentOriginPaired) {
-        try {
-          const driveList = await companionService.getDrives();
-          if (mountedRef.current) {
-            setStatus("paired");
-            setDrivesIfChanged(driveList);
-          }
-          return;
-        } catch (err) {
-          logger.warn("Stored companion secret was not accepted during startup", { error: err }, "companion");
-          if (mountedRef.current) {
-            setStatus("needs_repair");
-            setDrivesIfChanged([]);
-          }
+        if (!health) {
+          transientFailure();
           return;
         }
-      }
 
-      if (currentOriginPaired) {
-        logger.warn("Companion reported this origin as paired but no usable browser secret was available", {}, "companion");
-        setStatus("needs_repair");
-        setDrivesIfChanged([]);
-        return;
-      }
+        if (getCompanionAuthProtocolStatus(health) !== "compatible") {
+          setStatus("update_required");
+          setDrivesIfChanged([]);
+          setRetryCount(0);
+          return;
+        }
 
-      setStatus("unpaired");
-      setDrivesIfChanged([]);
-    } catch {
-      if (mountedRef.current) {
-        setStatus("unavailable");
+        const storedSecret = hasStoredSecret();
+        const pairStatus = await companionService.getPairStatus();
+        if (!mountedRef.current) return;
+        const currentOriginPaired = pairStatus.status === "paired";
+
+        if (pairStatus.status === "pending_local_approval") {
+          setStatus("pending_local_approval");
+          setDrivesIfChanged([]);
+          setRetryCount(0);
+          return;
+        }
+
+        // Companion is reachable and the browser already has a shared secret.
+        // Even if the companion's health flag is stale, a successful authenticated
+        // drive fetch proves the pairing is still valid.
+        if (storedSecret && currentOriginPaired) {
+          try {
+            const driveList = await companionService.getDrives().catch((error: unknown) => {
+              if (!isCompanionPairingRejected(error)) throw error;
+              return companionService.getDrives();
+            });
+            if (mountedRef.current) {
+              setStatus("paired");
+              setDrivesIfChanged(driveList);
+              setRetryCount(0);
+            }
+            return;
+          } catch (err) {
+            if (!mountedRef.current) return;
+            if (isCompanionPairingRejected(err)) {
+              logger.warn("Companion rejected pairing verification", { error: err }, "companion");
+              setStatus("needs_repair");
+              setDrivesIfChanged([]);
+              setRetryCount(0);
+            } else {
+              logger.warn("Could not verify the Companion drive list; will retry", { error: err }, "companion");
+              transientFailure();
+            }
+            return;
+          }
+        }
+
+        if (currentOriginPaired) {
+          logger.warn("Companion reported this origin as paired but no usable browser secret was available", {}, "companion");
+          setStatus("needs_repair");
+          setDrivesIfChanged([]);
+          setRetryCount(0);
+          return;
+        }
+
+        setStatus("unpaired");
         setDrivesIfChanged([]);
+        setRetryCount(0);
+      } catch (error) {
+        logger.warn("Could not verify Companion availability", { error }, "companion");
+        transientFailure();
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+        }
       }
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
+    };
+    const attempt = probe().finally(() => {
+      detectionRef.current = null;
+    });
+    detectionRef.current = attempt;
+    return attempt;
   }, [setDrivesIfChanged]);
 
   // Detect on mount
@@ -160,12 +195,29 @@ export function useCompanion(): UseCompanionResult {
   }, [detect]);
 
   useEffect(() => {
+    if (!retryCount) return;
+    const retry = () => {
+      if (document.visibilityState !== "hidden") void detect();
+    };
+    const timer = window.setTimeout(retry, healthRetryDelay(retryCount));
+    document.addEventListener("visibilitychange", retry);
+    window.addEventListener("focus", retry);
+    window.addEventListener("online", retry);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", retry);
+      window.removeEventListener("focus", retry);
+      window.removeEventListener("online", retry);
+    };
+  }, [detect, retryCount]);
+
+  useEffect(() => {
     const sessionStatus =
       status === "paired"
         ? "paired"
         : status === "detecting" || status === "pending_local_approval"
           ? "pairing"
-          : status === "unavailable"
+          : status === "unavailable" || status === "reconnecting"
             ? "unavailable"
             : "unpaired";
     companionSession.setState(

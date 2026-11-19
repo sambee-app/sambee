@@ -52,7 +52,7 @@ function getSeverityColor(severity: AggregateHealthSeverity | HealthSeverity): s
 }
 
 type OverviewMetric = Pick<MemoryMetric, "severity" | "availability" | "is_stale">;
-type SourceMetric = Pick<MemoryMetric, "source" | "availability" | "age_seconds" | "is_stale">;
+type SourceMetric = Pick<MemoryMetric, "source" | "availability" | "age_seconds" | "is_stale" | "sampled_at">;
 
 const SEVERITY_ORDER: Record<HealthSeverity, number> = { error: 0, warning: 1, unknown: 2, ok: 3, informational: 4 };
 const PERCENT_SCALE = 100;
@@ -93,6 +93,7 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
           ? ` · ${t(`systemHealth.availability.${availability}`)}`
           : ""}
         {ageText ? ` · ${ageText}` : ""}
+        {metric.sampled_at ? ` · ${t("systemHealth.summary.lastUpdatedLabel")}: ${formatDate(metric.sampled_at)}` : ""}
       </Typography>
     );
   };
@@ -388,7 +389,7 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
             : item.kind === "local_drive" && !state.current
               ? health.companionUpdateRequired
                 ? t("systemHealth.metrics.updateCompanion")
-                : t("systemHealth.overview.localDriveHelp")
+                : (item.action ?? t("systemHealth.overview.localDriveHelp"))
               : undefined;
         return (
           <Box key={item.id}>
@@ -441,8 +442,14 @@ export function SystemHealthDialog({ open, onClose, health, restoreFocusEl = nul
             <Box sx={{ minWidth: 0 }}>
               <Box role="status">
                 <Typography variant="subtitle1" sx={{ fontWeight: 700, color: getSeverityColor(health.severity) }}>
-                  {t(`systemHealth.overview.${health.severity}`)}
+                  {health.checking ? t("systemHealth.overview.checking") : t(`systemHealth.overview.${health.severity}`)}
                 </Typography>
+                {health.refreshing && <Typography variant="body2">{t("systemHealth.summary.refreshing")}</Typography>}
+                {health.retryNotes?.map((note) => (
+                  <Typography key={note} variant="body2" sx={{ color: "text.secondary" }}>
+                    {note}
+                  </Typography>
+                ))}
                 {(health.backendUnavailable ||
                   health.severity === "warning" ||
                   health.severity === "error" ||

@@ -44,6 +44,14 @@ export function isCompanionPairingMissing(error: unknown): boolean {
   return error.response.data?.code === COMPANION_PAIRING_NOT_FOUND_CODE || error.response.data?.detail === "Not paired with this origin";
 }
 
+export function isCompanionPairingRejected(error: unknown): boolean {
+  return isCompanionAuthSignatureMismatch(error) || isCompanionPairingMissing(error);
+}
+
+export function isCompanionTimestampRejected(error: unknown): boolean {
+  return isApiError(error) && error.response?.status === 403 && error.response.data?.detail === "Request timestamp too old or too new";
+}
+
 export function isCompanionCapacityUnsupported(error: unknown): boolean {
   if (!isApiError(error)) return false;
   const status = error.response?.status;
@@ -382,6 +390,7 @@ class CompanionService {
    */
   async getDrivesCapacity(options?: { signal?: AbortSignal }): Promise<CompanionDriveCapacityListing> {
     const headers = await this.buildAuthHeaders("GET", "/drives/capacity");
+    options?.signal?.throwIfAborted();
     const response = await this.client.get<CompanionDriveCapacityListing>("/drives/capacity", {
       headers,
       ...(options?.signal ? { signal: options.signal } : {}),

@@ -154,6 +154,7 @@ export function ConnectionSelector({
         {/* Connections settings shortcut for local-drive management */}
         {(companionStatus === "unpaired" ||
           companionStatus === "unavailable" ||
+          companionStatus === "reconnecting" ||
           companionStatus === "pending_local_approval" ||
           companionStatus === "needs_repair" ||
           companionStatus === "update_required") && (

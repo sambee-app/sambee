@@ -58,6 +58,14 @@ export class CompanionSession {
       return;
     }
 
+    this.publish(status, drives, error);
+  }
+
+  private publish(
+    status: CompanionSessionSnapshot["status"],
+    drives: readonly CompanionDriveDescriptor[],
+    error: CompanionSessionSnapshot["error"]
+  ): void {
     this.revision += 1;
     this.snapshot = { status, drives, error, revision: this.revision };
     for (const listener of this.listeners) listener();
@@ -68,8 +76,13 @@ export class CompanionSession {
   }
 
   storeSecret(secret: string): void {
+    const changed = localStorage.getItem(COMPANION_SECRET_KEY) !== secret;
     localStorage.setItem(COMPANION_SECRET_KEY, secret);
-    this.setState("paired", this.snapshot.drives);
+    if (changed) {
+      this.publish("paired", this.snapshot.drives, null);
+    } else {
+      this.setState("paired", this.snapshot.drives);
+    }
   }
 
   clearPairing(): void {
