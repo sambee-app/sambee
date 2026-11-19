@@ -20,6 +20,12 @@ Sambee now shows the system health status in the top-right corner. In the built-
 
 - Fixed result menu flickering while typing in directory navigation mode.
 
+## Markdown Viewer
+
+### Improvements
+
+- Links in printed documents are now underlined and use the theme's link color instead of black.
+
 ## Security
 
 - Updated all dependencies with known issues or vulnerabilities to fixed versions.
