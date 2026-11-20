@@ -565,7 +565,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                   </Typography>
                   {imageLoadingFeedbackStage === "slow" && (
                     <>
-                      <Typography variant="body2">This image is taking longer than usual.</Typography>
+                      <Typography variant="body2">{t("viewer.slowImage")}</Typography>
                       <Button color="inherit" size="small" onClick={cancelCurrentImageLoad}>
                         Cancel
                       </Button>

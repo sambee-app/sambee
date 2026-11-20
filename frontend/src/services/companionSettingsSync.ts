@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { translate } from "../i18n";
+import { getBrowserLanguage, translate } from "../i18n";
 import { isApiError } from "../types";
 import {
   COMPANION_SETTINGS_SECTIONS,
@@ -24,6 +24,7 @@ const LEGACY_DIRECTORY_POLICY_ERRORS = new Set([
   "Directory settings are invalid. Correct server policy and retry.",
   "Backend policy contains unsupported resource values.",
 ]);
+const LEGACY_LOCALIZATION_ERROR = "Localization settings are invalid. Correct the server preferences and retry.";
 export type SettingsSyncPhase =
   | "defaults_active"
   | "synchronized"
@@ -97,10 +98,12 @@ class CompanionSettingsSynchronizer {
     window.addEventListener(COMPANION_SETTINGS_CHANGED_EVENT, preferences);
     document.addEventListener("visibilitychange", visible);
     window.addEventListener("online", reconnect);
+    window.addEventListener("languagechange", reconnect);
     this.cleanup = [
       () => window.removeEventListener(COMPANION_SETTINGS_CHANGED_EVENT, preferences),
       () => document.removeEventListener("visibilitychange", visible),
       () => window.removeEventListener("online", reconnect),
+      () => window.removeEventListener("languagechange", reconnect),
       companionSession.subscribe(() => {
         if (companionSession.hasSecret()) this.request();
         else {
@@ -205,7 +208,7 @@ class CompanionSettingsSynchronizer {
       if (!check()) return;
       const synchronize = async () => {
         if (!check()) return;
-        const options = { signal: controller.signal };
+        const options = { signal: controller.signal, params: { browser_language: getBrowserLanguage() } };
         const [metadata, status] = await Promise.all([
           api.getCompanionSettingsMetadata(options),
           companionService.getSettingsStatus(options),
@@ -283,12 +286,16 @@ class CompanionSettingsSynchronizer {
       if (controller.signal.aborted || generation !== this.generation || !this.running) return;
       const status = isApiError(error) ? error.response?.status : undefined;
       const code = isApiError(error) ? error.response?.data?.code : undefined;
-      const errorMessage = getApiErrorMessage(
-        error,
-        "Settings delivery failed. Check the connection and retry. The last valid settings remain active."
-      );
+      const errorMessage = getApiErrorMessage(error, translate("settings.companionSync.delivery_failed"));
+      const needsLanguageUpdate =
+        code === "companion_locale_update_required" ||
+        (this.snapshot.sections.localization === "synchronizing" && errorMessage === LEGACY_LOCALIZATION_ERROR);
       const phase =
-        status === 404 || status === 426 || code === "settings_update_required" || code === "companion_browser_update_required"
+        status === 404 ||
+        status === 426 ||
+        code === "settings_update_required" ||
+        code === "companion_browser_update_required" ||
+        needsLanguageUpdate
           ? "update_required"
           : code === "settings_authority_conflict"
             ? "authority_conflict"
@@ -302,9 +309,11 @@ class CompanionSettingsSynchronizer {
         message:
           phase === "pairing_required"
             ? null
-            : LEGACY_DIRECTORY_POLICY_ERRORS.has(errorMessage)
-              ? translate("settings.companionSync.directoryPolicyUpdateRequired")
-              : errorMessage,
+            : needsLanguageUpdate
+              ? translate("settings.companionSync.languageUpdateRequired")
+              : LEGACY_DIRECTORY_POLICY_ERRORS.has(errorMessage)
+                ? translate("settings.companionSync.directoryPolicyUpdateRequired")
+                : errorMessage,
         sections: Object.fromEntries(Object.keys(this.snapshot.sections).map((name) => [name, phase])),
       });
       delay = RETRY_DELAYS_MS[this.retries++] ?? CHECK_INTERVAL_MS;

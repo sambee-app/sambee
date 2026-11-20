@@ -1,4 +1,3 @@
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import CloseIcon from "@mui/icons-material/Close";
 import {
   AppBar,
@@ -33,6 +32,7 @@ import {
   SAFE_AREA_INSET,
 } from "../../theme/mobileShell";
 import { FORM_SURFACE_CSS_VARIABLE, getOverlaySurfaceTokens, OVERLAY_SURFACE_CSS_VARIABLE } from "../../theme/palette";
+import { DirectionalBackButton } from "../DirectionalBackButton";
 
 interface ResponsiveDialogShellProps {
   open: boolean;
@@ -203,21 +203,21 @@ export function ResponsiveDialogShell({
             <AppBar position="static" sx={mobileSafeAreaAppBarSx}>
               <Toolbar sx={mobileSafeAreaToolbarSx}>
                 {!showCloseButton && (
-                  <IconButton
-                    edge="start"
-                    color="inherit"
+                  <DirectionalBackButton
                     onClick={handleRequestClose}
                     aria-label={mobileActionLabel ?? t("common.navigation.goBack")}
                     disabled={disableClose}
-                  >
-                    <ArrowBackIcon />
-                  </IconButton>
+                  />
                 )}
                 <Typography
                   id={titleId}
                   variant="h6"
                   component="h1"
-                  sx={{ flex: 1, ml: showCloseButton ? 0 : 2, fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_TITLE_PX}px` }}
+                  sx={{
+                    flex: 1,
+                    marginInlineStart: showCloseButton ? 0 : 2,
+                    fontSize: `${COMPACT_LAYOUT_SIZE.DIALOG_TITLE_PX}px`,
+                  }}
                 >
                   {title}
                 </Typography>

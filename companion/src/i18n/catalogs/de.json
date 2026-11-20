@@ -1,0 +1,242 @@
+{
+  "native": {
+    "trayPreferences": "Einstellungen…",
+    "trayQuit": "Sambee Companion beenden",
+    "noOperations": "Keine laufenden Vorgänge",
+    "editing": "In Bearbeitung: {{filename}}",
+    "uploading": "Wird hochgeladen ({{percent}}): {{filename}}",
+    "uploadFailed": "Hochladen fehlgeschlagen: {{filename}}",
+    "downloading": "Wird heruntergeladen: {{filename}}",
+    "preferencesTitle": "Sambee Companion — Einstellungen",
+    "pairingTitle": "Sambee Companion — Kopplungsanfrage",
+    "appPickerTitle": "Sambee Companion — Anwendung auswählen",
+    "editingTitle": "Sambee — Bearbeitung",
+    "authenticationTitle": "Sambee-Anmeldung"
+  },
+  "pairing": {
+    "title": "Herkunft dieser Browseranfrage bestätigen",
+    "body": "Dieser Server erhält Zugriff auf lokale Laufwerke und verwaltet das Design, die Spracheinstellungen und die Regeln für die Ordnersuche in Companion. Durch die Kopplung übernimmt dieser Server die Verwaltung der Einstellungen.",
+    "idleMessage": "Warten auf eine Kopplungsanfrage.",
+    "eyebrow": "Herkunft der Browseranfrage zulassen",
+    "closeTitle": "Schließen",
+    "labels": {
+      "requestingOrigin": "Herkunft der Anfrage",
+      "verificationCode": "Bestätigungscode"
+    },
+    "hint": "Bestätigen Sie die Anfrage nur, wenn der Kopplungsdialog in Sambee denselben Code anzeigt.",
+    "actions": {
+      "reject": "Ablehnen",
+      "codesMatch": "Codes stimmen überein",
+      "close": "Jetzt schließen"
+    },
+    "approved": {
+      "title": "Bestätigung gesendet",
+      "body": "Die Codes für {{origin}} stimmen überein.",
+      "hint": "Sambee muss diese Herkunft noch als vertrauenswürdig speichern."
+    },
+    "success": {
+      "title": "Herkunft bestätigt",
+      "body": "Dieser Server kann auf lokale Laufwerke zugreifen und verwaltet jetzt die Einstellungen von Companion.",
+      "hint": "Dieses Fenster schließt sich in Kürze automatisch."
+    }
+  },
+  "app": {
+    "title": "Sambee Companion",
+    "idleMessage": "Companion läuft im Infobereich. Es werden keine Dateien bearbeitet."
+  },
+  "doneEditing": {
+    "waitingForContext": "Warten auf Angaben zur Bearbeitung…",
+    "openedIn": "Geöffnet in: {{appName}}",
+    "statusLabel": "Status:",
+    "modifiedAt": "Geändert: {{time}}",
+    "unchanged": "Unverändert",
+    "parseConflictError": "Die Konfliktinformationen konnten nicht gelesen werden",
+    "authRefreshedRetryUpload": "Die Authentifizierung wurde erneuert. Halten Sie „Bearbeitung abschließen“ erneut gedrückt, um den Upload zu wiederholen.",
+    "lifecycle": {
+      "renewalRequired": "Die Bearbeitungssitzung ist abgelaufen, bevor Companion sie verlängern konnte. Öffnen Sie die Datei erneut aus Sambee und versuchen Sie dann noch einmal, sie zu speichern.",
+      "authFailed": "Companion konnte nicht bestätigen, dass diese Bearbeitungssitzung noch autorisiert ist. Öffnen Sie die Datei erneut aus Sambee, um eine neue Sitzung zu starten.",
+      "lockLost": "Die Bearbeitungssperre auf dem Server ist nicht mehr aktiv. Öffnen Sie die Datei erneut aus Sambee, bevor Sie den Upload wiederholen.",
+      "recoveryRequired": "Diese Bearbeitungssitzung ist abgelaufen und kann nicht fortgesetzt werden. Öffnen Sie die Datei erneut aus Sambee, um eine neue Wiederherstellung zu starten."
+    },
+    "buttons": {
+      "doneUpload": "✓ Bearbeitung abschließen — zum Hochladen gedrückt halten",
+      "retryUpload": "✓ Bearbeitung abschließen — zum erneuten Hochladen gedrückt halten",
+      "reopenRequired": "Sitzung abgelaufen — erneut aus Sambee öffnen",
+      "authFailed": "Authentifizierung fehlgeschlagen — erneut aus Sambee öffnen",
+      "lockLost": "Sperre nicht mehr aktiv — erneut aus Sambee öffnen",
+      "recoveryRequired": "Wiederherstellung erforderlich — erneut aus Sambee öffnen",
+      "doneClose": "✓ Bearbeitung abschließen — zum Schließen gedrückt halten",
+      "uploading": "✓ Wird hochgeladen…",
+      "closing": "✓ Wird geschlossen…",
+      "discardHold": "Änderungen verwerfen — gedrückt halten"
+    },
+    "aria": {
+      "confirmUpload": "{{seconds}} Sekunden gedrückt halten, um den Upload zu bestätigen",
+      "retryUpload": "{{seconds}} Sekunden gedrückt halten, um nach erneuter Authentifizierung noch einmal hochzuladen",
+      "confirmClose": "{{seconds}} Sekunden gedrückt halten, um zu schließen und die Sperre aufzuheben",
+      "discardChanges": "{{seconds}} Sekunden gedrückt halten, um die Änderungen zu verwerfen",
+      "actionUnavailable": "Diese Aktion ist erst verfügbar, nachdem Sie die Datei erneut aus Sambee geöffnet haben",
+      "reopenInBrowser": "Sambee im Browser öffnen, um eine neue Bearbeitungssitzung zu starten",
+      "uploadProgress": "Upload-Fortschritt"
+    }
+  },
+  "conflictDialog": {
+    "title": "⚠ Konflikt erkannt",
+    "body": "Während Sie die Datei bearbeitet haben, hat ein anderer Benutzer sie auf dem Server geändert.",
+    "labels": {
+      "yourDownload": "Heruntergeladene Version:",
+      "serverVersion": "Serverversion:"
+    },
+    "actions": {
+      "overwrite": "Serverversion überschreiben",
+      "saveCopy": "Als Kopie speichern",
+      "cancel": "Abbrechen"
+    },
+    "authRefreshedRetry": "Die Authentifizierung wurde erneuert. Wählen Sie erneut „Serverversion überschreiben“ oder „Als Kopie speichern“, um den Upload zu wiederholen.",
+    "lifecycle": {
+      "renewalRequired": "Diese Bearbeitungssitzung ist abgelaufen, bevor der Upload autorisiert werden konnte. Schließen Sie diesen Dialog und öffnen Sie die Datei erneut aus Sambee.",
+      "authFailed": "Companion konnte nicht bestätigen, dass diese Bearbeitungssitzung noch autorisiert ist. Schließen Sie diesen Dialog und öffnen Sie die Datei erneut aus Sambee.",
+      "lockLost": "Die Serversperre für diese Bearbeitungssitzung ist nicht mehr aktiv. Schließen Sie diesen Dialog und öffnen Sie die Datei erneut aus Sambee.",
+      "recoveryRequired": "Diese Bearbeitungssitzung ist abgelaufen und kann nicht fortgesetzt werden. Schließen Sie diesen Dialog und öffnen Sie die Datei erneut aus Sambee."
+    }
+  },
+  "largeFileWarning": {
+    "title": "⚠ Große Datei",
+    "body": "Diese Datei ist {{sizeMb}} MB groß (Grenze: {{limitMb}} MB). Das Herunterladen und Synchronisieren großer Dateien kann lange dauern und viel Speicherplatz belegen.",
+    "actions": {
+      "continue": "Trotzdem fortfahren",
+      "cancel": "Abbrechen"
+    }
+  },
+  "appPicker": {
+    "title": "Anwendung zum Öffnen dieser .{{extension}}-Datei auswählen",
+    "loading": "Verfügbare Anwendungen werden geladen…",
+    "browseDialogTitle": "Nach einer Anwendung suchen",
+    "empty": "Für .{{extension}}-Dateien sind keine Anwendungen registriert.",
+    "sectionDefault": "Standardanwendung",
+    "sectionSuggested": "Vorgeschlagene Anwendungen",
+    "sectionMoreOptions": "Weitere Optionen",
+    "defaultBadge": "(Standard)",
+    "alwaysUse": "Diese Anwendung immer für .{{extension}}-Dateien verwenden",
+    "browseButton": "Nach einer anderen Anwendung suchen…",
+    "chooseAnotherApp": "Andere Anwendung auswählen",
+    "iconAlt": "Symbol für {{appName}}"
+  },
+  "preferences": {
+    "title": "Einstellungen",
+    "loading": "Einstellungen werden geladen…",
+    "closeTitle": "Schließen",
+    "sections": {
+      "pairedBrowsers": "Vertrauenswürdige Browser-Ursprünge",
+      "localization": "Sprache und Region",
+      "editingBehavior": "Verhalten beim Bearbeiten",
+      "startup": "Start",
+      "updates": "Updates",
+      "notifications": "Benachrichtigungen",
+      "tempFileCleanup": "Temporäre Dateien bereinigen"
+    },
+    "pairedBrowsersHint": "Diese vertrauenswürdigen Browser-Ursprünge können über Companion auf lokale Laufwerke zugreifen. Wenn Sie einen Ursprung entfernen, muss er den Zugriff erneut anfordern.",
+    "pairedBrowsersEmpty": "Companion vertraut derzeit keinen Browser-Ursprüngen.",
+    "directoryPolicy": {
+      "title": "Verwaltete Einstellungen",
+      "loading": "Der Status der Regeln für die Ordnersuche wird geladen.",
+      "unavailable": "Die Regeln für die Ordnersuche sind nicht verfügbar. Warten Sie kurz und aktualisieren Sie den Status oder starten Sie Companion neu.",
+      "active": "Der gekoppelte Server verwaltet die Einstellungen von Companion. Koppeln Sie einen anderen Server, um die Verwaltung zu wechseln.",
+      "defaults": "Es ist kein verwaltender Server ausgewählt. Die Standardeinstellungen oder die letzten gültigen Einstellungen gelten weiterhin. Koppeln Sie den gewünschten Server.",
+      "owner": "Verwaltender Server",
+      "revision": "Aktive Revision",
+      "refresh": "Regelstatus aktualisieren"
+    },
+    "localizationStatusHint": "Zeigt die Einstellungen für Sprache und Region, die zuletzt von einem vertrauenswürdigen Sambee-Browser-Ursprung synchronisiert wurden.",
+    "localizationStatus": {
+      "syncedBadge": "Aus dem Browser synchronisiert",
+      "languageLabel": "Sprache",
+      "regionalLocaleLabel": "Regionsformat",
+      "updatedAtLabel": "Zuletzt aktualisiert",
+      "sourceOriginLabel": "Herkunft der Einstellungen",
+      "empty": "Es wurden noch keine Einstellungen für Sprache und Region aus dem Browser synchronisiert."
+    },
+    "unpairTitle": "Vertrauenswürdigen Ursprung entfernen",
+    "unpairButton": "Entfernen",
+    "conflictResolutionLabel": "Verhalten bei Upload-Konflikten",
+    "conflictResolutionHint": "Legt fest, was geschieht, wenn sich die Datei auf dem Server während der Bearbeitung geändert hat.",
+    "conflictActions": {
+      "ask": "Jedes Mal nachfragen",
+      "overwrite": "Serverversion immer überschreiben",
+      "saveCopy": "Immer als neue Kopie speichern"
+    },
+    "startupLabel": "Sambee Companion bei der Systemanmeldung starten",
+    "startupHint": "Für lokale Laufwerke empfohlen. Der Browser kann nur auf lokale Laufwerke zugreifen, wenn Companion läuft.",
+    "updateChannelLabel": "Update-Kanal",
+    "updateChannelHint": "Legt fest, aus welchem Kanal Companion automatische Updates bezieht.",
+    "updateChannels": {
+      "stable": "Stabil",
+      "beta": "Beta",
+      "test": "Test"
+    },
+    "preReleaseWarning": "Versionen aus dem Kanal „{{channel}}“ können unfertige Funktionen enthalten oder bestehende Funktionen beeinträchtigen.",
+    "confirmUpdateChannel": {
+      "title": "Update-Kanal wechseln?",
+      "body": "Wenn Sie vom Kanal „Stabil“ zu „{{channel}}“ wechseln, kann Companion weniger gründlich getestete Vorabversionen installieren.",
+      "confirm": "Kanal wechseln"
+    },
+    "updateActions": {
+      "checkNow": "Nach Updates suchen",
+      "checking": "Suche läuft…",
+      "install": "Update installieren",
+      "installing": "Wird installiert…"
+    },
+    "updateStatus": {
+      "statusLabel": "Update-Status",
+      "lastChecked": "Zuletzt geprüft: {{time}}",
+      "currentVersionLabel": "Aktuelle Version",
+      "latestVersionLabel": "Verfügbare Version",
+      "publishedAtLabel": "Veröffentlicht",
+      "errorLabel": "Details",
+      "upToDate": "Sie verwenden die neueste Version aus dem Kanal „{{channel}}“.",
+      "updateAvailable": "Update {{version}} ist im Kanal „{{channel}}“ verfügbar.",
+      "installing": "Update {{version}} aus dem Kanal „{{channel}}“ wird installiert.",
+      "installed": "Update {{version}} wurde installiert. Starten Sie die Anwendung neu, falls sie nicht automatisch neu startet.",
+      "checkFailed": "Die Suche nach Updates im Kanal „{{channel}}“ ist fehlgeschlagen.",
+      "unknownVersion": "Unbekannt",
+      "unknownError": "Unbekannter Fehler"
+    },
+    "notificationsLabel": "Desktop-Benachrichtigungen anzeigen",
+    "notificationsHint": "Zeigt Systembenachrichtigungen zur Bearbeitung an, etwa bei einem erfolgreichen oder fehlgeschlagenen Upload.",
+    "retentionLabel": "Temporäre Dateien aufbewahren (Tage)",
+    "retentionHint": "Beim Start werden ältere temporäre Dateien im Papierkorb automatisch gelöscht. Gültig sind 1 bis 90 Tage.",
+    "savedIndicator": "Gespeichert ✓",
+    "confirmUnpair": {
+      "title": "Vertrauenswürdigen Ursprung entfernen?",
+      "body": "{{origin}} verliert den Zugriff auf lokale Laufwerke, bis dieser Ursprung die Genehmigung erneut bei Companion anfordert.",
+      "unpairing": "Wird entfernt…"
+    }
+  },
+  "recovery": {
+    "title": "Nicht gespeicherte Dateien gefunden",
+    "subtitle_one": "{{count}} Datei aus einer früheren Sitzung muss geprüft werden.",
+    "subtitle_other": "{{count}} Dateien aus einer früheren Sitzung müssen geprüft werden.",
+    "detail": "{{remotePath}} — geändert: {{localModified}}",
+    "authRefreshedRetryUpload": "Die Authentifizierung wurde erneuert. Klicken Sie erneut auf „Hochladen“, um die Datei noch einmal an den Server zu senden.",
+    "lifecycle": {
+      "renewalRequired": "Die wiederhergestellte Bearbeitungssitzung ist vor dem Upload abgelaufen. Öffnen Sie die Datei erneut aus Sambee oder verwerfen Sie diese temporäre Kopie.",
+      "authFailed": "Companion konnte nicht bestätigen, dass die wiederhergestellte Bearbeitungssitzung noch autorisiert ist. Öffnen Sie die Datei erneut aus Sambee oder verwerfen Sie diese temporäre Kopie.",
+      "lockLost": "Die Serversperre für die wiederhergestellte Bearbeitungssitzung ist nicht mehr aktiv. Öffnen Sie die Datei erneut aus Sambee oder verwerfen Sie diese temporäre Kopie.",
+      "recoveryRequired": "Die wiederhergestellte Bearbeitungssitzung ist abgelaufen und kann nicht fortgesetzt werden. Öffnen Sie die Datei erneut aus Sambee oder verwerfen Sie diese temporäre Kopie."
+    },
+    "actions": {
+      "upload": "Hochladen",
+      "retryUpload": "Erneut hochladen",
+      "discard": "Verwerfen",
+      "later": "Später",
+      "dismissAll": "Alle Hinweise schließen"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Abbrechen",
+      "close": "Schließen",
+      "open": "Öffnen"
+    }
+  }
+}

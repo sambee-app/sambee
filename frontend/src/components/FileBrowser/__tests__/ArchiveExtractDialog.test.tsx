@@ -4,12 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ArchiveExtractDialog } from "../ArchiveExtractDialog";
 import { OVERWRITE_CONFLICT_STRINGS as S } from "../overwriteConflictStrings";
 
-vi.mock("react-i18next", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("react-i18next")>()),
-  useTranslation: () => ({
-    t: (key: string) => key,
-  }),
-}));
+vi.mock("react-i18next", async () => (await import("../../../test/mocks/reactI18next")).mockReactI18next());
 
 const defaultProps = {
   archiveName: "project.zip",

@@ -1,0 +1,242 @@
+{
+  "native": {
+    "trayPreferences": "Voorkeuren…",
+    "trayQuit": "Sambee Companion afsluiten",
+    "noOperations": "Geen actieve bewerkingen",
+    "editing": "Bezig met bewerken: {{filename}}",
+    "uploading": "Bezig met uploaden ({{percent}}): {{filename}}",
+    "uploadFailed": "Uploaden mislukt: {{filename}}",
+    "downloading": "Bezig met downloaden: {{filename}}",
+    "preferencesTitle": "Sambee Companion — Voorkeuren",
+    "pairingTitle": "Sambee Companion — Koppelverzoek",
+    "appPickerTitle": "Sambee Companion — App kiezen",
+    "editingTitle": "Sambee — Bezig met bewerken",
+    "authenticationTitle": "Sambee-verificatie"
+  },
+  "pairing": {
+    "title": "Bevestig de herkomst van dit browserverzoek",
+    "body": "Deze server krijgt toegang tot lokale schijven en beheert het thema, de taal- en regio-instellingen en het zoekbeleid voor mappen in Companion. Na het koppelen neemt deze server het beheer van de instellingen over.",
+    "idleMessage": "Wachten op een koppelverzoek.",
+    "eyebrow": "Herkomst van browserverzoek goedkeuren",
+    "closeTitle": "Sluiten",
+    "labels": {
+      "requestingOrigin": "Herkomst van het verzoek",
+      "verificationCode": "Verificatiecode"
+    },
+    "hint": "Keur het verzoek alleen goed als het koppelvenster van Sambee dezelfde code toont.",
+    "actions": {
+      "reject": "Weigeren",
+      "codesMatch": "Codes komen overeen",
+      "close": "Nu sluiten"
+    },
+    "approved": {
+      "title": "Goedkeuring verzonden",
+      "body": "De codes voor {{origin}} komen overeen.",
+      "hint": "Wachten tot Sambee deze herkomst als vertrouwd heeft opgeslagen."
+    },
+    "success": {
+      "title": "Herkomst goedgekeurd",
+      "body": "Deze server heeft toegang tot lokale schijven en beheert nu de instellingen van Companion.",
+      "hint": "Dit venster sluit zo automatisch."
+    }
+  },
+  "preferences": {
+    "title": "Voorkeuren",
+    "loading": "Voorkeuren laden…",
+    "closeTitle": "Sluiten",
+    "sections": {
+      "pairedBrowsers": "Vertrouwde browserherkomsten",
+      "localization": "Taal en regio",
+      "editingBehavior": "Gedrag bij het bewerken",
+      "startup": "Opstarten",
+      "updates": "Updates",
+      "notifications": "Meldingen",
+      "tempFileCleanup": "Tijdelijke bestanden opruimen"
+    },
+    "pairedBrowsersHint": "Deze vertrouwde browserherkomsten hebben via Companion toegang tot lokale schijven. Als je een herkomst verwijdert, moet die opnieuw om toestemming vragen.",
+    "pairedBrowsersEmpty": "Companion vertrouwt momenteel geen browserherkomsten.",
+    "directoryPolicy": {
+      "title": "Beheerde instellingen",
+      "loading": "De status van het zoekbeleid voor mappen wordt geladen.",
+      "unavailable": "Het zoekbeleid voor mappen is niet beschikbaar. Wacht even en vernieuw de status, of start Companion opnieuw.",
+      "active": "De gekoppelde server beheert de instellingen van Companion. Koppel een andere server om het beheer over te dragen.",
+      "defaults": "Er is geen beheerserver geselecteerd. De standaardinstellingen of de laatst geldige instellingen blijven van kracht. Koppel de server die je wilt gebruiken.",
+      "owner": "Beheerserver",
+      "revision": "Actieve revisie",
+      "refresh": "Beleidsstatus vernieuwen"
+    },
+    "localizationStatusHint": "Toont welke taal- en regio-instellingen voor het laatst zijn gesynchroniseerd vanuit een vertrouwde browserherkomst van Sambee.",
+    "localizationStatus": {
+      "syncedBadge": "Gesynchroniseerd vanuit de browser",
+      "languageLabel": "Taal",
+      "regionalLocaleLabel": "Regionale notatie",
+      "updatedAtLabel": "Laatst bijgewerkt",
+      "sourceOriginLabel": "Herkomst van de synchronisatie",
+      "empty": "Er zijn nog geen taal- en regio-instellingen gesynchroniseerd vanuit de browser."
+    },
+    "unpairTitle": "Vertrouwde herkomst verwijderen",
+    "unpairButton": "Verwijderen",
+    "conflictResolutionLabel": "Uploadconflicten oplossen",
+    "conflictResolutionHint": "Wat er gebeurt als het bestand op de server tijdens het bewerken is gewijzigd.",
+    "conflictActions": {
+      "ask": "Elke keer vragen",
+      "overwrite": "Serverversie altijd overschrijven",
+      "saveCopy": "Altijd opslaan als nieuwe kopie"
+    },
+    "startupLabel": "Sambee Companion starten wanneer ik me aanmeld",
+    "startupHint": "Aanbevolen voor lokale schijven. De browser heeft alleen toegang tot lokale schijven als Companion actief is.",
+    "updateChannelLabel": "Updatekanaal",
+    "updateChannelHint": "Bepaalt uit welk kanaal Companion automatische updates ontvangt.",
+    "updateChannels": {
+      "stable": "Stabiel",
+      "beta": "Bèta",
+      "test": "Test"
+    },
+    "preReleaseWarning": "Versies uit het kanaal ‘{{channel}}’ kunnen onvoltooide functies bevatten of problemen met bestaande functies veroorzaken.",
+    "confirmUpdateChannel": {
+      "title": "Updatekanaal wijzigen?",
+      "body": "Als je van het kanaal Stabiel naar ‘{{channel}}’ overstapt, kan Companion voorlopige versies installeren die minder uitvoerig zijn getest.",
+      "confirm": "Kanaal wijzigen"
+    },
+    "updateActions": {
+      "checkNow": "Controleren op updates",
+      "checking": "Bezig met controleren…",
+      "install": "Update installeren",
+      "installing": "Bezig met installeren…"
+    },
+    "updateStatus": {
+      "statusLabel": "Updatestatus",
+      "lastChecked": "Laatst gecontroleerd: {{time}}",
+      "currentVersionLabel": "Huidige versie",
+      "latestVersionLabel": "Beschikbare versie",
+      "publishedAtLabel": "Publicatiedatum",
+      "errorLabel": "Details",
+      "upToDate": "Je gebruikt de nieuwste versie uit het kanaal ‘{{channel}}’.",
+      "updateAvailable": "Update {{version}} is beschikbaar in het kanaal ‘{{channel}}’.",
+      "installing": "Update {{version}} uit het kanaal ‘{{channel}}’ wordt geïnstalleerd.",
+      "installed": "Update {{version}} is geïnstalleerd. Start de app opnieuw als die niet automatisch opnieuw wordt gestart.",
+      "checkFailed": "Kan niet controleren op updates in het kanaal ‘{{channel}}’.",
+      "unknownVersion": "Onbekend",
+      "unknownError": "Onbekende fout"
+    },
+    "notificationsLabel": "Bureaubladmeldingen tonen",
+    "notificationsHint": "Toont systeemmeldingen over bewerkingen, bijvoorbeeld als een upload slaagt of mislukt.",
+    "retentionLabel": "Tijdelijke bestanden bewaren (dagen)",
+    "retentionHint": "Bij het opstarten verwijdert Companion automatisch tijdelijke bestanden die langer dan deze termijn in de prullenbak staan (1–90 dagen).",
+    "savedIndicator": "Opgeslagen ✓",
+    "confirmUnpair": {
+      "title": "Vertrouwde herkomst verwijderen?",
+      "body": "{{origin}} heeft geen toegang meer tot lokale schijven totdat deze herkomst opnieuw toestemming vraagt aan Companion.",
+      "unpairing": "Bezig met verwijderen…"
+    }
+  },
+  "recovery": {
+    "title": "Niet-opgeslagen bestanden gevonden",
+    "subtitle_one": "{{count}} bestand uit een vorige sessie moet worden gecontroleerd.",
+    "subtitle_other": "{{count}} bestanden uit een vorige sessie moeten worden gecontroleerd.",
+    "detail": "{{remotePath}} — gewijzigd: {{localModified}}",
+    "authRefreshedRetryUpload": "De verificatie is vernieuwd. Kies opnieuw ‘Uploaden’ om het bestand nogmaals naar de server te sturen.",
+    "lifecycle": {
+      "renewalRequired": "De herstelde bewerksessie is verlopen voordat het bestand kon worden geüpload. Open het bestand opnieuw vanuit Sambee of gooi deze tijdelijke kopie weg.",
+      "authFailed": "Companion kon niet verifiëren of de herstelde bewerksessie nog is toegestaan. Open het bestand opnieuw vanuit Sambee of gooi deze tijdelijke kopie weg.",
+      "lockLost": "De vergrendeling voor de herstelde bewerksessie is niet meer actief op de server. Open het bestand opnieuw vanuit Sambee of gooi deze tijdelijke kopie weg.",
+      "recoveryRequired": "De herstelde bewerksessie is verlopen en kan niet worden hervat. Open het bestand opnieuw vanuit Sambee of gooi deze tijdelijke kopie weg."
+    },
+    "actions": {
+      "upload": "Uploaden",
+      "retryUpload": "Opnieuw uploaden",
+      "discard": "Weggooien",
+      "later": "Later",
+      "dismissAll": "Alle meldingen sluiten"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Annuleren",
+      "close": "Sluiten",
+      "open": "Openen"
+    }
+  },
+  "app": {
+    "title": "Sambee Companion",
+    "idleMessage": "Companion is actief in het systeemvak. Er worden geen bestanden bewerkt."
+  },
+  "doneEditing": {
+    "waitingForContext": "Wachten op de gegevens van de bewerksessie…",
+    "openedIn": "Geopend in: {{appName}}",
+    "statusLabel": "Status:",
+    "modifiedAt": "Gewijzigd: {{time}}",
+    "unchanged": "Ongewijzigd",
+    "parseConflictError": "Kan de conflictgegevens niet lezen",
+    "authRefreshedRetryUpload": "De verificatie is vernieuwd. Houd ‘Bewerken voltooien’ opnieuw ingedrukt om de upload opnieuw te proberen.",
+    "lifecycle": {
+      "renewalRequired": "De bewerksessie is verlopen voordat Companion deze kon verlengen. Open het bestand opnieuw vanuit Sambee en probeer het daarna opnieuw op te slaan.",
+      "authFailed": "Companion kon niet verifiëren of deze bewerksessie nog is toegestaan. Open het bestand opnieuw vanuit Sambee om een nieuwe sessie te starten.",
+      "lockLost": "De bewerkvergrendeling is niet meer actief op de server. Open het bestand opnieuw vanuit Sambee voordat je de upload opnieuw probeert.",
+      "recoveryRequired": "Deze bewerksessie is verlopen en kan niet worden hervat. Open het bestand opnieuw vanuit Sambee om een nieuw herstel te starten."
+    },
+    "buttons": {
+      "doneUpload": "✓ Bewerken voltooien — ingedrukt houden om te uploaden",
+      "retryUpload": "✓ Bewerken voltooien — ingedrukt houden om opnieuw te uploaden",
+      "reopenRequired": "Sessie verlopen — opnieuw openen vanuit Sambee",
+      "authFailed": "Verificatie mislukt — opnieuw openen vanuit Sambee",
+      "lockLost": "Vergrendeling verloren — opnieuw openen vanuit Sambee",
+      "recoveryRequired": "Herstel nodig — opnieuw openen vanuit Sambee",
+      "doneClose": "✓ Bewerken voltooien — ingedrukt houden om te sluiten",
+      "uploading": "✓ Bezig met uploaden…",
+      "closing": "✓ Bezig met sluiten…",
+      "discardHold": "Wijzigingen weggooien — ingedrukt houden"
+    },
+    "aria": {
+      "confirmUpload": "Houd {{seconds}} seconden ingedrukt om de upload te bevestigen",
+      "retryUpload": "Houd {{seconds}} seconden ingedrukt om na hernieuwde verificatie opnieuw te uploaden",
+      "confirmClose": "Houd {{seconds}} seconden ingedrukt om te sluiten en de vergrendeling op te heffen",
+      "discardChanges": "Houd {{seconds}} seconden ingedrukt om de wijzigingen weg te gooien",
+      "actionUnavailable": "Open het bestand opnieuw vanuit Sambee om deze actie te gebruiken",
+      "reopenInBrowser": "Open Sambee in je browser om een nieuwe bewerksessie te starten",
+      "uploadProgress": "Uploadvoortgang"
+    }
+  },
+  "conflictDialog": {
+    "title": "⚠ Conflict gedetecteerd",
+    "body": "Een andere gebruiker heeft dit bestand op de server gewijzigd terwijl je het aan het bewerken was.",
+    "labels": {
+      "yourDownload": "Gedownloade versie:",
+      "serverVersion": "Serverversie:"
+    },
+    "actions": {
+      "overwrite": "Serverversie overschrijven",
+      "saveCopy": "Opslaan als kopie",
+      "cancel": "Annuleren"
+    },
+    "authRefreshedRetry": "De verificatie is vernieuwd. Kies opnieuw ‘Serverversie overschrijven’ of ‘Opslaan als kopie’ om de upload opnieuw te proberen.",
+    "lifecycle": {
+      "renewalRequired": "Deze bewerksessie is verlopen voordat de upload kon worden toegestaan. Sluit dit venster en open het bestand opnieuw vanuit Sambee.",
+      "authFailed": "Companion kon niet verifiëren of deze bewerksessie nog is toegestaan. Sluit dit venster en open het bestand opnieuw vanuit Sambee.",
+      "lockLost": "De vergrendeling voor deze bewerksessie is niet meer actief op de server. Sluit dit venster en open het bestand opnieuw vanuit Sambee.",
+      "recoveryRequired": "Deze bewerksessie is verlopen en kan niet worden hervat. Sluit dit venster en open het bestand opnieuw vanuit Sambee."
+    }
+  },
+  "largeFileWarning": {
+    "title": "⚠ Groot bestand",
+    "body": "Dit bestand is {{sizeMb}} MB groot (limiet: {{limitMb}} MB). Grote bestanden downloaden en synchroniseren kan lang duren en veel schijfruimte kosten.",
+    "actions": {
+      "continue": "Toch doorgaan",
+      "cancel": "Annuleren"
+    }
+  },
+  "appPicker": {
+    "title": "Kies een app om dit .{{extension}}-bestand te openen",
+    "loading": "Beschikbare apps laden…",
+    "browseDialogTitle": "Een app zoeken",
+    "empty": "Er zijn geen apps geregistreerd om .{{extension}}-bestanden te openen.",
+    "sectionDefault": "Standaardapp",
+    "sectionSuggested": "Voorgestelde apps",
+    "sectionMoreOptions": "Meer opties",
+    "defaultBadge": "(standaard)",
+    "alwaysUse": "Deze app altijd gebruiken voor .{{extension}}-bestanden",
+    "browseButton": "Een andere app zoeken…",
+    "chooseAnotherApp": "Een andere app kiezen",
+    "iconAlt": "Pictogram van {{appName}}"
+  }
+}

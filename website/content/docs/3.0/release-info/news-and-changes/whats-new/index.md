@@ -10,6 +10,10 @@ Open multiple tabs for the locations you need most often and switch between them
 - Close tab: <kbd>Alt+Minus</kbd>
 - Navigate between tabs: <kbd>Arrow left</kbd> and <kbd>Arrow right</kbd>
 
+## UI Translations
+
+Sambee's UI (frontend and Companion) is now available in the following languages: English, Chinese (Simplified), Dutch, French, German, Italian, Korean, Japanese, Polish, Portuguese, Spanish, Swedish.
+
 ## System Health Monitoring
 
 Sambee now shows the system health status in the top-right corner. In the built-in themes, the button background is blue for an unknown status, orange for a warning, and red for an error. When the status is OK, the button has no status color. Select the icon or use <kbd>Ctrl+P</kbd> and choose **Open System Health** to see details about the server, Sambee container, and connected storage.
@@ -30,3 +34,7 @@ Sambee now shows the system health status in the top-right corner. In the built-
 ## Security
 
 - Updated all dependencies with known issues or vulnerabilities to fixed versions.
+
+## Miscellaneous
+
+- Sambee now opts out of automatic page translation in Chrome because translation may cause UI errors. To change the interface language, use **Settings** > **Appearance** > **Localization** > **Language**.

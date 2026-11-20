@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use crate::native_i18n::{has_catalog, UI_LANGUAGES};
 use crate::server::localization::LocalizationState;
 use crate::server::models::LocalizationSyncRequest;
 use crate::server::pairing::{PairingState, SettingsAuthority};
@@ -210,7 +211,8 @@ impl Receipt {
         if let Some(section) = &self.localization {
             validate_marker(section, true)?;
             let locale = &section.payload.regional_locale;
-            if !matches!(section.payload.language.as_str(), "browser" | "en" | "en-XA")
+            if !(matches!(section.payload.language.as_str(), "browser" | "en-XA")
+                || UI_LANGUAGES.contains(&section.payload.language.as_str()))
                 || locale.is_empty()
                 || locale.len() > 128
                 || (locale != "browser"
@@ -692,19 +694,35 @@ impl DirectoryPolicyState {
 }
 
 fn apply_localization(app: &AppHandle, localization: &LocalizationState, origin: &str, payload: &Localization) -> Result<(), ApiError> {
+    if !has_catalog(&payload.language) {
+        return Err(ApiError::ConflictWithCode {
+            code: "companion_locale_update_required",
+            message: "Update Sambee Companion to use this UI language. The last valid language remains active.".to_owned(),
+        });
+    }
     let (current, _) = localization
         .apply_managed_update(
             app,
             origin,
             LocalizationSyncRequest {
-                language: payload.language.clone(),
+                language: if payload.language == "browser" {
+                    "en".to_owned()
+                } else {
+                    payload.language.clone()
+                },
                 regional_locale: payload.regional_locale.clone(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
             },
         )
         .map_err(|message| failure(&message))?;
-    app.emit("localization-updated", &current)
-        .map_err(|_| failure("Localization broadcast failed. Restart the Companion."))
+    if let Err(error) = app.emit("localization-updated", &current) {
+        log::warn!("Could not notify Companion webviews of persisted localization: {error}");
+    }
+    let handle = app.clone();
+    if let Err(error) = app.run_on_main_thread(move || crate::refresh_native_localization(&handle)) {
+        log::warn!("Could not refresh Companion native localization: {error}");
+    }
+    Ok(())
 }
 
 fn encode_theme(theme: &Theme) -> Result<String, ApiError> {
@@ -828,7 +846,17 @@ mod tests {
                 regional_locale: "browser".to_owned(),
             },
         });
-        assert!(value.validate().is_ok());
+        for language in [
+            "browser", "en", "en-XA", "zh-Hans", "nl", "fr", "de", "it", "ko", "ja", "pl", "pt", "es", "sv",
+        ] {
+            value.localization.as_mut().unwrap().payload.language = language.to_owned();
+            assert!(value.validate().is_ok(), "{language}");
+        }
+        for language in ["zh-Hant", "pt-BR", "en-US", "invalid"] {
+            value.localization.as_mut().unwrap().payload.language = language.to_owned();
+            assert!(value.validate().is_err(), "{language}");
+        }
+        value.localization.as_mut().unwrap().payload.language = "browser".to_owned();
         value.localization.as_mut().unwrap().user_scope = Some(uuid::Uuid::new_v4().to_string());
         assert!(value.validate().is_err());
     }

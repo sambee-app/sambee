@@ -3,11 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SambeeThemeProvider } from "../../../theme";
 import DeleteDialog from "../DeleteDialog";
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-  }),
-}));
+vi.mock("react-i18next", async () => (await import("../../../test/mocks/reactI18next")).mockReactI18next());
 
 function mockMobileMode(isMobile: boolean) {
   Object.defineProperty(window, "matchMedia", {

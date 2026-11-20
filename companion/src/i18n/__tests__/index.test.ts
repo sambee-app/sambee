@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyCompanionLocalization,
+  getCurrentLanguage,
   getCurrentRegionalLocale,
   LOCALE_STORAGE_KEY,
   REGIONAL_LOCALE_STORAGE_KEY,
@@ -11,6 +12,8 @@ import {
 describe("companion i18n", () => {
   afterEach(async () => {
     await setLocale("en");
+    window.localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it("switches representative companion strings when the locale changes", async () => {
@@ -52,14 +55,37 @@ describe("companion i18n", () => {
     expect(window.localStorage.getItem(REGIONAL_LOCALE_STORAGE_KEY)).toBe("en-GB");
   });
 
-  it("resolves browser preferences using the Companion operating-system webview locale", async () => {
+  it("uses English for a legacy browser language but keeps system regional formats", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("de-DE");
     await applyCompanionLocalization({
       language: "browser",
       regional_locale: "browser",
       updated_at: "2026-11-04T00:00:00Z",
       source_origin: "https://sambee.example",
     });
+    expect(getCurrentLanguage()).toBe("en");
     expect(getCurrentRegionalLocale()).toBe(Intl.getCanonicalLocales(navigator.language)[0]);
     expect(window.localStorage.getItem(REGIONAL_LOCALE_STORAGE_KEY)).not.toBe("browser");
+  });
+
+  it("starts in English before a sync and uses the last applied language offline", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("en-XA");
+    window.localStorage.clear();
+    vi.resetModules();
+    const fresh = await import("../index");
+    expect(fresh.getCurrentLanguage()).toBe("en");
+    const state = {
+      language: "ja",
+      regional_locale: "pt-BR",
+      updated_at: "2026-11-04T00:00:00Z",
+      source_origin: "https://sambee.example",
+    };
+    await fresh.applyCompanionLocalization(state);
+    await expect(fresh.applyCompanionLocalization({ ...state, language: "zh-Hant", regional_locale: "zh-TW" })).rejects.toThrow();
+    vi.resetModules();
+    const offline = await import("../index");
+    expect(offline.getCurrentLanguage()).toBe("ja");
+    expect(offline.translate("recovery.subtitle", { count: 2 })).not.toBe(translate("recovery.subtitle", { count: 2 }));
+    expect(offline.getCurrentRegionalLocale()).toBe("pt-BR");
   });
 });

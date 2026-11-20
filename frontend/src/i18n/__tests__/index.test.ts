@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CONNECTION_DIALOG_STRINGS } from "../../components/Admin/connectionDialogConstants";
 import { CONFIRM_DELETE_STRINGS } from "../../components/FileBrowser/confirmDeleteDialogStrings";
 import { SORT_CONTROLS_STRINGS } from "../../components/FileBrowser/sortControlsStrings";
@@ -7,11 +7,23 @@ import { VIEW_MODE_SELECTOR_STRINGS } from "../../components/FileBrowser/viewMod
 import { THEME_SELECTOR_STRINGS } from "../../components/themeSelectorStrings";
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { compareLocalizedStrings, formatLocalizedDateTime, formatLocalizedNumber } from "../../utils/localeFormatting";
-import { getAvailableLanguages, isPseudoLanguageEnabled, setLocale, setRegionalLocalePreference, translate } from "../index";
+import i18n, {
+  getAvailableLanguages,
+  getCurrentLanguage,
+  getCurrentLanguagePreference,
+  getCurrentRegionalLocale,
+  isPseudoLanguageEnabled,
+  setLocale,
+  setRegionalLocalePreference,
+  translate,
+} from "../index";
+import { matchBrowserLanguage, SHIPPING_LANGUAGES } from "../languages";
 
 describe("frontend i18n", () => {
   afterEach(async () => {
     await setLocale("en");
+    i18n.removeResourceBundle("pt", "translation");
+    vi.restoreAllMocks();
     await setRegionalLocalePreference("browser");
   });
 
@@ -72,6 +84,15 @@ describe("frontend i18n", () => {
     expect(window.localStorage.getItem("sambee.locale")).toBeNull();
   });
 
+  it("does not emit a language change when the requested language is already active", async () => {
+    await setLocale("en");
+    const changeLanguage = vi.spyOn(i18n, "changeLanguage");
+
+    await setLocale("en");
+
+    expect(changeLanguage).not.toHaveBeenCalled();
+  });
+
   it("updates regional formatting independently from the display language", async () => {
     await setLocale("en");
     await setRegionalLocalePreference("de-DE");
@@ -86,6 +107,68 @@ describe("frontend i18n", () => {
 
   it("hides the pseudo locale from production language options", () => {
     expect(isPseudoLanguageEnabled(false)).toBe(false);
-    expect(getAvailableLanguages(false)).toEqual(["en"]);
+    expect(getAvailableLanguages(false)).toContain("en");
+    expect(getAvailableLanguages(false)).not.toContain("en-XA");
+    expect(getAvailableLanguages(false).includes("pl")).toBe(SHIPPING_LANGUAGES.includes("pl"));
+  });
+
+  it("loads a draft catalog and selects the target language's plural forms", async () => {
+    expect(getAvailableLanguages(true)).toContain("pl");
+    await setLocale("pl");
+    const counts = [1, 2, 5, 1.5].map((count) => STATUS_BAR_STRINGS.itemCount(count));
+    expect(new Set(counts.map((message) => message.replace(/^[\d.,]+ /, ""))).size).toBe(4);
+    expect(document.documentElement.lang).toBe("pl");
+    expect(translate("common.labels.connection")).toBe("Połączenie");
+  });
+
+  it("tries browser locales in order and does not use Simplified Chinese for Traditional Chinese", () => {
+    const supported = ["en", "zh-Hans", "pt", "de"] as const;
+    expect(matchBrowserLanguage(["xx-XA", "not a tag", "de-AT", "pt-PT"], supported)).toBe("de");
+    expect(matchBrowserLanguage(["zh-TW", "zh-Hant-CN", "pt-BR"], supported)).toBe("pt");
+    expect(matchBrowserLanguage(["zh-Hans-TW"], supported)).toBe("zh-Hans");
+    expect(matchBrowserLanguage(["zh-SG", "pt-PT"], supported)).toBe("zh-Hans");
+    expect(matchBrowserLanguage(["zh-Hant", "xx"], supported)).toBe("en");
+    expect(matchBrowserLanguage(["pt-PT"], supported)).toBe("pt");
+  });
+
+  it.each(["pt-PT", "pt-BR"])("shares the Portuguese UI but keeps %s formats and falls back per missing message", async (locale) => {
+    vi.spyOn(navigator, "languages", "get").mockReturnValue([locale]);
+    expect(matchBrowserLanguage(navigator.languages, ["en", "pt"])).toBe("pt");
+    i18n.removeResourceBundle("pt", "translation");
+    i18n.addResourceBundle("pt", "translation", { app: { loading: "…" } });
+    await setRegionalLocalePreference("browser");
+    await setLocale("pt");
+    expect(getCurrentLanguage()).toBe("pt");
+    expect(document.documentElement.lang).toBe("pt");
+    expect(translate("app.loading")).toBe("…");
+    expect(translate("common.labels.connection")).toBe("Connection");
+    expect(getCurrentRegionalLocale()).toBe(locale);
+    const formatted = formatLocalizedDateTime("2026-03-22T14:35:00Z", { timeZone: "UTC", dateStyle: "long" });
+    expect(formatted).toBe(
+      new Intl.DateTimeFormat(locale, { timeZone: "UTC", dateStyle: "long" }).format(new Date("2026-03-22T14:35:00Z"))
+    );
+    await setLocale("en");
+    expect(getCurrentRegionalLocale()).toBe(locale);
+    expect(formatLocalizedDateTime("2026-03-22T14:35:00Z", { timeZone: "UTC", dateStyle: "long" })).toBe(formatted);
+    await setLocale("invalid");
+    expect(getCurrentLanguage()).toBe("en");
+  });
+
+  it("logs a missing catalog and does not apply or report an older failed request", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const hasResourceBundle = i18n.hasResourceBundle.bind(i18n);
+    const lookup = vi.spyOn(i18n, "hasResourceBundle").mockImplementation((language, namespace) => {
+      return language !== "en-XA" && hasResourceBundle(language, namespace);
+    });
+    await setLocale("browser");
+    await expect(setLocale("en-XA")).rejects.toThrow("Catalog not found");
+    expect(warning).toHaveBeenCalled();
+    expect(getCurrentLanguage()).toBe("en");
+    expect(getCurrentLanguagePreference()).toBe("browser");
+    const stale = setLocale("en-XA");
+    await setLocale("en");
+    await stale;
+    expect(getCurrentLanguagePreference()).toBe("en");
+    lookup.mockRestore();
   });
 });

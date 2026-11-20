@@ -26,6 +26,16 @@ const {
 
 vi.mock("../../services/userSettingsStore", () => ({
   useCurrentUserSetting: (field: string) => {
+    if (field === "localization.language" || field === "localization.regional_locale") {
+      return {
+        confirmedValue: field === "localization.language" ? "en" : "browser",
+        error: null,
+        pending: false,
+        saved: false,
+        commit: vi.fn(),
+        clearError: vi.fn(),
+      };
+    }
     const state =
       field === "browser.quick_nav_include_dot_directories"
         ? settingStates.includeDotDirectories
@@ -56,6 +66,18 @@ vi.mock("../../services/recentDirectoriesSync", () => ({
   publishRecentDirectoriesChanged: publishRecentDirectoriesChangedMock,
 }));
 
+async function renderSettings() {
+  let view: ReturnType<typeof render> | undefined;
+  // The shared wrapper applies locale preferences asynchronously after mounting.
+  await act(async () => {
+    view = render(<FileBrowserSettings />);
+  });
+  if (!view) {
+    throw new Error("File browser settings did not render.");
+  }
+  return view;
+}
+
 describe("FileBrowserSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -69,8 +91,8 @@ describe("FileBrowserSettings", () => {
     }
   });
 
-  it("renders the quick navigation settings group", () => {
-    render(<FileBrowserSettings />);
+  it("renders the quick navigation settings group", async () => {
+    await renderSettings();
 
     expect(screen.getByText("File Browser")).toBeInTheDocument();
     expect(screen.getByText("Quick navigation")).toBeInTheDocument();
@@ -80,7 +102,7 @@ describe("FileBrowserSettings", () => {
 
   it("updates the dot-directory preference", async () => {
     const user = userEvent.setup();
-    render(<FileBrowserSettings />);
+    await renderSettings();
 
     await user.click(screen.getByRole("checkbox", { name: "Include dot directories in quick nav" }));
     expect(commitMock).toHaveBeenCalledWith(true);
@@ -88,7 +110,7 @@ describe("FileBrowserSettings", () => {
 
   it("updates the shortcut-hint visibility preference", async () => {
     const user = userEvent.setup();
-    render(<FileBrowserSettings />);
+    await renderSettings();
 
     await user.click(screen.getByRole("combobox", { name: "Keyboard shortcut hints" }));
     await user.click(screen.getByRole("option", { name: "Never show" }));
@@ -98,7 +120,7 @@ describe("FileBrowserSettings", () => {
 
   it("updates the touch-friendly file-selection preference", async () => {
     const user = userEvent.setup();
-    render(<FileBrowserSettings />);
+    await renderSettings();
 
     await user.click(screen.getByRole("combobox", { name: "Touch-friendly file selection" }));
     await user.click(screen.getByRole("option", { name: "Always on" }));
@@ -106,9 +128,9 @@ describe("FileBrowserSettings", () => {
     expect(commitMock).toHaveBeenCalledWith("always");
   });
 
-  it("renders checkbox and select persistence feedback", () => {
+  it("renders checkbox and select persistence feedback", async () => {
     settingStates.includeDotDirectories.pending = true;
-    const { rerender } = render(<FileBrowserSettings />);
+    const { rerender } = await renderSettings();
 
     expect(screen.getByRole("checkbox", { name: "Include dot directories in quick nav" })).toBeDisabled();
     expect(screen.getByRole("status", { name: "Saving setting" })).toBeInTheDocument();
@@ -123,7 +145,7 @@ describe("FileBrowserSettings", () => {
 
   it("restores checkbox focus after saving", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(<FileBrowserSettings />);
+    const { rerender } = await renderSettings();
     const includeDotDirectories = screen.getByRole("checkbox", { name: "Include dot directories in quick nav" });
 
     await act(async () => includeDotDirectories.focus());
@@ -141,7 +163,7 @@ describe("FileBrowserSettings", () => {
 
   it("cancels clear-history confirmation and restores focus to its trigger", async () => {
     const user = userEvent.setup();
-    render(<FileBrowserSettings />);
+    await renderSettings();
 
     const trigger = screen.getByRole("button", { name: "Clear recent files" });
     await act(async () => trigger.focus());
@@ -171,7 +193,7 @@ describe("FileBrowserSettings", () => {
           resolveClear = resolve;
         })
     );
-    render(<FileBrowserSettings />);
+    await renderSettings();
 
     const trigger = screen.getByRole("button", { name: "Clear recent files" });
     await act(async () => trigger.focus());
@@ -183,7 +205,7 @@ describe("FileBrowserSettings", () => {
     expect(confirm).toBeDisabled();
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
 
-    resolveClear?.(3);
+    await act(async () => resolveClear?.(3));
 
     await waitFor(() => {
       expect(clearRecentFilesMock).toHaveBeenCalledOnce();
@@ -196,7 +218,7 @@ describe("FileBrowserSettings", () => {
   it("keeps the confirmation open and shows an error when clearing history fails", async () => {
     const user = userEvent.setup();
     clearRecentFilesMock.mockRejectedValueOnce(new Error("network failure"));
-    render(<FileBrowserSettings />);
+    await renderSettings();
 
     await user.click(screen.getByRole("button", { name: "Clear recent files" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear recent files" }));
@@ -208,7 +230,7 @@ describe("FileBrowserSettings", () => {
 
   it("clears recent directories and publishes the dedicated history event", async () => {
     const user = userEvent.setup();
-    render(<FileBrowserSettings />);
+    await renderSettings();
 
     await user.click(screen.getByRole("button", { name: "Clear recent directories" }));
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Clear recent directories" }));

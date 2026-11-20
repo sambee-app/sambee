@@ -13,7 +13,7 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::http_client::{is_proxy_auth_required_error, SambeeHttpClientStore};
 
-const PROXY_AUTH_WINDOW_LABEL: &str = "proxy-auth";
+pub(crate) const PROXY_AUTH_WINDOW_LABEL: &str = "proxy-auth";
 const PROXY_AUTH_WINDOW_WIDTH: f64 = 720.0;
 const PROXY_AUTH_WINDOW_HEIGHT: f64 = 760.0;
 const PROXY_AUTH_TIMEOUT_SECS: u64 = 300;
@@ -80,7 +80,7 @@ pub async fn authenticate_reverse_proxy(
 
     info!("Opening reverse-proxy authentication window for {server_url}");
     let window = WebviewWindowBuilder::new(app, PROXY_AUTH_WINDOW_LABEL, WebviewUrl::External(probe.clone()))
-        .title("Sambee Authentication")
+        .title(crate::native_i18n::NativeLocale::from_app(app).text("authenticationTitle"))
         .inner_size(PROXY_AUTH_WINDOW_WIDTH, PROXY_AUTH_WINDOW_HEIGHT)
         .resizable(true)
         .center()

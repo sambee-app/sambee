@@ -1,0 +1,1866 @@
+{
+  "viewer": {
+    "pdfPassword": {
+      "title": "Lås upp PDF",
+      "description": "Ange lösenordet för att visa den här PDF-filen.",
+      "open": "Öppna PDF",
+      "label": "PDF-lösenord",
+      "show": "Visa lösenord",
+      "hide": "Dölj lösenord"
+    },
+    "slowImage": "Det tar längre tid än vanligt att läsa in bilden.",
+    "slowPdf": "Det tar längre tid än vanligt att läsa in PDF-filen.",
+    "pdfLoadFailed": "Det gick inte att läsa in PDF-dokumentet",
+    "renderingFailed": "Det gick inte att färdigställa visningen av dokumentet. Stäng och öppna filen igen för att försöka på nytt.",
+    "renderingPrintPending": "Dokumentet läses fortfarande in. Stäng utskriftsdialogen och försök igen när inläsningen är klar.",
+    "printTitle": "Skriv ut / Spara som PDF",
+    "printError": "Utskriftsdialogen kunde inte öppnas. Prova Skriv ut i webbläsarens meny.",
+    "helpTitles": {
+      "pdf": "Genvägar för PDF-visaren",
+      "image": "Genvägar för bildvisaren",
+      "markdown": "Genvägar för Markdown-visaren"
+    },
+    "fallback": {
+      "failedTitle": "Visaren är inte tillgänglig",
+      "unsupportedTitle": "Visaren stöds inte",
+      "closeAriaLabel": "Stäng felmeddelandet för visaren",
+      "failedMessageWithError": "{{message}} Det gick inte att läsa in visarens kod.",
+      "failedMessageGeneric": "Det gick inte att läsa in visarens kod. Servern eller värden för appens resurser kan vara tillfälligt otillgänglig.",
+      "unsupportedMessage": "Det finns ingen tillgänglig visare för filtypen i det aktuella gränssnittet.",
+      "stillAvailable": "Filhanteraren är fortfarande tillgänglig. Du kan stänga dialogrutan och fortsätta arbeta på andra ställen i appen.",
+      "retry": "Försök igen"
+    },
+    "controls": {
+      "previous": "Föregående",
+      "next": "Nästa",
+      "previousPage": "Föregående sida",
+      "nextPage": "Nästa sida",
+      "previousImage": "Föregående bild",
+      "nextImage": "Nästa bild",
+      "zoomIn": "Zooma in",
+      "zoomOut": "Zooma ut",
+      "rotateLeft": "Rotera åt vänster",
+      "rotateRight": "Rotera åt höger",
+      "shareUnavailable": "Delning är inte tillgänglig på den här enheten eller i den här webbläsaren",
+      "searchUnavailable": "Sökning är inte tillgänglig. PDF-filen saknar textlager och kan vara en skannad bild.",
+      "pdfSearchPlaceholder": "Sök i PDF…"
+    },
+    "edit": {
+      "lockFailed": "Det gick inte att starta redigeringen. {{message}}",
+      "lockFailedReason": "Det gick inte att ta redigeringslåset.",
+      "saveFailed": "Det gick inte att spara Markdown-ändringarna.",
+      "commandFailed": "Det gick inte att köra {{action}}. {{message}}",
+      "commandFailedReason": "Redigeraren avvisade kommandot.",
+      "discardConfirm": "Vill du ignorera osparade ändringar?",
+      "closeConfirm": "Det finns osparade ändringar. Vill du stänga visaren ändå?",
+      "editorLabel": "Markdown-redigerare",
+      "editorLoadTitle": "Det gick inte att läsa in redigeraren",
+      "editorLoadMessage": "Det gick inte att läsa in Markdown-redigeraren. Utkastet finns kvar i minnet. Försök öppna redigeraren igen eller gå tillbaka till den skrivskyddade förhandsvisningen.",
+      "editorLoadFailedReason": "Det gick inte att läsa in redigerarens kod.",
+      "editorCrashTitle": "Redigeraren är inte tillgänglig",
+      "editorCrashMessage": "Ett internt fel uppstod i Markdown-redigeraren. Utkastet finns kvar i minnet. Försök öppna redigeraren igen eller gå tillbaka till den skrivskyddade förhandsvisningen.",
+      "retryEditor": "Försök öppna redigeraren igen",
+      "returnToPreview": "Tillbaka till förhandsvisningen",
+      "unsavedIndicator": "Osparat",
+      "unsavedIndicatorAria": "Osparade ändringar",
+      "unsavedChangesTitle": "Osparade ändringar",
+      "unsavedChangesExitMessage": "Vill du spara ändringarna innan du avslutar redigeringen?",
+      "unsavedChangesCloseMessage": "Vill du spara ändringarna innan du stänger visaren?",
+      "recovery": {
+        "title": "Osparat lokalt utkast finns",
+        "description": "Det finns ett osparat lokalt utkast.",
+        "newerDescription": "Det finns ett osparat lokalt utkast som uppdaterades efter att filen sparades.",
+        "savedFile": "Sparad fil",
+        "localDraft": "Lokalt utkast",
+        "unknown": "Okänt",
+        "discard": "Kasta utkast",
+        "resume": "Fortsätt redigera",
+        "tooLargeWarning": "Utkastet kan inte återställas eftersom ändringarna är för stora.",
+        "storageUnavailableWarning": "Återställning av utkast är inte tillgänglig i den här webbläsarsessionen."
+      },
+      "searchUnavailable": "Sökning i visarens gemensamma verktygsfält är bara tillgänglig vid formaterad textredigering.",
+      "caseSensitive": "Matcha stora och små bokstäver",
+      "caseSensitiveShortcut": "Matcha stora och små bokstäver (Alt+C)",
+      "find": "Sök",
+      "findReplace": "Sök och ersätt",
+      "findWithHistory": "Sök (⇅ för historik)",
+      "invalidRegularExpression": "Ogiltigt reguljärt uttryck",
+      "matchOptions": "Matchningsalternativ",
+      "nextMatch": "Nästa träff",
+      "previousMatch": "Föregående träff",
+      "regularExpression": "Använd reguljärt uttryck",
+      "regularExpressionShortcut": "Använd reguljärt uttryck (Alt+R)",
+      "replaceAll": "Ersätt alla",
+      "replacing": "Ersätter träffar…",
+      "replacementFailed": "Det gick inte att ersätta träffarna. Försök med Ersätt alla igen.",
+      "replaceCurrent": "Ersätt aktuell träff",
+      "wholeWord": "Matcha hela ord",
+      "wholeWordShortcut": "Matcha hela ord (Alt+W)",
+      "bold": "Fetstil",
+      "removeBold": "Ta bort fetstil",
+      "italic": "Kursiv",
+      "replace": "Ersätt",
+      "replaceWithHistory": "Ersätt (⇅ för historik)",
+      "toggleCaseSensitive": "Växla skiftlägeskänslig sökning",
+      "toggleWholeWord": "Växla sökning efter hela ord",
+      "toggleRegularExpression": "Växla sökning med reguljärt uttryck",
+      "toggleWordWrap": "Växla radbrytning",
+      "removeItalic": "Ta bort kursivering",
+      "underline": "Understrykning",
+      "removeUnderline": "Ta bort understrykning",
+      "undo": "Ångra",
+      "redo": "Gör om"
+    },
+    "text": {
+      "loadFailed": "Det gick inte att läsa in filen.",
+      "lockFailed": "Filen öppnades skrivskyddad. {{message}}",
+      "lockFailedReason": "Det gick inte att ta redigeringslåset.",
+      "saveFailed": "Det gick inte att spara ändringarna i textfilen.",
+      "editorLabel": "Textredigerare",
+      "editorCrashTitle": "Textredigeraren är inte tillgänglig",
+      "editorCrashMessage": "Ett internt fel uppstod i textredigeraren. Utkastet finns kvar i minnet. Försök öppna redigeraren igen eller stäng filen.",
+      "acquiring": "Kontrollerar skrivbehörighet…",
+      "retryEditing": "Försök redigera igen",
+      "lockedNotification": "Filen redigeras i en annan session. Du kan läsa den här. Försök redigera igen med <retryIcon/> när den andra redigeraren har stängts.",
+      "heartbeatFailed": "Det gick inte att förnya redigeringslåset. Kontrollera anslutningen. Du kan behöva ta låset på nytt för att kunna spara.",
+      "readOnlyReasons": {
+        "read-only": "Den här platsen är skrivskyddad.",
+        "locked": "Filen redigeras i en annan session. Du kan läsa den här och försöka redigera igen när låset har släppts.",
+        "permission-denied": "Du har inte skrivbehörighet till filen.",
+        "unsupported": "Den här källan stöder inte redigering.",
+        "unavailable": "Skrivåtkomst är tillfälligt otillgänglig. Du kan fortsätta läsa eller försöka redigera igen.",
+        "lost": "Redigeringslåset gäller inte längre. Utkastet finns kvar. Försök redigera igen för att ta ett nytt lås.",
+        "conflict": "Den sparade filen ändrades medan utkastet inte skyddades av ett redigeringslås."
+      },
+      "conflictTitle": "Filen har ändrats",
+      "conflictDescription": "Den sparade filen skiljer sig från utkastets ursprungliga version. Välj vilket innehåll som ska behållas i redigeraren. Om du behåller utkastet sparas det inte förrän du väljer Spara.",
+      "useSavedFile": "Använd sparad fil",
+      "keepDraft": "Behåll mitt utkast",
+      "limitMessage": "Filen är {{currentSizeMb}} MB, vilket överskrider textredigerarens gräns på {{maxSizeMb}} MB. Sambee öppnade filen i ett säkrare skrivskyddat läge i stället för i den fullständiga CodeMirror-redigeraren.",
+      "limitSearchUnavailable": "Sökning är inte tillgänglig när filen visas i det skrivskyddade läget för stora filer."
+    },
+    "share": {
+      "preparing": "Förbereder fil för delning…",
+      "failed": "Det gick inte att dela filen",
+      "failedText": "Det gick inte att dela texten",
+      "unsupported": "Delning är inte tillgänglig på den här enheten eller i den här webbläsaren",
+      "payloadUnsupported": "Webbläsaren kan inte dela den här bilagan.",
+      "details": "Delningsinformation",
+      "detailsAction": "Detaljer",
+      "copyDetails": "Kopiera delningsinformation",
+      "copySuccess": "Delningsinformationen kopierades.",
+      "copyError": "Det gick inte att kopiera delningsinformationen. Markera rapporten för att kopiera den manuellt.",
+      "downloadSuggestion": "Ladda ned filen och dela den från enhetens filhanterare i stället.",
+      "asFile": "Dela som fil",
+      "asText": "Dela som text"
+    },
+    "shortcuts": {
+      "open": "Öppna",
+      "close": "Stäng",
+      "download": "Ladda ned",
+      "edit": "Redigera",
+      "save": "Spara",
+      "bold": "Fetstil",
+      "italic": "Kursiv",
+      "createLink": "Skapa länk",
+      "insertTable": "Infoga tabell",
+      "insertThematicBreak": "Infoga avskiljare",
+      "inlineCode": "Kod i löptext",
+      "insertCodeBlock": "Infoga kodblock",
+      "showHelp": "Visa tangentbordsgenvägar",
+      "search": "Sök",
+      "nextMatch": "Nästa träff",
+      "previousMatch": "Föregående träff",
+      "firstPage": "Första sidan",
+      "lastPage": "Sista sidan",
+      "firstImage": "Första bilden",
+      "lastImage": "Sista bilden",
+      "nextPage": "Nästa sida",
+      "previousPage": "Föregående sida",
+      "next": "Nästa",
+      "previous": "Föregående",
+      "zoomIn": "Zooma in",
+      "zoomOut": "Zooma ut",
+      "resetZoom": "Återställ zoom",
+      "rotateRight": "Rotera åt höger",
+      "rotateLeft": "Rotera åt vänster",
+      "toggleFullscreen": "Växla helskärmsläge"
+    }
+  },
+  "app": {
+    "loading": "Läser in…",
+    "errorBoundary": {
+      "title": "Något gick fel",
+      "description": "Ett oväntat fel uppstod. Felet har loggats.",
+      "tryAgain": "Försök igen",
+      "reloadPage": "Läs in sidan igen",
+      "developmentDetails": "Felinformation (endast vid utveckling)"
+    },
+    "updateAvailable": {
+      "title": "Uppdatering tillgänglig",
+      "description": "En nyare version av Sambee är tillgänglig.",
+      "currentBuild": "Nuvarande bygge: v{{version}} ({{commit}})",
+      "latestBuild": "Senaste bygge: v{{version}} ({{commit}})",
+      "later": "Senare",
+      "reload": "Läs in igen nu"
+    }
+  },
+  "auth": {
+    "passwordChange": {
+      "title": "Byt lösenord",
+      "required": "Administratören kräver att du byter ditt lokala lösenord för Sambee innan du fortsätter.",
+      "checking": "Kontrollerar kontot…",
+      "checkFailed": "Ditt konto kunde inte kontrolleras. Försök igen.",
+      "checkForChangeFailed": "Ditt konto kunde inte kontrolleras. Logga in igen eller försök på nytt.",
+      "changeFailed": "Det gick inte att byta lösenord. Försök igen.",
+      "current": "Nuvarande lösenord",
+      "new": "Nytt lösenord",
+      "confirmation": "Bekräfta nytt lösenord",
+      "mismatch": "Lösenorden stämmer inte överens.",
+      "show": "Visa lösenord",
+      "hide": "Dölj lösenord",
+      "signOut": "Logga ut",
+      "changing": "Byter lösenord…",
+      "retry": "Försök igen"
+    },
+    "oidcCallback": {
+      "progress": "Slutför inloggningen",
+      "failed": "Inloggningen kunde inte slutföras.",
+      "title": "Inloggning inte tillgänglig",
+      "retry": "Försök igen"
+    },
+    "login": {
+      "title": "Logga in i Sambee",
+      "usernameLabel": "Användarnamn",
+      "passwordLabel": "Lösenord",
+      "submit": "Logga in",
+      "submitWithPassword": "Logga in med lösenord",
+      "submitWithOidc": "Logga in med SSO ({{providerName}} OIDC)",
+      "invalidCredentials": "Fel användarnamn eller lösenord"
+    }
+  },
+  "settings": {
+    "appearancePage": {
+      "localizationTitle": "Språk och region",
+      "localizationDescription": "Välj språk för gränssnittet och format för datum och tal.",
+      "languageLabel": "Språk",
+      "languageDescription": "Välj språk för gränssnittet.",
+      "languageLoadFailed": "Språket kunde inte läsas in. Sambee använder engelska. Välj språket igen för att försöka på nytt.",
+      "regionalLocaleLabel": "Regionala inställningar",
+      "regionalLocaleDescription": "Välj region för datum, tid, talformat och sortering.",
+      "browserDefaultOption": "Webbläsarens standardinställning",
+      "themeTitle": "Tema",
+      "themeDescription": "Välj appens tema och standardutseende.",
+      "englishLanguageOption": "Engelska",
+      "pseudoLanguageOption": "Pseudoengelska (för lokaliseringstest)",
+      "pseudoLanguageShortLabel": "Pseudoengelska",
+      "pseudoLanguageDescription": "Pseudoengelska används för lokaliseringstest.",
+      "themeScopes": {
+        "personal": "Dina teman",
+        "site": "Webbplatsteman",
+        "builtIn": "Inbyggda teman"
+      },
+      "themeDefaultBadge": "Standard",
+      "themeSiteDefaultTitle": "Webbplatsstandard",
+      "themeSetDefault": "Ange som standard",
+      "themeDeleteTitle": "Ta bort tema?",
+      "themeDeleteDescription": "Ta bort {{themeName}}? De användare som har valt det använder webbplatsens standardtema.",
+      "regionalLocaleOptions": {
+        "enUS": "Engelska (USA)",
+        "enGB": "Engelska (Storbritannien)",
+        "deDE": "Tyska (Tyskland)",
+        "frFR": "Franska (Frankrike)",
+        "jaJP": "Japanska (Japan)",
+        "zhCN": "Kinesiska (Kina)",
+        "nlNL": "Nederländska (Nederländerna)",
+        "itIT": "Italienska (Italien)",
+        "koKR": "Koreanska (Sydkorea)",
+        "plPL": "Polska (Polen)",
+        "ptPT": "Portugisiska (Portugal)",
+        "esES": "Spanska (Spanien)",
+        "svSE": "Svenska (Sverige)"
+      },
+      "regionalSettingsPreviewTitle": "Förhandsvisning"
+    },
+    "networkPage": {
+      "loading": "Läser in nätverksinställningar",
+      "loadFailed": "Det gick inte att läsa in nätverksinställningarna.",
+      "saveFailed": "Det gick inte att spara nätverksinställningarna.",
+      "publicUrl": {
+        "label": "Offentlig webbadress",
+        "help": "Det HTTPS-ursprung som kan nås utifrån, utan sökväg. Om det ändras avbryts pågående OIDC-inloggningar.",
+        "saving": "Sparar offentlig webbadress",
+        "saved": "Offentlig webbadress sparad"
+      },
+      "trustedProxyCidrs": {
+        "label": "Betrodda proxyservrars CIDR-intervall",
+        "help": "Ett CIDR-intervall per rad. Lämna tomt om du inte driver en omvänd proxy som vidarebefordrar klienternas IP-adresser.",
+        "saving": "Sparar betrodda proxyservrars CIDR-intervall",
+        "saved": "Betrodda proxyservrars CIDR-intervall sparade"
+      }
+    },
+    "saveStatus": {
+      "saving": "Sparar inställning",
+      "saved": "Inställningen sparades"
+    },
+    "shell": {
+      "title": "Inställningar",
+      "closeAriaLabel": "Stäng inställningar",
+      "categoriesAriaLabel": "Inställningskategorier",
+      "expandItemAriaLabel": "Visa underkategorier för {{label}}",
+      "collapseItemAriaLabel": "Dölj underkategorier för {{label}}",
+      "versionLabel": "Version",
+      "buildLabel": "Bygge",
+      "commitLabel": "Commit",
+      "unknownValue": "Okänt"
+    },
+    "sections": {
+      "personal": "Personligt",
+      "administration": "Administration"
+    },
+    "categories": {
+      "appearance": {
+        "label": "Utseende",
+        "description": "Anpassa appens tema och språkinställningar."
+      },
+      "account": {
+        "label": "Konto",
+        "description": "Hantera din identitet, ditt lösenord, dina sessioner och utloggning."
+      },
+      "fileBrowser": {
+        "label": "Filhanterare",
+        "description": "Ange hur filhanteraren ska fungera som standard."
+      },
+      "textEditor": {
+        "label": "Textredigerare",
+        "description": "Ställ in standardvärden och säkerhetsgränser för den allmänna textredigeraren."
+      },
+      "imageViewer": {
+        "label": "Bildvisare",
+        "description": "Ställ in bildövergångar för datorer. Peknavigeringen ändras inte."
+      },
+      "connections": {
+        "label": "Anslutningar",
+        "description": "Hantera delade och privata SMB-anslutningar."
+      },
+      "adminUsers": {
+        "label": "Användarhantering",
+        "description": "Skapa konton, tilldela roller och initiera återställningar av lösenord."
+      },
+      "adminAuthentication": {
+        "label": "Autentisering",
+        "description": "Ställ in inloggningsmetoder (se <guide>konfigurationsguiden för OpenID Connect</guide>)."
+      },
+      "adminNetwork": {
+        "label": "Nätverk",
+        "description": "Ställ in Sambees externa webbadress och betrodda omvända proxyservrar."
+      },
+      "adminSystem": {
+        "label": "System",
+        "description": "Hantera gränser för att skapa arkiv."
+      },
+      "adminImageViewer": {
+        "label": "Bildvisare",
+        "description": "Ställ in gränser för bildkonvertering och bildbearbetning."
+      },
+      "adminPdfViewer": {
+        "label": "PDF-visare",
+        "description": "Ställ in PDF-kompatibilitet, cache och bearbetningsgränser."
+      },
+      "adminSmb": {
+        "label": "SMB",
+        "description": "Ställ in säkerhetspolicy och driftgränser för SMB-servrar."
+      },
+      "adminFileSearch": {
+        "label": "Filsökning",
+        "description": "Ställ in historik, resultatgränser och undantag för filsökning."
+      },
+      "adminDirectorySearch": {
+        "label": "Mappsökning",
+        "description": "Ställ in resurser för och verifiering av mappindex på servern och alla Companion-enheter."
+      },
+      "adminHealthMonitoring": {
+        "label": "Statusövervakning",
+        "description": "Välj vem som får se systemstatus och ange larmgränser."
+      },
+      "adminAbout": {
+        "label": "Om",
+        "description": "Visa information om Sambees bygge, programvara och maskinvara."
+      }
+    },
+    "imageViewerPage": {
+      "transitionDescription": "Karusellen låter bilder glida in när du navigerar med musen eller tangentbordet. Utan animering byts bilderna direkt. Svep på pekskärm använder alltid karusellanimeringen.",
+      "transition": "Övergång",
+      "carousel": "Karusell",
+      "none": "Ingen animering"
+    },
+    "directorySearch": {
+      "loadFailed": "Det gick inte att läsa in policyn för mappsökning. Kontrollera serveranslutningen och försök sedan igen.",
+      "saveFailed": "Det gick inte att spara inställningen för mappsökning. Kontrollera värdet och serveranslutningen och försök sedan igen.",
+      "backendTitle": "Serverns mappindex",
+      "companionTitle": "Companions mappindex",
+      "deviceTitle": "Mappsökning på den här enheten",
+      "refresh": "Uppdatera status"
+    },
+    "healthMonitoring": {
+      "loadFailed": "Det gick inte att läsa in inställningarna för statusövervakning. Kontrollera serveranslutningen och försök sedan igen.",
+      "saveFailed": "Det gick inte att spara inställningen för statusövervakning. Kontrollera värdet och försök igen.",
+      "cpuRefreshFailed": "Inställningen sparades, men informationen om processortemperaturen kunde inte uppdateras. Välj Försök igen för att uppdatera informationen.",
+      "saving": "Sparar inställning",
+      "saved": "Inställningen sparades",
+      "sections": {
+        "visibility": "Övervakning och synlighet",
+        "memoryThresholds": "Minnesgränser",
+        "loadThresholds": "Gränser för normaliserad genomsnittlig belastning",
+        "storageThresholds": "Gränser för ledigt lagringsutrymme",
+        "cpuTemperature": "Gränser för processortemperatur"
+      },
+      "fields": {
+        "enabled": "Aktivera statusövervakning",
+        "enabledDescription": "Kontrollera resurser och visa systemstatus för de valda rollerna.",
+        "stateOn": "På",
+        "stateOff": "Av",
+        "audience": "Visa systemstatus för",
+        "audienceDescription": "Roller som får se systemstatus. Läsare ingår inte.",
+        "audienceOptions": {
+          "admins": "Administratörer",
+          "editors": "Redigerare",
+          "both": "Båda (administratörer och redigerare)"
+        },
+        "memoryWarning": "Varningsgräns för minnesanvändning (%)",
+        "memoryWarningDescription": "Varna när användningen ligger på eller över gränsen i 60 sekunder. Gäller värdens minne och containrar med en minnesgräns. Filcache räknas inte med.",
+        "memoryError": "Felgräns för minnesanvändning (%)",
+        "memoryErrorDescription": "Visa fel när användningen ligger på eller över gränsen i 60 sekunder. Containrar utan minnesgräns har inga procentbaserade larm.",
+        "loadWarning": "Varningsgräns för genomsnittlig belastning",
+        "loadWarningDescription": "Varna när femminutersmedelvärdet delat med antalet logiska processorer når eller överstiger gränsen. Detta är inte processoranvändning.",
+        "loadError": "Felgräns för genomsnittlig belastning",
+        "loadErrorDescription": "Visa fel när det normaliserade femminutersmedelvärdet når eller överstiger gränsen.",
+        "spaceWarning": "Varningsgräns för ledigt lagringsutrymme (%)",
+        "spaceWarningDescription": "Varna när andelen ledigt utrymme når eller understiger gränsen.",
+        "spaceError": "Felgräns för ledigt lagringsutrymme (%)",
+        "spaceErrorDescription": "Visa fel när andelen ledigt utrymme når eller understiger gränsen eller när utrymmet är slut.",
+        "cpuDetectedWarning": "Identifierad varningsgräns",
+        "cpuDetectedError": "Identifierad kritisk gräns",
+        "cpuWarningOverride": "Varningsgräns (°C)",
+        "cpuWarningOverrideDescription": "Lämna tomt för Automatiskt eller ange varningsgränsen i steg om 0,1 °C.",
+        "cpuErrorOverride": "Felgräns (°C)",
+        "cpuErrorOverrideDescription": "Lämna tomt för Automatiskt eller ange felgränsen i steg om 0,1 °C.",
+        "automaticPlaceholder": "Automatiskt",
+        "returnToAutomatic": "Återgå till Automatiskt",
+        "reconfirmOverride": "Bekräfta det manuella värdet igen",
+        "notAvailable": "Inte tillgängligt",
+        "originHardware": "Maskinvara",
+        "originKernelPolicy": "Kärnans temperaturpolicy",
+        "originAdminOverride": "Manuellt administratörsvärde",
+        "exceedsDetectedWarning": "Varning: Den manuella varningsgränsen ({{override}}) överskrider den identifierade gränsen ({{detected}}). Värdens maskinvaruskydd ändras inte.",
+        "exceedsDetectedError": "Varning: Den manuella felgränsen ({{override}}) överskrider den identifierade kritiska gränsen ({{detected}}). Värdens maskinvaruskydd ändras inte."
+      },
+      "validation": {
+        "memoryRange": "Ange ett procenttal från 0,1 till 100,0 i steg om 0,1.",
+        "memoryPairWarningAboveError": "Minnets varningsgräns får inte överstiga felgränsen ({{other}} %). Höj felgränsen först.",
+        "memoryPairErrorBelowWarning": "Minnets felgräns får inte understiga varningsgränsen ({{other}} %). Sänk varningsgränsen först.",
+        "loadRange": "Ange ett ändligt tal på minst 0,01 i steg om 0,01.",
+        "loadPairWarningAboveError": "Belastningens varningsgräns får inte överstiga felgränsen ({{other}}). Höj felgränsen först.",
+        "loadPairErrorBelowWarning": "Belastningens felgräns får inte understiga varningsgränsen ({{other}}). Sänk varningsgränsen först.",
+        "spaceRange": "Ange ett procenttal från 0,0 till 99,9 i steg om 0,1.",
+        "spacePairWarningBelowError": "Varningsgränsen för ledigt utrymme får inte understiga felgränsen ({{other}} %). Sänk felgränsen först.",
+        "spacePairErrorAboveWarning": "Felgränsen för ledigt utrymme får inte överstiga varningsgränsen ({{other}} %). Höj varningsgränsen först.",
+        "cpuRange": "Ange en positiv temperatur i steg om 0,1 °C eller töm fältet för Automatiskt.",
+        "cpuPairWarningAboveError": "Processorns varningsgräns får inte överstiga den gällande felgränsen ({{other}}). Höj eller rensa felgränsen först.",
+        "cpuPairErrorBelowWarning": "Processorns felgräns får inte understiga den gällande varningsgränsen ({{other}}). Sänk eller rensa varningsgränsen först."
+      }
+    },
+    "companionSync": {
+      "results": {
+        "defaults_active": "Inbyggda standardinställningar",
+        "synchronized": "Synkroniserat",
+        "synchronizing": "Synkroniserar",
+        "update_required": "Uppdatering krävs",
+        "authority_conflict": "Annan inställningskälla",
+        "pairing_required": "Parkoppling krävs",
+        "delivery_failed": "Överföringen misslyckades. Senaste giltiga inställningar används"
+      },
+      "defaults_active": "De inbyggda standardinställningarna används tills en parkopplad server skickar inställningar.",
+      "synchronized": "Inställningarna är synkroniserade.",
+      "synchronizing": "Inställningarna synkroniseras. De senaste giltiga inställningarna gäller fortfarande.",
+      "update_required": "Uppdatera Sambee och Companion om du vill överföra gemensamma inställningar.",
+      "languageUpdateRequired": "Uppdatera Sambee Companion för att använda det här språket och försök sedan igen. Det senaste giltiga språket används fortfarande i Companion.",
+      "directoryPolicyUpdateRequired": "Uppdatera Sambee Companion för att använda de här policyvärdena för mappsökning och försök sedan igen. Den senaste giltiga policyn och mappsökning är fortfarande tillgängliga.",
+      "authority_conflict": "Den här servern hanterar inte Companions inställningar. Parkoppla den avsedda servern igen för att byta inställningskälla.",
+      "pairing_required": "Companion kunde inte autentisera webbläsaren. Parkoppla webbläsaren under Inställningar > Lokala enheter eller parkoppla den igen för att reparera anslutningen. Kontrollerna av inställningarna pausas tills du försöker igen eller parkopplingen lyckas.",
+      "delivery_failed": "Inställningarna kunde inte överföras. Kontrollera anslutningen och försök igen. De senaste giltiga inställningarna och mappsökning är fortfarande tillgängliga.",
+      "authority": "Inställningskälla: {{origin}}",
+      "sections": {
+        "theme": "Tema",
+        "localization": "Språk och region",
+        "directory_index": "Policy för mappsökning"
+      }
+    },
+    "aboutPage": {
+      "applicationTitle": "Program",
+      "runtimeTitle": "Programvara",
+      "platformTitle": "Maskinvara",
+      "versionLabel": "Version",
+      "buildLabel": "Bygge",
+      "commitLabel": "Commit",
+      "startedLabel": "Startad",
+      "pythonLabel": "Python",
+      "architectureLabel": "Arkitektur",
+      "cpuCountLabel": "Logiska processorer",
+      "memoryLabel": "Tillgängligt minne",
+      "copyAriaLabel": "Kopiera information",
+      "copyTooltip": "Kopiera information",
+      "copyAboutMenuItem": "Kopiera programinformation",
+      "copyPublicSupportReportMenuItem": "Kopiera offentlig supportrapport",
+      "copySuccess": "Programinformationen kopierades.",
+      "copyError": "Det gick inte att kopiera programinformationen.",
+      "copyPublicSupportReportSuccess": "Den offentliga supportrapporten kopierades.",
+      "copyPublicSupportReportError": "Det gick inte att kopiera den offentliga supportrapporten.",
+      "unavailableValue": "Inte tillgängligt",
+      "loadError": "Det gick inte att läsa in programinformationen."
+    },
+    "connectionsSubgroups": {
+      "smb": {
+        "label": "SMB-anslutningar",
+        "description": "Bläddra bland delade SMB-anslutningar och hantera dina privata nätverksresurser."
+      },
+      "localDrives": {
+        "label": "Lokala enheter",
+        "description": "Parkoppla Sambee Companion, hantera åtkomst till lokala enheter och installera hjälpprogrammet."
+      }
+    },
+    "fileBrowserPage": {
+      "quickNavigationTitle": "Snabbnavigering",
+      "includeDotDirectoriesLabel": "Ta med punktmappar i snabbnavigeringen",
+      "includeDotDirectoriesDescription": "Visa mappar som .git, .cache och andra mappar vars namn börjar med punkt i snabbnavigeringens resultat.",
+      "shortcutHintsLabel": "Tips om tangentbordsgenvägar",
+      "shortcutHintsDescription": "Välj när snabbfältet ska visa tips om tangentbordsgenvägar.",
+      "shortcutHintsAuto": "Automatiskt",
+      "shortcutHintsAlways": "Visa alltid",
+      "shortcutHintsNever": "Visa aldrig",
+      "fileSelectionTitle": "Filmarkering",
+      "touchFriendlyFileSelectionLabel": "Pekanpassad filmarkering",
+      "touchFriendlyFileSelectionDescription": "Välj när filmarkering använder pekanpassade reglage och gester.",
+      "touchFriendlyFileSelectionAuto": "Automatiskt",
+      "touchFriendlyFileSelectionAlways": "Alltid på",
+      "touchFriendlyFileSelectionNever": "Av",
+      "fileSearchTitle": "Filsökning",
+      "clearRecentFiles": "Rensa senaste filer",
+      "clearRecentFilesDescription": "Filsökningshistoriken tas bort permanent från servern utan att några filer eller mappar påverkas.",
+      "clearRecentFilesFailed": "Det gick inte att rensa senaste filer. Försök igen.",
+      "clearRecentDirectories": "Rensa senaste mappar",
+      "clearRecentDirectoriesDescription": "Historiken för mappnavigering tas bort permanent från servern utan att några filer eller mappar påverkas.",
+      "clearRecentDirectoriesFailed": "Det gick inte att rensa senaste mappar. Försök igen."
+    },
+    "textEditorPage": {
+      "limitsTitle": "Gränser",
+      "maxFileSizeLabel": "Största filstorlek för den avancerade redigeraren (MB)",
+      "maxFileSizeDescription": "Filer som är större än gränsen öppnas inte i den fullständiga CodeMirror-baserade textredigeraren. Använd gränsen för att undvika långsam eller minneskrävande redigering av mycket stora filer."
+    },
+    "connectionsPage": {
+      "smbSectionTitle": "SMB-anslutningar",
+      "smbSectionDescription": "Bläddra bland delade anslutningar och hantera dina privata SMB-anslutningar.",
+      "localDrivesSectionTitle": "Lokala enheter",
+      "localDrivesSectionDescription": "Parkoppla Sambee Companion och styr åtkomsten till lokala enheter från den här webbläsaren."
+    },
+    "localDrives": {
+      "menuActionLabel": "Hantera lokala enheter…",
+      "headerTitle": "Lokala enheter",
+      "headerDescription": "Parkoppla Sambee Companion och styr åtkomsten till lokala enheter från den här webbläsaren.",
+      "intro": "Hantera parkopplingen mellan Sambee Companion och den här webbläsaren och verifiera åtkomsten till lokala enheter på den här datorn.",
+      "summaryTitle": "Aktuell status",
+      "secureContextTitle": "Lokala enheter kräver en säker webbläsare med Web Crypto",
+      "secureContextMessage": "Parkoppling och åtkomst till lokala enheter kräver en säker webbläsarkontext med stöd för Web Crypto. Använd HTTPS (eller localhost för lokal utveckling) och en webbläsare där Web Crypto är aktiverat.",
+      "unsupportedMobileTitle": "Lokala enheter kräver en webbläsare på en dator",
+      "unsupportedMobileDescription": "Sambee Companion finns inte för iOS eller Android.",
+      "unsupportedMobileAlert": "Använd Sambee i en webbläsare på Windows, macOS eller Linux för att installera Companion, parkoppla webbläsaren och komma åt lokala enheter.",
+      "statusLabelReady": "Klar",
+      "statusLabelActionRequired": "Åtgärd krävs",
+      "statusLabelUnavailable": "Companion är inte tillgängligt",
+      "summaryReadyTitle": "Lokala enheter är klara att användas",
+      "summaryPairingRequiredTitle": "Parkoppla webbläsaren för att få åtkomst till lokala enheter",
+      "summaryPendingApprovalTitle": "Slutför godkännandet i Sambee Companion",
+      "summaryRepairTitle": "Reparera webbläsarens parkoppling",
+      "summaryUpdateRequiredTitle": "Uppdatera Sambee Companion",
+      "summaryBrowserUpdateRequiredTitle": "Uppdatera Sambee",
+      "summaryVerificationUnavailableTitle": "Det gick inte att verifiera åtkomsten till lokala enheter",
+      "summaryUnavailableTitle": "Starta Sambee Companion på den här datorn",
+      "companionRunningChecklistLabel": "Companion körs",
+      "browserFullyPairedChecklistLabel": "Den här webbläsaren är parkopplad",
+      "accessSectionTitle": "Lokal åtkomst",
+      "accessSectionDescription": "Hantera parkopplingen för webbläsaren och kontrollera om lokala enheter är tillgängliga just nu.",
+      "pairingSectionTitle": "Parkoppla webbläsaren",
+      "pairingSectionReady": "Den här webbläsaren är redan parkopplad med Sambee Companion.",
+      "pairingSectionUnavailable": "Starta Sambee Companion på den här datorn och återvänd hit för att parkoppla webbläsaren.",
+      "pairingSectionRequired": "Godkänn en parkopplingsbegäran i Sambee Companion för att kunna bläddra på lokala enheter.",
+      "pairingSectionPendingApproval": "En parkopplingsbegäran väntar redan i Sambee Companion. Godkänn eller avvisa den där innan du gör ett nytt försök.",
+      "pairingSectionRepair": "Läs först in sidan igen för att uppdatera Sambees anslutning till Companion. Parkoppla webbläsaren igen om du fortfarande inte kommer åt lokala enheter.",
+      "verificationSectionTitle": "Verifiera lokal åtkomst",
+      "verificationSectionDescription": "Gör ett snabbtest för att bekräfta att webbläsaren fortfarande kommer åt lokala enheter.",
+      "verificationSectionReady": "Gör ett snabbtest innan du öppnar lokala filer från Sambee.",
+      "verificationSectionBlocked": "Slutför parkopplingen först och testa den sedan härifrån.",
+      "troubleshootingSectionTitle": "Hantera webbläsarens parkoppling",
+      "troubleshootingSectionDescription": "Granska eller ta bort parkopplingen som ger webbläsaren åtkomst till lokala enheter.",
+      "troubleshootingSectionReady": "Ta bort webbläsarens parkoppling för att återkalla dess åtkomst till lokala enheter på den här datorn.",
+      "loadError": "Det gick inte att läsa in status för Companion.",
+      "pairingCreated": "Parkopplingen för lokala enheter skapades.",
+      "pairingRemoved": "Webbläsarens parkoppling har tagits bort.",
+      "pairingRemoveFailed": "Det gick inte att ta bort parkopplingen.",
+      "pairingTestSucceeded": "Parkopplingen verifierades. Webbläsaren har åtkomst till lokala enheter.",
+      "pairingTestFailed": "Companion avvisade webbläsarens signatur. Läs först in Sambee igen. Parkoppla webbläsaren på nytt om testet fortfarande misslyckas.",
+      "pairingTestUnavailable": "Det gick inte att verifiera åtkomsten till lokala enheter. Kontrollera att Companion körs och testa sedan igen.",
+      "reloadButton": "Läs in Sambee igen",
+      "statusUnavailable": "Sambee Companion körs inte på den här datorn. Starta programmet och återvänd hit för att parkoppla webbläsaren, testa lokal åtkomst eller öppna lokala filer från Sambee.",
+      "statusPaired": "Webbläsaren är parkopplad med Sambee Companion. Du kan bläddra bland och öppna lokala filer från Sambee.",
+      "statusPendingApproval": "En parkopplingsbegäran från webbläsaren väntar på godkännande i Sambee Companion. Slutför begäran där innan du försöker igen.",
+      "statusRecoverable": "Companion kan inte verifiera webbläsarens parkoppling. Läs först in Sambee igen för att få eventuella uppdateringar. Parkoppla webbläsaren på nytt om åtkomsten fortfarande inte fungerar.",
+      "statusUpdateRequired": "Den här versionen av Companion använder ett äldre autentiseringsprotokoll. Uppdatera och starta om Companion och läs sedan in Sambee igen. En ny parkoppling löser inte en versionskonflikt.",
+      "statusBrowserUpdateRequired": "Companion använder ett nyare autentiseringsprotokoll än vad den här Sambee-sidan stöder. Läs in Sambee igen. Uppdatera Sambee om versionskonflikten kvarstår. En ny parkoppling löser inte problemet.",
+      "statusVerificationUnavailable": "Companion kan nås, men parkopplingens status kunde inte verifieras. Försök igen.",
+      "statusUnpaired": "Den här webbläsaren är inte parkopplad med Sambee Companion.",
+      "downloadSectionTitle": "Installera Sambee Companion",
+      "downloadSectionDescription": "Ladda ned Sambee Companion om det inte är installerat på datorn. Starta programmet efter installationen och återvänd hit för att parkoppla webbläsaren eller testa åtkomst till lokala enheter.",
+      "downloadSectionSourcePrefix": "Källa",
+      "downloadVersionLabel": "Tillgänglig version",
+      "downloadFeedSourceLabel": "Senaste rekommenderade version",
+      "downloadPinSourceLabel": "Vald av administratören",
+      "downloadPrimaryButton": "Ladda ned för den här datorn",
+      "downloadOtherPlatformsLabel": "Övriga nedladdningar",
+      "downloadRecommendedLabel": "Rekommenderas för den här datorn",
+      "downloadUnavailable": "Nedladdningslänkar är inte tillgängliga just nu. Uppdatera status och försök igen om en stund.",
+      "downloadLoadFailed": "Det gick inte att hämta nedladdningsinformation för Companion.",
+      "testCurrentPairingButton": "Testa aktuell parkoppling",
+      "pairThisBrowserButton": "Parkoppla webbläsaren",
+      "waitingForApprovalButton": "Väntar på godkännande…",
+      "unpairThisBrowserButton": "Ta bort webbläsarens parkoppling",
+      "testingButton": "Testar…",
+      "unpairingButton": "Tar bort parkoppling…",
+      "pairingDialog": {
+        "title": "Parkoppla med Companion",
+        "intro": "Parkoppla webbläsaren med Sambee Companion för att bläddra på lokala enheter. Kontrollera att Companion körs på datorn.",
+        "verifyCodePrompt": "Kontrollera att koden stämmer överens med den som visas i Companion:",
+        "verifyCodeHelp": "Om koderna stämmer, klicka på Bekräfta nedan och godkänn parkopplingen i Companion.",
+        "confirming": "Väntar på bekräftelse från Companion…",
+        "success": "Parkopplingen lyckades! Dina lokala enheter är nu tillgängliga.",
+        "startButton": "Starta parkoppling",
+        "confirmButton": "Koderna stämmer – bekräfta",
+        "cancelButton": "Avbryt",
+        "doneButton": "Klar",
+        "closeButton": "Stäng",
+        "retryButton": "Försök igen",
+        "initiateFailed": "Det gick inte att starta parkopplingen. Körs Companion?",
+        "confirmFailed": "Parkopplingen misslyckades. Companion kan ha avvisat begäran eller så har parkopplingen löpt ut."
+      }
+    },
+    "connectionManagement": {
+      "headerTitle": "SMB-anslutningar",
+      "headerDescription": "Bläddra bland delade anslutningar och hantera dina privata SMB-anslutningar.",
+      "addConnectionButton": "Lägg till anslutning",
+      "addConnectionFabAriaLabel": "Lägg till anslutning",
+      "connectionActionsAriaLabel": "Anslutningsåtgärder",
+      "userLabel": "Användare:",
+      "pathLabel": "Sökväg:",
+      "sharedSectionTitle": "Delade anslutningar",
+      "sharedSectionEmpty": "Det finns inga delade anslutningar.",
+      "privateSectionTitle": "Mina anslutningar",
+      "privateSectionEmpty": "Du har inga privata anslutningar än.",
+      "emptyTitle": "Inga anslutningar har ställts in",
+      "emptyAdminDescription": "Klicka på + för att skapa en delad eller privat SMB-anslutning.",
+      "emptyRegularDescription": "Klicka på + för att skapa din första privata SMB-anslutning.",
+      "emptyViewerDescription": "Det finns inga anslutningar för ditt konto än. Be en administratör skapa eller dela en anslutning.",
+      "menuTest": "Testa anslutning",
+      "menuEdit": "Redigera",
+      "menuDelete": "Ta bort",
+      "tooltipTest": "Testa anslutning",
+      "tooltipEdit": "Redigera",
+      "tooltipDelete": "Ta bort",
+      "ariaTest": "Testa anslutning",
+      "ariaEdit": "Redigera anslutning",
+      "ariaDelete": "Ta bort anslutning",
+      "columns": {
+        "port": "Port",
+        "type": "Typ",
+        "actions": "Åtgärder"
+      },
+      "deleteDialogTitle": "Ta bort anslutning",
+      "deleteDialogDescription": "Vill du verkligen ta bort anslutningen?",
+      "notifications": {
+        "loadFailed": "Det gick inte att läsa in anslutningarna",
+        "savedPrivateInfo": "Anslutningen sparades som privat. Delad synlighet kräver administratörsbehörighet.",
+        "createdSuccess": "Anslutningen skapades",
+        "updatedSuccess": "Anslutningen uppdaterades",
+        "deletedSuccess": "Anslutningen togs bort",
+        "deleteFailed": "Det gick inte att ta bort anslutningen",
+        "testFailed": "Anslutningstestet misslyckades",
+        "saveFailed": "Det gick inte att spara anslutningen"
+      },
+      "scope": {
+        "sharedChip": "DELAD",
+        "privateChip": "PRIVAT"
+      }
+    },
+    "connectionDialog": {
+      "titles": {
+        "add": "Lägg till anslutning",
+        "edit": "Redigera anslutning"
+      },
+      "results": {
+        "success": "Anslutningen fungerar",
+        "error": "Anslutningen misslyckades",
+        "errorDialogTitle": "Anslutningstestet misslyckades"
+      },
+      "labels": {
+        "name": "Anslutningsnamn",
+        "host": "Värd",
+        "shareName": "Nätverksresursens namn",
+        "username": "Användarnamn",
+        "password": "Lösenord",
+        "pathPrefix": "Sökvägsprefix",
+        "visibility": "Synlighet",
+        "accessMode": "Åtkomstläge"
+      },
+      "sections": {
+        "access": "Åtkomst"
+      },
+      "helpers": {
+        "name": "Ett namn som identifierar anslutningen i Sambee",
+        "host": "SMB-serverns IP-adress eller värdnamn",
+        "shareName": "Namnet på nätverksresursen på servern",
+        "passwordAdd": "SMB-kontots lösenord",
+        "passwordEdit": "Lämna tomt för att behålla det befintliga lösenordet",
+        "pathPrefix": "Bassökväg i nätverksresursen (valfritt)",
+        "username": "Använd formatet DOMAIN\\USER om det behövs",
+        "visibility": "Välj privat eller delad åtkomst",
+        "visibilityAdmin": "Administratörer kan skapa delade anslutningar för alla eller privata anslutningar åt sig själva.",
+        "visibilityRegular": "Delade anslutningar kräver administratörsbehörighet. Om du väljer delad utan den behörigheten sparar servern anslutningen som privat.",
+        "accessModeReadWrite": "Välj skrivskydd eller läs- och skrivåtkomst",
+        "accessModeReadOnly": "Välj skrivskydd eller läs- och skrivåtkomst"
+      },
+      "errors": {
+        "nameRequired": "Anslutningsnamn krävs",
+        "hostRequired": "Värd krävs",
+        "shareNameRequired": "Nätverksresursens namn krävs",
+        "usernameRequired": "Användarnamn krävs",
+        "passwordRequired": "Lösenord krävs"
+      },
+      "actions": {
+        "save": "Spara"
+      },
+      "aria": {
+        "togglePassword": "Visa eller dölj lösenord"
+      },
+      "visibility": {
+        "privateLabel": "Privat för mig",
+        "privateDescription": "Syns bara för ditt konto. Du kan hantera alla dess inställningar.",
+        "sharedLabel": "Delad med alla",
+        "sharedDescription": "Syns för alla användare. Endast administratörer kan hantera den."
+      },
+      "accessMode": {
+        "readWriteLabel": "Läs och skriv",
+        "readOnlyLabel": "Skrivskyddad"
+      }
+    },
+    "userManagement": {
+      "addUserButton": "Lägg till användare",
+      "addUserFabAriaLabel": "Lägg till användare",
+      "totalUsers_one": "Användare: {{count}}",
+      "totalUsers_other": "Användare: {{count}}",
+      "activeAdmins_one": "Administratörer: {{count}}",
+      "activeAdmins_other": "Administratörer: {{count}}",
+      "emptyTitle": "Inga användare hittades",
+      "emptyDescription": "Skapa det första användarkontot för att börja delegera åtkomst.",
+      "currentUserSuffix": "(du)",
+      "adminRole": "Administratör",
+      "editorRole": "Redigerare",
+      "viewerRole": "Läsare",
+      "activeStatus": "Aktiv",
+      "disabledStatus": "Inaktiverad",
+      "passwordResetPending": "Lösenordsbyte krävs",
+      "roleSource": {
+        "localAssignment": "Rollkälla: Lokal tilldelning",
+        "individualOverride": "Rollkälla: Individuell tilldelning",
+        "oidcDefault": "Rollkälla: Standardroll för OIDC",
+        "oidcGroups": "Rollkälla: OIDC-grupper",
+        "awaitingOidcSignIn": "Rollkälla: Väntar på OIDC-inloggning"
+      },
+      "createdAt": "Skapad {{timestamp}}",
+      "expiresAt": "Upphör {{timestamp}}",
+      "actions": {
+        "editUser": "Redigera användare",
+        "resetPassword": "Återställ lösenord",
+        "deleteUser": "Ta bort användare",
+        "deleteSelfDisabled": "Du kan inte ta bort ditt eget konto här",
+        "saveChanges": "Spara ändringar",
+        "createUser": "Skapa användare",
+        "close": "Stäng"
+      },
+      "aria": {
+        "editUser": "Redigera {{username}}",
+        "resetPassword": "Återställ lösenordet för {{username}}",
+        "deleteUser": "Ta bort {{username}}"
+      },
+      "editor": {
+        "titleEdit": "Redigera användare",
+        "titleCreate": "Skapa användare",
+        "descriptionEdit": "Uppdatera kontouppgifter och åtkomstnivå. Lösenord återställs separat",
+        "sections": {
+          "access": "Åtkomst",
+          "credentials": "Inloggningsuppgifter"
+        },
+        "usernameLabel": "Användarnamn",
+        "usernameHelp": "Unikt inloggningsnamn",
+        "usernameTaken": "En användare med det namnet finns redan",
+        "nameLabel": "Fullständigt namn",
+        "nameHelp": "Kontonamnet som visas",
+        "oidcNameHelp": "Hanteras av den länkade OIDC-leverantören",
+        "emailLabel": "E-postadress",
+        "emailHelp": "Valfri e-postadress för kontakt",
+        "oidcEmailHelp": "Hanteras av den länkade OIDC-leverantören",
+        "roleLabel": "Roll",
+        "roleHelp": "Välj åtkomstnivå",
+        "oidcRoleHelp": "Välj en individuell roll eller ärv den roll som fastställts via den länkade OIDC-leverantören",
+        "oidcRoleUnavailableHelp": "Välj en individuell roll. Rollen från leverantören blir tillgänglig efter användarens nästa OIDC-inloggning",
+        "roleOptions": {
+          "admin": "Hantera inställningar, användare och innehåll",
+          "editor": "Ändra innehåll",
+          "viewer": "Bläddra i innehåll"
+        },
+        "inheritedRole": "Ärvd ({{role}})",
+        "inheritedRoleDescription": "Använder rollen från användarens senast verifierade OIDC-grupper",
+        "expiresAtLabel": "Utgångstid",
+        "expiresAtHelp": "Lämna tomt om kontot inte ska upphöra att gälla",
+        "accountActiveLabel": "Kontot är aktivt",
+        "accountActiveHelp": "Inaktiverade konton kan inte logga in",
+        "initialPasswordLabel": "Första lösenord",
+        "initialPasswordHelp": "Om fältet lämnas tomt skapar servern ett säkert tillfälligt lösenord",
+        "showInitialPassword": "Visa första lösenordet",
+        "hideInitialPassword": "Dölj första lösenordet",
+        "requirePasswordChangeLabel": "Kräv byte vid nästa inloggning med lösenord",
+        "requirePasswordChangeHelp": "Blockera åtkomst med lokalt lösenord tills det har bytts. OIDC-inloggning är fortfarande tillgänglig.",
+        "switchOn": "På",
+        "switchOff": "Av"
+      },
+      "resetPasswordEditor": {
+        "title": "Återställ lösenord",
+        "descriptionWithName": "Ange ett nytt lösenord för {{username}}. Användaren loggas omedelbart ut överallt.",
+        "descriptionFallback": "Ange ett nytt lösenord för användaren. Användaren loggas omedelbart ut överallt.",
+        "passwordLabel": "Nytt lösenord",
+        "passwordHelp": "Välj lösenordet som användaren ska använda vid nästa inloggning",
+        "showPassword": "Visa nytt lösenord",
+        "hidePassword": "Dölj nytt lösenord",
+        "requirePasswordChangeLabel": "Kräv byte vid nästa inloggning med lösenord",
+        "requirePasswordChangeHelp": "Blockera åtkomst med lokalt lösenord tills det har bytts. OIDC-inloggning är fortfarande tillgänglig.",
+        "passwordRequired": "Ett nytt lösenord krävs",
+        "submit": "Ange lösenord"
+      },
+      "credentialsDialog": {
+        "usernameLabel": "Användarnamn",
+        "temporaryPasswordLabel": "Tillfälligt lösenord",
+        "createTitle": "Tillfälligt lösenord skapat",
+        "createDescription": "Dela det tillfälliga lösenordet på ett säkert sätt. Användaren måste byta lösenord efter inloggningen."
+      },
+      "deleteDialog": {
+        "title": "Ta bort användare",
+        "descriptionFallback": "Vill du ta bort den här användaren?"
+      },
+      "notifications": {
+        "loadFailed": "Det gick inte att läsa in användarna",
+        "usernameRequired": "Användarnamn krävs",
+        "userUpdated": "Användaren uppdaterades",
+        "userCreated": "Användaren skapades",
+        "updateFailed": "Det gick inte att uppdatera användaren",
+        "createFailed": "Det gick inte att skapa användaren",
+        "resetFailed": "Det gick inte att återställa lösenordet",
+        "userDeleted": "Användaren togs bort",
+        "deleteFailed": "Det gick inte att ta bort användaren"
+      }
+    },
+    "advanced": {
+      "imageConversion": {
+        "label": "Prioritet vid bildkonvertering",
+        "description": "Gäller förhandsvisningar av bilder på servern, inklusive konvertering med libvips. Bilder på lokala enheter påverkas inte.",
+        "speed": "Konverteringshastighet",
+        "speedDescription": "Använd snabbare kodning för förhandsvisningar utan genomskinlighet. Filerna kan bli större.",
+        "size": "Målstorlek",
+        "sizeDescription": "Använd WebP för mindre förhandsvisningar utan genomskinlighet. Konverteringen kan kräva mer processorkraft."
+      },
+      "saveChanges": "Spara ändringar",
+      "saveSuccess": "Avancerade inställningar sparades",
+      "loadFailed": "Det gick inte att läsa in de avancerade inställningarna",
+      "saveFailed": "Det gick inte att spara de avancerade inställningarna",
+      "resetOverride": "Återställ till ärvt värde",
+      "resetFailed": "Det gick inte att återställa inställningen till det ärvda värdet",
+      "resetSuccess": "{{label}} återställdes till sitt ärvda värde",
+      "sections": {
+        "smbBackends": "SMB-servrar",
+        "preprocessors": "Förbehandlare",
+        "imageMagick": "ImageMagick",
+        "pdfCompatibility": "PDF-kompatibilitet",
+        "archiveDownloads": "Skapa arkiv"
+      },
+      "fields": {
+        "value": "Värde",
+        "unit": "Enhet",
+        "seconds": "sekunder"
+      },
+      "validation": {
+        "enterLabel": "Ange {{label}}",
+        "wholeNumber": "{{label}} måste vara ett heltal",
+        "betweenRange": "{{label}} måste vara mellan {{min}} och {{max}}",
+        "betweenRangeWithUnit": "{{label}} måste vara mellan {{min}} och {{max}} {{unit}}"
+      },
+      "helperText": {
+        "integer": "{{description}} Standard: {{defaultValue}}. Intervall: {{minValue}}–{{maxValue}}.",
+        "byteSize": "{{description}} Standard: {{defaultValue}}. Intervall: {{minValue}} till {{maxValue}}."
+      }
+    },
+    "smbSettings": {
+      "loadFailed": "Det gick inte att läsa in SMB-inställningarna",
+      "saveFailed": "Det gick inte att spara SMB-inställningarna",
+      "saving": "Sparar SMB-inställning",
+      "saved": "SMB-inställningen sparades",
+      "connectionTimeoutError": "Ange ett heltal mellan 5 och 120.",
+      "readChunkSizeError": "Ange ett heltal inom det tillåtna intervallet för blockstorlek.",
+      "sections": {
+        "protection": "Skydd",
+        "connectionBehavior": "Anslutningsbeteende",
+        "fileStreaming": "Filströmning"
+      },
+      "fields": {
+        "authenticationMode": "Autentiseringsläge",
+        "encryptionMode": "Transportskydd",
+        "connectionTimeout": "Tidsgräns för anslutning",
+        "readChunkSize": "SMB-läsblockets storlek"
+      },
+      "helper": {
+        "authenticationMode": "Automatiskt använder Kerberos när det är tillgängligt, annars NTLM. Välj Kerberos krävs för att förhindra att NTLM används som reserv.",
+        "encryptionMode": "Signering krävs alltid. Endast signering tillåter okrypterade SMB 2-anslutningar. Kräv kryptering för att skydda SMB-trafiken mot avlyssning.",
+        "connectionTimeout": "Längsta tillåtna tid för att upprätta en SMB-transportanslutning.",
+        "readChunkSize": "Antal byte som läses per åtgärd vid filströmning."
+      },
+      "options": {
+        "negotiate": "Automatiskt (Kerberos eller NTLM)",
+        "kerberosRequired": "Kerberos krävs",
+        "signingOnly": "Endast signering (kompatibelt med SMB 2)",
+        "encryptionRequired": "Signering och kryptering (SMB 3+)"
+      },
+      "source": {
+        "default": "Inbyggt standardvärde",
+        "database": "Anpassat systemvärde",
+        "configFile": "Konfigurationsfil"
+      }
+    },
+    "fileSearch": {
+      "title": "Filsökning",
+      "saveChanges": "Spara ändringar",
+      "resetToDefault": "Återställ till standardvärde",
+      "loadFailed": "Det gick inte att läsa in inställningarna för filsökning.",
+      "saveFailed": "Det gick inte att spara inställningarna för filsökning.",
+      "resetFailed": "Det gick inte att återställa inställningarna för filsökning.",
+      "retentionLimit": "Antal senaste filer och mappar att behålla",
+      "retentionLimitError": "Ange ett heltal mellan 0 och 500.",
+      "resultLimit": "Resultat per grupp",
+      "resultLimitError": "Ange ett heltal mellan 1 och 50.",
+      "excludedCategories": "Undanta filkategorier",
+      "excludedCategoriesHelp": "Undantagna filer visas inte i filsökningens resultat eller historik.",
+      "excludeImages": "Undanta bilder",
+      "excludeTemporaryBackup": "Undanta tillfälliga filer och säkerhetskopior",
+      "excludedExtensions": "Undantagna filändelser",
+      "excludedExtensionsInputLabel": "Lägg till undantagen filändelse",
+      "excludedExtensionsAdd": "Lägg till filändelse",
+      "excludedExtensionsError": "Ange filändelser på högst 255 tecken. Jokertecken och sökvägar är inte tillåtna.",
+      "excludedExtensionsDuplicateError": "Den här filändelsen är redan undantagen.",
+      "excludedExtensionsHelp": "Ange en filändelse. Jokertecken och sökvägar stöds inte.",
+      "excludedExtensionsNormalization": "Sparas som {{extension}}.",
+      "excludedExtensionsRemove": "Ta bort {{extension}}"
+    }
+  },
+  "fileBrowser": {
+    "chrome": {
+      "statusBar": {
+        "itemCount_one": "{{count}} objekt",
+        "itemCount_other": "{{count}} objekt",
+        "noSelection": "Inget markerat",
+        "linkTargetMissing": "Genvägens mål hittades inte",
+        "linkTargetAccessDenied": "Åtkomst till genvägens mål nekades",
+        "linkTargetUnresolvable": "Genvägens mål kan inte fastställas",
+        "linkTargetLocalDrivesOnly": "Genvägens mål kan bara fastställas på lokala enheter",
+        "linkTargetUnmappedDrive": "Genvägens mål finns utanför de tillgängliga enheterna",
+        "linkTargetUnsupported": "Genvägens mål är inte en fil eller mapp"
+      },
+      "breadcrumb": {
+        "navigateRoot": "Gå till rotmappen",
+        "navigateTo": "Gå till {{path}}"
+      },
+      "connectionSelector": {
+        "placeholder": "Välj anslutning"
+      },
+      "mobileToolbar": {
+        "openMenu": "Öppna meny",
+        "navigateUpTitle": "Navigera uppåt",
+        "navigateUpAriaLabel": "Gå till överordnad mapp"
+      },
+      "sort": {
+        "ariaLabel": "Sorteringsalternativ",
+        "fields": {
+          "name": "Namn",
+          "size": "Storlek",
+          "modified": "Ändrad",
+          "type": "Typ"
+        },
+        "direction": {
+          "ascending": "Stigande",
+          "descending": "Fallande"
+        }
+      },
+      "viewMode": {
+        "ariaLabel": "Visningsalternativ",
+        "options": {
+          "list": "Lista",
+          "details": "Detaljer"
+        }
+      },
+      "dualPaneToggle": {
+        "ariaLabel": "Växla tvåpanelsvy",
+        "label": "Paneler"
+      },
+      "alerts": {
+        "folderNotFound": "Mappen ”{{name}}” hittades inte. Den kan ha flyttats eller tagits bort.",
+        "folderNotFoundSummary": "Mappen hittades inte. Den kan ha flyttats eller tagits bort.",
+        "fileNotFoundSummary": "Filen hittades inte. Den kan ha flyttats eller tagits bort.",
+        "fileFailure": {
+          "missing": "Filen ”{{name}}” hittades inte. Den kan ha flyttats eller tagits bort.",
+          "not_file": "Målet är inte en vanlig fil. Välj en annan fil.",
+          "access_denied": "Åtkomst till filen nekades. Kontrollera dina behörigheter och försök igen.",
+          "timeout": "Tidsgränsen för filbegäran överskreds. Kontrollera anslutningen och försök igen.",
+          "unavailable": "Filen är inte tillgänglig. Kontrollera anslutningen och försök igen.",
+          "pairing": "Parkopplingen för lokala enheter är inte tillgänglig. Öppna inställningarna för Lokala enheter och parkoppla webbläsaren igen.",
+          "cancelled": "Filbegäran avbröts.",
+          "unknown": "Det gick inte att öppna filen. Kontrollera anslutningen och försök igen."
+        },
+        "folderRecovered": "Mappen ”{{name}}” hittades inte. ”{{parent}}” öppnades i stället.",
+        "folderRecoveredSummary": "Mappen hittades inte. ”{{parent}}” öppnades i stället.",
+        "folderAccessDenied": "Du har inte behörighet att öppna den här mappen.",
+        "notAFolder": "Det här objektet är inte en mapp.",
+        "connectionUnavailable": "Anslutningen är inte tillgänglig. Kontrollera anslutningsinställningarna och försök igen.",
+        "directoryMonitoringTimeout": "Mappövervakningen startade inte i tid. Uppdatera mappen för att försöka igen.",
+        "leftPane": "Vänster panel",
+        "rightPane": "Höger panel",
+        "localDrivePairingRejected": "{{connection}}: Sambee Companion avvisade webbläsarens parkoppling. Läs in Sambee igen för att få eventuella uppdateringar. Öppna Lokala enheter för att kontrollera parkopplingen om problemet kvarstår.",
+        "localDrivePairingRequired": "{{connection}}: Webbläsaren är inte parkopplad med Sambee Companion. Öppna Lokala enheter för att parkoppla den.",
+        "welcomeTitle": "Välkommen till Sambee!",
+        "adminOnboardingPrefix": "Börja med att ",
+        "adminOnboardingLink": "lägga till din första delade SMB-resurs",
+        "adminOnboardingSuffix": ". Sedan kan du bläddra bland och visa filer på ditt lagringsutrymme i nätverket.",
+        "regularOnboarding": "Med Sambee kan du bläddra bland och visa filer på delade nätverksresurser. Be en administratör ställa in nätverksresurserna.",
+        "backendUnavailable": "Anslutningen till servern bröts. Gränssnittet är fortfarande tillgängligt, men manuella och automatiska uppdateringar kan misslyckas tills anslutningen återställts.",
+        "backendReconnecting": "Återansluter till servern. Automatiska uppdateringar kan fördröjas en stund.",
+        "loadingConnections": "Läser in anslutningar…",
+        "companionLaunchHint": "Öppnar i Sambee Companion. Om inget hände, kontrollera att Companion är installerat och körs. Om Companion kräver inloggning eller återställning öppnas Sambee här igen med nästa steg.",
+        "companionLifecycle": {
+          "renewal_required": "Redigeringssessionen i Companion löpte ut innan filen kunde slutföras. Öppna filen från Sambee igen för att fortsätta redigera.",
+          "auth_failed": "Companion kunde inte slutföra inloggningen på Sambee-servern. Slutför inloggningen i Companion om du uppmanas till det och öppna sedan filen från Sambee igen.",
+          "lock_lost": "Companion förlorade det aktiva redigeringslåset för filen. Öppna filen från Sambee igen innan du gör fler ändringar.",
+          "recovery_required": "Companion har ett oavslutat återställningsärende för filen. Slutför det från Sambee eller i Companion innan du startar en ny redigeringssession."
+        }
+      },
+      "mobileMenu": {
+        "selectConnectionAriaLabel": "Välj anslutning",
+        "navigateRootAriaLabel": "Gå till rotmappen",
+        "openKeyboardShortcutsAriaLabel": "Öppna tangentbordsgenvägar",
+        "openDocumentationAriaLabel": "Öppna dokumentation",
+        "openSettingsAriaLabel": "Öppna inställningar",
+        "systemHealth": "Systemstatus",
+        "openSystemHealthAriaLabel": "Systemstatus: {{status}}. {{headline}}",
+        "logoutAriaLabel": "Logga ut"
+      },
+      "helpMenu": {
+        "keyboardShortcuts": "Tangentbordsgenvägar",
+        "documentation": "Dokumentation",
+        "issues": "Ärenden",
+        "discussions": "Diskussioner"
+      },
+      "toolbar": {
+        "help": "Hjälp",
+        "openSettings": "Öppna inställningar",
+        "systemHealthTooltip": "Systemstatus: {{status}}. {{headline}}"
+      }
+    },
+    "list": {
+      "emptyDirectory": "Den här mappen är tom"
+    },
+    "search": {
+      "modeSelectorAriaLabel": "Byt läge i snabbfältet",
+      "modes": {
+        "navigate": "Navigera",
+        "quickNav": "Snabbnavigering",
+        "commands": "Kommandon",
+        "fileSearch": "Filsökning"
+      },
+      "placeholders": {
+        "directory": "Navigera till valfri mapp",
+        "command": "Kör ett kommando",
+        "smart": "Gå till valfri mapp eller skriv > för kommandon",
+        "fileSearch": "Sök bland senaste filer och filer i aktuell mapp"
+      },
+      "footer": {
+        "navigate": "navigera",
+        "open": "öppna",
+        "removeRecent": "Ta bort från senaste objekt",
+        "removeRecentDirectory": "Ta bort från senaste mappar",
+        "run": "kör",
+        "commands": "kommandon",
+        "close": "stäng"
+      },
+      "itemTypes": {
+        "directory": "Mapp",
+        "file": "Fil"
+      },
+      "results": {
+        "none": "Inga resultat för ”{{query}}”",
+        "failed": "Sökningen slutfördes inte. Försök igen.",
+        "removeFailed": "Det gick inte att ta bort det här objektet från historiken. Försök igen.",
+        "count_one": "{{count}} resultat",
+        "count_other": "{{count}} resultat",
+        "countTruncated": "{{count}}+ resultat",
+        "commandCount_one": "{{count}} kommando",
+        "commandCount_other": "{{count}} kommandon",
+        "directoriesIndexed_one": "{{count}} mapp indexerad",
+        "directoriesIndexed_other": "{{count}} mappar indexerade"
+      },
+      "status": {
+        "connectionStatus": "{{connection}}: {{message}}",
+        "indexingPending": "Indexerar…",
+        "indexing": "Indexerar… ({{count}} mappar hittades)",
+        "updating": "Uppdaterar index… ({{count}} mappar)",
+        "updatingProgress": "Uppdaterar index… ({{done}} av cirka {{total}} mappar kontrollerade)",
+        "startingIndex": "Startar indexering…",
+        "indexCoveragePartial": "alla mappar kunde inte indexeras.",
+        "indexCoverageUncertain": "Mappindexet är inte verifierat. En ny kontroll väntar.",
+        "legacyDirectorySearch": "Mappsökning med flera sökord har inte bekräftats för den här källan. Sök med ett ord eller kontrollera stödet på servern och i Companion.",
+        "historyUnavailable": "Senaste mappar är inte tillgängliga. Kontrollera serveranslutningen och försök igen.",
+        "fileHistoryUnavailable": "Senaste filer är inte tillgängliga. Kontrollera serveranslutningen och försök igen.",
+        "indexUnavailable": "Mappsökning är inte tillgänglig. Kontrollera anslutningen till källan och försök igen."
+      },
+      "statusDetails": {
+        "title": "Status för mappsökning",
+        "linkSuffix": " (<details>detaljer</details>).",
+        "source": "Källa",
+        "impact": "Sökresultaten kan sakna mappar på de här platserna.",
+        "incomplete": "Endast ett urval av berörda platser visas. Fler mappar kan vara berörda.",
+        "locations": "Berörda platser",
+        "location": "Plats",
+        "reason": "Orsak",
+        "containingDirectory": "Överordnad mapp",
+        "unavailable": "De här uppgifterna är inte längre tillgängliga. Uppdatera status.",
+        "failed": "Det gick inte att läsa in statusuppgifterna. Kontrollera anslutningen till källan och öppna dialogrutan igen.",
+        "reasons": {
+          "access_denied": "Åtkomst nekad",
+          "unsupported_encoding": "Ett mappnamn kunde inte läsas",
+          "unsafe_traversal": "Säkerhetskontrollen av mappen misslyckades",
+          "scan_failed": "En mapp kunde inte läsas"
+        },
+        "actions": {
+          "access_denied": "Kontrollera att källans konto har behörighet att läsa mappen.",
+          "unsupported_encoding": "Kontrollera om några mappnamn innehåller tecken som inte stöds eller är för långa.",
+          "unsafe_traversal": "Kontrollera om mappen ändrades under genomsökningen. Anslut till källan igen om problemet kvarstår.",
+          "scan_failed": "Kontrollera att mappen finns och går att läsa. Återställ anslutningen till källan vid behov."
+        }
+      },
+      "groups": {
+        "recentFiles": "Senaste filer",
+        "recentDirectories": "Senaste mappar",
+        "directories": "Mappar",
+        "currentDirectory": "Aktuell mapp"
+      },
+      "belowMinimum": "Skriv minst {{count}} tecken för att söka"
+    },
+    "commands": {
+      "categories": {
+        "navigation": "Navigering",
+        "files": "Filer",
+        "view": "Visning",
+        "panes": "Paneler",
+        "settings": "Inställningar",
+        "help": "Hjälp"
+      },
+      "items": {
+        "quickNav": {
+          "title": "Öppna navigeringsläget",
+          "description": "Gå direkt till mappar från snabbfältet"
+        },
+        "fileSearch": {
+          "title": "Filsökning",
+          "description": "Sök bland senaste filer och filer i den aktiva mappen"
+        },
+        "commandPalette": {
+          "title": "Visa kommandon",
+          "description": "Öppna filhanterarens kommandopalett"
+        },
+        "open": {
+          "title": "Öppna objektet i fokus"
+        },
+        "navigateUp": {
+          "title": "Gå upp en mappnivå"
+        },
+        "refresh": {
+          "title": "Uppdatera fillistan"
+        },
+        "rename": {
+          "title": "Byt namn på objektet i fokus"
+        },
+        "delete": {
+          "title": "Ta bort objektet i fokus"
+        },
+        "newDirectory": {
+          "title": "Skapa ny mapp"
+        },
+        "newFile": {
+          "title": "Skapa ny fil"
+        },
+        "createArchive": {
+          "title": "Skapa ZIP-arkiv"
+        },
+        "extractArchive": {
+          "title": "Packa upp ZIP-arkiv"
+        },
+        "openInApp": {
+          "title": "Öppna filen i fokus i ett lokalt program"
+        },
+        "openInViewerPicker": {
+          "title": "Välj Sambee-visare för filen i fokus"
+        },
+        "openInNativePicker": {
+          "title": "Välj lokalt program för filen i fokus"
+        },
+        "toggleDualPane": {
+          "title": "Växla tvåpanelsvy"
+        },
+        "openLocationInNewTab": {
+          "title": "Öppna aktuell plats i en ny flik"
+        },
+        "matchLeftPaneLocation": {
+          "title": "Visa högra panelens plats till vänster"
+        },
+        "matchRightPaneLocation": {
+          "title": "Visa vänstra panelens plats till höger"
+        },
+        "focusLeftPane": {
+          "title": "Fokusera vänstra panelen"
+        },
+        "focusRightPane": {
+          "title": "Fokusera högra panelen"
+        },
+        "switchPane": {
+          "title": "Byt aktiv panel"
+        },
+        "newTab": {
+          "title": "Ny mappflik"
+        },
+        "closeTab": {
+          "title": "Stäng mappflik"
+        },
+        "undoCloseTab": {
+          "title": "Ångra stängning av mappflik"
+        },
+        "previousTab": {
+          "title": "Föregående mappflik"
+        },
+        "nextTab": {
+          "title": "Nästa mappflik"
+        },
+        "copyToOtherPane": {
+          "title": "Kopiera till andra panelen"
+        },
+        "moveToOtherPane": {
+          "title": "Flytta till andra panelen"
+        },
+        "openSettings": {
+          "title": "Öppna inställningar"
+        },
+        "openConnectionsSettings": {
+          "title": "Öppna anslutningsinställningar"
+        },
+        "openSystemHealth": {
+          "title": "Öppna systemstatus"
+        },
+        "showHelp": {
+          "title": "Visa tangentbordsgenvägar"
+        }
+      }
+    },
+    "toolbar": {
+      "newFolder": "Ny mapp",
+      "newFile": "Ny fil",
+      "upload": "Ladda upp",
+      "uploadChoiceFiles": "Filer",
+      "uploadChoiceFolder": "Mapp",
+      "uploadFiles": "Ladda upp filer",
+      "uploadFolder": "Ladda upp mapp",
+      "createArchive": "Skapa arkiv",
+      "extractArchive": "Packa upp arkiv",
+      "refresh": "Uppdatera",
+      "more": "Mer"
+    },
+    "transfers": {
+      "downloadFailed": "Nedladdningen misslyckades. Försök igen.",
+      "downloadSizeLimitExceeded": "Det valda ZIP-arkivet överskrider storleksgränsen för tillfälliga nedladdningar.",
+      "preparingArchive": "Förbereder arkiv",
+      "downloading": "Förbereder nedladdning",
+      "preparingUpload": "Förbereder uppladdning",
+      "dropToUpload": "Släpp för att ladda upp",
+      "dropUnavailable": "Det går inte att ladda upp till den här mappen",
+      "dropBusy": "Slutför den pågående uppladdningen först",
+      "dropUnsupported": "Det går inte att dra och släppa mappar i den här webbläsaren. Välj Ladda upp i stället",
+      "uploadComplete_one": "{{count}} fil laddades upp",
+      "uploadComplete_other": "{{count}} filer laddades upp",
+      "uploadSkipped_one": "{{count}} överhoppad",
+      "uploadSkipped_other": "{{count}} överhoppade",
+      "uploadFailed_one": "{{count}} misslyckad",
+      "uploadFailed_other": "{{count}} misslyckade",
+      "uploadUnknown_one": "{{count}} med osäkert resultat",
+      "uploadUnknown_other": "{{count}} med osäkert resultat",
+      "uploadCancelled_one": "{{count}} avbruten",
+      "uploadCancelled_other": "{{count}} avbrutna",
+      "uploadSummaryWithIssues": "{{summary}} · {{issues}}",
+      "uploadDestinationChanged": "Uppladdningen avbröts eftersom målet ändrades. Välj en mapp och försök igen.",
+      "uploadInspectDestination": "Resultatet är osäkert. Kontrollera målet innan du försöker igen",
+      "uploadFolders": "{{created}} mappar skapades, {{merged}} slogs samman, {{skipped}} hoppades över",
+      "uploadPartial": "Uppladdningen avbröts. Filer och mappar som redan har överförts finns kvar på målet.",
+      "uploadFolderFailed_one": "{{count}} mapp kunde inte laddas upp",
+      "uploadFolderFailed_other": "{{count}} mappar kunde inte laddas upp",
+      "uploadProgress": "Laddar upp {{name}} ({{current}}/{{total}}) · {{bytes}} / {{size}} · {{completed}} klara, {{skipped}} överhoppade, {{failed}} misslyckade",
+      "uploadSending": "Laddar upp {{name}} ({{current}}/{{total}}) · Skickar · {{completed}} klara, {{skipped}} överhoppade, {{failed}} misslyckade",
+      "uploadPublishing": "Laddar upp {{name}} ({{current}}/{{total}}) · Publicerar · {{completed}} klara, {{skipped}} överhoppade, {{failed}} misslyckade",
+      "uploadRemaining_one": "{{count}} fil väntar på uppladdning",
+      "uploadRemaining_other": "{{count}} filer väntar på uppladdning"
+    },
+    "compactActions": {
+      "clearSelection": "Rensa markering",
+      "createNewItem": "Skapa nytt objekt",
+      "deselect": "Avmarkera",
+      "moreActionsFor": "Fler åtgärder för {{name}}",
+      "select": "Markera",
+      "selectedCount_one": "{{count}} objekt markerat",
+      "selectedCount_other": "{{count}} objekt markerade",
+      "selectionCleared": "Markeringen rensades",
+      "selectionActions": "Åtgärder för markerade objekt"
+    },
+    "share": {
+      "filesOnly": "Endast filer kan delas. Avmarkera mapparna.",
+      "selectFiles": "Markera en eller flera filer att dela.",
+      "preparing_one": "Laddar ned {{count}} fil för delning…",
+      "preparing_other": "Laddar ned {{count}} filer för delning…",
+      "ready_one": "{{count}} fil är klar att dela",
+      "ready_other": "{{count}} filer är klara att dela",
+      "sharing": "Öppnar delningsmenyn…",
+      "rejected": "Webbläsaren kunde inte dela filerna. Ladda ned dem i stället",
+      "fileTypeRejected": "Webbläsaren tillåter kanske inte delning av de här filtyperna. Ladda ned filerna och försök dela dem från enhetens filhanterare.",
+      "downloadNext": "Ladda ned {{current}}/{{count}}",
+      "downloadFailed": "Det gick inte att ladda ned filen"
+    },
+    "archiveMembers": {
+      "encrypted": "Det här objektet i arkivet är krypterat. Använd ett arkivverktyg och lösenordet för att förhandsvisa eller packa upp objektet.",
+      "unsupportedCompression": "Sambee stöder inte objektets komprimeringsmetod. Använd ett annat arkivverktyg för att förhandsvisa eller packa upp objektet.",
+      "unavailable": "Det här objektet i arkivet är inte tillgängligt. Använd ett annat arkivverktyg för att undersöka det."
+    },
+    "row": {
+      "openInCompanionApp": "Öppna i lokalt program",
+      "openInBrowserViewer": "Öppna i Sambee",
+      "chooseBrowserViewer": "Välj Sambee-visare",
+      "openInNativeApp": "Öppna i lokalt program",
+      "chooseNativeApp": "Välj lokalt program",
+      "itemTypes": {
+        "folder": "Mapp",
+        "file": "Fil"
+      },
+      "shortcutSuffix": " (genväg)",
+      "shortcutTargetSuffix": " (genvägens mål: {{target}})",
+      "unsavedLocalDraft": "Osparat lokalt utkast finns",
+      "unsavedLocalDraftSuffix": ": osparat lokalt utkast finns",
+      "selectedSuffix": " (markerat)"
+    },
+    "viewerPicker": {
+      "title": "Välj visare",
+      "fileLabel": "Fil att öppna",
+      "open": "Öppna",
+      "openWithoutSaving": "Öppna utan att spara",
+      "alwaysUse": "Använd alltid den här visaren för den här filtypen",
+      "default": "Standard",
+      "openInNativeApp": "Öppna i lokalt program",
+      "nativeDescription": "Använd ett skrivbordsprogram i stället för en Sambee-visare",
+      "viewers": {
+        "image": "Bildvisare",
+        "markdown": "Markdown-visare",
+        "pdf": "PDF-visare",
+        "text": "Textredigerare"
+      }
+    },
+    "shortcuts": {
+      "copyToOtherPane": "Kopiera till andra panelen",
+      "copyToOtherPaneInDualPane": "Kopiera till andra panelen (tvåpanelsläge)",
+      "createArchive": "Skapa ZIP-arkiv",
+      "download": "Ladda ned markerade objekt",
+      "createDirectory": "Skapa ny mapp",
+      "createFile": "Skapa ny fil",
+      "deleteItem": "Ta bort fil eller mapp",
+      "extractArchive": "Packa upp ZIP-arkiv",
+      "fileSearch": "Sök bland senaste filer och filer i aktuell mapp",
+      "moveToOtherPane": "Flytta till andra panelen",
+      "moveToOtherPaneInDualPane": "Flytta till andra panelen (tvåpanelsläge)",
+      "navigateDown": "Navigera nedåt",
+      "navigateUp": "Gå upp en mappnivå",
+      "navigateUpRow": "Navigera uppåt",
+      "openConnectionSelector": "Öppna anslutningsväljaren",
+      "openInCompanion": "Öppna den markerade filen i dess lokala program",
+      "openNativePicker": "Välj ett lokalt program för den markerade filen",
+      "openQuickNavigation": "Öppna snabbnavigeringen",
+      "openSelectedItem": "Öppna den markerade filen i Sambee.",
+      "openSettings": "Öppna inställningar",
+      "openSmartNavigation": "Öppna navigeringsläget",
+      "openViewerPicker": "Välj en Sambee-visare för den markerade filen",
+      "refresh": "Uppdatera fillistan",
+      "renameItem": "Byt namn på fil eller mapp",
+      "selectAllFiles": "Markera alla filer",
+      "selectAndMoveDown": "Markera och gå nedåt",
+      "selectAndMoveUp": "Markera och gå uppåt",
+      "selectToFirst": "Markera från objektet i fokus till det första objektet",
+      "selectToLast": "Markera från objektet i fokus till det sista objektet",
+      "showCommands": "Visa kommandon",
+      "showHelp": "Visa tangentbordsgenvägar",
+      "switchActivePane": "Byt aktiv panel",
+      "previousTab": "Välj föregående mappflik",
+      "nextTab": "Välj nästa mappflik",
+      "newTab": "Ny mappflik",
+      "closeTab": "Stäng vald mappflik",
+      "openLocationInNewTab": "Öppna aktuell plats i en ny flik",
+      "matchLeftPaneLocation": "Visa högra panelens plats till vänster",
+      "matchRightPaneLocation": "Visa vänstra panelens plats till höger",
+      "toggleDualPane": "Växla tvåpanelsvy",
+      "toggleSelectionAndMoveDown": "Växla markering och gå nedåt",
+      "upload": "Ladda upp filer till aktuell mapp"
+    },
+    "unavailableShortcuts": {
+      "archiveContentImmutable": "Arkivets innehåll kan inte ändras.",
+      "archiveExtractionUnavailable": "Det går inte att packa upp arkivet på den aktuella målplatsen.",
+      "companionUnavailable": "Anslut Sambee Companion innan du skapar ett arkiv med lokala filer.",
+      "destinationUnavailable": "Den här platsen kan inte ta emot filer.",
+      "dualPaneRequired": "Kopiering kräver tvåpanelsläge.",
+      "interactionBlocked": "Åtgärden är inte tillgänglig när en annan vy är öppen.",
+      "readOnlyLocation": "Den här platsen är skrivskyddad.",
+      "selectArchiveToExtract": "Välj ett arkiv att packa upp.",
+      "selectItemToDelete": "Markera ett objekt att ta bort.",
+      "selectItemToRename": "Markera ett objekt att byta namn på.",
+      "selectItemsToArchive": "Markera objekt som kan läggas till i ett arkiv.",
+      "selectItemsToCopy": "Markera ett eller flera objekt att kopiera.",
+      "selectItemsToDownload": "Markera ett eller flera objekt att ladda ned.",
+      "selectItemsToMove": "Markera ett eller flera objekt att flytta.",
+      "sourceUnavailable": "Åtgärden kan inte användas med det markerade objektet.",
+      "locationUnavailable": "Vänta tills panelens plats lästs in. Om inläsningen misslyckas, välj Uppdatera eller välj en annan plats.",
+      "lastTabProtected": "Behåll minst en öppen flik i varje panel"
+    },
+    "tabs": {
+      "groupAriaLabel": "Mappflikar",
+      "leftPaneGroupAriaLabel": "Mappflikar i vänstra panelen",
+      "rightPaneGroupAriaLabel": "Mappflikar i högra panelen",
+      "newTab": "Ny flik",
+      "allTabsAriaLabel": "Alla flikar ({{total}})",
+      "allTabsOverflowAriaLabel": "Alla flikar ({{total}}, {{hidden}} dolda)",
+      "selectTabAriaLabel": "{{name}} – {{location}}",
+      "closeTabAriaLabel": "Stäng fliken {{name}} ({{location}})",
+      "closeTab": "Stäng flik",
+      "closeBackgroundTabTooltip": "Stäng flik ({{shortcut}} stänger den valda fliken)",
+      "closeMenuTabTooltip": "Stäng flik ({{shortcut}} stänger fliken i fokus)",
+      "closedNotice": "Fliken stängdes",
+      "undo": "Ångra",
+      "selectedAnnouncement": "{{name}}, flik {{index}} av {{total}}",
+      "listInstructions": "Använd vänster och höger piltangent för att byta mappflik, {{newTabShortcut}} för att öppna en ny flik och {{closeTabShortcut}} för att stänga den valda fliken.",
+      "restorationUnavailableNotice": "Flikar kan inte återställas efter ny inläsning i den här webbläsarsessionen."
+    },
+    "confirmDelete": {
+      "titleFile": "Ta bort fil",
+      "titleDirectory": "Ta bort mapp",
+      "titleMulti": "Ta bort objekt",
+      "confirmFile": "Den här filen tas bort permanent:",
+      "confirmDirectory": "Den här mappen och allt innehåll tas bort permanent:",
+      "confirmMulti": "Följande {{count}} objekt tas bort permanent:",
+      "ariaLabelItem": "Objekt att ta bort",
+      "ariaLabelItems": "Objekt att ta bort",
+      "moreItems_one": " och 1 objekt till",
+      "moreItems_other": " och {{count}} objekt till",
+      "buttonDeleting": "Tar bort…"
+    },
+    "operationContext": {
+      "file": "Fil",
+      "sourceItem": "Källobjekt",
+      "destinationDirectory": "Målmapp",
+      "archive": "Arkiv",
+      "archiveMember": "Objekt i arkivet",
+      "selectedItems": "Markerade objekt"
+    },
+    "rename": {
+      "titleFile": "Byt namn på fil",
+      "titleDirectory": "Byt namn på mapp",
+      "inputLabel": "Nytt namn",
+      "description": "Välj ett nytt namn för objektet.",
+      "validationSame": "Namnet har inte ändrats.",
+      "buttonRenaming": "Byter namn…"
+    },
+    "createItem": {
+      "titleFile": "Ny fil",
+      "titleDirectory": "Ny mapp",
+      "inputLabel": "Namn",
+      "descriptionFile": "Skapa filen i målmappen.",
+      "descriptionDirectory": "Skapa mappen i målmappen.",
+      "buttonCreating": "Skapar…"
+    },
+    "archive": {
+      "createTitle": "Skapa ZIP-arkiv",
+      "nameLabel": "Arkivnamn",
+      "createDescription_one": "Skapa ett ZIP-arkiv i målmappen från 1 markerat objekt.",
+      "createDescription_other": "Skapa ett ZIP-arkiv i målmappen från {{count}} markerade objekt.",
+      "progressCreating": "Skapar arkiv…",
+      "progressPreparing": "Förbereder arkiv…",
+      "progressProcessedMembers": "{{processed}} arkivobjekt bearbetade…",
+      "buttonCreate": "Skapa arkiv",
+      "buttonCreating": "Skapar arkiv…",
+      "validationExtension": "Arkivnamn måste sluta med .zip.",
+      "errorGeneric": "Det gick inte att skapa arkivet.",
+      "createPartialOutputError": "Det gick inte att skapa arkivet. Den nya ZIP-filen kan vara ofullständig.",
+      "createCancelled": "Arbetet med att skapa arkivet avbröts.",
+      "buttonCancelCreation": "Avbryt skapandet av arkivet",
+      "progressSourceArchive": "Källarkiv",
+      "progressMembers": "{{completed}} av {{total}} objekt",
+      "progressBytes": "{{processed}} av {{total}} byte",
+      "interruptedAfterReload": "Arkivarbetet avbröts. Kontrollera målplatsen innan du försöker igen.",
+      "browseError": "Det gick inte att läsa in arkivets innehåll.",
+      "downloadError": "Det gick inte att ladda ned objektet från arkivet.",
+      "download": "Ladda ned",
+      "previewTitle": "Förhandsvisa {{name}}",
+      "previewLoading": "Läser in förhandsvisning",
+      "previewError": "Det gick inte att läsa in förhandsvisningen av arkivobjektet.",
+      "previewTooLarge": "Det här arkivobjektet är för stort för att förhandsvisa. Ladda ned det för att visa filen.",
+      "previewUnavailable": "Den här filtypen kan inte förhandsvisas här. Ladda ned filen för att öppna den i ett annat program.",
+      "closeBrowser": "Stäng arkivvyn",
+      "root": "Arkivets rotmapp",
+      "breadcrumbs": "Sökväg i arkivet",
+      "historyBack": "Bakåt",
+      "historyForward": "Framåt",
+      "up": "Upp",
+      "more": "Läs in fler",
+      "entryUnavailable": "Inte tillgängligt",
+      "extractTitle": "Packa upp från ZIP-arkiv",
+      "extractDescriptionArchive": "Packa upp arkivet i målmappen.",
+      "extractDescriptionMember": "Packa upp det markerade objektet i målmappen.",
+      "extractDescriptionMembers_one": "Packa upp 1 markerat objekt i målmappen.",
+      "extractDescriptionMembers_other": "Packa upp {{count}} markerade objekt i målmappen.",
+      "memberErrorTitle": "Åtgärda uppackningsproblem",
+      "memberErrorPrompt": "Det gick inte att packa upp ett objekt i arkivet.",
+      "destinationLabel": "Målmapp",
+      "destinationNameLabel": "Målnamn",
+      "buttonExtract": "Packa upp",
+      "buttonExtracting": "Packar upp…",
+      "buttonCancelExtraction": "Avbryt uppackning",
+      "buttonOpenDestination": "Öppna målplatsen",
+      "buttonRetryMemberError": "Försök packa upp objektet igen",
+      "buttonIgnoreMemberError": "Hoppa över objektet",
+      "validationDestinationEmpty": "Ange en målmapp.",
+      "validationDestinationUnsafe": "Använd en relativ sökväg till mappen, utan tomma delar, ”.” eller ”..”.",
+      "validationDestinationExists": "Välj en ny målmapp. Uppackningen skriver inte över befintliga mappar.",
+      "extractError": "Det gick inte att packa upp arkivet.",
+      "extractPartialOutputError": "Det gick inte att packa upp arkivet. Målmappen kan innehålla ofullständiga filer.",
+      "extractSuccess": "Arkivet har packats upp.",
+      "summaryFilesExtracted": "Uppackade filer",
+      "summaryDirectoriesCreated": "Skapade mappar",
+      "summaryBytesWritten": "Skrivna byte",
+      "summaryFilesSkipped": "Överhoppade filer",
+      "summaryFilesReplaced": "Ersatta filer",
+      "summaryPartialMembers": "Ofullständiga arkivobjekt",
+      "extractPartialSuccess_one": "Arkivet packades upp, men 1 objekt hoppades över.",
+      "extractPartialSuccess_other": "Arkivet packades upp, men {{count}} objekt hoppades över.",
+      "extractEncryptedSkipped_one": "1 krypterat arkivobjekt hoppades över.",
+      "extractEncryptedSkipped_other": "{{count}} krypterade arkivobjekt hoppades över.",
+      "extractUnsupportedCompressionSkipped_one": "1 arkivobjekt hoppades över eftersom komprimeringsmetoden inte stöds.",
+      "extractUnsupportedCompressionSkipped_other": "{{count}} arkivobjekt hoppades över eftersom komprimeringsmetoden inte stöds.",
+      "extractCancelled": "Uppackningen av arkivet avbröts.",
+      "extractInterrupted": "Uppackningen av arkivet avbröts. Målplatsen kan innehålla ofullständiga resultat.",
+      "extractConflictPending": "Uppackningen väntar på att du ska välja hur en namnkonflikt ska hanteras.",
+      "collisionTitle": "Filerna finns redan",
+      "collisionPrompt": "Välj hur befintliga filer på målplatsen ska hanteras.",
+      "collisionListLabel": "Arkivobjekt med namnkonflikter",
+      "collisionMore": "Ytterligare {{count}} filer har namnkonflikter.",
+      "collisionArchiveMemberLabel": "Arkivobjekt",
+      "collisionDestinationPathLabel": "Målsökväg",
+      "collisionArchiveColumn": "Arkiv",
+      "collisionDestinationColumn": "Befintlig",
+      "collisionSizeLabel": "Storlek",
+      "collisionModifiedLabel": "Ändrad",
+      "collisionByteCount": "{{count}} byte",
+      "collisionResolutionLabel": "Välj en åtgärd",
+      "collisionChoiceSkip": "Hoppa över den här filen",
+      "collisionChoiceReplace": "Ersätt den här filen",
+      "collisionChoiceReplaceOlder": "Ersätt bara filer där filen i arkivet är nyare",
+      "collisionChoiceRename": "Byt namn på den uppackade filen",
+      "collisionApplyRemaining": "Använd valet för återstående konflikter",
+      "collisionContinue": "Fortsätt",
+      "memberErrorTargetLabel": "Målsökväg",
+      "memberErrorPartialOutputNote": "En ofullständig målfil skapades. Ett nytt försök packar upp objektet från början.",
+      "buttonSkipAll": "Hoppa över alla",
+      "buttonReplaceAll": "Ersätt alla",
+      "buttonReplaceOlder": "Ersätt bara äldre filer",
+      "buttonSkip": "Hoppa över",
+      "buttonReplace": "Ersätt",
+      "buttonRename": "Byt namn",
+      "renameTargetLabel": "Ny målsökväg"
+    },
+    "nameDialog": {
+      "validationEmpty": "Namn krävs.",
+      "validationInvalidChars": "Ta bort dessa otillåtna tecken: \\ / : * ? \" < > |.",
+      "validationDotNames": "”.” och ”..” är reserverade mappnamn.",
+      "validationTrailing": "Namn får inte sluta med blanksteg eller punkt."
+    },
+    "copyMove": {
+      "descriptionCopySingle": "Kopiera objektet till målmappen.",
+      "descriptionCopyMultiple_one": "Kopiera objektet till målmappen.",
+      "descriptionCopyMultiple_other": "Kopiera {{count}} markerade objekt till målmappen.",
+      "descriptionMoveSingle": "Flytta objektet till målmappen.",
+      "descriptionMoveMultiple_one": "Flytta objektet till målmappen.",
+      "descriptionMoveMultiple_other": "Flytta {{count}} markerade objekt till målmappen.",
+      "labelDestination": "Mapp",
+      "labelFilename": "Nytt namn",
+      "errorSameFilename": "Det finns redan ett objekt med det här namnet i målmappen.",
+      "errorSameDirectory": "Målmappen och källmappen är samma mapp.",
+      "warnEmptyFilename": "Namn krävs.",
+      "buttonCopying": "Kopierar…",
+      "buttonMoving": "Flyttar…",
+      "progressCopy": "Kopierar {{current}} av {{total}}…",
+      "progressMove": "Flyttar {{current}} av {{total}}…",
+      "errorGeneric": "Åtgärden misslyckades. Vissa objekt kan ha lämnats obearbetade."
+    },
+    "overwriteConflict": {
+      "title": "Målet finns redan",
+      "alreadyExists": "Det finns redan ett mål med det här namnet:",
+      "folderConflict": "Ett befintligt objekt blockerar den inkommande mappen. Hoppa över mappen eller byt namn på den.",
+      "fileFolderConflict": "En befintlig mapp blockerar den inkommande filen. Hoppa över filen eller byt namn på den.",
+      "skipFolder": "Hoppa över mapp",
+      "renameFolder": "Byt namn på inkommande mapp",
+      "labelPath": "Sökväg",
+      "labelTargetName": "Målnamn",
+      "labelExisting": "Mål",
+      "labelIncoming": "Källa",
+      "labelSize": "Storlek",
+      "labelModified": "Ändrad",
+      "metadataLabel": "Målinformation",
+      "resolutionLabel": "Välj en åtgärd",
+      "resolutionSkip": "Hoppa över",
+      "resolutionOverwrite": "Skriv över",
+      "resolutionOverwriteOnlyOlder": "Skriv bara över äldre filer",
+      "resolutionRename": "Byt namn",
+      "applyToAll": "Använd valet för återstående konflikter i den här åtgärden",
+      "targetNameUnchanged": "Välj ett annat målnamn.",
+      "noResolutionAvailable": "Det finns ingen tillgänglig lösning för det här målet. Avbryt åtgärden och försök igen.",
+      "cancelCopy": "Avbryt kopiering",
+      "cancelUpload": "Avbryt uppladdning",
+      "cancelMove": "Avbryt flytt",
+      "cancelExtraction": "Avbryt uppackning",
+      "continue": "Fortsätt",
+      "progressContext_one": "Objekt {{current}} av {{total}} • {{count}} konflikt hittills",
+      "progressContext_other": "Objekt {{current}} av {{total}} • {{count}} konflikter hittills"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Avbryt",
+      "close": "Stäng",
+      "companionRecovery": "Återställning med Companion",
+      "connectionStatus": "Anslutningsstatus",
+      "copy": "Kopiera",
+      "create": "Skapa",
+      "delete": "Ta bort",
+      "discard": "Ignorera ändringar",
+      "download": "Ladda ned",
+      "edit": "Redigera",
+      "logout": "Logga ut",
+      "move": "Flytta",
+      "nextNotice": "Nästa avisering",
+      "print": "Skriv ut",
+      "rename": "Byt namn",
+      "replace": "Ersätt",
+      "retry": "Försök igen",
+      "monitoringStopped": "Automatiska uppdateringar stoppade",
+      "save": "Spara",
+      "share": "Dela",
+      "skip": "Hoppa över"
+    },
+    "labels": {
+      "connection": "Anslutning",
+      "itemToDelete": "Objekt att ta bort",
+      "root": "Rot",
+      "settings": "Inställningar"
+    },
+    "navigation": {
+      "goBack": "Gå tillbaka"
+    },
+    "search": {
+      "action": "Sök",
+      "placeholder": "Sök",
+      "clear": "Rensa sökning",
+      "previousMatch": "Föregående träff",
+      "nextMatch": "Nästa träff"
+    }
+  },
+  "themeSelector": {
+    "openButtonLabel": "Byt tema",
+    "dialogTitle": "Välj tema",
+    "previewPrimaryColor": "Primärfärg",
+    "modes": {
+      "light": "Ljust",
+      "dark": "Mörkt"
+    },
+    "builtInThemes": {
+      "sambeeLight": {
+        "name": "Sambee ljust",
+        "description": "Appens ljusa standardtema"
+      },
+      "sambeeDark": {
+        "name": "Sambee mörkt",
+        "description": "Appens mörka standardtema"
+      }
+    }
+  },
+  "keyboardShortcutsHelp": {
+    "defaultTitle": "Tangentbordsgenvägar",
+    "emptyState": "Det finns inga tangentbordsgenvägar",
+    "noSearchResults": "Inga matchande tangentbordsgenvägar",
+    "searchAriaLabel": "Sök bland tangentbordsgenvägar",
+    "searchPlaceholder": "Sök genvägar",
+    "resultsAriaLabel": "Sökresultat för tangentbordsgenvägar",
+    "closeAriaLabel": "Stäng tangentbordsgenvägar",
+    "groups": {
+      "general": "Allmänt",
+      "search": "Sökning",
+      "navigation": "Navigering",
+      "selection": "Markering",
+      "fileActions": "Filåtgärder",
+      "editing": "Redigering",
+      "view": "Visning",
+      "panes": "Paneler och layout"
+    },
+    "titles": {
+      "fileBrowser": "Genvägar för filhanteraren",
+      "pdfViewer": "Genvägar för PDF-visaren",
+      "imageViewer": "Genvägar för bildvisaren",
+      "markdownViewer": "Genvägar för Markdown-visaren",
+      "markdownEditor": "Genvägar för Markdown-redigeraren",
+      "textEditor": "Genvägar för textredigeraren"
+    }
+  },
+  "systemHealth": {
+    "dialogTitle": "Systemstatus",
+    "overview": {
+      "ok": "Inga problem hittades",
+      "warning": "Behöver kontrolleras",
+      "error": "Åtgärd krävs",
+      "unknown": "Vissa kontroller är inte tillgängliga",
+      "partialChecks": "Vissa kontroller är inte tillgängliga.",
+      "attentionHelp": "Kontrollera de markerade objekten nedan.",
+      "connectionHelp": "Det går inte att uppdatera serverkontrollerna. Sambee försöker igen automatiskt. Kontrollera nätverksanslutningen om problemet kvarstår.",
+      "server": "Server",
+      "container": "Container",
+      "containerApplicationData": "Lagring: programdata",
+      "containerTemporaryStorage": "Lagring: tillfälliga data",
+      "containerCombinedStorage": "Lagring: programdata och tillfälliga data",
+      "connectionStorage": "Anslutningens lagringsutrymme",
+      "localDrive": "Lokal enhet",
+      "localDrives": "Lokala enheter",
+      "smb": "SMB-anslutning",
+      "hostMemory": "Minne",
+      "systemLoad": "Genomsnittlig belastning (normaliserad)",
+      "containerMemory": "Minne",
+      "percentUsed": "{{percent}} % används",
+      "bytesUsed": "{{used}} används",
+      "memoryUsed": "{{used}} används ({{percent}} %)",
+      "spaceFree": "{{available}} ledigt ({{percent}} %)",
+      "noLimit": "Ingen gräns inställd",
+      "oldData": "Inaktuellt",
+      "checking": "Kontrollerar",
+      "localDriveHelp": "Kontrollera Companion under Inställningar > Lokala enheter."
+    },
+    "statuses": {
+      "ok": "OK",
+      "warning": "Varning",
+      "error": "Fel",
+      "unknown": "Okänt",
+      "informational": "Information",
+      "notAvailable": "Inte tillgängligt"
+    },
+    "availability": {
+      "available": "Aktuellt",
+      "collecting": "Samlar in",
+      "not_mounted": "Inte tillgängligt (montering har inte ställts in)",
+      "unsupported": "Inte tillgängligt",
+      "permission_denied": "Åtkomst nekad",
+      "offline": "Frånkopplad",
+      "timeout": "Tidsgränsen överskreds",
+      "stale": "Inaktuella uppgifter",
+      "invalid": "Ogiltigt mätvärde",
+      "unavailable": "Insamlingsfel"
+    },
+    "summary": {
+      "sectionTitle": "Sammanfattning",
+      "severityLabel": "Övergripande status",
+      "coverageLabel": "Täckning",
+      "coverageComplete": "Fullständig för aktiva kontroller",
+      "coverageIncomplete": "Ofullständig täckning",
+      "lastUpdatedLabel": "Senaste uppdatering",
+      "neverUpdated": "Väntar på första kontrollen",
+      "refreshing": "Uppdaterar statuskontroller",
+      "policyRetrying": "Det går inte att uppdatera behörigheterna för statusövervakning. Sambee försöker igen.",
+      "backendRetrying": "Vissa server- eller SMB-kontroller gav inget aktuellt mätvärde. Sambee försöker igen.",
+      "companionRetrying": "Companion gav inga aktuella mätvärden för enheterna. Sambee försöker igen.",
+      "backendUnavailableHeadline": "Serverns statusuppgifter är inte tillgängliga. Sambee försöker igen.",
+      "localDriveErrorHeadline": "En lokal enhet har kritiskt lite ledigt utrymme.",
+      "localDriveErrorsHeadline": "{{count}} lokala enheter har kritiskt lite ledigt utrymme.",
+      "localDriveWarningHeadline": "En lokal enhet har lite ledigt utrymme.",
+      "localDriveWarningsHeadline": "{{count}} lokala enheter har lite ledigt utrymme.",
+      "localDriveUnknownHeadline": "Uppgifter om utrymme på lokala enheter är inte tillgängliga eller inväntas från Companion."
+    },
+    "sections": {
+      "backendHost": "Servervärd",
+      "containerRuntime": "Serverns containermiljö",
+      "storage": "Ledigt lagringsutrymme"
+    },
+    "metrics": {
+      "hostMemory": "Värdens minne",
+      "systemLoad": "Normaliserad systembelastning",
+      "cpuTemperature": "Processortemperatur",
+      "containerMemory": "Containerns arbetsminne (working set)",
+      "load1m": "1 min",
+      "load5mEvaluated": "5 min (bedömningsgrund)",
+      "load15m": "15 min",
+      "logicalCpuMetadata": "{{count}} logiska processorer",
+      "memoryCapacity": "{{total}} totalt · {{available}} tillgängligt",
+      "memoryLimit": "Minnesgräns: {{limit}}",
+      "noMemoryLimit": "Containern har ingen minnesgräns. Procentbaserade larm är avstängda.",
+      "hostMemoryPercent": "Procentandelen baseras på värdens totala minne.",
+      "containerMemoryScope": "Gäller alla processer i containern, inte bara Sambee. Filcache räknas inte med. Delat minne och kärnminne ingår.",
+      "fileCache": "Filcache: {{cache}}",
+      "storageCapacity": "Kapacitet: {{total}}",
+      "usedValue": "{{percent}} % används ({{used}} av {{total}}, {{available}} tillgängligt)",
+      "workingSetFinite": "{{percent}} % av gränsen ({{used}} arbetsminne av {{limit}})",
+      "workingSetUnlimited": "{{used}} arbetsminne – ingen minnesgräns inställd.",
+      "storageValue": "{{percent}} % tillgängligt, {{available}} av {{total}}",
+      "thresholdsHigh": "Varning ≥ {{warning}}, fel ≥ {{error}}",
+      "thresholdsLow": "Varning ≤ {{warning}}, fel ≤ {{error}}",
+      "detectedLimits": "Identifierade gränser: varning {{warning}}, kritisk {{error}}",
+      "effectiveThresholds": "Gällande gränser: varning {{warning}} ({{warningOrigin}}), fel {{error}} ({{errorOrigin}})",
+      "sourceLabel": "Källa: {{source}}",
+      "ageSeconds": "För {{seconds}} s sedan",
+      "staleTag": "Inaktuella uppgifter (för {{seconds}} s sedan)",
+      "actualFreeNote": "Totalt ledigt fysiskt utrymme på nätverksresursen: {{actual}}",
+      "updateCompanion": "Uppdatera Companion för att visa lagringsutrymme för enheterna.",
+      "pairingLost": "Companion kunde inte verifiera parkopplingen. Kontrollera Inställningar > Lokala enheter och parkoppla på nytt vid behov.",
+      "localDriveAction": "Frigör utrymme eller välj en annan plats."
+    }
+  }
+}

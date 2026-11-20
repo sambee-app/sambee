@@ -1,31 +1,29 @@
 import { Alert, Box, CircularProgress, Stack, TextField } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { SettingsPage } from "../components/Settings/SettingsPage";
 import { loadNetworkSettingsData, SETTINGS_DATA_CACHE_KEYS } from "../components/Settings/settingsDataSources";
 import { clearCachedAsyncData, useCachedAsyncData } from "../hooks/useCachedAsyncData";
 import { SettingPersistenceAdornment, useSystemSettingPersistence } from "../hooks/useSystemSettingPersistence";
+import { translate } from "../i18n";
 import api from "../services/api";
 import type { NetworkSettings as NetworkSettingsData, NetworkSettingsUpdate } from "../types";
 import { getApiErrorMessage } from "../utils/apiErrors";
-
-const TRUSTED_PROXY_CIDRS_LABEL = "Trusted proxy CIDRs";
 
 function formatTrustedProxyCidrs(cidrs: string[]): string {
   return cidrs.join("\n");
 }
 
 export function NetworkSettings() {
+  const { t } = useTranslation();
   const [publicUrl, setPublicUrl] = useState("");
   const [trustedProxyCidrs, setTrustedProxyCidrs] = useState("");
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<{ detail: string } | null>(null);
   const persistence = useSystemSettingPersistence<NetworkSettingsUpdate>(
     (update, options) => api.updateNetworkSettings(update, options),
-    (saveError) => getApiErrorMessage(saveError, "Network settings could not be saved.")
+    (saveError) => getApiErrorMessage(saveError, translate("settings.networkPage.saveFailed"))
   );
-  const handleLoadError = useCallback(
-    (loadError: unknown) => setLoadError(getApiErrorMessage(loadError, "Network settings could not be loaded.")),
-    []
-  );
+  const handleLoadError = useCallback((error: unknown) => setLoadError({ detail: getApiErrorMessage(error, "") }), []);
   const {
     data: settings,
     loading,
@@ -52,17 +50,20 @@ export function NetworkSettings() {
   };
 
   return (
-    <SettingsPage category="admin-network" contextualNotice={loadError ? <Alert severity="error">{loadError}</Alert> : null}>
+    <SettingsPage
+      category="admin-network"
+      contextualNotice={loadError ? <Alert severity="error">{loadError.detail || t("settings.networkPage.loadFailed")}</Alert> : null}
+    >
       {loading && !settings ? (
         <Box sx={{ display: "flex", justifyContent: "center", pt: 5 }}>
-          <CircularProgress aria-label="Loading network settings" />
+          <CircularProgress aria-label={t("settings.networkPage.loading")} />
         </Box>
       ) : null}
       <Stack spacing={2.5}>
         <TextField
           required
           fullWidth
-          label="Public URL"
+          label={t("settings.networkPage.publicUrl.label")}
           value={publicUrl}
           onChange={(event) => {
             setPublicUrl(event.target.value);
@@ -76,10 +77,7 @@ export function NetworkSettings() {
           }}
           disabled={persistence.isPending("public_url")}
           error={Boolean(persistence.fieldErrors["public_url"])}
-          helperText={
-            persistence.fieldErrors["public_url"] ??
-            "The externally reachable HTTPS origin, without a path. Changing it cancels incomplete OIDC sign-ins."
-          }
+          helperText={persistence.fieldErrors["public_url"] ?? t("settings.networkPage.publicUrl.help")}
           slotProps={{
             input: {
               endAdornment:
@@ -87,8 +85,8 @@ export function NetworkSettings() {
                   <SettingPersistenceAdornment
                     pending={persistence.isPending("public_url")}
                     saved={persistence.isSaved("public_url")}
-                    savingLabel="Saving public URL"
-                    savedLabel="Public URL saved"
+                    savingLabel={t("settings.networkPage.publicUrl.saving")}
+                    savedLabel={t("settings.networkPage.publicUrl.saved")}
                   />
                 ) : null,
             },
@@ -98,7 +96,7 @@ export function NetworkSettings() {
           fullWidth
           multiline
           minRows={3}
-          label={TRUSTED_PROXY_CIDRS_LABEL}
+          label={t("settings.networkPage.trustedProxyCidrs.label")}
           value={trustedProxyCidrs}
           onChange={(event) => {
             setTrustedProxyCidrs(event.target.value);
@@ -115,10 +113,7 @@ export function NetworkSettings() {
           }
           disabled={persistence.isPending("trusted_proxy_cidrs")}
           error={Boolean(persistence.fieldErrors["trusted_proxy_cidrs"])}
-          helperText={
-            persistence.fieldErrors["trusted_proxy_cidrs"] ??
-            "One CIDR per line. Leave empty unless a reverse proxy you operate forwards client IP addresses."
-          }
+          helperText={persistence.fieldErrors["trusted_proxy_cidrs"] ?? t("settings.networkPage.trustedProxyCidrs.help")}
           slotProps={{
             inputLabel: { shrink: true },
             input: {
@@ -127,8 +122,8 @@ export function NetworkSettings() {
                   <SettingPersistenceAdornment
                     pending={persistence.isPending("trusted_proxy_cidrs")}
                     saved={persistence.isSaved("trusted_proxy_cidrs")}
-                    savingLabel="Saving trusted proxy CIDRs"
-                    savedLabel="Trusted proxy CIDRs saved"
+                    savingLabel={t("settings.networkPage.trustedProxyCidrs.saving")}
+                    savedLabel={t("settings.networkPage.trustedProxyCidrs.saved")}
                   />
                 ) : null,
             },

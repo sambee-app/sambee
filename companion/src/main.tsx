@@ -51,21 +51,20 @@ if (!isBrowserPreviewRuntime) {
     applyThemeFromBase64(event.payload);
   });
 
-  listen<CompanionLocalizationState>("localization-updated", (event) => {
-    void applyCompanionLocalization(event.payload);
-  });
-
-  void invoke<CompanionLocalizationState | null>("get_synced_localization")
-    .then((state) => {
-      if (!state) {
-        return;
-      }
-
-      return applyCompanionLocalization(state);
-    })
-    .catch(() => {
-      // Ignore hydration failures; the companion falls back to local defaults.
+  const hydrateLocalization = async () => {
+    let updateReceived = false;
+    await listen<CompanionLocalizationState>("localization-updated", (event) => {
+      updateReceived = true;
+      void applyCompanionLocalization(event.payload).catch((error) => {
+        console.warn("Could not apply synced Companion localization", error);
+      });
     });
+    const state = await invoke<CompanionLocalizationState | null>("get_synced_localization");
+    if (!updateReceived && state) await applyCompanionLocalization(state);
+  };
+  void hydrateLocalization().catch((error) => {
+    console.warn("Could not read synced Companion localization; keeping the last applied language", error);
+  });
 }
 
 const root = document.getElementById("app");

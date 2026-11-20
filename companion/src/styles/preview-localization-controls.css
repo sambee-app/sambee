@@ -1,0 +1,36 @@
+.preview-localization-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.preview-localization-controls__field {
+  display: flex;
+  flex: 1 1 132px;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  color: var(--text-primary, #1f262b);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.preview-localization-controls__field select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0.45rem 0.625rem;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 4px;
+  color: var(--text-primary, #1f262b);
+  background: var(--bg-paper, #ffffff);
+  font: inherit;
+}
+
+.preview-localization-controls__error {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--danger-text, #dc2626);
+  font-size: 0.8125rem;
+}

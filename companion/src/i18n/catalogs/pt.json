@@ -1,0 +1,243 @@
+{
+  "native": {
+    "trayPreferences": "Preferências…",
+    "trayQuit": "Fechar o Sambee Companion",
+    "noOperations": "Nenhuma operação em curso",
+    "editing": "Em edição: {{filename}}",
+    "uploading": "A enviar ({{percent}}): {{filename}}",
+    "uploadFailed": "Falha no envio: {{filename}}",
+    "downloading": "Baixando: {{filename}}",
+    "preferencesTitle": "Sambee Companion — Preferências",
+    "pairingTitle": "Sambee Companion — Pedido de emparelhamento",
+    "appPickerTitle": "Sambee Companion — Escolher uma aplicação",
+    "editingTitle": "Sambee — Em edição",
+    "authenticationTitle": "Autenticação do Sambee"
+  },
+  "pairing": {
+    "title": "Confirme a origem deste pedido do navegador",
+    "body": "Este servidor poderá acessar as unidades locais e gerenciar o tema, o idioma, os formatos regionais e a política de pesquisa de pastas do Companion. O emparelhamento transfere a gestão das configurações para este servidor.",
+    "idleMessage": "A aguardar um pedido de emparelhamento.",
+    "eyebrow": "Autorizar a origem do pedido do navegador",
+    "closeTitle": "Fechar",
+    "labels": {
+      "requestingOrigin": "Origem do pedido",
+      "verificationCode": "Código de verificação"
+    },
+    "hint": "Autorize o pedido apenas se a janela de emparelhamento do Sambee mostrar o mesmo código.",
+    "actions": {
+      "reject": "Recusar",
+      "codesMatch": "Os códigos coincidem",
+      "close": "Fechar agora"
+    },
+    "approved": {
+      "title": "Autorização enviada",
+      "body": "Os códigos de {{origin}} coincidem.",
+      "hint": "O Sambee ainda precisa de registar esta origem como confiável."
+    },
+    "success": {
+      "title": "Origem autorizada",
+      "body": "Este servidor pode acessar as unidades locais e passa a gerenciar as configurações do Companion.",
+      "hint": "Esta janela fecha automaticamente dentro de instantes."
+    }
+  },
+  "preferences": {
+    "title": "Preferências",
+    "loading": "Carregando as preferências…",
+    "closeTitle": "Fechar",
+    "sections": {
+      "pairedBrowsers": "Origens confiáveis do navegador",
+      "localization": "Idioma e região",
+      "editingBehavior": "Comportamento durante a edição",
+      "startup": "Inicialização",
+      "updates": "Atualizações",
+      "notifications": "Notificações",
+      "tempFileCleanup": "Limpeza de arquivos temporários"
+    },
+    "pairedBrowsersHint": "Estas origens confiáveis do navegador podem acessar unidades locais por meio de Companion. Ao remover uma origem, ela precisará pedir autorização novamente.",
+    "pairedBrowsersEmpty": "Companion ainda não confia em nenhuma origem do navegador.",
+    "directoryPolicy": {
+      "title": "Configurações geridas",
+      "loading": "Carregando o estado da política de pesquisa de pastas.",
+      "unavailable": "A política de pesquisa de pastas não está disponível. Aguarde um momento e atualize o estado ou reinicie Companion.",
+      "active": "O servidor associado gerencia as configurações do Companion. Associe outro servidor para lhe transferir a gestão.",
+      "defaults": "Nenhum servidor de gestão está selecionado. Continuam ativas as configurações padrão ou as últimas configurações válidas. Associe o servidor que quer usar.",
+      "owner": "Servidor de gestão",
+      "revision": "Revisão ativa",
+      "refresh": "Atualizar o estado da política"
+    },
+    "localizationStatusHint": "Mostra as últimas configurações de idioma e região sincronizadas a partir de uma origem confiável do navegador para Sambee.",
+    "localizationStatus": {
+      "syncedBadge": "Sincronizado a partir do navegador",
+      "languageLabel": "Idioma",
+      "regionalLocaleLabel": "Formato regional",
+      "updatedAtLabel": "Última atualização",
+      "sourceOriginLabel": "Origem da sincronização",
+      "empty": "Ainda não houve sincronização do idioma e da região a partir do navegador."
+    },
+    "unpairTitle": "Remover origem confiável",
+    "unpairButton": "Remover",
+    "conflictResolutionLabel": "Resolução de conflitos de envio",
+    "conflictResolutionHint": "O que fazer se o arquivo no servidor mudar durante a edição.",
+    "conflictActions": {
+      "ask": "Perguntar sempre",
+      "overwrite": "Substituir sempre a versão no servidor",
+      "saveCopy": "Salvar sempre como nova cópia"
+    },
+    "startupLabel": "Iniciar Sambee Companion ao entrar no sistema",
+    "startupHint": "Opção recomendada para unidades locais. O navegador só consegue acessar as unidades locais enquanto Companion está em execução.",
+    "updateChannelLabel": "Canal de atualização",
+    "updateChannelHint": "Determina de que canal Companion recebe as atualizações automáticas.",
+    "updateChannels": {
+      "stable": "Estável",
+      "beta": "Beta",
+      "test": "Teste"
+    },
+    "preReleaseWarning": "As versões do canal «{{channel}}» podem incluir funções incompletas ou causar falhas nas funções existentes.",
+    "confirmUpdateChannel": {
+      "title": "Mudar o canal de atualização?",
+      "body": "Ao mudar do canal Estável para «{{channel}}», Companion pode instalar versões preliminares que passaram por menos testes.",
+      "confirm": "Mudar de canal"
+    },
+    "updateActions": {
+      "checkNow": "Procurar atualizações",
+      "checking": "Pesquisa em curso…",
+      "install": "Instalar atualização",
+      "installing": "Instalação em curso…"
+    },
+    "updateStatus": {
+      "statusLabel": "Estado das atualizações",
+      "lastChecked": "Última pesquisa: {{time}}",
+      "currentVersionLabel": "Versão atual",
+      "latestVersionLabel": "Versão disponível",
+      "publishedAtLabel": "Data de publicação",
+      "errorLabel": "Detalhes",
+      "upToDate": "Você está usando a versão mais recente do canal «{{channel}}».",
+      "updateAvailable": "A atualização {{version}} está disponível no canal «{{channel}}».",
+      "installing": "Instalação da atualização {{version}} do canal «{{channel}}» em curso.",
+      "installed": "A atualização {{version}} foi instalada. Reinicie a aplicação se ela não reiniciar automaticamente.",
+      "checkFailed": "Não foi possível procurar atualizações no canal «{{channel}}».",
+      "unknownVersion": "Desconhecida",
+      "unknownError": "Erro desconhecido"
+    },
+    "notificationsLabel": "Mostrar notificações do sistema",
+    "notificationsHint": "Mostra notificações do sistema sobre a edição, por exemplo, quando um envio é concluído ou falha.",
+    "retentionLabel": "Manter arquivos temporários por (dias)",
+    "retentionHint": "Ao iniciar, Companion elimina automaticamente da lixeira os arquivos temporários que excedem este prazo. O intervalo é de 1 a 90 dias.",
+    "savedIndicator": "Salvo ✓",
+    "confirmUnpair": {
+      "title": "Remover a origem confiável?",
+      "body": "{{origin}} perderá o acesso às unidades locais até pedir autorização novamente a Companion.",
+      "unpairing": "Remoção em curso…"
+    }
+  },
+  "recovery": {
+    "title": "Foram encontradas edições não salvas",
+    "subtitle_one": "Verifique {{count}} item de uma sessão anterior.",
+    "subtitle_many": "Verifique {{count}} itens de uma sessão anterior.",
+    "subtitle_other": "Verifique {{count}} itens de uma sessão anterior.",
+    "detail": "{{remotePath}} — última alteração: {{localModified}}",
+    "authRefreshedRetryUpload": "A autenticação foi renovada. Selecione «Enviar» novamente para repetir o envio do arquivo ao servidor.",
+    "lifecycle": {
+      "renewalRequired": "A sessão de edição recuperada expirou antes do envio. Abra o arquivo novamente no Sambee ou descarte esta cópia temporária.",
+      "authFailed": "Companion não conseguiu confirmar que a sessão de edição recuperada ainda está autorizada. Abra o arquivo novamente no Sambee ou descarte esta cópia temporária.",
+      "lockLost": "O bloqueio da sessão de edição recuperada já não está ativo no servidor. Abra o arquivo novamente no Sambee ou descarte esta cópia temporária.",
+      "recoveryRequired": "A sessão de edição recuperada expirou e não pode continuar. Abra o arquivo novamente no Sambee ou descarte esta cópia temporária."
+    },
+    "actions": {
+      "upload": "Enviar",
+      "retryUpload": "Repetir envio",
+      "discard": "Descartar",
+      "later": "Mais tarde",
+      "dismissAll": "Fechar todos os avisos"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Cancelar",
+      "close": "Fechar",
+      "open": "Abrir"
+    }
+  },
+  "app": {
+    "title": "Sambee Companion",
+    "idleMessage": "Companion está ativo na área de notificação. Nenhum arquivo em edição."
+  },
+  "doneEditing": {
+    "waitingForContext": "Aguardando os dados da sessão de edição…",
+    "openedIn": "Aberto em: {{appName}}",
+    "statusLabel": "Status:",
+    "modifiedAt": "Última alteração: {{time}}",
+    "unchanged": "Sem alterações",
+    "parseConflictError": "Não foi possível ler as informações do conflito",
+    "authRefreshedRetryUpload": "A autenticação foi renovada. Mantenha «Concluir edição» pressionado novamente para repetir o envio.",
+    "lifecycle": {
+      "renewalRequired": "A sessão de edição expirou antes que Companion pudesse renová-la. Abra o arquivo novamente no Sambee e tente salvá-lo outra vez.",
+      "authFailed": "Companion não conseguiu confirmar que a sessão de edição ainda está autorizada. Abra o arquivo novamente no Sambee para iniciar outra sessão.",
+      "lockLost": "O bloqueio de edição já não está ativo no servidor. Abra o arquivo novamente no Sambee antes de repetir o envio.",
+      "recoveryRequired": "Esta sessão de edição expirou e não pode continuar. Abra o arquivo novamente no Sambee para iniciar uma nova recuperação."
+    },
+    "buttons": {
+      "doneUpload": "✓ Concluir edição — mantenha pressionado para enviar",
+      "retryUpload": "✓ Concluir edição — mantenha pressionado para repetir o envio",
+      "reopenRequired": "Sessão expirada — abra o arquivo novamente no Sambee",
+      "authFailed": "Falha na autenticação — abra o arquivo novamente no Sambee",
+      "lockLost": "Bloqueio inativo — abra o arquivo novamente no Sambee",
+      "recoveryRequired": "Recuperação necessária — abra o arquivo novamente no Sambee",
+      "doneClose": "✓ Concluir edição — mantenha pressionado para fechar",
+      "uploading": "✓ Envio em curso…",
+      "closing": "✓ Fechamento em curso…",
+      "discardHold": "Descartar alterações — mantenha pressionado"
+    },
+    "aria": {
+      "confirmUpload": "Mantenha pressionado por {{seconds}} segundos para confirmar o envio",
+      "retryUpload": "Mantenha pressionado por {{seconds}} segundos para repetir o envio após renovar a autenticação",
+      "confirmClose": "Mantenha pressionado por {{seconds}} segundos para fechar e liberar o bloqueio",
+      "discardChanges": "Mantenha pressionado por {{seconds}} segundos para descartar as alterações",
+      "actionUnavailable": "Para usar esta ação, abra o arquivo novamente no Sambee",
+      "reopenInBrowser": "Abra Sambee no navegador para iniciar uma nova sessão de edição",
+      "uploadProgress": "Progresso do envio"
+    }
+  },
+  "conflictDialog": {
+    "title": "⚠ Conflito identificado",
+    "body": "Outro usuário alterou este arquivo no servidor enquanto você o editava.",
+    "labels": {
+      "yourDownload": "Versão baixada por você:",
+      "serverVersion": "Versão no servidor:"
+    },
+    "actions": {
+      "overwrite": "Substituir a versão no servidor",
+      "saveCopy": "Salvar como cópia",
+      "cancel": "Cancelar"
+    },
+    "authRefreshedRetry": "A autenticação foi renovada. Selecione novamente «Substituir a versão no servidor» ou «Salvar como cópia» para repetir o envio.",
+    "lifecycle": {
+      "renewalRequired": "A sessão de edição expirou antes que o envio pudesse ser autorizado. Feche esta janela e abra o arquivo novamente no Sambee.",
+      "authFailed": "Companion não conseguiu confirmar que a sessão de edição ainda está autorizada. Feche esta janela e abra o arquivo novamente no Sambee.",
+      "lockLost": "O bloqueio desta sessão de edição já não está ativo no servidor. Feche esta janela e abra o arquivo novamente no Sambee.",
+      "recoveryRequired": "Esta sessão de edição expirou e não pode continuar. Feche esta janela e abra o arquivo novamente no Sambee."
+    }
+  },
+  "largeFileWarning": {
+    "title": "⚠ Arquivo grande",
+    "body": "Este arquivo ocupa {{sizeMb}} MB (limite: {{limitMb}} MB). A transferência e a sincronização de arquivos grandes podem demorar e ocupar muito espaço em disco.",
+    "actions": {
+      "continue": "Continuar mesmo assim",
+      "cancel": "Cancelar"
+    }
+  },
+  "appPicker": {
+    "title": "Escolha uma aplicação para abrir este arquivo .{{extension}}",
+    "loading": "Carregando as aplicações disponíveis…",
+    "browseDialogTitle": "Procurar uma aplicação",
+    "empty": "Não há aplicações registradas para abrir arquivos .{{extension}}.",
+    "sectionDefault": "Aplicação padrão",
+    "sectionSuggested": "Aplicações sugeridas",
+    "sectionMoreOptions": "Mais opções",
+    "defaultBadge": "(padrão)",
+    "alwaysUse": "Usar sempre esta aplicação para arquivos .{{extension}}",
+    "browseButton": "Procurar outra aplicação…",
+    "chooseAnotherApp": "Escolher outra aplicação",
+    "iconAlt": "Ícone de {{appName}}"
+  }
+}

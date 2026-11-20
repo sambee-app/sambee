@@ -43,6 +43,8 @@ If an error-path test must emit an expected diagnostic, mock that specific messa
 
 ### Frontend jsdom Fixtures
 
+When a test asserts translation keys instead of translated text, use `mockReactI18next` from `frontend/src/test/mocks/reactI18next.ts`. It supplies both `t` and `i18n.dir()`, so shared controls such as the mobile back button can render. Use real i18n when testing translations or text direction.
+
 Use `renderWithStyles` from `frontend/src/test/utils/renderWithStyles.tsx` for styled components. The shared browser, component, and integration render helpers already use it. It gives each render a separate Emotion cache, uses CSS rule insertion instead of a style element for each rule, and removes its style sheets after React Testing Library cleanup. The wrapper also keeps the cache through `rerender` and Strict Mode.
 
 The default Emotion cache retains generated styles after components unmount. In large test files, thousands of retained style sheets can make CSS queries, focus changes, and menus slow enough to exceed the test timeout. Do not remove style elements without resetting their cache: later renders can then omit required CSS.

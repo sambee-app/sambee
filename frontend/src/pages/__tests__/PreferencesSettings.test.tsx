@@ -1,25 +1,32 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setLocale } from "../../i18n";
 import type { StoredTheme } from "../../services/api";
 import api from "../../services/api";
 import { render } from "../../test/utils/test-utils";
 import { builtInThemes } from "../../theme/themes";
 import { AppearanceSettings } from "../PreferencesSettings";
 
-const { setLanguagePreferenceMock, setRegionalLocalePreferenceMock, themeCommitMock, themeContextState, settingStates } = vi.hoisted(
-  () => ({
-    setLanguagePreferenceMock: vi.fn(),
-    setRegionalLocalePreferenceMock: vi.fn(),
-    themeCommitMock: vi.fn(),
-    themeContextState: { isAdmin: false, currentThemeId: "sambee-light", storedThemes: [] as StoredTheme[], refreshThemes: vi.fn() },
-    settingStates: {
-      language: { error: null as string | null, pending: false, saved: false },
-      regionalLocale: { error: null as string | null, pending: false, saved: false },
-      theme: { error: null as string | null, pending: false, saved: false },
-    },
-  })
-);
+const {
+  setLanguagePreferenceMock,
+  setRegionalLocalePreferenceMock,
+  themeCommitMock,
+  themeContextState,
+  localePreferenceState,
+  settingStates,
+} = vi.hoisted(() => ({
+  setLanguagePreferenceMock: vi.fn(),
+  setRegionalLocalePreferenceMock: vi.fn(),
+  themeCommitMock: vi.fn(),
+  themeContextState: { isAdmin: false, currentThemeId: "sambee-light", storedThemes: [] as StoredTheme[], refreshThemes: vi.fn() },
+  localePreferenceState: { languagePreference: "browser" },
+  settingStates: {
+    language: { error: null as string | null, pending: false, saved: false },
+    regionalLocale: { error: null as string | null, pending: false, saved: false },
+    theme: { error: null as string | null, pending: false, saved: false },
+  },
+}));
 
 vi.mock("../../theme", () => ({
   useSambeeTheme: () => ({
@@ -45,7 +52,8 @@ vi.mock("../../theme", () => ({
 vi.mock("../../i18n/LocalePreferencesProvider", () => ({
   LocalePreferencesProvider: ({ children }: { children: React.ReactNode }) => children,
   useLocalePreferences: () => ({
-    languagePreference: "browser",
+    languageLoadFailed: false,
+    languagePreference: localePreferenceState.languagePreference,
     regionalLocale: "en-US",
     regionalLocalePreference: "browser",
     setLanguagePreference: setLanguagePreferenceMock,
@@ -78,6 +86,7 @@ describe("AppearanceSettings", () => {
     themeContextState.isAdmin = false;
     themeContextState.currentThemeId = "sambee-light";
     themeContextState.storedThemes = [];
+    localePreferenceState.languagePreference = "browser";
     themeContextState.refreshThemes.mockResolvedValue(undefined);
     themeCommitMock.mockResolvedValue(undefined);
     setLanguagePreferenceMock.mockResolvedValue(undefined);
@@ -97,6 +106,23 @@ describe("AppearanceSettings", () => {
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
   });
 
+  it("translates theme scopes and actions with the active locale", async () => {
+    await act(async () => setLocale("en-XA"));
+    try {
+      themeContextState.storedThemes = [
+        { id: "personal", scope: "user", version: 1, definition: { ...builtInThemes[0]!, name: "Personal" } },
+      ];
+      render(<AppearanceSettings />);
+
+      expect(screen.getByText("[Ýóúŕ ťħéḿéš]")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "[Ćóṕý]" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "[Éďíť]" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+    } finally {
+      await act(async () => setLocale("en"));
+    }
+  });
+
   it("persists a selected language immediately", async () => {
     const user = userEvent.setup();
     render(<AppearanceSettings />);
@@ -107,6 +133,23 @@ describe("AppearanceSettings", () => {
     await waitFor(() => expect(setLanguagePreferenceMock).toHaveBeenCalledWith("en-XA"));
   });
 
+  it("uses a compact pseudo-language label and explains its purpose", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<AppearanceSettings />);
+
+    await user.click(screen.getByRole("combobox", { name: "Language" }));
+    const pseudoOption = await screen.findByRole("option", { name: "Pseudo-English (for localization testing)" });
+    expect(pseudoOption).toHaveTextContent("Pseudo-English");
+    expect(pseudoOption).toHaveAttribute("aria-label", "Pseudo-English (for localization testing)");
+    await user.click(pseudoOption);
+    localePreferenceState.languagePreference = "en-XA";
+    rerender(<AppearanceSettings />);
+
+    expect(screen.getByText("Pseudo-English")).toBeInTheDocument();
+    expect(screen.getByText("Pseudo-English is for localization testing.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Language" })).toHaveAccessibleDescription("Pseudo-English is for localization testing.");
+  });
+
   it("persists a selected regional locale immediately", async () => {
     const user = userEvent.setup();
     render(<AppearanceSettings />);
@@ -115,6 +158,36 @@ describe("AppearanceSettings", () => {
     await user.click(await screen.findByRole("option", { name: "German (Germany)" }));
 
     await waitFor(() => expect(setRegionalLocalePreferenceMock).toHaveBeenCalledWith("de-DE"));
+  });
+
+  it("offers a regional preset for each translated language", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSettings />);
+
+    await user.click(screen.getByRole("combobox", { name: "Regional settings" }));
+
+    for (const label of [
+      "Chinese (China)",
+      "Dutch (Netherlands)",
+      "Italian (Italy)",
+      "Korean (South Korea)",
+      "Polish (Poland)",
+      "Portuguese (Portugal)",
+      "Spanish (Spain)",
+      "Swedish (Sweden)",
+    ]) {
+      expect(await screen.findByRole("option", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("persists a newly added regional locale immediately", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceSettings />);
+
+    await user.click(screen.getByRole("combobox", { name: "Regional settings" }));
+    await user.click(await screen.findByRole("option", { name: "Spanish (Spain)" }));
+
+    await waitFor(() => expect(setRegionalLocalePreferenceMock).toHaveBeenCalledWith("es-ES"));
   });
 
   it("persists a selected theme as its own field update", async () => {

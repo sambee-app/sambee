@@ -1,6 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { DialogPreviewLayout, type PreviewThemeMode } from "./DialogPreviewLayout";
 import { type LeftoverInfo, RecoveryDialog } from "./RecoveryDialog";
+import { usePreviewSettings } from "./usePreviewSettings";
 
 type PreviewActionResult = "success" | "error" | "reauth";
 type PreviewCount = "one" | "three";
@@ -31,16 +32,45 @@ const PREVIEW_LEFTOVERS: LeftoverInfo[] = [
     local_modified: "yesterday at 18:22",
   },
 ];
+const LONG_PREVIEW_LEFTOVERS: LeftoverInfo[] = [
+  {
+    operation_dir: "preview-long-operation-1",
+    filename: "Jahresabschlusszusammenstellungsdokumentation_2026.xlsx",
+    server_url: "https://sambee.local",
+    remote_path:
+      "/AbteilungsübergreifendeZusammenarbeitsdokumentation/Finanzplanung/Jahresabschlusszusammenstellungsdokumentation_2026.xlsx",
+    connection_id: "preview-connection-1",
+    local_modified: "today at 12:16",
+  },
+  {
+    operation_dir: "preview-long-operation-2",
+    filename: "Unternehmenssteuererklärungsvorbereitungsunterlagen.docx",
+    server_url: "https://sambee.local",
+    remote_path: "/Finanzen/Unternehmenssteuererklärungsvorbereitungsunterlagen.docx",
+    connection_id: "preview-connection-1",
+    local_modified: "today at 11:43",
+  },
+  {
+    operation_dir: "preview-long-operation-3",
+    filename: "AbteilungsübergreifendeZusammenarbeitsdokumentation.md",
+    server_url: "https://sambee.local",
+    remote_path: "/Team/AbteilungsübergreifendeZusammenarbeitsdokumentation.md",
+    connection_id: "preview-connection-2",
+    local_modified: "yesterday at 18:22",
+  },
+];
 
 /** Browser-only preview for the leftover recovery dialog. */
 export function RecoveryDialogPreview() {
+  const previewSettings = usePreviewSettings();
   const [themeMode, setThemeMode] = useState<PreviewThemeMode>("light");
   const [actionResult, setActionResult] = useState<PreviewActionResult>("success");
   const [count, setCount] = useState<PreviewCount>("three");
   const [visible, setVisible] = useState(true);
   const [instanceKey, setInstanceKey] = useState(0);
 
-  const leftovers = count === "one" ? PREVIEW_LEFTOVERS.slice(0, 1) : PREVIEW_LEFTOVERS;
+  const previewLeftovers = previewSettings.dataVariant === "long" ? LONG_PREVIEW_LEFTOVERS : PREVIEW_LEFTOVERS;
+  const leftovers = count === "one" ? previewLeftovers.slice(0, 1) : previewLeftovers;
 
   const uploadActionHandler = useMemo(
     () => async () => {
@@ -75,6 +105,7 @@ export function RecoveryDialogPreview() {
       themeMode={themeMode}
       onThemeModeChange={setThemeMode}
       onReset={resetPreview}
+      settings={previewSettings}
       controls={[
         <label class="dialog-preview__field" key="count">
           <span>Items</span>
@@ -97,7 +128,7 @@ export function RecoveryDialogPreview() {
       ]}
     >
       {visible ? (
-        <div key={instanceKey}>
+        <div key={`${instanceKey}-${previewSettings.dataVariant}`}>
           <RecoveryDialog
             leftovers={leftovers}
             onDone={() => setVisible(false)}

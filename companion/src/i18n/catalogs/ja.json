@@ -1,0 +1,241 @@
+{
+  "native": {
+    "trayPreferences": "設定…",
+    "trayQuit": "Sambee Companion を終了",
+    "noOperations": "実行中の操作はありません",
+    "editing": "編集中: {{filename}}",
+    "uploading": "アップロード中（{{percent}}）: {{filename}}",
+    "uploadFailed": "アップロードできませんでした: {{filename}}",
+    "downloading": "ダウンロード中: {{filename}}",
+    "preferencesTitle": "Sambee Companion — 設定",
+    "pairingTitle": "Sambee Companion — ペアリング要求",
+    "appPickerTitle": "Sambee Companion — アプリの選択",
+    "editingTitle": "Sambee — 編集中",
+    "authenticationTitle": "Sambee の認証"
+  },
+  "pairing": {
+    "title": "ブラウザーのオリジンを確認",
+    "body": "このサーバーはローカルドライブにアクセスし、Companion のテーマ、言語と地域、フォルダー検索のポリシーを管理します。ペアリングすると、設定を管理するサーバーが切り替わります。",
+    "idleMessage": "ペアリング要求を待っています。",
+    "eyebrow": "ブラウザーのオリジンを承認",
+    "closeTitle": "閉じる",
+    "labels": {
+      "requestingOrigin": "要求元のオリジン",
+      "verificationCode": "確認コード"
+    },
+    "hint": "Sambee のペアリング画面に同じコードが表示されている場合にのみ承認してください。",
+    "actions": {
+      "reject": "拒否",
+      "codesMatch": "コードが一致",
+      "close": "今すぐ閉じる"
+    },
+    "approved": {
+      "title": "承認を送信しました",
+      "body": "{{origin}} のコードが一致しました。",
+      "hint": "Sambee がこのオリジンを信頼済みとして保存するまでお待ちください。"
+    },
+    "success": {
+      "title": "オリジンを承認しました",
+      "body": "このサーバーはローカルドライブにアクセスでき、Companion の設定を管理するようになりました。",
+      "hint": "このウィンドウはまもなく自動的に閉じます。"
+    }
+  },
+  "preferences": {
+    "title": "設定",
+    "loading": "設定を読み込み中…",
+    "closeTitle": "閉じる",
+    "sections": {
+      "pairedBrowsers": "信頼済みのブラウザーオリジン",
+      "localization": "言語と地域",
+      "editingBehavior": "編集時の動作",
+      "startup": "起動",
+      "updates": "更新",
+      "notifications": "通知",
+      "tempFileCleanup": "一時ファイルの整理"
+    },
+    "pairedBrowsersHint": "これらの信頼済みのオリジンは、Companion を通じてローカルドライブにアクセスできます。オリジンを削除すると、そのオリジンから再度許可を求める必要があります。",
+    "pairedBrowsersEmpty": "信頼済みのブラウザーオリジンはありません。",
+    "directoryPolicy": {
+      "title": "管理対象の設定",
+      "loading": "フォルダー検索ポリシーの状態を読み込み中です。",
+      "unavailable": "フォルダー検索ポリシーを取得できません。少し待ってから状態を更新するか、Companion を再起動してください。",
+      "active": "ペアリング済みのサーバーが Companion の設定を管理しています。管理するサーバーを変更するには、別のサーバーとペアリングしてください。",
+      "defaults": "設定を管理するサーバーが選択されていません。既定の設定または最後に有効だった設定が適用されています。使用するサーバーとペアリングしてください。",
+      "owner": "設定管理サーバー",
+      "revision": "適用中のリビジョン",
+      "refresh": "ポリシーの状態を更新"
+    },
+    "localizationStatusHint": "信頼済みの Sambee のブラウザーオリジンから最後に同期された言語と地域の設定を表示します。",
+    "localizationStatus": {
+      "syncedBadge": "ブラウザーから同期済み",
+      "languageLabel": "言語",
+      "regionalLocaleLabel": "地域形式",
+      "updatedAtLabel": "最終更新",
+      "sourceOriginLabel": "同期元のオリジン",
+      "empty": "ブラウザーから言語と地域の設定がまだ同期されていません。"
+    },
+    "unpairTitle": "信頼済みのオリジンを削除",
+    "unpairButton": "削除",
+    "conflictResolutionLabel": "アップロード時の競合の解決方法",
+    "conflictResolutionHint": "編集中にサーバー上のファイルが変更された場合の動作です。",
+    "conflictActions": {
+      "ask": "毎回確認する",
+      "overwrite": "常にサーバー上のバージョンを上書きする",
+      "saveCopy": "常に新しいコピーとして保存する"
+    },
+    "startupLabel": "サインイン時に Sambee Companion を起動する",
+    "startupHint": "ローカルドライブを使う場合におすすめします。ブラウザーからローカルドライブにアクセスできるのは、Companion の実行中だけです。",
+    "updateChannelLabel": "更新チャンネル",
+    "updateChannelHint": "Companion が自動更新に使うチャンネルを指定します。",
+    "updateChannels": {
+      "stable": "安定版",
+      "beta": "ベータ版",
+      "test": "テスト版"
+    },
+    "preReleaseWarning": "「{{channel}}」には未完成の機能や、既存の機能に影響する不具合が含まれることがあります。",
+    "confirmUpdateChannel": {
+      "title": "更新チャンネルを切り替えますか？",
+      "body": "安定版から「{{channel}}」に切り替えると、テスト回数の少ないプレビュー版がインストールされることがあります。",
+      "confirm": "チャンネルを切り替える"
+    },
+    "updateActions": {
+      "checkNow": "更新を確認",
+      "checking": "確認中…",
+      "install": "更新をインストール",
+      "installing": "インストール中…"
+    },
+    "updateStatus": {
+      "statusLabel": "更新状態",
+      "lastChecked": "最終確認：{{time}}",
+      "currentVersionLabel": "現在のバージョン",
+      "latestVersionLabel": "利用可能なバージョン",
+      "publishedAtLabel": "公開日",
+      "errorLabel": "詳細",
+      "upToDate": "「{{channel}}」の最新バージョンを使用しています。",
+      "updateAvailable": "「{{channel}}」で更新 {{version}} を利用できます。",
+      "installing": "「{{channel}}」の更新 {{version}} をインストールしています。",
+      "installed": "更新 {{version}} をインストールしました。アプリが自動で再起動しない場合は、手動で再起動してください。",
+      "checkFailed": "「{{channel}}」の更新を確認できませんでした。",
+      "unknownVersion": "不明",
+      "unknownError": "不明なエラー"
+    },
+    "notificationsLabel": "デスクトップ通知を表示",
+    "notificationsHint": "アップロードの成功や失敗など、編集に関するシステム通知を表示します。",
+    "retentionLabel": "一時ファイルの保持期間（日数）",
+    "retentionHint": "起動時に、保持期間を過ぎたごみ箱内の一時ファイルが自動的に削除されます。1～90 日の範囲で設定できます。",
+    "savedIndicator": "保存済み ✓",
+    "confirmUnpair": {
+      "title": "信頼済みのオリジンを削除しますか？",
+      "body": "{{origin}} は、この Companion に再度許可を求めるまでローカルドライブにアクセスできなくなります。",
+      "unpairing": "削除中…"
+    }
+  },
+  "recovery": {
+    "title": "保存されていないファイルが見つかりました",
+    "subtitle_other": "以前のセッションのファイルが {{count}} 件あります。内容を確認してください。",
+    "detail": "{{remotePath}} — 更新日時：{{localModified}}",
+    "authRefreshedRetryUpload": "認証が更新されました。もう一度「アップロード」を選択して、このファイルをサーバーに送信し直してください。",
+    "lifecycle": {
+      "renewalRequired": "アップロードの前に、復元した編集セッションの有効期限が切れました。Sambee からファイルを開き直すか、この一時コピーを破棄してください。",
+      "authFailed": "復元した編集セッションが引き続き許可されていることを確認できませんでした。Sambee からファイルを開き直すか、この一時コピーを破棄してください。",
+      "lockLost": "復元した編集セッションのサーバー上のロックが無効になりました。Sambee からファイルを開き直すか、この一時コピーを破棄してください。",
+      "recoveryRequired": "復元した編集セッションの有効期限が切れたため、再開できません。Sambee からファイルを開き直すか、この一時コピーを破棄してください。"
+    },
+    "actions": {
+      "upload": "アップロード",
+      "retryUpload": "アップロードを再試行",
+      "discard": "破棄",
+      "later": "後で",
+      "dismissAll": "すべての通知を閉じる"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "キャンセル",
+      "close": "閉じる",
+      "open": "開く"
+    }
+  },
+  "app": {
+    "title": "Sambee Companion",
+    "idleMessage": "通知領域で実行中です。編集中のファイルはありません。"
+  },
+  "doneEditing": {
+    "waitingForContext": "編集セッションの情報を待っています…",
+    "openedIn": "開いたアプリ：{{appName}}",
+    "statusLabel": "状態：",
+    "modifiedAt": "更新日時：{{time}}",
+    "unchanged": "変更なし",
+    "parseConflictError": "競合情報を読み取れませんでした",
+    "authRefreshedRetryUpload": "認証が更新されました。もう一度「編集を完了」を長押しして、アップロードをやり直してください。",
+    "lifecycle": {
+      "renewalRequired": "Companion が更新する前に編集セッションの有効期限が切れました。Sambee からファイルを開き直してから、もう一度保存してください。",
+      "authFailed": "編集セッションが引き続き許可されていることを確認できませんでした。Sambee からファイルを開き直して、新しい編集セッションを開始してください。",
+      "lockLost": "サーバー上の編集ロックが無効になりました。Sambee からファイルを開き直してから、もう一度アップロードしてください。",
+      "recoveryRequired": "編集セッションの有効期限が切れたため、再開できません。Sambee からファイルを開き直して、新たに復元を開始してください。"
+    },
+    "buttons": {
+      "doneUpload": "✓ 編集を完了 — 長押しでアップロード",
+      "retryUpload": "✓ 編集を完了 — 長押しでアップロードを再試行",
+      "reopenRequired": "セッションの有効期限切れ — Sambee から開き直す",
+      "authFailed": "認証に失敗 — Sambee から開き直す",
+      "lockLost": "ロックが無効 — Sambee から開き直す",
+      "recoveryRequired": "復元が必要 — Sambee から開き直す",
+      "doneClose": "✓ 編集を完了 — 長押しで閉じる",
+      "uploading": "✓ アップロード中…",
+      "closing": "✓ 閉じています…",
+      "discardHold": "変更を破棄 — 長押し"
+    },
+    "aria": {
+      "confirmUpload": "{{seconds}} 秒間長押ししてアップロードを確定",
+      "retryUpload": "再認証後、{{seconds}} 秒間長押ししてアップロードを再試行",
+      "confirmClose": "{{seconds}} 秒間長押しして閉じ、ロックを解除",
+      "discardChanges": "{{seconds}} 秒間長押しして変更を破棄",
+      "actionUnavailable": "この操作を行うには、Sambee からファイルを開き直してください",
+      "reopenInBrowser": "ブラウザーで Sambee を開き、新しい編集セッションを開始",
+      "uploadProgress": "アップロードの進行状況"
+    }
+  },
+  "conflictDialog": {
+    "title": "⚠ 競合が発生しました",
+    "body": "編集中に別のユーザーがサーバー上のファイルを変更しました。",
+    "labels": {
+      "yourDownload": "ダウンロードしたバージョン：",
+      "serverVersion": "サーバー上のバージョン："
+    },
+    "actions": {
+      "overwrite": "サーバー上のバージョンを上書き",
+      "saveCopy": "コピーとして保存",
+      "cancel": "キャンセル"
+    },
+    "authRefreshedRetry": "認証が更新されました。もう一度「サーバー上のバージョンを上書き」または「コピーとして保存」を選択して、アップロードをやり直してください。",
+    "lifecycle": {
+      "renewalRequired": "アップロードが許可される前に編集セッションの有効期限が切れました。このダイアログを閉じ、Sambee からファイルを開き直してください。",
+      "authFailed": "編集セッションが引き続き許可されていることを確認できませんでした。このダイアログを閉じ、Sambee からファイルを開き直してください。",
+      "lockLost": "この編集セッションのサーバー上のロックが無効になりました。このダイアログを閉じ、Sambee からファイルを開き直してください。",
+      "recoveryRequired": "編集セッションの有効期限が切れたため、再開できません。このダイアログを閉じ、Sambee からファイルを開き直してください。"
+    }
+  },
+  "largeFileWarning": {
+    "title": "⚠ サイズの大きいファイル",
+    "body": "このファイルのサイズは {{sizeMb}} MB です（上限：{{limitMb}} MB）。サイズの大きいファイルのダウンロードや同期には時間がかかり、多くのディスク容量を使うことがあります。",
+    "actions": {
+      "continue": "続行する",
+      "cancel": "キャンセル"
+    }
+  },
+  "appPicker": {
+    "title": "この .{{extension}} ファイルを開くアプリを選択",
+    "loading": "使用できるアプリを読み込み中…",
+    "browseDialogTitle": "アプリの場所を参照",
+    "empty": ".{{extension}} ファイルを開くアプリが登録されていません。",
+    "sectionDefault": "既定のアプリ",
+    "sectionSuggested": "おすすめのアプリ",
+    "sectionMoreOptions": "その他のオプション",
+    "defaultBadge": "（既定）",
+    "alwaysUse": "常にこのアプリで .{{extension}} ファイルを開く",
+    "browseButton": "別のアプリの場所を参照…",
+    "chooseAnotherApp": "別のアプリを選択",
+    "iconAlt": "{{appName}} のアイコン"
+  }
+}

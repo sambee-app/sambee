@@ -64,6 +64,8 @@ echo -e "${BLUE}======================================${NC}"
 echo -e "${BLUE}  Sambee - Test & Analysis Suite${NC}"
 echo -e "${BLUE}======================================${NC}\n"
 
+run_check "Localization catalogs validated" "Localization catalog validation failed" node "$SCRIPT_DIR/validate-localization.mjs"
+run_check "Localization validator tests passed" "Localization validator tests failed" node --test "$SCRIPT_DIR/validate-localization.test.mjs"
 require_backend_venv
 run_check "Frontend dependencies are up to date" "Frontend dependency check failed" node "$REPO_ROOT/frontend/scripts/dependency-state.mjs" --check
 
@@ -165,6 +167,7 @@ if [ -d "$REPO_ROOT/companion/src-tauri" ]; then
     # TypeScript - Type checking
     echo -e "${BLUE}Running TypeScript compiler (companion type checking)...${NC}"
     run_check "Companion TypeScript type check passed" "Companion TypeScript type check failed" npx tsc --noEmit
+    run_check "Companion webview tests passed" "Companion webview tests failed" npm test
 
     echo -e "${YELLOW}=== Companion: Windows Cross-Check ===${NC}"
     echo -e "${BLUE}Running Windows GNU target cargo check...${NC}"

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { DialogPreviewLayout, type PreviewThemeMode } from "./DialogPreviewLayout";
 import { type LargeFileInfo, LargeFileWarning } from "./LargeFileWarning";
+import { usePreviewSettings } from "./usePreviewSettings";
 
 type PreviewActionResult = "success" | "error";
 
@@ -10,9 +11,14 @@ const PREVIEW_INFO: LargeFileInfo = {
   size_mb: 842,
   limit_mb: 250,
 };
+const LONG_PREVIEW_INFO: LargeFileInfo = {
+  ...PREVIEW_INFO,
+  filename: "Jahresabschlusszusammenstellungsdokumentation_Quartalsbudget_2026.mov",
+};
 
 /** Browser-only preview for the large file warning dialog. */
 export function LargeFileWarningPreview() {
+  const previewSettings = usePreviewSettings();
   const [themeMode, setThemeMode] = useState<PreviewThemeMode>("light");
   const [actionResult, setActionResult] = useState<PreviewActionResult>("success");
   const [visible, setVisible] = useState(true);
@@ -38,6 +44,7 @@ export function LargeFileWarningPreview() {
       themeMode={themeMode}
       onThemeModeChange={setThemeMode}
       onReset={resetPreview}
+      settings={previewSettings}
       controls={
         <label class="dialog-preview__field">
           <span>Action result</span>
@@ -52,8 +59,12 @@ export function LargeFileWarningPreview() {
       }
     >
       {visible ? (
-        <div key={instanceKey}>
-          <LargeFileWarning info={PREVIEW_INFO} onResolved={() => setVisible(false)} onRespondAction={respondAction} />
+        <div key={`${instanceKey}-${previewSettings.dataVariant}`}>
+          <LargeFileWarning
+            info={previewSettings.dataVariant === "long" ? LONG_PREVIEW_INFO : PREVIEW_INFO}
+            onResolved={() => setVisible(false)}
+            onRespondAction={respondAction}
+          />
         </div>
       ) : (
         <div class="dialog-preview__dismissed-card">

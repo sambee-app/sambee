@@ -469,7 +469,7 @@ pub async fn prompt_for_app_selection(app: &AppHandle, extension: &str, force_pi
 
     let newly_created = match crate::ensure_main_window(
         app,
-        "Sambee Companion — Choose Application",
+        crate::native_i18n::NativeLocale::from_app(app).text("appPickerTitle"),
         crate::APP_PICKER_WIDTH,
         crate::APP_PICKER_INITIAL_HEIGHT,
     ) {
@@ -569,7 +569,7 @@ pub fn spawn_done_editing_window(app: &AppHandle, operation: &FileOperation, app
     let pos_y = DONE_EDITING_MARGIN + existing_count * DONE_EDITING_CASCADE_STEP;
 
     let _window = tauri::WebviewWindowBuilder::new(app, &window_label, tauri::WebviewUrl::App("/done-editing".into()))
-        .title("Sambee — Editing")
+        .title(crate::native_i18n::NativeLocale::from_app(app).text("editingTitle"))
         .inner_size(DONE_EDITING_WIDTH, DONE_EDITING_HEIGHT)
         .position(pos_x, pos_y)
         .resizable(false)

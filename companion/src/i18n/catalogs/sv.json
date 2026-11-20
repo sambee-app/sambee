@@ -1,0 +1,242 @@
+{
+  "native": {
+    "trayPreferences": "Inställningar…",
+    "trayQuit": "Avsluta Sambee Companion",
+    "noOperations": "Inga pågående åtgärder",
+    "editing": "Redigerar: {{filename}}",
+    "uploading": "Laddar upp ({{percent}}): {{filename}}",
+    "uploadFailed": "Uppladdningen misslyckades: {{filename}}",
+    "downloading": "Laddar ned: {{filename}}",
+    "preferencesTitle": "Sambee Companion — Inställningar",
+    "pairingTitle": "Sambee Companion — Begäran om parkoppling",
+    "appPickerTitle": "Sambee Companion — Välj program",
+    "editingTitle": "Sambee — Redigering pågår",
+    "authenticationTitle": "Sambee-autentisering"
+  },
+  "pairing": {
+    "title": "Bekräfta ursprunget till webbläsarens begäran",
+    "body": "Den här servern får åtkomst till lokala enheter och hanterar tema, språk, regionala format och regler för mappsökning i Companion. Parkopplingen ger den här servern kontroll över inställningarna.",
+    "idleMessage": "Väntar på en begäran om parkoppling.",
+    "eyebrow": "Godkänn ursprunget för webbläsarens begäran",
+    "closeTitle": "Stäng",
+    "labels": {
+      "requestingOrigin": "Begärans ursprung",
+      "verificationCode": "Verifieringskod"
+    },
+    "hint": "Godkänn bara begäran om samma kod visas i Sambees dialogruta för parkoppling.",
+    "actions": {
+      "reject": "Avvisa",
+      "codesMatch": "Koderna stämmer överens",
+      "close": "Stäng nu"
+    },
+    "approved": {
+      "title": "Godkännande skickat",
+      "body": "Koderna för {{origin}} stämde överens.",
+      "hint": "Väntar på att Sambee ska spara det här ursprunget som betrott."
+    },
+    "success": {
+      "title": "Ursprunget godkänt",
+      "body": "Den här servern har åtkomst till lokala enheter och hanterar nu inställningarna i Companion.",
+      "hint": "Det här fönstret stängs snart automatiskt."
+    }
+  },
+  "preferences": {
+    "title": "Inställningar",
+    "loading": "Läser in inställningar…",
+    "closeTitle": "Stäng",
+    "sections": {
+      "pairedBrowsers": "Betrodda webbläsarursprung",
+      "localization": "Språk och region",
+      "editingBehavior": "Beteende vid redigering",
+      "startup": "Start",
+      "updates": "Uppdateringar",
+      "notifications": "Aviseringar",
+      "tempFileCleanup": "Rensning av tillfälliga filer"
+    },
+    "pairedBrowsersHint": "Dessa betrodda webbläsarursprung kan komma åt lokala enheter via Companion. Om du tar bort ett ursprung måste det begära åtkomst igen.",
+    "pairedBrowsersEmpty": "Companion litar för närvarande inte på något webbläsarursprung.",
+    "directoryPolicy": {
+      "title": "Hanterade inställningar",
+      "loading": "Läser in status för reglerna för mappsökning.",
+      "unavailable": "Reglerna för mappsökning är inte tillgängliga. Vänta en stund och läs in statusen igen eller starta om Companion.",
+      "active": "Den parkopplade servern hanterar inställningarna för Companion. Parkoppla en annan server om den ska ta över hanteringen.",
+      "defaults": "Ingen server har valts för att hantera inställningarna. Standardinställningarna eller de senaste giltiga inställningarna gäller. Parkoppla den server du vill använda.",
+      "owner": "Server som hanterar inställningarna",
+      "revision": "Aktiv revision",
+      "refresh": "Uppdatera regelstatus"
+    },
+    "localizationStatusHint": "Visar de senaste språk- och regioninställningarna som synkroniserades från ett betrott Sambee-ursprung i webbläsaren.",
+    "localizationStatus": {
+      "syncedBadge": "Synkroniserat från webbläsaren",
+      "languageLabel": "Språk",
+      "regionalLocaleLabel": "Regionalt format",
+      "updatedAtLabel": "Senast uppdaterat",
+      "sourceOriginLabel": "Synkroniseringens ursprung",
+      "empty": "Inga språk- och regioninställningar har ännu synkroniserats från webbläsaren."
+    },
+    "unpairTitle": "Ta bort betrott ursprung",
+    "unpairButton": "Ta bort",
+    "conflictResolutionLabel": "Hantering av uppladdningskonflikter",
+    "conflictResolutionHint": "Vad som ska hända om filen på servern ändras medan du redigerar den.",
+    "conflictActions": {
+      "ask": "Fråga varje gång",
+      "overwrite": "Skriv alltid över serverns version",
+      "saveCopy": "Spara alltid som ny kopia"
+    },
+    "startupLabel": "Starta Sambee Companion när jag loggar in",
+    "startupHint": "Rekommenderas för lokala enheter. Webbläsaren kan bara komma åt lokala enheter när Companion körs.",
+    "updateChannelLabel": "Uppdateringskanal",
+    "updateChannelHint": "Anger vilken kanal Companion hämtar automatiska uppdateringar från.",
+    "updateChannels": {
+      "stable": "Stabil",
+      "beta": "Beta",
+      "test": "Test"
+    },
+    "preReleaseWarning": "Versioner från kanalen ”{{channel}}” kan innehålla oavslutade funktioner eller orsaka fel i befintliga funktioner.",
+    "confirmUpdateChannel": {
+      "title": "Byta uppdateringskanal?",
+      "body": "Om du byter från kanalen Stabil till ”{{channel}}” kan Companion installera förhandsversioner som inte har testats lika mycket.",
+      "confirm": "Byt kanal"
+    },
+    "updateActions": {
+      "checkNow": "Sök efter uppdateringar",
+      "checking": "Söker…",
+      "install": "Installera uppdatering",
+      "installing": "Installerar…"
+    },
+    "updateStatus": {
+      "statusLabel": "Uppdateringsstatus",
+      "lastChecked": "Senast kontrollerat: {{time}}",
+      "currentVersionLabel": "Aktuell version",
+      "latestVersionLabel": "Tillgänglig version",
+      "publishedAtLabel": "Publicerad",
+      "errorLabel": "Detaljer",
+      "upToDate": "Du använder den senaste versionen från kanalen ”{{channel}}”.",
+      "updateAvailable": "Uppdatering {{version}} är tillgänglig i kanalen ”{{channel}}”.",
+      "installing": "Installerar uppdatering {{version}} från kanalen ”{{channel}}”.",
+      "installed": "Uppdatering {{version}} har installerats. Starta om appen om den inte startar om automatiskt.",
+      "checkFailed": "Det gick inte att söka efter uppdateringar i kanalen ”{{channel}}”.",
+      "unknownVersion": "Okänd",
+      "unknownError": "Okänt fel"
+    },
+    "notificationsLabel": "Visa skrivbordsaviseringar",
+    "notificationsHint": "Visar systemaviseringar om redigering, till exempel när en uppladdning lyckas eller misslyckas.",
+    "retentionLabel": "Behåll tillfälliga filer i (dagar)",
+    "retentionHint": "Vid start tar Companion automatiskt bort tillfälliga filer i papperskorgen som är äldre än den angivna tiden (1–90 dagar).",
+    "savedIndicator": "Sparat ✓",
+    "confirmUnpair": {
+      "title": "Ta bort betrott ursprung?",
+      "body": "{{origin}} förlorar åtkomsten till lokala enheter tills ursprunget begär åtkomst från Companion igen.",
+      "unpairing": "Tar bort…"
+    }
+  },
+  "recovery": {
+    "title": "Osparade filer hittades",
+    "subtitle_one": "Kontrollera {{count}} fil från en tidigare session.",
+    "subtitle_other": "Kontrollera {{count}} filer från en tidigare session.",
+    "detail": "{{remotePath}} – ändrad: {{localModified}}",
+    "authRefreshedRetryUpload": "Autentiseringen har förnyats. Välj ”Ladda upp” igen för att försöka skicka filen till servern på nytt.",
+    "lifecycle": {
+      "renewalRequired": "Den återställda redigeringssessionen löpte ut innan filen kunde laddas upp. Öppna filen på nytt från Sambee eller kassera den tillfälliga kopian.",
+      "authFailed": "Companion kunde inte bekräfta att den återställda redigeringssessionen fortfarande är behörig. Öppna filen på nytt från Sambee eller kassera den tillfälliga kopian.",
+      "lockLost": "Låset för den återställda redigeringssessionen är inte längre aktivt på servern. Öppna filen på nytt från Sambee eller kassera den tillfälliga kopian.",
+      "recoveryRequired": "Den återställda redigeringssessionen har löpt ut och kan inte återupptas. Öppna filen på nytt från Sambee eller kassera den tillfälliga kopian."
+    },
+    "actions": {
+      "upload": "Ladda upp",
+      "retryUpload": "Försök ladda upp igen",
+      "discard": "Kassera",
+      "later": "Senare",
+      "dismissAll": "Stäng alla meddelanden"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Avbryt",
+      "close": "Stäng",
+      "open": "Öppna"
+    }
+  },
+  "app": {
+    "title": "Sambee Companion",
+    "idleMessage": "Companion körs i meddelandefältet. Inga filer redigeras."
+  },
+  "doneEditing": {
+    "waitingForContext": "Väntar på information om redigeringssessionen…",
+    "openedIn": "Öppnad i: {{appName}}",
+    "statusLabel": "Status:",
+    "modifiedAt": "Ändrad: {{time}}",
+    "unchanged": "Oförändrad",
+    "parseConflictError": "Det gick inte att läsa informationen om konflikten",
+    "authRefreshedRetryUpload": "Autentiseringen har förnyats. Håll ned ”Slutför redigeringen” igen för att försöka ladda upp filen på nytt.",
+    "lifecycle": {
+      "renewalRequired": "Redigeringssessionen löpte ut innan Companion kunde förnya den. Öppna filen på nytt från Sambee och försök sedan spara den igen.",
+      "authFailed": "Companion kunde inte bekräfta att redigeringssessionen fortfarande är behörig. Öppna filen på nytt från Sambee för att starta en ny session.",
+      "lockLost": "Redigeringslåset är inte längre aktivt på servern. Öppna filen på nytt från Sambee innan du försöker ladda upp den igen.",
+      "recoveryRequired": "Redigeringssessionen har löpt ut och kan inte återupptas. Öppna filen på nytt från Sambee för att starta en ny återställning."
+    },
+    "buttons": {
+      "doneUpload": "✓ Slutför redigeringen – håll ned för att ladda upp",
+      "retryUpload": "✓ Slutför redigeringen – håll ned för att försöka ladda upp igen",
+      "reopenRequired": "Sessionen har löpt ut – öppna filen på nytt från Sambee",
+      "authFailed": "Autentiseringen misslyckades – öppna filen på nytt från Sambee",
+      "lockLost": "Låset är inte längre aktivt – öppna filen på nytt från Sambee",
+      "recoveryRequired": "Återställning krävs – öppna filen på nytt från Sambee",
+      "doneClose": "✓ Slutför redigeringen – håll ned för att stänga",
+      "uploading": "✓ Laddar upp…",
+      "closing": "✓ Stänger…",
+      "discardHold": "Ignorera ändringar – håll ned"
+    },
+    "aria": {
+      "confirmUpload": "Håll ned i {{seconds}} sekunder för att bekräfta uppladdningen",
+      "retryUpload": "Håll ned i {{seconds}} sekunder för att försöka ladda upp igen efter ny autentisering",
+      "confirmClose": "Håll ned i {{seconds}} sekunder för att stänga och släppa låset",
+      "discardChanges": "Håll ned i {{seconds}} sekunder för att ignorera ändringarna",
+      "actionUnavailable": "Öppna filen på nytt från Sambee för att använda den här åtgärden",
+      "reopenInBrowser": "Öppna Sambee i webbläsaren för att starta en ny redigeringssession",
+      "uploadProgress": "Uppladdningsförlopp"
+    }
+  },
+  "conflictDialog": {
+    "title": "⚠ Konflikt upptäckt",
+    "body": "En annan användare ändrade filen på servern medan du redigerade den.",
+    "labels": {
+      "yourDownload": "Versionen du hämtade:",
+      "serverVersion": "Serverns version:"
+    },
+    "actions": {
+      "overwrite": "Skriv över serverns version",
+      "saveCopy": "Spara som kopia",
+      "cancel": "Avbryt"
+    },
+    "authRefreshedRetry": "Autentiseringen har förnyats. Välj ”Skriv över serverns version” eller ”Spara som kopia” igen för att försöka ladda upp filen på nytt.",
+    "lifecycle": {
+      "renewalRequired": "Redigeringssessionen löpte ut innan uppladdningen kunde godkännas. Stäng den här dialogrutan och öppna filen på nytt från Sambee.",
+      "authFailed": "Companion kunde inte bekräfta att redigeringssessionen fortfarande är behörig. Stäng den här dialogrutan och öppna filen på nytt från Sambee.",
+      "lockLost": "Låset för redigeringssessionen är inte längre aktivt på servern. Stäng den här dialogrutan och öppna filen på nytt från Sambee.",
+      "recoveryRequired": "Redigeringssessionen har löpt ut och kan inte återupptas. Stäng den här dialogrutan och öppna filen på nytt från Sambee."
+    }
+  },
+  "largeFileWarning": {
+    "title": "⚠ Stor fil",
+    "body": "Filen är {{sizeMb}} MB (gräns: {{limitMb}} MB). Det kan ta tid och kräva mycket diskutrymme att hämta och synkronisera stora filer.",
+    "actions": {
+      "continue": "Fortsätt ändå",
+      "cancel": "Avbryt"
+    }
+  },
+  "appPicker": {
+    "title": "Välj en app för att öppna den här .{{extension}}-filen",
+    "loading": "Läser in tillgängliga appar…",
+    "browseDialogTitle": "Bläddra efter en app",
+    "empty": "Det finns inga registrerade appar för .{{extension}}-filer.",
+    "sectionDefault": "Standardapp",
+    "sectionSuggested": "Föreslagna appar",
+    "sectionMoreOptions": "Fler alternativ",
+    "defaultBadge": "(standard)",
+    "alwaysUse": "Använd alltid den här appen för .{{extension}}-filer",
+    "browseButton": "Bläddra efter en annan app…",
+    "chooseAnotherApp": "Välj en annan app",
+    "iconAlt": "Ikon för {{appName}}"
+  }
+}

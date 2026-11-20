@@ -51,6 +51,16 @@ jobs:
         git fetch --no-tags --depth=1 origin "$DIFF_BASE"
         git diff --check "$DIFF_BASE" "$GITHUB_SHA"
 
+    - name: Set up Node.js for catalog validation
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '24'
+
+    - name: Validate localization catalogs
+      run: |
+        node scripts/validate-localization.mjs
+        node --test scripts/validate-localization.test.mjs
+
   # ──────────────────────────────────────────────
   # Website docs: validator + standalone tests
   # ──────────────────────────────────────────────
@@ -268,6 +278,9 @@ jobs:
 
     - name: TypeScript type check
       run: cd companion && npx tsc --noEmit
+
+    - name: Run Companion webview tests
+      run: npm test --prefix companion
 
     - name: Run archive topology conformance checks
       run: scripts/test-archive-topology-conformance companion

@@ -45,9 +45,11 @@
 
 .app-picker__header {
   flex-shrink: 0;
+  min-width: 0;
   font-size: 1rem;
   font-weight: 600;
   color: inherit;
+  overflow-wrap: anywhere;
 }
 
 .app-picker__extension {
@@ -309,6 +311,7 @@
 }
 
 .app-picker__error {
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -317,4 +320,5 @@
   font-size: 0.875rem;
   background-color: var(--danger-bg, rgba(220, 38, 38, 0.06));
   border-radius: 4px;
+  overflow-wrap: anywhere;
 }

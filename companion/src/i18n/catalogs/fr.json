@@ -1,0 +1,243 @@
+{
+  "native": {
+    "trayPreferences": "Préférences…",
+    "trayQuit": "Quitter Sambee Companion",
+    "noOperations": "Aucune opération en cours",
+    "editing": "Modification en cours : {{filename}}",
+    "uploading": "Envoi en cours ({{percent}}) : {{filename}}",
+    "uploadFailed": "Échec de l’envoi : {{filename}}",
+    "downloading": "Téléchargement en cours : {{filename}}",
+    "preferencesTitle": "Sambee Companion — Préférences",
+    "pairingTitle": "Sambee Companion — Demande d’association",
+    "appPickerTitle": "Sambee Companion — Choisir une application",
+    "editingTitle": "Sambee — Modification en cours",
+    "authenticationTitle": "Authentification Sambee"
+  },
+  "pairing": {
+    "title": "Confirmer l’origine de cette demande du navigateur",
+    "body": "Ce serveur pourra accéder aux lecteurs locaux et gérer le thème, la langue, les formats régionaux et les règles de recherche de dossiers dans Companion. Après l’association, ce serveur prendra en charge la gestion des paramètres.",
+    "idleMessage": "En attente d’une demande d’association.",
+    "eyebrow": "Autoriser l’origine de la demande du navigateur",
+    "closeTitle": "Fermer",
+    "labels": {
+      "requestingOrigin": "Origine de la demande",
+      "verificationCode": "Code de vérification"
+    },
+    "hint": "N’autorisez la demande que si le même code s’affiche dans la fenêtre d’association de Sambee.",
+    "actions": {
+      "reject": "Refuser",
+      "codesMatch": "Les codes correspondent",
+      "close": "Fermer maintenant"
+    },
+    "approved": {
+      "title": "Autorisation envoyée",
+      "body": "Les codes pour {{origin}} correspondent.",
+      "hint": "Sambee doit encore enregistrer cette origine comme fiable."
+    },
+    "success": {
+      "title": "Origine autorisée",
+      "body": "Ce serveur peut accéder aux lecteurs locaux et gère maintenant les paramètres de Companion.",
+      "hint": "Cette fenêtre se fermera automatiquement dans un instant."
+    }
+  },
+  "app": {
+    "title": "Sambee Companion",
+    "idleMessage": "Companion est actif dans la zone de notification. Aucun fichier n’est en cours de modification."
+  },
+  "doneEditing": {
+    "waitingForContext": "En attente des informations de la session de modification…",
+    "openedIn": "Ouvert dans : {{appName}}",
+    "statusLabel": "État :",
+    "modifiedAt": "Modifié à {{time}}",
+    "unchanged": "Non modifié",
+    "parseConflictError": "Impossible de lire les informations sur le conflit",
+    "authRefreshedRetryUpload": "L’authentification a été renouvelée. Maintenez de nouveau « Terminer la modification » enfoncé pour réessayer l’envoi.",
+    "lifecycle": {
+      "renewalRequired": "La session de modification a expiré avant que Companion puisse la renouveler. Rouvrez le fichier depuis Sambee, puis réessayez de l’enregistrer.",
+      "authFailed": "Companion n’a pas pu vérifier que cette session de modification est toujours autorisée. Rouvrez le fichier depuis Sambee pour commencer une nouvelle session.",
+      "lockLost": "Le verrou de modification n’est plus actif sur le serveur. Rouvrez le fichier depuis Sambee avant de réessayer l’envoi.",
+      "recoveryRequired": "Cette session de modification a expiré et ne peut pas reprendre. Rouvrez le fichier depuis Sambee pour lancer une nouvelle récupération."
+    },
+    "buttons": {
+      "doneUpload": "✓ Terminer la modification — maintenir pour envoyer",
+      "retryUpload": "✓ Terminer la modification — maintenir pour réessayer l’envoi",
+      "reopenRequired": "Session expirée — rouvrir depuis Sambee",
+      "authFailed": "Échec de l’authentification — rouvrir depuis Sambee",
+      "lockLost": "Verrou perdu — rouvrir depuis Sambee",
+      "recoveryRequired": "Récupération nécessaire — rouvrir depuis Sambee",
+      "doneClose": "✓ Terminer la modification — maintenir pour fermer",
+      "uploading": "✓ Envoi en cours…",
+      "closing": "✓ Fermeture en cours…",
+      "discardHold": "Ignorer les modifications — maintenir enfoncé"
+    },
+    "aria": {
+      "confirmUpload": "Maintenir enfoncé pendant {{seconds}} secondes pour confirmer l’envoi",
+      "retryUpload": "Maintenir enfoncé pendant {{seconds}} secondes pour réessayer l’envoi après une nouvelle authentification",
+      "confirmClose": "Maintenir enfoncé pendant {{seconds}} secondes pour fermer et libérer le verrou",
+      "discardChanges": "Maintenir enfoncé pendant {{seconds}} secondes pour ignorer les modifications",
+      "actionUnavailable": "Rouvrez le fichier depuis Sambee pour rendre cette action disponible",
+      "reopenInBrowser": "Ouvrir Sambee dans le navigateur pour commencer une nouvelle session de modification",
+      "uploadProgress": "Progression de l’envoi"
+    }
+  },
+  "conflictDialog": {
+    "title": "⚠ Conflit détecté",
+    "body": "Un autre utilisateur a modifié ce fichier sur le serveur pendant que vous le modifiiez.",
+    "labels": {
+      "yourDownload": "Version téléchargée :",
+      "serverVersion": "Version du serveur :"
+    },
+    "actions": {
+      "overwrite": "Écraser la version du serveur",
+      "saveCopy": "Enregistrer une copie",
+      "cancel": "Annuler"
+    },
+    "authRefreshedRetry": "L’authentification a été renouvelée. Sélectionnez de nouveau « Écraser la version du serveur » ou « Enregistrer une copie » pour réessayer l’envoi.",
+    "lifecycle": {
+      "renewalRequired": "Cette session de modification a expiré avant l’autorisation de l’envoi. Fermez cette boîte de dialogue et rouvrez le fichier depuis Sambee.",
+      "authFailed": "Companion n’a pas pu vérifier que cette session de modification est toujours autorisée. Fermez cette boîte de dialogue et rouvrez le fichier depuis Sambee.",
+      "lockLost": "Le verrou de cette session de modification n’est plus actif sur le serveur. Fermez cette boîte de dialogue et rouvrez le fichier depuis Sambee.",
+      "recoveryRequired": "Cette session de modification a expiré et ne peut pas reprendre. Fermez cette boîte de dialogue et rouvrez le fichier depuis Sambee."
+    }
+  },
+  "largeFileWarning": {
+    "title": "⚠ Fichier volumineux",
+    "body": "Ce fichier fait {{sizeMb}} Mo (limite : {{limitMb}} Mo). Le téléchargement et la synchronisation des fichiers volumineux peuvent prendre du temps et occuper beaucoup d’espace disque.",
+    "actions": {
+      "continue": "Continuer quand même",
+      "cancel": "Annuler"
+    }
+  },
+  "appPicker": {
+    "title": "Choisir une application pour ouvrir ce fichier .{{extension}}",
+    "loading": "Chargement des applications disponibles…",
+    "browseDialogTitle": "Rechercher une application",
+    "empty": "Aucune application n’est enregistrée pour ouvrir les fichiers .{{extension}}.",
+    "sectionDefault": "Application par défaut",
+    "sectionSuggested": "Applications suggérées",
+    "sectionMoreOptions": "Autres options",
+    "defaultBadge": "(par défaut)",
+    "alwaysUse": "Toujours utiliser cette application pour les fichiers .{{extension}}",
+    "browseButton": "Rechercher une autre application…",
+    "chooseAnotherApp": "Choisir une autre application",
+    "iconAlt": "Icône de {{appName}}"
+  },
+  "preferences": {
+    "title": "Préférences",
+    "loading": "Chargement des préférences…",
+    "closeTitle": "Fermer",
+    "sections": {
+      "pairedBrowsers": "Origines de navigateur de confiance",
+      "localization": "Langue et région",
+      "editingBehavior": "Comportement lors des modifications",
+      "startup": "Démarrage",
+      "updates": "Mises à jour",
+      "notifications": "Notifications",
+      "tempFileCleanup": "Nettoyage des fichiers temporaires"
+    },
+    "pairedBrowsersHint": "Ces origines de navigateur de confiance peuvent accéder aux lecteurs locaux par l’intermédiaire de Companion. Si vous supprimez une origine, elle doit demander une nouvelle autorisation.",
+    "pairedBrowsersEmpty": "Companion ne fait actuellement confiance à aucune origine de navigateur.",
+    "directoryPolicy": {
+      "title": "Paramètres gérés",
+      "loading": "Chargement de l’état des règles de recherche de dossiers.",
+      "unavailable": "Les règles de recherche de dossiers ne sont pas disponibles. Patientez un instant et actualisez leur état, ou redémarrez Companion.",
+      "active": "Le serveur associé gère les paramètres de Companion. Associez un autre serveur pour lui confier la gestion.",
+      "defaults": "Aucun serveur de gestion n’est sélectionné. Les paramètres par défaut ou les derniers paramètres valides restent actifs. Associez le serveur de votre choix.",
+      "owner": "Serveur de gestion",
+      "revision": "Révision active",
+      "refresh": "Actualiser l’état des règles"
+    },
+    "localizationStatusHint": "Affiche les derniers paramètres de langue et de région synchronisés depuis une origine Sambee de confiance.",
+    "localizationStatus": {
+      "syncedBadge": "Synchronisé depuis le navigateur",
+      "languageLabel": "Langue",
+      "regionalLocaleLabel": "Format régional",
+      "updatedAtLabel": "Dernière mise à jour",
+      "sourceOriginLabel": "Origine de la synchronisation",
+      "empty": "Aucun paramètre de langue ou de région n’a encore été synchronisé depuis le navigateur."
+    },
+    "unpairTitle": "Supprimer l’origine de confiance",
+    "unpairButton": "Supprimer",
+    "conflictResolutionLabel": "Résolution des conflits d’envoi",
+    "conflictResolutionHint": "Action à effectuer si le fichier sur le serveur a changé pendant que vous le modifiiez.",
+    "conflictActions": {
+      "ask": "Me demander à chaque fois",
+      "overwrite": "Toujours écraser la version du serveur",
+      "saveCopy": "Toujours enregistrer une nouvelle copie"
+    },
+    "startupLabel": "Lancer Sambee Companion à l’ouverture de ma session",
+    "startupHint": "Recommandé pour les lecteurs locaux. Le navigateur ne peut accéder aux lecteurs locaux que si Companion est en cours d’exécution.",
+    "updateChannelLabel": "Canal de mise à jour",
+    "updateChannelHint": "Détermine le canal utilisé par Companion pour les mises à jour automatiques.",
+    "updateChannels": {
+      "stable": "Stable",
+      "beta": "Bêta",
+      "test": "Test"
+    },
+    "preReleaseWarning": "Les versions du canal « {{channel}} » peuvent contenir des fonctions inachevées ou perturber le fonctionnement de fonctions existantes.",
+    "confirmUpdateChannel": {
+      "title": "Changer de canal de mise à jour ?",
+      "body": "Si vous passez du canal Stable au canal « {{channel}} », Companion peut installer des versions préliminaires qui ont fait l’objet de moins de tests.",
+      "confirm": "Changer de canal"
+    },
+    "updateActions": {
+      "checkNow": "Rechercher des mises à jour",
+      "checking": "Recherche en cours…",
+      "install": "Installer la mise à jour",
+      "installing": "Installation en cours…"
+    },
+    "updateStatus": {
+      "statusLabel": "État des mises à jour",
+      "lastChecked": "Dernière recherche : {{time}}",
+      "currentVersionLabel": "Version actuelle",
+      "latestVersionLabel": "Version disponible",
+      "publishedAtLabel": "Date de publication",
+      "errorLabel": "Détails",
+      "upToDate": "Vous utilisez la dernière version du canal « {{channel}} ».",
+      "updateAvailable": "La mise à jour {{version}} est disponible sur le canal « {{channel}} ».",
+      "installing": "Installation de la mise à jour {{version}} du canal « {{channel}} ».",
+      "installed": "La mise à jour {{version}} a été installée. Redémarrez l’application si elle ne redémarre pas automatiquement.",
+      "checkFailed": "Impossible de rechercher des mises à jour sur le canal « {{channel}} ».",
+      "unknownVersion": "Inconnue",
+      "unknownError": "Erreur inconnue"
+    },
+    "notificationsLabel": "Afficher les notifications de bureau",
+    "notificationsHint": "Affiche des notifications système liées aux modifications, par exemple pour signaler la réussite ou l’échec d’un envoi.",
+    "retentionLabel": "Durée de conservation des fichiers temporaires (en jours)",
+    "retentionHint": "Au démarrage, Companion supprime automatiquement les fichiers temporaires de la corbeille qui dépassent cette durée (de 1 à 90 jours).",
+    "savedIndicator": "Enregistré ✓",
+    "confirmUnpair": {
+      "title": "Supprimer l’origine de confiance ?",
+      "body": "{{origin}} perdra l’accès aux lecteurs locaux et devra demander de nouveau l’autorisation à Companion.",
+      "unpairing": "Suppression en cours…"
+    }
+  },
+  "recovery": {
+    "title": "Fichiers non enregistrés détectés",
+    "subtitle_one": "{{count}} fichier d’une session précédente doit être vérifié.",
+    "subtitle_many": "{{count}} fichiers d’une session précédente doivent être vérifiés.",
+    "subtitle_other": "{{count}} fichiers d’une session précédente doivent être vérifiés.",
+    "detail": "{{remotePath}} — modifié à {{localModified}}",
+    "authRefreshedRetryUpload": "L’authentification a été renouvelée. Sélectionnez de nouveau « Envoyer » pour réessayer d’envoyer ce fichier au serveur.",
+    "lifecycle": {
+      "renewalRequired": "La session de modification récupérée a expiré avant l’envoi. Rouvrez le fichier depuis Sambee ou supprimez cette copie temporaire.",
+      "authFailed": "Companion n’a pas pu vérifier que la session de modification récupérée est toujours autorisée. Rouvrez le fichier depuis Sambee ou supprimez cette copie temporaire.",
+      "lockLost": "Le verrou de la session de modification récupérée n’est plus actif sur le serveur. Rouvrez le fichier depuis Sambee ou supprimez cette copie temporaire.",
+      "recoveryRequired": "La session de modification récupérée a expiré et ne peut pas reprendre. Rouvrez le fichier depuis Sambee ou supprimez cette copie temporaire."
+    },
+    "actions": {
+      "upload": "Envoyer",
+      "retryUpload": "Réessayer l’envoi",
+      "discard": "Supprimer la copie",
+      "later": "Plus tard",
+      "dismissAll": "Ignorer toutes les alertes"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Annuler",
+      "close": "Fermer",
+      "open": "Ouvrir"
+    }
+  }
+}

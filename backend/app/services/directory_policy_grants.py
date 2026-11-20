@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from joserfc.errors import JoseError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import delete, func, update
 from sqlmodel import Session, col, select
 
@@ -32,6 +33,7 @@ from app.models.system_settings import (
     DirectoryPolicyGrantRedeem,
 )
 from app.models.user import User
+from app.models.user_settings import CatalogLanguage
 from app.services.system_settings import build_directory_index_settings_read
 
 
@@ -61,7 +63,12 @@ def _delivery_user(session: Session, user_id: uuid.UUID) -> User:
 
 
 def issue_directory_policy_grant(
-    binding: DirectoryPolicyGrantBinding, administrator: User, session: Session, *, browser_session_id: uuid.UUID | None = None
+    binding: DirectoryPolicyGrantBinding,
+    administrator: User,
+    session: Session,
+    *,
+    browser_session_id: uuid.UUID | None = None,
+    browser_language: CatalogLanguage = "en",
 ) -> DirectoryPolicyGrantRead | SettingsGrantRead:
     shared = isinstance(binding, SettingsGrantBinding)
     user = _delivery_user(session, administrator.id) if shared else _administrator(session, administrator.id)
@@ -89,12 +96,13 @@ def issue_directory_policy_grant(
     if isinstance(binding, SettingsGrantBinding):
         from app.services.companion_settings import build_settings_metadata
 
-        metadata = build_settings_metadata(user, session)
+        metadata = build_settings_metadata(user, session, browser_language)
         section_claims = {
             "settings_version": binding.version,
             "sections": {name: getattr(metadata, name).model_dump() for name in set(binding.sections)},
             "switch_user": binding.switch_user,
             "browser_session_id": str(browser_session_id) if browser_session_id else None,
+            "browser_language": browser_language,
         }
     token = create_access_token(
         data={
@@ -203,7 +211,11 @@ def redeem_directory_policy_grant(binding: DirectoryPolicyGrantRedeem, session: 
     if shared:
         from app.services.companion_settings import build_settings_sections
 
-        theme, localization, directory = build_settings_sections(user, session)
+        try:
+            browser_language = TypeAdapter(CatalogLanguage).validate_python(claims.get("browser_language", "en"))
+        except ValidationError as error:
+            raise HTTPException(status_code=403, detail="Settings grant language is invalid. Request a new Companion grant.") from error
+        theme, localization, directory = build_settings_sections(user, session, browser_language)
         available = {"theme": theme, "localization": localization, "directory_index": directory}
         selected = claims.get("sections")
         if (

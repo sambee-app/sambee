@@ -974,13 +974,16 @@ class ApiService {
     return response.data;
   }
 
-  async getCompanionSettingsMetadata(options?: { signal?: AbortSignal }): Promise<CompanionSettingsMetadata> {
+  async getCompanionSettingsMetadata(options?: {
+    signal?: AbortSignal;
+    params?: { browser_language: string };
+  }): Promise<CompanionSettingsMetadata> {
     return (await this.api.get<CompanionSettingsMetadata>("/admin/settings/companion", options)).data;
   }
 
   async issueCompanionSettingsGrant(
     binding: CompanionSettingsGrantBinding,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; params?: { browser_language: string } }
   ): Promise<CompanionSettingsGrant> {
     return (await this.api.post<CompanionSettingsGrant>("/admin/settings/companion/grants", binding, options)).data;
   }

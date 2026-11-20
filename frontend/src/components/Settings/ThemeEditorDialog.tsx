@@ -16,6 +16,7 @@ import {
 } from "@mui/material";
 import { type ChangeEvent, useRef, useState } from "react";
 import { HexAlphaColorPicker } from "react-colorful";
+import { useTranslation } from "react-i18next";
 import api, { getThemeRequestError, type StoredTheme } from "../../services/api";
 import { resolveSyntaxTheme } from "../../theme/resolveSyntaxTheme";
 import {
@@ -48,6 +49,7 @@ interface ThemeEditorDialogProps {
 const GROUPS = ["Core", "Viewers", "Markdown", "Syntax", "Search", "Alerts"] as const;
 
 export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClose, onSaved }: ThemeEditorDialogProps) {
+  const { t } = useTranslation();
   const muiTheme = useTheme();
   const usesDesktopFormLayout = useMediaQuery(muiTheme.breakpoints.up("md"));
   const [draft, setDraft] = useState<ThemeConfig>(() => resolveSyntaxTheme(theme));
@@ -203,7 +205,7 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
                     void save("user");
                   }}
                 >
-                  Your themes
+                  {t("settings.appearancePage.themeScopes.personal")}
                 </MenuItem>
                 {isAdmin && (
                   <MenuItem
@@ -212,7 +214,7 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
                       void save("site");
                     }}
                   >
-                    Site themes
+                    {t("settings.appearancePage.themeScopes.site")}
                   </MenuItem>
                 )}
               </Menu>

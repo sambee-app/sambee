@@ -1,9 +1,28 @@
-import i18n from "i18next";
-import { DEFAULT_LANGUAGE, resources, SUPPORTED_LANGUAGES, type SupportedLanguage } from "./resources";
+import { createInstance } from "i18next";
+import { DEFAULT_LANGUAGE, resources } from "./resources";
+
+export { DEFAULT_LANGUAGE };
+
+const i18n = createInstance();
+const catalogs = import.meta.glob<Record<string, unknown>>("./catalogs/*.json", { eager: true, import: "default" });
+const drafts = import.meta.env.DEV ? import.meta.glob<Record<string, unknown>>("./drafts/*.json", { eager: true, import: "default" }) : {};
+const bundledResources = {
+  ...resources,
+  ...Object.fromEntries(
+    Object.entries({ ...drafts, ...catalogs }).map(([path, translation]) => [
+      path.slice(path.lastIndexOf("/") + 1, -".json".length),
+      { translation },
+    ])
+  ),
+};
 
 export const LOCALE_STORAGE_KEY = "sambee.locale";
 export const REGIONAL_LOCALE_STORAGE_KEY = "sambee.regional-locale";
 export const REGIONAL_LOCALE_CHANGED_EVENT = "sambee:regional-locale-changed";
+export const PREVIEW_TEXT_EXPANSION_CHANGED_EVENT = "sambee:preview-text-expansion-changed";
+
+const PREVIEW_WORD_EXPANSION_RATIO = 0.4;
+const PREVIEW_EXPANDABLE_WORD = /[\p{L}\p{M}]{4,}/gu;
 
 export interface CompanionLocalizationState {
   language: string;
@@ -14,31 +33,20 @@ export interface CompanionLocalizationState {
 
 let localeSideEffectsRegistered = false;
 let currentRegionalLocale = DEFAULT_LANGUAGE;
+let previewTextExpansionEnabled = false;
 
-function resolveLanguage(language?: string | null): SupportedLanguage {
-  if (!language) {
-    return DEFAULT_LANGUAGE;
-  }
-
-  const exactMatch = SUPPORTED_LANGUAGES.find((supportedLanguage) => supportedLanguage.toLowerCase() === language.toLowerCase());
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  const baseLanguage = language.split("-")[0]?.toLowerCase();
-  const fallbackMatch = SUPPORTED_LANGUAGES.find((supportedLanguage) => supportedLanguage.toLowerCase() === baseLanguage);
-
-  return fallbackMatch ?? DEFAULT_LANGUAGE;
+function hasLanguage(language: string): boolean {
+  return Object.keys(bundledResources).includes(language);
 }
 
-function readStoredLanguage(): SupportedLanguage | undefined {
+function readStoredLanguage(): string | undefined {
   if (typeof window === "undefined") {
     return undefined;
   }
 
   try {
     const storedLanguage = window.localStorage.getItem(LOCALE_STORAGE_KEY);
-    return storedLanguage ? resolveLanguage(storedLanguage) : undefined;
+    return storedLanguage && hasLanguage(storedLanguage) ? storedLanguage : undefined;
   } catch {
     return undefined;
   }
@@ -75,7 +83,7 @@ function persistLanguage(language: string): void {
   }
 
   try {
-    window.localStorage.setItem(LOCALE_STORAGE_KEY, resolveLanguage(language));
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, language);
   } catch {
     // Ignore storage failures; locale changes should still work for the current session.
   }
@@ -98,9 +106,8 @@ function syncDocumentLanguage(language: string): void {
     return;
   }
 
-  const resolvedLanguage = resolveLanguage(language);
-  document.documentElement.lang = resolvedLanguage;
-  document.documentElement.dir = i18n.dir(resolvedLanguage);
+  document.documentElement.lang = language;
+  document.documentElement.dir = i18n.dir(language);
 }
 
 function registerLocaleSideEffects(): void {
@@ -117,7 +124,9 @@ function registerLocaleSideEffects(): void {
 
 function resolveRegionalLocale(locale?: string | null): string {
   return (
-    canonicalizeLocale(locale) ?? canonicalizeLocale(typeof navigator === "undefined" ? undefined : navigator.language) ?? DEFAULT_LANGUAGE
+    canonicalizeLocale(locale === "browser" ? undefined : locale) ??
+    canonicalizeLocale(typeof navigator === "undefined" ? undefined : navigator.language) ??
+    DEFAULT_LANGUAGE
   );
 }
 
@@ -134,47 +143,76 @@ function updateRegionalLocale(locale: string): void {
   }
 }
 
-export function getCurrentLanguage(): SupportedLanguage {
-  return resolveLanguage(i18n.resolvedLanguage ?? i18n.language);
+export function getCurrentLanguage(): string {
+  return i18n.resolvedLanguage ?? i18n.language ?? DEFAULT_LANGUAGE;
+}
+
+export function getAvailableLanguages(): string[] {
+  return Object.keys(bundledResources).sort();
 }
 
 export function getCurrentRegionalLocale(): string {
   return currentRegionalLocale;
 }
 
-const initialLanguage = readStoredLanguage() ?? resolveLanguage(typeof navigator === "undefined" ? undefined : navigator.language);
+const initialLanguage = readStoredLanguage() ?? DEFAULT_LANGUAGE;
 currentRegionalLocale =
   readStoredRegionalLocale() ?? resolveRegionalLocale(typeof navigator === "undefined" ? undefined : navigator.language);
 
 registerLocaleSideEffects();
 syncDocumentLanguage(initialLanguage);
 
-if (!i18n.isInitialized) {
-  void i18n.init({
-    resources,
-    lng: initialLanguage,
-    fallbackLng: DEFAULT_LANGUAGE,
-    supportedLngs: SUPPORTED_LANGUAGES,
-    defaultNS: "translation",
-    interpolation: {
-      escapeValue: false,
-    },
-    returnNull: false,
+const initialization = i18n.init({
+  resources: bundledResources,
+  lng: initialLanguage,
+  fallbackLng: DEFAULT_LANGUAGE,
+  load: "currentOnly",
+  defaultNS: "translation",
+  interpolation: {
+    escapeValue: false,
+  },
+  returnNull: false,
+});
+
+function expandPreviewText(text: string): string {
+  return text.replace(PREVIEW_EXPANDABLE_WORD, (word) => {
+    const characters = Array.from(word);
+    const finalCharacter = characters[characters.length - 1];
+    if (!finalCharacter) {
+      return word;
+    }
+
+    const extraLength = Math.ceil(characters.length * PREVIEW_WORD_EXPANSION_RATIO);
+    return `${word}${finalCharacter.repeat(extraLength)}`;
   });
 }
 
+export function setPreviewTextExpansion(enabled: boolean): void {
+  if (previewTextExpansionEnabled === enabled) {
+    return;
+  }
+
+  previewTextExpansionEnabled = enabled;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(PREVIEW_TEXT_EXPANSION_CHANGED_EVENT));
+  }
+}
+
 export function translate(...args: Parameters<typeof i18n.t>): string {
-  return i18n.t(...args) as string;
+  const translatedText = i18n.t(...args) as string;
+  return previewTextExpansionEnabled ? expandPreviewText(translatedText) : translatedText;
 }
 
 export async function setLocale(language: string): Promise<void> {
-  await i18n.changeLanguage(resolveLanguage(language));
+  await initialization;
+  if (!hasLanguage(language)) throw new Error(`Catalog not bundled: ${language}`);
+  await i18n.changeLanguage(language);
 }
 
 export async function applyCompanionLocalization(state: CompanionLocalizationState): Promise<void> {
-  const systemLocale = typeof navigator === "undefined" ? DEFAULT_LANGUAGE : navigator.language;
-  updateRegionalLocale(state.regional_locale === "browser" ? systemLocale : state.regional_locale);
-  await setLocale(state.language === "browser" ? systemLocale : state.language);
+  // Old servers can still send `browser`; only the paired browser can resolve it.
+  await setLocale(state.language === "browser" ? DEFAULT_LANGUAGE : state.language);
+  updateRegionalLocale(state.regional_locale);
 }
 
 export default i18n;

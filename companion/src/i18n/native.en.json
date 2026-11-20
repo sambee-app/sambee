@@ -1,0 +1,14 @@
+{
+  "trayPreferences": "Preferences…",
+  "trayQuit": "Quit Sambee Companion",
+  "noOperations": "No active operations",
+  "editing": "Editing: {{filename}}",
+  "uploading": "Uploading ({{percent}}): {{filename}}",
+  "uploadFailed": "Upload failed: {{filename}}",
+  "downloading": "Downloading: {{filename}}",
+  "preferencesTitle": "Sambee Companion — Preferences",
+  "pairingTitle": "Sambee Companion — Pairing Request",
+  "appPickerTitle": "Sambee Companion — Choose Application",
+  "editingTitle": "Sambee — Editing",
+  "authenticationTitle": "Sambee Authentication"
+}

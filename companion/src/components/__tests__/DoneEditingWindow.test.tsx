@@ -261,6 +261,8 @@ describe("DoneEditingWindow", () => {
       />
     );
 
+    expect(setSizeMock).not.toHaveBeenCalled();
+
     const reopenButton = screen.getByRole("button", { name: translate("doneEditing.aria.reopenInBrowser") });
     expect(reopenButton).toHaveTextContent(translate("doneEditing.buttons.reopenRequired"));
 

@@ -127,6 +127,27 @@ export function DoneEditingWindow() {
   const pendingAction = useRef<(() => void) | null>(null);
 
   const isModified = fileStatus.kind === "modified";
+  const isExpanded = isModified && !processing;
+  const lastWindowHeightRef = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (!context || conflict) {
+      return;
+    }
+
+    const targetHeight = isExpanded ? DONE_EDITING_EXPANDED_HEIGHT : DONE_EDITING_DEFAULT_HEIGHT;
+    if (lastWindowHeightRef.current === targetHeight) {
+      return;
+    }
+
+    lastWindowHeightRef.current = targetHeight;
+    void getCurrentWindow()
+      .setSize(new LogicalSize(DONE_EDITING_WINDOW_WIDTH, targetHeight))
+      .catch((err: unknown) => {
+        console.warn("Failed to resize Done Editing window", err);
+        lastWindowHeightRef.current = null;
+      });
+  }, [conflict, context, isExpanded]);
 
   useEffect(() => {
     const unlistenContext = listen<DoneEditingContext>("edit-context", (event) => {
@@ -388,8 +409,6 @@ export function DoneEditingWindowView({
   const { t } = useI18n();
   const isModified = fileStatus.kind === "modified";
   const primaryButtonRef = useRef<HTMLButtonElement | null>(null);
-  const isExpanded = isModified && !processing;
-  const lastWindowHeightRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     if (!autoFocusPrimary || processing || conflict) {
@@ -398,27 +417,6 @@ export function DoneEditingWindowView({
 
     primaryButtonRef.current?.focus({ preventScroll: true });
   }, [autoFocusPrimary, conflict, processing]);
-
-  useLayoutEffect(() => {
-    if (conflict) {
-      return;
-    }
-
-    const targetHeight = isExpanded ? DONE_EDITING_EXPANDED_HEIGHT : DONE_EDITING_DEFAULT_HEIGHT;
-
-    if (lastWindowHeightRef.current === targetHeight) {
-      return;
-    }
-
-    lastWindowHeightRef.current = targetHeight;
-
-    void getCurrentWindow()
-      .setSize(new LogicalSize(DONE_EDITING_WINDOW_WIDTH, targetHeight))
-      .catch((err: unknown) => {
-        console.warn("Failed to resize Done Editing window", err);
-        lastWindowHeightRef.current = null;
-      });
-  }, [conflict, isExpanded]);
 
   if (conflict) {
     return <ConflictDialog conflict={conflict} onResolved={onConflictResolved} />;
