@@ -1,6 +1,7 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
-import { DEFAULT_LANGUAGE, PSEUDO_LANGUAGE, resources, SUPPORTED_LANGUAGES, type SupportedLanguage } from "./resources";
+import { isCatalogLanguage, LANGUAGE_NAMES, matchBrowserLanguage, SHIPPING_LANGUAGES, type SupportedLanguage } from "./languages";
+import { DEFAULT_LANGUAGE, PSEUDO_LANGUAGE, resources } from "./resources";
 
 export const LOCALE_STORAGE_KEY = "sambee.locale";
 export const REGIONAL_LOCALE_STORAGE_KEY = "sambee.regional-locale";
@@ -8,6 +9,7 @@ export const BROWSER_LANGUAGE_PREFERENCE = "browser";
 export const BROWSER_REGIONAL_LOCALE_PREFERENCE = "browser";
 export const DEFAULT_LANGUAGE_PREFERENCE = BROWSER_LANGUAGE_PREFERENCE;
 export const DEFAULT_REGIONAL_LOCALE_PREFERENCE = BROWSER_REGIONAL_LOCALE_PREFERENCE;
+export const LANGUAGE_PREFERENCE_CHANGED_EVENT = "sambee:language-preference-changed";
 export const REGIONAL_LOCALE_CHANGED_EVENT = "sambee:regional-locale-changed";
 
 export type LanguagePreference = SupportedLanguage | typeof BROWSER_LANGUAGE_PREFERENCE;
@@ -17,15 +19,21 @@ let localeSideEffectsRegistered = false;
 let currentLanguagePreference: LanguagePreference = DEFAULT_LANGUAGE_PREFERENCE;
 let currentRegionalLocalePreference: RegionalLocalePreference = DEFAULT_REGIONAL_LOCALE_PREFERENCE;
 let currentRegionalLocale = DEFAULT_LANGUAGE;
+let languageRequest = 0;
+const catalogLoaders = import.meta.glob<{ default: Record<string, unknown> }>("./catalogs/*.json");
+const draftLoaders = import.meta.env.DEV ? import.meta.glob<{ default: Record<string, unknown> }>("./drafts/*.json") : {};
 
 export function isPseudoLanguageEnabled(isDevelopment: boolean = import.meta.env.DEV): boolean {
   return isDevelopment;
 }
 
 export function getAvailableLanguages(isDevelopment: boolean = import.meta.env.DEV): SupportedLanguage[] {
-  return isPseudoLanguageEnabled(isDevelopment)
-    ? SUPPORTED_LANGUAGES
-    : SUPPORTED_LANGUAGES.filter((supportedLanguage) => supportedLanguage !== PSEUDO_LANGUAGE);
+  if (!isPseudoLanguageEnabled(isDevelopment)) return [...SHIPPING_LANGUAGES];
+  const drafts = Object.keys(LANGUAGE_NAMES).filter(
+    (language) =>
+      isCatalogLanguage(language) && !SHIPPING_LANGUAGES.includes(language) && Object.hasOwn(draftLoaders, `./drafts/${language}.json`)
+  );
+  return [...SHIPPING_LANGUAGES, ...drafts.filter(isCatalogLanguage), PSEUDO_LANGUAGE];
 }
 
 function getBrowserLocales(): string[] {
@@ -49,44 +57,12 @@ function canonicalizeLocale(locale: string): string | null {
   }
 }
 
-function resolveLanguage(language?: string | null): SupportedLanguage {
-  if (!language) {
-    return DEFAULT_LANGUAGE;
-  }
-
-  const exactMatch = SUPPORTED_LANGUAGES.find((supportedLanguage) => supportedLanguage.toLowerCase() === language.toLowerCase());
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  const baseLanguage = language.split("-")[0]?.toLowerCase();
-  const fallbackMatch = SUPPORTED_LANGUAGES.find((supportedLanguage) => supportedLanguage.toLowerCase() === baseLanguage);
-
-  return fallbackMatch ?? DEFAULT_LANGUAGE;
+function resolveLanguage(language: string | undefined): SupportedLanguage {
+  return language && (language === PSEUDO_LANGUAGE || isCatalogLanguage(language)) ? language : DEFAULT_LANGUAGE;
 }
 
-function resolveLanguagePreference(language?: string | null): LanguagePreference {
-  if (!language || language === BROWSER_LANGUAGE_PREFERENCE) {
-    return DEFAULT_LANGUAGE_PREFERENCE;
-  }
-
-  return resolveLanguage(language);
-}
-
-function resolveLanguageFromPreference(languagePreference: LanguagePreference): SupportedLanguage {
-  if (languagePreference !== BROWSER_LANGUAGE_PREFERENCE) {
-    return resolveLanguage(languagePreference);
-  }
-
-  const browserLocales = getBrowserLocales();
-  for (const locale of browserLocales) {
-    const supportedLanguage = resolveLanguage(locale);
-    if (supportedLanguage) {
-      return supportedLanguage;
-    }
-  }
-
-  return DEFAULT_LANGUAGE;
+export function getBrowserLanguage() {
+  return matchBrowserLanguage(getBrowserLocales());
 }
 
 function resolveRegionalLocalePreference(locale?: string | null): RegionalLocalePreference {
@@ -97,9 +73,9 @@ function resolveRegionalLocalePreference(locale?: string | null): RegionalLocale
   return canonicalizeLocale(locale) ?? DEFAULT_REGIONAL_LOCALE_PREFERENCE;
 }
 
-function resolveRegionalLocale(localePreference: RegionalLocalePreference, languagePreference: LanguagePreference): string {
+function resolveRegionalLocale(localePreference: RegionalLocalePreference): string {
   if (localePreference !== BROWSER_REGIONAL_LOCALE_PREFERENCE) {
-    return canonicalizeLocale(localePreference) ?? resolveLanguageFromPreference(languagePreference);
+    return canonicalizeLocale(localePreference) ?? DEFAULT_LANGUAGE;
   }
 
   for (const locale of getBrowserLocales()) {
@@ -109,7 +85,7 @@ function resolveRegionalLocale(localePreference: RegionalLocalePreference, langu
     }
   }
 
-  return resolveLanguageFromPreference(languagePreference);
+  return DEFAULT_LANGUAGE;
 }
 
 function syncDocumentLanguage(language: string): void {
@@ -150,7 +126,7 @@ export function getCurrentRegionalLocale(): string {
 }
 
 function updateResolvedRegionalLocale(): void {
-  currentRegionalLocale = resolveRegionalLocale(currentRegionalLocalePreference, currentLanguagePreference);
+  currentRegionalLocale = resolveRegionalLocale(currentRegionalLocalePreference);
   if (typeof window !== "undefined") {
     window.dispatchEvent(
       new CustomEvent(REGIONAL_LOCALE_CHANGED_EVENT, {
@@ -163,37 +139,59 @@ function updateResolvedRegionalLocale(): void {
   }
 }
 
-const initialLanguage = resolveLanguageFromPreference(currentLanguagePreference);
-currentRegionalLocale = resolveRegionalLocale(currentRegionalLocalePreference, currentLanguagePreference);
+currentRegionalLocale = resolveRegionalLocale(currentRegionalLocalePreference);
 
 registerLocaleSideEffects();
-syncDocumentLanguage(initialLanguage);
+syncDocumentLanguage(DEFAULT_LANGUAGE);
 
-if (!i18n.isInitialized) {
-  void i18n.use(initReactI18next).init({
-    resources,
-    lng: initialLanguage,
-    fallbackLng: DEFAULT_LANGUAGE,
-    supportedLngs: SUPPORTED_LANGUAGES,
-    defaultNS: "translation",
-    interpolation: {
-      escapeValue: false,
-    },
-    react: {
-      useSuspense: false,
-    },
-    returnNull: false,
-  });
-}
+const initialization = i18n.isInitialized
+  ? Promise.resolve()
+  : i18n.use(initReactI18next).init({
+      resources,
+      lng: DEFAULT_LANGUAGE,
+      fallbackLng: DEFAULT_LANGUAGE,
+      load: "currentOnly",
+      defaultNS: "translation",
+      interpolation: {
+        escapeValue: false,
+      },
+      react: {
+        useSuspense: false,
+      },
+      returnNull: false,
+    });
 
 export function translate(...args: Parameters<typeof i18n.t>): string {
   return i18n.t(...args) as string;
 }
 
 export async function setLanguagePreference(languagePreference: string): Promise<void> {
-  currentLanguagePreference = resolveLanguagePreference(languagePreference);
-  updateResolvedRegionalLocale();
-  await i18n.changeLanguage(resolveLanguageFromPreference(currentLanguagePreference));
+  const request = ++languageRequest;
+  const preference = languagePreference === BROWSER_LANGUAGE_PREFERENCE ? languagePreference : resolveLanguage(languagePreference);
+  const language = preference === BROWSER_LANGUAGE_PREFERENCE ? getBrowserLanguage() : preference;
+  await initialization;
+  try {
+    if (!i18n.hasResourceBundle(language, "translation")) {
+      const load = catalogLoaders[`./catalogs/${language}.json`] ?? draftLoaders[`./drafts/${language}.json`];
+      if (!load) throw new Error(`Catalog not found: ${language}`);
+      const { default: catalog } = await load();
+      i18n.addResourceBundle(language, "translation", catalog);
+    }
+  } catch (error) {
+    console.warn("Could not load Sambee UI translations", { language, error });
+    if (request !== languageRequest) return;
+    await i18n.changeLanguage(DEFAULT_LANGUAGE);
+    throw error;
+  }
+  if (request !== languageRequest) return;
+  const preferenceChanged = currentLanguagePreference !== preference;
+  currentLanguagePreference = preference;
+  if (preferenceChanged && typeof window !== "undefined") {
+    window.dispatchEvent(new Event(LANGUAGE_PREFERENCE_CHANGED_EVENT));
+  }
+  if (i18n.language !== language) {
+    await i18n.changeLanguage(language);
+  }
 }
 
 export async function setRegionalLocalePreference(regionalLocalePreference: string): Promise<void> {
@@ -204,5 +202,9 @@ export async function setRegionalLocalePreference(regionalLocalePreference: stri
 export async function setLocale(language: string): Promise<void> {
   await setLanguagePreference(language);
 }
+
+void setLanguagePreference(DEFAULT_LANGUAGE_PREFERENCE).catch(() => {
+  // Loading already logged the failure and selected English.
+});
 
 export default i18n;

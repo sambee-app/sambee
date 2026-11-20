@@ -1,0 +1,1772 @@
+{
+  "app": {
+    "loading": "正在加载…",
+    "errorBoundary": {
+      "title": "出现问题",
+      "description": "发生意外错误。系统已记录此错误。",
+      "tryAgain": "重试",
+      "reloadPage": "重新加载页面",
+      "developmentDetails": "错误详情（仅开发环境）"
+    },
+    "updateAvailable": {
+      "title": "有可用更新",
+      "description": "有较新版本的 Sambee 可用。",
+      "currentBuild": "当前构建版本：v{{version}}（{{commit}}）",
+      "latestBuild": "最新构建版本：v{{version}}（{{commit}}）",
+      "later": "稍后",
+      "reload": "立即重新加载"
+    }
+  },
+  "viewer": {
+    "pdfPassword": {
+      "title": "解锁 PDF",
+      "description": "输入密码以查看此 PDF。",
+      "open": "打开 PDF",
+      "label": "PDF 密码",
+      "show": "显示密码",
+      "hide": "隐藏密码"
+    },
+    "slowImage": "此图片的加载时间比平时长。",
+    "slowPdf": "此 PDF 的加载时间比平时长。",
+    "pdfLoadFailed": "无法加载 PDF 文档",
+    "renderingFailed": "无法完成此文档的渲染。请关闭文件后重新打开。",
+    "renderingPrintPending": "文档仍在加载。请关闭打印对话框，等加载完成后重试。",
+    "printTitle": "打印 / 保存为 PDF",
+    "printError": "无法打开打印对话框。请从浏览器菜单选择“打印”。",
+    "helpTitles": {
+      "pdf": "PDF 查看器快捷键",
+      "image": "图片查看器快捷键",
+      "markdown": "Markdown 查看器快捷键"
+    },
+    "fallback": {
+      "failedTitle": "查看器不可用",
+      "unsupportedTitle": "不支持此查看器",
+      "closeAriaLabel": "关闭查看器错误提示",
+      "failedMessageWithError": "{{message}} 无法加载查看器代码。",
+      "failedMessageGeneric": "无法加载查看器代码。后端或静态资源服务器可能暂时不可用。",
+      "unsupportedMessage": "当前前端环境没有可用于此文件类型的查看器。",
+      "stillAvailable": "文件浏览器仍可使用。你可以关闭此对话框并在应用的其他位置继续操作。",
+      "retry": "重试"
+    },
+    "controls": {
+      "previous": "上一个",
+      "next": "下一个",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "previousImage": "上一张图片",
+      "nextImage": "下一张图片",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "rotateLeft": "向左旋转",
+      "rotateRight": "向右旋转",
+      "shareUnavailable": "此设备或浏览器不支持分享",
+      "searchUnavailable": "无法搜索：PDF 不含文本层，可能是扫描图像",
+      "pdfSearchPlaceholder": "在 PDF 中搜索…"
+    },
+    "share": {
+      "preparing": "正在准备要分享的文件…",
+      "failed": "无法分享文件",
+      "failedText": "无法分享文本",
+      "unsupported": "此设备或浏览器不支持分享",
+      "payloadUnsupported": "此浏览器无法分享此附件。",
+      "details": "分享详情",
+      "detailsAction": "详情",
+      "copyDetails": "复制分享详情",
+      "copySuccess": "已复制分享详情。",
+      "copyError": "无法复制分享详情。请选择报告内容并手动复制。",
+      "downloadSuggestion": "请下载文件，再通过设备上的文件管理应用分享。",
+      "asFile": "作为文件分享",
+      "asText": "作为文本分享"
+    },
+    "shortcuts": {
+      "open": "打开",
+      "close": "关闭",
+      "download": "下载",
+      "edit": "编辑",
+      "save": "保存",
+      "bold": "加粗",
+      "italic": "斜体",
+      "createLink": "创建链接",
+      "insertTable": "插入表格",
+      "insertThematicBreak": "插入分隔线",
+      "inlineCode": "行内代码",
+      "insertCodeBlock": "插入代码块",
+      "showHelp": "显示键盘快捷键",
+      "search": "搜索",
+      "nextMatch": "下一个匹配项",
+      "previousMatch": "上一个匹配项",
+      "firstPage": "第一页",
+      "lastPage": "最后一页",
+      "firstImage": "第一张图片",
+      "lastImage": "最后一张图片",
+      "nextPage": "下一页",
+      "previousPage": "上一页",
+      "next": "下一个",
+      "previous": "上一个",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "resetZoom": "重置缩放",
+      "rotateRight": "向右旋转",
+      "rotateLeft": "向左旋转",
+      "toggleFullscreen": "切换全屏"
+    },
+    "edit": {
+      "lockFailed": "无法进入编辑模式。{{message}}",
+      "lockFailedReason": "无法获取编辑锁。",
+      "saveFailed": "无法保存 Markdown 更改。",
+      "commandFailed": "无法执行“{{action}}”。{{message}}",
+      "commandFailedReason": "编辑器拒绝了此命令。",
+      "discardConfirm": "要放弃未保存的更改吗？",
+      "closeConfirm": "还有未保存的更改。仍要关闭查看器吗？",
+      "editorLabel": "Markdown 编辑器",
+      "editorLoadTitle": "无法加载编辑器",
+      "editorLoadMessage": "无法加载 Markdown 编辑器。草稿仍保留在内存中。请重试加载编辑器，或返回只读预览。",
+      "editorLoadFailedReason": "无法加载编辑器代码。",
+      "editorCrashTitle": "编辑器不可用",
+      "editorCrashMessage": "Markdown 编辑器发生内部错误。草稿仍保留在内存中。请重试打开编辑器，或返回只读预览。",
+      "retryEditor": "重试打开编辑器",
+      "returnToPreview": "返回预览",
+      "unsavedIndicator": "未保存",
+      "unsavedIndicatorAria": "未保存的更改",
+      "unsavedChangesTitle": "未保存的更改",
+      "unsavedChangesExitMessage": "要在退出编辑模式之前保存更改吗？",
+      "unsavedChangesCloseMessage": "要在关闭查看器之前保存更改吗？",
+      "recovery": {
+        "title": "有未保存的本地草稿",
+        "description": "有一份未保存的本地草稿。",
+        "newerDescription": "有一份未保存的本地草稿，其更新时间晚于已保存的文件。",
+        "savedFile": "已保存的文件",
+        "localDraft": "本地草稿",
+        "unknown": "未知",
+        "discard": "放弃草稿",
+        "resume": "继续编辑",
+        "tooLargeWarning": "编辑内容过大，无法恢复草稿。",
+        "storageUnavailableWarning": "此浏览器会话不支持恢复草稿。"
+      },
+      "searchUnavailable": "只有在富文本编辑模式下才能使用查看器工具栏搜索。",
+      "caseSensitive": "区分大小写",
+      "caseSensitiveShortcut": "区分大小写（Alt+C）",
+      "find": "查找",
+      "findReplace": "查找和替换",
+      "findWithHistory": "搜索（按 ⇅ 查看历史记录）",
+      "invalidRegularExpression": "正则表达式无效",
+      "matchOptions": "匹配选项",
+      "nextMatch": "下一个匹配项",
+      "previousMatch": "上一个匹配项",
+      "regularExpression": "使用正则表达式",
+      "regularExpressionShortcut": "使用正则表达式（Alt+R）",
+      "replaceAll": "全部替换",
+      "replacing": "正在替换匹配项…",
+      "replacementFailed": "替换失败。请再次选择“全部替换”。",
+      "replaceCurrent": "替换当前匹配项",
+      "wholeWord": "全字匹配",
+      "wholeWordShortcut": "全字匹配（Alt+W）",
+      "bold": "加粗",
+      "removeBold": "取消加粗",
+      "italic": "斜体",
+      "replace": "替换",
+      "replaceWithHistory": "替换（按 ⇅ 查看历史记录）",
+      "toggleCaseSensitive": "切换大小写匹配",
+      "toggleWholeWord": "切换全字匹配",
+      "toggleRegularExpression": "切换正则表达式匹配",
+      "toggleWordWrap": "切换自动换行",
+      "removeItalic": "取消斜体",
+      "underline": "下划线",
+      "removeUnderline": "取消下划线",
+      "undo": "撤销",
+      "redo": "重做"
+    },
+    "text": {
+      "loadFailed": "无法加载文件。",
+      "lockFailed": "已以只读方式打开。{{message}}",
+      "lockFailedReason": "无法获取编辑锁。",
+      "saveFailed": "无法保存文本文件的更改。",
+      "editorLabel": "文本编辑器",
+      "editorCrashTitle": "文本编辑器不可用",
+      "editorCrashMessage": "文本编辑器发生内部错误。草稿仍保留在内存中。请重试打开编辑器，或关闭文件。",
+      "acquiring": "正在检查写入权限…",
+      "retryEditing": "重试编辑",
+      "lockedNotification": "另一个会话正在编辑此文件。你仍可在此处阅读。对方关闭编辑器后，请用 <retryIcon/> 重试编辑。",
+      "heartbeatFailed": "无法续期编辑锁。请检查连接。保存前可能需要重新获取编辑锁。",
+      "readOnlyReasons": {
+        "read-only": "此位置为只读。",
+        "locked": "另一个会话正在编辑此文件。你可以继续阅读，等编辑锁释放后再重试编辑。",
+        "permission-denied": "你没有此文件的写入权限。",
+        "unsupported": "此来源不支持编辑。",
+        "unavailable": "写入暂时不可用。你可以继续阅读或重试编辑。",
+        "lost": "编辑锁已失效。草稿仍保留。请重试编辑以获取新的锁。",
+        "conflict": "草稿未受编辑锁保护期间，已保存的文件发生了更改。"
+      },
+      "conflictTitle": "文件已更改",
+      "conflictDescription": "已保存的文件与草稿所基于的版本不同。请选择要在编辑器中保留的内容。选择保留草稿不会立即保存，只有选择“保存”后才会写入。",
+      "useSavedFile": "使用已保存的文件",
+      "keepDraft": "保留我的草稿",
+      "limitMessage": "此文件大小为 {{currentSizeMb}} MB，超过了文本编辑器的 {{maxSizeMb}} MB 上限。为安全起见，Sambee 已改用只读模式打开文件，而未使用完整的 CodeMirror 编辑器。",
+      "limitSearchUnavailable": "此文件以大文件只读模式显示时，无法搜索。"
+    }
+  },
+  "systemHealth": {
+    "dialogTitle": "系统健康状况",
+    "overview": {
+      "ok": "未发现问题",
+      "warning": "需要关注",
+      "error": "需要处理",
+      "unknown": "部分检查不可用",
+      "partialChecks": "部分检查不可用。",
+      "attentionHelp": "请检查下方突出显示的项目。",
+      "connectionHelp": "无法更新服务器检查结果。系统会自动重试。如果问题持续存在，请检查网络连接。",
+      "server": "服务器",
+      "container": "容器",
+      "containerApplicationData": "存储：应用数据",
+      "containerTemporaryStorage": "存储：临时数据",
+      "containerCombinedStorage": "存储：应用数据和临时数据",
+      "connectionStorage": "连接存储",
+      "localDrive": "本地驱动器",
+      "localDrives": "本地驱动器",
+      "smb": "SMB 连接",
+      "hostMemory": "内存",
+      "systemLoad": "平均负载（归一化）",
+      "containerMemory": "内存",
+      "percentUsed": "已用 {{percent}}%",
+      "bytesUsed": "已用 {{used}}",
+      "memoryUsed": "已用 {{used}}（{{percent}}%）",
+      "spaceFree": "剩余 {{available}}（{{percent}}%）",
+      "noLimit": "未设置上限",
+      "oldData": "数据已过时",
+      "checking": "正在检查",
+      "localDriveHelp": "请在“设置 > 本地驱动器”中检查 Companion。"
+    },
+    "statuses": {
+      "ok": "正常",
+      "warning": "警告",
+      "error": "错误",
+      "unknown": "未知",
+      "informational": "仅供参考",
+      "notAvailable": "不可用"
+    },
+    "availability": {
+      "available": "最新",
+      "collecting": "正在收集",
+      "not_mounted": "不可用（未配置挂载）",
+      "unsupported": "不可用",
+      "permission_denied": "权限不足",
+      "offline": "离线",
+      "timeout": "超时",
+      "stale": "数据已过时",
+      "invalid": "读数无效",
+      "unavailable": "收集失败"
+    },
+    "summary": {
+      "sectionTitle": "摘要",
+      "severityLabel": "总体状态",
+      "coverageLabel": "检查覆盖范围",
+      "coverageComplete": "已覆盖所有启用的检查",
+      "coverageIncomplete": "检查覆盖不完整",
+      "lastUpdatedLabel": "上次更新",
+      "neverUpdated": "等待首次检查",
+      "refreshing": "正在刷新健康检查结果",
+      "policyRetrying": "无法刷新健康监控权限。Sambee 将重试。",
+      "backendRetrying": "部分服务器或 SMB 检查未返回最新读数。Sambee 将重试。",
+      "companionRetrying": "Companion 未返回最新的驱动器读数。Sambee 将重试。",
+      "backendUnavailableHeadline": "无法获取服务器健康数据。Sambee 将重试。",
+      "localDriveErrorHeadline": "有一个本地驱动器的剩余空间严重不足。",
+      "localDriveErrorsHeadline": "有 {{count}} 个本地驱动器的剩余空间严重不足。",
+      "localDriveWarningHeadline": "有一个本地驱动器的剩余空间不足。",
+      "localDriveWarningsHeadline": "有 {{count}} 个本地驱动器的剩余空间不足。",
+      "localDriveUnknownHeadline": "本地驱动器的空间数据不可用，或正在等待 Companion 返回数据。"
+    },
+    "sections": {
+      "backendHost": "后端主机",
+      "containerRuntime": "后端容器运行环境",
+      "storage": "可用存储空间"
+    },
+    "metrics": {
+      "hostMemory": "主机内存",
+      "systemLoad": "归一化系统负载",
+      "cpuTemperature": "CPU 温度",
+      "containerMemory": "容器工作集内存",
+      "load1m": "1 分钟",
+      "load5mEvaluated": "5 分钟（用于评估）",
+      "load15m": "15 分钟",
+      "logicalCpuMetadata": "{{count}} 个逻辑 CPU",
+      "memoryCapacity": "总计 {{total}} · 可用 {{available}}",
+      "memoryLimit": "内存上限：{{limit}}",
+      "noMemoryLimit": "未设置容器内存上限，已停用基于百分比的告警。",
+      "hostMemoryPercent": "百分比以主机总内存为基准。",
+      "containerMemoryScope": "统计此容器中的所有进程，不仅是 Sambee。不含文件缓存，包含共享内存和内核内存。",
+      "fileCache": "文件缓存：{{cache}}",
+      "storageCapacity": "容量：{{total}}",
+      "usedValue": "已用 {{percent}}%（总计 {{total}}，已用 {{used}}，可用 {{available}}）",
+      "workingSetFinite": "达到上限的 {{percent}}%（工作集 {{used}}，上限 {{limit}}）",
+      "workingSetUnlimited": "工作集 {{used}} — 未设置内存上限。",
+      "storageValue": "可用 {{percent}}%（总计 {{total}}，可用 {{available}}）",
+      "thresholdsHigh": "警告 ≥ {{warning}}，错误 ≥ {{error}}",
+      "thresholdsLow": "警告 ≤ {{warning}}，错误 ≤ {{error}}",
+      "detectedLimits": "检测到的限制：警告 {{warning}}，严重 {{error}}",
+      "effectiveThresholds": "生效阈值：警告 {{warning}}（{{warningOrigin}}），错误 {{error}}（{{errorOrigin}}）",
+      "sourceLabel": "来源：{{source}}",
+      "ageSeconds": "{{seconds}} 秒前",
+      "staleTag": "数据已过时（{{seconds}} 秒前）",
+      "actualFreeNote": "共享资源的实际剩余空间总量：{{actual}}",
+      "updateCompanion": "请更新 Companion 以查看驱动器空间。",
+      "pairingLost": "Companion 无法验证配对。请查看“设置 > 本地驱动器”，并在需要时重新配对。",
+      "localDriveAction": "请释放空间或选择其他位置。"
+    }
+  },
+  "themeSelector": {
+    "openButtonLabel": "更改主题",
+    "dialogTitle": "选择主题",
+    "previewPrimaryColor": "主色",
+    "modes": {
+      "light": "浅色",
+      "dark": "深色"
+    },
+    "builtInThemes": {
+      "sambeeLight": {
+        "name": "Sambee 浅色",
+        "description": "应用默认浅色主题"
+      },
+      "sambeeDark": {
+        "name": "Sambee 深色",
+        "description": "应用默认深色主题"
+      }
+    }
+  },
+  "keyboardShortcutsHelp": {
+    "defaultTitle": "键盘快捷键",
+    "emptyState": "没有可用的键盘快捷键",
+    "noSearchResults": "没有匹配的键盘快捷键",
+    "searchAriaLabel": "搜索键盘快捷键",
+    "searchPlaceholder": "搜索快捷键",
+    "resultsAriaLabel": "键盘快捷键搜索结果",
+    "closeAriaLabel": "关闭键盘快捷键窗口",
+    "groups": {
+      "general": "常规",
+      "search": "搜索",
+      "navigation": "导航",
+      "selection": "选择",
+      "fileActions": "文件操作",
+      "editing": "编辑",
+      "view": "视图",
+      "panes": "窗格和布局"
+    },
+    "titles": {
+      "fileBrowser": "文件浏览器快捷键",
+      "pdfViewer": "PDF 查看器快捷键",
+      "imageViewer": "图片查看器快捷键",
+      "markdownViewer": "Markdown 查看器快捷键",
+      "markdownEditor": "Markdown 编辑器快捷键",
+      "textEditor": "文本编辑器快捷键"
+    }
+  },
+  "auth": {
+    "passwordChange": {
+      "title": "更改密码",
+      "required": "管理员要求你先更改 Sambee 本地账户密码，然后才能继续。",
+      "checking": "正在检查账户…",
+      "checkFailed": "无法检查账户。请重试。",
+      "checkForChangeFailed": "无法检查账户。请重新登录或重试。",
+      "changeFailed": "无法更改密码。请重试。",
+      "current": "当前密码",
+      "new": "新密码",
+      "confirmation": "确认新密码",
+      "mismatch": "两次输入的密码不一致。",
+      "show": "显示密码",
+      "hide": "隐藏密码",
+      "signOut": "退出登录",
+      "changing": "正在更改密码…",
+      "retry": "重试"
+    },
+    "oidcCallback": {
+      "progress": "正在完成登录",
+      "failed": "无法完成登录。",
+      "title": "暂时无法登录",
+      "retry": "重试"
+    },
+    "login": {
+      "title": "登录 Sambee",
+      "usernameLabel": "用户名",
+      "passwordLabel": "密码",
+      "submit": "登录",
+      "submitWithPassword": "使用密码登录",
+      "submitWithOidc": "使用单点登录（{{providerName}} OIDC）",
+      "invalidCredentials": "用户名或密码不正确"
+    }
+  },
+  "settings": {
+    "userManagement": {
+      "addUserButton": "添加用户",
+      "addUserFabAriaLabel": "添加用户",
+      "totalUsers_other": "用户：{{count}}",
+      "activeAdmins_other": "管理员：{{count}}",
+      "emptyTitle": "未找到用户",
+      "emptyDescription": "创建第一个用户账户，即可向其他人授予访问权限。",
+      "currentUserSuffix": "（你）",
+      "adminRole": "管理员",
+      "editorRole": "编辑者",
+      "viewerRole": "查看者",
+      "activeStatus": "已启用",
+      "disabledStatus": "已停用",
+      "passwordResetPending": "需要更改密码",
+      "roleSource": {
+        "localAssignment": "角色来源：本地分配",
+        "individualOverride": "角色来源：单独指定",
+        "oidcDefault": "角色来源：OIDC 默认角色",
+        "oidcGroups": "角色来源：OIDC 组",
+        "awaitingOidcSignIn": "角色来源：等待 OIDC 登录"
+      },
+      "createdAt": "创建于 {{timestamp}}",
+      "expiresAt": "到期时间：{{timestamp}}",
+      "actions": {
+        "editUser": "编辑用户",
+        "resetPassword": "重置密码",
+        "deleteUser": "删除用户",
+        "deleteSelfDisabled": "你无法在此处删除自己的账户",
+        "saveChanges": "保存更改",
+        "createUser": "创建用户",
+        "close": "关闭"
+      },
+      "aria": {
+        "editUser": "编辑 {{username}}",
+        "resetPassword": "重置 {{username}} 的密码",
+        "deleteUser": "删除 {{username}}"
+      },
+      "editor": {
+        "titleEdit": "编辑用户",
+        "titleCreate": "创建用户",
+        "descriptionEdit": "更新账户信息和访问级别。密码需单独重置。",
+        "sections": {
+          "access": "访问权限",
+          "credentials": "凭据"
+        },
+        "usernameLabel": "用户名",
+        "usernameHelp": "用于登录的唯一名称",
+        "usernameTaken": "此用户名已被使用",
+        "nameLabel": "全名",
+        "nameHelp": "显示的账户名称",
+        "oidcNameHelp": "由关联的 OIDC 提供商管理",
+        "emailLabel": "电子邮箱",
+        "emailHelp": "联系邮箱（可选）",
+        "oidcEmailHelp": "由关联的 OIDC 提供商管理",
+        "roleLabel": "角色",
+        "roleHelp": "选择访问级别",
+        "oidcRoleHelp": "为此用户单独指定角色，或沿用从关联的 OIDC 提供商解析出的角色",
+        "oidcRoleUnavailableHelp": "请为此用户单独指定角色。用户下次通过 OIDC 登录后，即可使用来自提供商的角色。",
+        "roleOptions": {
+          "admin": "管理设置、用户和内容",
+          "editor": "修改内容",
+          "viewer": "浏览内容"
+        },
+        "inheritedRole": "继承（{{role}}）",
+        "inheritedRoleDescription": "使用从该用户最近验证的 OIDC 组中解析出的角色",
+        "expiresAtLabel": "到期时间",
+        "expiresAtHelp": "留空表示永不过期",
+        "accountActiveLabel": "启用账户",
+        "accountActiveHelp": "已停用的账户无法登录",
+        "initialPasswordLabel": "初始密码",
+        "initialPasswordHelp": "如果留空，服务器将生成安全的临时密码",
+        "showInitialPassword": "显示初始密码",
+        "hideInitialPassword": "隐藏初始密码",
+        "requirePasswordChangeLabel": "要求下次使用密码登录时更改密码",
+        "requirePasswordChangeHelp": "更改密码前，不允许通过本地密码访问。仍可通过 OIDC 登录。",
+        "switchOn": "开启",
+        "switchOff": "关闭"
+      },
+      "resetPasswordEditor": {
+        "title": "重置密码",
+        "descriptionWithName": "为 {{username}} 设置新密码。此操作会立即结束该用户在所有设备上的登录会话。",
+        "descriptionFallback": "为此用户设置新密码。此操作会立即结束该用户在所有设备上的登录会话。",
+        "passwordLabel": "新密码",
+        "passwordHelp": "设置此用户下次登录时使用的密码",
+        "showPassword": "显示新密码",
+        "hidePassword": "隐藏新密码",
+        "requirePasswordChangeLabel": "要求下次使用密码登录时更改密码",
+        "requirePasswordChangeHelp": "更改密码前，不允许通过本地密码访问。仍可通过 OIDC 登录。",
+        "passwordRequired": "请输入新密码",
+        "submit": "设置密码"
+      },
+      "credentialsDialog": {
+        "usernameLabel": "用户名",
+        "temporaryPasswordLabel": "临时密码",
+        "createTitle": "已生成临时密码",
+        "createDescription": "请通过安全的方式将此临时密码告知用户。用户登录后必须更改密码。"
+      },
+      "deleteDialog": {
+        "title": "删除用户",
+        "descriptionFallback": "要删除此用户吗？"
+      },
+      "notifications": {
+        "loadFailed": "无法加载用户",
+        "usernameRequired": "请输入用户名",
+        "userUpdated": "用户已更新",
+        "userCreated": "用户已创建",
+        "updateFailed": "无法更新用户",
+        "createFailed": "无法创建用户",
+        "resetFailed": "无法重置密码",
+        "userDeleted": "用户已删除",
+        "deleteFailed": "无法删除用户"
+      }
+    },
+    "connectionManagement": {
+      "headerTitle": "SMB 连接",
+      "headerDescription": "浏览共享连接并管理你的私有 SMB 共享连接。",
+      "addConnectionButton": "添加连接",
+      "addConnectionFabAriaLabel": "添加连接",
+      "connectionActionsAriaLabel": "连接操作",
+      "userLabel": "用户：",
+      "pathLabel": "路径：",
+      "sharedSectionTitle": "共享连接",
+      "sharedSectionEmpty": "没有可用的共享连接。",
+      "privateSectionTitle": "我的连接",
+      "privateSectionEmpty": "你还没有私有连接。",
+      "emptyTitle": "未配置连接",
+      "emptyAdminDescription": "单击加号按钮创建共享或私有 SMB 连接。",
+      "emptyRegularDescription": "单击加号按钮创建你的第一个私有 SMB 连接。",
+      "emptyViewerDescription": "你的账户目前没有可用连接。请联系管理员创建或共享连接。",
+      "menuTest": "测试连接",
+      "menuEdit": "编辑",
+      "menuDelete": "删除",
+      "tooltipTest": "测试连接",
+      "tooltipEdit": "编辑",
+      "tooltipDelete": "删除",
+      "ariaTest": "测试连接",
+      "ariaEdit": "编辑连接",
+      "ariaDelete": "删除连接",
+      "columns": {
+        "port": "端口",
+        "type": "类型",
+        "actions": "操作"
+      },
+      "deleteDialogTitle": "删除连接",
+      "deleteDialogDescription": "确定要删除此连接吗？",
+      "notifications": {
+        "loadFailed": "无法加载连接",
+        "savedPrivateInfo": "连接已保存为私有连接。共享连接需要管理员权限。",
+        "createdSuccess": "连接已创建",
+        "updatedSuccess": "连接已更新",
+        "deletedSuccess": "连接已删除",
+        "deleteFailed": "无法删除连接",
+        "testFailed": "连接测试失败",
+        "saveFailed": "无法保存连接"
+      },
+      "scope": {
+        "sharedChip": "共享",
+        "privateChip": "私有"
+      }
+    },
+    "connectionDialog": {
+      "titles": {
+        "add": "添加连接",
+        "edit": "编辑连接"
+      },
+      "results": {
+        "success": "连接成功",
+        "error": "连接失败",
+        "errorDialogTitle": "连接测试失败"
+      },
+      "labels": {
+        "name": "连接名称",
+        "host": "主机",
+        "shareName": "共享名称",
+        "username": "用户名",
+        "password": "密码",
+        "pathPrefix": "路径前缀",
+        "visibility": "可见范围",
+        "accessMode": "访问模式"
+      },
+      "sections": {
+        "access": "访问权限"
+      },
+      "helpers": {
+        "name": "用于在 Sambee 中识别此连接的名称",
+        "host": "SMB 服务器的 IP 地址或主机名",
+        "shareName": "服务器上的共享名称",
+        "passwordAdd": "SMB 账户的密码",
+        "passwordEdit": "留空以保留现有密码",
+        "pathPrefix": "共享中的基本路径（可选）",
+        "username": "如有需要，请使用 DOMAIN\\USER 格式",
+        "visibility": "选择私有或共享访问",
+        "visibilityAdmin": "管理员可以创建供所有人使用的共享连接，也可以为自己创建私有连接。",
+        "visibilityRegular": "共享连接需要管理员权限。没有此权限时，即使选择共享，服务器也会将连接保存为私有连接。",
+        "accessModeReadWrite": "选择只读或读写访问",
+        "accessModeReadOnly": "选择只读或读写访问"
+      },
+      "errors": {
+        "nameRequired": "请输入连接名称",
+        "hostRequired": "请输入主机",
+        "shareNameRequired": "请输入共享名称",
+        "usernameRequired": "请输入用户名",
+        "passwordRequired": "请输入密码"
+      },
+      "actions": {
+        "save": "保存"
+      },
+      "aria": {
+        "togglePassword": "切换密码的显示状态"
+      },
+      "visibility": {
+        "privateLabel": "仅自己可见",
+        "privateDescription": "仅你的账户可见。你可以完全管理此连接。",
+        "sharedLabel": "与所有人共享",
+        "sharedDescription": "所有用户均可查看。只有管理员可以管理。"
+      },
+      "accessMode": {
+        "readWriteLabel": "读写",
+        "readOnlyLabel": "只读"
+      }
+    },
+    "localDrives": {
+      "menuActionLabel": "管理本地驱动器…",
+      "headerTitle": "本地驱动器",
+      "headerDescription": "配对 Sambee Companion 并控制此浏览器对本地驱动器的访问。",
+      "intro": "管理此浏览器与 Sambee Companion 的配对，并验证是否能够访问此计算机上的本地驱动器。",
+      "summaryTitle": "当前状态",
+      "secureContextTitle": "本地驱动器需要支持 Web Crypto 的安全浏览器环境",
+      "secureContextMessage": "配对和访问本地驱动器需要支持 Web Crypto 的安全浏览器环境。请使用 HTTPS（本地开发时可使用 localhost），并使用已启用 Web Crypto 的浏览器。",
+      "unsupportedMobileTitle": "访问本地驱动器需要桌面浏览器",
+      "unsupportedMobileDescription": "Sambee Companion 不支持 iOS 或 Android。",
+      "unsupportedMobileAlert": "请在 Windows、macOS 或 Linux 的桌面浏览器中使用 Sambee，以便安装 Companion、配对此浏览器并访问本地驱动器。",
+      "statusLabelReady": "就绪",
+      "statusLabelActionRequired": "需要操作",
+      "statusLabelUnavailable": "Companion 不可用",
+      "summaryReadyTitle": "本地驱动器可用",
+      "summaryPairingRequiredTitle": "配对此浏览器以访问本地驱动器",
+      "summaryPendingApprovalTitle": "在 Sambee Companion 中完成授权",
+      "summaryRepairTitle": "修复此浏览器的配对",
+      "summaryUpdateRequiredTitle": "更新 Sambee Companion",
+      "summaryBrowserUpdateRequiredTitle": "更新 Sambee",
+      "summaryVerificationUnavailableTitle": "无法验证本地驱动器的访问权限",
+      "summaryUnavailableTitle": "在此计算机上启动 Sambee Companion",
+      "companionRunningChecklistLabel": "Companion 正在运行",
+      "browserFullyPairedChecklistLabel": "此浏览器已配对",
+      "accessSectionTitle": "本地访问",
+      "accessSectionDescription": "管理此浏览器的配对，并确认当前能否访问本地驱动器。",
+      "pairingSectionTitle": "配对此浏览器",
+      "pairingSectionReady": "此浏览器已与 Sambee Companion 配对。",
+      "pairingSectionUnavailable": "请在此计算机上启动 Sambee Companion，然后返回此处配对此浏览器。",
+      "pairingSectionRequired": "请在 Sambee Companion 中批准配对请求，以便浏览本地驱动器。",
+      "pairingSectionPendingApproval": "Sambee Companion 中已有一个待处理的配对请求。请先在其中批准或拒绝该请求，再尝试配对。",
+      "pairingSectionRepair": "请先重新加载此页面，以更新 Sambee 与 Companion 的连接。如果仍无法访问本地驱动器，请重新配对此浏览器。",
+      "verificationSectionTitle": "验证本地访问",
+      "verificationSectionDescription": "执行快速检查，确认此浏览器仍可访问本地驱动器。",
+      "verificationSectionReady": "从 Sambee 打开本地文件前，可以先快速检查访问权限。",
+      "verificationSectionBlocked": "请先完成配对，然后在此处测试配对。",
+      "troubleshootingSectionTitle": "管理此浏览器的配对",
+      "troubleshootingSectionDescription": "查看或移除允许此浏览器访问本地驱动器的配对。",
+      "troubleshootingSectionReady": "取消配对此浏览器，撤销它对这台计算机上的本地驱动器的访问权限。",
+      "loadError": "无法加载 Companion 状态。",
+      "pairingCreated": "已为本地驱动器创建配对。",
+      "pairingRemoved": "已取消配对此浏览器。",
+      "pairingRemoveFailed": "无法移除配对。",
+      "pairingTestSucceeded": "配对验证成功。此浏览器可以访问本地驱动器。",
+      "pairingTestFailed": "Companion 拒绝了此浏览器的签名。请先重新加载 Sambee；如果测试仍然失败，请重新配对此浏览器。",
+      "pairingTestUnavailable": "无法验证本地驱动器的访问权限。请检查 Companion 是否正在运行，然后重试。",
+      "reloadButton": "重新加载 Sambee",
+      "statusUnavailable": "Sambee Companion 未在此计算机上运行。请启动它，然后返回此处配对此浏览器、测试本地访问或从 Sambee 打开本地文件。",
+      "statusPaired": "此浏览器已与 Sambee Companion 配对，可以在 Sambee 中浏览和打开本地文件。",
+      "statusPendingApproval": "此浏览器的配对请求正在等待 Sambee Companion 批准。请先在 Companion 中处理该请求，再重试。",
+      "statusRecoverable": "Companion 无法验证此浏览器的配对。请先重新加载 Sambee 以应用可能存在的更新；如果仍无法访问，请重新配对此浏览器。",
+      "statusUpdateRequired": "此版本的 Companion 使用较旧的身份验证协议。请更新并重启 Companion，然后重新加载 Sambee。重新配对无法解决版本不一致的问题。",
+      "statusBrowserUpdateRequired": "Companion 使用的身份验证协议比此 Sambee 页面支持的版本更新。请重新加载 Sambee；如果问题仍未解决，请更新 Sambee。重新配对无法解决此问题。",
+      "statusVerificationUnavailable": "可以连接 Companion，但无法验证配对状态。请重试。",
+      "statusUnpaired": "此浏览器尚未与 Sambee Companion 配对。",
+      "downloadSectionTitle": "安装 Sambee Companion",
+      "downloadSectionDescription": "如果此计算机尚未安装 Sambee Companion，请下载并安装。安装后，请启动该应用并返回此处配对此浏览器或测试本地驱动器访问。",
+      "downloadSectionSourcePrefix": "来源",
+      "downloadVersionLabel": "可用版本",
+      "downloadFeedSourceLabel": "最新发布版本",
+      "downloadPinSourceLabel": "管理员指定的版本",
+      "downloadPrimaryButton": "下载适用于此计算机的版本",
+      "downloadOtherPlatformsLabel": "其他可用下载",
+      "downloadRecommendedLabel": "为此计算机推荐",
+      "downloadUnavailable": "下载链接暂不可用。请稍后刷新状态并重试。",
+      "downloadLoadFailed": "无法获取 Companion 的下载信息。",
+      "testCurrentPairingButton": "测试当前配对",
+      "pairThisBrowserButton": "配对此浏览器",
+      "waitingForApprovalButton": "等待批准…",
+      "unpairThisBrowserButton": "取消配对此浏览器",
+      "testingButton": "正在测试…",
+      "unpairingButton": "正在取消配对…",
+      "pairingDialog": {
+        "title": "与 Companion 配对",
+        "intro": "将此浏览器与 Sambee Companion 配对，即可浏览本地驱动器。请确保 Companion 正在此计算机上运行。",
+        "verifyCodePrompt": "请确认此验证码与 Companion 中显示的一致：",
+        "verifyCodeHelp": "如果验证码一致，请单击下方的确认按钮，然后在 Companion 中批准配对。",
+        "confirming": "正在等待 Companion 确认…",
+        "success": "配对成功。现在可以访问本地驱动器。",
+        "startButton": "开始配对",
+        "confirmButton": "验证码一致 — 确认",
+        "cancelButton": "取消",
+        "doneButton": "完成",
+        "closeButton": "关闭",
+        "retryButton": "重试",
+        "initiateFailed": "无法发起配对。请检查 Companion 是否正在运行。",
+        "confirmFailed": "配对失败。Companion 可能拒绝了请求，或配对请求已过期。"
+      }
+    },
+    "healthMonitoring": {
+      "loadFailed": "无法加载健康监控设置。请检查后端连接，然后重试。",
+      "saveFailed": "无法保存此健康监控设置。请检查输入值后重试。",
+      "cpuRefreshFailed": "设置已保存，但无法刷新 CPU 温度详情。请选择“重试”以更新详情。",
+      "saving": "正在保存设置",
+      "saved": "设置已保存",
+      "sections": {
+        "visibility": "监控和可见范围",
+        "memoryThresholds": "内存阈值",
+        "loadThresholds": "平均负载阈值（归一化）",
+        "storageThresholds": "剩余存储空间阈值",
+        "cpuTemperature": "CPU 温度阈值"
+      },
+      "fields": {
+        "enabled": "启用健康监控",
+        "enabledDescription": "检查资源，并向所选角色显示系统健康状况。",
+        "stateOn": "开启",
+        "stateOff": "关闭",
+        "audience": "向以下角色显示健康信息",
+        "audienceDescription": "设置哪些角色可以查看系统健康状况。不包括查看者。",
+        "audienceOptions": {
+          "admins": "管理员",
+          "editors": "编辑者",
+          "both": "管理员和编辑者"
+        },
+        "memoryWarning": "内存警告阈值（%）",
+        "memoryWarningDescription": "使用率达到或超过此值并持续 60 秒时发出警告。适用于主机内存和设置了内存上限的容器，不含文件缓存。",
+        "memoryError": "内存错误阈值（%）",
+        "memoryErrorDescription": "使用率达到或超过此值并持续 60 秒时报错。未设置内存上限的容器不会触发基于百分比的告警。",
+        "loadWarning": "平均负载警告阈值",
+        "loadWarningDescription": "5 分钟平均负载除以逻辑 CPU 数量后的结果达到或超过此值时发出警告。此值不是 CPU 使用率。",
+        "loadError": "平均负载错误阈值",
+        "loadErrorDescription": "归一化的 5 分钟平均负载达到或超过此值时报错。",
+        "spaceWarning": "剩余存储空间警告阈值（%）",
+        "spaceWarningDescription": "剩余空间百分比等于或低于此值时发出警告。",
+        "spaceError": "剩余存储空间错误阈值（%）",
+        "spaceErrorDescription": "剩余空间百分比等于或低于此值，或空间耗尽时报错。",
+        "cpuDetectedWarning": "检测到的警告上限",
+        "cpuDetectedError": "检测到的严重告警上限",
+        "cpuWarningOverride": "警告阈值（°C）",
+        "cpuWarningOverrideDescription": "留空以使用自动设置，或以 0.1 °C 为步长设置警告阈值。",
+        "cpuErrorOverride": "错误阈值（°C）",
+        "cpuErrorOverrideDescription": "留空以使用自动设置，或以 0.1 °C 为步长设置错误阈值。",
+        "automaticPlaceholder": "自动",
+        "returnToAutomatic": "恢复自动设置",
+        "reconfirmOverride": "重新确认覆盖值",
+        "notAvailable": "不可用",
+        "originHardware": "硬件",
+        "originKernelPolicy": "内核温控策略",
+        "originAdminOverride": "管理员覆盖值",
+        "exceedsDetectedWarning": "警告：手动设置的警告阈值（{{override}}）超过检测到的上限（{{detected}}）。主机硬件保护不受影响。",
+        "exceedsDetectedError": "警告：手动设置的错误阈值（{{override}}）超过检测到的严重告警上限（{{detected}}）。主机硬件保护不受影响。"
+      },
+      "validation": {
+        "memoryRange": "请输入 0.1 到 100.0 之间的百分比，步长为 0.1。",
+        "memoryPairWarningAboveError": "内存警告阈值不能高于错误阈值（{{other}}%）。请先提高错误阈值。",
+        "memoryPairErrorBelowWarning": "内存错误阈值不能低于警告阈值（{{other}}%）。请先降低警告阈值。",
+        "loadRange": "请输入不小于 0.01 的有限数值，步长为 0.01。",
+        "loadPairWarningAboveError": "负载警告阈值不能高于错误阈值（{{other}}）。请先提高错误阈值。",
+        "loadPairErrorBelowWarning": "负载错误阈值不能低于警告阈值（{{other}}）。请先降低警告阈值。",
+        "spaceRange": "请输入 0.0 到 99.9 之间的百分比，步长为 0.1。",
+        "spacePairWarningBelowError": "剩余空间警告阈值不能低于错误阈值（{{other}}%）。请先降低错误阈值。",
+        "spacePairErrorAboveWarning": "剩余空间错误阈值不能高于警告阈值（{{other}}%）。请先提高警告阈值。",
+        "cpuRange": "请输入大于零的摄氏温度，步长为 0.1 °C，或清空此字段以使用自动设置。",
+        "cpuPairWarningAboveError": "CPU 警告阈值不能高于当前生效的错误阈值（{{other}}）。请先提高或清除错误阈值。",
+        "cpuPairErrorBelowWarning": "CPU 错误阈值不能低于当前生效的警告阈值（{{other}}）。请先降低或清除警告阈值。"
+      }
+    },
+    "advanced": {
+      "imageConversion": {
+        "label": "图片转换偏好",
+        "description": "适用于后端生成的图片预览，包括由 libvips 转换的预览。不影响本地驱动器上的图片。",
+        "speed": "转换速度",
+        "speedDescription": "对不透明的预览使用更快的编码。生成的文件可能更大。",
+        "size": "目标大小",
+        "sizeDescription": "使用 WebP 减小不透明预览的文件大小。转换可能占用更多 CPU 资源。"
+      },
+      "saveChanges": "保存更改",
+      "saveSuccess": "高级设置已保存",
+      "loadFailed": "无法加载高级设置",
+      "saveFailed": "无法保存高级设置",
+      "resetOverride": "重置覆盖值",
+      "resetFailed": "无法重置设置的覆盖值",
+      "resetSuccess": "已将{{label}}恢复为继承值",
+      "sections": {
+        "smbBackends": "SMB 后端",
+        "preprocessors": "预处理程序",
+        "imageMagick": "ImageMagick",
+        "pdfCompatibility": "PDF 兼容性",
+        "archiveDownloads": "创建归档文件"
+      },
+      "fields": {
+        "value": "值",
+        "unit": "单位",
+        "seconds": "秒"
+      },
+      "validation": {
+        "enterLabel": "请输入{{label}}",
+        "wholeNumber": "{{label}}必须为整数",
+        "betweenRange": "{{label}}必须介于 {{min}} 和 {{max}} 之间",
+        "betweenRangeWithUnit": "{{label}}必须在 {{min}} 至 {{max}} {{unit}} 的范围内"
+      },
+      "helperText": {
+        "integer": "{{description}} 默认值：{{defaultValue}}。范围：{{minValue}} 至 {{maxValue}}。",
+        "byteSize": "{{description}} 默认值：{{defaultValue}}。范围：{{minValue}} 至 {{maxValue}}。"
+      }
+    },
+    "smbSettings": {
+      "loadFailed": "无法加载 SMB 设置",
+      "saveFailed": "无法保存 SMB 设置",
+      "saving": "正在保存 SMB 设置",
+      "saved": "SMB 设置已保存",
+      "connectionTimeoutError": "请输入 5 到 120 之间的整数。",
+      "readChunkSizeError": "请输入允许的块大小范围内的整数。",
+      "sections": {
+        "protection": "保护",
+        "connectionBehavior": "连接行为",
+        "fileStreaming": "文件流式传输"
+      },
+      "fields": {
+        "authenticationMode": "身份验证模式",
+        "encryptionMode": "传输保护",
+        "connectionTimeout": "连接超时",
+        "readChunkSize": "SMB 读取块大小"
+      },
+      "helper": {
+        "authenticationMode": "自动模式优先使用 Kerberos，不可用时改用 NTLM。若要禁止回退到 NTLM，请选择“必须使用 Kerberos”。",
+        "encryptionMode": "始终要求签名。“仅签名”允许使用未加密的 SMB 2 连接。如需防止他人在网络上读取 SMB 流量，请要求加密。",
+        "connectionTimeout": "建立 SMB 传输连接允许的最长时间。",
+        "readChunkSize": "每次流式读取文件时读取的字节数。"
+      },
+      "options": {
+        "negotiate": "自动（Kerberos 或 NTLM）",
+        "kerberosRequired": "必须使用 Kerberos",
+        "signingOnly": "仅签名（兼容 SMB 2）",
+        "encryptionRequired": "签名并加密（SMB 3 及以上）"
+      },
+      "source": {
+        "default": "内置默认值",
+        "database": "系统覆盖值",
+        "configFile": "配置文件"
+      }
+    },
+    "imageViewerPage": {
+      "transitionDescription": "使用鼠标或键盘切换图片时，轮播会播放滑动效果。选择无动画则直接切换图片。触摸滑动始终使用轮播动画。",
+      "transition": "切换效果",
+      "carousel": "轮播",
+      "none": "无动画"
+    },
+    "fileBrowserPage": {
+      "quickNavigationTitle": "快速导航",
+      "includeDotDirectoriesLabel": "在快速导航中包含以点开头的文件夹",
+      "includeDotDirectoriesDescription": "在快速导航结果中显示 .git、.cache 等名称以点开头的文件夹。",
+      "shortcutHintsLabel": "键盘快捷键提示",
+      "shortcutHintsDescription": "选择何时显示快捷栏的键盘快捷键提示。",
+      "shortcutHintsAuto": "自动",
+      "shortcutHintsAlways": "始终显示",
+      "shortcutHintsNever": "从不显示",
+      "fileSelectionTitle": "文件选择",
+      "touchFriendlyFileSelectionLabel": "触摸式文件选择",
+      "touchFriendlyFileSelectionDescription": "选择何时使用适合触摸操作的控件和手势来选择文件。",
+      "touchFriendlyFileSelectionAuto": "自动",
+      "touchFriendlyFileSelectionAlways": "始终启用",
+      "touchFriendlyFileSelectionNever": "关闭",
+      "fileSearchTitle": "文件搜索",
+      "clearRecentFiles": "清除最近使用的文件记录",
+      "clearRecentFilesDescription": "此操作会从服务器永久删除你的文件搜索历史记录，不会影响任何文件或文件夹。",
+      "clearRecentFilesFailed": "无法清除最近使用的文件记录。请重试。",
+      "clearRecentDirectories": "清除最近访问的文件夹记录",
+      "clearRecentDirectoriesDescription": "此操作会从服务器永久删除你的文件夹导航历史记录，不会影响任何文件或文件夹。",
+      "clearRecentDirectoriesFailed": "无法清除最近访问的文件夹记录。请重试。"
+    },
+    "textEditorPage": {
+      "limitsTitle": "限制",
+      "maxFileSizeLabel": "功能完整的编辑器可打开的最大文件大小（MB）",
+      "maxFileSizeDescription": "超过此大小的文件不会在基于 CodeMirror 的完整文本编辑器中打开。可使用此限制避免在编辑特大文件时速度过慢或占用过多内存。"
+    },
+    "fileSearch": {
+      "title": "文件搜索",
+      "saveChanges": "保存更改",
+      "resetToDefault": "恢复默认设置",
+      "loadFailed": "无法加载文件搜索设置。",
+      "saveFailed": "无法保存文件搜索设置。",
+      "resetFailed": "无法重置文件搜索设置。",
+      "retentionLimit": "保留的最近文件和文件夹数量",
+      "retentionLimitError": "请输入 0 到 500 之间的整数。",
+      "resultLimit": "每组的结果数",
+      "resultLimitError": "请输入 1 到 50 之间的整数。",
+      "excludedCategories": "排除文件类别",
+      "excludedCategoriesHelp": "排除的文件不会出现在文件搜索结果或历史记录中。",
+      "excludeImages": "排除图片",
+      "excludeTemporaryBackup": "排除临时文件和备份文件",
+      "excludedExtensions": "排除的扩展名",
+      "excludedExtensionsInputLabel": "添加要排除的扩展名",
+      "excludedExtensionsAdd": "添加扩展名",
+      "excludedExtensionsError": "扩展名最多可包含 255 个字符，不允许使用通配模式或路径。",
+      "excludedExtensionsDuplicateError": "此扩展名已被排除。",
+      "excludedExtensionsHelp": "请输入一个确切的扩展名。不支持通配模式或路径。",
+      "excludedExtensionsNormalization": "将保存为 {{extension}}。",
+      "excludedExtensionsRemove": "移除 {{extension}}"
+    },
+    "categories": {
+      "appearance": {
+        "label": "外观",
+        "description": "自定义应用主题和语言设置。"
+      },
+      "account": {
+        "label": "账户",
+        "description": "管理个人身份信息、密码、会话和退出登录。"
+      },
+      "fileBrowser": {
+        "label": "文件浏览器",
+        "description": "设置文件浏览器的默认行为。"
+      },
+      "textEditor": {
+        "label": "文本编辑器",
+        "description": "配置通用文本编辑器的默认设置和安全限制。"
+      },
+      "imageViewer": {
+        "label": "图片查看器",
+        "description": "配置桌面端的图片切换效果。触摸导航不受影响。"
+      },
+      "connections": {
+        "label": "连接",
+        "description": "管理共享和私有 SMB 连接。"
+      },
+      "adminUsers": {
+        "label": "用户管理",
+        "description": "创建账户、分配角色并发起密码重置。"
+      },
+      "adminAuthentication": {
+        "label": "身份验证",
+        "description": "配置登录方式（请参阅<guide>OpenID Connect 设置指南</guide>）。"
+      },
+      "adminNetwork": {
+        "label": "网络",
+        "description": "配置 Sambee 的外部 URL 和受信任的反向代理。"
+      },
+      "adminSystem": {
+        "label": "系统",
+        "description": "管理创建归档文件的限制。"
+      },
+      "adminImageViewer": {
+        "label": "图片查看器",
+        "description": "配置图片转换和处理限制。"
+      },
+      "adminPdfViewer": {
+        "label": "PDF 查看器",
+        "description": "配置 PDF 兼容性、缓存和处理限制。"
+      },
+      "adminSmb": {
+        "label": "SMB",
+        "description": "配置 SMB 后端的安全策略和运行限制。"
+      },
+      "adminFileSearch": {
+        "label": "文件搜索",
+        "description": "配置文件搜索历史记录、结果数量上限和排除项。"
+      },
+      "adminDirectorySearch": {
+        "label": "文件夹搜索",
+        "description": "配置后端和所有 Companion 设备的文件夹索引资源及验证设置。"
+      },
+      "adminHealthMonitoring": {
+        "label": "健康监控",
+        "description": "选择可以查看系统健康状况的用户，并设置告警阈值。"
+      },
+      "adminAbout": {
+        "label": "关于",
+        "description": "查看 Sambee 构建版本、软件和硬件信息。"
+      }
+    },
+    "directorySearch": {
+      "loadFailed": "无法加载文件夹搜索策略。请检查后端连接，然后重试。",
+      "saveFailed": "无法保存此文件夹搜索设置。请检查输入值和后端连接，然后重试。",
+      "backendTitle": "后端文件夹索引",
+      "companionTitle": "Companion 文件夹索引",
+      "deviceTitle": "此设备上的文件夹搜索",
+      "refresh": "刷新状态"
+    },
+    "companionSync": {
+      "results": {
+        "defaults_active": "内置默认设置",
+        "synchronized": "已同步",
+        "synchronizing": "正在同步",
+        "update_required": "需要更新",
+        "authority_conflict": "由其他服务器管理设置",
+        "pairing_required": "需要配对",
+        "delivery_failed": "设置下发失败，仍使用上次有效的设置"
+      },
+      "defaults_active": "在收到配对服务器下发的设置前，将使用内置默认设置。",
+      "synchronized": "设置已同步。",
+      "synchronizing": "正在同步设置。上次有效的设置仍然生效。",
+      "update_required": "请更新 Sambee 和 Companion 以使用共享设置下发功能。",
+      "languageUpdateRequired": "请更新 Sambee Companion 以使用此语言，然后重试。Companion 仍使用上次有效的语言。",
+      "directoryPolicyUpdateRequired": "请更新 Sambee Companion 以使用这些文件夹搜索策略值，然后重试。上次有效的策略和文件夹搜索功能仍可使用。",
+      "authority_conflict": "此服务器不管理 Companion 设置。若要更换管理服务器，请与所需的服务器重新配对。",
+      "pairing_required": "Companion 无法验证此浏览器。请在“设置 > 本地驱动器”中对此浏览器进行配对，或重新配对以修复连接。设置检查已暂停，直到你重试或配对成功。",
+      "delivery_failed": "设置下发失败。请检查连接并重试。上次有效的设置和文件夹搜索功能仍可使用。",
+      "authority": "设置管理服务器：{{origin}}",
+      "sections": {
+        "theme": "主题",
+        "localization": "语言和地区",
+        "directory_index": "文件夹搜索策略"
+      }
+    },
+    "connectionsSubgroups": {
+      "smb": {
+        "label": "SMB 连接",
+        "description": "浏览共享的 SMB 连接并管理你的私有共享。"
+      },
+      "localDrives": {
+        "label": "本地驱动器",
+        "description": "配对 Sambee Companion、管理本地驱动器访问权限并安装桌面助手。"
+      }
+    },
+    "connectionsPage": {
+      "smbSectionTitle": "SMB 连接",
+      "smbSectionDescription": "浏览共享连接并管理你的私有 SMB 共享连接。",
+      "localDrivesSectionTitle": "本地驱动器",
+      "localDrivesSectionDescription": "配对 Sambee Companion 并控制此浏览器对本地驱动器的访问。"
+    },
+    "networkPage": {
+      "loading": "正在加载网络设置",
+      "loadFailed": "无法加载网络设置。",
+      "saveFailed": "无法保存网络设置。",
+      "publicUrl": {
+        "label": "公共 URL",
+        "help": "可从外部访问的 HTTPS 源，不含路径。更改此值会取消尚未完成的 OIDC 登录。",
+        "saving": "正在保存公共 URL",
+        "saved": "公共 URL 已保存"
+      },
+      "trustedProxyCidrs": {
+        "label": "受信任代理的 CIDR 网段",
+        "help": "每行填写一个 CIDR 网段。除非你管理的反向代理会转发客户端 IP 地址，否则请留空。",
+        "saving": "正在保存受信任代理的 CIDR 网段",
+        "saved": "受信任代理的 CIDR 网段已保存"
+      }
+    },
+    "saveStatus": {
+      "saving": "正在保存设置",
+      "saved": "设置已保存"
+    },
+    "shell": {
+      "title": "设置",
+      "closeAriaLabel": "关闭设置",
+      "categoriesAriaLabel": "设置类别",
+      "expandItemAriaLabel": "展开{{label}}",
+      "collapseItemAriaLabel": "收起{{label}}",
+      "versionLabel": "版本",
+      "buildLabel": "构建",
+      "commitLabel": "提交",
+      "unknownValue": "未知"
+    },
+    "sections": {
+      "personal": "个人",
+      "administration": "管理"
+    },
+    "aboutPage": {
+      "applicationTitle": "应用",
+      "runtimeTitle": "软件",
+      "platformTitle": "硬件",
+      "versionLabel": "版本",
+      "buildLabel": "构建",
+      "commitLabel": "提交",
+      "startedLabel": "启动时间",
+      "pythonLabel": "Python",
+      "architectureLabel": "架构",
+      "cpuCountLabel": "逻辑 CPU",
+      "memoryLabel": "可用内存",
+      "copyAriaLabel": "复制信息",
+      "copyTooltip": "复制信息",
+      "copyAboutMenuItem": "复制关于信息",
+      "copyPublicSupportReportMenuItem": "复制公开支持报告",
+      "copySuccess": "已复制关于信息。",
+      "copyError": "无法复制关于信息。",
+      "copyPublicSupportReportSuccess": "已复制公开支持报告。",
+      "copyPublicSupportReportError": "无法复制公开支持报告。",
+      "unavailableValue": "不可用",
+      "loadError": "无法加载关于信息。"
+    },
+    "appearancePage": {
+      "themeTitle": "主题",
+      "themeDescription": "选择应用主题和默认外观。",
+      "localizationTitle": "语言和地区",
+      "localizationDescription": "选择界面语言以及日期和数字的显示格式。",
+      "languageLabel": "语言",
+      "languageDescription": "选择界面显示语言。",
+      "languageLoadFailed": "无法加载此语言。Sambee 正在使用英语。请再次选择该语言重试。",
+      "regionalLocaleLabel": "地区设置",
+      "regionalLocaleDescription": "选择用于日期、时间、数字格式和排序的地区。",
+      "browserDefaultOption": "使用浏览器默认设置",
+      "englishLanguageOption": "英语",
+      "pseudoLanguageOption": "伪英语（用于本地化测试）",
+      "pseudoLanguageShortLabel": "伪英语",
+      "pseudoLanguageDescription": "伪英语用于测试本地化。",
+      "themeScopes": {
+        "personal": "我的主题",
+        "site": "站点主题",
+        "builtIn": "内置主题"
+      },
+      "themeDefaultBadge": "默认",
+      "themeSiteDefaultTitle": "站点默认主题",
+      "themeSetDefault": "设为默认",
+      "themeDeleteTitle": "删除主题？",
+      "themeDeleteDescription": "删除 {{themeName}}？选择了此主题的用户将改用站点默认主题。",
+      "regionalLocaleOptions": {
+        "enUS": "英语（美国）",
+        "enGB": "英语（英国）",
+        "deDE": "德语（德国）",
+        "frFR": "法语（法国）",
+        "jaJP": "日语（日本）",
+        "zhCN": "中文（中国）",
+        "nlNL": "荷兰语（荷兰）",
+        "itIT": "意大利语（意大利）",
+        "koKR": "韩语（韩国）",
+        "plPL": "波兰语（波兰）",
+        "ptPT": "葡萄牙语（葡萄牙）",
+        "esES": "西班牙语（西班牙）",
+        "svSE": "瑞典语（瑞典）"
+      },
+      "regionalSettingsPreviewTitle": "预览"
+    }
+  },
+  "fileBrowser": {
+    "archive": {
+      "createTitle": "创建 ZIP 归档文件",
+      "nameLabel": "归档文件名称",
+      "createDescription_other": "将所选的 {{count}} 项打包为 ZIP 归档文件，并保存到目标文件夹。",
+      "progressCreating": "正在创建归档文件…",
+      "progressPreparing": "正在准备归档文件…",
+      "progressProcessedMembers": "已处理 {{processed}} 个归档条目…",
+      "buttonCreate": "创建归档文件",
+      "buttonCreating": "正在创建归档文件…",
+      "validationExtension": "归档文件名称必须以 .zip 结尾。",
+      "errorGeneric": "无法创建归档文件。",
+      "createPartialOutputError": "创建归档文件失败。新建的 ZIP 文件可能不完整。",
+      "createCancelled": "已取消创建归档文件。",
+      "buttonCancelCreation": "取消创建归档文件",
+      "progressSourceArchive": "源归档文件",
+      "progressMembers": "已处理 {{completed}} 个条目，共 {{total}} 个",
+      "progressBytes": "已处理 {{processed}} 字节，共 {{total}} 字节",
+      "interruptedAfterReload": "归档操作已中断。请先检查目标位置，再重试。",
+      "browseError": "无法加载归档文件的内容。",
+      "downloadError": "无法下载归档条目。",
+      "download": "下载",
+      "previewTitle": "预览 {{name}}",
+      "previewLoading": "正在加载预览",
+      "previewError": "无法加载归档条目的预览。",
+      "previewTooLarge": "此归档条目太大，无法预览。请下载后查看。",
+      "previewUnavailable": "无法在此处预览此文件类型。请下载文件并使用其他应用打开。",
+      "closeBrowser": "关闭归档浏览器",
+      "root": "归档根目录",
+      "breadcrumbs": "归档路径",
+      "historyBack": "后退",
+      "historyForward": "前进",
+      "up": "上一级",
+      "more": "加载更多",
+      "entryUnavailable": "不可用",
+      "extractTitle": "从 ZIP 归档文件解压",
+      "extractDescriptionArchive": "将归档文件解压到目标文件夹。",
+      "extractDescriptionMember": "将所选项目解压到目标文件夹。",
+      "extractDescriptionMembers_other": "将所选的 {{count}} 项解压到目标文件夹。",
+      "memberErrorTitle": "解决解压问题",
+      "memberErrorPrompt": "无法解压某个归档条目。",
+      "destinationLabel": "目标文件夹",
+      "destinationNameLabel": "目标名称",
+      "buttonExtract": "解压",
+      "buttonExtracting": "正在解压…",
+      "buttonCancelExtraction": "取消解压",
+      "buttonOpenDestination": "打开目标位置",
+      "buttonRetryMemberError": "重试此条目",
+      "buttonIgnoreMemberError": "跳过此条目",
+      "validationDestinationEmpty": "请输入目标文件夹。",
+      "validationDestinationUnsafe": "请使用相对文件夹路径，路径中不能包含空段、“.”或“..”。",
+      "validationDestinationExists": "请选择新的目标文件夹。解压操作不会覆盖现有文件夹。",
+      "extractError": "解压失败。",
+      "extractPartialOutputError": "解压失败。目标文件夹中可能有不完整的文件。",
+      "extractSuccess": "解压完成。",
+      "summaryFilesExtracted": "已解压的文件",
+      "summaryDirectoriesCreated": "已创建的文件夹",
+      "summaryBytesWritten": "已写入的字节数",
+      "summaryFilesSkipped": "已跳过的文件",
+      "summaryFilesReplaced": "已替换的文件",
+      "summaryPartialMembers": "不完整的条目",
+      "extractPartialSuccess_other": "解压完成，已跳过 {{count}} 个条目。",
+      "extractEncryptedSkipped_other": "已跳过 {{count}} 个加密条目。",
+      "extractUnsupportedCompressionSkipped_other": "已跳过 {{count}} 个使用不受支持的压缩方式的条目。",
+      "extractCancelled": "已取消解压。",
+      "extractInterrupted": "解压已中断。目标位置可能包含不完整的输出。",
+      "extractConflictPending": "解压操作正在等待你处理文件冲突。",
+      "collisionTitle": "文件已存在",
+      "collisionPrompt": "请选择如何处理目标位置中的这些现有文件。",
+      "collisionListLabel": "有冲突的归档条目",
+      "collisionMore": "另有 {{count}} 个文件存在冲突。",
+      "collisionArchiveMemberLabel": "归档条目",
+      "collisionDestinationPathLabel": "目标路径",
+      "collisionArchiveColumn": "归档文件中",
+      "collisionDestinationColumn": "现有文件",
+      "collisionSizeLabel": "大小",
+      "collisionModifiedLabel": "修改时间",
+      "collisionByteCount": "{{count}} 字节",
+      "collisionResolutionLabel": "选择解决方法",
+      "collisionChoiceSkip": "跳过此文件",
+      "collisionChoiceReplace": "替换此文件",
+      "collisionChoiceReplaceOlder": "仅当归档中的文件较新时才替换",
+      "collisionChoiceRename": "重命名解压后的文件",
+      "collisionApplyRemaining": "对其余冲突使用此选项",
+      "collisionContinue": "继续",
+      "memberErrorTargetLabel": "目标路径",
+      "memberErrorPartialOutputNote": "已创建不完整的目标文件。重试将从头解压此条目。",
+      "buttonSkipAll": "全部跳过",
+      "buttonReplaceAll": "全部替换",
+      "buttonReplaceOlder": "仅替换较旧的文件",
+      "buttonSkip": "跳过",
+      "buttonReplace": "替换",
+      "buttonRename": "重命名",
+      "renameTargetLabel": "新的目标路径"
+    },
+    "chrome": {
+      "breadcrumb": {
+        "navigateRoot": "转到根目录",
+        "navigateTo": "转到 {{path}}"
+      },
+      "connectionSelector": {
+        "placeholder": "选择连接"
+      },
+      "mobileToolbar": {
+        "openMenu": "打开菜单",
+        "navigateUpTitle": "转到上一级",
+        "navigateUpAriaLabel": "转到上一级文件夹"
+      },
+      "sort": {
+        "ariaLabel": "排序选项",
+        "fields": {
+          "name": "名称",
+          "size": "大小",
+          "modified": "修改时间",
+          "type": "类型"
+        },
+        "direction": {
+          "ascending": "升序",
+          "descending": "降序"
+        }
+      },
+      "viewMode": {
+        "ariaLabel": "视图模式选项",
+        "options": {
+          "list": "列表",
+          "details": "详细信息"
+        }
+      },
+      "dualPaneToggle": {
+        "ariaLabel": "切换双窗格视图",
+        "label": "窗格"
+      },
+      "statusBar": {
+        "itemCount_other": "{{count}} 项",
+        "noSelection": "未选择项目",
+        "linkTargetMissing": "未找到快捷方式的目标",
+        "linkTargetAccessDenied": "无法访问快捷方式的目标",
+        "linkTargetUnresolvable": "无法解析快捷方式的目标",
+        "linkTargetLocalDrivesOnly": "只能解析本地驱动器上的快捷方式目标",
+        "linkTargetUnmappedDrive": "快捷方式的目标不在可用驱动器上",
+        "linkTargetUnsupported": "快捷方式的目标不是文件或文件夹"
+      },
+      "alerts": {
+        "folderNotFound": "未找到文件夹“{{name}}”。它可能已被移动或删除。",
+        "folderNotFoundSummary": "未找到文件夹。它可能已被移动或删除。",
+        "fileNotFoundSummary": "未找到文件。它可能已被移动或删除。",
+        "fileFailure": {
+          "missing": "未找到文件“{{name}}”。它可能已被移动或删除。",
+          "not_file": "此目标不是普通文件。请选择其他文件。",
+          "access_denied": "无法访问此文件。请检查权限后重试。",
+          "timeout": "文件请求超时。请检查连接后重试。",
+          "unavailable": "此文件不可用。请检查连接后重试。",
+          "pairing": "本地驱动器配对不可用。请打开本地驱动器设置并重新配对此浏览器。",
+          "cancelled": "文件请求已取消。",
+          "unknown": "无法打开此文件。请检查连接后重试。"
+        },
+        "folderRecovered": "未找到文件夹“{{name}}”。已改为打开“{{parent}}”。",
+        "folderRecoveredSummary": "未找到文件夹。已改为打开“{{parent}}”。",
+        "folderAccessDenied": "你没有权限打开此文件夹。",
+        "notAFolder": "此项目不是文件夹。",
+        "connectionUnavailable": "连接不可用。请检查连接设置后重试。",
+        "directoryMonitoringTimeout": "文件夹监控未能及时启动。请刷新文件夹后重试。",
+        "leftPane": "左侧窗格",
+        "rightPane": "右侧窗格",
+        "localDrivePairingRejected": "{{connection}}：Sambee Companion 拒绝了此浏览器的配对。请重新加载 Sambee 以应用可能存在的更新。如果仍然失败，请打开“本地驱动器”检查配对。",
+        "localDrivePairingRequired": "{{connection}}：此浏览器尚未与 Sambee Companion 配对。请打开“本地驱动器”进行配对。",
+        "welcomeTitle": "欢迎使用 Sambee！",
+        "adminOnboardingPrefix": "首先",
+        "adminOnboardingLink": "添加你的第一个 SMB 网络共享",
+        "adminOnboardingSuffix": "。添加后，即可浏览和查看网络存储中的文件。",
+        "regularOnboarding": "Sambee 可以浏览和查看网络共享中的文件。请联系管理员配置网络共享。",
+        "backendUnavailable": "与后端的连接已断开。当前界面仍可使用，但在连接恢复前，刷新和实时更新可能失败。",
+        "backendReconnecting": "正在重新连接后端。实时更新可能会暂时延迟。",
+        "loadingConnections": "正在加载连接…",
+        "companionLaunchHint": "正在 Sambee Companion 中打开。如果没有响应，请确认 Companion 已安装且正在运行。如果需要登录或恢复文件，Sambee 会在此处重新打开并提示下一步。",
+        "companionLifecycle": {
+          "renewal_required": "Companion 编辑会话在完成文件编辑前已过期。请从 Sambee 重新打开文件以继续编辑。",
+          "auth_failed": "Companion 无法完成 Sambee 后端登录。如果 Companion 提示登录，请先完成登录，再从 Sambee 重新打开文件。",
+          "lock_lost": "Companion 已失去此文件的编辑锁。请先从 Sambee 重新打开文件，再继续编辑。",
+          "recovery_required": "Companion 中有此文件尚未处理的恢复项目。请先在 Sambee 或 Companion 中处理，再开始新的编辑会话。"
+        }
+      },
+      "mobileMenu": {
+        "selectConnectionAriaLabel": "选择连接",
+        "navigateRootAriaLabel": "转到根目录",
+        "openKeyboardShortcutsAriaLabel": "打开键盘快捷键",
+        "openDocumentationAriaLabel": "打开文档",
+        "openSettingsAriaLabel": "打开设置",
+        "systemHealth": "系统健康状况",
+        "openSystemHealthAriaLabel": "系统健康状况：{{status}}。{{headline}}",
+        "logoutAriaLabel": "退出登录"
+      },
+      "helpMenu": {
+        "keyboardShortcuts": "键盘快捷键",
+        "documentation": "文档",
+        "issues": "问题跟踪",
+        "discussions": "讨论"
+      },
+      "toolbar": {
+        "help": "帮助",
+        "openSettings": "打开设置",
+        "systemHealthTooltip": "系统健康状况：{{status}}。{{headline}}"
+      }
+    },
+    "list": {
+      "emptyDirectory": "此文件夹为空"
+    },
+    "archiveMembers": {
+      "encrypted": "此归档条目已加密。请使用支持输入密码的归档工具预览或解压。",
+      "unsupportedCompression": "Sambee 不支持此条目的压缩方式。请使用其他归档工具预览或解压。",
+      "unavailable": "此归档条目不可用。请使用其他归档工具查看。"
+    },
+    "compactActions": {
+      "clearSelection": "清除选择",
+      "createNewItem": "新建项目",
+      "deselect": "取消选择",
+      "moreActionsFor": "{{name}} 的更多操作",
+      "select": "选择",
+      "selectedCount_other": "已选择 {{count}} 项",
+      "selectionCleared": "已清除选择",
+      "selectionActions": "所选项目的操作"
+    },
+    "confirmDelete": {
+      "titleFile": "删除文件",
+      "titleDirectory": "删除文件夹",
+      "titleMulti": "删除项目",
+      "confirmFile": "以下文件将被永久删除：",
+      "confirmDirectory": "以下文件夹及其内容将被永久删除：",
+      "confirmMulti": "以下 {{count}} 项将被永久删除：",
+      "ariaLabelItem": "要删除的项目",
+      "ariaLabelItems": "要删除的项目",
+      "moreItems_other": "另有 {{count}} 项",
+      "buttonDeleting": "正在删除…"
+    },
+    "copyMove": {
+      "descriptionCopySingle": "将此项目复制到目标文件夹。",
+      "descriptionCopyMultiple_other": "将所选的 {{count}} 项复制到目标文件夹。",
+      "descriptionMoveSingle": "将此项目移动到目标文件夹。",
+      "descriptionMoveMultiple_other": "将所选的 {{count}} 项移动到目标文件夹。",
+      "labelDestination": "文件夹",
+      "labelFilename": "新名称",
+      "errorSameFilename": "目标文件夹中已有同名项目。",
+      "errorSameDirectory": "目标文件夹与源文件夹相同。",
+      "warnEmptyFilename": "请输入名称。",
+      "buttonCopying": "正在复制…",
+      "buttonMoving": "正在移动…",
+      "progressCopy": "正在复制第 {{current}} 项，共 {{total}} 项…",
+      "progressMove": "正在移动第 {{current}} 项，共 {{total}} 项…",
+      "errorGeneric": "操作失败。可能有部分项目未处理。"
+    },
+    "createItem": {
+      "titleFile": "新建文件",
+      "titleDirectory": "新建文件夹",
+      "inputLabel": "名称",
+      "descriptionFile": "在目标文件夹中创建新文件。",
+      "descriptionDirectory": "在目标文件夹中创建新文件夹。",
+      "buttonCreating": "正在创建…"
+    },
+    "nameDialog": {
+      "validationEmpty": "请输入名称。",
+      "validationInvalidChars": "请移除以下不受支持的字符：\\ / : * ? \" < > |。",
+      "validationDotNames": "“.”和“..”是保留的文件夹名称。",
+      "validationTrailing": "名称不能以空格或句点结尾。"
+    },
+    "operationContext": {
+      "file": "文件",
+      "sourceItem": "源项目",
+      "destinationDirectory": "目标文件夹",
+      "archive": "归档文件",
+      "archiveMember": "归档条目",
+      "selectedItems": "所选项目"
+    },
+    "rename": {
+      "titleFile": "重命名文件",
+      "titleDirectory": "重命名文件夹",
+      "inputLabel": "新名称",
+      "description": "为此项目选择新名称。",
+      "validationSame": "名称未更改。",
+      "buttonRenaming": "正在重命名…"
+    },
+    "row": {
+      "openInCompanionApp": "在本机应用中打开",
+      "openInBrowserViewer": "在 Sambee 中打开",
+      "chooseBrowserViewer": "选择 Sambee 查看器",
+      "openInNativeApp": "在本机应用中打开",
+      "chooseNativeApp": "选择本机应用",
+      "itemTypes": {
+        "folder": "文件夹",
+        "file": "文件"
+      },
+      "shortcutSuffix": "（快捷方式）",
+      "shortcutTargetSuffix": "（快捷方式目标：{{target}}）",
+      "unsavedLocalDraft": "有未保存的本地草稿",
+      "unsavedLocalDraftSuffix": "：有未保存的本地草稿",
+      "selectedSuffix": "（已选择）"
+    },
+    "share": {
+      "filesOnly": "只能分享文件。请取消选择文件夹。",
+      "selectFiles": "请选择一个或多个要分享的文件。",
+      "preparing_other": "正在下载 {{count}} 个要分享的文件…",
+      "ready_other": "有 {{count}} 个文件可分享",
+      "sharing": "正在打开分享面板…",
+      "rejected": "浏览器无法分享这些文件。请改为下载。",
+      "fileTypeRejected": "此浏览器可能不支持分享这些文件类型。请下载文件，再尝试通过设备上的文件管理应用分享。",
+      "downloadNext": "下载 {{current}}/{{count}}",
+      "downloadFailed": "无法下载文件"
+    },
+    "tabs": {
+      "groupAriaLabel": "文件夹标签页",
+      "leftPaneGroupAriaLabel": "左侧窗格的文件夹标签页",
+      "rightPaneGroupAriaLabel": "右侧窗格的文件夹标签页",
+      "newTab": "新建标签页",
+      "allTabsAriaLabel": "所有标签页（{{total}} 个）",
+      "allTabsOverflowAriaLabel": "所有标签页（{{total}} 个，其中 {{hidden}} 个已隐藏）",
+      "selectTabAriaLabel": "{{name}} — {{location}}",
+      "closeTabAriaLabel": "关闭 {{name}} 标签页（{{location}}）",
+      "closeTab": "关闭标签页",
+      "closeBackgroundTabTooltip": "关闭标签页（{{shortcut}} 关闭所选标签页）",
+      "closeMenuTabTooltip": "关闭标签页（{{shortcut}} 关闭当前获得焦点的标签页）",
+      "closedNotice": "标签页已关闭",
+      "undo": "撤销",
+      "selectedAnnouncement": "{{name}}，第 {{index}} 个标签页，共 {{total}} 个",
+      "listInstructions": "使用左右方向键切换文件夹标签页，按 {{newTabShortcut}} 新建标签页，按 {{closeTabShortcut}} 关闭所选标签页。",
+      "restorationUnavailableNotice": "此浏览器会话不支持在重新加载后恢复标签页。"
+    },
+    "commands": {
+      "categories": {
+        "navigation": "导航",
+        "files": "文件",
+        "view": "视图",
+        "panes": "窗格",
+        "settings": "设置",
+        "help": "帮助"
+      },
+      "items": {
+        "quickNav": { "title": "打开导航模式", "description": "通过快捷栏跳转到文件夹" },
+        "fileSearch": { "title": "文件搜索", "description": "搜索最近使用的文件和当前文件夹中的文件" },
+        "commandPalette": { "title": "显示命令", "description": "打开文件浏览器的命令面板" },
+        "open": { "title": "打开焦点所在的项目" },
+        "navigateUp": { "title": "转到上一级文件夹" },
+        "refresh": { "title": "刷新文件列表" },
+        "rename": { "title": "重命名焦点所在的项目" },
+        "delete": { "title": "删除焦点所在的项目" },
+        "newDirectory": { "title": "新建文件夹" },
+        "newFile": { "title": "新建文件" },
+        "createArchive": { "title": "创建 ZIP 归档文件" },
+        "extractArchive": { "title": "从 ZIP 归档文件解压" },
+        "openInApp": { "title": "在本机应用中打开焦点所在的文件" },
+        "openInViewerPicker": { "title": "为焦点所在的文件选择 Sambee 查看器" },
+        "openInNativePicker": { "title": "为焦点所在的文件选择本机应用" },
+        "toggleDualPane": { "title": "切换双窗格视图" },
+        "openLocationInNewTab": { "title": "在新标签页中打开当前位置" },
+        "matchLeftPaneLocation": { "title": "在左侧窗格打开右侧窗格的位置" },
+        "matchRightPaneLocation": { "title": "在右侧窗格打开左侧窗格的位置" },
+        "focusLeftPane": { "title": "将焦点移到左侧窗格" },
+        "focusRightPane": { "title": "将焦点移到右侧窗格" },
+        "switchPane": { "title": "切换活动窗格" },
+        "newTab": { "title": "新建文件夹标签页" },
+        "closeTab": { "title": "关闭文件夹标签页" },
+        "undoCloseTab": { "title": "撤销关闭文件夹标签页" },
+        "previousTab": { "title": "上一个文件夹标签页" },
+        "nextTab": { "title": "下一个文件夹标签页" },
+        "copyToOtherPane": { "title": "复制到另一个窗格" },
+        "moveToOtherPane": { "title": "移动到另一个窗格" },
+        "openSettings": { "title": "打开设置" },
+        "openConnectionsSettings": { "title": "打开连接设置" },
+        "openSystemHealth": { "title": "打开系统健康状况" },
+        "showHelp": { "title": "显示键盘快捷键" }
+      }
+    },
+    "shortcuts": {
+      "copyToOtherPane": "复制到另一个窗格",
+      "copyToOtherPaneInDualPane": "复制到另一个窗格（双窗格模式）",
+      "createArchive": "创建 ZIP 归档文件",
+      "download": "下载所选项目",
+      "createDirectory": "新建文件夹",
+      "createFile": "新建文件",
+      "deleteItem": "删除文件或文件夹",
+      "extractArchive": "解压 ZIP 归档文件",
+      "fileSearch": "搜索最近使用的文件和当前文件夹中的文件",
+      "moveToOtherPane": "移动到另一个窗格",
+      "moveToOtherPaneInDualPane": "移动到另一个窗格（双窗格模式）",
+      "navigateDown": "向下移动",
+      "navigateUp": "转到上一级文件夹",
+      "navigateUpRow": "向上移动",
+      "openConnectionSelector": "打开连接选择器",
+      "openInCompanion": "在本机应用中打开所选文件",
+      "openNativePicker": "为所选文件选择本机应用",
+      "openQuickNavigation": "打开快速导航",
+      "openSelectedItem": "在 Sambee 中打开所选文件。",
+      "openSettings": "打开设置",
+      "openSmartNavigation": "打开导航模式",
+      "openViewerPicker": "为所选文件选择 Sambee 查看器",
+      "refresh": "刷新文件列表",
+      "renameItem": "重命名文件或文件夹",
+      "selectAllFiles": "选择所有文件",
+      "selectAndMoveDown": "选择并向下移动",
+      "selectAndMoveUp": "选择并向上移动",
+      "selectToFirst": "从焦点所在的项目选到第一项",
+      "selectToLast": "从焦点所在的项目选到最后一项",
+      "showCommands": "显示命令",
+      "showHelp": "显示键盘快捷键",
+      "switchActivePane": "切换活动窗格",
+      "previousTab": "选择上一个文件夹标签页",
+      "nextTab": "选择下一个文件夹标签页",
+      "newTab": "新建文件夹标签页",
+      "closeTab": "关闭所选文件夹标签页",
+      "openLocationInNewTab": "在新标签页中打开当前位置",
+      "matchLeftPaneLocation": "在左侧窗格打开右侧窗格的位置",
+      "matchRightPaneLocation": "在右侧窗格打开左侧窗格的位置",
+      "toggleDualPane": "切换双窗格视图",
+      "toggleSelectionAndMoveDown": "切换选择状态并向下移动",
+      "upload": "将文件上传到当前文件夹"
+    },
+    "search": {
+      "modeSelectorAriaLabel": "切换快捷栏模式",
+      "modes": {
+        "navigate": "导航",
+        "quickNav": "快速导航",
+        "commands": "命令",
+        "fileSearch": "文件搜索"
+      },
+      "placeholders": {
+        "directory": "转到任意文件夹",
+        "command": "运行命令",
+        "smart": "转到任意文件夹，或输入 > 查看命令",
+        "fileSearch": "搜索最近使用的文件和当前文件夹中的文件"
+      },
+      "footer": {
+        "navigate": "导航",
+        "open": "打开",
+        "removeRecent": "移除最近使用的项目",
+        "removeRecentDirectory": "移除最近访问的文件夹",
+        "run": "运行",
+        "commands": "命令",
+        "close": "关闭"
+      },
+      "itemTypes": {
+        "directory": "文件夹",
+        "file": "文件"
+      },
+      "results": {
+        "none": "未找到与“{{query}}”匹配的结果",
+        "failed": "无法完成搜索。请重试。",
+        "removeFailed": "无法移除此最近使用的项目。请重试。",
+        "count_other": "{{count}} 条结果",
+        "countTruncated": "{{count}} 条以上结果",
+        "commandCount_other": "{{count}} 条命令",
+        "directoriesIndexed_other": "已索引 {{count}} 个文件夹"
+      },
+      "status": {
+        "connectionStatus": "{{connection}}：{{message}}",
+        "indexingPending": "正在建立索引…",
+        "indexing": "正在建立索引…（已找到 {{count}} 个文件夹）",
+        "updating": "正在更新索引…（{{count}} 个文件夹）",
+        "updatingProgress": "正在更新索引…（已检查 {{done}} 个文件夹，总计约 {{total}} 个）",
+        "startingIndex": "正在启动索引…",
+        "indexCoveragePartial": "部分文件夹无法建立索引。",
+        "indexCoverageUncertain": "文件夹索引尚未验证，正在等待再次检查。",
+        "legacyDirectorySearch": "尚未确认此来源支持多词文件夹搜索。请使用单个搜索词，或检查后端和 Companion 是否支持此功能。",
+        "historyUnavailable": "最近访问的文件夹不可用。请检查后端连接后重试。",
+        "fileHistoryUnavailable": "最近使用的文件不可用。请检查后端连接后重试。",
+        "indexUnavailable": "文件夹搜索不可用。请检查与来源的连接后重试。"
+      },
+      "statusDetails": {
+        "title": "文件夹搜索状态",
+        "linkSuffix": "（<details>详情</details>）。",
+        "source": "来源",
+        "impact": "搜索结果可能不包含这些位置中的文件夹。",
+        "incomplete": "此处仅显示部分受影响的位置。可能还有其他文件夹受影响。",
+        "locations": "受影响的位置",
+        "location": "位置",
+        "reason": "原因",
+        "containingDirectory": "所在文件夹",
+        "unavailable": "这些详情已不可用。请刷新状态。",
+        "failed": "无法加载状态详情。请检查与来源的连接，再重新打开此对话框。",
+        "reasons": {
+          "access_denied": "访问被拒绝",
+          "unsupported_encoding": "无法读取某个文件夹的名称",
+          "unsafe_traversal": "文件夹安全验证失败",
+          "scan_failed": "无法读取某个文件夹"
+        },
+        "actions": {
+          "access_denied": "请检查来源账户是否有权读取此文件夹。",
+          "unsupported_encoding": "请检查文件夹名称是否包含不受支持的字符或过长。",
+          "unsafe_traversal": "请检查文件夹在扫描期间是否发生更改。如果问题持续存在，请重新连接来源。",
+          "scan_failed": "请检查文件夹是否存在且可读取。如有需要，请恢复与来源的连接。"
+        }
+      },
+      "groups": {
+        "recentFiles": "最近使用的文件",
+        "recentDirectories": "最近访问的文件夹",
+        "directories": "文件夹",
+        "currentDirectory": "当前文件夹"
+      },
+      "belowMinimum": "请输入至少 {{count}} 个字符进行搜索"
+    },
+    "transfers": {
+      "downloadFailed": "下载失败。请重试。",
+      "downloadSizeLimitExceeded": "所选 ZIP 文件超过临时下载大小上限。",
+      "preparingArchive": "正在准备归档文件",
+      "downloading": "正在准备下载",
+      "preparingUpload": "正在准备上传",
+      "dropToUpload": "松开以上传",
+      "dropUnavailable": "无法上传到此文件夹",
+      "dropBusy": "请先完成当前上传",
+      "dropUnsupported": "此浏览器不支持拖放文件夹。请改用“上传”。",
+      "uploadComplete_other": "已上传 {{count}} 个文件",
+      "uploadSkipped_other": "已跳过 {{count}} 项",
+      "uploadFailed_other": "{{count}} 项失败",
+      "uploadUnknown_other": "{{count}} 项结果不确定",
+      "uploadCancelled_other": "{{count}} 项已取消",
+      "uploadSummaryWithIssues": "{{summary}} · {{issues}}",
+      "uploadDestinationChanged": "目标位置已更改，上传已取消。请选择文件夹并重试。",
+      "uploadInspectDestination": "上传结果不确定。请先检查目标位置，再重试。",
+      "uploadFolders": "已创建 {{created}} 个文件夹，已合并 {{merged}} 个，已跳过 {{skipped}} 个",
+      "uploadPartial": "上传已取消。已传输的文件和文件夹仍保留在目标位置。",
+      "uploadFolderFailed_other": "{{count}} 个文件夹上传失败",
+      "uploadProgress": "正在上传 {{name}}（{{current}}/{{total}}）· {{bytes}} / {{size}} · 已完成 {{completed}} 项，已跳过 {{skipped}} 项，失败 {{failed}} 项",
+      "uploadSending": "正在上传 {{name}}（{{current}}/{{total}}）· 正在发送 · 已完成 {{completed}} 项，已跳过 {{skipped}} 项，失败 {{failed}} 项",
+      "uploadPublishing": "正在上传 {{name}}（{{current}}/{{total}}）· 正在写入目标位置 · 已完成 {{completed}} 项，已跳过 {{skipped}} 项，失败 {{failed}} 项",
+      "uploadRemaining_other": "{{count}} 个文件尚未开始上传"
+    },
+    "unavailableShortcuts": {
+      "archiveContentImmutable": "无法修改归档文件的内容。",
+      "archiveExtractionUnavailable": "无法将此归档文件解压到当前目标位置。",
+      "companionUnavailable": "请先连接 Sambee Companion，再将本地文件添加到归档文件。",
+      "destinationUnavailable": "无法将文件传输到此位置。",
+      "dualPaneRequired": "复制操作需要双窗格模式。",
+      "interactionBlocked": "其他视图打开时无法执行此操作。",
+      "readOnlyLocation": "此位置为只读。",
+      "selectArchiveToExtract": "请选择要解压的归档文件。",
+      "selectItemToDelete": "请选择要删除的项目。",
+      "selectItemToRename": "请选择要重命名的项目。",
+      "selectItemsToArchive": "请选择可添加到归档文件的项目。",
+      "selectItemsToCopy": "请选择一个或多个要复制的项目。",
+      "selectItemsToDownload": "请选择一个或多个要下载的项目。",
+      "selectItemsToMove": "请选择一个或多个要移动的项目。",
+      "sourceUnavailable": "无法对所选项目执行此操作。",
+      "locationUnavailable": "请等待窗格中的位置加载完成。如果加载失败，请刷新或选择其他位置。",
+      "lastTabProtected": "每个窗格应至少保留一个打开的标签页"
+    },
+    "overwriteConflict": {
+      "title": "目标已存在",
+      "alreadyExists": "已存在同名的目标：",
+      "folderConflict": "已有项目阻止写入此文件夹。请跳过此文件夹或为其重命名。",
+      "fileFolderConflict": "已有文件夹阻止写入此文件。请跳过此文件或为其重命名。",
+      "skipFolder": "跳过文件夹",
+      "renameFolder": "重命名源文件夹",
+      "labelPath": "路径",
+      "labelTargetName": "目标名称",
+      "labelExisting": "目标",
+      "labelIncoming": "源",
+      "labelSize": "大小",
+      "labelModified": "修改时间",
+      "metadataLabel": "目标详情",
+      "resolutionLabel": "选择解决方法",
+      "resolutionSkip": "跳过",
+      "resolutionOverwrite": "覆盖",
+      "resolutionOverwriteOnlyOlder": "仅覆盖较旧的目标",
+      "resolutionRename": "重命名",
+      "applyToAll": "对本次操作中的其余冲突使用此选项",
+      "targetNameUnchanged": "请选择不同的目标名称。",
+      "noResolutionAvailable": "没有适用于此目标的解决方法。请取消操作并重试。",
+      "cancelCopy": "取消复制",
+      "cancelUpload": "取消上传",
+      "cancelMove": "取消移动",
+      "cancelExtraction": "取消解压",
+      "continue": "继续",
+      "progressContext_other": "第 {{current}} 项，共 {{total}} 项 • 已遇到 {{count}} 个冲突"
+    },
+    "toolbar": {
+      "newFolder": "新建文件夹",
+      "newFile": "新建文件",
+      "upload": "上传",
+      "uploadChoiceFiles": "文件",
+      "uploadChoiceFolder": "文件夹",
+      "uploadFiles": "上传文件",
+      "uploadFolder": "上传文件夹",
+      "createArchive": "创建归档文件",
+      "extractArchive": "解压归档文件",
+      "refresh": "刷新",
+      "more": "更多"
+    },
+    "viewerPicker": {
+      "title": "选择查看器",
+      "fileLabel": "要打开的文件",
+      "open": "打开",
+      "openWithoutSaving": "打开但不保存设置",
+      "alwaysUse": "始终使用此查看器打开此类文件",
+      "default": "默认",
+      "openInNativeApp": "在本机应用中打开",
+      "nativeDescription": "使用桌面应用，而不使用 Sambee 查看器",
+      "viewers": {
+        "image": "图片查看器",
+        "markdown": "Markdown 查看器",
+        "pdf": "PDF 查看器",
+        "text": "文本编辑器"
+      }
+    }
+  },
+  "common": {
+    "labels": {
+      "connection": "连接",
+      "itemToDelete": "要删除的项目",
+      "root": "根目录",
+      "settings": "设置"
+    },
+    "navigation": {
+      "goBack": "返回"
+    },
+    "search": {
+      "action": "搜索",
+      "placeholder": "搜索",
+      "clear": "清除搜索",
+      "previousMatch": "上一个匹配项",
+      "nextMatch": "下一个匹配项"
+    },
+    "actions": {
+      "cancel": "取消",
+      "close": "关闭",
+      "companionRecovery": "Companion 恢复",
+      "connectionStatus": "连接状态",
+      "copy": "复制",
+      "create": "创建",
+      "delete": "删除",
+      "discard": "放弃",
+      "download": "下载",
+      "edit": "编辑",
+      "logout": "退出登录",
+      "move": "移动",
+      "nextNotice": "下一条通知",
+      "print": "打印",
+      "rename": "重命名",
+      "replace": "替换",
+      "retry": "重试",
+      "monitoringStopped": "自动更新已停止",
+      "save": "保存",
+      "share": "分享",
+      "skip": "跳过"
+    }
+  }
+}

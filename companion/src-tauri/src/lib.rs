@@ -8,6 +8,7 @@ mod app_registry;
 mod commands;
 mod http_client;
 mod logging;
+mod native_i18n;
 mod proxy_auth;
 mod server;
 mod sync;
@@ -638,8 +639,9 @@ async fn start_edit_lifecycle(app: tauri::AppHandle, uri: SambeeUri) -> Result<(
 /// Assigns the tray ID [`TRAY_ICON_ID`] so it can be retrieved later
 /// via `app.tray_by_id()` for dynamic menu rebuilds.
 fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let prefs = MenuItem::with_id(app, TRAY_MENU_PREFERENCES, "Preferences…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, TRAY_MENU_QUIT, "Quit Sambee Companion", true, None::<&str>)?;
+    let locale = native_i18n::NativeLocale::from_app(app.handle());
+    let prefs = MenuItem::with_id(app, TRAY_MENU_PREFERENCES, locale.text("trayPreferences"), true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, TRAY_MENU_QUIT, locale.text("trayQuit"), true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&prefs, &quit])?;
 
     TrayIconBuilder::with_id(TRAY_ICON_ID)
@@ -712,6 +714,7 @@ pub(crate) fn ensure_main_window(app: &tauri::AppHandle, title: &str, width: f64
 /// Create (or focus) the main webview window and emit "show-preferences"
 /// so the Preact frontend switches to the Preferences view.
 pub(crate) fn show_preferences_window(app: &tauri::AppHandle) {
+    let title = native_i18n::NativeLocale::from_app(app).text("preferencesTitle");
     // Re-use the existing main window if it is already open
     if let Some(win) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = win.set_resizable(false);
@@ -724,7 +727,7 @@ pub(crate) fn show_preferences_window(app: &tauri::AppHandle) {
             width: PREFERENCES_WIDTH,
             height: PREFERENCES_HEIGHT,
         }));
-        let _ = win.set_title("Sambee Companion \u{2014} Preferences");
+        let _ = win.set_title(title);
         let _ = win.center();
         let _ = win.show();
         let _ = win.set_focus();
@@ -734,7 +737,7 @@ pub(crate) fn show_preferences_window(app: &tauri::AppHandle) {
 
     // Create a new window for the preferences panel
     match tauri::WebviewWindowBuilder::new(app, MAIN_WINDOW_LABEL, tauri::WebviewUrl::App("/".into()))
-        .title("Sambee Companion — Preferences")
+        .title(title)
         .inner_size(PREFERENCES_WIDTH, PREFERENCES_HEIGHT)
         .resizable(false)
         .maximizable(false)
@@ -768,6 +771,7 @@ pub(crate) fn show_preferences_window(app: &tauri::AppHandle) {
 /// Create (or focus) the dedicated pairing window and emit `show-pairing`
 /// so the pairing UI displays the current approval request.
 pub(crate) fn show_pairing_window(app: &tauri::AppHandle, pairing_id: &str, origin: &str, pairing_code: &str) {
+    let title = native_i18n::NativeLocale::from_app(app).text("pairingTitle");
     let newly_created = if let Some(win) = app.get_webview_window(PAIRING_WINDOW_LABEL) {
         let _ = win.set_decorations(true);
         let _ = win.set_always_on_top(true);
@@ -775,7 +779,7 @@ pub(crate) fn show_pairing_window(app: &tauri::AppHandle, pairing_id: &str, orig
             width: PAIRING_WIDTH,
             height: PAIRING_HEIGHT,
         }));
-        let _ = win.set_title("Sambee Companion — Pairing Request");
+        let _ = win.set_title(title);
         let _ = win.center();
         let _ = win.unminimize();
         let _ = win.show();
@@ -783,7 +787,7 @@ pub(crate) fn show_pairing_window(app: &tauri::AppHandle, pairing_id: &str, orig
         false
     } else {
         match tauri::WebviewWindowBuilder::new(app, PAIRING_WINDOW_LABEL, tauri::WebviewUrl::App("/pairing".into()))
-            .title("Sambee Companion — Pairing Request")
+            .title(title)
             .inner_size(PAIRING_WIDTH, PAIRING_HEIGHT)
             .resizable(false)
             .maximizable(false)
@@ -879,26 +883,26 @@ pub(crate) fn refresh_tray_menu(app: &tauri::AppHandle) {
         None => return,
     };
 
+    let locale = native_i18n::NativeLocale::from_app(app);
     let active = store.active_operations();
 
     // Build menu items.  We silently skip any items that fail to construct.
     let mut items: Vec<MenuItem<tauri::Wry>> = Vec::new();
 
     if active.is_empty() {
-        if let Ok(item) = MenuItem::with_id(app, "no-ops", "No active operations", false, None::<&str>) {
+        if let Ok(item) = MenuItem::with_id(app, "no-ops", locale.text("noOperations"), false, None::<&str>) {
             items.push(item);
         }
     } else {
         for op in &active {
             let label = match &op.status {
-                OperationStatus::Editing => format!("Editing: {}", op.filename()),
-                OperationStatus::Uploading(pct) => {
-                    format!("Uploading ({:.0}%): {}", pct * 100.0, op.filename())
-                }
-                OperationStatus::UploadFailed(_) => {
-                    format!("Upload failed: {}", op.filename())
-                }
-                OperationStatus::Downloading => format!("Downloading: {}", op.filename()),
+                OperationStatus::Editing => locale.format("editing", &[("filename", op.filename())]),
+                OperationStatus::Uploading(pct) => locale.format(
+                    "uploading",
+                    &[("percent", &format!("{:.0}%", pct * 100.0)), ("filename", op.filename())],
+                ),
+                OperationStatus::UploadFailed(_) => locale.format("uploadFailed", &[("filename", op.filename())]),
+                OperationStatus::Downloading => locale.format("downloading", &[("filename", op.filename())]),
                 _ => op.filename().to_string(),
             };
 
@@ -910,10 +914,10 @@ pub(crate) fn refresh_tray_menu(app: &tauri::AppHandle) {
     }
 
     // Build the final menu with Preferences + Quit at the end
-    if let Ok(prefs) = MenuItem::with_id(app, TRAY_MENU_PREFERENCES, "Preferences…", true, None::<&str>) {
+    if let Ok(prefs) = MenuItem::with_id(app, TRAY_MENU_PREFERENCES, locale.text("trayPreferences"), true, None::<&str>) {
         items.push(prefs);
     }
-    if let Ok(quit) = MenuItem::with_id(app, TRAY_MENU_QUIT, "Quit Sambee Companion", true, None::<&str>) {
+    if let Ok(quit) = MenuItem::with_id(app, TRAY_MENU_QUIT, locale.text("trayQuit"), true, None::<&str>) {
         items.push(quit);
     }
 
@@ -927,6 +931,29 @@ pub(crate) fn refresh_tray_menu(app: &tauri::AppHandle) {
             }
         }
         Err(e) => warn!("Failed to build tray menu: {e}"),
+    }
+}
+
+pub(crate) fn refresh_native_localization(app: &tauri::AppHandle) {
+    use native_i18n::NativeLocale;
+
+    refresh_tray_menu(app);
+    let locale = NativeLocale::from_app(app);
+    for (label, window) in app.webview_windows() {
+        let key = match label.as_str() {
+            MAIN_WINDOW_LABEL => match window.title() {
+                Ok(title) if NativeLocale::is_title("appPickerTitle", &title) => "appPickerTitle",
+                Ok(title) if NativeLocale::is_title("preferencesTitle", &title) => "preferencesTitle",
+                _ => continue,
+            },
+            PAIRING_WINDOW_LABEL => "pairingTitle",
+            proxy_auth::PROXY_AUTH_WINDOW_LABEL => "authenticationTitle",
+            label if commands::open_file::is_done_editing_window_label(label) => "editingTitle",
+            _ => continue,
+        };
+        if let Err(error) = window.set_title(locale.text(key)) {
+            warn!("Could not refresh Companion window title: {error}");
+        }
     }
 }
 
@@ -1118,9 +1145,14 @@ pub fn run() {
                 app.deep_link().register_all()?;
             }
 
+            let localization_state = app.state::<Arc<LocalizationState>>().inner().clone();
+            localization_state.load_from_disk(app.handle());
+
             // Set up system tray
             if let Err(e) = setup_system_tray(app) {
                 error!("Failed to set up system tray: {e}");
+            } else {
+                refresh_native_localization(app.handle());
             }
 
             // Run recycle bin cleanup on startup
@@ -1144,9 +1176,7 @@ pub fn run() {
 
             // Start the local companion HTTP server with shared pairing state
             let pairing_state = app.state::<Arc<PairingState>>().inner().clone();
-            let localization_state = app.state::<Arc<LocalizationState>>().inner().clone();
             pairing_state.load_from_keychain();
-            localization_state.load_from_disk(app.handle());
             server::start_server(app.handle().clone(), pairing_state, localization_state);
 
             // Process deep-link if app was cold-started via a URI

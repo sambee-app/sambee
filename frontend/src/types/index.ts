@@ -6,7 +6,7 @@ export type AccountSessionKind = "password" | "oidc";
 export type ConnectionScope = "shared" | "private";
 export type ConnectionAccessMode = "read_write" | "read_only";
 export type SystemSettingSource = "database" | "config_file" | "default";
-export type LanguagePreference = "browser" | "en" | "en-XA";
+export type LanguagePreference = "browser" | import("../i18n/languages").SupportedLanguage;
 export type RegionalLocalePreference = string;
 export type CompanionDownloadPlatform = "windows-x64" | "windows-arm64" | "macos-arm64" | "linux-x64";
 

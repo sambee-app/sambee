@@ -2,8 +2,7 @@
 // MobileSettingsDrawer
 //
 
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import { AppBar, Box, Drawer, IconButton, Toolbar, Typography } from "@mui/material";
+import { AppBar, Box, Drawer, Toolbar, Typography } from "@mui/material";
 import type React from "react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,6 +14,7 @@ import {
   mobileScrollableContentSx,
 } from "../../theme/mobileShell";
 import { FORM_SURFACE_CSS_VARIABLE, getOverlaySurfaceTokens, OVERLAY_SURFACE_CSS_VARIABLE } from "../../theme/palette";
+import { DirectionalBackButton } from "../DirectionalBackButton";
 import { SettingsCategoryContent } from "../Settings/SettingsCategoryContent";
 import { SettingsCategoryList } from "../Settings/SettingsCategoryList";
 import { prefetchSettingsDataForItems } from "../Settings/settingsDataSources";
@@ -103,10 +103,8 @@ export const MobileSettingsDrawer: React.FC<MobileSettingsDrawerProps> = ({
         {/* AppBar */}
         <AppBar position="static" sx={mobileSafeAreaAppBarSx}>
           <Toolbar sx={mobileSafeAreaToolbarSx}>
-            <IconButton edge="start" color="inherit" onClick={handleBack} aria-label={t("common.navigation.goBack")}>
-              <ArrowBackIcon />
-            </IconButton>
-            <Typography variant="h6" component="h1" sx={{ ml: 2 }}>
+            <DirectionalBackButton onClick={handleBack} aria-label={t("common.navigation.goBack")} />
+            <Typography variant="h6" component="h1" sx={{ marginInlineStart: 2 }}>
               {getSettingsViewTitle(currentView)}
             </Typography>
           </Toolbar>

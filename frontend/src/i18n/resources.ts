@@ -109,6 +109,29 @@ export const EN_TRANSLATIONS = {
     },
   },
   auth: {
+    passwordChange: {
+      title: "Change password",
+      required: "Your administrator requires you to change your local Sambee password before continuing.",
+      checking: "Checking account...",
+      checkFailed: "Your account could not be checked. Try again.",
+      checkForChangeFailed: "Your account could not be checked. Sign in again or retry.",
+      changeFailed: "The password could not be changed. Try again.",
+      current: "Current password",
+      new: "New password",
+      confirmation: "Confirm new password",
+      mismatch: "The passwords do not match.",
+      show: "Show passwords",
+      hide: "Hide passwords",
+      signOut: "Sign out",
+      changing: "Changing password...",
+      retry: "Try again",
+    },
+    oidcCallback: {
+      progress: "Completing sign in",
+      failed: "Sign in could not be completed.",
+      title: "Sign in unavailable",
+      retry: "Try again",
+    },
     login: {
       title: "Sambee Login",
       usernameLabel: "Username",
@@ -120,6 +143,23 @@ export const EN_TRANSLATIONS = {
     },
   },
   settings: {
+    networkPage: {
+      loading: "Loading network settings",
+      loadFailed: "Network settings could not be loaded.",
+      saveFailed: "Network settings could not be saved.",
+      publicUrl: {
+        label: "Public URL",
+        help: "The externally reachable HTTPS origin, without a path. Changing it cancels incomplete OIDC sign-ins.",
+        saving: "Saving public URL",
+        saved: "Public URL saved",
+      },
+      trustedProxyCidrs: {
+        label: "Trusted proxy CIDRs",
+        help: "One CIDR per line. Leave empty unless a reverse proxy you operate forwards client IP addresses.",
+        saving: "Saving trusted proxy CIDRs",
+        saved: "Trusted proxy CIDRs saved",
+      },
+    },
     saveStatus: {
       saving: "Saving setting",
       saved: "Setting saved",
@@ -317,6 +357,7 @@ export const EN_TRANSLATIONS = {
       synchronized: "Settings are synchronized.",
       synchronizing: "Settings are synchronizing. The last valid settings remain active.",
       update_required: "Update Sambee and Companion to use shared settings delivery.",
+      languageUpdateRequired: "Update Sambee Companion to use this language, then retry. The last valid Companion language remains active.",
       directoryPolicyUpdateRequired:
         "Update Sambee Companion to use these directory-search policy values, then retry. The last valid policy and directory search remain available.",
       authority_conflict: "This server does not manage Companion settings. Pair the intended server again to change authority.",
@@ -363,21 +404,42 @@ export const EN_TRANSLATIONS = {
     appearancePage: {
       themeTitle: "Theme",
       themeDescription: "Choose the application theme and visual defaults.",
+      themeScopes: {
+        personal: "Your themes",
+        site: "Site themes",
+        builtIn: "Built-in themes",
+      },
+      themeDefaultBadge: "Default",
+      themeSiteDefaultTitle: "Site default",
+      themeSetDefault: "Set as default",
+      themeDeleteTitle: "Delete theme?",
+      themeDeleteDescription: "Delete {{themeName}}? Users who selected it will use the site default.",
       localizationTitle: "Localization",
       localizationDescription: "Choose the display language and how dates and numbers are formatted.",
       languageLabel: "Language",
       languageDescription: "Pick a display language for the interface.",
+      languageLoadFailed: "The language could not load. Sambee is using English. Select the language again to retry.",
       regionalLocaleLabel: "Regional settings",
       regionalLocaleDescription: "Choose the locale used for dates, times, number formatting, and sorting.",
       browserDefaultOption: "Browser default",
       englishLanguageOption: "English",
       pseudoLanguageOption: "Pseudo-English (for localization testing)",
+      pseudoLanguageShortLabel: "Pseudo-English",
+      pseudoLanguageDescription: "Pseudo-English is for localization testing.",
       regionalLocaleOptions: {
         enUS: "English (United States)",
         enGB: "English (United Kingdom)",
         deDE: "German (Germany)",
         frFR: "French (France)",
         jaJP: "Japanese (Japan)",
+        zhCN: "Chinese (China)",
+        nlNL: "Dutch (Netherlands)",
+        itIT: "Italian (Italy)",
+        koKR: "Korean (South Korea)",
+        plPL: "Polish (Poland)",
+        ptPT: "Portuguese (Portugal)",
+        esES: "Spanish (Spain)",
+        svSE: "Swedish (Sweden)",
       },
       regionalSettingsPreviewTitle: "Preview",
     },
@@ -1553,6 +1615,17 @@ export const EN_TRANSLATIONS = {
     },
   },
   viewer: {
+    slowImage: "This image is taking longer than usual.",
+    slowPdf: "This PDF is taking longer than usual.",
+    pdfLoadFailed: "Failed to load PDF document",
+    pdfPassword: {
+      title: "Unlock PDF",
+      description: "Enter the password to view this PDF.",
+      open: "Open PDF",
+      label: "PDF password",
+      show: "Show password",
+      hide: "Hide password",
+    },
     renderingFailed: "Unable to finish rendering this document. Close and reopen the file to retry.",
     renderingPrintPending: "The document is still loading. Close the print dialog and try again when loading finishes.",
     printTitle: "Print / Save as PDF",
@@ -1915,10 +1988,6 @@ export const resources = {
     translation: PSEUDO_TRANSLATIONS,
   },
 } as const;
-
-export type SupportedLanguage = keyof typeof resources;
-
-export const SUPPORTED_LANGUAGES = Object.keys(resources) as SupportedLanguage[];
 
 function createPseudoLocaleTranslations(tree: TranslationTree): TranslationTree {
   return Object.fromEntries(

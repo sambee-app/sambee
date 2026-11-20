@@ -44,6 +44,7 @@ from app.models.system_settings import (
     SmbSettingsUpdateResult,
 )
 from app.models.user import User
+from app.models.user_settings import CatalogLanguage
 from app.services.system_settings import (
     build_about_settings_read,
     build_advanced_system_settings_read,
@@ -67,11 +68,13 @@ router = APIRouter()
 
 @router.get("/settings/companion", response_model=SettingsMetadata)
 def get_companion_settings(
-    current_user: User = Depends(get_current_user_with_auth_check), session: Session = Depends(get_session)
+    current_user: User = Depends(get_current_user_with_auth_check),
+    session: Session = Depends(get_session),
+    browser_language: CatalogLanguage = "en",
 ) -> SettingsMetadata:
     from app.services.companion_settings import build_settings_metadata
 
-    return build_settings_metadata(current_user, session)
+    return build_settings_metadata(current_user, session, browser_language)
 
 
 @router.post("/settings/companion/grants", response_model=SettingsGrantRead)
@@ -80,12 +83,15 @@ def post_companion_settings_grant(
     request: Request,
     authentication: BrowserAuthentication = Depends(get_current_browser_authentication_with_auth_check),
     session: Session = Depends(get_immediate_session),
+    browser_language: CatalogLanguage = "en",
 ) -> SettingsGrantRead:
     from app.services.directory_policy_grants import issue_directory_policy_grant
 
     if request.headers.get("origin") != payload.origin:
         raise HTTPException(status_code=403, detail="Settings origin does not match the browser. Retry from the paired server.")
-    result = issue_directory_policy_grant(payload, authentication.user, session, browser_session_id=authentication.oidc_browser_session_id)
+    result = issue_directory_policy_grant(
+        payload, authentication.user, session, browser_session_id=authentication.oidc_browser_session_id, browser_language=browser_language
+    )
     assert isinstance(result, SettingsGrantRead)
     return result
 

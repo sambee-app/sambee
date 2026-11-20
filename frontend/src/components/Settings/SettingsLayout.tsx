@@ -2,8 +2,7 @@
 // SettingsLayout
 //
 
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
-import { AppBar, Box, IconButton, Toolbar, Typography, useMediaQuery, useTheme } from "@mui/material";
+import { AppBar, Box, Toolbar, Typography, useMediaQuery, useTheme } from "@mui/material";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -13,6 +12,7 @@ import {
   mobileSafeAreaToolbarSx,
   mobileScrollableContentSx,
 } from "../../theme/mobileShell";
+import { DirectionalBackButton } from "../DirectionalBackButton";
 import { SettingsSidebar } from "./SettingsSidebar";
 import { prefetchSettingsDataForItems } from "./settingsDataSources";
 import {
@@ -89,10 +89,8 @@ export function SettingsLayout() {
       <Box data-testid="settings-mobile-typography-scope" sx={[getMobileViewportShellSx(true), settingsCompactTypographyScopeSx]}>
         <AppBar position="static" sx={mobileSafeAreaAppBarSx}>
           <Toolbar sx={mobileSafeAreaToolbarSx}>
-            <IconButton edge="start" color="inherit" onClick={handleMobileBack} aria-label={t("common.navigation.goBack")}>
-              <ArrowBackIcon />
-            </IconButton>
-            <Typography variant="h6" component="h1" sx={{ ml: 2 }}>
+            <DirectionalBackButton onClick={handleMobileBack} aria-label={t("common.navigation.goBack")} />
+            <Typography variant="h6" component="h1" sx={{ marginInlineStart: 2 }}>
               {getPageTitle()}
             </Typography>
           </Toolbar>

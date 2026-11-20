@@ -17,6 +17,7 @@ WEBSITE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(WEBSITE / "scripts"))
 HUGO_VERSION = "0.166.0"
 COMMAND_TIMEOUT = 30
+HUGO_WATCH_READY = "Press Ctrl+C to stop"
 
 
 def load_script(name: str):
@@ -158,6 +159,7 @@ items = ["alpha", "beta"]
             stable = root / "public/docs/guide/start/alpha/index.html"
             explicit = root / "public/docs/2.0/guide/start/alpha/index.html"
             beta = root / "public/docs/guide/start/beta/index.html"
+            log_path = root / "hugo-watch.log"
 
             def wait_for_text(paths: list[Path], text: str) -> None:
                 deadline = time.monotonic() + COMMAND_TIMEOUT
@@ -169,9 +171,10 @@ items = ["alpha", "beta"]
                     if process.poll() is not None:
                         break
                     time.sleep(0.05)
-                log.seek(0)
                 self.fail(
-                    f"Watch build did not produce {text!r} in {paths}:\n{log.read()}"
+                    f"Hugo watch did not produce {text!r} in {paths} "
+                    f"(exit code: {process.returncode}):\n"
+                    f"{log_path.read_text(encoding='utf-8')}"
                 )
 
             def sequence(path: Path) -> dict:
@@ -182,7 +185,7 @@ items = ["alpha", "beta"]
                 assert match is not None
                 return json.loads(match.group(1))
 
-            with tempfile.TemporaryFile(mode="w+") as log:
+            with log_path.open("w", encoding="utf-8") as log:
                 process = subprocess.Popen(
                     ["hugo", "--watch", "--environment", "development"],
                     cwd=root,
@@ -191,6 +194,9 @@ items = ["alpha", "beta"]
                     text=True,
                 )
                 try:
+                    # Hugo writes the initial HTML before it registers the watches.
+                    # This message appears only after registration.
+                    wait_for_text([log_path], HUGO_WATCH_READY)
                     wait_for_text([stable, explicit, beta], "Alpha")
                     for page, prefix in [(stable, "/docs/"), (explicit, "/docs/2.0/")]:
                         html = page.read_text()

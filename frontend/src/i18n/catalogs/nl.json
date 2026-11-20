@@ -1,0 +1,1866 @@
+{
+  "viewer": {
+    "pdfPassword": {
+      "title": "Pdf ontgrendelen",
+      "description": "Voer het wachtwoord in om deze pdf te bekijken.",
+      "open": "Pdf openen",
+      "label": "Pdf-wachtwoord",
+      "show": "Wachtwoord tonen",
+      "hide": "Wachtwoord verbergen"
+    },
+    "shortcuts": {
+      "search": "Zoeken",
+      "previousMatch": "Vorig resultaat",
+      "nextMatch": "Volgend resultaat",
+      "close": "Sluiten",
+      "edit": "Bewerken",
+      "save": "Opslaan",
+      "open": "Openen",
+      "showHelp": "Actief paneel wisselen",
+      "download": "Downloaden",
+      "previous": "Vorige",
+      "next": "Volgende",
+      "previousPage": "Vorige pagina",
+      "nextPage": "Volgende pagina",
+      "zoomIn": "Inzoomen",
+      "zoomOut": "Uitzoomen",
+      "rotateLeft": "Linksom draaien",
+      "rotateRight": "Rechtsom draaien",
+      "bold": "Vet",
+      "italic": "Cursief",
+      "createLink": "Link maken",
+      "insertTable": "Tabel invoegen",
+      "insertThematicBreak": "Horizontale scheidingslijn invoegen",
+      "inlineCode": "Code in de tekst",
+      "insertCodeBlock": "Codeblok invoegen",
+      "firstPage": "Eerste pagina",
+      "lastPage": "Laatste pagina",
+      "firstImage": "Eerste afbeelding",
+      "lastImage": "Laatste afbeelding",
+      "resetZoom": "Zoom herstellen",
+      "toggleFullscreen": "Volledig scherm in- of uitschakelen"
+    },
+    "edit": {
+      "previousMatch": "Vorig resultaat",
+      "nextMatch": "Volgend resultaat",
+      "recovery": {
+        "unknown": "Onbekend",
+        "title": "Niet-opgeslagen lokaal concept beschikbaar",
+        "description": "Er is een niet-opgeslagen lokaal concept beschikbaar.",
+        "newerDescription": "Er is een niet-opgeslagen lokaal concept beschikbaar dat nieuwer is dan het opgeslagen bestand.",
+        "savedFile": "Opgeslagen bestand",
+        "localDraft": "Lokaal concept",
+        "discard": "Concept weggooien",
+        "resume": "Verder bewerken",
+        "tooLargeWarning": "Concept herstellen is niet beschikbaar omdat deze bewerking te groot is.",
+        "storageUnavailableWarning": "Concept herstellen is niet beschikbaar in deze browsersessie."
+      },
+      "undo": "Ongedaan maken",
+      "replaceAll": "Alles vervangen",
+      "replace": "Vervangen",
+      "lockFailed": "De bewerkmodus kon niet worden geopend. {{message}}",
+      "lockFailedReason": "Er kon geen bewerkingsvergrendeling worden verkregen.",
+      "saveFailed": "De Markdown-wijzigingen konden niet worden opgeslagen.",
+      "commandFailed": "{{action}} kon niet worden uitgevoerd. {{message}}",
+      "commandFailedReason": "De editor heeft de opdracht afgewezen.",
+      "discardConfirm": "Niet-opgeslagen wijzigingen weggooien?",
+      "closeConfirm": "Je hebt niet-opgeslagen wijzigingen. Wil je de viewer toch sluiten?",
+      "editorLabel": "Markdown-editor",
+      "editorLoadTitle": "Editor kon niet worden geladen",
+      "editorLoadMessage": "De Markdown-editor kon niet worden geladen. Je concept staat nog in het geheugen. Probeer de editor opnieuw te openen of ga terug naar de alleen-lezen voorbeeldweergave.",
+      "editorLoadFailedReason": "De editorcode kon niet worden geladen.",
+      "editorCrashTitle": "Editor niet beschikbaar",
+      "editorCrashMessage": "Er is een interne fout opgetreden in de Markdown-editor. Je concept staat nog in het geheugen. Probeer de editor opnieuw te openen of ga terug naar de alleen-lezen voorbeeldweergave.",
+      "retryEditor": "Editor opnieuw proberen",
+      "returnToPreview": "Terug naar voorbeeld",
+      "unsavedIndicator": "Niet opgeslagen",
+      "unsavedIndicatorAria": "Niet-opgeslagen wijzigingen",
+      "unsavedChangesTitle": "Niet-opgeslagen wijzigingen",
+      "unsavedChangesExitMessage": "Wil je je wijzigingen opslaan voordat je de bewerkmodus verlaat?",
+      "unsavedChangesCloseMessage": "Wil je je wijzigingen opslaan voordat je de viewer sluit?",
+      "searchUnavailable": "Zoeken via de gedeelde viewerwerkbalk kan alleen in de uitgebreide bewerkmodus.",
+      "caseSensitive": "Hoofdlettergevoelig",
+      "caseSensitiveShortcut": "Hoofdlettergevoelig (Alt+C)",
+      "find": "Zoeken",
+      "findReplace": "Zoeken en vervangen",
+      "findWithHistory": "Zoeken (⇅ voor geschiedenis)",
+      "invalidRegularExpression": "Ongeldige reguliere expressie",
+      "matchOptions": "Zoekopties",
+      "regularExpression": "Reguliere expressie gebruiken",
+      "regularExpressionShortcut": "Reguliere expressie gebruiken (Alt+R)",
+      "replacing": "Overeenkomsten vervangen…",
+      "replacementFailed": "Vervangen mislukt. Probeer Alles vervangen opnieuw.",
+      "replaceCurrent": "Huidige overeenkomst vervangen",
+      "wholeWord": "Heel woord",
+      "wholeWordShortcut": "Heel woord (Alt+W)",
+      "bold": "Vet",
+      "removeBold": "Vet verwijderen",
+      "italic": "Cursief",
+      "replaceWithHistory": "Vervangen (⇅ voor geschiedenis)",
+      "toggleCaseSensitive": "Hoofdlettergevoelig zoeken in- of uitschakelen",
+      "toggleWholeWord": "Zoeken op hele woorden in- of uitschakelen",
+      "toggleRegularExpression": "Zoeken met reguliere expressies in- of uitschakelen",
+      "toggleWordWrap": "Regelafbreking in- of uitschakelen",
+      "removeItalic": "Cursief verwijderen",
+      "underline": "Onderstrepen",
+      "removeUnderline": "Onderstreping verwijderen",
+      "redo": "Opnieuw uitvoeren"
+    },
+    "helpTitles": {
+      "pdf": "Sneltoetsen voor de pdf-viewer",
+      "image": "Sneltoetsen voor de afbeeldingsviewer",
+      "markdown": "Sneltoetsen voor de Markdown-viewer"
+    },
+    "fallback": {
+      "retry": "Opnieuw proberen",
+      "failedTitle": "Viewer niet beschikbaar",
+      "unsupportedTitle": "Viewer niet ondersteund",
+      "closeAriaLabel": "Viewerfout sluiten",
+      "failedMessageWithError": "{{message}} De viewercode kon niet worden geladen.",
+      "failedMessageGeneric": "De viewercode kon niet worden geladen. Dit kan gebeuren als de backend of de server voor appbestanden tijdelijk niet beschikbaar is.",
+      "unsupportedMessage": "Voor dit bestandstype is geen viewer beschikbaar in de huidige frontendomgeving.",
+      "stillAvailable": "De bestandsbrowser blijft beschikbaar. Je kunt dit dialoogvenster sluiten en elders in de app verder werken."
+    },
+    "text": {
+      "readOnlyReasons": {
+        "read-only": "Deze locatie is alleen-lezen.",
+        "locked": "Dit bestand wordt in een andere sessie bewerkt. Je kunt het hier lezen en opnieuw proberen te bewerken als de vergrendeling is opgeheven.",
+        "permission-denied": "Je hebt geen schrijftoegang tot dit bestand.",
+        "unsupported": "Deze bron ondersteunt bewerken niet.",
+        "unavailable": "Schrijftoegang is tijdelijk niet beschikbaar. Je kunt verder lezen of opnieuw proberen te bewerken.",
+        "lost": "De bewerkingsvergrendeling is niet meer actief. Je concept is behouden. Probeer opnieuw te bewerken om een nieuwe vergrendeling te krijgen.",
+        "conflict": "Het opgeslagen bestand is gewijzigd toen je concept niet door een bewerkingsvergrendeling werd beschermd."
+      },
+      "lockFailedReason": "Er kon geen bewerkingsvergrendeling worden verkregen.",
+      "loadFailed": "Het bestand kon niet worden geladen.",
+      "lockFailed": "Geopend als alleen-lezen. {{message}}",
+      "saveFailed": "De wijzigingen in het tekstbestand konden niet worden opgeslagen.",
+      "editorLabel": "Teksteditor",
+      "editorCrashTitle": "Teksteditor niet beschikbaar",
+      "editorCrashMessage": "Er is een interne fout opgetreden in de teksteditor. Je concept staat nog in het geheugen. Probeer de editor opnieuw te openen of sluit het bestand.",
+      "acquiring": "Schrijftoegang controleren…",
+      "retryEditing": "Opnieuw proberen te bewerken",
+      "lockedNotification": "Dit bestand wordt in een andere sessie bewerkt. Je kunt het hier lezen. Gebruik <retryIcon/> om opnieuw te proberen zodra de andere editor is gesloten.",
+      "heartbeatFailed": "De bewerkingsvergrendeling kon niet worden vernieuwd. Controleer je verbinding. Mogelijk moet je opnieuw een vergrendeling verkrijgen om op te slaan.",
+      "conflictTitle": "Bestand gewijzigd",
+      "conflictDescription": "Het opgeslagen bestand wijkt af van de oorspronkelijke versie van je concept. Kies welke inhoud je in de editor wilt behouden. Als je je concept behoudt, wordt het pas opgeslagen nadat je Opslaan kiest.",
+      "useSavedFile": "Opgeslagen bestand gebruiken",
+      "keepDraft": "Mijn concept behouden",
+      "limitMessage": "Dit bestand is {{currentSizeMb}} MB en overschrijdt de limiet van {{maxSizeMb}} MB voor de teksteditor. Sambee heeft het in een veiligere alleen-lezen weergave geopend in plaats van in de volledige CodeMirror-editor.",
+      "limitSearchUnavailable": "Zoeken is niet beschikbaar zolang dit bestand in de weergave voor grote bestanden staat."
+    },
+    "share": {
+      "detailsAction": "Details",
+      "unsupported": "Delen is niet beschikbaar op dit apparaat of in deze browser",
+      "preparing": "Bestand voorbereiden om te delen…",
+      "failed": "Het bestand kon niet worden gedeeld",
+      "failedText": "De tekst kon niet worden gedeeld",
+      "payloadUnsupported": "Deze browser kan deze bijlage niet delen.",
+      "details": "Deeldetails",
+      "copyDetails": "Deeldetails kopiëren",
+      "copySuccess": "Deeldetails gekopieerd.",
+      "copyError": "De deeldetails konden niet worden gekopieerd. Selecteer het rapport om het handmatig te kopiëren.",
+      "downloadSuggestion": "Download het bestand en deel het via de Bestanden-app van je apparaat.",
+      "asFile": "Delen als bestand",
+      "asText": "Delen als tekst"
+    },
+    "slowImage": "Het laden van deze afbeelding duurt langer dan gewoonlijk.",
+    "slowPdf": "Het laden van deze pdf duurt langer dan gewoonlijk.",
+    "pdfLoadFailed": "Het pdf-document kon niet worden geladen",
+    "renderingFailed": "Dit document kon niet volledig worden weergegeven. Sluit het bestand en open het opnieuw.",
+    "renderingPrintPending": "Het document wordt nog geladen. Sluit het afdrukvenster en probeer het opnieuw zodra het laden klaar is.",
+    "printTitle": "Afdrukken / opslaan als pdf",
+    "printError": "Het afdrukvenster kon niet worden geopend. Kies Afdrukken in het browsermenu.",
+    "controls": {
+      "previous": "Vorige",
+      "next": "Volgende",
+      "previousPage": "Vorige pagina",
+      "nextPage": "Volgende pagina",
+      "previousImage": "Vorige afbeelding",
+      "nextImage": "Volgende afbeelding",
+      "zoomIn": "Inzoomen",
+      "zoomOut": "Uitzoomen",
+      "rotateLeft": "Linksom draaien",
+      "rotateRight": "Rechtsom draaien",
+      "shareUnavailable": "Delen is niet beschikbaar op dit apparaat of in deze browser",
+      "searchUnavailable": "Zoeken niet beschikbaar: de pdf heeft geen tekstlaag (mogelijk een scan)",
+      "pdfSearchPlaceholder": "Zoeken in pdf…"
+    }
+  },
+  "app": {
+    "loading": "Bezig met laden…",
+    "errorBoundary": {
+      "title": "Er is iets misgegaan",
+      "description": "Er is een onverwachte fout opgetreden. De fout is vastgelegd in het logboek.",
+      "tryAgain": "Opnieuw proberen",
+      "reloadPage": "Pagina opnieuw laden",
+      "developmentDetails": "Foutdetails (alleen voor ontwikkeling)"
+    },
+    "updateAvailable": {
+      "title": "Update beschikbaar",
+      "description": "Er is een nieuwere versie van Sambee beschikbaar.",
+      "currentBuild": "Huidige build: v{{version}} ({{commit}})",
+      "latestBuild": "Nieuwste build: v{{version}} ({{commit}})",
+      "later": "Later",
+      "reload": "Nu opnieuw laden"
+    }
+  },
+  "auth": {
+    "passwordChange": {
+      "title": "Wachtwoord wijzigen",
+      "required": "Je beheerder vereist dat je je lokale Sambee-wachtwoord wijzigt voordat je doorgaat.",
+      "checking": "Account controleren…",
+      "checkFailed": "Je account kon niet worden gecontroleerd. Probeer het opnieuw.",
+      "checkForChangeFailed": "Je account kon niet worden gecontroleerd. Meld je opnieuw aan of probeer het opnieuw.",
+      "changeFailed": "Het wachtwoord kon niet worden gewijzigd. Probeer het opnieuw.",
+      "current": "Huidig wachtwoord",
+      "new": "Nieuw wachtwoord",
+      "confirmation": "Nieuw wachtwoord bevestigen",
+      "mismatch": "De wachtwoorden komen niet overeen.",
+      "show": "Wachtwoorden tonen",
+      "hide": "Wachtwoorden verbergen",
+      "signOut": "Afmelden",
+      "changing": "Wachtwoord wijzigen…",
+      "retry": "Opnieuw proberen"
+    },
+    "oidcCallback": {
+      "progress": "Aanmelding voltooien",
+      "failed": "De aanmelding kon niet worden voltooid.",
+      "title": "Aanmelden niet beschikbaar",
+      "retry": "Opnieuw proberen"
+    },
+    "login": {
+      "title": "Aanmelden bij Sambee",
+      "usernameLabel": "Gebruikersnaam",
+      "passwordLabel": "Wachtwoord",
+      "submit": "Aanmelden",
+      "submitWithPassword": "Aanmelden met een wachtwoord",
+      "submitWithOidc": "Aanmelden via SSO ({{providerName}} OIDC)",
+      "invalidCredentials": "Onjuiste gebruikersnaam of wachtwoord"
+    }
+  },
+  "settings": {
+    "appearancePage": {
+      "localizationTitle": "Taal en regio",
+      "localizationDescription": "Kies de taal van de interface en de notatie voor datums en getallen.",
+      "languageLabel": "Taal",
+      "languageDescription": "Kies de taal van de interface.",
+      "languageLoadFailed": "De taal kon niet worden geladen. Sambee gebruikt Engels. Selecteer de taal opnieuw om het nog eens te proberen.",
+      "regionalLocaleLabel": "Regionale instellingen",
+      "regionalLocaleDescription": "Kies de regio voor de notatie van datums, tijden en getallen en voor de sorteervolgorde.",
+      "browserDefaultOption": "Standaard van de browser",
+      "themeTitle": "Thema",
+      "themeDescription": "Kies het thema en de standaardweergave van de app.",
+      "englishLanguageOption": "Engels",
+      "pseudoLanguageOption": "Pseudo-Engels (voor lokalisatietests)",
+      "pseudoLanguageShortLabel": "Pseudo-Engels",
+      "pseudoLanguageDescription": "Pseudo-Engels is bedoeld voor lokalisatietests.",
+      "themeScopes": {
+        "personal": "Je thema's",
+        "site": "Sitethema's",
+        "builtIn": "Ingebouwde thema's"
+      },
+      "themeDefaultBadge": "Standaard",
+      "themeSiteDefaultTitle": "Standaard van de website",
+      "themeSetDefault": "Instellen als standaard",
+      "themeDeleteTitle": "Thema verwijderen?",
+      "themeDeleteDescription": "{{themeName}} verwijderen? Gebruikers die dit thema hebben gekozen, gebruiken voortaan het standaardthema van de website.",
+      "regionalLocaleOptions": {
+        "enUS": "Engels (Verenigde Staten)",
+        "enGB": "Engels (Verenigd Koninkrijk)",
+        "deDE": "Duits (Duitsland)",
+        "frFR": "Frans (Frankrijk)",
+        "jaJP": "Japans (Japan)",
+        "zhCN": "Chinees (China)",
+        "nlNL": "Nederlands (Nederland)",
+        "itIT": "Italiaans (Italië)",
+        "koKR": "Koreaans (Zuid-Korea)",
+        "plPL": "Pools (Polen)",
+        "ptPT": "Portugees (Portugal)",
+        "esES": "Spaans (Spanje)",
+        "svSE": "Zweeds (Zweden)"
+      },
+      "regionalSettingsPreviewTitle": "Voorbeeld"
+    },
+    "shell": {
+      "title": "Instellingen",
+      "closeAriaLabel": "Instellingen sluiten",
+      "categoriesAriaLabel": "Instellingscategorieën",
+      "expandItemAriaLabel": "{{label}} uitklappen",
+      "collapseItemAriaLabel": "{{label}} inklappen",
+      "versionLabel": "Versie",
+      "buildLabel": "Build",
+      "commitLabel": "Commit",
+      "unknownValue": "Onbekend"
+    },
+    "networkPage": {
+      "loading": "Netwerkinstellingen laden",
+      "loadFailed": "De netwerkinstellingen konden niet worden geladen.",
+      "saveFailed": "De netwerkinstellingen konden niet worden opgeslagen.",
+      "publicUrl": {
+        "label": "Openbare URL",
+        "help": "De extern bereikbare HTTPS-oorsprong, zonder pad. Een wijziging annuleert onvoltooide OIDC-aanmeldingen.",
+        "saving": "Openbare URL opslaan",
+        "saved": "Openbare URL opgeslagen"
+      },
+      "trustedProxyCidrs": {
+        "label": "CIDR-bereiken van vertrouwde proxy’s",
+        "help": "Eén CIDR-bereik per regel. Laat dit leeg, tenzij een reverse proxy die je beheert IP-adressen van clients doorgeeft.",
+        "saving": "CIDR-bereiken van vertrouwde proxy’s opslaan",
+        "saved": "CIDR-bereiken van vertrouwde proxy’s opgeslagen"
+      }
+    },
+    "saveStatus": {
+      "saving": "Instelling opslaan",
+      "saved": "Instelling opgeslagen"
+    },
+    "healthMonitoring": {
+      "saving": "Instelling opslaan",
+      "saved": "Instelling opgeslagen",
+      "loadFailed": "De instellingen voor systeembewaking konden niet worden geladen. Controleer de verbinding met de backend en probeer het opnieuw.",
+      "saveFailed": "Deze instelling voor systeembewaking kon niet worden opgeslagen. Controleer de waarde en probeer het opnieuw.",
+      "cpuRefreshFailed": "De instelling is opgeslagen, maar de details over de CPU-temperatuur konden niet worden vernieuwd. Kies Opnieuw proberen om de details bij te werken.",
+      "sections": {
+        "visibility": "Bewaking en zichtbaarheid",
+        "memoryThresholds": "Geheugendrempels",
+        "loadThresholds": "Drempels voor gemiddelde belasting (genormaliseerd)",
+        "storageThresholds": "Drempels voor vrije opslagruimte",
+        "cpuTemperature": "Drempels voor CPU-temperatuur"
+      },
+      "fields": {
+        "enabled": "Systeembewaking inschakelen",
+        "enabledDescription": "Controleer systeembronnen en toon de systeemstatus aan de gekozen rollen.",
+        "stateOn": "Aan",
+        "stateOff": "Uit",
+        "audience": "Systeemstatus tonen aan",
+        "audienceDescription": "Rollen die de systeemstatus kunnen bekijken. Lezers zijn uitgesloten.",
+        "audienceOptions": {
+          "admins": "Beheerders",
+          "editors": "Bewerkers",
+          "both": "Beide (beheerders en bewerkers)"
+        },
+        "memoryWarning": "Waarschuwingsdrempel voor geheugen (%)",
+        "memoryWarningDescription": "Waarschuwing als het gebruik 60 seconden lang op of boven deze waarde ligt. Geldt voor hostgeheugen en containers met een geheugenlimiet. De bestandscache telt niet mee.",
+        "memoryError": "Foutdrempel voor geheugen (%)",
+        "memoryErrorDescription": "Fout als het gebruik 60 seconden lang op of boven deze waarde ligt. Containers zonder geheugenlimiet krijgen geen meldingen op basis van percentages.",
+        "loadWarning": "Waarschuwingsdrempel voor gemiddelde belasting",
+        "loadWarningDescription": "Waarschuwing vanaf deze gemiddelde belasting over 5 minuten, gedeeld door het aantal logische CPU’s. Dit is niet het CPU-gebruik.",
+        "loadError": "Foutdrempel voor gemiddelde belasting",
+        "loadErrorDescription": "Fout vanaf dit genormaliseerde gemiddelde over 5 minuten.",
+        "spaceWarning": "Waarschuwingsdrempel voor vrije opslagruimte (%)",
+        "spaceWarningDescription": "Waarschuwing als de vrije ruimte op of onder dit percentage ligt.",
+        "spaceError": "Foutdrempel voor vrije opslagruimte (%)",
+        "spaceErrorDescription": "Fout als de vrije ruimte op of onder dit percentage ligt, of als er geen ruimte meer vrij is.",
+        "cpuDetectedWarning": "Gedetecteerde waarschuwingsgrens",
+        "cpuDetectedError": "Gedetecteerde kritieke grens",
+        "cpuWarningOverride": "Waarschuwingsdrempel (°C)",
+        "cpuWarningOverrideDescription": "Laat leeg voor Automatisch of stel de waarschuwingsdrempel in stappen van 0,1 °C in.",
+        "cpuErrorOverride": "Foutdrempel (°C)",
+        "cpuErrorOverrideDescription": "Laat leeg voor Automatisch of stel de foutdrempel in stappen van 0,1 °C in.",
+        "automaticPlaceholder": "Automatisch",
+        "returnToAutomatic": "Terug naar Automatisch",
+        "reconfirmOverride": "Afwijkende instelling opnieuw bevestigen",
+        "notAvailable": "Niet beschikbaar",
+        "originHardware": "Hardware",
+        "originKernelPolicy": "Thermisch beleid van de kernel",
+        "originAdminOverride": "Handmatig ingesteld door beheerder",
+        "exceedsDetectedWarning": "Waarschuwing: de handmatige waarschuwingsdrempel ({{override}}) ligt boven de gedetecteerde grens ({{detected}}). De hardwarebescherming van de host blijft ongewijzigd.",
+        "exceedsDetectedError": "Waarschuwing: de handmatige foutdrempel ({{override}}) ligt boven de gedetecteerde kritieke grens ({{detected}}). De hardwarebescherming van de host blijft ongewijzigd."
+      },
+      "validation": {
+        "memoryRange": "Voer een percentage van 0,1 tot 100,0 in, in stappen van 0,1.",
+        "memoryPairWarningAboveError": "De waarschuwingsdrempel voor geheugen mag niet boven de foutdrempel ({{other}}%) liggen. Verhoog eerst de foutdrempel.",
+        "memoryPairErrorBelowWarning": "De foutdrempel voor geheugen mag niet onder de waarschuwingsdrempel ({{other}}%) liggen. Verlaag eerst de waarschuwingsdrempel.",
+        "loadRange": "Voer een eindig getal van minstens 0,01 in, in stappen van 0,01.",
+        "loadPairWarningAboveError": "De waarschuwingsdrempel voor belasting mag niet boven de foutdrempel ({{other}}) liggen. Verhoog eerst de foutdrempel.",
+        "loadPairErrorBelowWarning": "De foutdrempel voor belasting mag niet onder de waarschuwingsdrempel ({{other}}) liggen. Verlaag eerst de waarschuwingsdrempel.",
+        "spaceRange": "Voer een percentage van 0,0 tot 99,9 in, in stappen van 0,1.",
+        "spacePairWarningBelowError": "De waarschuwingsdrempel voor vrije ruimte mag niet onder de foutdrempel ({{other}}%) liggen. Verlaag eerst de foutdrempel.",
+        "spacePairErrorAboveWarning": "De foutdrempel voor vrije ruimte mag niet boven de waarschuwingsdrempel ({{other}}%) liggen. Verhoog eerst de waarschuwingsdrempel.",
+        "cpuRange": "Voer een positieve temperatuur in stappen van 0,1 °C in of maak het veld leeg voor Automatisch.",
+        "cpuPairWarningAboveError": "De waarschuwingsdrempel voor de CPU mag niet boven de geldende foutdrempel ({{other}}) liggen. Verhoog of wis eerst de foutdrempel.",
+        "cpuPairErrorBelowWarning": "De foutdrempel voor de CPU mag niet onder de geldende waarschuwingsdrempel ({{other}}) liggen. Verlaag of wis eerst de waarschuwingsdrempel."
+      }
+    },
+    "aboutPage": {
+      "versionLabel": "Versie",
+      "buildLabel": "Build",
+      "commitLabel": "Commit",
+      "platformTitle": "Hardware",
+      "applicationTitle": "App",
+      "runtimeTitle": "Software",
+      "startedLabel": "Gestart",
+      "pythonLabel": "Python",
+      "architectureLabel": "Architectuur",
+      "cpuCountLabel": "Logische CPU’s",
+      "memoryLabel": "Beschikbaar geheugen",
+      "copyAriaLabel": "Informatie kopiëren",
+      "copyTooltip": "Informatie kopiëren",
+      "copyAboutMenuItem": "Systeeminformatie kopiëren",
+      "copyPublicSupportReportMenuItem": "Openbaar ondersteuningsrapport kopiëren",
+      "copySuccess": "Systeeminformatie gekopieerd.",
+      "copyError": "De systeeminformatie kon niet worden gekopieerd.",
+      "copyPublicSupportReportSuccess": "Openbaar ondersteuningsrapport gekopieerd.",
+      "copyPublicSupportReportError": "Het openbare ondersteuningsrapport kon niet worden gekopieerd.",
+      "unavailableValue": "Niet beschikbaar",
+      "loadError": "De systeeminformatie kon niet worden geladen."
+    },
+    "sections": {
+      "personal": "Persoonlijk",
+      "administration": "Beheer"
+    },
+    "categories": {
+      "appearance": {
+        "label": "Uiterlijk",
+        "description": "Pas het thema en de taalinstellingen van de app aan."
+      },
+      "account": {
+        "label": "Account",
+        "description": "Beheer je identiteit, wachtwoord en sessies, of meld je af."
+      },
+      "fileBrowser": {
+        "label": "Bestandsbrowser",
+        "description": "Stel het standaardgedrag van de bestandsbrowser in."
+      },
+      "textEditor": {
+        "label": "Teksteditor",
+        "description": "Stel standaardopties en veiligheidslimieten in voor de algemene teksteditor."
+      },
+      "imageViewer": {
+        "label": "Afbeeldingsviewer",
+        "description": "Stel beeldovergangen op desktops in. Navigatie via aanraking blijft ongewijzigd."
+      },
+      "adminImageViewer": {
+        "label": "Afbeeldingsviewer",
+        "description": "Stel limieten in voor het converteren en verwerken van afbeeldingen."
+      },
+      "connections": {
+        "label": "Verbindingen",
+        "description": "Beheer gedeelde en privé-SMB-verbindingen."
+      },
+      "adminUsers": {
+        "label": "Gebruikersbeheer",
+        "description": "Maak accounts aan, wijs rollen toe en geef wachtwoordresets uit."
+      },
+      "adminAuthentication": {
+        "label": "Authenticatie",
+        "description": "Stel aanmeldmethoden in (zie de <guide>configuratiehandleiding voor OpenID Connect</guide>)."
+      },
+      "adminNetwork": {
+        "label": "Netwerk",
+        "description": "Stel de externe URL en vertrouwde reverse proxy’s van Sambee in."
+      },
+      "adminSystem": {
+        "label": "Systeem",
+        "description": "Beheer limieten voor het maken van archieven."
+      },
+      "adminPdfViewer": {
+        "label": "Pdf-viewer",
+        "description": "Stel pdf-compatibiliteit, cache en verwerkingslimieten in."
+      },
+      "adminSmb": {
+        "label": "SMB",
+        "description": "Stel het beveiligingsbeleid en de uitvoeringslimieten voor SMB-backends in."
+      },
+      "adminFileSearch": {
+        "label": "Bestanden zoeken",
+        "description": "Stel de zoekgeschiedenis, resultaatlimieten en uitsluitingen voor het zoeken naar bestanden in."
+      },
+      "adminDirectorySearch": {
+        "label": "Mappen zoeken",
+        "description": "Stel middelen en controles voor de mapindex in voor de backend en alle Companion-apparaten."
+      },
+      "adminHealthMonitoring": {
+        "label": "Systeembewaking",
+        "description": "Kies wie de systeemstatus kan bekijken en stel alarmdrempels in."
+      },
+      "adminAbout": {
+        "label": "Over Sambee",
+        "description": "Bekijk informatie over de build, software en hardware van Sambee."
+      }
+    },
+    "fileBrowserPage": {
+      "fileSearchTitle": "Bestanden zoeken",
+      "touchFriendlyFileSelectionNever": "Uit",
+      "shortcutHintsAuto": "Automatisch",
+      "touchFriendlyFileSelectionAuto": "Automatisch",
+      "quickNavigationTitle": "Snelle navigatie",
+      "includeDotDirectoriesLabel": "Mappen die met een punt beginnen opnemen in snelle navigatie",
+      "includeDotDirectoriesDescription": "Toon mappen zoals .git, .cache en andere mappen die met een punt beginnen in de resultaten voor snelle navigatie.",
+      "shortcutHintsLabel": "Sneltoetstips",
+      "shortcutHintsDescription": "Kies wanneer de snelbalk sneltoetstips toont.",
+      "shortcutHintsAlways": "Altijd tonen",
+      "shortcutHintsNever": "Nooit tonen",
+      "fileSelectionTitle": "Bestandsselectie",
+      "touchFriendlyFileSelectionLabel": "Bestanden selecteren via aanraking",
+      "touchFriendlyFileSelectionDescription": "Kies wanneer je bestanden selecteert met grotere knoppen en aanraakgebaren.",
+      "touchFriendlyFileSelectionAlways": "Altijd aan",
+      "clearRecentFiles": "Recente bestanden wissen",
+      "clearRecentFilesDescription": "Hiermee verwijder je de zoekgeschiedenis voor bestanden definitief van de server. Bestanden en mappen blijven ongewijzigd.",
+      "clearRecentFilesFailed": "Recente bestanden konden niet worden gewist. Probeer het opnieuw.",
+      "clearRecentDirectories": "Recente mappen wissen",
+      "clearRecentDirectoriesDescription": "Hiermee verwijder je de navigatiegeschiedenis voor mappen definitief van de server. Bestanden en mappen blijven ongewijzigd.",
+      "clearRecentDirectoriesFailed": "Recente mappen konden niet worden gewist. Probeer het opnieuw."
+    },
+    "fileSearch": {
+      "title": "Bestanden zoeken",
+      "saveChanges": "Wijzigingen opslaan",
+      "resetToDefault": "Standaard herstellen",
+      "loadFailed": "De instellingen voor het zoeken naar bestanden konden niet worden geladen.",
+      "saveFailed": "De instellingen voor het zoeken naar bestanden konden niet worden opgeslagen.",
+      "resetFailed": "De instellingen voor het zoeken naar bestanden konden niet worden teruggezet.",
+      "retentionLimit": "Aantal recente bestanden en mappen dat wordt bewaard",
+      "retentionLimitError": "Voer een geheel getal van 0 tot 500 in.",
+      "resultLimit": "Resultaten per groep",
+      "resultLimitError": "Voer een geheel getal van 1 tot 50 in.",
+      "excludedCategories": "Bestandscategorieën uitsluiten",
+      "excludedCategoriesHelp": "Uitgesloten bestanden verschijnen niet in de zoekresultaten of zoekgeschiedenis voor bestanden.",
+      "excludeImages": "Afbeeldingen uitsluiten",
+      "excludeTemporaryBackup": "Tijdelijke bestanden en reservekopieën uitsluiten",
+      "excludedExtensions": "Uitgesloten extensies",
+      "excludedExtensionsInputLabel": "Uitgesloten extensie toevoegen",
+      "excludedExtensionsAdd": "Extensie toevoegen",
+      "excludedExtensionsError": "Gebruik letterlijke extensies van maximaal 255 tekens. Jokertekenpatronen en paden zijn niet toegestaan.",
+      "excludedExtensionsDuplicateError": "Deze extensie is al uitgesloten.",
+      "excludedExtensionsHelp": "Voer één letterlijke extensie in. Jokertekenpatronen en paden worden niet ondersteund.",
+      "excludedExtensionsNormalization": "Wordt opgeslagen als {{extension}}.",
+      "excludedExtensionsRemove": "{{extension}} verwijderen"
+    },
+    "imageViewerPage": {
+      "transitionDescription": "Met Carrousel schuiven afbeeldingen bij navigatie met de muis of het toetsenbord. Zonder animatie wisselen afbeeldingen direct. Bij vegen op een touchscreen wordt altijd de carrouselanimatie gebruikt.",
+      "transition": "Overgang",
+      "carousel": "Carrousel",
+      "none": "Geen animatie"
+    },
+    "directorySearch": {
+      "loadFailed": "Het zoekbeleid voor mappen kon niet worden geladen. Controleer de verbinding met de backend en probeer het opnieuw.",
+      "saveFailed": "Deze instelling voor het zoeken naar mappen kon niet worden opgeslagen. Controleer de waarde en de verbinding met de backend en probeer het opnieuw.",
+      "backendTitle": "Mapindexen van de backend",
+      "companionTitle": "Mapindexen van Companion",
+      "deviceTitle": "Mappen zoeken op dit apparaat",
+      "refresh": "Status vernieuwen"
+    },
+    "userManagement": {
+      "editor": {
+        "switchOn": "Aan",
+        "switchOff": "Uit",
+        "sections": {
+          "access": "Toegang",
+          "credentials": "Aanmeldgegevens"
+        },
+        "titleCreate": "Gebruiker maken",
+        "titleEdit": "Gebruiker bewerken",
+        "descriptionEdit": "Werk accountgegevens en toegangsniveau bij. Wachtwoorden reset je apart",
+        "usernameLabel": "Gebruikersnaam",
+        "usernameHelp": "Unieke aanmeldnaam",
+        "usernameTaken": "Er bestaat al een gebruiker met deze gebruikersnaam",
+        "nameLabel": "Volledige naam",
+        "nameHelp": "Weergegeven accountnaam",
+        "oidcNameHelp": "Beheerd door de gekoppelde OIDC-provider",
+        "oidcEmailHelp": "Beheerd door de gekoppelde OIDC-provider",
+        "emailLabel": "E-mailadres",
+        "emailHelp": "Optioneel e-mailadres voor contact",
+        "roleLabel": "Rol",
+        "roleHelp": "Kies een toegangsniveau",
+        "oidcRoleHelp": "Stel een individuele rol in of neem de rol over die is bepaald aan de hand van de gekoppelde OIDC-provider",
+        "oidcRoleUnavailableHelp": "Stel een individuele rol in. De rol uit de provider is beschikbaar zodra de gebruiker zich opnieuw via OIDC aanmeldt",
+        "roleOptions": {
+          "admin": "Instellingen, gebruikers en inhoud beheren",
+          "editor": "Inhoud wijzigen",
+          "viewer": "Door inhoud bladeren"
+        },
+        "inheritedRole": "Overgenomen ({{role}})",
+        "inheritedRoleDescription": "Gebruikt de rol die is bepaald aan de hand van de laatst geverifieerde OIDC-groepen van de gebruiker",
+        "expiresAtLabel": "Vervaltijd",
+        "expiresAtHelp": "Laat leeg om het account niet te laten verlopen",
+        "accountActiveLabel": "Account is actief",
+        "accountActiveHelp": "Uitgeschakelde accounts kunnen zich niet aanmelden",
+        "initialPasswordLabel": "Initieel wachtwoord",
+        "initialPasswordHelp": "Laat je dit leeg, dan genereert de server een veilig tijdelijk wachtwoord",
+        "showInitialPassword": "Initieel wachtwoord tonen",
+        "hideInitialPassword": "Initieel wachtwoord verbergen",
+        "requirePasswordChangeLabel": "Wijziging verplicht bij volgende aanmelding met wachtwoord",
+        "requirePasswordChangeHelp": "Blokkeer toegang met het lokale wachtwoord totdat het wachtwoord is gewijzigd. Aanmelden via OIDC blijft mogelijk."
+      },
+      "actions": {
+        "close": "Sluiten",
+        "editUser": "Gebruiker bewerken",
+        "resetPassword": "Wachtwoord resetten",
+        "deleteUser": "Gebruiker verwijderen",
+        "deleteSelfDisabled": "Je kunt je eigen account hier niet verwijderen",
+        "saveChanges": "Wijzigingen opslaan",
+        "createUser": "Gebruiker maken"
+      },
+      "notifications": {
+        "usernameRequired": "Een gebruikersnaam is vereist",
+        "loadFailed": "De gebruikers konden niet worden geladen",
+        "userUpdated": "Gebruiker bijgewerkt",
+        "userCreated": "Gebruiker gemaakt",
+        "updateFailed": "De gebruiker kon niet worden bijgewerkt",
+        "createFailed": "De gebruiker kon niet worden gemaakt",
+        "resetFailed": "Het wachtwoord kon niet worden gereset",
+        "userDeleted": "Gebruiker verwijderd",
+        "deleteFailed": "De gebruiker kon niet worden verwijderd"
+      },
+      "addUserButton": "Gebruiker toevoegen",
+      "addUserFabAriaLabel": "Gebruiker toevoegen",
+      "totalUsers_one": "Gebruikers: {{count}}",
+      "totalUsers_other": "Gebruikers: {{count}}",
+      "activeAdmins_one": "Beheerders: {{count}}",
+      "activeAdmins_other": "Beheerders: {{count}}",
+      "emptyTitle": "Geen gebruikers gevonden",
+      "emptyDescription": "Maak het eerste gebruikersaccount om toegang aan anderen te geven.",
+      "currentUserSuffix": "(jij)",
+      "adminRole": "Beheerder",
+      "editorRole": "Bewerker",
+      "viewerRole": "Lezer",
+      "activeStatus": "Actief",
+      "disabledStatus": "Uitgeschakeld",
+      "passwordResetPending": "Wachtwoordwijziging vereist",
+      "roleSource": {
+        "localAssignment": "Rolbron: lokaal toegewezen",
+        "individualOverride": "Rolbron: individueel ingesteld",
+        "oidcDefault": "Rolbron: standaardrol van OIDC",
+        "oidcGroups": "Rolbron: OIDC-groepen",
+        "awaitingOidcSignIn": "Rolbron: wacht op OIDC-aanmelding"
+      },
+      "createdAt": "Gemaakt op {{timestamp}}",
+      "expiresAt": "Verloopt op {{timestamp}}",
+      "aria": {
+        "editUser": "{{username}} bewerken",
+        "resetPassword": "Wachtwoord voor {{username}} resetten",
+        "deleteUser": "{{username}} verwijderen"
+      },
+      "credentialsDialog": {
+        "usernameLabel": "Gebruikersnaam",
+        "temporaryPasswordLabel": "Tijdelijk wachtwoord",
+        "createTitle": "Tijdelijk wachtwoord gemaakt",
+        "createDescription": "Deel dit tijdelijke wachtwoord op een veilige manier. De gebruiker moet het na aanmelding wijzigen."
+      },
+      "resetPasswordEditor": {
+        "requirePasswordChangeLabel": "Wijziging verplicht bij volgende aanmelding met wachtwoord",
+        "requirePasswordChangeHelp": "Blokkeer toegang met het lokale wachtwoord totdat het wachtwoord is gewijzigd. Aanmelden via OIDC blijft mogelijk.",
+        "title": "Wachtwoord resetten",
+        "descriptionWithName": "Stel een nieuw wachtwoord in voor {{username}}. De gebruiker wordt direct overal afgemeld.",
+        "descriptionFallback": "Stel een nieuw wachtwoord in voor deze gebruiker. De gebruiker wordt direct overal afgemeld.",
+        "passwordLabel": "Nieuw wachtwoord",
+        "passwordHelp": "Kies het wachtwoord voor de volgende aanmelding van de gebruiker",
+        "showPassword": "Nieuw wachtwoord tonen",
+        "hidePassword": "Nieuw wachtwoord verbergen",
+        "passwordRequired": "Een nieuw wachtwoord is vereist",
+        "submit": "Wachtwoord instellen"
+      },
+      "deleteDialog": {
+        "title": "Gebruiker verwijderen",
+        "descriptionFallback": "Deze gebruiker verwijderen?"
+      }
+    },
+    "companionSync": {
+      "results": {
+        "defaults_active": "Ingebouwde standaardinstellingen",
+        "synchronized": "Gesynchroniseerd",
+        "synchronizing": "Synchroniseren",
+        "update_required": "Update vereist",
+        "authority_conflict": "Andere server beheert instellingen",
+        "pairing_required": "Koppeling vereist",
+        "delivery_failed": "Overdracht mislukt; laatste geldige instellingen actief"
+      },
+      "defaults_active": "De ingebouwde standaardinstellingen blijven actief totdat een gekoppelde server instellingen doorgeeft.",
+      "synchronized": "De instellingen zijn gesynchroniseerd.",
+      "synchronizing": "De instellingen worden gesynchroniseerd. De laatste geldige instellingen blijven actief.",
+      "update_required": "Werk Sambee en Companion bij om gedeelde instellingen te kunnen doorgeven.",
+      "languageUpdateRequired": "Werk Sambee Companion bij om deze taal te gebruiken en probeer het opnieuw. De laatste geldige taal van Companion blijft actief.",
+      "directoryPolicyUpdateRequired": "Werk Sambee Companion bij om deze beleidswaarden voor het zoeken naar mappen te gebruiken. Probeer het daarna opnieuw. Het laatste geldige beleid en de zoekfunctie voor mappen blijven beschikbaar.",
+      "authority_conflict": "Deze server beheert de instellingen van Companion niet. Koppel de gewenste server opnieuw om het beheer over te dragen.",
+      "pairing_required": "Companion kon deze browser niet verifiëren. Koppel deze browser via Instellingen > Lokale schijven of koppel hem opnieuw om de verbinding te herstellen. Instellingen worden niet gecontroleerd totdat je het opnieuw probeert of de koppeling slaagt.",
+      "delivery_failed": "De instellingen konden niet worden doorgegeven. Controleer de verbinding en probeer het opnieuw. De laatste geldige instellingen en de zoekfunctie voor mappen blijven beschikbaar.",
+      "authority": "Server voor instellingen: {{origin}}",
+      "sections": {
+        "theme": "Thema",
+        "localization": "Taal en regio",
+        "directory_index": "Zoekbeleid voor mappen"
+      }
+    },
+    "connectionsSubgroups": {
+      "smb": {
+        "label": "SMB-verbindingen",
+        "description": "Blader door gedeelde SMB-verbindingen en beheer je privéshares."
+      },
+      "localDrives": {
+        "label": "Lokale schijven",
+        "description": "Koppel Sambee Companion, beheer toegang tot lokale schijven en installeer de desktop-app."
+      }
+    },
+    "connectionsPage": {
+      "smbSectionTitle": "SMB-verbindingen",
+      "localDrivesSectionTitle": "Lokale schijven",
+      "smbSectionDescription": "Blader door gedeelde verbindingen en beheer je privéverbindingen met SMB-shares.",
+      "localDrivesSectionDescription": "Koppel Sambee Companion en beheer vanuit deze browser de toegang tot lokale schijven."
+    },
+    "connectionManagement": {
+      "headerTitle": "SMB-verbindingen",
+      "headerDescription": "Blader door gedeelde verbindingen en beheer je privéverbindingen met SMB-shares.",
+      "addConnectionButton": "Verbinding toevoegen",
+      "addConnectionFabAriaLabel": "Verbinding toevoegen",
+      "connectionActionsAriaLabel": "Verbindingsacties",
+      "userLabel": "Gebruiker:",
+      "pathLabel": "Pad:",
+      "sharedSectionTitle": "Gedeelde verbindingen",
+      "sharedSectionEmpty": "Er zijn geen gedeelde verbindingen beschikbaar.",
+      "privateSectionTitle": "Mijn verbindingen",
+      "privateSectionEmpty": "Je hebt nog geen privéverbindingen.",
+      "emptyTitle": "Geen verbindingen ingesteld",
+      "emptyAdminDescription": "Klik op + om een gedeelde of privé-SMB-verbinding te maken.",
+      "emptyRegularDescription": "Klik op + om je eerste privé-SMB-verbinding te maken.",
+      "emptyViewerDescription": "Er zijn nog geen verbindingen beschikbaar voor je account. Vraag een beheerder om er een te maken of te delen.",
+      "menuTest": "Verbinding testen",
+      "tooltipTest": "Verbinding testen",
+      "menuEdit": "Bewerken",
+      "tooltipEdit": "Bewerken",
+      "menuDelete": "Verwijderen",
+      "tooltipDelete": "Verwijderen",
+      "ariaTest": "Verbinding testen",
+      "ariaEdit": "Verbinding bewerken",
+      "ariaDelete": "Verbinding verwijderen",
+      "columns": {
+        "port": "Poort",
+        "type": "Type",
+        "actions": "Acties"
+      },
+      "deleteDialogTitle": "Verbinding verwijderen",
+      "deleteDialogDescription": "Weet je zeker dat je de verbinding wilt verwijderen?",
+      "notifications": {
+        "loadFailed": "De verbindingen konden niet worden geladen",
+        "savedPrivateInfo": "Verbinding opgeslagen als privéverbinding. Alleen beheerders kunnen verbindingen delen.",
+        "createdSuccess": "Verbinding gemaakt",
+        "updatedSuccess": "Verbinding bijgewerkt",
+        "deletedSuccess": "Verbinding verwijderd",
+        "deleteFailed": "De verbinding kon niet worden verwijderd",
+        "testFailed": "Verbindingstest mislukt",
+        "saveFailed": "De verbinding kon niet worden opgeslagen"
+      },
+      "scope": {
+        "sharedChip": "GEDEELD",
+        "privateChip": "PRIVÉ"
+      }
+    },
+    "localDrives": {
+      "headerTitle": "Lokale schijven",
+      "headerDescription": "Koppel Sambee Companion en beheer vanuit deze browser de toegang tot lokale schijven.",
+      "menuActionLabel": "Lokale schijven beheren…",
+      "intro": "Beheer de koppeling van deze browser met Sambee Companion en controleer de toegang tot lokale schijven op deze computer.",
+      "summaryTitle": "Huidige status",
+      "secureContextTitle": "Lokale schijven vereisen een beveiligde browser met Web Crypto",
+      "secureContextMessage": "Voor koppeling en toegang tot lokale schijven is een beveiligde browsercontext met Web Crypto vereist. Gebruik HTTPS (of localhost voor lokale ontwikkeling) en een browser waarin Web Crypto is ingeschakeld.",
+      "unsupportedMobileTitle": "Voor lokale schijven is een desktopbrowser vereist",
+      "unsupportedMobileDescription": "Sambee Companion is niet beschikbaar op iOS of Android.",
+      "unsupportedMobileAlert": "Gebruik Sambee in een desktopbrowser op Windows, macOS of Linux om Companion te installeren, deze browser te koppelen en lokale schijven te openen.",
+      "statusLabelReady": "Gereed",
+      "statusLabelActionRequired": "Actie vereist",
+      "statusLabelUnavailable": "Companion niet beschikbaar",
+      "summaryReadyTitle": "Lokale schijven zijn klaar voor gebruik",
+      "summaryPairingRequiredTitle": "Koppel deze browser voor toegang tot lokale schijven",
+      "summaryPendingApprovalTitle": "Voltooi de goedkeuring in Sambee Companion",
+      "summaryRepairTitle": "Herstel de koppeling van deze browser",
+      "summaryUpdateRequiredTitle": "Werk Sambee Companion bij",
+      "summaryBrowserUpdateRequiredTitle": "Werk Sambee bij",
+      "summaryVerificationUnavailableTitle": "Toegang tot lokale schijven kon niet worden geverifieerd",
+      "summaryUnavailableTitle": "Start Sambee Companion op deze computer",
+      "companionRunningChecklistLabel": "De Companion-app is actief",
+      "browserFullyPairedChecklistLabel": "Deze browser is gekoppeld",
+      "accessSectionTitle": "Lokale toegang",
+      "accessSectionDescription": "Beheer de koppeling van deze browser en controleer of lokale schijven momenteel toegankelijk zijn.",
+      "pairingSectionTitle": "Deze browser koppelen",
+      "pairingSectionReady": "Deze browser is al gekoppeld aan Sambee Companion.",
+      "pairingSectionUnavailable": "Start Sambee Companion op deze computer en keer hier terug om deze browser te koppelen.",
+      "pairingSectionRequired": "Keur een koppelverzoek goed in Sambee Companion om door lokale schijven te kunnen bladeren.",
+      "pairingSectionPendingApproval": "Er wacht al een koppelverzoek in Sambee Companion. Keur het daar goed of wijs het af voordat je opnieuw probeert te koppelen.",
+      "pairingSectionRepair": "Laad deze pagina eerst opnieuw om de verbinding tussen Sambee en Companion te vernieuwen. Koppel deze browser opnieuw als de toegang tot lokale schijven nog steeds mislukt.",
+      "verificationSectionTitle": "Lokale toegang controleren",
+      "verificationSectionDescription": "Controleer snel of deze browser nog toegang heeft tot lokale schijven.",
+      "verificationSectionReady": "Voer een snelle toegangscontrole uit voordat je lokale bestanden vanuit Sambee opent.",
+      "verificationSectionBlocked": "Voltooi eerst de koppeling en test deze daarna hier.",
+      "troubleshootingSectionTitle": "Koppeling van deze browser beheren",
+      "troubleshootingSectionDescription": "Bekijk of verwijder de koppeling die deze browser toegang geeft tot lokale schijven.",
+      "troubleshootingSectionReady": "Ontkoppel deze browser om de toegang tot lokale schijven op deze computer in te trekken.",
+      "loadError": "De status van Companion kon niet worden geladen.",
+      "pairingCreated": "Koppeling voor lokale schijven gemaakt.",
+      "pairingRemoved": "Deze browser is ontkoppeld.",
+      "pairingRemoveFailed": "De koppeling kon niet worden verwijderd.",
+      "pairingTestSucceeded": "Koppeling geverifieerd. Deze browser heeft toegang tot lokale schijven.",
+      "pairingTestFailed": "Companion heeft de handtekening van deze browser afgewezen. Laad Sambee eerst opnieuw. Koppel deze browser opnieuw als de test nog steeds mislukt.",
+      "pairingTestUnavailable": "De toegang tot lokale schijven kon niet worden geverifieerd. Controleer of Companion actief is en voer de test opnieuw uit.",
+      "reloadButton": "Sambee opnieuw laden",
+      "statusUnavailable": "Sambee Companion is niet actief op deze computer. Start de app en keer hier terug om deze browser te koppelen, de toegang tot lokale schijven te testen of lokale bestanden vanuit Sambee te openen.",
+      "statusPaired": "Deze browser is gekoppeld aan Sambee Companion. Je kunt vanuit Sambee door lokale bestanden bladeren en ze openen.",
+      "statusPendingApproval": "Een koppelverzoek van deze browser wacht op goedkeuring in Sambee Companion. Handel het verzoek daar af voordat je het opnieuw probeert.",
+      "statusRecoverable": "Companion kan de koppeling van deze browser niet verifiëren. Laad Sambee eerst opnieuw om een eventuele update toe te passen. Koppel deze browser opnieuw als de toegang nog steeds mislukt.",
+      "statusUpdateRequired": "Deze versie van Companion gebruikt een ouder authenticatieprotocol. Werk Companion bij en start het opnieuw. Laad daarna Sambee opnieuw. Opnieuw koppelen lost dit versieverschil niet op.",
+      "statusBrowserUpdateRequired": "Companion gebruikt een nieuwer authenticatieprotocol dan deze Sambee-pagina ondersteunt. Laad Sambee opnieuw. Werk Sambee bij als het verschil blijft bestaan. Opnieuw koppelen lost dit niet op.",
+      "statusVerificationUnavailable": "Companion is bereikbaar, maar de koppelstatus kon niet worden geverifieerd. Probeer het opnieuw.",
+      "statusUnpaired": "Deze browser is momenteel niet gekoppeld aan Sambee Companion.",
+      "downloadSectionTitle": "Sambee Companion installeren",
+      "downloadSectionDescription": "Download Sambee Companion als het nog niet op deze computer is geïnstalleerd. Start de app na installatie en keer hier terug om deze browser te koppelen of de toegang tot lokale schijven te testen.",
+      "downloadSectionSourcePrefix": "Bron",
+      "downloadVersionLabel": "Beschikbare versie",
+      "downloadFeedSourceLabel": "Nieuwste aanbevolen release",
+      "downloadPinSourceLabel": "Vastgezet door beheerder",
+      "downloadPrimaryButton": "Downloaden voor deze computer",
+      "downloadOtherPlatformsLabel": "Andere beschikbare downloads",
+      "downloadRecommendedLabel": "Aanbevolen voor deze computer",
+      "downloadUnavailable": "Downloadlinks zijn momenteel niet beschikbaar. Vernieuw de status en probeer het over een ogenblik opnieuw.",
+      "downloadLoadFailed": "Downloadinformatie voor Companion kon niet worden opgehaald.",
+      "testCurrentPairingButton": "Huidige koppeling testen",
+      "pairThisBrowserButton": "Deze browser koppelen",
+      "waitingForApprovalButton": "Wachten op goedkeuring…",
+      "unpairThisBrowserButton": "Deze browser ontkoppelen",
+      "testingButton": "Testen…",
+      "unpairingButton": "Ontkoppelen…",
+      "pairingDialog": {
+        "title": "Koppelen met Companion",
+        "intro": "Koppel deze browser aan de Sambee Companion-app om door lokale schijven te bladeren. Zorg dat Companion op deze computer actief is.",
+        "verifyCodePrompt": "Controleer of deze code overeenkomt met de code in de Companion-app:",
+        "verifyCodeHelp": "Komen de codes overeen? Klik hieronder op Bevestigen en keur de koppeling goed in Companion.",
+        "confirming": "Wachten op bevestiging in Companion…",
+        "success": "Koppeling geslaagd! Je lokale schijven zijn nu beschikbaar.",
+        "startButton": "Koppeling starten",
+        "confirmButton": "Codes komen overeen – bevestigen",
+        "cancelButton": "Annuleren",
+        "doneButton": "Gereed",
+        "closeButton": "Sluiten",
+        "retryButton": "Opnieuw proberen",
+        "initiateFailed": "De koppeling kon niet worden gestart. Is Companion actief?",
+        "confirmFailed": "Koppeling mislukt. Companion heeft het verzoek mogelijk afgewezen of het verzoek is verlopen."
+      }
+    },
+    "textEditorPage": {
+      "limitsTitle": "Limieten",
+      "maxFileSizeLabel": "Maximale bestandsgrootte voor de uitgebreide editor (MB)",
+      "maxFileSizeDescription": "Bestanden boven deze limiet worden niet geopend in de volledige teksteditor op basis van CodeMirror. Zo voorkom je vertraging of hoog geheugengebruik bij het bewerken van zeer grote bestanden."
+    },
+    "connectionDialog": {
+      "titles": {
+        "add": "Verbinding toevoegen",
+        "edit": "Verbinding bewerken"
+      },
+      "results": {
+        "errorDialogTitle": "Verbindingstest mislukt",
+        "success": "Verbinding geslaagd",
+        "error": "Verbinding mislukt"
+      },
+      "labels": {
+        "name": "Verbindingsnaam",
+        "host": "Host",
+        "shareName": "Sharenaam",
+        "username": "Gebruikersnaam",
+        "password": "Wachtwoord",
+        "pathPrefix": "Padvoorvoegsel",
+        "visibility": "Zichtbaarheid",
+        "accessMode": "Toegangsmodus"
+      },
+      "sections": {
+        "access": "Toegang"
+      },
+      "helpers": {
+        "name": "Een naam waaraan je deze verbinding in Sambee herkent",
+        "host": "IP-adres of hostnaam van de SMB-server",
+        "shareName": "Naam van de share op de server",
+        "passwordAdd": "Wachtwoord van het SMB-account",
+        "passwordEdit": "Laat leeg om het bestaande wachtwoord te behouden",
+        "pathPrefix": "Basispad binnen de share (optioneel)",
+        "username": "Gebruik indien nodig de notatie DOMAIN\\USER",
+        "visibility": "Kies privétoegang of gedeelde toegang",
+        "visibilityAdmin": "Beheerders kunnen gedeelde verbindingen voor iedereen of privéverbindingen voor zichzelf maken.",
+        "visibilityRegular": "Voor gedeelde verbindingen zijn beheerdersrechten vereist. Kies je zonder die rechten voor gedeeld, dan slaat de server de verbinding als privé op.",
+        "accessModeReadWrite": "Kies alleen lezen of lezen en schrijven",
+        "accessModeReadOnly": "Kies alleen lezen of lezen en schrijven"
+      },
+      "errors": {
+        "nameRequired": "Een verbindingsnaam is vereist",
+        "hostRequired": "Een host is vereist",
+        "shareNameRequired": "Een sharenaam is vereist",
+        "usernameRequired": "Een gebruikersnaam is vereist",
+        "passwordRequired": "Een wachtwoord is vereist"
+      },
+      "actions": {
+        "save": "Opslaan"
+      },
+      "aria": {
+        "togglePassword": "Wachtwoord tonen of verbergen"
+      },
+      "visibility": {
+        "privateLabel": "Alleen voor mij",
+        "privateDescription": "Alleen zichtbaar voor jouw account. Je kunt deze verbinding volledig beheren.",
+        "sharedLabel": "Gedeeld met iedereen",
+        "sharedDescription": "Zichtbaar voor alle gebruikers. Alleen beheerders kunnen deze verbinding beheren."
+      },
+      "accessMode": {
+        "readWriteLabel": "Lezen en schrijven",
+        "readOnlyLabel": "Alleen lezen"
+      }
+    },
+    "advanced": {
+      "imageConversion": {
+        "label": "Voorkeur voor afbeeldingsconversie",
+        "description": "Geldt voor afbeeldingsvoorbeelden van de backend, inclusief conversies met libvips. Afbeeldingen op lokale schijven blijven ongewijzigd.",
+        "speed": "Conversiesnelheid",
+        "speedDescription": "Gebruik snellere codering voor voorbeelden zonder transparantie. Bestanden kunnen groter zijn.",
+        "size": "Gewenste grootte",
+        "sizeDescription": "Gebruik WebP voor kleinere voorbeelden zonder transparantie. Conversie kan meer CPU-capaciteit vergen."
+      },
+      "saveChanges": "Wijzigingen opslaan",
+      "saveSuccess": "Geavanceerde instellingen opgeslagen",
+      "loadFailed": "De geavanceerde instellingen konden niet worden geladen",
+      "saveFailed": "De geavanceerde instellingen konden niet worden opgeslagen",
+      "resetOverride": "Afwijkende instelling herstellen",
+      "resetFailed": "De afwijkende instelling kon niet worden hersteld",
+      "resetSuccess": "{{label}} teruggezet naar de overgenomen waarde",
+      "sections": {
+        "smbBackends": "SMB-backends",
+        "preprocessors": "Voorverwerkers",
+        "imageMagick": "ImageMagick",
+        "pdfCompatibility": "Pdf-compatibiliteit",
+        "archiveDownloads": "Archieven maken"
+      },
+      "fields": {
+        "value": "Waarde",
+        "unit": "Eenheid",
+        "seconds": "seconden"
+      },
+      "validation": {
+        "enterLabel": "Voer {{label}} in",
+        "wholeNumber": "{{label}} moet een geheel getal zijn",
+        "betweenRange": "{{label}} moet tussen {{min}} en {{max}} liggen",
+        "betweenRangeWithUnit": "{{label}} moet tussen {{min}} en {{max}} {{unit}} liggen"
+      },
+      "helperText": {
+        "integer": "{{description}} Standaard: {{defaultValue}}. Bereik: {{minValue}} – {{maxValue}}.",
+        "byteSize": "{{description}} Standaard: {{defaultValue}}. Bereik: {{minValue}} tot {{maxValue}}."
+      }
+    },
+    "smbSettings": {
+      "loadFailed": "De SMB-instellingen konden niet worden geladen",
+      "saveFailed": "De SMB-instellingen konden niet worden opgeslagen",
+      "saving": "SMB-instelling opslaan",
+      "saved": "SMB-instelling opgeslagen",
+      "connectionTimeoutError": "Voer een geheel getal van 5 tot 120 in.",
+      "readChunkSizeError": "Voer een geheel getal binnen het toegestane bereik voor de blokgrootte in.",
+      "sections": {
+        "protection": "Beveiliging",
+        "connectionBehavior": "Verbindingsgedrag",
+        "fileStreaming": "Bestanden streamen"
+      },
+      "fields": {
+        "authenticationMode": "Authenticatiemodus",
+        "encryptionMode": "Transportbeveiliging",
+        "connectionTimeout": "Time-out voor verbinding",
+        "readChunkSize": "SMB-leesblokgrootte"
+      },
+      "helper": {
+        "authenticationMode": "Automatisch gebruikt Kerberos als dat beschikbaar is en valt anders terug op NTLM. Kies Kerberos vereist om terugval op NTLM te blokkeren.",
+        "encryptionMode": "Ondertekening is altijd vereist. Met Alleen ondertekening zijn onversleutelde SMB 2-verbindingen toegestaan. Stel versleuteling verplicht om te voorkomen dat anderen op het netwerk SMB-verkeer kunnen lezen.",
+        "connectionTimeout": "Maximale tijd om een SMB-transportverbinding tot stand te brengen.",
+        "readChunkSize": "Aantal bytes dat per leesactie tijdens het streamen van bestanden wordt gelezen."
+      },
+      "options": {
+        "negotiate": "Automatisch (Kerberos of NTLM)",
+        "kerberosRequired": "Kerberos vereist",
+        "signingOnly": "Alleen ondertekening (compatibel met SMB 2)",
+        "encryptionRequired": "Ondertekening en versleuteling (SMB 3+)"
+      },
+      "source": {
+        "default": "Ingebouwde standaard",
+        "database": "Afwijkende systeeminstelling",
+        "configFile": "Configuratiebestand"
+      }
+    }
+  },
+  "fileBrowser": {
+    "chrome": {
+      "statusBar": {
+        "itemCount_one": "{{count}} item",
+        "itemCount_other": "{{count}} items",
+        "noSelection": "Geen selectie",
+        "linkTargetMissing": "Doel van snelkoppeling niet gevonden",
+        "linkTargetAccessDenied": "Toegang tot doel van snelkoppeling geweigerd",
+        "linkTargetUnresolvable": "Doel van snelkoppeling kan niet worden bepaald",
+        "linkTargetLocalDrivesOnly": "Doelen van snelkoppelingen kunnen alleen op lokale schijven worden bepaald",
+        "linkTargetUnmappedDrive": "Doel van snelkoppeling ligt buiten de beschikbare schijven",
+        "linkTargetUnsupported": "Doel van snelkoppeling is geen bestand of map"
+      },
+      "sort": {
+        "fields": {
+          "type": "Type",
+          "name": "Naam",
+          "size": "Grootte",
+          "modified": "Gewijzigd"
+        },
+        "ariaLabel": "Sorteeropties",
+        "direction": {
+          "ascending": "Oplopend",
+          "descending": "Aflopend"
+        }
+      },
+      "dualPaneToggle": {
+        "label": "Panelen",
+        "ariaLabel": "Weergave met twee panelen omschakelen"
+      },
+      "toolbar": {
+        "help": "Help",
+        "openSettings": "Instellingen openen",
+        "systemHealthTooltip": "Systeemstatus: {{status}}. {{headline}}"
+      },
+      "mobileToolbar": {
+        "navigateUpTitle": "Omhoog navigeren",
+        "openMenu": "Menu openen",
+        "navigateUpAriaLabel": "Naar bovenliggende map gaan"
+      },
+      "mobileMenu": {
+        "openSettingsAriaLabel": "Instellingen openen",
+        "navigateRootAriaLabel": "Naar de hoofdmap gaan",
+        "selectConnectionAriaLabel": "Verbinding selecteren",
+        "openKeyboardShortcutsAriaLabel": "Sneltoetsen openen",
+        "openDocumentationAriaLabel": "Documentatie openen",
+        "systemHealth": "Systeemstatus",
+        "openSystemHealthAriaLabel": "Systeemstatus: {{status}}. {{headline}}",
+        "logoutAriaLabel": "Afmelden"
+      },
+      "breadcrumb": {
+        "navigateRoot": "Naar de hoofdmap gaan",
+        "navigateTo": "Naar {{path}} gaan"
+      },
+      "connectionSelector": {
+        "placeholder": "Verbinding selecteren"
+      },
+      "viewMode": {
+        "ariaLabel": "Weergaveopties",
+        "options": {
+          "list": "Lijst",
+          "details": "Details"
+        }
+      },
+      "alerts": {
+        "folderNotFound": "Map ‘{{name}}’ niet gevonden. De map is mogelijk verplaatst of verwijderd.",
+        "folderNotFoundSummary": "Map niet gevonden. De map is mogelijk verplaatst of verwijderd.",
+        "fileNotFoundSummary": "Bestand niet gevonden. Het bestand is mogelijk verplaatst of verwijderd.",
+        "fileFailure": {
+          "missing": "Bestand ‘{{name}}’ niet gevonden. Het bestand is mogelijk verplaatst of verwijderd.",
+          "not_file": "Dit doel is geen normaal bestand. Selecteer een ander bestand.",
+          "access_denied": "Toegang tot dit bestand is geweigerd. Controleer je machtigingen en probeer het opnieuw.",
+          "timeout": "De bestandsaanvraag duurde te lang. Controleer de verbinding en probeer het opnieuw.",
+          "unavailable": "Het bestand is niet beschikbaar. Controleer de verbinding en probeer het opnieuw.",
+          "pairing": "De koppeling voor lokale schijven is niet beschikbaar. Open de instellingen voor Lokale schijven en koppel deze browser opnieuw.",
+          "cancelled": "De bestandsaanvraag is geannuleerd.",
+          "unknown": "Het bestand kon niet worden geopend. Controleer de verbinding en probeer het opnieuw."
+        },
+        "folderRecovered": "Map ‘{{name}}’ niet gevonden. In plaats daarvan is ‘{{parent}}’ geopend.",
+        "folderRecoveredSummary": "Map niet gevonden. In plaats daarvan is ‘{{parent}}’ geopend.",
+        "folderAccessDenied": "Je hebt geen machtiging om deze map te openen.",
+        "notAFolder": "Dit item is geen map.",
+        "connectionUnavailable": "De verbinding is niet beschikbaar. Controleer de verbindingsinstellingen en probeer het opnieuw.",
+        "directoryMonitoringTimeout": "Mapbewaking is niet op tijd gestart. Vernieuw de map om het opnieuw te proberen.",
+        "leftPane": "Linkerpaneel",
+        "rightPane": "Rechterpaneel",
+        "localDrivePairingRejected": "{{connection}}: Sambee Companion heeft de koppeling van deze browser afgewezen. Laad Sambee opnieuw om een eventuele update toe te passen. Open Lokale schijven om de koppeling te controleren als het probleem aanhoudt.",
+        "localDrivePairingRequired": "{{connection}}: Deze browser is niet gekoppeld aan Sambee Companion. Open Lokale schijven om de browser te koppelen.",
+        "welcomeTitle": "Welkom bij Sambee!",
+        "adminOnboardingPrefix": "Ga aan de slag door ",
+        "adminOnboardingLink": "je eerste SMB-netwerkshare toe te voegen",
+        "adminOnboardingSuffix": ". Daarna kun je door bestanden op je netwerkopslag bladeren en ze bekijken.",
+        "regularOnboarding": "Met Sambee kun je door bestanden op netwerkshares bladeren en ze bekijken. Vraag een beheerder om netwerkshares in te stellen.",
+        "backendUnavailable": "De verbinding met de backend is verbroken. De huidige interface blijft beschikbaar, maar vernieuwen en live-updates kunnen mislukken totdat de verbinding is hersteld.",
+        "backendReconnecting": "Opnieuw verbinden met de backend. Live-updates kunnen even vertraging oplopen.",
+        "loadingConnections": "Verbindingen laden…",
+        "companionLaunchHint": "Openen in Sambee Companion. Gebeurt er niets? Controleer of Companion is geïnstalleerd en actief is. Als je in Companion moet aanmelden of iets moet herstellen, opent Sambee hier opnieuw met de volgende stap.",
+        "companionLifecycle": {
+          "renewal_required": "De bewerksessie in Companion is verlopen voordat de bewerking van het bestand kon worden afgerond. Open het bestand opnieuw vanuit Sambee om verder te bewerken.",
+          "auth_failed": "Companion kon de aanmelding bij de Sambee-backend niet voltooien. Rond de aanmelding af in Companion als daarom wordt gevraagd en open het bestand daarna opnieuw vanuit Sambee.",
+          "lock_lost": "Companion is de actieve bewerkingsvergrendeling voor dit bestand kwijtgeraakt. Open het bestand opnieuw vanuit Sambee voordat je meer wijzigingen aanbrengt.",
+          "recovery_required": "Er staat in Companion nog een herstelactie open voor dit bestand. Rond die af in Sambee of Companion voordat je een nieuwe bewerksessie start."
+        }
+      },
+      "helpMenu": {
+        "keyboardShortcuts": "Sneltoetsen",
+        "documentation": "Documentatie",
+        "issues": "Problemen",
+        "discussions": "Discussies"
+      }
+    },
+    "list": {
+      "emptyDirectory": "Deze map is leeg"
+    },
+    "confirmDelete": {
+      "ariaLabelItem": "Te verwijderen item",
+      "titleFile": "Bestand verwijderen",
+      "titleDirectory": "Map verwijderen",
+      "titleMulti": "Items verwijderen",
+      "confirmFile": "Dit bestand wordt definitief verwijderd:",
+      "confirmDirectory": "Deze map en de inhoud ervan worden definitief verwijderd:",
+      "confirmMulti": "De volgende {{count}} items worden definitief verwijderd:",
+      "ariaLabelItems": "Te verwijderen items",
+      "moreItems_one": "en nog 1 item",
+      "moreItems_other": "en nog {{count}} items",
+      "buttonDeleting": "Verwijderen…"
+    },
+    "commands": {
+      "categories": {
+        "settings": "Instellingen",
+        "navigation": "Navigatie",
+        "view": "Weergave",
+        "files": "Bestanden",
+        "panes": "Panelen",
+        "help": "Help"
+      },
+      "items": {
+        "fileSearch": {
+          "title": "Bestanden zoeken",
+          "description": "Zoek in recente bestanden en in bestanden in de actieve map"
+        },
+        "quickNav": {
+          "title": "Navigatiemodus openen",
+          "description": "Spring naar mappen vanuit de snelbalk"
+        },
+        "commandPalette": {
+          "title": "Opdrachten tonen",
+          "description": "Open het opdrachtenpalet van de bestandsbrowser"
+        },
+        "open": {
+          "title": "Item met focus openen"
+        },
+        "navigateUp": {
+          "title": "Eén map omhoog"
+        },
+        "refresh": {
+          "title": "Bestandslijst vernieuwen"
+        },
+        "rename": {
+          "title": "Naam van item met focus wijzigen"
+        },
+        "delete": {
+          "title": "Item met focus verwijderen"
+        },
+        "newDirectory": {
+          "title": "Nieuwe map maken"
+        },
+        "newFile": {
+          "title": "Nieuw bestand maken"
+        },
+        "createArchive": {
+          "title": "Zip-archief maken"
+        },
+        "extractArchive": {
+          "title": "Uit zip-archief uitpakken"
+        },
+        "openInApp": {
+          "title": "Bestand met focus openen in een lokale app"
+        },
+        "openInViewerPicker": {
+          "title": "Sambee-viewer kiezen voor bestand met focus"
+        },
+        "openInNativePicker": {
+          "title": "Lokale app kiezen voor bestand met focus"
+        },
+        "toggleDualPane": {
+          "title": "Weergave met twee panelen omschakelen"
+        },
+        "openLocationInNewTab": {
+          "title": "Huidige locatie in nieuw tabblad openen"
+        },
+        "matchLeftPaneLocation": {
+          "title": "Locatie van rechterpaneel openen in linkerpaneel"
+        },
+        "matchRightPaneLocation": {
+          "title": "Locatie van linkerpaneel openen in rechterpaneel"
+        },
+        "focusLeftPane": {
+          "title": "Focus naar linkerpaneel"
+        },
+        "focusRightPane": {
+          "title": "Focus naar rechterpaneel"
+        },
+        "switchPane": {
+          "title": "Actief paneel wisselen"
+        },
+        "newTab": {
+          "title": "Nieuw maptabblad"
+        },
+        "closeTab": {
+          "title": "Maptabblad sluiten"
+        },
+        "undoCloseTab": {
+          "title": "Gesloten maptabblad herstellen"
+        },
+        "previousTab": {
+          "title": "Vorig maptabblad"
+        },
+        "nextTab": {
+          "title": "Volgend maptabblad"
+        },
+        "copyToOtherPane": {
+          "title": "Naar ander paneel kopiëren"
+        },
+        "moveToOtherPane": {
+          "title": "Naar ander paneel verplaatsen"
+        },
+        "openSettings": {
+          "title": "Instellingen openen"
+        },
+        "openConnectionsSettings": {
+          "title": "Verbindingsinstellingen openen"
+        },
+        "openSystemHealth": {
+          "title": "Systeemstatus openen"
+        },
+        "showHelp": {
+          "title": "Sneltoetsen tonen"
+        }
+      }
+    },
+    "viewerPicker": {
+      "viewers": {
+        "text": "Teksteditor",
+        "image": "Afbeeldingsviewer",
+        "pdf": "Pdf-viewer",
+        "markdown": "Markdown-viewer"
+      },
+      "openInNativeApp": "Openen in lokale app",
+      "title": "Viewer kiezen",
+      "fileLabel": "Te openen bestand",
+      "open": "Openen",
+      "openWithoutSaving": "Openen zonder opslaan",
+      "alwaysUse": "Deze viewer altijd gebruiken voor dit bestandstype",
+      "default": "Standaard",
+      "nativeDescription": "Gebruik je desktop-app in plaats van een Sambee-viewer"
+    },
+    "search": {
+      "modes": {
+        "fileSearch": "Bestanden zoeken",
+        "navigate": "Navigeren",
+        "quickNav": "Snel navigeren",
+        "commands": "Opdrachten"
+      },
+      "statusDetails": {
+        "source": "Bron",
+        "title": "Status van zoeken naar mappen",
+        "linkSuffix": " (<details>details</details>).",
+        "impact": "Mappen op deze locaties kunnen ontbreken in de zoekresultaten.",
+        "incomplete": "Er wordt slechts een deel van de getroffen locaties getoond. Mogelijk zijn meer mappen getroffen.",
+        "locations": "Getroffen locaties",
+        "location": "Locatie",
+        "reason": "Reden",
+        "containingDirectory": "Bovenliggende map",
+        "unavailable": "Deze details zijn niet meer beschikbaar. Vernieuw de status.",
+        "failed": "De statusdetails konden niet worden geladen. Controleer de verbinding met de bron en open dit dialoogvenster opnieuw.",
+        "reasons": {
+          "access_denied": "Toegang geweigerd",
+          "unsupported_encoding": "Een mapnaam kon niet worden gelezen",
+          "unsafe_traversal": "Veiligheidscontrole van het mappad mislukt",
+          "scan_failed": "Een map kon niet worden gelezen"
+        },
+        "actions": {
+          "access_denied": "Controleer of het account voor deze bron leesrechten voor deze map heeft.",
+          "unsupported_encoding": "Controleer of mapnamen niet-ondersteunde tekens bevatten of te lang zijn.",
+          "unsafe_traversal": "Controleer of de map tijdens de scan is gewijzigd. Maak opnieuw verbinding met de bron als dit blijft gebeuren.",
+          "scan_failed": "Controleer of de map bestaat en leesbaar is. Herstel zo nodig de verbinding met de bron."
+        }
+      },
+      "modeSelectorAriaLabel": "Modus van de snelbalk wijzigen",
+      "placeholders": {
+        "directory": "Navigeer naar een map",
+        "command": "Voer een opdracht uit",
+        "smart": "Ga naar een map of typ > voor opdrachten",
+        "fileSearch": "Zoek in recente bestanden en bestanden in de huidige map"
+      },
+      "footer": {
+        "navigate": "navigeren",
+        "open": "openen",
+        "removeRecent": "Recent item verwijderen",
+        "removeRecentDirectory": "Recente map verwijderen",
+        "run": "uitvoeren",
+        "commands": "opdrachten",
+        "close": "sluiten"
+      },
+      "itemTypes": {
+        "directory": "Map",
+        "file": "Bestand"
+      },
+      "results": {
+        "none": "Geen resultaten gevonden voor ‘{{query}}’",
+        "failed": "De zoekopdracht kon niet worden voltooid. Probeer het opnieuw.",
+        "removeFailed": "Dit recente item kon niet worden verwijderd. Probeer het opnieuw.",
+        "count_one": "{{count}} resultaat",
+        "count_other": "{{count}} resultaten",
+        "countTruncated": "{{count}}+ resultaten",
+        "commandCount_one": "{{count}} opdracht",
+        "commandCount_other": "{{count}} opdrachten",
+        "directoriesIndexed_one": "{{count}} map geïndexeerd",
+        "directoriesIndexed_other": "{{count}} mappen geïndexeerd"
+      },
+      "status": {
+        "connectionStatus": "{{connection}}: {{message}}",
+        "indexingPending": "Indexeren…",
+        "indexing": "Indexeren… ({{count}} mappen gevonden)",
+        "updating": "Index bijwerken… ({{count}} mappen)",
+        "updatingProgress": "Index bijwerken… ({{done}} van circa {{total}} mappen gecontroleerd)",
+        "startingIndex": "Indexering starten…",
+        "indexCoveragePartial": "niet alle mappen konden worden geïndexeerd.",
+        "indexCoverageUncertain": "De mapindex is niet geverifieerd. Er volgt een nieuwe controle.",
+        "legacyDirectorySearch": "Zoeken naar mappen met meerdere termen is voor deze bron niet bevestigd. Zoek met één term of controleer of de backend en Companion dit ondersteunen.",
+        "historyUnavailable": "Recente mappen zijn niet beschikbaar. Controleer de verbinding met de backend en probeer het opnieuw.",
+        "fileHistoryUnavailable": "Recente bestanden zijn niet beschikbaar. Controleer de verbinding met de backend en probeer het opnieuw.",
+        "indexUnavailable": "Zoeken naar mappen is niet beschikbaar. Controleer de verbinding met de bron en probeer het opnieuw."
+      },
+      "groups": {
+        "recentFiles": "Recente bestanden",
+        "recentDirectories": "Recente mappen",
+        "directories": "Mappen",
+        "currentDirectory": "Huidige map"
+      },
+      "belowMinimum": "Typ minstens {{count}} tekens om te zoeken"
+    },
+    "archive": {
+      "entryUnavailable": "Niet beschikbaar",
+      "createTitle": "Zip-archief maken",
+      "extractTitle": "Uit zip-archief uitpakken",
+      "buttonCreate": "Archief maken",
+      "collisionSizeLabel": "Grootte",
+      "collisionModifiedLabel": "Gewijzigd",
+      "destinationLabel": "Doelmap",
+      "collisionArchiveColumn": "Archief",
+      "collisionArchiveMemberLabel": "Archiefitem",
+      "nameLabel": "Archiefnaam",
+      "createDescription_one": "Maak een zip-archief van 1 geselecteerd item in de doelmap.",
+      "createDescription_other": "Maak een zip-archief van {{count}} geselecteerde items in de doelmap.",
+      "progressCreating": "Archief maken…",
+      "progressPreparing": "Archief voorbereiden…",
+      "progressProcessedMembers": "{{processed}} archiefitems verwerkt…",
+      "buttonCreating": "Archief maken…",
+      "validationExtension": "Archiefnamen moeten eindigen op .zip.",
+      "errorGeneric": "Het archief kon niet worden gemaakt.",
+      "createPartialOutputError": "Het archief kon niet worden gemaakt. Het nieuwe zip-bestand is mogelijk onvolledig.",
+      "createCancelled": "Het maken van het archief is geannuleerd.",
+      "buttonCancelCreation": "Maken van archief annuleren",
+      "progressSourceArchive": "Bronarchief",
+      "progressMembers": "{{completed}} van {{total}} archiefitems",
+      "progressBytes": "{{processed}} van {{total}} bytes",
+      "interruptedAfterReload": "De archiefbewerking is onderbroken. Controleer de bestemming voordat je het opnieuw probeert.",
+      "browseError": "De inhoud van het archief kon niet worden geladen.",
+      "downloadError": "Het archiefitem kon niet worden gedownload.",
+      "download": "Downloaden",
+      "previewTitle": "Voorbeeld van {{name}}",
+      "previewLoading": "Voorbeeld laden",
+      "previewError": "Het voorbeeld van het archiefitem kon niet worden geladen.",
+      "previewTooLarge": "Dit archiefitem is te groot voor een voorbeeld. Download het om het bestand te bekijken.",
+      "previewUnavailable": "Van dit bestandstype is hier geen voorbeeld beschikbaar. Download het om het in een andere app te openen.",
+      "closeBrowser": "Archiefbrowser sluiten",
+      "root": "Hoofdmap van archief",
+      "breadcrumbs": "Archiefpad",
+      "historyBack": "Terug",
+      "historyForward": "Vooruit",
+      "up": "Omhoog",
+      "more": "Meer laden",
+      "extractDescriptionArchive": "Pak het archief uit naar de doelmap.",
+      "extractDescriptionMember": "Pak het geselecteerde item uit naar de doelmap.",
+      "extractDescriptionMembers_one": "Pak 1 geselecteerd item uit naar de doelmap.",
+      "extractDescriptionMembers_other": "Pak {{count}} geselecteerde items uit naar de doelmap.",
+      "memberErrorTitle": "Probleem met uitpakken oplossen",
+      "memberErrorPrompt": "Een archiefitem kon niet worden uitgepakt.",
+      "destinationNameLabel": "Doelnaam",
+      "buttonExtract": "Uitpakken",
+      "buttonExtracting": "Uitpakken…",
+      "buttonCancelExtraction": "Uitpakken annuleren",
+      "buttonOpenDestination": "Bestemming openen",
+      "buttonRetryMemberError": "Dit item opnieuw proberen",
+      "buttonIgnoreMemberError": "Dit item overslaan",
+      "validationDestinationEmpty": "Voer een doelmap in.",
+      "validationDestinationUnsafe": "Gebruik een relatief mappad zonder lege segmenten of segmenten met alleen ‘.’ of ‘..’.",
+      "validationDestinationExists": "Kies een nieuwe doelmap. Uitpakken overschrijft geen bestaande mappen.",
+      "extractError": "Het archief kon niet worden uitgepakt.",
+      "extractPartialOutputError": "Het archief kon niet worden uitgepakt. De doelmap kan onvolledige bestanden bevatten.",
+      "extractSuccess": "Archief uitgepakt.",
+      "summaryFilesExtracted": "Bestanden uitgepakt",
+      "summaryDirectoriesCreated": "Mappen gemaakt",
+      "summaryBytesWritten": "Bytes geschreven",
+      "summaryFilesSkipped": "Bestanden overgeslagen",
+      "summaryFilesReplaced": "Bestanden vervangen",
+      "summaryPartialMembers": "Onvolledige archiefitems",
+      "extractPartialSuccess_one": "Archief uitgepakt; 1 archiefitem overgeslagen.",
+      "extractPartialSuccess_other": "Archief uitgepakt; {{count}} archiefitems overgeslagen.",
+      "extractEncryptedSkipped_one": "1 versleuteld archiefitem is overgeslagen.",
+      "extractEncryptedSkipped_other": "{{count}} versleutelde archiefitems zijn overgeslagen.",
+      "extractUnsupportedCompressionSkipped_one": "1 archiefitem met een niet-ondersteunde compressiemethode is overgeslagen.",
+      "extractUnsupportedCompressionSkipped_other": "{{count}} archiefitems met een niet-ondersteunde compressiemethode zijn overgeslagen.",
+      "extractCancelled": "Het uitpakken van het archief is geannuleerd.",
+      "extractInterrupted": "Het uitpakken van het archief is onderbroken. Op de bestemming staan mogelijk onvolledige bestanden.",
+      "extractConflictPending": "Uitpakken wacht op een keuze voor bestanden die al bestaan.",
+      "collisionTitle": "Bestanden bestaan al",
+      "collisionPrompt": "Kies wat je met deze bestaande bestanden op de bestemming wilt doen.",
+      "collisionListLabel": "Conflicterende archiefitems",
+      "collisionMore": "Nog {{count}} conflicterende bestanden.",
+      "collisionDestinationPathLabel": "Doelpad",
+      "memberErrorTargetLabel": "Doelpad",
+      "collisionDestinationColumn": "Bestaand",
+      "collisionByteCount": "{{count}} bytes",
+      "collisionResolutionLabel": "Kies een oplossing",
+      "collisionChoiceSkip": "Dit bestand overslaan",
+      "collisionChoiceReplace": "Dit bestand vervangen",
+      "collisionChoiceReplaceOlder": "Alleen bestanden vervangen waarvan de versie in het archief nieuwer is",
+      "collisionChoiceRename": "Naam van uitgepakt bestand wijzigen",
+      "collisionApplyRemaining": "Deze keuze toepassen op resterende conflicten",
+      "collisionContinue": "Doorgaan",
+      "memberErrorPartialOutputNote": "Er is een onvolledig doelbestand gemaakt. Als je het opnieuw probeert, wordt dit item vanaf het begin uitgepakt.",
+      "buttonSkipAll": "Alles overslaan",
+      "buttonReplaceAll": "Alles vervangen",
+      "buttonReplaceOlder": "Alleen oudere bestanden vervangen",
+      "buttonSkip": "Overslaan",
+      "buttonReplace": "Vervangen",
+      "buttonRename": "Naam wijzigen",
+      "renameTargetLabel": "Nieuw doelpad"
+    },
+    "overwriteConflict": {
+      "labelIncoming": "Bron",
+      "labelSize": "Grootte",
+      "labelModified": "Gewijzigd",
+      "cancelExtraction": "Uitpakken annuleren",
+      "resolutionLabel": "Kies een oplossing",
+      "continue": "Doorgaan",
+      "resolutionSkip": "Overslaan",
+      "resolutionRename": "Naam wijzigen",
+      "title": "Doel bestaat al",
+      "alreadyExists": "Er bestaat al een doel met deze naam:",
+      "folderConflict": "Een bestaand item blokkeert de map die je wilt toevoegen. Sla de map over of wijzig de naam.",
+      "fileFolderConflict": "Een bestaande map blokkeert het bestand dat je wilt toevoegen. Sla het bestand over of wijzig de naam.",
+      "skipFolder": "Map overslaan",
+      "renameFolder": "Naam van inkomende map wijzigen",
+      "labelPath": "Pad",
+      "labelTargetName": "Doelnaam",
+      "labelExisting": "Doel",
+      "metadataLabel": "Doeldetails",
+      "resolutionOverwrite": "Overschrijven",
+      "resolutionOverwriteOnlyOlder": "Alleen oudere bestanden overschrijven",
+      "applyToAll": "Deze keuze toepassen op resterende conflicten in deze bewerking",
+      "targetNameUnchanged": "Kies een andere doelnaam.",
+      "noResolutionAvailable": "Er is geen oplossing beschikbaar voor dit doel. Annuleer de bewerking en probeer het opnieuw.",
+      "cancelCopy": "Kopiëren annuleren",
+      "cancelUpload": "Upload annuleren",
+      "cancelMove": "Verplaatsen annuleren",
+      "progressContext_one": "Item {{current}} van {{total}} • Tot nu toe {{count}} conflict",
+      "progressContext_other": "Item {{current}} van {{total}} • Tot nu toe {{count}} conflicten"
+    },
+    "shortcuts": {
+      "fileSearch": "Zoek in recente bestanden en bestanden in de huidige map",
+      "copyToOtherPane": "Naar ander paneel kopiëren",
+      "copyToOtherPaneInDualPane": "Naar ander paneel kopiëren (tweepaneelmodus)",
+      "createArchive": "Zip-archief maken",
+      "download": "Geselecteerde items downloaden",
+      "createDirectory": "Nieuwe map maken",
+      "createFile": "Nieuw bestand maken",
+      "deleteItem": "Bestand of map verwijderen",
+      "extractArchive": "Zip-archief uitpakken",
+      "moveToOtherPane": "Naar ander paneel verplaatsen",
+      "moveToOtherPaneInDualPane": "Naar ander paneel verplaatsen (tweepaneelmodus)",
+      "navigateDown": "Omlaag navigeren",
+      "navigateUp": "Eén map omhoog",
+      "navigateUpRow": "Omhoog navigeren",
+      "openConnectionSelector": "Verbindingskiezer openen",
+      "openInCompanion": "Het geselecteerde bestand in de bijbehorende lokale app openen",
+      "openNativePicker": "Een lokale app kiezen voor het geselecteerde bestand",
+      "openQuickNavigation": "Snelle navigatie openen",
+      "openSelectedItem": "Het geselecteerde bestand openen in Sambee.",
+      "openSettings": "Instellingen openen",
+      "openSmartNavigation": "Navigatiemodus openen",
+      "openViewerPicker": "Een Sambee-viewer kiezen voor het geselecteerde bestand",
+      "refresh": "Bestandslijst vernieuwen",
+      "renameItem": "Naam van bestand of map wijzigen",
+      "selectAllFiles": "Alle bestanden selecteren",
+      "selectAndMoveDown": "Selecteren en omlaag gaan",
+      "selectAndMoveUp": "Selecteren en omhoog gaan",
+      "selectToFirst": "Selecteren van item met focus tot eerste item",
+      "selectToLast": "Selecteren van item met focus tot laatste item",
+      "showCommands": "Opdrachten tonen",
+      "showHelp": "Sneltoetsen tonen",
+      "switchActivePane": "Actief paneel wisselen",
+      "previousTab": "Vorig maptabblad selecteren",
+      "nextTab": "Volgend maptabblad selecteren",
+      "newTab": "Nieuw maptabblad",
+      "closeTab": "Geselecteerd maptabblad sluiten",
+      "openLocationInNewTab": "Huidige locatie in nieuw tabblad openen",
+      "matchLeftPaneLocation": "Locatie van rechterpaneel openen in linkerpaneel",
+      "matchRightPaneLocation": "Locatie van linkerpaneel openen in rechterpaneel",
+      "toggleDualPane": "Weergave met twee panelen omschakelen",
+      "toggleSelectionAndMoveDown": "Selectie omschakelen en omlaag gaan",
+      "upload": "Bestanden uploaden naar de huidige map"
+    },
+    "copyMove": {
+      "labelDestination": "Map",
+      "labelFilename": "Nieuwe naam",
+      "warnEmptyFilename": "Een naam is vereist.",
+      "descriptionCopySingle": "Kopieer dit item naar de doelmap.",
+      "descriptionCopyMultiple_one": "Kopieer dit item naar de doelmap.",
+      "descriptionCopyMultiple_other": "Kopieer {{count}} geselecteerde items naar de doelmap.",
+      "descriptionMoveSingle": "Verplaats dit item naar de doelmap.",
+      "descriptionMoveMultiple_one": "Verplaats dit item naar de doelmap.",
+      "descriptionMoveMultiple_other": "Verplaats {{count}} geselecteerde items naar de doelmap.",
+      "errorSameFilename": "Er staat al een item met deze naam in de doelmap.",
+      "errorSameDirectory": "De doelmap is dezelfde als de bronmap.",
+      "buttonCopying": "Kopiëren…",
+      "buttonMoving": "Verplaatsen…",
+      "progressCopy": "Kopiëren: {{current}} van {{total}}…",
+      "progressMove": "Verplaatsen: {{current}} van {{total}}…",
+      "errorGeneric": "De bewerking is mislukt. Sommige items zijn mogelijk niet verwerkt."
+    },
+    "row": {
+      "itemTypes": {
+        "file": "Bestand",
+        "folder": "Map"
+      },
+      "openInCompanionApp": "Openen in lokale app",
+      "openInNativeApp": "Openen in lokale app",
+      "openInBrowserViewer": "Openen in Sambee",
+      "chooseBrowserViewer": "Sambee-viewer kiezen",
+      "chooseNativeApp": "Lokale app kiezen",
+      "shortcutSuffix": " (snelkoppeling)",
+      "shortcutTargetSuffix": " (doel van snelkoppeling: {{target}})",
+      "unsavedLocalDraft": "Niet-opgeslagen lokaal concept beschikbaar",
+      "unsavedLocalDraftSuffix": ": niet-opgeslagen lokaal concept beschikbaar",
+      "selectedSuffix": " (geselecteerd)"
+    },
+    "operationContext": {
+      "file": "Bestand",
+      "sourceItem": "Bronitem",
+      "destinationDirectory": "Doelmap",
+      "archive": "Archief",
+      "archiveMember": "Archiefitem",
+      "selectedItems": "Geselecteerde items"
+    },
+    "toolbar": {
+      "uploadChoiceFiles": "Bestanden",
+      "newFolder": "Nieuwe map",
+      "newFile": "Nieuw bestand",
+      "upload": "Uploaden",
+      "uploadChoiceFolder": "Map",
+      "uploadFiles": "Bestanden uploaden",
+      "uploadFolder": "Map uploaden",
+      "createArchive": "Archief maken",
+      "extractArchive": "Archief uitpakken",
+      "refresh": "Vernieuwen",
+      "more": "Meer"
+    },
+    "createItem": {
+      "titleFile": "Nieuw bestand",
+      "inputLabel": "Naam",
+      "titleDirectory": "Nieuwe map",
+      "descriptionFile": "Maak het nieuwe bestand in de doelmap.",
+      "descriptionDirectory": "Maak de nieuwe map in de doelmap.",
+      "buttonCreating": "Maken…"
+    },
+    "transfers": {
+      "downloadFailed": "Download mislukt. Probeer het opnieuw.",
+      "downloadSizeLimitExceeded": "Het geselecteerde zip-bestand overschrijdt de limiet voor tijdelijke downloads.",
+      "preparingArchive": "Archief voorbereiden",
+      "downloading": "Download voorbereiden",
+      "preparingUpload": "Upload voorbereiden",
+      "dropToUpload": "Sleep hierheen om te uploaden",
+      "dropUnavailable": "Uploaden is niet mogelijk in deze map",
+      "dropBusy": "Voltooi eerst de huidige upload",
+      "dropUnsupported": "Deze browser ondersteunt het slepen van mappen niet. Gebruik Uploaden",
+      "uploadComplete_one": "{{count}} bestand geüpload",
+      "uploadComplete_other": "{{count}} bestanden geüpload",
+      "uploadSkipped_one": "{{count}} overgeslagen",
+      "uploadSkipped_other": "{{count}} overgeslagen",
+      "uploadFailed_one": "{{count}} mislukt",
+      "uploadFailed_other": "{{count}} mislukt",
+      "uploadUnknown_one": "{{count}} onzekere uitkomst",
+      "uploadUnknown_other": "{{count}} onzekere uitkomsten",
+      "uploadCancelled_one": "{{count}} geannuleerd",
+      "uploadCancelled_other": "{{count}} geannuleerd",
+      "uploadSummaryWithIssues": "{{summary}} · {{issues}}",
+      "uploadDestinationChanged": "Upload geannuleerd omdat de bestemming is gewijzigd. Kies een map en probeer het opnieuw.",
+      "uploadInspectDestination": "Uitkomst onzeker. Controleer de bestemming voordat je het opnieuw probeert",
+      "uploadFolders": "{{created}} mappen gemaakt, {{merged}} samengevoegd, {{skipped}} overgeslagen",
+      "uploadPartial": "Upload geannuleerd. Bestanden en mappen die al zijn overgedragen, blijven op de bestemming staan.",
+      "uploadFolderFailed_one": "Upload van {{count}} map mislukt",
+      "uploadFolderFailed_other": "Upload van {{count}} mappen mislukt",
+      "uploadProgress": "{{name}} uploaden ({{current}}/{{total}}) · {{bytes}} / {{size}} · {{completed}} gereed, {{skipped}} overgeslagen, {{failed}} mislukt",
+      "uploadSending": "{{name}} uploaden ({{current}}/{{total}}) · Verzenden · {{completed}} gereed, {{skipped}} overgeslagen, {{failed}} mislukt",
+      "uploadPublishing": "{{name}} uploaden ({{current}}/{{total}}) · Publiceren · {{completed}} gereed, {{skipped}} overgeslagen, {{failed}} mislukt",
+      "uploadRemaining_one": "Upload van {{count}} bestand niet gestart",
+      "uploadRemaining_other": "Upload van {{count}} bestanden niet gestart"
+    },
+    "compactActions": {
+      "clearSelection": "Selectie wissen",
+      "createNewItem": "Nieuw item maken",
+      "deselect": "Deselecteren",
+      "moreActionsFor": "Meer acties voor {{name}}",
+      "select": "Selecteren",
+      "selectedCount_one": "{{count}} item geselecteerd",
+      "selectedCount_other": "{{count}} items geselecteerd",
+      "selectionCleared": "Selectie gewist",
+      "selectionActions": "Acties voor selectie"
+    },
+    "share": {
+      "filesOnly": "Je kunt alleen bestanden delen. Verwijder mappen uit de selectie.",
+      "selectFiles": "Selecteer een of meer bestanden om te delen.",
+      "preparing_one": "{{count}} bestand downloaden om te delen…",
+      "preparing_other": "{{count}} bestanden downloaden om te delen…",
+      "ready_one": "{{count}} bestand klaar om te delen",
+      "ready_other": "{{count}} bestanden klaar om te delen",
+      "sharing": "Deelmenu openen…",
+      "rejected": "De browser kon deze bestanden niet delen. Download ze in plaats daarvan",
+      "fileTypeRejected": "Deze browser staat het delen van deze bestandstypen mogelijk niet toe. Download de bestanden en probeer ze te delen via de Bestanden-app van je apparaat.",
+      "downloadNext": "Downloaden {{current}}/{{count}}",
+      "downloadFailed": "Het bestand kon niet worden gedownload"
+    },
+    "archiveMembers": {
+      "encrypted": "Dit archiefitem is versleuteld. Gebruik een archiefprogramma en het wachtwoord om het te bekijken of uit te pakken.",
+      "unsupportedCompression": "Sambee ondersteunt de compressiemethode van dit item niet. Gebruik een ander archiefprogramma om het te bekijken of uit te pakken.",
+      "unavailable": "Dit archiefitem is niet beschikbaar. Gebruik een ander archiefprogramma om het te controleren."
+    },
+    "unavailableShortcuts": {
+      "archiveContentImmutable": "De inhoud van het archief kan niet worden gewijzigd.",
+      "archiveExtractionUnavailable": "Dit archief kan niet worden uitgepakt op de huidige bestemming.",
+      "companionUnavailable": "Maak verbinding met Sambee Companion voordat je een archief met lokale bestanden maakt.",
+      "destinationUnavailable": "Deze locatie kan geen bestanden ontvangen.",
+      "dualPaneRequired": "Voor kopiëren zijn twee panelen nodig.",
+      "interactionBlocked": "Deze actie is niet beschikbaar zolang een andere weergave open is.",
+      "readOnlyLocation": "Deze locatie is alleen-lezen.",
+      "selectArchiveToExtract": "Selecteer een archief om uit te pakken.",
+      "selectItemToDelete": "Selecteer een item om te verwijderen.",
+      "selectItemToRename": "Selecteer een item waarvan je de naam wilt wijzigen.",
+      "selectItemsToArchive": "Selecteer items die aan een archief kunnen worden toegevoegd.",
+      "selectItemsToCopy": "Selecteer een of meer items om te kopiëren.",
+      "selectItemsToDownload": "Selecteer een of meer items om te downloaden.",
+      "selectItemsToMove": "Selecteer een of meer items om te verplaatsen.",
+      "sourceUnavailable": "Deze actie is niet mogelijk voor het geselecteerde item.",
+      "locationUnavailable": "Wacht totdat de paneellocatie is geladen. Als het laden mislukt, kies je Vernieuwen of selecteer je een andere locatie.",
+      "lastTabProtected": "Houd in elk paneel minstens één tabblad open"
+    },
+    "tabs": {
+      "groupAriaLabel": "Maptabbladen",
+      "leftPaneGroupAriaLabel": "Maptabbladen van het linkerpaneel",
+      "rightPaneGroupAriaLabel": "Maptabbladen van het rechterpaneel",
+      "newTab": "Nieuw tabblad",
+      "allTabsAriaLabel": "Alle tabbladen ({{total}})",
+      "allTabsOverflowAriaLabel": "Alle tabbladen ({{total}}, {{hidden}} verborgen)",
+      "selectTabAriaLabel": "{{name}} — {{location}}",
+      "closeTabAriaLabel": "Tabblad {{name}} sluiten ({{location}})",
+      "closeTab": "Tabblad sluiten",
+      "closeBackgroundTabTooltip": "Tabblad sluiten ({{shortcut}} sluit het geselecteerde tabblad)",
+      "closeMenuTabTooltip": "Tabblad sluiten ({{shortcut}} sluit het tabblad met focus)",
+      "closedNotice": "Tabblad gesloten",
+      "undo": "Ongedaan maken",
+      "selectedAnnouncement": "{{name}}, tabblad {{index}} van {{total}}",
+      "listInstructions": "Gebruik Pijl-links en Pijl-rechts om tussen maptabbladen te wisselen. Gebruik {{newTabShortcut}} om een nieuw tabblad te openen en {{closeTabShortcut}} om het geselecteerde tabblad te sluiten.",
+      "restorationUnavailableNotice": "Tabbladen herstellen na het opnieuw laden is niet beschikbaar in deze browsersessie."
+    },
+    "rename": {
+      "titleFile": "Bestandsnaam wijzigen",
+      "titleDirectory": "Mapnaam wijzigen",
+      "inputLabel": "Nieuwe naam",
+      "description": "Kies een nieuwe naam voor dit item.",
+      "validationSame": "De naam is niet gewijzigd.",
+      "buttonRenaming": "Naam wijzigen…"
+    },
+    "nameDialog": {
+      "validationEmpty": "Een naam is vereist.",
+      "validationInvalidChars": "Verwijder deze niet-ondersteunde tekens: \\ / : * ? \" < > |.",
+      "validationDotNames": "‘.’ en ‘..’ zijn gereserveerde mapnamen.",
+      "validationTrailing": "Namen mogen niet eindigen op een spatie of punt."
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Annuleren",
+      "close": "Sluiten",
+      "companionRecovery": "Companion-herstel",
+      "connectionStatus": "Verbindingsstatus",
+      "copy": "Kopiëren",
+      "create": "Maken",
+      "delete": "Verwijderen",
+      "discard": "Verwerpen",
+      "download": "Downloaden",
+      "edit": "Bewerken",
+      "logout": "Afmelden",
+      "move": "Verplaatsen",
+      "nextNotice": "Volgende melding",
+      "print": "Afdrukken",
+      "rename": "Naam wijzigen",
+      "replace": "Vervangen",
+      "retry": "Opnieuw proberen",
+      "monitoringStopped": "Automatische updates gestopt",
+      "save": "Opslaan",
+      "share": "Delen",
+      "skip": "Overslaan"
+    },
+    "labels": {
+      "connection": "Verbinding",
+      "itemToDelete": "Te verwijderen item",
+      "root": "Hoofdmap",
+      "settings": "Instellingen"
+    },
+    "navigation": {
+      "goBack": "Terug"
+    },
+    "search": {
+      "action": "Zoeken",
+      "placeholder": "Zoeken",
+      "clear": "Zoekopdracht wissen",
+      "previousMatch": "Vorig resultaat",
+      "nextMatch": "Volgend resultaat"
+    }
+  },
+  "keyboardShortcutsHelp": {
+    "groups": {
+      "search": "Zoeken",
+      "general": "Algemeen",
+      "navigation": "Navigatie",
+      "selection": "Selectie",
+      "fileActions": "Bestandsacties",
+      "editing": "Bewerken",
+      "view": "Weergave",
+      "panes": "Panelen en indeling"
+    },
+    "defaultTitle": "Sneltoetsen",
+    "emptyState": "Geen sneltoetsen beschikbaar",
+    "noSearchResults": "Geen sneltoetsen gevonden",
+    "searchAriaLabel": "Zoeken in sneltoetsen",
+    "searchPlaceholder": "Sneltoetsen zoeken",
+    "resultsAriaLabel": "Zoekresultaten voor sneltoetsen",
+    "closeAriaLabel": "Sneltoetsen sluiten",
+    "titles": {
+      "fileBrowser": "Sneltoetsen voor de bestandsbrowser",
+      "pdfViewer": "Sneltoetsen voor de pdf-viewer",
+      "imageViewer": "Sneltoetsen voor de afbeeldingsviewer",
+      "markdownViewer": "Sneltoetsen voor de Markdown-viewer",
+      "markdownEditor": "Sneltoetsen voor de Markdown-editor",
+      "textEditor": "Sneltoetsen voor de teksteditor"
+    }
+  },
+  "themeSelector": {
+    "openButtonLabel": "Thema wijzigen",
+    "dialogTitle": "Thema kiezen",
+    "previewPrimaryColor": "Primaire kleur",
+    "modes": {
+      "light": "Licht",
+      "dark": "Donker"
+    },
+    "builtInThemes": {
+      "sambeeLight": {
+        "name": "Sambee licht",
+        "description": "Standaard licht thema van de app"
+      },
+      "sambeeDark": {
+        "name": "Sambee donker",
+        "description": "Standaard donker thema van de app"
+      }
+    }
+  },
+  "systemHealth": {
+    "statuses": {
+      "unknown": "Onbekend",
+      "notAvailable": "Niet beschikbaar",
+      "ok": "OK",
+      "warning": "Waarschuwing",
+      "error": "Fout",
+      "informational": "Ter informatie"
+    },
+    "availability": {
+      "unsupported": "Niet beschikbaar",
+      "available": "Actueel",
+      "collecting": "Metingen verzamelen",
+      "not_mounted": "Niet beschikbaar (koppelpunt niet ingesteld)",
+      "permission_denied": "Machtiging geweigerd",
+      "offline": "Offline",
+      "timeout": "Time-out",
+      "stale": "Verouderde gegevens",
+      "invalid": "Ongeldige meting",
+      "unavailable": "Fout bij ophalen van meting"
+    },
+    "dialogTitle": "Systeemstatus",
+    "overview": {
+      "ok": "Geen problemen gevonden",
+      "warning": "Aandacht vereist",
+      "error": "Actie nodig",
+      "unknown": "Sommige controles zijn niet beschikbaar",
+      "partialChecks": "Sommige controles zijn niet beschikbaar.",
+      "attentionHelp": "Controleer de gemarkeerde items hieronder.",
+      "connectionHelp": "De servercontroles konden niet worden bijgewerkt. Ze worden automatisch opnieuw uitgevoerd. Controleer je netwerkverbinding als het probleem aanhoudt.",
+      "server": "Server",
+      "container": "Container",
+      "containerApplicationData": "Opslag: appgegevens",
+      "containerTemporaryStorage": "Opslag: tijdelijke gegevens",
+      "containerCombinedStorage": "Opslag: appgegevens en tijdelijke gegevens",
+      "connectionStorage": "Opslag van verbinding",
+      "localDrive": "Lokale schijf",
+      "localDrives": "Lokale schijven",
+      "smb": "SMB-verbinding",
+      "hostMemory": "Geheugen",
+      "containerMemory": "Geheugen",
+      "systemLoad": "Gemiddelde belasting (genormaliseerd)",
+      "percentUsed": "{{percent}}% gebruikt",
+      "bytesUsed": "{{used}} gebruikt",
+      "memoryUsed": "{{used}} gebruikt ({{percent}}%)",
+      "spaceFree": "{{available}} vrij ({{percent}}%)",
+      "noLimit": "Geen limiet ingesteld",
+      "oldData": "Verouderd",
+      "checking": "Controleren",
+      "localDriveHelp": "Controleer Companion via Instellingen > Lokale schijven."
+    },
+    "summary": {
+      "sectionTitle": "Overzicht",
+      "severityLabel": "Algemene status",
+      "coverageLabel": "Dekking",
+      "coverageComplete": "Volledig voor actieve controles",
+      "coverageIncomplete": "Onvolledige dekking",
+      "lastUpdatedLabel": "Laatste update",
+      "neverUpdated": "Wachten op eerste controle",
+      "refreshing": "Systeemcontroles vernieuwen",
+      "policyRetrying": "Machtigingen voor systeembewaking konden niet worden vernieuwd. Sambee probeert het opnieuw.",
+      "backendRetrying": "Sommige server- of SMB-controles hebben geen actuele meting opgeleverd. Sambee probeert het opnieuw.",
+      "companionRetrying": "Companion heeft geen actuele schijfmetingen doorgegeven. Sambee probeert het opnieuw.",
+      "backendUnavailableHeadline": "De serverstatus is niet beschikbaar. Sambee probeert het opnieuw.",
+      "localDriveErrorHeadline": "De vrije ruimte op één lokale schijf ligt onder de kritieke grens.",
+      "localDriveErrorsHeadline": "De vrije ruimte op {{count}} lokale schijven ligt onder de kritieke grens.",
+      "localDriveWarningHeadline": "Eén lokale schijf heeft weinig vrije ruimte.",
+      "localDriveWarningsHeadline": "{{count}} lokale schijven hebben weinig vrije ruimte.",
+      "localDriveUnknownHeadline": "Gegevens over de ruimte op lokale schijven zijn niet beschikbaar of wachten op Companion."
+    },
+    "sections": {
+      "backendHost": "Backendhost",
+      "containerRuntime": "Containeromgeving van de backend",
+      "storage": "Vrije opslagruimte"
+    },
+    "metrics": {
+      "hostMemory": "Hostgeheugen",
+      "systemLoad": "Genormaliseerde systeembelasting",
+      "cpuTemperature": "CPU-temperatuur",
+      "containerMemory": "Werkgeheugen van de container (working set)",
+      "load1m": "1 min",
+      "load5mEvaluated": "5 min (voor beoordeling)",
+      "load15m": "15 min",
+      "logicalCpuMetadata": "{{count}} logische CPU’s",
+      "memoryCapacity": "{{total}} totaal · {{available}} beschikbaar",
+      "memoryLimit": "Geheugenlimiet: {{limit}}",
+      "noMemoryLimit": "Er is geen geheugenlimiet voor de container ingesteld. Meldingen op basis van percentages zijn uitgeschakeld.",
+      "hostMemoryPercent": "Het percentage is gebaseerd op het totale hostgeheugen.",
+      "containerMemoryScope": "Alle processen in deze container tellen mee, niet alleen Sambee. Inclusief gedeeld geheugen en kernelgeheugen, exclusief bestandscache.",
+      "fileCache": "Bestandscache: {{cache}}",
+      "storageCapacity": "Capaciteit: {{total}}",
+      "usedValue": "{{percent}}% gebruikt ({{used}} van {{total}}, {{available}} beschikbaar)",
+      "workingSetFinite": "{{percent}}% van de limiet ({{used}} werkgeheugen van {{limit}})",
+      "workingSetUnlimited": "{{used}} werkgeheugen — Geen geheugenlimiet ingesteld.",
+      "storageValue": "{{percent}}% beschikbaar, {{available}} van {{total}}",
+      "thresholdsHigh": "Waarschuwing ≥ {{warning}}, fout ≥ {{error}}",
+      "thresholdsLow": "Waarschuwing ≤ {{warning}}, fout ≤ {{error}}",
+      "detectedLimits": "Gedetecteerde grenzen: waarschuwing {{warning}}, kritiek {{error}}",
+      "effectiveThresholds": "Geldende drempels: waarschuwing {{warning}} ({{warningOrigin}}), fout {{error}} ({{errorOrigin}})",
+      "sourceLabel": "Bron: {{source}}",
+      "ageSeconds": "{{seconds}} s geleden",
+      "staleTag": "Verouderde gegevens ({{seconds}} s geleden)",
+      "actualFreeNote": "Totale fysieke vrije ruimte op de share: {{actual}}",
+      "updateCompanion": "Werk Companion bij om de schijfruimte te tonen.",
+      "pairingLost": "Companion kon de koppeling niet verifiëren. Controleer Instellingen > Lokale schijven en koppel zo nodig opnieuw.",
+      "localDriveAction": "Maak ruimte vrij of kies een andere locatie."
+    }
+  }
+}

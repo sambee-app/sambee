@@ -8,11 +8,7 @@ import { ResponsiveDialogShell } from "../../Dialog/ResponsiveDialogShell";
 
 const IME_PROCESS_KEY_CODE = 229;
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-  }),
-}));
+vi.mock("react-i18next", async () => (await import("../../../test/mocks/reactI18next")).mockReactI18next());
 
 function mockMobileMode(isMobile: boolean) {
   Object.defineProperty(window, "matchMedia", {

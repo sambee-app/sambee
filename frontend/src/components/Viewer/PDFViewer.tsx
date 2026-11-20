@@ -1566,7 +1566,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                     <Typography>{pdfLoadingStage === "loading" ? "Loading PDF" : getPdfLoadPhaseMessage(pdfLoadPhase)}</Typography>
                     {pdfLoadingStage === "slow" && (
                       <>
-                        <Typography variant="body2">This PDF is taking longer than usual.</Typography>
+                        <Typography variant="body2">{t("viewer.slowPdf")}</Typography>
                         <Button color="inherit" size="small" onClick={handleCancelPdfLoad}>
                           Cancel
                         </Button>
@@ -1670,7 +1670,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                 loading={null}
                 error={
                   <Box sx={{ p: 2 }}>
-                    <Alert severity="error">Failed to load PDF document</Alert>
+                    <Alert severity="error">{t("viewer.pdfLoadFailed")}</Alert>
                   </Box>
                 }
               >
@@ -1720,17 +1720,17 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
             <ResponsiveDialogShell
               open
               onClose={handlePdfPasswordCancel}
-              title="Unlock PDF"
-              description="Enter the password to view this PDF."
+              title={t("viewer.pdfPassword.title")}
+              description={t("viewer.pdfPassword.description")}
               maxWidth="xs"
               onTransitionEntered={() => pdfPasswordInputRef.current?.focus()}
               actions={
                 <>
                   <Button onClick={handlePdfPasswordCancel} variant="outlined" sx={settingsUtilityButtonSx}>
-                    Cancel
+                    {t("common.actions.cancel")}
                   </Button>
                   <Button type="submit" form={pdfPasswordFormId} variant="contained" disabled={!pdfPassword}>
-                    Open PDF
+                    {t("viewer.pdfPassword.open")}
                   </Button>
                 </>
               }
@@ -1748,7 +1748,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                   autoFocus
                   inputRef={pdfPasswordInputRef}
                   fullWidth
-                  label="PDF password"
+                  label={t("viewer.pdfPassword.label")}
                   type={showPdfPassword ? "text" : "password"}
                   autoComplete="current-password"
                   value={pdfPassword}
@@ -1757,9 +1757,9 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                     input: {
                       endAdornment: (
                         <InputAdornment position="end">
-                          <Tooltip title={showPdfPassword ? "Hide password" : "Show password"}>
+                          <Tooltip title={t(showPdfPassword ? "viewer.pdfPassword.hide" : "viewer.pdfPassword.show")}>
                             <IconButton
-                              aria-label={showPdfPassword ? "Hide password" : "Show password"}
+                              aria-label={t(showPdfPassword ? "viewer.pdfPassword.hide" : "viewer.pdfPassword.show")}
                               edge="end"
                               onClick={() => setShowPdfPassword((visible) => !visible)}
                             >

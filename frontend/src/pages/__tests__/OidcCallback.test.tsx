@@ -3,6 +3,7 @@ import { HttpResponse, http } from "msw";
 import { type ReactNode, StrictMode, useEffect, useState } from "react";
 import { createMemoryRouter, Route, RouterProvider, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "../../i18n";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { server } from "../../test/mocks/server";
 import { SambeeThemeProvider, useSambeeTheme } from "../../theme";

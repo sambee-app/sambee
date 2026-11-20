@@ -1,0 +1,305 @@
+{
+  "locales": {
+    "pt": {
+      "style": "Use terms that are clear in both Brazil and Portugal. Use the preferred forms below consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization means settings were applied; it does not mean a file upload completed. Keep interface language and regional format separate.",
+      "terms": [
+        {
+          "concept": "file",
+          "preferred": "arquivo",
+          "avoid": ["ficheiro", "ficheiros"]
+        },
+        {
+          "concept": "folder",
+          "preferred": "pasta",
+          "avoid": []
+        },
+        {
+          "concept": "file manager",
+          "preferred": "gerenciador de arquivos",
+          "avoid": ["gestor de ficheiros", "gestor de arquivos"]
+        },
+        {
+          "concept": "manage",
+          "preferred": "gerenciar",
+          "avoid": ["gerir", "gere", "gerem", "geriu", "geriram", "gerindo"]
+        },
+        {
+          "concept": "ongoing editing",
+          "preferred": "sendo editado",
+          "avoid": ["a ser editado", "a ser editada", "a ser editados", "a ser editadas"]
+        },
+        {
+          "concept": "save",
+          "preferred": "salvar",
+          "avoid": [
+            "guardar", "guardado", "guardada", "guardados", "guardadas", "guardando", "guarde", "guarda",
+            "guardam", "guardem", "guardará", "guardarão", "guardaria", "guardariam", "guardaram",
+            "guardasse", "guardassem", "guardava", "guardavam"
+          ]
+        },
+        {
+          "concept": "download",
+          "preferred": "baixar",
+          "keyIncludes": ["download", "viewer.share.preparing", "fileBrowser.share.preparing"],
+          "avoid": [
+            "transferir", "transfira", "transfiram", "transfere", "transferem", "transferido",
+            "transferida", "transferidos", "transferidas", "transferiu", "transferiram",
+            "transferirá", "transferirão", "transferindo"
+          ]
+        },
+        {
+          "concept": "download section noun forms",
+          "preferred": "baixar",
+          "keyIncludes": ["downloadOtherPlatformsLabel", "downloadUnavailable", "downloadLoadFailed"],
+          "avoid": ["transferência", "transferências"]
+        },
+        {
+          "concept": "share",
+          "preferred": "compartilhar",
+          "avoid": [
+            "partilhar", "partilhe", "partilhem", "partilhou", "partilharam", "partilhando",
+            "partilhado", "partilhada", "partilhados", "partilhadas"
+          ]
+        },
+        {
+          "concept": "user",
+          "preferred": "usuário",
+          "avoid": ["utilizador", "utilizadores", "utilizadora", "utilizadoras"]
+        },
+        {
+          "concept": "screen",
+          "preferred": "tela",
+          "avoid": ["ecrã", "ecrãs"]
+        },
+        {
+          "concept": "upload",
+          "preferred": "enviar",
+          "avoid": []
+        },
+        {
+          "concept": "settings synchronization",
+          "preferred": "sincronização de configurações",
+          "keyIncludes": ["companionSync", "localizationStatus"],
+          "avoid": []
+        },
+        {
+          "concept": "directory search policy",
+          "preferred": "política de pesquisa de pastas",
+          "keyIncludes": ["directory_index", "directoryPolicy", "directoryPolicyUpdateRequired", "pairing.body"],
+          "avoid": ["regra de pesquisa de pastas", "regras de pesquisa de pastas"]
+        },
+        {
+          "concept": "pairing",
+          "preferred": "emparelhamento",
+          "keyIncludes": ["pairing", "pairedBrowsers"],
+          "avoid": ["associação", "associações"]
+        },
+        {
+          "concept": "pair",
+          "preferred": "emparelhar",
+          "keyIncludes": ["pairing", "pairedBrowsers"],
+          "avoid": [
+            "associar", "associe", "associem", "associado", "associada", "associados", "associadas",
+            "associando"
+          ]
+        },
+        {
+          "concept": "unpair",
+          "preferred": "desemparelhar",
+          "keyIncludes": ["unpair"],
+          "avoid": ["desassociar", "desassociação"]
+        },
+        {
+          "concept": "edit session",
+          "preferred": "sessão de edição",
+          "avoid": []
+        },
+        {
+          "concept": "edit lock",
+          "preferred": "bloqueio de edição",
+          "avoid": []
+        },
+        {
+          "concept": "draft recovery",
+          "preferred": "recuperação de rascunhos",
+          "avoid": []
+        },
+        {
+          "concept": "trusted browser origin",
+          "preferred": "origem confiável do navegador",
+          "avoid": []
+        },
+        {
+          "concept": "interface language",
+          "preferred": "idioma da interface",
+          "avoid": []
+        },
+        {
+          "concept": "regional format",
+          "preferred": "formato regional",
+          "avoid": []
+        }
+      ]
+    },
+    "de": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "Kopplung", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "vertrauenswürdiger Browser-Ursprung", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "Richtlinie für die Verzeichnissuche", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "Aus dem Browser synchronisiert", "avoid": [] },
+        { "concept": "file upload", "preferred": "hochladen", "avoid": [] },
+        { "concept": "file download", "preferred": "herunterladen", "avoid": [] },
+        { "concept": "edit session", "preferred": "Bearbeitungssitzung", "avoid": [] },
+        { "concept": "edit lock", "preferred": "Bearbeitungssperre", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "Wiederherstellung von Entwürfen", "avoid": [] },
+        { "concept": "interface language", "preferred": "Anzeigesprache der Benutzeroberfläche", "avoid": [] },
+        { "concept": "regional format", "preferred": "Regionsformat", "avoid": [] }
+      ]
+    },
+    "es": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "vinculación", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "origen de navegador de confianza", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "política de búsqueda de directorios", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "Sincronizado desde el navegador", "avoid": [] },
+        { "concept": "file upload", "preferred": "subir", "avoid": [] },
+        { "concept": "file download", "preferred": "descargar", "avoid": [] },
+        { "concept": "edit session", "preferred": "sesión de edición", "avoid": [] },
+        { "concept": "edit lock", "preferred": "bloqueo de edición", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "recuperación de borradores", "avoid": [] },
+        { "concept": "interface language", "preferred": "idioma de la interfaz", "avoid": [] },
+        { "concept": "regional format", "preferred": "formato regional", "avoid": [] }
+      ]
+    },
+    "fr": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "association", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "origine de navigateur de confiance", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "politique de recherche de répertoires", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "Synchronisé depuis le navigateur", "avoid": [] },
+        { "concept": "file upload", "preferred": "téléverser", "avoid": [] },
+        { "concept": "file download", "preferred": "télécharger", "avoid": [] },
+        { "concept": "edit session", "preferred": "session de modification", "avoid": [] },
+        { "concept": "edit lock", "preferred": "verrou de modification", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "récupération des brouillons", "avoid": [] },
+        { "concept": "interface language", "preferred": "langue d’affichage de l’interface", "avoid": [] },
+        { "concept": "regional format", "preferred": "format régional", "avoid": [] }
+      ]
+    },
+    "it": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "associazione", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "origine attendibile del browser", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "criteri di ricerca delle directory", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "Sincronizzato dal browser", "avoid": [] },
+        { "concept": "file upload", "preferred": "caricare", "avoid": [] },
+        { "concept": "file download", "preferred": "scaricare", "avoid": [] },
+        { "concept": "edit session", "preferred": "sessione di modifica", "avoid": [] },
+        { "concept": "edit lock", "preferred": "blocco di modifica", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "recupero delle bozze", "avoid": [] },
+        { "concept": "interface language", "preferred": "lingua di visualizzazione dell’interfaccia", "avoid": [] },
+        { "concept": "regional format", "preferred": "formato regionale", "avoid": [] }
+      ]
+    },
+    "ja": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "ペアリング", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "信頼済みのブラウザーオリジン", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "ディレクトリ検索ポリシー", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "ブラウザーから同期済み", "avoid": [] },
+        { "concept": "file upload", "preferred": "アップロード", "avoid": [] },
+        { "concept": "file download", "preferred": "ダウンロード", "avoid": [] },
+        { "concept": "edit session", "preferred": "編集セッション", "avoid": [] },
+        { "concept": "edit lock", "preferred": "編集ロック", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "下書きの復元", "avoid": [] },
+        { "concept": "interface language", "preferred": "画面に表示する言語", "avoid": [] },
+        { "concept": "regional format", "preferred": "地域形式", "avoid": [] }
+      ]
+    },
+    "ko": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "페어링", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "신뢰할 수 있는 브라우저 출처", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "디렉터리 검색 정책", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "브라우저에서 동기화됨", "avoid": [] },
+        { "concept": "file upload", "preferred": "업로드", "avoid": [] },
+        { "concept": "file download", "preferred": "다운로드", "avoid": [] },
+        { "concept": "edit session", "preferred": "편집 세션", "avoid": [] },
+        { "concept": "edit lock", "preferred": "편집 잠금", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "초안 복구", "avoid": [] },
+        { "concept": "interface language", "preferred": "인터페이스에 표시할 언어", "avoid": [] },
+        { "concept": "regional format", "preferred": "지역 형식", "avoid": [] }
+      ]
+    },
+    "nl": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "koppeling", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "vertrouwde browserherkomst", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "beleid voor het zoeken in mappen", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "Gesynchroniseerd vanuit de browser", "avoid": [] },
+        { "concept": "file upload", "preferred": "uploaden", "avoid": [] },
+        { "concept": "file download", "preferred": "downloaden", "avoid": [] },
+        { "concept": "edit session", "preferred": "bewerkingssessie", "avoid": [] },
+        { "concept": "edit lock", "preferred": "bewerkvergrendeling", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "herstel van concepten", "avoid": [] },
+        { "concept": "interface language", "preferred": "taal van de interface", "avoid": [] },
+        { "concept": "regional format", "preferred": "regionale notatie", "avoid": [] }
+      ]
+    },
+    "pl": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "parowanie", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "zaufane źródło przeglądarki", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "zasady wyszukiwania katalogów", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "Zsynchronizowano z przeglądarki", "avoid": [] },
+        { "concept": "file upload", "preferred": "przesyłanie", "avoid": [] },
+        { "concept": "file download", "preferred": "pobieranie", "avoid": [] },
+        { "concept": "edit session", "preferred": "sesja edycji", "avoid": [] },
+        { "concept": "edit lock", "preferred": "blokada edycji", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "odzyskiwanie wersji roboczej", "avoid": [] },
+        { "concept": "interface language", "preferred": "język interfejsu", "avoid": [] },
+        { "concept": "regional format", "preferred": "format regionalny", "avoid": [] }
+      ]
+    },
+    "sv": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "parkoppling", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "betrott webbläsarursprung", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "policy för katalogsökning", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "Synkroniserat från webbläsaren", "avoid": [] },
+        { "concept": "file upload", "preferred": "ladda upp", "avoid": [] },
+        { "concept": "file download", "preferred": "ladda ned", "avoid": [] },
+        { "concept": "edit session", "preferred": "redigeringssession", "avoid": [] },
+        { "concept": "edit lock", "preferred": "redigeringslås", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "återställning av utkast", "avoid": [] },
+        { "concept": "interface language", "preferred": "språk för gränssnittet", "avoid": [] },
+        { "concept": "regional format", "preferred": "regionalt format", "avoid": [] }
+      ]
+    },
+    "zh-Hans": {
+      "style": "Use these terms consistently in the frontend and Companion. Pairing authorizes a trusted browser origin, not a user account. Settings synchronization applies settings; it does not confirm a file upload. Keep interface language and regional format separate.",
+      "terms": [
+        { "concept": "pairing", "preferred": "配对", "avoid": [] },
+        { "concept": "trusted browser origin", "preferred": "受信任的浏览器来源", "avoid": [] },
+        { "concept": "directory search policy", "preferred": "目录搜索策略", "avoid": [] },
+        { "concept": "settings synchronization", "preferred": "已从浏览器同步", "avoid": [] },
+        { "concept": "file upload", "preferred": "上传", "avoid": [] },
+        { "concept": "file download", "preferred": "下载", "avoid": [] },
+        { "concept": "edit session", "preferred": "编辑会话", "avoid": [] },
+        { "concept": "edit lock", "preferred": "编辑锁", "avoid": [] },
+        { "concept": "draft recovery", "preferred": "草稿恢复", "avoid": [] },
+        { "concept": "interface language", "preferred": "界面显示语言", "avoid": [] },
+        { "concept": "regional format", "preferred": "地区格式", "avoid": [] }
+      ]
+    }
+  }
+}

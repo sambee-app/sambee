@@ -159,6 +159,28 @@ describe("shared Companion settings lifecycle", () => {
     expect(mocks.redeem).toHaveBeenCalledWith("grant", expect.objectContaining({ signal: expect.anything() }));
   });
 
+  it.each([
+    { status: 400, data: { detail: "Localization settings are invalid. Correct the server preferences and retry." } },
+    { status: 409, data: { code: "companion_locale_update_required" } },
+  ])("shows an update action when Companion rejects a language ($status)", async (response) => {
+    const native = status();
+    native.sections.localization!.marker = "old";
+    mocks.status.mockResolvedValue(native);
+    mocks.redeem.mockRejectedValue({ response });
+    companionSettingsSync.start();
+    await settle();
+    expect(mocks.metadata).toHaveBeenCalledWith(expect.objectContaining({ params: { browser_language: "en" } }));
+    expect(mocks.grant).toHaveBeenCalledWith(
+      expect.objectContaining({ sections: ["localization"] }),
+      expect.objectContaining({ params: { browser_language: "en" } })
+    );
+    expect(companionSettingsSync.getSnapshot()).toMatchObject({
+      phase: "update_required",
+      message: "Update Sambee Companion to use this language, then retry. The last valid Companion language remains active.",
+      status: { sections: { localization: { marker: "old" } } },
+    });
+  });
+
   it("retries failed restored sections even when their markers match", async () => {
     companionSettingsSync.start();
     await settle();

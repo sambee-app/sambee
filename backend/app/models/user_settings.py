@@ -21,7 +21,8 @@ class AppearanceUserSettingsRead(SQLModel):
     custom_themes: list[dict[str, Any]] = Field(default_factory=list)
 
 
-LanguagePreference = Literal["browser", "en", "en-XA"]
+CatalogLanguage = Literal["en", "zh-Hans", "nl", "fr", "de", "it", "ko", "ja", "pl", "pt", "es", "sv"]
+LanguagePreference = Literal["browser", "en-XA", CatalogLanguage]
 QuickBarShortcutHintVisibility = Literal["auto", "always", "never"]
 TouchFriendlyFileSelection = Literal["auto", "always", "never"]
 

@@ -6,7 +6,7 @@ import { Box, Button, FormControl, InputLabel, MenuItem, Radio, Select, Typograp
 import type { SelectChangeEvent } from "@mui/material/Select";
 import axios from "axios";
 import type { TFunction } from "i18next";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CompactBadge as Chip } from "../components/CompactBadge";
 import { ResponsiveDialogShell } from "../components/Dialog/ResponsiveDialogShell";
@@ -22,6 +22,7 @@ import { ThemeEditorDialog } from "../components/Settings/ThemeEditorDialog";
 import { useRestoreFocusAfterPending } from "../hooks/useRestoreFocusAfterPending";
 import { getAvailableLanguages } from "../i18n";
 import { useLocalePreferences } from "../i18n/LocalePreferencesProvider";
+import { LANGUAGE_NAMES, type SupportedLanguage } from "../i18n/languages";
 import { PSEUDO_LANGUAGE } from "../i18n/resources";
 import api, { getThemeRequestError } from "../services/api";
 import { useCurrentUserSetting } from "../services/userSettingsStore";
@@ -32,20 +33,45 @@ import type { ThemeConfig } from "../theme/types";
 import type { LanguagePreference } from "../types";
 import { formatLocalizedDateTime, formatLocalizedNumber } from "../utils/localeFormatting";
 
-const REGIONAL_LOCALE_OPTIONS = ["en-US", "en-GB", "de-DE", "fr-FR", "ja-JP"] as const;
+const REGIONAL_LOCALE_OPTIONS = [
+  "en-US",
+  "en-GB",
+  "de-DE",
+  "fr-FR",
+  "ja-JP",
+  "zh-CN",
+  "nl-NL",
+  "it-IT",
+  "ko-KR",
+  "pl-PL",
+  "pt-PT",
+  "es-ES",
+  "sv-SE",
+] as const;
 const REGIONAL_LOCALE_LABEL_KEYS = {
   "en-US": "settings.appearancePage.regionalLocaleOptions.enUS",
   "en-GB": "settings.appearancePage.regionalLocaleOptions.enGB",
   "de-DE": "settings.appearancePage.regionalLocaleOptions.deDE",
   "fr-FR": "settings.appearancePage.regionalLocaleOptions.frFR",
   "ja-JP": "settings.appearancePage.regionalLocaleOptions.jaJP",
+  "zh-CN": "settings.appearancePage.regionalLocaleOptions.zhCN",
+  "nl-NL": "settings.appearancePage.regionalLocaleOptions.nlNL",
+  "it-IT": "settings.appearancePage.regionalLocaleOptions.itIT",
+  "ko-KR": "settings.appearancePage.regionalLocaleOptions.koKR",
+  "pl-PL": "settings.appearancePage.regionalLocaleOptions.plPL",
+  "pt-PT": "settings.appearancePage.regionalLocaleOptions.ptPT",
+  "es-ES": "settings.appearancePage.regionalLocaleOptions.esES",
+  "sv-SE": "settings.appearancePage.regionalLocaleOptions.svSE",
 } as const satisfies Record<(typeof REGIONAL_LOCALE_OPTIONS)[number], string>;
+const THEME_SCOPE_LABEL_KEYS = {
+  user: "settings.appearancePage.themeScopes.personal",
+  site: "settings.appearancePage.themeScopes.site",
+  "built-in": "settings.appearancePage.themeScopes.builtIn",
+} as const satisfies Record<"user" | "site" | "built-in", string>;
 const PREVIEW_DATE = new Date("2026-03-22T14:35:00Z");
 
-function getLanguageOptionLabel(t: TFunction, language: string): string {
-  return language === PSEUDO_LANGUAGE
-    ? t("settings.appearancePage.pseudoLanguageOption")
-    : t("settings.appearancePage.englishLanguageOption");
+function getLanguageOptionLabel(t: TFunction, language: SupportedLanguage): string {
+  return language === PSEUDO_LANGUAGE ? t("settings.appearancePage.pseudoLanguageShortLabel") : LANGUAGE_NAMES[language];
 }
 
 function ThemePreview({ theme }: { theme: ThemeConfig }) {
@@ -104,12 +130,16 @@ export function AppearanceSettings() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [themeActionPending, setThemeActionPending] = useState(false);
   const [themeActionError, setThemeActionError] = useState<string | null>(null);
+  const languageDescriptionId = useId();
   const restoreThemeFocus = useRestoreFocusAfterPending(themeSetting.pending || pendingThemeId !== null);
   const restoreLanguageFocus = useRestoreFocusAfterPending(languageSetting.pending);
   const restoreRegionalLocaleFocus = useRestoreFocusAfterPending(regionalLocaleSetting.pending);
   const { t } = useTranslation();
-  const { languagePreference, regionalLocalePreference, setLanguagePreference, setRegionalLocalePreference } = useLocalePreferences();
+  const { languageLoadFailed, languagePreference, regionalLocalePreference, setLanguagePreference, setRegionalLocalePreference } =
+    useLocalePreferences();
   const availableLanguages = getAvailableLanguages();
+  const selectedLanguage = languagePreference === "browser" || availableLanguages.includes(languagePreference) ? languagePreference : "en";
+  const languageError = languageSetting.error ?? (languageLoadFailed ? t("settings.appearancePage.languageLoadFailed") : null);
   const languageOptions = useMemo(
     () => [
       { value: "browser", label: t("settings.appearancePage.browserDefaultOption") },
@@ -209,7 +239,7 @@ export function AppearanceSettings() {
             return (
               <Box key={scope} sx={{ mb: 2 }}>
                 <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                  {scope === "user" ? "Your themes" : scope === "site" ? "Site themes" : "Built-in themes"}
+                  {t(THEME_SCOPE_LABEL_KEYS[scope])}
                 </Typography>
                 <Box
                   sx={{
@@ -242,8 +272,8 @@ export function AppearanceSettings() {
                     >
                       {siteDefaultId === themeOption.id && (
                         <Chip
-                          label="Default"
-                          title="Site default"
+                          label={t("settings.appearancePage.themeDefaultBadge")}
+                          title={t("settings.appearancePage.themeSiteDefaultTitle")}
                           size="small"
                           variant="outlined"
                           sx={{ position: "absolute", top: 8, right: 8, bgcolor: "background.paper" }}
@@ -308,7 +338,7 @@ export function AppearanceSettings() {
               onClick={copyTheme}
               disabled={!selectedTile || themeActionPending}
             >
-              Copy
+              {t("common.actions.copy")}
             </Button>
             <Button
               variant="outlined"
@@ -317,7 +347,7 @@ export function AppearanceSettings() {
               onClick={() => selectedTile && setEditing(selectedTile)}
               disabled={!selectedTile || themeActionPending}
             >
-              Edit
+              {t("common.actions.edit")}
             </Button>
             <Button
               variant="outlined"
@@ -326,7 +356,7 @@ export function AppearanceSettings() {
               onClick={() => setConfirmDelete(true)}
               disabled={!selectedWritable || themeActionPending}
             >
-              Delete
+              {t("common.actions.delete")}
             </Button>
             <Button
               variant="outlined"
@@ -346,7 +376,7 @@ export function AppearanceSettings() {
                 themeActionPending
               }
             >
-              Set as default
+              {t("settings.appearancePage.themeSetDefault")}
             </Button>
           </Box>
           {themeActionError && <SettingsFieldHelp sx={{ color: "error.main" }}>{themeActionError}</SettingsFieldHelp>}
@@ -368,11 +398,11 @@ export function AppearanceSettings() {
           <ResponsiveDialogShell
             open={confirmDelete}
             onClose={() => setConfirmDelete(false)}
-            title="Delete theme?"
+            title={t("settings.appearancePage.themeDeleteTitle")}
             actions={
               <>
                 <Button onClick={() => setConfirmDelete(false)} variant="outlined" sx={settingsUtilityButtonSx}>
-                  Cancel
+                  {t("common.actions.cancel")}
                 </Button>
                 <Button
                   color="error"
@@ -394,12 +424,14 @@ export function AppearanceSettings() {
                     });
                   }}
                 >
-                  Delete
+                  {t("common.actions.delete")}
                 </Button>
               </>
             }
           >
-            <Typography>Delete {selectedTile?.name}? Users who selected it will use the site default.</Typography>
+            {selectedTile && (
+              <Typography>{t("settings.appearancePage.themeDeleteDescription", { themeName: selectedTile.name })}</Typography>
+            )}
           </ResponsiveDialogShell>
         </SettingsGroup>
 
@@ -410,18 +442,25 @@ export function AppearanceSettings() {
               <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
                 <Select
                   labelId="appearance-language-label"
-                  value={languagePreference}
+                  value={selectedLanguage}
                   label={t("settings.appearancePage.languageLabel")}
                   onChange={handleLanguageChange}
                   onFocus={() => restoreLanguageFocus()}
                   disabled={languageSetting.pending}
-                  error={Boolean(languageSetting.error)}
+                  error={Boolean(languageError)}
+                  aria-describedby={languageDescriptionId}
                   sx={{ ...formSelectSx, flex: 1, minWidth: 0 }}
                   MenuProps={formSelectMenuProps}
                 >
                   {languageOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
+                    <MenuItem
+                      key={option.value}
+                      value={option.value}
+                      aria-label={option.value === PSEUDO_LANGUAGE ? t("settings.appearancePage.pseudoLanguageOption") : undefined}
+                    >
+                      <span lang={option.value === "browser" || option.value === PSEUDO_LANGUAGE ? undefined : option.value}>
+                        {option.label}
+                      </span>
                     </MenuItem>
                   ))}
                 </Select>
@@ -434,8 +473,13 @@ export function AppearanceSettings() {
                   />
                 </Box>
               </Box>
-              <SettingsFieldHelp sx={languageSetting.error ? { color: "error.main" } : undefined}>
-                {languageSetting.error ?? t("settings.appearancePage.languageDescription")}
+              <SettingsFieldHelp id={languageDescriptionId} sx={languageError ? { color: "error.main" } : undefined}>
+                {languageError ??
+                  t(
+                    selectedLanguage === PSEUDO_LANGUAGE
+                      ? "settings.appearancePage.pseudoLanguageDescription"
+                      : "settings.appearancePage.languageDescription"
+                  )}
               </SettingsFieldHelp>
             </FormControl>
 

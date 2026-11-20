@@ -1,0 +1,1841 @@
+{
+  "viewer": {
+    "pdfPassword": {
+      "title": "PDF のロックを解除",
+      "description": "この PDF を表示するにはパスワードを入力してください。",
+      "open": "PDF を開く",
+      "label": "PDF のパスワード",
+      "show": "パスワードを表示",
+      "hide": "パスワードを隠す"
+    },
+    "slowImage": "画像の読み込みに通常より時間がかかっています。",
+    "slowPdf": "PDF の読み込みに通常より時間がかかっています。",
+    "pdfLoadFailed": "PDF を読み込めませんでした",
+    "renderingFailed": "ドキュメントの描画を完了できませんでした。ファイルを閉じて開き直してください。",
+    "renderingPrintPending": "ドキュメントを読み込み中です。印刷ダイアログを閉じ、読み込みが完了してから再試行してください。",
+    "printTitle": "印刷／PDF として保存",
+    "printError": "印刷ダイアログを開けませんでした。ブラウザーのメニューから印刷をお試しください。",
+    "helpTitles": {
+      "pdf": "PDF ビューアーのショートカット",
+      "image": "画像ビューアーのショートカット",
+      "markdown": "Markdown ビューアーのショートカット"
+    },
+    "fallback": {
+      "failedTitle": "ビューアーを利用できません",
+      "unsupportedTitle": "対応するビューアーがありません",
+      "closeAriaLabel": "ビューアーのエラーを閉じる",
+      "failedMessageWithError": "{{message}} ビューアーのコードを読み込めませんでした。",
+      "failedMessageGeneric": "ビューアーのコードを読み込めませんでした。バックエンドや静的ファイルの配信元を一時的に利用できない場合に発生することがあります。",
+      "unsupportedMessage": "現在のフロントエンドの実行環境では、この種類のファイルに対応するビューアーを利用できません。",
+      "stillAvailable": "ファイルブラウザーは引き続き利用できます。このダイアログを閉じて、アプリのほかの画面で作業を続けられます。",
+      "retry": "再試行"
+    },
+    "controls": {
+      "previous": "前へ",
+      "next": "次へ",
+      "previousPage": "前のページ",
+      "nextPage": "次のページ",
+      "previousImage": "前の画像",
+      "nextImage": "次の画像",
+      "zoomIn": "拡大",
+      "zoomOut": "縮小",
+      "rotateLeft": "左に回転",
+      "rotateRight": "右に回転",
+      "shareUnavailable": "このデバイスまたはブラウザーでは共有できません",
+      "searchUnavailable": "検索できません。PDF にテキストレイヤーがありません（スキャン画像の可能性があります）",
+      "pdfSearchPlaceholder": "PDF 内を検索…"
+    },
+    "edit": {
+      "lockFailed": "編集モードに切り替えられません。{{message}}",
+      "lockFailedReason": "編集ロックを取得できませんでした。",
+      "saveFailed": "Markdown の変更を保存できませんでした。",
+      "commandFailed": "{{action}}を実行できませんでした。{{message}}",
+      "commandFailedReason": "エディターがコマンドを拒否しました。",
+      "discardConfirm": "保存していない変更を破棄しますか？",
+      "closeConfirm": "保存していない変更があります。それでもビューアーを閉じますか？",
+      "editorLabel": "Markdown エディター",
+      "editorLoadTitle": "エディターを読み込めませんでした",
+      "editorLoadMessage": "Markdown エディターを読み込めませんでした。下書きはメモリに残っています。エディターの読み込みを再試行するか、読み取り専用のプレビューに戻ってください。",
+      "editorLoadFailedReason": "エディターのコードを読み込めませんでした。",
+      "editorCrashTitle": "エディターを利用できません",
+      "editorCrashMessage": "Markdown エディターで内部エラーが発生しました。下書きはメモリに残っています。エディターを開き直すか、読み取り専用のプレビューに戻ってください。",
+      "retryEditor": "エディターを再試行",
+      "returnToPreview": "プレビューに戻る",
+      "unsavedIndicator": "未保存",
+      "unsavedIndicatorAria": "保存していない変更",
+      "unsavedChangesTitle": "保存していない変更",
+      "unsavedChangesExitMessage": "編集モードを終了する前に、変更を保存しますか？",
+      "unsavedChangesCloseMessage": "ビューアーを閉じる前に、変更を保存しますか？",
+      "recovery": {
+        "title": "未保存のローカル下書きがあります",
+        "description": "未保存のローカル下書きがあります。",
+        "newerDescription": "未保存のローカル下書きがあります。下書きは、保存済みのファイルより後に更新されています。",
+        "savedFile": "保存済みファイル",
+        "localDraft": "ローカル下書き",
+        "unknown": "不明",
+        "discard": "下書きを破棄",
+        "resume": "編集を再開",
+        "tooLargeWarning": "編集中の内容が大きすぎるため、下書きの復元を利用できません。",
+        "storageUnavailableWarning": "このブラウザーセッションでは下書きの復元を利用できません。"
+      },
+      "searchUnavailable": "ビューアー共通のツールバーから検索できるのは、リッチテキスト編集モードのみです。",
+      "caseSensitive": "大文字と小文字を区別",
+      "caseSensitiveShortcut": "大文字と小文字を区別（Alt+C）",
+      "find": "検索",
+      "findReplace": "検索と置換",
+      "findWithHistory": "検索（⇅ で履歴）",
+      "invalidRegularExpression": "無効な正規表現",
+      "matchOptions": "一致条件",
+      "nextMatch": "次の一致箇所",
+      "previousMatch": "前の一致箇所",
+      "regularExpression": "正規表現を使用",
+      "regularExpressionShortcut": "正規表現を使用（Alt+R）",
+      "replaceAll": "すべて置換",
+      "replacing": "一致箇所を置換中…",
+      "replacementFailed": "置換できませんでした。「すべて置換」をもう一度お試しください。",
+      "replaceCurrent": "現在の一致箇所を置換",
+      "wholeWord": "単語単位で一致",
+      "wholeWordShortcut": "単語単位で一致（Alt+W）",
+      "bold": "太字",
+      "removeBold": "太字を解除",
+      "italic": "斜体",
+      "replace": "置換",
+      "replaceWithHistory": "置換（⇅ で履歴）",
+      "toggleCaseSensitive": "大文字と小文字の区別を切り替え",
+      "toggleWholeWord": "単語単位の一致を切り替え",
+      "toggleRegularExpression": "正規表現の使用を切り替え",
+      "toggleWordWrap": "行の折り返しを切り替え",
+      "removeItalic": "斜体を解除",
+      "underline": "下線",
+      "removeUnderline": "下線を解除",
+      "undo": "元に戻す",
+      "redo": "やり直す"
+    },
+    "text": {
+      "loadFailed": "ファイルを読み込めませんでした。",
+      "lockFailed": "読み取り専用で開きました。{{message}}",
+      "lockFailedReason": "編集ロックを取得できませんでした。",
+      "saveFailed": "テキストファイルの変更を保存できませんでした。",
+      "editorLabel": "テキストエディター",
+      "editorCrashTitle": "テキストエディターを利用できません",
+      "editorCrashMessage": "テキストエディターで内部エラーが発生しました。下書きはメモリに残っています。エディターを開き直すか、ファイルを閉じてください。",
+      "acquiring": "書き込み権限を確認中…",
+      "retryEditing": "編集を再試行",
+      "lockedNotification": "このファイルは別のセッションで編集中です。ここでは読み取れます。ほかのエディターを閉じた後、<retryIcon/> で編集を再試行してください。",
+      "heartbeatFailed": "編集ロックを更新できませんでした。接続を確認してください。保存するには、編集ロックを取り直す必要がある場合があります。",
+      "readOnlyReasons": {
+        "read-only": "この場所は読み取り専用です。",
+        "locked": "このファイルは別のセッションで編集中です。ここでは読み取れます。ロックが解除された後、編集を再試行できます。",
+        "permission-denied": "このファイルへの書き込み権限がありません。",
+        "unsupported": "この接続先では編集に対応していません。",
+        "unavailable": "書き込みアクセスを一時的に利用できません。そのまま読むか、編集を再試行できます。",
+        "lost": "編集ロックが無効になりました。下書きは保持されています。新しいロックを取得するには、編集を再試行してください。",
+        "conflict": "下書きが編集ロックで保護されていない間に、保存済みのファイルが変更されました。"
+      },
+      "conflictTitle": "ファイルが変更されました",
+      "conflictDescription": "保存済みのファイルは、下書きの元になった版と異なります。エディターに残す内容を選択してください。下書きを残しても、「保存」を選択するまではファイルに保存されません。",
+      "useSavedFile": "保存済みファイルを使用",
+      "keepDraft": "下書きを残す",
+      "limitMessage": "このファイルは {{currentSizeMb}} MB で、テキストエディターの上限（{{maxSizeMb}} MB）を超えています。Sambee は高機能な CodeMirror エディターの代わりに、より安全な読み取り専用表示で開きました。",
+      "limitSearchUnavailable": "このファイルを大容量ファイル用の表示で開いている間は、検索を利用できません。"
+    },
+    "share": {
+      "preparing": "共有するファイルを準備中…",
+      "failed": "ファイルを共有できませんでした",
+      "failedText": "テキストを共有できませんでした",
+      "unsupported": "このデバイスまたはブラウザーでは共有できません",
+      "payloadUnsupported": "このブラウザーではこの添付データを共有できません。",
+      "details": "共有の詳細",
+      "detailsAction": "詳細",
+      "copyDetails": "共有の詳細をコピー",
+      "copySuccess": "共有の詳細をコピーしました。",
+      "copyError": "共有の詳細をコピーできませんでした。レポートを選択して手動でコピーしてください。",
+      "downloadSuggestion": "代わりにファイルをダウンロードし、デバイスのファイルアプリから共有してください。",
+      "asFile": "ファイルとして共有",
+      "asText": "テキストとして共有"
+    },
+    "shortcuts": {
+      "open": "開く",
+      "close": "閉じる",
+      "download": "ダウンロード",
+      "edit": "編集",
+      "save": "保存",
+      "bold": "太字",
+      "italic": "斜体",
+      "createLink": "リンクを作成",
+      "insertTable": "表を挿入",
+      "insertThematicBreak": "区切り線を挿入",
+      "inlineCode": "インラインコード",
+      "insertCodeBlock": "コードブロックを挿入",
+      "showHelp": "キーボードショートカットを表示",
+      "search": "検索",
+      "nextMatch": "次の一致箇所",
+      "previousMatch": "前の一致箇所",
+      "firstPage": "最初のページ",
+      "lastPage": "最後のページ",
+      "firstImage": "最初の画像",
+      "lastImage": "最後の画像",
+      "nextPage": "次のページ",
+      "previousPage": "前のページ",
+      "next": "次へ",
+      "previous": "前へ",
+      "zoomIn": "拡大",
+      "zoomOut": "縮小",
+      "resetZoom": "拡大率をリセット",
+      "rotateRight": "右に回転",
+      "rotateLeft": "左に回転",
+      "toggleFullscreen": "全画面表示を切り替え"
+    }
+  },
+  "app": {
+    "loading": "読み込み中…",
+    "errorBoundary": {
+      "title": "問題が発生しました",
+      "description": "予期しないエラーが発生しました。エラーはログに記録されました。",
+      "tryAgain": "再試行",
+      "reloadPage": "ページを再読み込み",
+      "developmentDetails": "エラーの詳細（開発時のみ）"
+    },
+    "updateAvailable": {
+      "title": "アップデートがあります",
+      "description": "Sambee の新しいバージョンを利用できます。",
+      "currentBuild": "現在のビルド：v{{version}}（{{commit}}）",
+      "latestBuild": "最新のビルド：v{{version}}（{{commit}}）",
+      "later": "後で",
+      "reload": "今すぐ再読み込み"
+    }
+  },
+  "auth": {
+    "passwordChange": {
+      "title": "パスワードを変更",
+      "required": "続行するには、管理者の指示に従って Sambee のローカルパスワードを変更してください。",
+      "checking": "アカウントを確認中…",
+      "checkFailed": "アカウントを確認できませんでした。もう一度お試しください。",
+      "checkForChangeFailed": "アカウントを確認できませんでした。再度サインインするか、もう一度お試しください。",
+      "changeFailed": "パスワードを変更できませんでした。もう一度お試しください。",
+      "current": "現在のパスワード",
+      "new": "新しいパスワード",
+      "confirmation": "新しいパスワードの確認",
+      "mismatch": "パスワードが一致しません。",
+      "show": "パスワードを表示",
+      "hide": "パスワードを隠す",
+      "signOut": "サインアウト",
+      "changing": "パスワードを変更中…",
+      "retry": "再試行"
+    },
+    "oidcCallback": {
+      "progress": "サインインを完了しています",
+      "failed": "サインインを完了できませんでした。",
+      "title": "サインインできません",
+      "retry": "再試行"
+    },
+    "login": {
+      "title": "Sambee にサインイン",
+      "usernameLabel": "ユーザー名",
+      "passwordLabel": "パスワード",
+      "submit": "サインイン",
+      "submitWithPassword": "パスワードでサインイン",
+      "submitWithOidc": "SSO でサインイン（{{providerName}} OIDC）",
+      "invalidCredentials": "ユーザー名またはパスワードが正しくありません"
+    }
+  },
+  "settings": {
+    "appearancePage": {
+      "localizationTitle": "言語と地域",
+      "localizationDescription": "表示言語と、日付や数値の表示形式を選択します。",
+      "languageLabel": "言語",
+      "languageDescription": "画面に表示する言語を選択します。",
+      "languageLoadFailed": "言語を読み込めなかったため、Sambee を英語で表示しています。再試行するには、その言語をもう一度選択してください。",
+      "regionalLocaleLabel": "地域設定",
+      "regionalLocaleDescription": "日付、時刻、数値の表示形式と並べ替えに使用する地域を選択します。",
+      "browserDefaultOption": "ブラウザーの設定を使用",
+      "themeTitle": "テーマ",
+      "themeDescription": "アプリのテーマと表示の既定値を選択します。",
+      "englishLanguageOption": "英語",
+      "pseudoLanguageOption": "疑似英語（ローカライズのテスト用）",
+      "pseudoLanguageShortLabel": "疑似英語",
+      "pseudoLanguageDescription": "疑似英語はローカライズのテストに使用します。",
+      "themeScopes": {
+        "personal": "自分のテーマ",
+        "site": "サイトのテーマ",
+        "builtIn": "組み込みテーマ"
+      },
+      "themeDefaultBadge": "デフォルト",
+      "themeSiteDefaultTitle": "サイトのデフォルト",
+      "themeSetDefault": "デフォルトに設定",
+      "themeDeleteTitle": "テーマを削除しますか？",
+      "themeDeleteDescription": "{{themeName}}を削除しますか？選択しているユーザーにはサイトのデフォルトが適用されます。",
+      "regionalLocaleOptions": {
+        "enUS": "英語（米国）",
+        "enGB": "英語（英国）",
+        "deDE": "ドイツ語（ドイツ）",
+        "frFR": "フランス語（フランス）",
+        "jaJP": "日本語（日本）",
+        "zhCN": "中国語（中国）",
+        "nlNL": "オランダ語（オランダ）",
+        "itIT": "イタリア語（イタリア）",
+        "koKR": "韓国語（韓国）",
+        "plPL": "ポーランド語（ポーランド）",
+        "ptPT": "ポルトガル語（ポルトガル）",
+        "esES": "スペイン語（スペイン）",
+        "svSE": "スウェーデン語（スウェーデン）"
+      },
+      "regionalSettingsPreviewTitle": "プレビュー"
+    },
+    "networkPage": {
+      "loading": "ネットワーク設定を読み込み中…",
+      "loadFailed": "ネットワーク設定を読み込めませんでした。",
+      "saveFailed": "ネットワーク設定を保存できませんでした。",
+      "publicUrl": {
+        "label": "公開 URL",
+        "help": "外部からアクセスできる HTTPS オリジンです。パスは含めないでください。変更すると、進行中の OIDC サインインが取り消されます。",
+        "saving": "公開 URL を保存中…",
+        "saved": "公開 URL を保存しました"
+      },
+      "trustedProxyCidrs": {
+        "label": "信頼済みプロキシの CIDR",
+        "help": "1 行につき 1 つの CIDR を入力してください。自身で運用するリバースプロキシがクライアントの IP アドレスを転送する場合にのみ指定してください。",
+        "saving": "信頼済みプロキシの CIDR を保存中…",
+        "saved": "信頼済みプロキシの CIDR を保存しました"
+      }
+    },
+    "saveStatus": {
+      "saving": "設定を保存中…",
+      "saved": "設定を保存しました"
+    },
+    "shell": {
+      "title": "設定",
+      "closeAriaLabel": "設定を閉じる",
+      "categoriesAriaLabel": "設定カテゴリ",
+      "expandItemAriaLabel": "{{label}}を展開",
+      "collapseItemAriaLabel": "{{label}}を折りたたむ",
+      "versionLabel": "バージョン",
+      "buildLabel": "ビルド",
+      "commitLabel": "コミット",
+      "unknownValue": "不明"
+    },
+    "sections": {
+      "personal": "個人設定",
+      "administration": "管理"
+    },
+    "categories": {
+      "appearance": {
+        "label": "外観",
+        "description": "アプリのテーマと言語設定を変更します。"
+      },
+      "account": {
+        "label": "アカウント",
+        "description": "ユーザー情報、パスワード、セッション、サインアウトを管理します。"
+      },
+      "fileBrowser": {
+        "label": "ファイルブラウザー",
+        "description": "ファイルブラウザーの既定の動作を設定します。"
+      },
+      "textEditor": {
+        "label": "テキストエディター",
+        "description": "汎用テキストエディターの既定値と安全上の上限を設定します。"
+      },
+      "imageViewer": {
+        "label": "画像ビューアー",
+        "description": "デスクトップでの画像の切り替え方を設定します。タッチ操作は変わりません。"
+      },
+      "connections": {
+        "label": "接続",
+        "description": "共有および非公開の SMB 接続を管理します。"
+      },
+      "adminUsers": {
+        "label": "ユーザー管理",
+        "description": "アカウントを作成し、ロールを割り当て、パスワードのリセットを行います。"
+      },
+      "adminAuthentication": {
+        "label": "認証",
+        "description": "サインイン方法を設定します（<guide>OpenID Connect の設定ガイド</guide>を参照）。"
+      },
+      "adminNetwork": {
+        "label": "ネットワーク",
+        "description": "Sambee の外部 URL と信頼済みリバースプロキシを設定します。"
+      },
+      "adminSystem": {
+        "label": "システム",
+        "description": "アーカイブ作成時の上限を管理します。"
+      },
+      "adminImageViewer": {
+        "label": "画像ビューアー",
+        "description": "画像の変換と処理の上限を設定します。"
+      },
+      "adminPdfViewer": {
+        "label": "PDF ビューアー",
+        "description": "PDF の互換性、キャッシュ、処理の上限を設定します。"
+      },
+      "adminSmb": {
+        "label": "SMB",
+        "description": "SMB バックエンドのセキュリティポリシーと動作時の上限を設定します。"
+      },
+      "adminFileSearch": {
+        "label": "ファイル検索",
+        "description": "ファイル検索の履歴、結果件数の上限、除外条件を設定します。"
+      },
+      "adminDirectorySearch": {
+        "label": "フォルダー検索",
+        "description": "バックエンドとすべての Companion デバイスで使用するフォルダーインデックスのリソースと検証を設定します。"
+      },
+      "adminHealthMonitoring": {
+        "label": "稼働状況の監視",
+        "description": "システムの稼働状況を閲覧できるロールと、警告やエラーのしきい値を設定します。"
+      },
+      "adminAbout": {
+        "label": "製品情報",
+        "description": "Sambee のビルド、ソフトウェア、ハードウェアの情報を確認します。"
+      }
+    },
+    "imageViewerPage": {
+      "transitionDescription": "「カルーセル」では、マウスやキーボードで移動すると画像がスライドします。「アニメーションなし」では、スライドせずに画像が切り替わります。タッチでのスワイプには常にカルーセルのアニメーションが使われます。",
+      "transition": "切り替え効果",
+      "carousel": "カルーセル",
+      "none": "アニメーションなし"
+    },
+    "directorySearch": {
+      "loadFailed": "フォルダー検索のポリシーを読み込めませんでした。バックエンドへの接続を確認して再試行してください。",
+      "saveFailed": "このフォルダー検索設定を保存できませんでした。設定値とバックエンドへの接続を確認して再試行してください。",
+      "backendTitle": "バックエンドのフォルダーインデックス",
+      "companionTitle": "Companion のフォルダーインデックス",
+      "deviceTitle": "このデバイスでのフォルダー検索",
+      "refresh": "状態を更新"
+    },
+    "healthMonitoring": {
+      "loadFailed": "稼働状況の監視設定を読み込めませんでした。バックエンドへの接続を確認して再試行してください。",
+      "saveFailed": "この監視設定を保存できませんでした。設定値を確認して再試行してください。",
+      "cpuRefreshFailed": "設定は保存されましたが、CPU 温度の詳細を更新できませんでした。「再試行」を選択して詳細を更新してください。",
+      "saving": "設定を保存中…",
+      "saved": "設定を保存しました",
+      "sections": {
+        "visibility": "監視と表示範囲",
+        "memoryThresholds": "メモリのしきい値",
+        "loadThresholds": "正規化したロードアベレージのしきい値",
+        "storageThresholds": "ストレージの空き容量のしきい値",
+        "cpuTemperature": "CPU 温度のしきい値"
+      },
+      "fields": {
+        "enabled": "稼働状況の監視を有効にする",
+        "enabledDescription": "リソースを確認し、選択したロールにシステムの稼働状況を表示します。",
+        "stateOn": "オン",
+        "stateOff": "オフ",
+        "audience": "稼働状況の表示対象",
+        "audienceDescription": "システムの稼働状況を閲覧できるロールです。閲覧者は対象外です。",
+        "audienceOptions": {
+          "admins": "管理者",
+          "editors": "編集者",
+          "both": "両方（管理者と編集者）"
+        },
+        "memoryWarning": "メモリ警告のしきい値（%）",
+        "memoryWarningDescription": "使用率がこの値以上の状態が 60 秒間続くと警告します。ホストのメモリと、メモリ上限があるコンテナーが対象です。ファイルキャッシュは含みません。",
+        "memoryError": "メモリエラーのしきい値（%）",
+        "memoryErrorDescription": "使用率がこの値以上の状態が 60 秒間続くとエラーになります。メモリ上限がないコンテナーでは、使用率に基づく通知は行いません。",
+        "loadWarning": "ロードアベレージ警告のしきい値",
+        "loadWarningDescription": "5 分間のロードアベレージを論理 CPU 数で割った値が、この値以上になると警告します。CPU 使用率とは異なります。",
+        "loadError": "ロードアベレージエラーのしきい値",
+        "loadErrorDescription": "正規化した 5 分間のロードアベレージがこの値以上になると、エラーになります。",
+        "spaceWarning": "ストレージの空き容量警告のしきい値（%）",
+        "spaceWarningDescription": "空き容量の割合がこの値以下になると警告します。",
+        "spaceError": "ストレージの空き容量エラーのしきい値（%）",
+        "spaceErrorDescription": "空き容量の割合がこの値以下になるか、空き容量がなくなるとエラーになります。",
+        "cpuDetectedWarning": "検出された警告限界",
+        "cpuDetectedError": "検出された危険限界",
+        "cpuWarningOverride": "警告のしきい値（°C）",
+        "cpuWarningOverrideDescription": "自動設定にするには空欄のままにしてください。手動で設定する場合は 0.1 °C 刻みで入力してください。",
+        "cpuErrorOverride": "エラーのしきい値（°C）",
+        "cpuErrorOverrideDescription": "自動設定にするには空欄のままにしてください。手動で設定する場合は 0.1 °C 刻みで入力してください。",
+        "automaticPlaceholder": "自動",
+        "returnToAutomatic": "自動設定に戻す",
+        "reconfirmOverride": "手動設定を再確認",
+        "notAvailable": "利用できません",
+        "originHardware": "ハードウェア",
+        "originKernelPolicy": "カーネルの温度管理ポリシー",
+        "originAdminOverride": "管理者による手動設定",
+        "exceedsDetectedWarning": "警告：手動で設定した警告のしきい値（{{override}}）が、検出された限界（{{detected}}）を超えています。ホストのハードウェア保護は変わりません。",
+        "exceedsDetectedError": "警告：手動で設定したエラーのしきい値（{{override}}）が、検出された危険限界（{{detected}}）を超えています。ホストのハードウェア保護は変わりません。"
+      },
+      "validation": {
+        "memoryRange": "0.1～100.0% の値を 0.1 刻みで入力してください。",
+        "memoryPairWarningAboveError": "メモリ警告のしきい値は、エラーのしきい値（{{other}}%）を超えることができません。先にエラーのしきい値を上げてください。",
+        "memoryPairErrorBelowWarning": "メモリエラーのしきい値は、警告のしきい値（{{other}}%）を下回ることができません。先に警告のしきい値を下げてください。",
+        "loadRange": "0.01 以上の有限の数値を 0.01 刻みで入力してください。",
+        "loadPairWarningAboveError": "負荷の警告しきい値は、エラーのしきい値（{{other}}）を超えることができません。先にエラーのしきい値を上げてください。",
+        "loadPairErrorBelowWarning": "負荷のエラーしきい値は、警告のしきい値（{{other}}）を下回ることができません。先に警告のしきい値を下げてください。",
+        "spaceRange": "0.0～99.9% の値を 0.1 刻みで入力してください。",
+        "spacePairWarningBelowError": "空き容量の警告しきい値は、エラーのしきい値（{{other}}%）を下回ることができません。先にエラーのしきい値を下げてください。",
+        "spacePairErrorAboveWarning": "空き容量のエラーしきい値は、警告のしきい値（{{other}}%）を超えることができません。先に警告のしきい値を上げてください。",
+        "cpuRange": "正の摂氏温度を 0.1 °C 刻みで入力してください。自動設定にするには欄を空にしてください。",
+        "cpuPairWarningAboveError": "CPU 温度の警告しきい値は、有効なエラーしきい値（{{other}}）を超えることができません。先にエラーのしきい値を上げるか、欄を空にしてください。",
+        "cpuPairErrorBelowWarning": "CPU 温度のエラーしきい値は、有効な警告しきい値（{{other}}）を下回ることができません。先に警告のしきい値を下げるか、欄を空にしてください。"
+      }
+    },
+    "companionSync": {
+      "results": {
+        "defaults_active": "組み込みの既定値",
+        "synchronized": "同期済み",
+        "synchronizing": "同期中",
+        "update_required": "アップデートが必要",
+        "authority_conflict": "設定の管理元が異なります",
+        "pairing_required": "ペアリングが必要",
+        "delivery_failed": "設定の配信に失敗（前回の有効な設定を使用中）"
+      },
+      "defaults_active": "ペアリング済みのサーバーから設定が届くまで、組み込みの既定値が使われます。",
+      "synchronized": "設定は同期済みです。",
+      "synchronizing": "設定を同期中です。前回の有効な設定が引き続き使われます。",
+      "update_required": "共有設定の配信を利用するには、Sambee と Companion をアップデートしてください。",
+      "languageUpdateRequired": "この言語を使用するには、Sambee Companion をアップデートしてから再試行してください。Companion では前回の有効な言語が引き続き使われます。",
+      "directoryPolicyUpdateRequired": "このフォルダー検索ポリシーの設定値を使用するには、Sambee Companion をアップデートしてから再試行してください。前回の有効なポリシーとフォルダー検索は引き続き利用できます。",
+      "authority_conflict": "このサーバーは Companion の設定を管理していません。管理元を変更するには、設定を管理するサーバーで再度ペアリングしてください。",
+      "pairing_required": "Companion はこのブラウザーを認証できませんでした。「設定」→「ローカルドライブ」でこのブラウザーをペアリングしてください。すでにペアリング済みの場合は、再度ペアリングして接続を修復してください。再試行するかペアリングが成功するまで、設定の確認は一時停止します。",
+      "delivery_failed": "設定を配信できませんでした。接続を確認して再試行してください。前回の有効な設定とフォルダー検索は引き続き利用できます。",
+      "authority": "設定の管理元：{{origin}}",
+      "sections": {
+        "theme": "テーマ",
+        "localization": "言語と地域",
+        "directory_index": "フォルダー検索ポリシー"
+      }
+    },
+    "aboutPage": {
+      "applicationTitle": "アプリケーション",
+      "runtimeTitle": "ソフトウェア",
+      "platformTitle": "ハードウェア",
+      "versionLabel": "バージョン",
+      "buildLabel": "ビルド",
+      "commitLabel": "コミット",
+      "startedLabel": "起動時刻",
+      "pythonLabel": "Python",
+      "architectureLabel": "アーキテクチャ",
+      "cpuCountLabel": "論理 CPU 数",
+      "memoryLabel": "利用可能なメモリ",
+      "copyAriaLabel": "情報をコピー",
+      "copyTooltip": "情報をコピー",
+      "copyAboutMenuItem": "製品情報をコピー",
+      "copyPublicSupportReportMenuItem": "公開用サポートレポートをコピー",
+      "copySuccess": "製品情報をコピーしました。",
+      "copyError": "製品情報をコピーできませんでした。",
+      "copyPublicSupportReportSuccess": "公開用サポートレポートをコピーしました。",
+      "copyPublicSupportReportError": "公開用サポートレポートをコピーできませんでした。",
+      "unavailableValue": "取得できません",
+      "loadError": "製品情報を読み込めませんでした。"
+    },
+    "connectionsSubgroups": {
+      "smb": {
+        "label": "SMB 接続",
+        "description": "共有 SMB 接続の一覧を表示し、自分の非公開共有を管理します。"
+      },
+      "localDrives": {
+        "label": "ローカルドライブ",
+        "description": "Sambee Companion のペアリング、ローカルドライブへのアクセス管理、デスクトップ用補助アプリのインストールを行います。"
+      }
+    },
+    "fileBrowserPage": {
+      "quickNavigationTitle": "クイック移動",
+      "includeDotDirectoriesLabel": "ドットで始まるフォルダーもクイック移動に表示",
+      "includeDotDirectoriesDescription": ".git や .cache など、名前がドットで始まるフォルダーもクイック移動の結果に表示します。",
+      "shortcutHintsLabel": "キーボードショートカットのヒント",
+      "shortcutHintsDescription": "クイックバーにキーボードショートカットのヒントを表示する条件を選択します。",
+      "shortcutHintsAuto": "自動",
+      "shortcutHintsAlways": "常に表示",
+      "shortcutHintsNever": "表示しない",
+      "fileSelectionTitle": "ファイル選択",
+      "touchFriendlyFileSelectionLabel": "タッチ操作向けのファイル選択",
+      "touchFriendlyFileSelectionDescription": "ファイル選択時に、タッチ操作向けの大きなボタンとジェスチャーを使用する条件を選択します。",
+      "touchFriendlyFileSelectionAuto": "自動",
+      "touchFriendlyFileSelectionAlways": "常にオン",
+      "touchFriendlyFileSelectionNever": "オフ",
+      "fileSearchTitle": "ファイル検索",
+      "clearRecentFiles": "最近のファイル履歴を消去",
+      "clearRecentFilesDescription": "ファイル検索の履歴をサーバーから完全に削除します。ファイルやフォルダーは変更されません。",
+      "clearRecentFilesFailed": "最近のファイル履歴を消去できませんでした。もう一度お試しください。",
+      "clearRecentDirectories": "最近のフォルダー履歴を消去",
+      "clearRecentDirectoriesDescription": "フォルダー移動の履歴をサーバーから完全に削除します。ファイルやフォルダーは変更されません。",
+      "clearRecentDirectoriesFailed": "最近のフォルダー履歴を消去できませんでした。もう一度お試しください。"
+    },
+    "textEditorPage": {
+      "limitsTitle": "上限",
+      "maxFileSizeLabel": "高機能エディターで開ける最大ファイルサイズ（MB）",
+      "maxFileSizeDescription": "この上限を超えるファイルは、CodeMirror を使った高機能テキストエディターでは開けません。非常に大きなファイルの編集で動作が遅くなったり、メモリを大量に消費したりするのを防ぎます。"
+    },
+    "connectionsPage": {
+      "smbSectionTitle": "SMB 接続",
+      "smbSectionDescription": "共有接続の一覧を表示し、自分の非公開 SMB 共有への接続を管理します。",
+      "localDrivesSectionTitle": "ローカルドライブ",
+      "localDrivesSectionDescription": "Sambee Companion をペアリングし、このブラウザーからのローカルドライブへのアクセスを管理します。"
+    },
+    "localDrives": {
+      "menuActionLabel": "ローカルドライブを管理…",
+      "headerTitle": "ローカルドライブ",
+      "headerDescription": "Sambee Companion をペアリングし、このブラウザーからのローカルドライブへのアクセスを管理します。",
+      "intro": "このブラウザーと Sambee Companion のペアリングを管理し、このコンピューターのローカルドライブにアクセスできるか確認します。",
+      "summaryTitle": "現在の状態",
+      "secureContextTitle": "ローカルドライブには Web Crypto が使える安全なブラウザー環境が必要です",
+      "secureContextMessage": "ペアリングとローカルドライブへのアクセスには、Web Crypto をサポートする安全なブラウザー環境が必要です。HTTPS（ローカル開発時は localhost）と、Web Crypto が有効なブラウザーを使用してください。",
+      "unsupportedMobileTitle": "ローカルドライブにはデスクトップブラウザーが必要です",
+      "unsupportedMobileDescription": "Sambee Companion は iOS と Android では利用できません。",
+      "unsupportedMobileAlert": "Companion をインストールしてブラウザーをペアリングし、ローカルドライブにアクセスするには、Windows、macOS、Linux のいずれかのデスクトップブラウザーで Sambee を使用してください。",
+      "statusLabelReady": "準備完了",
+      "statusLabelActionRequired": "対応が必要",
+      "statusLabelUnavailable": "Companion を利用できません",
+      "summaryReadyTitle": "ローカルドライブを利用できます",
+      "summaryPairingRequiredTitle": "ローカルドライブにアクセスするには、このブラウザーをペアリングしてください",
+      "summaryPendingApprovalTitle": "Sambee Companion で承認を完了してください",
+      "summaryRepairTitle": "このブラウザーのペアリングを修復してください",
+      "summaryUpdateRequiredTitle": "Sambee Companion をアップデートしてください",
+      "summaryBrowserUpdateRequiredTitle": "Sambee をアップデートしてください",
+      "summaryVerificationUnavailableTitle": "ローカルドライブへのアクセスを確認できませんでした",
+      "summaryUnavailableTitle": "このコンピューターで Sambee Companion を起動してください",
+      "companionRunningChecklistLabel": "Companion アプリは実行中です",
+      "browserFullyPairedChecklistLabel": "このブラウザーはペアリング済みです",
+      "accessSectionTitle": "ローカルアクセス",
+      "accessSectionDescription": "このブラウザーのペアリングを管理し、現在ローカルドライブにアクセスできるか確認します。",
+      "pairingSectionTitle": "このブラウザーをペアリング",
+      "pairingSectionReady": "このブラウザーはすでに Sambee Companion とペアリングされています。",
+      "pairingSectionUnavailable": "このコンピューターで Sambee Companion を起動してから、ここに戻ってブラウザーをペアリングしてください。",
+      "pairingSectionRequired": "ローカルドライブを参照するには、Sambee Companion でペアリングの要求を承認してください。",
+      "pairingSectionPendingApproval": "Sambee Companion に承認待ちのペアリング要求があります。新たにペアリングを始める前に、Companion でその要求を承認または拒否してください。",
+      "pairingSectionRepair": "まずこのページを再読み込みし、Sambee と Companion の接続を更新してください。それでもローカルドライブにアクセスできない場合は、このブラウザーを再度ペアリングしてください。",
+      "verificationSectionTitle": "ローカルアクセスを確認",
+      "verificationSectionDescription": "簡単なテストを実行し、このブラウザーから引き続きローカルドライブにアクセスできるか確認します。",
+      "verificationSectionReady": "Sambee からローカルファイルを開く前に、簡単なアクセステストを実行してください。",
+      "verificationSectionBlocked": "まずペアリングを完了してから、ここでペアリングをテストしてください。",
+      "troubleshootingSectionTitle": "このブラウザーのペアリングを管理",
+      "troubleshootingSectionDescription": "このブラウザーにローカルドライブへのアクセスを許可するペアリングを確認または解除します。",
+      "troubleshootingSectionReady": "ペアリングを解除すると、このブラウザーからこのコンピューターのローカルドライブにアクセスできなくなります。",
+      "loadError": "Companion の状態を読み込めませんでした。",
+      "pairingCreated": "ローカルドライブ用のペアリングが完了しました。",
+      "pairingRemoved": "このブラウザーのペアリングを解除しました。",
+      "pairingRemoveFailed": "ペアリングを解除できませんでした。",
+      "pairingTestSucceeded": "ペアリングを確認しました。このブラウザーからローカルドライブにアクセスできます。",
+      "pairingTestFailed": "Companion がこのブラウザーの署名を拒否しました。まず Sambee を再読み込みしてください。それでもテストに失敗する場合は、このブラウザーを再度ペアリングしてください。",
+      "pairingTestUnavailable": "ローカルドライブへのアクセスを確認できませんでした。Companion が実行中であることを確認し、もう一度テストしてください。",
+      "reloadButton": "Sambee を再読み込み",
+      "statusUnavailable": "このコンピューターで Sambee Companion が実行されていません。起動してからここに戻り、ブラウザーのペアリング、ローカルドライブへのアクセスのテスト、または Sambee からのローカルファイルの起動を行ってください。",
+      "statusPaired": "このブラウザーは Sambee Companion とペアリング済みです。Sambee からローカルファイルを参照して開けます。",
+      "statusPendingApproval": "このブラウザーからのペアリング要求が Sambee Companion で承認待ちです。再試行する前に、Companion でその要求の処理を完了してください。",
+      "statusRecoverable": "Companion はこのブラウザーのペアリングを確認できません。まず Sambee を再読み込みして更新を反映してください。それでもアクセスできない場合は、このブラウザーを再度ペアリングしてください。",
+      "statusUpdateRequired": "このバージョンの Companion は古い認証プロトコルを使用しています。Companion をアップデートして再起動し、Sambee を再読み込みしてください。再ペアリングではバージョンの不一致は解消されません。",
+      "statusBrowserUpdateRequired": "Companion は、この Sambee ページが対応しているものより新しい認証プロトコルを使用しています。Sambee を再読み込みし、不一致が解消されない場合は Sambee をアップデートしてください。再ペアリングでは解消されません。",
+      "statusVerificationUnavailable": "Companion には接続できましたが、ペアリングの状態を確認できませんでした。もう一度お試しください。",
+      "statusUnpaired": "このブラウザーは Sambee Companion とペアリングされていません。",
+      "downloadSectionTitle": "Sambee Companion をインストール",
+      "downloadSectionDescription": "このコンピューターに Sambee Companion がインストールされていない場合は、ダウンロードしてください。インストール後にアプリを起動し、このブラウザーをペアリングするかローカルドライブへのアクセスをテストするために、ここに戻ってください。",
+      "downloadSectionSourcePrefix": "配布元",
+      "downloadVersionLabel": "利用可能なバージョン",
+      "downloadFeedSourceLabel": "最新の推奨リリース",
+      "downloadPinSourceLabel": "管理者が指定したバージョン",
+      "downloadPrimaryButton": "このコンピューター用をダウンロード",
+      "downloadOtherPlatformsLabel": "その他のダウンロード",
+      "downloadRecommendedLabel": "このコンピューターに推奨",
+      "downloadUnavailable": "現在ダウンロードリンクを利用できません。少し待ってから状態を更新し、再試行してください。",
+      "downloadLoadFailed": "Companion のダウンロード情報を取得できませんでした。",
+      "testCurrentPairingButton": "現在のペアリングをテスト",
+      "pairThisBrowserButton": "このブラウザーをペアリング",
+      "waitingForApprovalButton": "承認待ち…",
+      "unpairThisBrowserButton": "このブラウザーのペアリングを解除",
+      "testingButton": "テスト中…",
+      "unpairingButton": "ペアリングを解除中…",
+      "pairingDialog": {
+        "title": "Companion とペアリング",
+        "intro": "ローカルドライブを参照するには、このブラウザーと Sambee Companion アプリをペアリングしてください。このコンピューターで Companion が実行されていることを確認してください。",
+        "verifyCodePrompt": "このコードが Companion アプリに表示されたコードと一致することを確認してください：",
+        "verifyCodeHelp": "コードが一致する場合は、下の確認ボタンをクリックし、Companion でペアリングを承認してください。",
+        "confirming": "Companion での確認を待っています…",
+        "success": "ペアリングが完了しました。ローカルドライブを利用できます。",
+        "startButton": "ペアリングを開始",
+        "confirmButton": "コードが一致：確認",
+        "cancelButton": "キャンセル",
+        "doneButton": "完了",
+        "closeButton": "閉じる",
+        "retryButton": "再試行",
+        "initiateFailed": "ペアリングを開始できませんでした。Companion アプリは実行されていますか？",
+        "confirmFailed": "ペアリングに失敗しました。Companion が要求を拒否したか、ペアリングの有効期限が切れた可能性があります。"
+      }
+    },
+    "connectionManagement": {
+      "headerTitle": "SMB 接続",
+      "headerDescription": "共有接続の一覧を表示し、自分の非公開 SMB 共有への接続を管理します。",
+      "addConnectionButton": "接続を追加",
+      "addConnectionFabAriaLabel": "接続を追加",
+      "connectionActionsAriaLabel": "接続の操作",
+      "userLabel": "ユーザー：",
+      "pathLabel": "パス：",
+      "sharedSectionTitle": "共有接続",
+      "sharedSectionEmpty": "利用できる共有接続はありません。",
+      "privateSectionTitle": "自分の接続",
+      "privateSectionEmpty": "非公開接続はまだありません。",
+      "emptyTitle": "接続が設定されていません",
+      "emptyAdminDescription": "「＋」ボタンをクリックして、共有または非公開の SMB 接続を作成してください。",
+      "emptyRegularDescription": "「＋」ボタンをクリックして、最初の非公開 SMB 接続を作成してください。",
+      "emptyViewerDescription": "このアカウントで利用できる接続はまだありません。接続の作成または共有について管理者にお問い合わせください。",
+      "menuTest": "接続をテスト",
+      "menuEdit": "編集",
+      "menuDelete": "削除",
+      "tooltipTest": "接続をテスト",
+      "tooltipEdit": "編集",
+      "tooltipDelete": "削除",
+      "ariaTest": "接続をテスト",
+      "ariaEdit": "接続を編集",
+      "ariaDelete": "接続を削除",
+      "columns": {
+        "port": "ポート",
+        "type": "種類",
+        "actions": "操作"
+      },
+      "deleteDialogTitle": "接続を削除",
+      "deleteDialogDescription": "この接続を削除しますか？",
+      "notifications": {
+        "loadFailed": "接続を読み込めませんでした",
+        "savedPrivateInfo": "非公開接続として保存しました。接続を共有するには管理者権限が必要です。",
+        "createdSuccess": "接続を作成しました",
+        "updatedSuccess": "接続を更新しました",
+        "deletedSuccess": "接続を削除しました",
+        "deleteFailed": "接続を削除できませんでした",
+        "testFailed": "接続テストに失敗しました",
+        "saveFailed": "接続を保存できませんでした"
+      },
+      "scope": {
+        "sharedChip": "共有",
+        "privateChip": "非公開"
+      }
+    },
+    "connectionDialog": {
+      "titles": {
+        "add": "接続を追加",
+        "edit": "接続を編集"
+      },
+      "results": {
+        "success": "接続に成功しました",
+        "error": "接続に失敗しました",
+        "errorDialogTitle": "接続テストに失敗しました"
+      },
+      "labels": {
+        "name": "接続名",
+        "host": "ホスト",
+        "shareName": "共有名",
+        "username": "ユーザー名",
+        "password": "パスワード",
+        "pathPrefix": "パスのプレフィックス",
+        "visibility": "公開範囲",
+        "accessMode": "アクセスモード"
+      },
+      "sections": {
+        "access": "アクセス"
+      },
+      "helpers": {
+        "name": "Sambee でこの接続を識別するための名前",
+        "host": "SMB サーバーの IP アドレスまたはホスト名",
+        "shareName": "サーバー上の共有の名前",
+        "passwordAdd": "SMB アカウントのパスワード",
+        "passwordEdit": "既存のパスワードを使用する場合は空欄のままにしてください",
+        "pathPrefix": "共有内の基準パス（任意）",
+        "username": "必要に応じて DOMAIN\\USER 形式で入力してください",
+        "visibility": "非公開または共有を選択してください",
+        "visibilityAdmin": "管理者は、全員向けの共有接続や、自分だけが使える非公開接続を作成できます。",
+        "visibilityRegular": "共有接続を作成するには管理者権限が必要です。管理者権限なしで共有を選ぶと、サーバーは非公開接続として保存します。",
+        "accessModeReadWrite": "読み取り専用、または読み取りと書き込みを選択してください",
+        "accessModeReadOnly": "読み取り専用、または読み取りと書き込みを選択してください"
+      },
+      "errors": {
+        "nameRequired": "接続名を入力してください",
+        "hostRequired": "ホストを入力してください",
+        "shareNameRequired": "共有名を入力してください",
+        "usernameRequired": "ユーザー名を入力してください",
+        "passwordRequired": "パスワードを入力してください"
+      },
+      "actions": {
+        "save": "保存"
+      },
+      "aria": {
+        "togglePassword": "パスワードの表示を切り替え"
+      },
+      "visibility": {
+        "privateLabel": "自分のみ",
+        "privateDescription": "自分のアカウントにのみ表示されます。接続のすべての設定を管理できます。",
+        "sharedLabel": "全員と共有",
+        "sharedDescription": "すべてのユーザーに表示されます。管理できるのは管理者のみです。"
+      },
+      "accessMode": {
+        "readWriteLabel": "読み取りと書き込み",
+        "readOnlyLabel": "読み取り専用"
+      }
+    },
+    "userManagement": {
+      "addUserButton": "ユーザーを追加",
+      "addUserFabAriaLabel": "ユーザーを追加",
+      "totalUsers_other": "ユーザー：{{count}} 人",
+      "activeAdmins_other": "管理者：{{count}} 人",
+      "emptyTitle": "ユーザーが見つかりません",
+      "emptyDescription": "アクセス権を割り当てるには、最初のユーザーアカウントを作成してください。",
+      "currentUserSuffix": "（あなた）",
+      "adminRole": "管理者",
+      "editorRole": "編集者",
+      "viewerRole": "閲覧者",
+      "activeStatus": "有効",
+      "disabledStatus": "無効",
+      "passwordResetPending": "パスワード変更が必要",
+      "roleSource": {
+        "localAssignment": "ロールの割り当て元：ローカル設定",
+        "individualOverride": "ロールの割り当て元：個別設定",
+        "oidcDefault": "ロールの割り当て元：OIDC の既定値",
+        "oidcGroups": "ロールの割り当て元：OIDC グループ",
+        "awaitingOidcSignIn": "ロールの割り当て元：OIDC でのサインイン待ち"
+      },
+      "createdAt": "作成：{{timestamp}}",
+      "expiresAt": "有効期限：{{timestamp}}",
+      "actions": {
+        "editUser": "ユーザーを編集",
+        "resetPassword": "パスワードをリセット",
+        "deleteUser": "ユーザーを削除",
+        "deleteSelfDisabled": "ここでは自分のアカウントを削除できません",
+        "saveChanges": "変更を保存",
+        "createUser": "ユーザーを作成",
+        "close": "閉じる"
+      },
+      "aria": {
+        "editUser": "{{username}} を編集",
+        "resetPassword": "{{username}} のパスワードをリセット",
+        "deleteUser": "{{username}} を削除"
+      },
+      "editor": {
+        "titleEdit": "ユーザーを編集",
+        "titleCreate": "ユーザーを作成",
+        "descriptionEdit": "アカウント情報とアクセス権限を変更します。パスワードのリセットは別の操作です。",
+        "sections": {
+          "access": "アクセス",
+          "credentials": "認証情報"
+        },
+        "usernameLabel": "ユーザー名",
+        "usernameHelp": "サインインに使用する一意の名前",
+        "usernameTaken": "そのユーザー名はすでに使用されています",
+        "nameLabel": "氏名",
+        "nameHelp": "画面に表示するアカウント名",
+        "oidcNameHelp": "連携先の OIDC プロバイダーで管理されます",
+        "emailLabel": "メールアドレス",
+        "emailHelp": "連絡先メールアドレス（任意）",
+        "oidcEmailHelp": "連携先の OIDC プロバイダーで管理されます",
+        "roleLabel": "ロール",
+        "roleHelp": "アクセス権限を選択してください",
+        "oidcRoleHelp": "個別にロールを指定するか、連携先の OIDC プロバイダーから決まるロールを引き継いでください。",
+        "oidcRoleUnavailableHelp": "ロールを個別に指定してください。プロバイダーから決まるロールは、ユーザーが次回 OIDC でサインインした後に利用できます。",
+        "roleOptions": {
+          "admin": "設定、ユーザー、コンテンツを管理",
+          "editor": "コンテンツを変更",
+          "viewer": "コンテンツを閲覧"
+        },
+        "inheritedRole": "継承（{{role}}）",
+        "inheritedRoleDescription": "最後に確認されたユーザーの OIDC グループから決まるロールを使います",
+        "expiresAtLabel": "有効期限",
+        "expiresAtHelp": "有効期限を設けない場合は空欄のままにしてください",
+        "accountActiveLabel": "アカウントは有効",
+        "accountActiveHelp": "無効なアカウントではサインインできません",
+        "initialPasswordLabel": "初期パスワード",
+        "initialPasswordHelp": "空欄の場合、サーバーが安全な仮パスワードを生成します",
+        "showInitialPassword": "初期パスワードを表示",
+        "hideInitialPassword": "初期パスワードを隠す",
+        "requirePasswordChangeLabel": "次回のパスワードサインイン時に変更を要求",
+        "requirePasswordChangeHelp": "パスワードを変更するまで、ローカルパスワードでのアクセスを制限します。OIDC では引き続きサインインできます。",
+        "switchOn": "オン",
+        "switchOff": "オフ"
+      },
+      "resetPasswordEditor": {
+        "title": "パスワードをリセット",
+        "descriptionWithName": "{{username}} の新しいパスワードを設定します。このユーザーはすべてのセッションから直ちにサインアウトします。",
+        "descriptionFallback": "このユーザーの新しいパスワードを設定します。このユーザーはすべてのセッションから直ちにサインアウトします。",
+        "passwordLabel": "新しいパスワード",
+        "passwordHelp": "ユーザーが次回のサインインで使用するパスワードを指定してください",
+        "showPassword": "新しいパスワードを表示",
+        "hidePassword": "新しいパスワードを隠す",
+        "requirePasswordChangeLabel": "次回のパスワードサインイン時に変更を要求",
+        "requirePasswordChangeHelp": "パスワードを変更するまで、ローカルパスワードでのアクセスを制限します。OIDC では引き続きサインインできます。",
+        "passwordRequired": "新しいパスワードを入力してください",
+        "submit": "パスワードを設定"
+      },
+      "credentialsDialog": {
+        "usernameLabel": "ユーザー名",
+        "temporaryPasswordLabel": "仮パスワード",
+        "createTitle": "仮パスワードを作成しました",
+        "createDescription": "この仮パスワードを安全な方法で共有してください。ユーザーはサインイン後にパスワードを変更する必要があります。"
+      },
+      "deleteDialog": {
+        "title": "ユーザーを削除",
+        "descriptionFallback": "このユーザーを削除しますか？"
+      },
+      "notifications": {
+        "loadFailed": "ユーザーを読み込めませんでした",
+        "usernameRequired": "ユーザー名を入力してください",
+        "userUpdated": "ユーザーを更新しました",
+        "userCreated": "ユーザーを作成しました",
+        "updateFailed": "ユーザーを更新できませんでした",
+        "createFailed": "ユーザーを作成できませんでした",
+        "resetFailed": "パスワードをリセットできませんでした",
+        "userDeleted": "ユーザーを削除しました",
+        "deleteFailed": "ユーザーを削除できませんでした"
+      }
+    },
+    "advanced": {
+      "imageConversion": {
+        "label": "画像変換で優先する項目",
+        "description": "libvips による変換など、バックエンドの画像プレビューに適用します。ローカルドライブの画像には影響しません。",
+        "speed": "変換速度",
+        "speedDescription": "透明部分のないプレビューを高速にエンコードします。ファイルサイズが大きくなる場合があります。",
+        "size": "ファイルサイズ",
+        "sizeDescription": "透明部分のないプレビューを WebP で小さくします。変換時の CPU 使用量が増える場合があります。"
+      },
+      "saveChanges": "変更を保存",
+      "saveSuccess": "詳細設定を保存しました",
+      "loadFailed": "詳細設定を読み込めませんでした",
+      "saveFailed": "詳細設定を保存できませんでした",
+      "resetOverride": "上書き設定を解除",
+      "resetFailed": "上書き設定を解除できませんでした",
+      "resetSuccess": "{{label}}を継承値に戻しました",
+      "sections": {
+        "smbBackends": "SMB バックエンド",
+        "preprocessors": "前処理ツール",
+        "imageMagick": "ImageMagick",
+        "pdfCompatibility": "PDF の互換性",
+        "archiveDownloads": "アーカイブ作成"
+      },
+      "fields": {
+        "value": "値",
+        "unit": "単位",
+        "seconds": "秒"
+      },
+      "validation": {
+        "enterLabel": "{{label}}を入力してください",
+        "wholeNumber": "{{label}}は整数で指定してください",
+        "betweenRange": "{{label}}は {{min}}～{{max}} の範囲で指定してください",
+        "betweenRangeWithUnit": "{{label}}は {{min}}～{{max}} {{unit}} の範囲で指定してください"
+      },
+      "helperText": {
+        "integer": "{{description}} 既定値：{{defaultValue}}。範囲：{{minValue}}～{{maxValue}}。",
+        "byteSize": "{{description}} 既定値：{{defaultValue}}。範囲：{{minValue}}～{{maxValue}}。"
+      }
+    },
+    "smbSettings": {
+      "loadFailed": "SMB 設定を読み込めませんでした",
+      "saveFailed": "SMB 設定を保存できませんでした",
+      "saving": "SMB 設定を保存中…",
+      "saved": "SMB 設定を保存しました",
+      "connectionTimeoutError": "5～120 の整数を入力してください。",
+      "readChunkSizeError": "許容されるチャンクサイズの範囲内で整数を入力してください。",
+      "sections": {
+        "protection": "保護",
+        "connectionBehavior": "接続動作",
+        "fileStreaming": "ファイルのストリーミング"
+      },
+      "fields": {
+        "authenticationMode": "認証モード",
+        "encryptionMode": "通信の保護",
+        "connectionTimeout": "接続タイムアウト",
+        "readChunkSize": "SMB の読み取りチャンクサイズ"
+      },
+      "helper": {
+        "authenticationMode": "「自動」では Kerberos を優先し、利用できない場合は NTLM に切り替えます。NTLM への切り替えを許可しない場合は「Kerberos 必須」を選択してください。",
+        "encryptionMode": "署名は常に必須です。「署名のみ」では暗号化されていない SMB 2 接続を許可します。ネットワーク上で SMB 通信を傍受されないようにするには、暗号化を必須にしてください。",
+        "connectionTimeout": "SMB の通信接続を確立するまでに待機する最大時間です。",
+        "readChunkSize": "ファイルのストリーミングで 1 回に読み取るバイト数です。"
+      },
+      "options": {
+        "negotiate": "自動（Kerberos または NTLM）",
+        "kerberosRequired": "Kerberos 必須",
+        "signingOnly": "署名のみ（SMB 2 互換）",
+        "encryptionRequired": "署名と暗号化（SMB 3 以降）"
+      },
+      "source": {
+        "default": "組み込みの既定値",
+        "database": "システムの上書き設定",
+        "configFile": "設定ファイル"
+      }
+    },
+    "fileSearch": {
+      "title": "ファイル検索",
+      "saveChanges": "変更を保存",
+      "resetToDefault": "既定値に戻す",
+      "loadFailed": "ファイル検索の設定を読み込めませんでした。",
+      "saveFailed": "ファイル検索の設定を保存できませんでした。",
+      "resetFailed": "ファイル検索の設定を既定値に戻せませんでした。",
+      "retentionLimit": "履歴に残す最近のファイルとフォルダーの件数",
+      "retentionLimitError": "0～500 の整数を入力してください。",
+      "resultLimit": "グループごとの結果件数",
+      "resultLimitError": "1～50 の整数を入力してください。",
+      "excludedCategories": "除外するファイルの種類",
+      "excludedCategoriesHelp": "除外したファイルは、ファイル検索の結果と履歴に表示されません。",
+      "excludeImages": "画像を除外",
+      "excludeTemporaryBackup": "一時ファイルとバックアップファイルを除外",
+      "excludedExtensions": "除外する拡張子",
+      "excludedExtensionsInputLabel": "除外する拡張子を入力",
+      "excludedExtensionsAdd": "拡張子を追加",
+      "excludedExtensionsError": "拡張子は 255 文字以内でそのまま入力してください。グロブパターンやパスは使用できません。",
+      "excludedExtensionsDuplicateError": "この拡張子はすでに除外されています。",
+      "excludedExtensionsHelp": "拡張子を 1 つ、そのまま入力してください。グロブパターンやパスは使用できません。",
+      "excludedExtensionsNormalization": "{{extension}} として保存されます。",
+      "excludedExtensionsRemove": "{{extension}} を除外リストから削除"
+    }
+  },
+  "fileBrowser": {
+    "chrome": {
+      "statusBar": {
+        "itemCount_other": "{{count}} 件",
+        "noSelection": "選択なし",
+        "linkTargetMissing": "ショートカットのリンク先が見つかりません",
+        "linkTargetAccessDenied": "ショートカットのリンク先へのアクセスが拒否されました",
+        "linkTargetUnresolvable": "ショートカットのリンク先を特定できません",
+        "linkTargetLocalDrivesOnly": "ショートカットのリンク先を特定できるのはローカルドライブ内のみです",
+        "linkTargetUnmappedDrive": "ショートカットのリンク先は利用可能なドライブの外にあります",
+        "linkTargetUnsupported": "ショートカットのリンク先はファイルでもフォルダーでもありません"
+      },
+      "breadcrumb": {
+        "navigateRoot": "ルートフォルダーに移動",
+        "navigateTo": "{{path}} に移動"
+      },
+      "connectionSelector": {
+        "placeholder": "接続を選択"
+      },
+      "mobileToolbar": {
+        "openMenu": "メニューを開く",
+        "navigateUpTitle": "上のフォルダーに移動",
+        "navigateUpAriaLabel": "親フォルダーに移動"
+      },
+      "sort": {
+        "ariaLabel": "並べ替えオプション",
+        "fields": {
+          "name": "名前",
+          "size": "サイズ",
+          "modified": "更新日時",
+          "type": "種類"
+        },
+        "direction": {
+          "ascending": "昇順",
+          "descending": "降順"
+        }
+      },
+      "viewMode": {
+        "ariaLabel": "表示モードのオプション",
+        "options": {
+          "list": "一覧",
+          "details": "詳細"
+        }
+      },
+      "dualPaneToggle": {
+        "ariaLabel": "2 ペイン表示を切り替え",
+        "label": "ペイン"
+      },
+      "alerts": {
+        "folderNotFound": "フォルダー「{{name}}」が見つかりません。移動または削除された可能性があります。",
+        "folderNotFoundSummary": "フォルダーが見つかりません。移動または削除された可能性があります。",
+        "fileNotFoundSummary": "ファイルが見つかりません。移動または削除された可能性があります。",
+        "fileFailure": {
+          "missing": "ファイル「{{name}}」が見つかりません。移動または削除された可能性があります。",
+          "not_file": "対象は通常のファイルではありません。別のファイルを選択してください。",
+          "access_denied": "このファイルへのアクセスが拒否されました。権限を確認して再試行してください。",
+          "timeout": "ファイルの要求がタイムアウトしました。接続を確認して再試行してください。",
+          "unavailable": "ファイルを利用できません。接続を確認して再試行してください。",
+          "pairing": "ローカルドライブのペアリングを利用できません。「ローカルドライブ」設定を開き、このブラウザーを再度ペアリングしてください。",
+          "cancelled": "ファイルの要求をキャンセルしました。",
+          "unknown": "ファイルを開けませんでした。接続を確認して再試行してください。"
+        },
+        "folderRecovered": "フォルダー「{{name}}」が見つからなかったため、代わりに「{{parent}}」を開きました。",
+        "folderRecoveredSummary": "フォルダーが見つからなかったため、代わりに「{{parent}}」を開きました。",
+        "folderAccessDenied": "このフォルダーを開く権限がありません。",
+        "notAFolder": "この項目はフォルダーではありません。",
+        "connectionUnavailable": "接続を利用できません。接続設定を確認してからもう一度お試しください。",
+        "directoryMonitoringTimeout": "フォルダーの監視を開始できず、タイムアウトしました。フォルダーを更新して再試行してください。",
+        "leftPane": "左ペイン",
+        "rightPane": "右ペイン",
+        "localDrivePairingRejected": "{{connection}}：Sambee Companion がこのブラウザーのペアリングを拒否しました。Sambee を再読み込みして更新を反映してください。それでも接続できない場合は、「ローカルドライブ」を開いてペアリングを確認してください。",
+        "localDrivePairingRequired": "{{connection}}：このブラウザーは Sambee Companion とペアリングされていません。「ローカルドライブ」を開いてペアリングしてください。",
+        "welcomeTitle": "Sambee へようこそ！",
+        "adminOnboardingPrefix": "まず、",
+        "adminOnboardingLink": "最初の SMB ネットワーク共有を追加",
+        "adminOnboardingSuffix": "してください。ネットワークストレージ内のファイルを参照して開けるようになります。",
+        "regularOnboarding": "Sambee では、ネットワーク共有内のファイルを参照して開けます。ネットワーク共有の設定については管理者にお問い合わせください。",
+        "backendUnavailable": "バックエンドへの接続が切断されました。現在の画面は引き続き利用できますが、接続が復旧するまで手動更新や自動更新に失敗する場合があります。",
+        "backendReconnecting": "バックエンドに再接続しています。自動更新が一時的に遅れる場合があります。",
+        "loadingConnections": "接続を読み込み中…",
+        "companionLaunchHint": "Sambee Companion で開いています。何も起きない場合は、Companion がインストールされ、実行中であることを確認してください。Companion でサインインや復元が必要な場合は、Sambee がこの画面を開き直し、次の手順を表示します。",
+        "companionLifecycle": {
+          "renewal_required": "ファイルの編集を完了する前に Companion の編集セッションが期限切れになりました。編集を続けるには、Sambee からファイルを開き直してください。",
+          "auth_failed": "Companion は Sambee のバックエンドへのサインインを完了できませんでした。サインインを求められた場合は Companion で完了し、Sambee からファイルを開き直してください。",
+          "lock_lost": "Companion はこのファイルの編集ロックを失いました。さらに編集する前に、Sambee からファイルを開き直してください。",
+          "recovery_required": "Companion にこのファイルの未処理の復元項目があります。新しい編集セッションを開始する前に、Sambee または Companion で処理してください。"
+        }
+      },
+      "mobileMenu": {
+        "selectConnectionAriaLabel": "接続を選択",
+        "navigateRootAriaLabel": "ルートフォルダーに移動",
+        "openKeyboardShortcutsAriaLabel": "キーボードショートカットを開く",
+        "openDocumentationAriaLabel": "ドキュメントを開く",
+        "openSettingsAriaLabel": "設定を開く",
+        "systemHealth": "システムの稼働状況",
+        "openSystemHealthAriaLabel": "システムの稼働状況：{{status}}。{{headline}}",
+        "logoutAriaLabel": "サインアウト"
+      },
+      "helpMenu": {
+        "keyboardShortcuts": "キーボードショートカット",
+        "documentation": "ドキュメント",
+        "issues": "課題",
+        "discussions": "ディスカッション"
+      },
+      "toolbar": {
+        "help": "ヘルプ",
+        "openSettings": "設定を開く",
+        "systemHealthTooltip": "システムの稼働状況：{{status}}。{{headline}}"
+      }
+    },
+    "list": {
+      "emptyDirectory": "このフォルダーは空です"
+    },
+    "search": {
+      "modeSelectorAriaLabel": "クイックバーのモードを切り替え",
+      "modes": {
+        "navigate": "移動",
+        "quickNav": "クイック移動",
+        "commands": "コマンド",
+        "fileSearch": "ファイル検索"
+      },
+      "placeholders": {
+        "directory": "任意のフォルダーに移動",
+        "command": "コマンドを実行",
+        "smart": "フォルダーに移動、または「>」を入力してコマンドを表示",
+        "fileSearch": "最近のファイルと現在のフォルダー内のファイルを検索"
+      },
+      "footer": {
+        "navigate": "移動",
+        "open": "開く",
+        "removeRecent": "履歴から除外",
+        "removeRecentDirectory": "フォルダーを履歴から除外",
+        "run": "実行",
+        "commands": "コマンド",
+        "close": "閉じる"
+      },
+      "itemTypes": {
+        "directory": "フォルダー",
+        "file": "ファイル"
+      },
+      "results": {
+        "none": "「{{query}}」に一致する結果がありません",
+        "failed": "検索を完了できませんでした。もう一度お試しください。",
+        "removeFailed": "この項目を履歴から除外できませんでした。もう一度お試しください。",
+        "count_other": "{{count}} 件の結果",
+        "countTruncated": "{{count}} 件以上の結果",
+        "commandCount_other": "{{count}} 件のコマンド",
+        "directoriesIndexed_other": "{{count}} 個のフォルダーをインデックスに登録済み"
+      },
+      "status": {
+        "connectionStatus": "{{connection}}：{{message}}",
+        "indexingPending": "インデックスを作成中…",
+        "indexing": "インデックスを作成中…（{{count}} 個のフォルダーを検出）",
+        "updating": "インデックスを更新中…（{{count}} 個のフォルダー）",
+        "updatingProgress": "インデックスを更新中…（約 {{total}} 個のうち {{done}} 個のフォルダーを確認）",
+        "startingIndex": "インデックスの作成を開始中…",
+        "indexCoveragePartial": "一部のフォルダーをインデックスに登録できませんでした。",
+        "indexCoverageUncertain": "フォルダーインデックスは未検証です。次の確認を待っています。",
+        "legacyDirectorySearch": "この接続先では複数の語句によるフォルダー検索への対応が確認できていません。語句を 1 つだけ指定して検索するか、バックエンドと Companion の対応状況を確認してください。",
+        "historyUnavailable": "最近のフォルダー履歴を利用できません。バックエンドへの接続を確認して再試行してください。",
+        "fileHistoryUnavailable": "最近のファイル履歴を利用できません。バックエンドへの接続を確認して再試行してください。",
+        "indexUnavailable": "フォルダー検索を利用できません。検索対象への接続を確認して再試行してください。"
+      },
+      "statusDetails": {
+        "title": "フォルダー検索の状態",
+        "linkSuffix": "（<details>詳細</details>）",
+        "source": "検索対象",
+        "impact": "これらの場所にあるフォルダーは、検索結果に含まれない場合があります。",
+        "incomplete": "影響を受けた場所の一部のみを表示しています。ほかのフォルダーも影響を受けている可能性があります。",
+        "locations": "影響を受けた場所",
+        "location": "場所",
+        "reason": "理由",
+        "containingDirectory": "格納先フォルダー",
+        "unavailable": "この詳細情報は利用できなくなりました。状態を更新してください。",
+        "failed": "状態の詳細を読み込めませんでした。検索対象への接続を確認し、このダイアログを開き直してください。",
+        "reasons": {
+          "access_denied": "アクセスが拒否されました",
+          "unsupported_encoding": "フォルダー名を読み取れませんでした",
+          "unsafe_traversal": "フォルダーの安全性を確認できませんでした",
+          "scan_failed": "フォルダーを読み取れませんでした"
+        },
+        "actions": {
+          "access_denied": "接続先のアカウントにこのフォルダーの読み取り権限があるか確認してください。",
+          "unsupported_encoding": "フォルダー名に非対応の文字が含まれていないか、名前が長すぎないか確認してください。",
+          "unsafe_traversal": "スキャン中にフォルダーが変更されなかったか確認してください。問題が続く場合は、検索対象に再接続してください。",
+          "scan_failed": "フォルダーが存在し、読み取れることを確認してください。必要に応じて検索対象に再接続してください。"
+        }
+      },
+      "groups": {
+        "recentFiles": "最近のファイル",
+        "recentDirectories": "最近のフォルダー",
+        "directories": "フォルダー",
+        "currentDirectory": "現在のフォルダー"
+      },
+      "belowMinimum": "検索するには {{count}} 文字以上入力してください"
+    },
+    "commands": {
+      "categories": {
+        "navigation": "移動",
+        "files": "ファイル",
+        "view": "表示",
+        "panes": "ペイン",
+        "settings": "設定",
+        "help": "ヘルプ"
+      },
+      "items": {
+        "quickNav": {
+          "title": "移動モードを開く",
+          "description": "クイックバーからフォルダーに直接移動します"
+        },
+        "fileSearch": {
+          "title": "ファイル検索",
+          "description": "最近のファイルとアクティブなフォルダー内のファイルを検索します"
+        },
+        "commandPalette": {
+          "title": "コマンドを表示",
+          "description": "ファイルブラウザーのコマンドパレットを開きます"
+        },
+        "open": {
+          "title": "フォーカス中の項目を開く"
+        },
+        "navigateUp": {
+          "title": "1 つ上のフォルダーに移動"
+        },
+        "refresh": {
+          "title": "ファイル一覧を更新"
+        },
+        "rename": {
+          "title": "フォーカス中の項目の名前を変更"
+        },
+        "delete": {
+          "title": "フォーカス中の項目を削除"
+        },
+        "newDirectory": {
+          "title": "新しいフォルダーを作成"
+        },
+        "newFile": {
+          "title": "新しいファイルを作成"
+        },
+        "createArchive": {
+          "title": "ZIP アーカイブを作成"
+        },
+        "extractArchive": {
+          "title": "ZIP アーカイブから展開"
+        },
+        "openInApp": {
+          "title": "フォーカス中のファイルをネイティブアプリで開く"
+        },
+        "openInViewerPicker": {
+          "title": "フォーカス中のファイルを開く Sambee ビューアーを選択"
+        },
+        "openInNativePicker": {
+          "title": "フォーカス中のファイルを開くネイティブアプリを選択"
+        },
+        "toggleDualPane": {
+          "title": "2 ペイン表示を切り替え"
+        },
+        "openLocationInNewTab": {
+          "title": "現在の場所を新しいタブで開く"
+        },
+        "matchLeftPaneLocation": {
+          "title": "左ペインの場所を右ペインに合わせる"
+        },
+        "matchRightPaneLocation": {
+          "title": "右ペインの場所を左ペインに合わせる"
+        },
+        "focusLeftPane": {
+          "title": "左ペインにフォーカス"
+        },
+        "focusRightPane": {
+          "title": "右ペインにフォーカス"
+        },
+        "switchPane": {
+          "title": "アクティブなペインを切り替え"
+        },
+        "newTab": {
+          "title": "新しいフォルダータブ"
+        },
+        "closeTab": {
+          "title": "フォルダータブを閉じる"
+        },
+        "undoCloseTab": {
+          "title": "閉じたフォルダータブを復元"
+        },
+        "previousTab": {
+          "title": "前のフォルダータブ"
+        },
+        "nextTab": {
+          "title": "次のフォルダータブ"
+        },
+        "copyToOtherPane": {
+          "title": "もう一方のペインにコピー"
+        },
+        "moveToOtherPane": {
+          "title": "もう一方のペインに移動"
+        },
+        "openSettings": {
+          "title": "設定を開く"
+        },
+        "openConnectionsSettings": {
+          "title": "接続設定を開く"
+        },
+        "openSystemHealth": {
+          "title": "システムの稼働状況を開く"
+        },
+        "showHelp": {
+          "title": "キーボードショートカットを表示"
+        }
+      }
+    },
+    "toolbar": {
+      "newFolder": "新しいフォルダー",
+      "newFile": "新しいファイル",
+      "upload": "アップロード",
+      "uploadChoiceFiles": "ファイル",
+      "uploadChoiceFolder": "フォルダー",
+      "uploadFiles": "ファイルをアップロード",
+      "uploadFolder": "フォルダーをアップロード",
+      "createArchive": "アーカイブを作成",
+      "extractArchive": "アーカイブを展開",
+      "refresh": "更新",
+      "more": "その他"
+    },
+    "transfers": {
+      "downloadFailed": "ダウンロードできませんでした。もう一度お試しください。",
+      "downloadSizeLimitExceeded": "選択した ZIP は一時ダウンロードのサイズ上限を超えています。",
+      "preparingArchive": "アーカイブを準備中",
+      "downloading": "ダウンロードを準備中",
+      "preparingUpload": "アップロードを準備中",
+      "dropToUpload": "ドロップしてアップロード",
+      "dropUnavailable": "このフォルダーにはアップロードできません",
+      "dropBusy": "現在のアップロードを先に完了してください",
+      "dropUnsupported": "このブラウザーではフォルダーをドロップできません。「アップロード」を使用してください",
+      "uploadComplete_other": "{{count}} ファイルをアップロードしました",
+      "uploadSkipped_other": "{{count}} 件スキップ",
+      "uploadFailed_other": "{{count}} 件失敗",
+      "uploadUnknown_other": "{{count}} 件の結果が不明",
+      "uploadCancelled_other": "{{count}} 件キャンセル",
+      "uploadSummaryWithIssues": "{{summary}} · {{issues}}",
+      "uploadDestinationChanged": "アップロード先が変わったため、アップロードをキャンセルしました。フォルダーを選択してやり直してください。",
+      "uploadInspectDestination": "結果を確認できません。再試行する前にアップロード先を確認してください",
+      "uploadFolders": "フォルダー：{{created}} 個作成、{{merged}} 個統合、{{skipped}} 個スキップ",
+      "uploadPartial": "アップロードをキャンセルしました。転送済みのファイルとフォルダーはアップロード先に残ります。",
+      "uploadFolderFailed_other": "{{count}} 個のフォルダーで失敗",
+      "uploadProgress": "{{name}} をアップロード中（{{current}}/{{total}}） · {{bytes}} / {{size}} · {{completed}} 件完了、{{skipped}} 件スキップ、{{failed}} 件失敗",
+      "uploadSending": "{{name}} をアップロード中（{{current}}/{{total}}） · 送信中 · {{completed}} 件完了、{{skipped}} 件スキップ、{{failed}} 件失敗",
+      "uploadPublishing": "{{name}} をアップロード中（{{current}}/{{total}}） · 保存先に反映中 · {{completed}} 件完了、{{skipped}} 件スキップ、{{failed}} 件失敗",
+      "uploadRemaining_other": "未送信：{{count}} ファイル"
+    },
+    "compactActions": {
+      "clearSelection": "選択をすべて解除",
+      "createNewItem": "新しい項目を作成",
+      "deselect": "選択を解除",
+      "moreActionsFor": "{{name}} のその他の操作",
+      "select": "選択",
+      "selectedCount_other": "{{count}} 件選択中",
+      "selectionCleared": "選択をすべて解除しました",
+      "selectionActions": "選択した項目の操作"
+    },
+    "share": {
+      "filesOnly": "共有できるのはファイルのみです。フォルダーの選択を解除してください。",
+      "selectFiles": "共有するファイルを 1 つ以上選択してください。",
+      "preparing_other": "共有する {{count}} ファイルをダウンロード中…",
+      "ready_other": "{{count}} ファイルを共有できます",
+      "sharing": "共有メニューを開いています…",
+      "rejected": "ブラウザーでこれらのファイルを共有できませんでした。代わりにダウンロードしてください",
+      "fileTypeRejected": "この種類のファイルは、このブラウザーで共有できない場合があります。ダウンロードしてから、デバイスのファイルアプリで共有をお試しください。",
+      "downloadNext": "ダウンロード（{{current}}/{{count}}）",
+      "downloadFailed": "ファイルをダウンロードできませんでした"
+    },
+    "archiveMembers": {
+      "encrypted": "このアーカイブ内の項目は暗号化されています。プレビューまたは展開するには、アーカイブツールでパスワードを入力してください。",
+      "unsupportedCompression": "この項目の圧縮方式には Sambee が対応していません。別のアーカイブツールでプレビューまたは展開してください。",
+      "unavailable": "このアーカイブ内の項目は利用できません。別のアーカイブツールで内容を確認してください。"
+    },
+    "row": {
+      "openInCompanionApp": "ネイティブアプリで開く",
+      "openInBrowserViewer": "Sambee で開く",
+      "chooseBrowserViewer": "Sambee ビューアーを選択",
+      "openInNativeApp": "ネイティブアプリで開く",
+      "chooseNativeApp": "ネイティブアプリを選択",
+      "itemTypes": {
+        "folder": "フォルダー",
+        "file": "ファイル"
+      },
+      "shortcutSuffix": "（ショートカット）",
+      "shortcutTargetSuffix": "（ショートカットのリンク先：{{target}}）",
+      "unsavedLocalDraft": "未保存のローカル下書きがあります",
+      "unsavedLocalDraftSuffix": "：未保存のローカル下書きがあります",
+      "selectedSuffix": "（選択済み）"
+    },
+    "viewerPicker": {
+      "title": "ビューアーを選択",
+      "fileLabel": "開くファイル",
+      "open": "開く",
+      "openWithoutSaving": "保存せずに開く",
+      "alwaysUse": "この種類のファイルは常にこのビューアーで開く",
+      "default": "既定",
+      "openInNativeApp": "ネイティブアプリで開く",
+      "nativeDescription": "Sambee ビューアーの代わりにデスクトップアプリを使用します",
+      "viewers": {
+        "image": "画像ビューアー",
+        "markdown": "Markdown ビューアー",
+        "pdf": "PDF ビューアー",
+        "text": "テキストエディター"
+      }
+    },
+    "shortcuts": {
+      "copyToOtherPane": "もう一方のペインにコピー",
+      "copyToOtherPaneInDualPane": "もう一方のペインにコピー（2 ペインモード）",
+      "createArchive": "ZIP アーカイブを作成",
+      "download": "選択した項目をダウンロード",
+      "createDirectory": "新しいフォルダーを作成",
+      "createFile": "新しいファイルを作成",
+      "deleteItem": "ファイルまたはフォルダーを削除",
+      "extractArchive": "ZIP アーカイブを展開",
+      "fileSearch": "最近のファイルと現在のフォルダー内のファイルを検索",
+      "moveToOtherPane": "もう一方のペインに移動",
+      "moveToOtherPaneInDualPane": "もう一方のペインに移動（2 ペインモード）",
+      "navigateDown": "下の項目に移動",
+      "navigateUp": "1 つ上のフォルダーに移動",
+      "navigateUpRow": "上の項目に移動",
+      "openConnectionSelector": "接続の選択を開く",
+      "openInCompanion": "選択したファイルをネイティブアプリで開く",
+      "openNativePicker": "選択したファイルを開くネイティブアプリを選択",
+      "openQuickNavigation": "クイック移動を開く",
+      "openSelectedItem": "選択したファイルを Sambee で開く",
+      "openSettings": "設定を開く",
+      "openSmartNavigation": "移動モードを開く",
+      "openViewerPicker": "選択したファイルを開く Sambee ビューアーを選択",
+      "refresh": "ファイル一覧を更新",
+      "renameItem": "ファイルまたはフォルダーの名前を変更",
+      "selectAllFiles": "すべてのファイルを選択",
+      "selectAndMoveDown": "選択して下の項目へ移動",
+      "selectAndMoveUp": "選択して上の項目へ移動",
+      "selectToFirst": "フォーカス中の項目から最初の項目まで選択",
+      "selectToLast": "フォーカス中の項目から最後の項目まで選択",
+      "showCommands": "コマンドを表示",
+      "showHelp": "キーボードショートカットを表示",
+      "switchActivePane": "アクティブなペインを切り替え",
+      "previousTab": "前のフォルダータブを選択",
+      "nextTab": "次のフォルダータブを選択",
+      "newTab": "新しいフォルダータブ",
+      "closeTab": "選択中のフォルダータブを閉じる",
+      "openLocationInNewTab": "現在の場所を新しいタブで開く",
+      "matchLeftPaneLocation": "左ペインの場所を右ペインに合わせる",
+      "matchRightPaneLocation": "右ペインの場所を左ペインに合わせる",
+      "toggleDualPane": "2 ペイン表示を切り替え",
+      "toggleSelectionAndMoveDown": "選択状態を切り替えて下の項目へ移動",
+      "upload": "現在のフォルダーにファイルをアップロード"
+    },
+    "unavailableShortcuts": {
+      "archiveContentImmutable": "アーカイブの内容は変更できません。",
+      "archiveExtractionUnavailable": "このアーカイブは現在の展開先に展開できません。",
+      "companionUnavailable": "ローカルファイルを含むアーカイブを作成するには、先に Sambee Companion に接続してください。",
+      "destinationUnavailable": "この場所にはファイルを追加できません。",
+      "dualPaneRequired": "コピーするには 2 ペインモードが必要です。",
+      "interactionBlocked": "別の画面が開いている間はこの操作を実行できません。",
+      "readOnlyLocation": "この場所は読み取り専用です。",
+      "selectArchiveToExtract": "展開するアーカイブを選択してください。",
+      "selectItemToDelete": "削除する項目を選択してください。",
+      "selectItemToRename": "名前を変更する項目を選択してください。",
+      "selectItemsToArchive": "アーカイブに追加できる項目を選択してください。",
+      "selectItemsToCopy": "コピーする項目を 1 つ以上選択してください。",
+      "selectItemsToDownload": "ダウンロードする項目を 1 つ以上選択してください。",
+      "selectItemsToMove": "移動する項目を 1 つ以上選択してください。",
+      "sourceUnavailable": "選択した項目にはこの操作を実行できません。",
+      "locationUnavailable": "ペインの場所が読み込まれるまでお待ちください。読み込めない場合は「更新」を選択するか、別の場所を選択してください。",
+      "lastTabProtected": "各ペインでタブを 1 つ以上開いたままにしてください"
+    },
+    "tabs": {
+      "groupAriaLabel": "フォルダータブ",
+      "leftPaneGroupAriaLabel": "左ペインのフォルダータブ",
+      "rightPaneGroupAriaLabel": "右ペインのフォルダータブ",
+      "newTab": "新しいタブ",
+      "allTabsAriaLabel": "すべてのタブ（{{total}} 個）",
+      "allTabsOverflowAriaLabel": "すべてのタブ（{{total}} 個、非表示 {{hidden}} 個）",
+      "selectTabAriaLabel": "{{name}} — {{location}}",
+      "closeTabAriaLabel": "タブ「{{name}}」を閉じる（{{location}}）",
+      "closeTab": "タブを閉じる",
+      "closeBackgroundTabTooltip": "タブを閉じる（{{shortcut}} で選択中のタブを閉じる）",
+      "closeMenuTabTooltip": "タブを閉じる（{{shortcut}} でフォーカス中のタブを閉じる）",
+      "closedNotice": "タブを閉じました",
+      "undo": "元に戻す",
+      "selectedAnnouncement": "{{name}}、{{total}} 個中 {{index}} 番目のタブ",
+      "listInstructions": "左右の矢印キーでフォルダータブを切り替え、{{newTabShortcut}} で新しいタブを開き、{{closeTabShortcut}} で選択中のタブを閉じます。",
+      "restorationUnavailableNotice": "このブラウザーセッションでは、再読み込み後にタブを復元できません。"
+    },
+    "confirmDelete": {
+      "titleFile": "ファイルを削除",
+      "titleDirectory": "フォルダーを削除",
+      "titleMulti": "項目を削除",
+      "confirmFile": "次のファイルは完全に削除されます：",
+      "confirmDirectory": "次のフォルダーとその内容は完全に削除されます：",
+      "confirmMulti": "次の {{count}} 件の項目は完全に削除されます：",
+      "ariaLabelItem": "削除する項目",
+      "ariaLabelItems": "削除する項目の一覧",
+      "moreItems_other": "ほか {{count}} 件",
+      "buttonDeleting": "削除中…"
+    },
+    "operationContext": {
+      "file": "ファイル",
+      "sourceItem": "操作元の項目",
+      "destinationDirectory": "操作先フォルダー",
+      "archive": "アーカイブ",
+      "archiveMember": "アーカイブ内の項目",
+      "selectedItems": "選択した項目"
+    },
+    "rename": {
+      "titleFile": "ファイルの名前を変更",
+      "titleDirectory": "フォルダーの名前を変更",
+      "inputLabel": "新しい名前",
+      "description": "この項目の新しい名前を指定してください。",
+      "validationSame": "名前が変更されていません。",
+      "buttonRenaming": "名前を変更中…"
+    },
+    "createItem": {
+      "titleFile": "新しいファイル",
+      "titleDirectory": "新しいフォルダー",
+      "inputLabel": "名前",
+      "descriptionFile": "指定したフォルダーに新しいファイルを作成します。",
+      "descriptionDirectory": "指定したフォルダーに新しいフォルダーを作成します。",
+      "buttonCreating": "作成中…"
+    },
+    "archive": {
+      "createTitle": "ZIP アーカイブを作成",
+      "nameLabel": "アーカイブ名",
+      "createDescription_other": "選択した {{count}} 件の項目をまとめた ZIP アーカイブを、指定したフォルダーに作成します。",
+      "progressCreating": "アーカイブを作成中…",
+      "progressPreparing": "アーカイブを準備中…",
+      "progressProcessedMembers": "アーカイブ内の {{processed}} 件の項目を処理済み…",
+      "buttonCreate": "アーカイブを作成",
+      "buttonCreating": "アーカイブを作成中…",
+      "validationExtension": "アーカイブ名は .zip で終わる必要があります。",
+      "errorGeneric": "アーカイブの作成に失敗しました。",
+      "createPartialOutputError": "アーカイブの作成に失敗しました。新しい ZIP ファイルが不完全な可能性があります。",
+      "createCancelled": "アーカイブの作成をキャンセルしました。",
+      "buttonCancelCreation": "アーカイブの作成をキャンセル",
+      "progressSourceArchive": "元のアーカイブ",
+      "progressMembers": "{{total}} 件中 {{completed}} 件",
+      "progressBytes": "{{total}} バイト中 {{processed}} バイト",
+      "interruptedAfterReload": "アーカイブの処理が中断されました。再試行する前に処理先を確認してください。",
+      "browseError": "アーカイブの内容を読み込めませんでした。",
+      "downloadError": "アーカイブ内の項目をダウンロードできませんでした。",
+      "download": "ダウンロード",
+      "previewTitle": "{{name}} をプレビュー",
+      "previewLoading": "プレビューを読み込み中",
+      "previewError": "アーカイブ内の項目のプレビューを読み込めませんでした。",
+      "previewTooLarge": "この項目はサイズが大きすぎるためプレビューできません。表示するにはダウンロードしてください。",
+      "previewUnavailable": "この種類のファイルはここではプレビューできません。ダウンロードして別のアプリで開いてください。",
+      "closeBrowser": "アーカイブブラウザーを閉じる",
+      "root": "アーカイブのルート",
+      "breadcrumbs": "アーカイブ内のパス",
+      "historyBack": "戻る",
+      "historyForward": "進む",
+      "up": "上へ",
+      "more": "さらに読み込む",
+      "entryUnavailable": "利用できません",
+      "extractTitle": "ZIP アーカイブから展開",
+      "extractDescriptionArchive": "アーカイブを指定したフォルダーに展開します。",
+      "extractDescriptionMember": "選択した項目を指定したフォルダーに展開します。",
+      "extractDescriptionMembers_other": "選択した {{count}} 件の項目を指定したフォルダーに展開します。",
+      "memberErrorTitle": "展開エラーに対処",
+      "memberErrorPrompt": "アーカイブ内の項目を展開できませんでした。",
+      "destinationLabel": "展開先フォルダー",
+      "destinationNameLabel": "展開先の名前",
+      "buttonExtract": "展開",
+      "buttonExtracting": "展開中…",
+      "buttonCancelExtraction": "展開をキャンセル",
+      "buttonOpenDestination": "展開先を開く",
+      "buttonRetryMemberError": "この項目の展開を再試行",
+      "buttonIgnoreMemberError": "この項目をスキップ",
+      "validationDestinationEmpty": "展開先フォルダーを入力してください。",
+      "validationDestinationUnsafe": "空の区間や「.」「..」を含まない相対フォルダーパスを指定してください。",
+      "validationDestinationExists": "新しい展開先フォルダーを指定してください。アーカイブの展開では既存のフォルダーを上書きしません。",
+      "extractError": "アーカイブの展開に失敗しました。",
+      "extractPartialOutputError": "アーカイブの展開に失敗しました。展開先フォルダーに不完全なファイルが残っている可能性があります。",
+      "extractSuccess": "アーカイブの展開が完了しました。",
+      "summaryFilesExtracted": "展開したファイル",
+      "summaryDirectoriesCreated": "作成したフォルダー",
+      "summaryBytesWritten": "書き込んだバイト数",
+      "summaryFilesSkipped": "スキップしたファイル",
+      "summaryFilesReplaced": "置き換えたファイル",
+      "summaryPartialMembers": "不完全な項目",
+      "extractPartialSuccess_other": "アーカイブの展開が完了しました。{{count}} 件の項目をスキップしました。",
+      "extractEncryptedSkipped_other": "暗号化された {{count}} 件の項目をスキップしました。",
+      "extractUnsupportedCompressionSkipped_other": "非対応の圧縮方式で保存された {{count}} 件の項目をスキップしました。",
+      "extractCancelled": "アーカイブの展開をキャンセルしました。",
+      "extractInterrupted": "アーカイブの展開が中断されました。展開先に不完全なファイルが残っている可能性があります。",
+      "extractConflictPending": "ファイルの競合への対処が選択されるまで、アーカイブの展開を一時停止しています。",
+      "collisionTitle": "同名のファイルがすでにあります",
+      "collisionPrompt": "展開先にあるこれらのファイルの扱いを選択してください。",
+      "collisionListLabel": "競合するアーカイブ内の項目",
+      "collisionMore": "ほか {{count}} 件のファイルが競合しています。",
+      "collisionArchiveMemberLabel": "アーカイブ内の項目",
+      "collisionDestinationPathLabel": "展開先のパス",
+      "collisionArchiveColumn": "アーカイブ内",
+      "collisionDestinationColumn": "既存のファイル",
+      "collisionSizeLabel": "サイズ",
+      "collisionModifiedLabel": "更新日時",
+      "collisionByteCount": "{{count}} バイト",
+      "collisionResolutionLabel": "対処方法を選択",
+      "collisionChoiceSkip": "このファイルをスキップ",
+      "collisionChoiceReplace": "このファイルを置き換え",
+      "collisionChoiceReplaceOlder": "既存のファイルは、アーカイブ内のファイルの方が新しい場合にのみ置き換え",
+      "collisionChoiceRename": "展開するファイルの名前を変更",
+      "collisionApplyRemaining": "残りの競合にもこの選択を適用",
+      "collisionContinue": "続行",
+      "memberErrorTargetLabel": "展開先のパス",
+      "memberErrorPartialOutputNote": "展開先に不完全なファイルが作成されました。再試行すると、この項目を最初から展開します。",
+      "buttonSkipAll": "すべてスキップ",
+      "buttonReplaceAll": "すべて置き換え",
+      "buttonReplaceOlder": "古いファイルのみ置き換え",
+      "buttonSkip": "スキップ",
+      "buttonReplace": "置き換え",
+      "buttonRename": "名前を変更",
+      "renameTargetLabel": "新しい展開先のパス"
+    },
+    "nameDialog": {
+      "validationEmpty": "名前を入力してください。",
+      "validationInvalidChars": "使用できない文字を取り除いてください：\\ / : * ? \" < > |",
+      "validationDotNames": "「.」と「..」は予約済みのフォルダー名です。",
+      "validationTrailing": "名前の末尾に空白やピリオドは使用できません。"
+    },
+    "copyMove": {
+      "descriptionCopySingle": "この項目を指定したフォルダーにコピーします。",
+      "descriptionCopyMultiple_other": "選択した {{count}} 件の項目を指定したフォルダーにコピーします。",
+      "descriptionMoveSingle": "この項目を指定したフォルダーに移動します。",
+      "descriptionMoveMultiple_other": "選択した {{count}} 件の項目を指定したフォルダーに移動します。",
+      "labelDestination": "フォルダー",
+      "labelFilename": "新しい名前",
+      "errorSameFilename": "指定したフォルダーに同じ名前の項目がすでにあります。",
+      "errorSameDirectory": "操作先と操作元のフォルダーが同じです。",
+      "warnEmptyFilename": "名前を入力してください。",
+      "buttonCopying": "コピー中…",
+      "buttonMoving": "移動中…",
+      "progressCopy": "コピー中（{{total}} 件中 {{current}} 件目）…",
+      "progressMove": "移動中（{{total}} 件中 {{current}} 件目）…",
+      "errorGeneric": "操作に失敗しました。処理されていない項目がある可能性があります。"
+    },
+    "overwriteConflict": {
+      "title": "同名の項目がすでにあります",
+      "alreadyExists": "次の名前の項目がすでにあります：",
+      "folderConflict": "同名の項目があるため、フォルダーを追加できません。フォルダーをスキップするか、名前を変更してください。",
+      "fileFolderConflict": "同名のフォルダーがあるため、ファイルを追加できません。ファイルをスキップするか、名前を変更してください。",
+      "skipFolder": "フォルダーをスキップ",
+      "renameFolder": "追加するフォルダーの名前を変更",
+      "labelPath": "パス",
+      "labelTargetName": "操作先での名前",
+      "labelExisting": "操作先",
+      "labelIncoming": "操作元",
+      "labelSize": "サイズ",
+      "labelModified": "更新日時",
+      "metadataLabel": "操作先の詳細",
+      "resolutionLabel": "対処方法を選択",
+      "resolutionSkip": "スキップ",
+      "resolutionOverwrite": "上書き",
+      "resolutionOverwriteOnlyOlder": "古い項目のみ上書き",
+      "resolutionRename": "名前を変更",
+      "applyToAll": "この操作で発生する残りの競合にも、この選択を適用",
+      "targetNameUnchanged": "操作先では別の名前を指定してください。",
+      "noResolutionAvailable": "この項目の競合は解消できません。操作をキャンセルしてやり直してください。",
+      "cancelCopy": "コピーをキャンセル",
+      "cancelUpload": "アップロードをキャンセル",
+      "cancelMove": "移動をキャンセル",
+      "cancelExtraction": "展開をキャンセル",
+      "continue": "続行",
+      "progressContext_other": "{{total}} 件中 {{current}} 件目 • ここまでの競合：{{count}} 件"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "キャンセル",
+      "close": "閉じる",
+      "companionRecovery": "Companion で復元",
+      "connectionStatus": "接続状態",
+      "copy": "コピー",
+      "create": "作成",
+      "delete": "削除",
+      "discard": "破棄",
+      "download": "ダウンロード",
+      "edit": "編集",
+      "logout": "サインアウト",
+      "move": "移動",
+      "nextNotice": "次の通知",
+      "print": "印刷",
+      "rename": "名前を変更",
+      "replace": "置き換え",
+      "retry": "再試行",
+      "monitoringStopped": "自動更新が停止しました",
+      "save": "保存",
+      "share": "共有",
+      "skip": "スキップ"
+    },
+    "labels": {
+      "connection": "接続",
+      "itemToDelete": "削除する項目",
+      "root": "ルート",
+      "settings": "設定"
+    },
+    "navigation": {
+      "goBack": "戻る"
+    },
+    "search": {
+      "action": "検索",
+      "placeholder": "検索",
+      "clear": "検索をクリア",
+      "previousMatch": "前の一致箇所",
+      "nextMatch": "次の一致箇所"
+    }
+  },
+  "themeSelector": {
+    "openButtonLabel": "テーマを変更",
+    "dialogTitle": "テーマを選択",
+    "previewPrimaryColor": "プライマリカラー",
+    "modes": {
+      "light": "ライト",
+      "dark": "ダーク"
+    },
+    "builtInThemes": {
+      "sambeeLight": {
+        "name": "Sambee ライト",
+        "description": "アプリの標準ライトテーマ"
+      },
+      "sambeeDark": {
+        "name": "Sambee ダーク",
+        "description": "アプリの標準ダークテーマ"
+      }
+    }
+  },
+  "keyboardShortcutsHelp": {
+    "defaultTitle": "キーボードショートカット",
+    "emptyState": "利用できるキーボードショートカットはありません",
+    "noSearchResults": "一致するキーボードショートカットはありません",
+    "searchAriaLabel": "キーボードショートカットを検索",
+    "searchPlaceholder": "ショートカットを検索",
+    "resultsAriaLabel": "キーボードショートカットの検索結果",
+    "closeAriaLabel": "キーボードショートカットを閉じる",
+    "groups": {
+      "general": "全般",
+      "search": "検索",
+      "navigation": "移動",
+      "selection": "選択",
+      "fileActions": "ファイル操作",
+      "editing": "編集",
+      "view": "表示",
+      "panes": "ペインとレイアウト"
+    },
+    "titles": {
+      "fileBrowser": "ファイルブラウザーのショートカット",
+      "pdfViewer": "PDF ビューアーのショートカット",
+      "imageViewer": "画像ビューアーのショートカット",
+      "markdownViewer": "Markdown ビューアーのショートカット",
+      "markdownEditor": "Markdown エディターのショートカット",
+      "textEditor": "テキストエディターのショートカット"
+    }
+  },
+  "systemHealth": {
+    "dialogTitle": "システムの稼働状況",
+    "overview": {
+      "ok": "問題は見つかりませんでした",
+      "warning": "注意が必要",
+      "error": "対応が必要",
+      "unknown": "一部の確認を実行できません",
+      "partialChecks": "一部の確認を実行できません。",
+      "attentionHelp": "下の強調表示された項目を確認してください。",
+      "connectionHelp": "サーバーの確認結果を更新できません。確認は自動的に再試行されます。問題が続く場合は、ネットワーク接続を確認してください。",
+      "server": "サーバー",
+      "container": "コンテナー",
+      "containerApplicationData": "ストレージ：アプリデータ",
+      "containerTemporaryStorage": "ストレージ：一時データ",
+      "containerCombinedStorage": "ストレージ：アプリデータと一時データ",
+      "connectionStorage": "接続先のストレージ",
+      "localDrive": "ローカルドライブ",
+      "localDrives": "ローカルドライブ",
+      "smb": "SMB 接続",
+      "hostMemory": "メモリ",
+      "systemLoad": "ロードアベレージ（正規化済み）",
+      "containerMemory": "メモリ",
+      "percentUsed": "{{percent}}% 使用中",
+      "bytesUsed": "{{used}} 使用中",
+      "memoryUsed": "{{used}} 使用中（{{percent}}%）",
+      "spaceFree": "空き {{available}}（{{percent}}%）",
+      "noLimit": "上限なし",
+      "oldData": "データが古くなっています",
+      "checking": "確認中",
+      "localDriveHelp": "「設定」→「ローカルドライブ」で Companion の状態を確認してください。"
+    },
+    "statuses": {
+      "ok": "正常",
+      "warning": "警告",
+      "error": "エラー",
+      "unknown": "不明",
+      "informational": "情報",
+      "notAvailable": "利用できません"
+    },
+    "availability": {
+      "available": "最新",
+      "collecting": "収集中",
+      "not_mounted": "利用できません（マウント未設定）",
+      "unsupported": "利用できません",
+      "permission_denied": "権限がありません",
+      "offline": "オフライン",
+      "timeout": "タイムアウト",
+      "stale": "古いデータ",
+      "invalid": "無効な測定値",
+      "unavailable": "データ収集エラー"
+    },
+    "summary": {
+      "sectionTitle": "概要",
+      "severityLabel": "全体の状態",
+      "coverageLabel": "確認範囲",
+      "coverageComplete": "有効な項目はすべて確認済み",
+      "coverageIncomplete": "一部の項目が未確認",
+      "lastUpdatedLabel": "最終更新",
+      "neverUpdated": "初回確認を待っています",
+      "refreshing": "確認結果を更新中",
+      "policyRetrying": "稼働状況の監視権限を更新できません。Sambee が再試行します。",
+      "backendRetrying": "サーバーまたは SMB の一部の確認で、最新の測定値を取得できませんでした。Sambee が再試行します。",
+      "companionRetrying": "Companion から最新のドライブ測定値を取得できませんでした。Sambee が再試行します。",
+      "backendUnavailableHeadline": "サーバーの稼働状況データを利用できません。Sambee が再試行します。",
+      "localDriveErrorHeadline": "1 台のローカルドライブの空き容量が極端に少なくなっています。",
+      "localDriveErrorsHeadline": "{{count}} 台のローカルドライブの空き容量が極端に少なくなっています。",
+      "localDriveWarningHeadline": "1 台のローカルドライブの空き容量が少なくなっています。",
+      "localDriveWarningsHeadline": "{{count}} 台のローカルドライブの空き容量が少なくなっています。",
+      "localDriveUnknownHeadline": "ローカルドライブの空き容量データを利用できないか、Companion からの応答を待っています。"
+    },
+    "sections": {
+      "backendHost": "バックエンドのホスト",
+      "containerRuntime": "バックエンドのコンテナーランタイム",
+      "storage": "ストレージの空き容量"
+    },
+    "metrics": {
+      "hostMemory": "ホストのメモリ",
+      "systemLoad": "正規化したシステム負荷",
+      "cpuTemperature": "CPU 温度",
+      "containerMemory": "コンテナーのメモリ作業セット",
+      "load1m": "1 分",
+      "load5mEvaluated": "5 分（判定に使用）",
+      "load15m": "15 分",
+      "logicalCpuMetadata": "論理 CPU {{count}} 個",
+      "memoryCapacity": "合計 {{total}} · 利用可能 {{available}}",
+      "memoryLimit": "メモリ上限：{{limit}}",
+      "noMemoryLimit": "コンテナーにメモリ上限が設定されていないため、使用率に基づく通知は無効です。",
+      "hostMemoryPercent": "使用率は、ホストの総メモリを基準とします。",
+      "containerMemoryScope": "Sambee だけでなく、このコンテナーの全プロセスが対象です。ファイルキャッシュを除き、共有メモリとカーネルメモリを含みます。",
+      "fileCache": "ファイルキャッシュ：{{cache}}",
+      "storageCapacity": "容量：{{total}}",
+      "usedValue": "{{percent}}% 使用中（合計 {{total}} のうち {{used}} を使用、{{available}} が利用可能）",
+      "workingSetFinite": "上限の {{percent}}%（上限 {{limit}} に対して作業セットは {{used}}）",
+      "workingSetUnlimited": "作業セット {{used}} — メモリ上限は設定されていません。",
+      "storageValue": "空き {{percent}}%（合計 {{total}} のうち {{available}}）",
+      "thresholdsHigh": "警告 ≥ {{warning}}、エラー ≥ {{error}}",
+      "thresholdsLow": "警告 ≤ {{warning}}、エラー ≤ {{error}}",
+      "detectedLimits": "検出された限界：警告 {{warning}}、危険 {{error}}",
+      "effectiveThresholds": "有効なしきい値：警告 {{warning}}（{{warningOrigin}}）、エラー {{error}}（{{errorOrigin}}）",
+      "sourceLabel": "取得元：{{source}}",
+      "ageSeconds": "{{seconds}} 秒前",
+      "staleTag": "古いデータ（{{seconds}} 秒前）",
+      "actualFreeNote": "共有の物理的な空き容量の合計：{{actual}}",
+      "updateCompanion": "ドライブの空き容量を表示するには Companion をアップデートしてください。",
+      "pairingLost": "Companion がペアリングを確認できませんでした。「設定」→「ローカルドライブ」を確認し、必要に応じて再度ペアリングしてください。",
+      "localDriveAction": "空き容量を増やすか、別の場所を選択してください。"
+    }
+  }
+}

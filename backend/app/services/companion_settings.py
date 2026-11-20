@@ -18,6 +18,7 @@ from app.models.companion_settings import (
 )
 from app.models.theme import StoredTheme, ThemeDefinition
 from app.models.user import User
+from app.models.user_settings import CatalogLanguage, LocalizationUserSettingsRead
 from app.services.directory_policy_grants import backend_policy_identity
 from app.services.system_settings import build_directory_index_settings_read
 from app.services.user_settings import build_current_user_settings_read
@@ -37,7 +38,9 @@ def section_digest(payload: CompanionTheme | object) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def build_settings_sections(user: User, session: Session) -> tuple[ThemeSection, LocalizationSection, DirectoryIndexSection]:
+def build_settings_sections(
+    user: User, session: Session, browser_language: CatalogLanguage = "en"
+) -> tuple[ThemeSection, LocalizationSection, DirectoryIndexSection]:
     preferences = build_current_user_settings_read(user_id=user.id, session=session)
     theme_id = preferences.appearance.theme_id
     theme = BUILT_IN_THEMES.get(theme_id)
@@ -52,15 +55,19 @@ def build_settings_sections(user: User, session: Session) -> tuple[ThemeSection,
             theme = BUILT_IN_THEMES[DEFAULT_THEME_ID]
     scope = str(user.id)
     directory = build_directory_index_settings_read(DirectoryIndexPolicyScope.COMPANION, session)
+    localization = LocalizationUserSettingsRead(
+        language=browser_language if preferences.localization.language == "browser" else preferences.localization.language,
+        regional_locale=preferences.localization.regional_locale,
+    )
     return (
         ThemeSection(marker=section_digest(theme), user_scope=scope, payload=theme),
-        LocalizationSection(marker=section_digest(preferences.localization), user_scope=scope, payload=preferences.localization),
+        LocalizationSection(marker=section_digest(localization), user_scope=scope, payload=localization),
         DirectoryIndexSection(marker=str(directory.revision), payload=directory.policy),
     )
 
 
-def build_settings_metadata(user: User, session: Session) -> SettingsMetadata:
-    theme, localization, directory = build_settings_sections(user, session)
+def build_settings_metadata(user: User, session: Session, browser_language: CatalogLanguage = "en") -> SettingsMetadata:
+    theme, localization, directory = build_settings_sections(user, session, browser_language)
     return SettingsMetadata(
         backend_identity=backend_policy_identity(),
         theme=SectionMarker.model_validate(theme.model_dump(exclude={"payload"})),

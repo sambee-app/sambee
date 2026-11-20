@@ -1,8 +1,11 @@
+import native from "./native.en.json" with { type: "json" };
+
 type TranslationTree = {
   [key: string]: string | TranslationTree;
 };
 
 export const EN_TRANSLATIONS = {
+  native,
   app: {
     title: "Sambee Companion",
     idleMessage: "Running in system tray. No active edit operations.",
@@ -327,7 +330,3 @@ export const resources = {
     translation: PSEUDO_TRANSLATIONS,
   },
 } as const;
-
-export type SupportedLanguage = keyof typeof resources;
-
-export const SUPPORTED_LANGUAGES = Object.keys(resources) as SupportedLanguage[];

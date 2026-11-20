@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { translate } from "../i18n";
 import { applyTheme, getDefaultTheme } from "../lib/theme";
 import type { NativeApp } from "../types";
 import { APP_PICKER_FALLBACK_WIDTH, AppPickerView, type AppPickerViewState } from "./AppPicker";
 import { PreviewIndexLink } from "./PreviewIndexLink";
+import { PreviewLocalizationControls } from "./PreviewLocalizationControls";
+import { usePreviewSettings } from "./usePreviewSettings";
 import "../styles/app-picker-preview.css";
 
 const PREVIEW_TITLEBAR_HEIGHT = 38;
@@ -14,6 +15,7 @@ type PreviewStatus = "loaded" | "loading" | "empty" | "error";
 const PREVIEW_ERROR_MESSAGE = "Mock backend error: failed to enumerate registered handlers for this file type.";
 const PREVIEW_BROWSED_APP_PATH = "C:\\Program Files\\Custom Office\\Spreadsheet Studio.exe";
 const PREVIEW_EXTENSIONS = ["xlsx", "docx", "png", "csv"] as const;
+const LONG_PREVIEW_APP_SUFFIX = "Jahresabschlusszusammenstellungsprogramm";
 const PREVIEW_APPS: NativeApp[] = [
   {
     name: "Editor",
@@ -114,6 +116,11 @@ const PREVIEW_APPS: NativeApp[] = [
     is_recommended: false,
   },
 ];
+const LONG_PREVIEW_APPS: NativeApp[] = PREVIEW_APPS.map((app) => ({
+  ...app,
+  name: `${app.name} ${LONG_PREVIEW_APP_SUFFIX}`,
+  executable: `C:\\Program Files\\Unternehmenskommunikationssoftware\\${app.name}\\${LONG_PREVIEW_APP_SUFFIX}.exe`,
+}));
 
 function buildPreviewState(status: PreviewStatus, apps: NativeApp[]): AppPickerViewState {
   switch (status) {
@@ -130,6 +137,7 @@ function buildPreviewState(status: PreviewStatus, apps: NativeApp[]): AppPickerV
 
 /** Browser-only preview for iterating on the app picker dialog without Tauri. */
 export function AppPickerPreview() {
+  const previewSettings = usePreviewSettings();
   const [themeMode, setThemeMode] = useState<PreviewThemeMode>("light");
   const [status, setStatus] = useState<PreviewStatus>("loaded");
   const [extension, setExtension] = useState<string>(PREVIEW_EXTENSIONS[0]);
@@ -157,6 +165,11 @@ export function AppPickerPreview() {
       return currentIndex >= 0 && currentIndex < apps.length ? currentIndex : 0;
     });
   }, [apps, status]);
+
+  useEffect(() => {
+    setApps(previewSettings.dataVariant === "long" ? LONG_PREVIEW_APPS : PREVIEW_APPS);
+    setSelectedIndex(0);
+  }, [previewSettings.dataVariant]);
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -190,62 +203,68 @@ export function AppPickerPreview() {
   const previewState = buildPreviewState(status, apps);
 
   return (
-    <div
-      class="app-picker-preview"
+    <main
+      class={`app-picker-preview app-picker-preview--${status}`}
+      dir={previewSettings.direction === "auto" ? undefined : previewSettings.direction}
+      data-text-expansion={previewSettings.textExpansion ? "expanded" : "normal"}
       style={{
         "--app-picker-preview-width": `${APP_PICKER_FALLBACK_WIDTH}px`,
         "--app-picker-preview-height": `${previewHeight}px`,
         "--app-picker-preview-window-height": `${previewHeight + PREVIEW_TITLEBAR_HEIGHT}px`,
       }}
     >
-      <div class="app-picker-preview__nav">
-        <PreviewIndexLink />
-      </div>
-      <div class="app-picker-preview__toolbar">
-        <div class="app-picker-preview__group">
-          <label class="app-picker-preview__field">
-            <span>{translate("appPicker.title", { extension: "" }).replace(/\.$/, "")}</span>
-            <select value={extension} onChange={(event) => setExtension((event.target as HTMLSelectElement).value)}>
-              {PREVIEW_EXTENSIONS.map((value) => (
-                <option key={value} value={value}>
-                  .{value}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label class="app-picker-preview__field">
-            <span>State</span>
-            <select value={status} onChange={(event) => setStatus((event.target as HTMLSelectElement).value as PreviewStatus)}>
-              <option value="loaded">Loaded</option>
-              <option value="loading">Loading</option>
-              <option value="empty">Empty</option>
-              <option value="error">Error</option>
-            </select>
-          </label>
-
-          <label class="app-picker-preview__field">
-            <span>Theme</span>
-            <select value={themeMode} onChange={(event) => setThemeMode((event.target as HTMLSelectElement).value as PreviewThemeMode)}>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-            </select>
-          </label>
+      <header class="app-picker-preview__controls">
+        <div class="app-picker-preview__nav">
+          <PreviewIndexLink />
         </div>
+        <div class="app-picker-preview__toolbar">
+          <div class="app-picker-preview__group">
+            <label class="app-picker-preview__field">
+              <span>File extension</span>
+              <select value={extension} onChange={(event) => setExtension((event.target as HTMLSelectElement).value)}>
+                {PREVIEW_EXTENSIONS.map((value) => (
+                  <option key={value} value={value}>
+                    .{value}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <button
-          type="button"
-          class="app-picker-preview__toolbar-btn"
-          onClick={() => {
-            setApps(PREVIEW_APPS);
-            setAlwaysUse(false);
-            setSelectedIndex(0);
-            setStatus("loaded");
-          }}
-        >
-          Reset Preview
-        </button>
-      </div>
+            <label class="app-picker-preview__field">
+              <span>State</span>
+              <select value={status} onChange={(event) => setStatus((event.target as HTMLSelectElement).value as PreviewStatus)}>
+                <option value="loaded">Loaded</option>
+                <option value="loading">Loading</option>
+                <option value="empty">Empty</option>
+                <option value="error">Error</option>
+              </select>
+            </label>
+
+            <label class="app-picker-preview__field">
+              <span>Theme</span>
+              <select value={themeMode} onChange={(event) => setThemeMode((event.target as HTMLSelectElement).value as PreviewThemeMode)}>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <PreviewLocalizationControls settings={previewSettings} />
+          </div>
+
+          <button
+            type="button"
+            class="app-picker-preview__toolbar-btn"
+            onClick={() => {
+              setThemeMode("light");
+              setAlwaysUse(false);
+              setSelectedIndex(0);
+              setStatus("loaded");
+              void previewSettings.reset();
+            }}
+          >
+            Reset Preview
+          </button>
+        </div>
+      </header>
 
       <div class="app-picker-preview__viewport">
         <div class="app-picker-preview__window">
@@ -299,6 +318,6 @@ export function AppPickerPreview() {
           />
         </div>
       </div>
-    </div>
+    </main>
   );
 }

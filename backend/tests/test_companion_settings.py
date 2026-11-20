@@ -1,3 +1,5 @@
+import pytest
+
 from app.models.companion_settings import CompanionTheme
 from app.services.companion_settings import BUILT_IN_THEMES, build_settings_metadata, section_digest
 from tests.test_system_settings import _policy_grant_binding
@@ -33,9 +35,38 @@ def test_nonadmin_settings_delivery_is_canonical_and_single_use(client, auth_hea
     payload = response.json()
     assert payload["theme"]["payload"]["id"] == "sambee-light"
     assert payload["theme"]["user_scope"] == str(regular_user.id)
-    assert payload["localization"]["payload"] == {"language": "browser", "regional_locale": "browser"}
+    assert payload["localization"]["payload"] == {"language": "en", "regional_locale": "browser"}
     assert payload["directory_index"]["marker"] == "0"
     assert client.post("/api/admin/settings/companion/grants/redeem", json=redeem).status_code == 409
+
+
+@pytest.mark.parametrize("language", ["en", "zh-Hans", "nl", "fr", "de", "it", "ko", "ja", "pl", "pt", "es", "sv"])
+def test_localization_language_tags_round_trip(client, auth_headers_user, language):
+    settings = "/api/auth/me/settings"
+    endpoint = "/api/admin/settings/companion"
+    binding = {**_policy_grant_binding(), "version": 1, "sections": ["localization"]}
+    headers = {**auth_headers_user, "Origin": binding["origin"]}
+
+    def deliver(browser_language):
+        params = {"browser_language": browser_language}
+        metadata = client.get(endpoint, headers=headers, params=params)
+        assert metadata.status_code == 200
+        issued = client.post(f"{endpoint}/grants", headers=headers, json=binding, params=params)
+        assert issued.status_code == 200
+        redeem = {key: value for key, value in binding.items() if key != "sections"}
+        response = client.post(f"{endpoint}/grants/redeem", json={**redeem, "grant": issued.json()["grant"]})
+        assert response.status_code == 200
+        section = response.json()["localization"]
+        assert section["marker"] == metadata.json()["localization"]["marker"]
+        return section
+
+    assert client.put(settings, headers=headers, json={"field": "localization.language", "value": "browser"}).status_code == 200
+    assert deliver(language)["payload"] == {"language": language, "regional_locale": "browser"}
+    assert client.get(settings, headers=headers).json()["localization"]["language"] == "browser"
+
+    assert client.put(settings, headers=headers, json={"field": "localization.language", "value": language}).status_code == 200
+    assert client.get(settings, headers=headers).json()["localization"]["language"] == language
+    assert deliver("en" if language != "en" else "pt")["payload"] == {"language": language, "regional_locale": "browser"}
 
 
 def test_settings_grant_rejects_changed_section_but_not_unselected_policy(client, auth_headers_user, auth_headers_admin):

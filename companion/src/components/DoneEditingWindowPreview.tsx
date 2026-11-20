@@ -7,6 +7,7 @@ import {
   type DoneEditingFileStatus,
   DoneEditingWindowView,
 } from "./DoneEditingWindow";
+import { usePreviewSettings } from "./usePreviewSettings";
 
 const PREVIEW_TITLEBAR_HEIGHT = 38;
 
@@ -19,6 +20,11 @@ const PREVIEW_CONTEXT: DoneEditingContext = {
   app_name: "LibreOffice Calc",
   server_url: "https://sambee.example.test",
 };
+const LONG_PREVIEW_CONTEXT: DoneEditingContext = {
+  ...PREVIEW_CONTEXT,
+  filename: "Jahresabschlusszusammenstellungsdokumentation_Quartalsbudget_2026.xlsx",
+  app_name: "LibreOffice Tabellenkalkulationsprogramm für Unternehmensfinanzen",
+};
 
 const NOOP_BUTTON_HANDLERS: DoneEditingButtonHandlers = {
   onMouseDown: () => {},
@@ -30,6 +36,7 @@ const NOOP_BUTTON_HANDLERS: DoneEditingButtonHandlers = {
 
 /** Browser-only preview for the Done Editing window. */
 export function DoneEditingWindowPreview() {
+  const previewSettings = usePreviewSettings();
   const [themeMode, setThemeMode] = useState<PreviewThemeMode>("light");
   const [fileState, setFileState] = useState<PreviewFileState>("modified");
   const [windowState, setWindowState] = useState<PreviewWindowState>("idle");
@@ -62,6 +69,7 @@ export function DoneEditingWindowPreview() {
       title="Done Editing Window"
       themeMode={themeMode}
       onThemeModeChange={setThemeMode}
+      settings={previewSettings}
       onReset={() => {
         setThemeMode("light");
         setFileState("modified");
@@ -100,7 +108,7 @@ export function DoneEditingWindowPreview() {
         </div>
         <div class="dialog-preview__window-meta">340 x {260 + PREVIEW_TITLEBAR_HEIGHT}</div>
         <DoneEditingWindowView
-          context={PREVIEW_CONTEXT}
+          context={previewSettings.dataVariant === "long" ? LONG_PREVIEW_CONTEXT : PREVIEW_CONTEXT}
           fileStatus={fileStatus}
           processing={processing}
           uploadProgress={0.62}

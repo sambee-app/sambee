@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from json import JSONDecodeError
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, cast, get_args
 
 from sqlmodel import Session, col, select
 
@@ -29,6 +29,7 @@ from app.models.theme import StoredTheme
 from app.models.user_settings import (
     AppearanceUserSettingsRead,
     BrowserUserSettingsRead,
+    CatalogLanguage,
     CurrentUserSettingsRead,
     CurrentUserSettingsUpdate,
     CurrentUserSettingsUpdateResult,
@@ -52,7 +53,7 @@ VALID_TOUCH_FRIENDLY_FILE_SELECTIONS = {"auto", "always", "never"}
 VALID_IMAGE_VIEWER_TRANSITIONS = {"carousel", "none"}
 MIN_TEXT_EDITOR_MAX_FILE_SIZE_BYTES = 65_536
 MAX_TEXT_EDITOR_MAX_FILE_SIZE_BYTES = 104_857_600
-VALID_LANGUAGE_PREFERENCES = {DEFAULT_LANGUAGE_PREFERENCE, "en", "en-XA"}
+VALID_LANGUAGE_PREFERENCES = {*get_args(CatalogLanguage), DEFAULT_LANGUAGE_PREFERENCE, "en-XA"}
 REGIONAL_LOCALE_PATTERN = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 BUILT_IN_THEME_IDS_PATHS = (
     Path(__file__).resolve().parents[3] / "shared" / "built_in_theme_ids.json",

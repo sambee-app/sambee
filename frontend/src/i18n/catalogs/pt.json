@@ -1,0 +1,1891 @@
+{
+  "viewer": {
+    "pdfPassword": {
+      "title": "Desbloquear PDF",
+      "description": "Introduza a senha para ver este PDF.",
+      "open": "Abrir PDF",
+      "label": "Senha do PDF",
+      "show": "Mostrar senha",
+      "hide": "Ocultar senha"
+    },
+    "shortcuts": {
+      "close": "Fechar",
+      "edit": "Editar",
+      "save": "Salvar",
+      "download": "Baixar",
+      "search": "Pesquisar",
+      "previousMatch": "Resultado anterior",
+      "nextMatch": "Próximo resultado",
+      "open": "Abrir",
+      "showHelp": "Mostrar atalhos de teclado",
+      "previous": "Anterior",
+      "next": "Seguinte",
+      "previousPage": "Página anterior",
+      "nextPage": "Próxima página",
+      "zoomIn": "Ampliar",
+      "zoomOut": "Reduzir",
+      "rotateLeft": "Girar para a esquerda",
+      "rotateRight": "Girar para a direita",
+      "bold": "Negrito",
+      "italic": "Itálico",
+      "createLink": "Criar link",
+      "insertTable": "Inserir tabela",
+      "insertThematicBreak": "Inserir separador",
+      "inlineCode": "Código em linha",
+      "insertCodeBlock": "Inserir bloco de código",
+      "firstPage": "Primeira página",
+      "lastPage": "Última página",
+      "firstImage": "Primeira imagem",
+      "lastImage": "Última imagem",
+      "resetZoom": "Restaurar ampliação",
+      "toggleFullscreen": "Alternar modo de tela inteira"
+    },
+    "fallback": {
+      "retry": "Tentar novamente",
+      "failedTitle": "Visualizador indisponível",
+      "unsupportedTitle": "Visualizador não suportado",
+      "closeAriaLabel": "Fechar erro do visualizador",
+      "failedMessageWithError": "{{message}} Não foi possível carregar o código do visualizador.",
+      "failedMessageGeneric": "Não foi possível carregar o código do visualizador. Isso pode acontecer se o backend ou o servidor de recursos estiver temporariamente indisponível.",
+      "unsupportedMessage": "Não há visualizador disponível para este tipo de arquivo nesta versão da interface.",
+      "stillAvailable": "O navegador de arquivos continua disponível. Pode fechar esta janela e continuar a trabalhar noutra parte da aplicação."
+    },
+    "edit": {
+      "replace": "Substituir",
+      "previousMatch": "Resultado anterior",
+      "nextMatch": "Próximo resultado",
+      "recovery": {
+        "unknown": "Desconhecido",
+        "title": "Rascunho local não salvo disponível",
+        "description": "Há um rascunho local não salvo.",
+        "newerDescription": "Há um rascunho local não salvo que foi atualizado depois do arquivo salvo.",
+        "savedFile": "Arquivo salvo",
+        "localDraft": "Rascunho local",
+        "discard": "Descartar rascunho",
+        "resume": "Retomar edição",
+        "tooLargeWarning": "Não é possível recuperar o rascunho porque esta edição é demasiado grande.",
+        "storageUnavailableWarning": "A recuperação de rascunhos não está disponível nesta sessão do navegador."
+      },
+      "undo": "Desfazer",
+      "replaceAll": "Substituir todos",
+      "lockFailed": "Não foi possível entrar no modo de edição. {{message}}",
+      "lockFailedReason": "Não foi possível obter o bloqueio de edição.",
+      "saveFailed": "Não foi possível salvar as alterações no Markdown.",
+      "commandFailed": "Não foi possível executar {{action}}. {{message}}",
+      "commandFailedReason": "O editor rejeitou o comando.",
+      "discardConfirm": "Descartar as alterações não salvas?",
+      "closeConfirm": "Há alterações não salvas. Fechar o visualizador mesmo assim?",
+      "editorLabel": "Editor de Markdown",
+      "editorLoadTitle": "Não foi possível carregar o editor",
+      "editorLoadMessage": "Não foi possível carregar o editor de Markdown. O rascunho continua na memória. Tente abrir o editor novamente ou volte à prévia em modo somente de leitura.",
+      "editorLoadFailedReason": "Não foi possível carregar o código do editor.",
+      "editorCrashTitle": "Editor indisponível",
+      "editorCrashMessage": "Ocorreu um erro interno no editor de Markdown. O rascunho continua na memória. Tente abrir o editor novamente ou volte à prévia em modo somente de leitura.",
+      "retryEditor": "Tentar abrir o editor novamente",
+      "returnToPreview": "Voltar à prévia",
+      "unsavedIndicator": "Não salvo",
+      "unsavedIndicatorAria": "Alterações não salvas",
+      "unsavedChangesTitle": "Alterações não salvas",
+      "unsavedChangesExitMessage": "Deseja salvar as alterações antes de sair do modo de edição?",
+      "unsavedChangesCloseMessage": "Deseja salvar as alterações antes de fechar o visualizador?",
+      "searchUnavailable": "A pesquisa na barra de ferramentas do visualizador só está disponível no modo de edição de texto avançado.",
+      "caseSensitive": "Diferenciar maiúsculas de minúsculas",
+      "caseSensitiveShortcut": "Diferenciar maiúsculas de minúsculas (Alt+C)",
+      "find": "Localizar",
+      "findReplace": "Localizar e substituir",
+      "findWithHistory": "Pesquisar (⇅ para ver o histórico)",
+      "invalidRegularExpression": "Expressão regular inválida",
+      "matchOptions": "Opções de correspondência",
+      "regularExpression": "Usar expressão regular",
+      "regularExpressionShortcut": "Usar expressão regular (Alt+R)",
+      "replacing": "A substituir resultados…",
+      "replacementFailed": "Falha na substituição. Tente novamente com Substituir todos.",
+      "replaceCurrent": "Substituir resultado atual",
+      "wholeWord": "Pesquisar palavra inteira",
+      "wholeWordShortcut": "Pesquisar palavra inteira (Alt+W)",
+      "bold": "Negrito",
+      "removeBold": "Remover negrito",
+      "italic": "Itálico",
+      "replaceWithHistory": "Substituir (⇅ para ver o histórico)",
+      "toggleCaseSensitive": "Ativar ou desativar distinção entre maiúsculas e minúsculas",
+      "toggleWholeWord": "Ativar ou desativar pesquisa por palavra inteira",
+      "toggleRegularExpression": "Ativar ou desativar uso de expressão regular",
+      "toggleWordWrap": "Ativar ou desativar quebra automática de linha",
+      "removeItalic": "Remover itálico",
+      "underline": "Sublinhado",
+      "removeUnderline": "Remover sublinhado",
+      "redo": "Refazer"
+    },
+    "helpTitles": {
+      "pdf": "Atalhos do visualizador de PDF",
+      "image": "Atalhos do visualizador de imagens",
+      "markdown": "Atalhos do visualizador de Markdown"
+    },
+    "text": {
+      "readOnlyReasons": {
+        "read-only": "Este local é somente de leitura.",
+        "locked": "Este arquivo está sendo editado em outra sessão. Pode lê-lo aqui e voltar a tentar editar quando o bloqueio for libertado.",
+        "permission-denied": "Não tem permissão de escrita neste arquivo.",
+        "unsupported": "Esta origem não permite edição.",
+        "unavailable": "A permissão de escrita está temporariamente indisponível. Pode continuar a ler ou voltar a tentar editar.",
+        "lost": "O bloqueio de edição já não está ativo. O rascunho foi preservado. Volte a tentar editar para obter um novo bloqueio.",
+        "conflict": "O arquivo salvo mudou enquanto o rascunho não estava protegido por um bloqueio de edição."
+      },
+      "lockFailedReason": "Não foi possível obter o bloqueio de edição.",
+      "loadFailed": "Não foi possível carregar o arquivo.",
+      "lockFailed": "Aberto em modo somente de leitura. {{message}}",
+      "saveFailed": "Não foi possível salvar as alterações no arquivo de texto.",
+      "editorLabel": "Editor de texto",
+      "editorCrashTitle": "Editor de texto indisponível",
+      "editorCrashMessage": "Ocorreu um erro interno no editor de texto. O rascunho continua na memória. Tente abrir o editor novamente ou feche o arquivo.",
+      "acquiring": "A verificar permissão de escrita…",
+      "retryEditing": "Tentar editar novamente",
+      "lockedNotification": "Este arquivo está sendo editado em outra sessão. Pode lê-lo aqui. Quando o outro editor for fechado, volte a tentar editar com <retryIcon/>.",
+      "heartbeatFailed": "Não foi possível renovar o bloqueio de edição. Verifique a conexão. Pode ser necessário obter novamente o bloqueio para salvar.",
+      "conflictTitle": "Arquivo alterado",
+      "conflictDescription": "O arquivo salvo é diferente da versão original do rascunho. Escolha que conteúdo manter no editor. Se mantiver o rascunho, ele só será salvo quando selecionar Salvar.",
+      "useSavedFile": "Usar arquivo salvo",
+      "keepDraft": "Manter o meu rascunho",
+      "limitMessage": "Este arquivo tem {{currentSizeMb}} MB e excede o limite de {{maxSizeMb}} MB do editor de texto. Por segurança, o Sambee abriu-o num visualizador alternativo em modo somente de leitura, em vez de usar o editor CodeMirror completo.",
+      "limitSearchUnavailable": "A pesquisa não está disponível no visualizador alternativo para arquivos grandes."
+    },
+    "share": {
+      "detailsAction": "Detalhes",
+      "unsupported": "O compartilhamento não está disponível neste dispositivo ou navegador",
+      "preparing": "A preparar arquivo para compartilhar…",
+      "failed": "Não foi possível compartilhar o arquivo",
+      "failedText": "Não foi possível compartilhar o texto",
+      "payloadUnsupported": "Este navegador não pode compartilhar este anexo.",
+      "details": "Detalhes do compartilhamento",
+      "copyDetails": "Copiar detalhes do compartilhamento",
+      "copySuccess": "Detalhes do compartilhamento copiados.",
+      "copyError": "Não foi possível copiar os detalhes do compartilhamento. Selecione o relatório para o copiar manualmente.",
+      "downloadSuggestion": "Em vez disso, baixe o arquivo e compartilhe-o pelo gerenciador de arquivos do dispositivo.",
+      "asFile": "Compartilhar como arquivo",
+      "asText": "Compartilhar como texto"
+    },
+    "slowImage": "Esta imagem está a demorar mais do que o habitual.",
+    "slowPdf": "Este PDF está a demorar mais do que o habitual.",
+    "pdfLoadFailed": "Não foi possível carregar o documento PDF",
+    "renderingFailed": "Não foi possível terminar de apresentar este documento. Feche e reabra o arquivo para tentar novamente.",
+    "renderingPrintPending": "O documento ainda está a carregar. Feche a janela de impressão e tente novamente quando o carregamento terminar.",
+    "printTitle": "Imprimir / Salvar como PDF",
+    "printError": "Não foi possível abrir a janela de impressão. Use a opção Imprimir no menu do navegador.",
+    "controls": {
+      "previous": "Anterior",
+      "next": "Seguinte",
+      "previousPage": "Página anterior",
+      "nextPage": "Próxima página",
+      "previousImage": "Imagem anterior",
+      "nextImage": "Próxima imagem",
+      "zoomIn": "Ampliar",
+      "zoomOut": "Reduzir",
+      "rotateLeft": "Girar para a esquerda",
+      "rotateRight": "Girar para a direita",
+      "shareUnavailable": "O compartilhamento não está disponível neste dispositivo ou navegador",
+      "searchUnavailable": "Pesquisa indisponível: o PDF não tem camada de texto (pode ser uma imagem digitalizada)",
+      "pdfSearchPlaceholder": "Pesquisar no PDF…"
+    }
+  },
+  "app": {
+    "loading": "A carregar…",
+    "errorBoundary": {
+      "title": "Algo correu mal",
+      "description": "Ocorreu um erro inesperado. O erro foi registado.",
+      "tryAgain": "Tentar novamente",
+      "reloadPage": "Recarregar página",
+      "developmentDetails": "Detalhes do erro (apenas para desenvolvimento)"
+    },
+    "updateAvailable": {
+      "title": "Atualização disponível",
+      "description": "Está disponível uma versão mais recente do Sambee.",
+      "currentBuild": "Compilação atual: v{{version}} ({{commit}})",
+      "latestBuild": "Compilação mais recente: v{{version}} ({{commit}})",
+      "later": "Mais tarde",
+      "reload": "Recarregar agora"
+    }
+  },
+  "auth": {
+    "passwordChange": {
+      "title": "Alterar senha",
+      "required": "O administrador exige que altere a sua senha local do Sambee para continuar.",
+      "checking": "A verificar a conta…",
+      "checkFailed": "Não foi possível verificar a sua conta. Tente novamente.",
+      "checkForChangeFailed": "Não foi possível verificar a sua conta. Entre novamente ou tente de novo.",
+      "changeFailed": "Não foi possível alterar a senha. Tente novamente.",
+      "current": "Senha atual",
+      "new": "Nova senha",
+      "confirmation": "Confirmar nova senha",
+      "mismatch": "As senhas não coincidem.",
+      "show": "Mostrar senhas",
+      "hide": "Ocultar senhas",
+      "signOut": "Sair",
+      "changing": "Alteração da senha em andamento…",
+      "retry": "Tentar novamente"
+    },
+    "oidcCallback": {
+      "progress": "A concluir o acesso",
+      "failed": "Não foi possível concluir o acesso.",
+      "title": "Acesso indisponível",
+      "retry": "Tentar novamente"
+    },
+    "login": {
+      "title": "Iniciar sessão no Sambee",
+      "usernameLabel": "Nome de usuário",
+      "passwordLabel": "Senha",
+      "submit": "Iniciar sessão",
+      "submitWithPassword": "Iniciar sessão com senha",
+      "submitWithOidc": "Iniciar sessão por SSO ({{providerName}} OIDC)",
+      "invalidCredentials": "Nome de usuário ou senha incorretos"
+    }
+  },
+  "settings": {
+    "appearancePage": {
+      "localizationTitle": "Idioma e região",
+      "localizationDescription": "Escolha o idioma da interface e o formato de datas e números.",
+      "languageLabel": "Idioma",
+      "languageDescription": "Escolha o idioma da interface.",
+      "languageLoadFailed": "Não foi possível carregar o idioma. O Sambee está em inglês. Selecione o idioma novamente para tentar outra vez.",
+      "regionalLocaleLabel": "Configurações regionais",
+      "regionalLocaleDescription": "Escolha a região usada para formatar datas, horas e números e para ordenar itens.",
+      "browserDefaultOption": "Usar a configuração do navegador",
+      "themeTitle": "Tema",
+      "themeDescription": "Escolha o tema e os padrões visuais da aplicação.",
+      "englishLanguageOption": "Inglês",
+      "pseudoLanguageOption": "Pseudoinglês (para testes de localização)",
+      "pseudoLanguageShortLabel": "Pseudoinglês",
+      "pseudoLanguageDescription": "Pseudoinglês serve para testar a localização.",
+      "themeScopes": {
+        "personal": "Seus temas",
+        "site": "Temas do site",
+        "builtIn": "Temas integrados"
+      },
+      "themeDefaultBadge": "Padrão",
+      "themeSiteDefaultTitle": "Padrão do site",
+      "themeSetDefault": "Definir como padrão",
+      "themeDeleteTitle": "Excluir tema?",
+      "themeDeleteDescription": "Excluir {{themeName}}? Quem o selecionou usará o tema padrão do site.",
+      "regionalLocaleOptions": {
+        "enUS": "Inglês (Estados Unidos)",
+        "enGB": "Inglês (Reino Unido)",
+        "deDE": "Alemão (Alemanha)",
+        "frFR": "Francês (França)",
+        "jaJP": "Japonês (Japão)",
+        "zhCN": "Chinês (China)",
+        "nlNL": "Holandês (Países Baixos)",
+        "itIT": "Italiano (Itália)",
+        "koKR": "Coreano (Coreia do Sul)",
+        "plPL": "Polonês (Polônia)",
+        "ptPT": "Português (Portugal)",
+        "esES": "Espanhol (Espanha)",
+        "svSE": "Sueco (Suécia)"
+      },
+      "regionalSettingsPreviewTitle": "Prévia"
+    },
+    "companionSync": {
+      "sections": {
+        "localization": "Idioma e região",
+        "theme": "Tema",
+        "directory_index": "Política de pesquisa de pastas"
+      },
+      "results": {
+        "defaults_active": "Padrões integrados",
+        "synchronized": "Sincronizado",
+        "synchronizing": "A sincronizar",
+        "update_required": "Atualização necessária",
+        "authority_conflict": "Outro servidor gerencia as configurações",
+        "pairing_required": "Emparelhamento necessário",
+        "delivery_failed": "Falha na entrega; últimas configurações válidas ativas"
+      },
+      "defaults_active": "Os padrões integrados ficam ativos até receber configurações de um servidor emparelhado.",
+      "synchronized": "As configurações estão sincronizadas.",
+      "synchronizing": "As configurações estão a ser sincronizadas. As últimas configurações válidas continuam ativas.",
+      "update_required": "Atualize o Sambee e o Companion para usar a entrega de configurações compartilhadas.",
+      "languageUpdateRequired": "Atualize o Sambee Companion para usar este idioma e tente novamente. O último idioma válido do Companion continua ativo.",
+      "directoryPolicyUpdateRequired": "Atualize o Sambee Companion para usar estes valores da política de pesquisa de pastas e tente novamente. A última política válida e a pesquisa de pastas continuam disponíveis.",
+      "authority_conflict": "Este servidor não gerencia as configurações do Companion. Emparelhe novamente o servidor pretendido para que este passe a gerenciar as configurações.",
+      "pairing_required": "O Companion não conseguiu autenticar este navegador. Em Configurações > Unidades locais, emparelhe o navegador ou repita o emparelhamento para reparar a conexão. A verificação das configurações fica suspensa até tentar novamente ou concluir o emparelhamento.",
+      "delivery_failed": "Falha na entrega das configurações. Verifique a conexão e tente novamente. As últimas configurações válidas e a pesquisa de pastas continuam disponíveis.",
+      "authority": "Origem que gerencia as configurações: {{origin}}"
+    },
+    "localDrives": {
+      "pairingDialog": {
+        "cancelButton": "Cancelar",
+        "closeButton": "Fechar",
+        "retryButton": "Tentar novamente",
+        "title": "Emparelhar com o Companion",
+        "intro": "Emparelhe este navegador com o Sambee Companion para navegar nas unidades locais. Certifique-se de que o Companion está em execução neste computador.",
+        "verifyCodePrompt": "Verifique se este código corresponde ao que aparece no Companion:",
+        "verifyCodeHelp": "Se os códigos coincidirem, clique em Confirmar abaixo e aprove o emparelhamento no Companion.",
+        "confirming": "A aguardar confirmação do Companion…",
+        "success": "Emparelhamento concluído! As unidades locais estão agora disponíveis.",
+        "startButton": "Iniciar emparelhamento",
+        "confirmButton": "Os códigos coincidem — Confirmar",
+        "doneButton": "Concluir",
+        "initiateFailed": "Não foi possível iniciar o emparelhamento. O Companion está em execução?",
+        "confirmFailed": "O emparelhamento falhou. O Companion pode ter rejeitado o pedido ou o emparelhamento pode ter expirado."
+      },
+      "headerTitle": "Unidades locais",
+      "headerDescription": "Emparelhe o Sambee Companion e controle o acesso deste navegador às unidades locais.",
+      "menuActionLabel": "Gerenciar unidades locais…",
+      "intro": "Gerencie o emparelhamento do Sambee Companion com este navegador e verifique o acesso às unidades locais deste computador.",
+      "summaryTitle": "Estado atual",
+      "secureContextTitle": "As unidades locais exigem um navegador seguro com Web Crypto",
+      "secureContextMessage": "O emparelhamento e o acesso às unidades locais exigem um contexto de navegador seguro com suporte a Web Crypto. Use HTTPS (ou localhost para desenvolvimento local) e um navegador com Web Crypto ativo.",
+      "unsupportedMobileTitle": "As unidades locais exigem um navegador de computador",
+      "unsupportedMobileDescription": "O Sambee Companion não está disponível no iOS ou no Android.",
+      "unsupportedMobileAlert": "Use o Sambee num navegador de computador com Windows, macOS ou Linux para instalar o Companion, emparelhar este navegador e acessar as unidades locais.",
+      "statusLabelReady": "Pronto",
+      "statusLabelActionRequired": "Ação necessária",
+      "statusLabelUnavailable": "Companion indisponível",
+      "summaryReadyTitle": "As unidades locais estão prontas a usar",
+      "summaryPairingRequiredTitle": "Emparelhe este navegador para acessar as unidades locais",
+      "summaryPendingApprovalTitle": "Conclua a aprovação no Sambee Companion",
+      "summaryRepairTitle": "Repare o emparelhamento deste navegador",
+      "summaryUpdateRequiredTitle": "Atualize o Sambee Companion",
+      "summaryBrowserUpdateRequiredTitle": "Atualize o Sambee",
+      "summaryVerificationUnavailableTitle": "Não foi possível verificar o acesso às unidades locais",
+      "summaryUnavailableTitle": "Inicie o Sambee Companion neste computador",
+      "companionRunningChecklistLabel": "O Companion está em execução",
+      "browserFullyPairedChecklistLabel": "Este navegador está emparelhado",
+      "accessSectionTitle": "Acesso local",
+      "accessSectionDescription": "Gerencie o emparelhamento deste navegador e confirme se o acesso às unidades locais está disponível.",
+      "pairingSectionTitle": "Emparelhar este navegador",
+      "pairingSectionReady": "Este navegador já está emparelhado com o Sambee Companion.",
+      "pairingSectionUnavailable": "Inicie o Sambee Companion neste computador e volte aqui para emparelhar este navegador.",
+      "pairingSectionRequired": "Aprove um pedido de emparelhamento no Sambee Companion para permitir a navegação nas unidades locais.",
+      "pairingSectionPendingApproval": "Já existe um pedido de emparelhamento pendente no Sambee Companion. Aprove ou rejeite esse pedido antes de iniciar outra tentativa.",
+      "pairingSectionRepair": "Recarregue primeiro esta página para atualizar a conexão do Sambee com o Companion. Se o acesso às unidades locais continuar a falhar, emparelhe novamente este navegador.",
+      "verificationSectionTitle": "Verificar acesso local",
+      "verificationSectionDescription": "Faça uma verificação rápida para confirmar que este navegador ainda tem acesso às unidades locais.",
+      "verificationSectionReady": "Faça uma verificação rápida do acesso antes de abrir arquivos locais no Sambee.",
+      "verificationSectionBlocked": "Conclua primeiro o emparelhamento e depois teste-o aqui.",
+      "troubleshootingSectionTitle": "Gerenciar o emparelhamento deste navegador",
+      "troubleshootingSectionDescription": "Consulte ou remova o emparelhamento que dá a este navegador acesso às unidades locais.",
+      "troubleshootingSectionReady": "Desemparelhe este navegador para remover o acesso às unidades locais deste computador.",
+      "loadError": "Não foi possível carregar o estado do Companion.",
+      "pairingCreated": "Emparelhamento para unidades locais criado.",
+      "pairingRemoved": "Este navegador foi desemparelhado.",
+      "pairingRemoveFailed": "Não foi possível remover o emparelhamento.",
+      "pairingTestSucceeded": "Emparelhamento verificado. Este navegador tem acesso às unidades locais.",
+      "pairingTestFailed": "O Companion rejeitou a assinatura deste navegador. Recarregue primeiro o Sambee. Se o teste ainda falhar, emparelhe novamente este navegador.",
+      "pairingTestUnavailable": "Não foi possível verificar o acesso às unidades locais. Verifique se o Companion está em execução e repita o teste.",
+      "reloadButton": "Recarregar o Sambee",
+      "statusUnavailable": "O Sambee Companion não está em execução neste computador. Inicie-o e volte aqui para emparelhar este navegador, testar o acesso às unidades locais ou abrir arquivos locais no Sambee.",
+      "statusPaired": "Este navegador está emparelhado com o Sambee Companion e pode navegar pelas unidades locais e abrir arquivos locais no Sambee.",
+      "statusPendingApproval": "Um pedido de emparelhamento deste navegador aguarda aprovação no Sambee Companion. Conclua esse pedido no Companion antes de tentar novamente.",
+      "statusRecoverable": "O Companion não consegue verificar o emparelhamento deste navegador. Recarregue primeiro o Sambee para aplicar eventuais atualizações. Se o acesso ainda falhar, emparelhe novamente este navegador.",
+      "statusUpdateRequired": "Esta versão do Companion usa um protocolo de autenticação antigo. Atualize e reinicie o Companion, depois recarregue o Sambee. Repetir o emparelhamento não resolve a incompatibilidade de versões.",
+      "statusBrowserUpdateRequired": "O Companion usa um protocolo de autenticação mais recente do que esta página do Sambee suporta. Recarregue o Sambee. Se a incompatibilidade persistir, atualize-o. Repetir o emparelhamento não resolve o problema.",
+      "statusVerificationUnavailable": "É possível conectar ao Companion, mas não foi possível verificar o estado do emparelhamento. Tente novamente.",
+      "statusUnpaired": "Este navegador não está emparelhado com o Sambee Companion.",
+      "downloadSectionTitle": "Instalar o Sambee Companion",
+      "downloadSectionDescription": "Baixe o Sambee Companion se ainda não estiver instalado neste computador. Depois de instalá-lo, inicie-o e volte aqui para emparelhar este navegador ou testar o acesso às unidades locais.",
+      "downloadSectionSourcePrefix": "Origem",
+      "downloadVersionLabel": "Versão disponível",
+      "downloadFeedSourceLabel": "Última versão recomendada",
+      "downloadPinSourceLabel": "Fixada pelo administrador",
+      "downloadPrimaryButton": "Baixar para este computador",
+      "downloadOtherPlatformsLabel": "Outras opções para baixar",
+      "downloadRecommendedLabel": "Recomendado para este computador",
+      "downloadUnavailable": "Os links para baixar não estão disponíveis no momento. Atualize o estado e tente novamente daqui a pouco.",
+      "downloadLoadFailed": "Não foi possível obter as informações para baixar o Companion.",
+      "testCurrentPairingButton": "Testar emparelhamento atual",
+      "pairThisBrowserButton": "Emparelhar este navegador",
+      "waitingForApprovalButton": "A aguardar aprovação…",
+      "unpairThisBrowserButton": "Desemparelhar este navegador",
+      "testingButton": "A testar…",
+      "unpairingButton": "A desemparelhar…"
+    },
+    "userManagement": {
+      "actions": {
+        "close": "Fechar",
+        "editUser": "Editar conta",
+        "resetPassword": "Redefinir senha",
+        "deleteUser": "Excluir conta",
+        "deleteSelfDisabled": "Não pode excluir a sua própria conta aqui",
+        "saveChanges": "Salvar alterações",
+        "createUser": "Criar conta"
+      },
+      "editor": {
+        "usernameLabel": "Nome de usuário",
+        "switchOn": "Ativado",
+        "switchOff": "Desativado",
+        "sections": {
+          "access": "Acesso",
+          "credentials": "Credenciais"
+        },
+        "titleCreate": "Criar conta",
+        "titleEdit": "Editar conta",
+        "descriptionEdit": "Atualize os dados da conta e o nível de acesso. A redefinição de senha é feita em separado",
+        "usernameHelp": "Nome único para iniciar sessão",
+        "usernameTaken": "Já existe uma conta com esse nome de usuário",
+        "nameLabel": "Nome completo",
+        "nameHelp": "Nome exibido para a conta",
+        "oidcNameHelp": "Gerenciado pelo provedor OIDC associado",
+        "oidcEmailHelp": "Gerenciado pelo provedor OIDC associado",
+        "emailLabel": "E-mail",
+        "emailHelp": "E-mail de contato opcional",
+        "roleLabel": "Função",
+        "roleHelp": "Escolha um nível de acesso",
+        "oidcRoleHelp": "Escolha uma função individual ou use a função determinada pelo provedor OIDC associado",
+        "oidcRoleUnavailableHelp": "Escolha uma função individual. A função do provedor estará disponível após o próximo início de sessão OIDC da conta",
+        "roleOptions": {
+          "admin": "Gerenciar configurações, contas e conteúdo",
+          "editor": "Modificar conteúdo",
+          "viewer": "Navegar pelo conteúdo"
+        },
+        "inheritedRole": "Herdada ({{role}})",
+        "inheritedRoleDescription": "Usa a função determinada pelos últimos grupos OIDC verificados da conta",
+        "expiresAtLabel": "Data e hora de expiração",
+        "expiresAtHelp": "Deixe em branco para não expirar",
+        "accountActiveLabel": "Conta ativa",
+        "accountActiveHelp": "Contas desativadas não podem iniciar sessão",
+        "initialPasswordLabel": "Senha inicial",
+        "initialPasswordHelp": "Se deixar em branco, o servidor criará uma senha temporária segura",
+        "showInitialPassword": "Mostrar senha inicial",
+        "hideInitialPassword": "Ocultar senha inicial",
+        "requirePasswordChangeLabel": "Exigir alteração no próximo início de sessão com senha",
+        "requirePasswordChangeHelp": "Bloqueia o acesso por senha local até que a senha seja alterada. O início de sessão por OIDC continua disponível."
+      },
+      "credentialsDialog": {
+        "usernameLabel": "Nome de usuário",
+        "temporaryPasswordLabel": "Senha temporária",
+        "createTitle": "Senha temporária criada",
+        "createDescription": "Compartilhe esta senha temporária de forma segura. A pessoa terá de alterá-la após iniciar sessão."
+      },
+      "notifications": {
+        "usernameRequired": "O nome de usuário é obrigatório",
+        "loadFailed": "Não foi possível carregar as contas",
+        "userUpdated": "Conta atualizada com sucesso",
+        "userCreated": "Conta criada com sucesso",
+        "updateFailed": "Não foi possível atualizar a conta",
+        "createFailed": "Não foi possível criar a conta",
+        "resetFailed": "Não foi possível redefinir a senha",
+        "userDeleted": "Conta excluída com sucesso",
+        "deleteFailed": "Não foi possível excluir a conta"
+      },
+      "addUserButton": "Adicionar conta",
+      "addUserFabAriaLabel": "Adicionar conta",
+      "totalUsers_one": "Contas: {{count}}",
+      "totalUsers_many": "Contas: {{count}}",
+      "totalUsers_other": "Contas: {{count}}",
+      "activeAdmins_one": "Administradores: {{count}}",
+      "activeAdmins_many": "Administradores: {{count}}",
+      "activeAdmins_other": "Administradores: {{count}}",
+      "emptyTitle": "Nenhuma conta encontrada",
+      "emptyDescription": "Crie a primeira conta para começar a delegar acesso.",
+      "currentUserSuffix": "(você)",
+      "adminRole": "Administrador",
+      "editorRole": "Editor",
+      "viewerRole": "Visualizador",
+      "activeStatus": "Ativa",
+      "disabledStatus": "Desativada",
+      "passwordResetPending": "Alteração de senha obrigatória",
+      "roleSource": {
+        "localAssignment": "Origem da função: atribuição local",
+        "individualOverride": "Origem da função: configuração individual",
+        "oidcDefault": "Origem da função: padrão OIDC",
+        "oidcGroups": "Origem da função: grupos OIDC",
+        "awaitingOidcSignIn": "Origem da função: a aguardar início de sessão OIDC"
+      },
+      "createdAt": "Criação: {{timestamp}}",
+      "expiresAt": "Expira em {{timestamp}}",
+      "aria": {
+        "editUser": "Editar {{username}}",
+        "resetPassword": "Redefinir senha de {{username}}",
+        "deleteUser": "Excluir {{username}}"
+      },
+      "resetPasswordEditor": {
+        "requirePasswordChangeLabel": "Exigir alteração no próximo início de sessão com senha",
+        "requirePasswordChangeHelp": "Bloqueia o acesso por senha local até que a senha seja alterada. O início de sessão por OIDC continua disponível.",
+        "title": "Redefinir senha",
+        "descriptionWithName": "Defina uma nova senha para {{username}}. Todas as sessões dessa conta serão encerradas imediatamente.",
+        "descriptionFallback": "Defina uma nova senha para esta conta. Todas as sessões dessa conta serão encerradas imediatamente.",
+        "passwordLabel": "Nova senha",
+        "passwordHelp": "Escolha a senha a usar no próximo início de sessão",
+        "showPassword": "Mostrar nova senha",
+        "hidePassword": "Ocultar nova senha",
+        "passwordRequired": "É necessário definir uma nova senha",
+        "submit": "Definir senha"
+      },
+      "deleteDialog": {
+        "title": "Excluir conta",
+        "descriptionFallback": "Excluir esta conta?"
+      }
+    },
+    "connectionManagement": {
+      "menuEdit": "Editar",
+      "tooltipEdit": "Editar",
+      "menuDelete": "Excluir",
+      "tooltipDelete": "Excluir",
+      "headerTitle": "Conexões SMB",
+      "headerDescription": "Consulte as conexões compartilhadas e gerencie as suas conexões a compartilhamentos SMB privados.",
+      "addConnectionButton": "Adicionar conexão",
+      "addConnectionFabAriaLabel": "Adicionar conexão",
+      "connectionActionsAriaLabel": "Ações da conexão",
+      "userLabel": "Conta:",
+      "pathLabel": "Caminho:",
+      "sharedSectionTitle": "Conexões compartilhadas",
+      "sharedSectionEmpty": "Não há conexões compartilhadas disponíveis.",
+      "privateSectionTitle": "Minhas conexões",
+      "privateSectionEmpty": "Ainda não tem conexões privadas.",
+      "emptyTitle": "Nenhuma conexão configurada",
+      "emptyAdminDescription": "Clique no botão + para criar uma conexão SMB compartilhada ou privada.",
+      "emptyRegularDescription": "Clique no botão + para criar a sua primeira conexão SMB privada.",
+      "emptyViewerDescription": "Ainda não há conexões disponíveis para a sua conta. Entre em contato com um administrador para criar ou compartilhar uma conexão.",
+      "menuTest": "Testar conexão",
+      "tooltipTest": "Testar conexão",
+      "ariaTest": "Testar conexão",
+      "ariaEdit": "Editar conexão",
+      "ariaDelete": "Excluir conexão",
+      "columns": {
+        "port": "Porta",
+        "type": "Tipo",
+        "actions": "Ações"
+      },
+      "deleteDialogTitle": "Excluir conexão",
+      "deleteDialogDescription": "Tem certeza de que deseja excluir a conexão?",
+      "notifications": {
+        "loadFailed": "Não foi possível carregar as conexões",
+        "savedPrivateInfo": "Conexão salva como privada. É necessário acesso de administrador para torná-la compartilhada.",
+        "createdSuccess": "Conexão criada com sucesso",
+        "updatedSuccess": "Conexão atualizada com sucesso",
+        "deletedSuccess": "Conexão excluída com sucesso",
+        "deleteFailed": "Não foi possível excluir a conexão",
+        "testFailed": "O teste de conexão falhou",
+        "saveFailed": "Não foi possível salvar a conexão"
+      },
+      "scope": {
+        "sharedChip": "COMPARTILHADA",
+        "privateChip": "PRIVADA"
+      }
+    },
+    "connectionDialog": {
+      "labels": {
+        "password": "Senha",
+        "name": "Nome da conexão",
+        "host": "Host",
+        "shareName": "Nome do compartilhamento",
+        "username": "Nome de usuário",
+        "pathPrefix": "Prefixo do caminho",
+        "visibility": "Visibilidade",
+        "accessMode": "Modo de acesso"
+      },
+      "actions": {
+        "save": "Salvar"
+      },
+      "titles": {
+        "add": "Adicionar conexão",
+        "edit": "Editar conexão"
+      },
+      "results": {
+        "errorDialogTitle": "O teste de conexão falhou",
+        "success": "Conexão bem-sucedida",
+        "error": "Falha na conexão"
+      },
+      "sections": {
+        "access": "Acesso"
+      },
+      "helpers": {
+        "name": "Nome que identifica esta conexão no Sambee",
+        "host": "Endereço IP ou nome de host do servidor SMB",
+        "shareName": "Nome do compartilhamento no servidor",
+        "passwordAdd": "Senha da conta SMB",
+        "passwordEdit": "Deixe em branco para manter a senha atual",
+        "pathPrefix": "Caminho base no compartilhamento (opcional)",
+        "username": "Use o formato DOMAIN\\USER, se necessário",
+        "visibility": "Escolha acesso privado ou compartilhado",
+        "visibilityAdmin": "Administradores podem criar conexões compartilhadas para todos ou conexões privadas para si.",
+        "visibilityRegular": "Conexões compartilhadas exigem acesso de administrador. Se escolher a opção compartilhada sem esse acesso, o servidor salvará a conexão como privada.",
+        "accessModeReadWrite": "Escolha acesso somente de leitura ou de leitura e escrita",
+        "accessModeReadOnly": "Escolha acesso somente de leitura ou de leitura e escrita"
+      },
+      "errors": {
+        "nameRequired": "O nome da conexão é obrigatório",
+        "hostRequired": "O host é obrigatório",
+        "shareNameRequired": "O nome do compartilhamento é obrigatório",
+        "usernameRequired": "O nome de usuário é obrigatório",
+        "passwordRequired": "A senha é obrigatória"
+      },
+      "aria": {
+        "togglePassword": "Alternar visibilidade da senha"
+      },
+      "visibility": {
+        "privateLabel": "Privada, só para mim",
+        "privateDescription": "Visível apenas para a sua conta. Pode gerenciá-la por completo.",
+        "sharedLabel": "Compartilhada com todos",
+        "sharedDescription": "Visível para todas as contas. Apenas administradores podem gerenciá-la."
+      },
+      "accessMode": {
+        "readWriteLabel": "Leitura e escrita",
+        "readOnlyLabel": "Somente leitura"
+      }
+    },
+    "shell": {
+      "title": "Configurações",
+      "closeAriaLabel": "Fechar configurações",
+      "categoriesAriaLabel": "Categorias de configurações",
+      "expandItemAriaLabel": "Expandir {{label}}",
+      "collapseItemAriaLabel": "Recolher {{label}}",
+      "versionLabel": "Versão",
+      "buildLabel": "Compilação",
+      "commitLabel": "Commit",
+      "unknownValue": "Desconhecido"
+    },
+    "networkPage": {
+      "loading": "A carregar configurações de rede",
+      "loadFailed": "Não foi possível carregar as configurações de rede.",
+      "saveFailed": "Não foi possível salvar as configurações de rede.",
+      "publicUrl": {
+        "label": "URL público",
+        "help": "Origem HTTPS acessível externamente, sem caminho. A alteração cancela os inícios de sessão OIDC que ainda não terminaram.",
+        "saving": "Salvando o URL público",
+        "saved": "URL público salvo"
+      },
+      "trustedProxyCidrs": {
+        "label": "CIDRs de proxies confiáveis",
+        "help": "Um CIDR por linha. Deixe em branco, exceto se um proxy reverso sob a sua gestão encaminhar os endereços IP dos clientes.",
+        "saving": "Salvando os CIDRs de proxies confiáveis",
+        "saved": "CIDRs de proxies confiáveis salvos"
+      }
+    },
+    "saveStatus": {
+      "saving": "Salvando a configuração",
+      "saved": "Configuração salva"
+    },
+    "healthMonitoring": {
+      "saving": "Salvando a configuração",
+      "saved": "Configuração salva",
+      "loadFailed": "Não foi possível carregar as configurações de monitoramento do sistema. Verifique a conexão com o backend e tente novamente.",
+      "saveFailed": "Não foi possível salvar esta configuração de monitoramento do sistema. Verifique o valor e tente novamente.",
+      "cpuRefreshFailed": "A configuração foi salva, mas não foi possível atualizar os detalhes da temperatura da CPU. Selecione Tentar novamente para atualizar os detalhes.",
+      "sections": {
+        "visibility": "Monitoramento e visibilidade",
+        "memoryThresholds": "Limites de memória",
+        "loadThresholds": "Limites de carga média (normalizada)",
+        "storageThresholds": "Limites de espaço livre de armazenamento",
+        "cpuTemperature": "Limites de temperatura da CPU"
+      },
+      "fields": {
+        "enabled": "Ativar monitoramento do sistema",
+        "enabledDescription": "Verifica os recursos e mostra o estado do sistema às funções selecionadas.",
+        "stateOn": "Ativado",
+        "stateOff": "Desativado",
+        "audience": "Mostrar o estado do sistema a",
+        "audienceDescription": "Funções que podem ver o estado do sistema. A função de visualização não tem acesso.",
+        "audienceOptions": {
+          "admins": "Administradores",
+          "editors": "Editores",
+          "both": "Ambos (administradores e editores)"
+        },
+        "memoryWarning": "Limite de aviso de memória (%)",
+        "memoryWarningDescription": "Emite um aviso se o uso atingir ou ultrapassar este valor por 60 segundos. Aplica-se à memória do host e a contêineres com limite de memória; não inclui o cache de arquivos.",
+        "memoryError": "Limite de erro de memória (%)",
+        "memoryErrorDescription": "Emite um erro se o uso atingir ou ultrapassar este valor por 60 segundos. Contêineres sem limite de memória não têm alertas percentuais.",
+        "loadWarning": "Limite de aviso de carga média",
+        "loadWarningDescription": "Emite um aviso se a média de 5 minutos, dividida pelo número de CPUs lógicas, atingir ou ultrapassar este valor. Não mede o uso da CPU.",
+        "loadError": "Limite de erro de carga média",
+        "loadErrorDescription": "Emite um erro se a média normalizada de 5 minutos atingir ou ultrapassar este valor.",
+        "spaceWarning": "Limite de aviso de espaço livre (%)",
+        "spaceWarningDescription": "Emite um aviso se o espaço livre for igual ou inferior a esta percentagem.",
+        "spaceError": "Limite de erro de espaço livre (%)",
+        "spaceErrorDescription": "Emite um erro se o espaço livre for igual ou inferior a esta percentagem ou se não houver espaço livre.",
+        "cpuDetectedWarning": "Limite de aviso detectado",
+        "cpuDetectedError": "Limite crítico detectado",
+        "cpuWarningOverride": "Limite de aviso (°C)",
+        "cpuWarningOverrideDescription": "Deixe em branco para usar o modo automático ou defina o limite de aviso em incrementos de 0,1 °C.",
+        "cpuErrorOverride": "Limite de erro (°C)",
+        "cpuErrorOverrideDescription": "Deixe em branco para usar o modo automático ou defina o limite de erro em incrementos de 0,1 °C.",
+        "automaticPlaceholder": "Automático",
+        "returnToAutomatic": "Voltar ao modo automático",
+        "reconfirmOverride": "Confirmar novamente o valor manual",
+        "notAvailable": "Não disponível",
+        "originHardware": "Hardware",
+        "originKernelPolicy": "Política térmica do kernel",
+        "originAdminOverride": "Valor manual do administrador",
+        "exceedsDetectedWarning": "Aviso: o limite de aviso manual ({{override}}) é superior ao limite detectado ({{detected}}). A proteção do hardware do host não muda.",
+        "exceedsDetectedError": "Aviso: o limite de erro manual ({{override}}) é superior ao limite crítico detectado ({{detected}}). A proteção do hardware do host não muda."
+      },
+      "validation": {
+        "memoryRange": "Insira uma percentagem de 0,1 a 100,0 em incrementos de 0,1.",
+        "memoryPairWarningAboveError": "O limite de aviso de memória não pode exceder o limite de erro ({{other}}%). Aumente primeiro o limite de erro.",
+        "memoryPairErrorBelowWarning": "O limite de erro de memória não pode ser inferior ao limite de aviso ({{other}}%). Reduza primeiro o limite de aviso.",
+        "loadRange": "Insira um número finito igual ou superior a 0,01 em incrementos de 0,01.",
+        "loadPairWarningAboveError": "O limite de aviso de carga não pode exceder o limite de erro ({{other}}). Aumente primeiro o limite de erro.",
+        "loadPairErrorBelowWarning": "O limite de erro de carga não pode ser inferior ao limite de aviso ({{other}}). Reduza primeiro o limite de aviso.",
+        "spaceRange": "Insira uma percentagem de 0,0 a 99,9 em incrementos de 0,1.",
+        "spacePairWarningBelowError": "O limite de aviso de espaço livre não pode ser inferior ao limite de erro ({{other}}%). Reduza primeiro o limite de erro.",
+        "spacePairErrorAboveWarning": "O limite de erro de espaço livre não pode exceder o limite de aviso ({{other}}%). Aumente primeiro o limite de aviso.",
+        "cpuRange": "Insira uma temperatura positiva em graus Celsius, em incrementos de 0,1 °C, ou limpe o campo para usar o modo automático.",
+        "cpuPairWarningAboveError": "O limite de aviso da CPU não pode exceder o limite de erro efetivo ({{other}}). Aumente ou limpe primeiro o limite de erro.",
+        "cpuPairErrorBelowWarning": "O limite de erro da CPU não pode ser inferior ao limite de aviso efetivo ({{other}}). Reduza ou limpe primeiro o limite de aviso."
+      }
+    },
+    "aboutPage": {
+      "versionLabel": "Versão",
+      "buildLabel": "Compilação",
+      "commitLabel": "Commit",
+      "platformTitle": "Hardware",
+      "applicationTitle": "Aplicação",
+      "runtimeTitle": "Software",
+      "startedLabel": "Início",
+      "pythonLabel": "Python",
+      "architectureLabel": "Arquitetura",
+      "cpuCountLabel": "CPUs lógicas",
+      "memoryLabel": "Memória disponível",
+      "copyAriaLabel": "Copiar informações",
+      "copyTooltip": "Copiar informações",
+      "copyAboutMenuItem": "Copiar informações do sistema",
+      "copyPublicSupportReportMenuItem": "Copiar relatório público de suporte",
+      "copySuccess": "Informações do sistema copiadas.",
+      "copyError": "Não foi possível copiar as informações do sistema.",
+      "copyPublicSupportReportSuccess": "Relatório público de suporte copiado.",
+      "copyPublicSupportReportError": "Não foi possível copiar o relatório público de suporte.",
+      "unavailableValue": "Indisponível",
+      "loadError": "Não foi possível carregar as informações do sistema."
+    },
+    "sections": {
+      "personal": "Pessoal",
+      "administration": "Administração"
+    },
+    "categories": {
+      "appearance": {
+        "label": "Aparência",
+        "description": "Personalize o tema e o idioma da aplicação."
+      },
+      "account": {
+        "label": "Conta",
+        "description": "Gerencie a sua identidade, senha e sessões, ou termine a sessão."
+      },
+      "fileBrowser": {
+        "label": "Navegador de arquivos",
+        "description": "Defina o comportamento padrão do navegador de arquivos."
+      },
+      "textEditor": {
+        "label": "Editor de texto",
+        "description": "Defina os padrões e os limites de segurança do editor de texto genérico."
+      },
+      "imageViewer": {
+        "label": "Visualizador de imagens",
+        "description": "Configure as transições entre imagens no computador. A navegação por toque não muda."
+      },
+      "adminImageViewer": {
+        "label": "Visualizador de imagens",
+        "description": "Configure os limites de conversão e processamento de imagens."
+      },
+      "connections": {
+        "label": "Conexões",
+        "description": "Gerencie conexões SMB compartilhadas e privadas."
+      },
+      "adminUsers": {
+        "label": "Gestão de contas",
+        "description": "Crie contas, atribua funções e solicite a redefinição de senhas."
+      },
+      "adminAuthentication": {
+        "label": "Autenticação",
+        "description": "Configure os métodos de início de sessão (consulte o <guide>guia de configuração do OpenID Connect</guide>)."
+      },
+      "adminNetwork": {
+        "label": "Rede",
+        "description": "Configure o URL externo do Sambee e os proxies reversos confiáveis."
+      },
+      "adminSystem": {
+        "label": "Sistema",
+        "description": "Gerencie os limites de criação de arquivos compactados."
+      },
+      "adminPdfViewer": {
+        "label": "Visualizador de PDF",
+        "description": "Configure a compatibilidade, o cache e os limites de processamento de PDF."
+      },
+      "adminSmb": {
+        "label": "SMB",
+        "description": "Configure a política de segurança e os limites de execução dos backends SMB."
+      },
+      "adminFileSearch": {
+        "label": "Pesquisa de arquivos",
+        "description": "Configure o histórico, os limites de resultados e as exclusões da pesquisa de arquivos."
+      },
+      "adminDirectorySearch": {
+        "label": "Pesquisa de pastas",
+        "description": "Configure os recursos e a verificação de índices de pastas no backend e em todos os dispositivos com Companion."
+      },
+      "adminHealthMonitoring": {
+        "label": "Monitoramento do sistema",
+        "description": "Escolha quem pode ver o estado do sistema e defina os limites de alerta."
+      },
+      "adminAbout": {
+        "label": "Sobre",
+        "description": "Consulte informações sobre a compilação, o software e o hardware do Sambee."
+      }
+    },
+    "fileBrowserPage": {
+      "fileSearchTitle": "Pesquisa de arquivos",
+      "touchFriendlyFileSelectionNever": "Desativado",
+      "shortcutHintsAuto": "Automático",
+      "touchFriendlyFileSelectionAuto": "Automático",
+      "quickNavigationTitle": "Navegação rápida",
+      "includeDotDirectoriesLabel": "Incluir pastas com nome iniciado por ponto na navegação rápida",
+      "includeDotDirectoriesDescription": "Mostra pastas como .git, .cache e outras que começam com ponto nos resultados de navegação rápida.",
+      "shortcutHintsLabel": "Dicas de atalhos de teclado",
+      "shortcutHintsDescription": "Escolha quando mostrar dicas de atalhos de teclado na barra rápida.",
+      "shortcutHintsAlways": "Mostrar sempre",
+      "shortcutHintsNever": "Nunca mostrar",
+      "fileSelectionTitle": "Seleção de arquivos",
+      "touchFriendlyFileSelectionLabel": "Seleção de arquivos por toque",
+      "touchFriendlyFileSelectionDescription": "Escolha quando usar gestos e controlos adaptados ao toque para selecionar arquivos.",
+      "touchFriendlyFileSelectionAlways": "Sempre ativo",
+      "clearRecentFiles": "Limpar arquivos recentes",
+      "clearRecentFilesDescription": "Isso remove permanentemente do servidor o seu histórico de pesquisa de arquivos, sem afetar nenhum arquivo ou pasta.",
+      "clearRecentFilesFailed": "Não foi possível limpar os arquivos recentes. Tente novamente.",
+      "clearRecentDirectories": "Limpar pastas recentes",
+      "clearRecentDirectoriesDescription": "Isso remove permanentemente do servidor o seu histórico de navegação em pastas, sem afetar nenhum arquivo ou pasta.",
+      "clearRecentDirectoriesFailed": "Não foi possível limpar as pastas recentes. Tente novamente."
+    },
+    "fileSearch": {
+      "title": "Pesquisa de arquivos",
+      "saveChanges": "Salvar alterações",
+      "resetToDefault": "Restaurar padrão",
+      "loadFailed": "Não foi possível carregar as configurações de pesquisa de arquivos.",
+      "saveFailed": "Não foi possível salvar as configurações de pesquisa de arquivos.",
+      "resetFailed": "Não foi possível restaurar as configurações de pesquisa de arquivos.",
+      "retentionLimit": "Quantidade de arquivos e pastas recentes a manter",
+      "retentionLimitError": "Insira um número inteiro de 0 a 500.",
+      "resultLimit": "Resultados por grupo",
+      "resultLimitError": "Insira um número inteiro de 1 a 50.",
+      "excludedCategories": "Excluir categorias de arquivos",
+      "excludedCategoriesHelp": "Os arquivos excluídos não aparecem nos resultados nem no histórico da pesquisa de arquivos.",
+      "excludeImages": "Excluir imagens da pesquisa",
+      "excludeTemporaryBackup": "Excluir arquivos temporários e cópias de segurança da pesquisa",
+      "excludedExtensions": "Extensões excluídas da pesquisa",
+      "excludedExtensionsInputLabel": "Adicionar uma extensão a excluir da pesquisa",
+      "excludedExtensionsAdd": "Adicionar extensão",
+      "excludedExtensionsError": "Use extensões literais de até 255 caracteres. Não são permitidos padrões glob nem caminhos.",
+      "excludedExtensionsDuplicateError": "Esta extensão já está excluída da pesquisa.",
+      "excludedExtensionsHelp": "Insira uma única extensão literal. Não são aceitos padrões glob nem caminhos.",
+      "excludedExtensionsNormalization": "Será salva como {{extension}}.",
+      "excludedExtensionsRemove": "Remover {{extension}}"
+    },
+    "imageViewerPage": {
+      "transitionDescription": "O carrossel desliza entre imagens ao navegar com o mouse ou o teclado. Sem animação, a troca é imediata. Os gestos de deslizar na tela usam sempre a animação do carrossel.",
+      "transition": "Transição",
+      "carousel": "Carrossel",
+      "none": "Sem animação"
+    },
+    "directorySearch": {
+      "loadFailed": "Não foi possível carregar a política de pesquisa de pastas. Verifique a conexão com o backend e tente novamente.",
+      "saveFailed": "Não foi possível salvar esta configuração de pesquisa de pastas. Verifique o valor e a conexão com o backend e tente novamente.",
+      "backendTitle": "Índices de pastas do backend",
+      "companionTitle": "Índices de pastas do Companion",
+      "deviceTitle": "Pesquisa de pastas neste dispositivo",
+      "refresh": "Atualizar estado"
+    },
+    "connectionsSubgroups": {
+      "smb": {
+        "label": "Conexões SMB",
+        "description": "Consulte as conexões compartilhadas e gerencie os seus compartilhamentos privados."
+      },
+      "localDrives": {
+        "label": "Unidades locais",
+        "description": "Emparelhe o Sambee Companion, gerencie o acesso às unidades locais e instale o aplicativo auxiliar no computador."
+      }
+    },
+    "connectionsPage": {
+      "smbSectionTitle": "Conexões SMB",
+      "localDrivesSectionTitle": "Unidades locais",
+      "smbSectionDescription": "Consulte as conexões compartilhadas e gerencie as suas conexões a compartilhamentos SMB privados.",
+      "localDrivesSectionDescription": "Emparelhe o Sambee Companion e controle o acesso deste navegador às unidades locais."
+    },
+    "textEditorPage": {
+      "limitsTitle": "Limites",
+      "maxFileSizeLabel": "Tamanho máximo de arquivo para o editor avançado (MB)",
+      "maxFileSizeDescription": "Os arquivos acima deste limite não abrem no editor de texto completo baseado no CodeMirror. Use este limite para evitar lentidão ou consumo excessivo de memória ao editar arquivos muito grandes."
+    },
+    "advanced": {
+      "imageConversion": {
+        "label": "Preferência de conversão de imagens",
+        "description": "Aplica-se às prévias de imagens no backend, incluindo conversões do libvips. As imagens das unidades locais não são afetadas.",
+        "speed": "Velocidade de conversão",
+        "speedDescription": "Usa codificação mais rápida para prévias sem transparência. Os arquivos podem ficar maiores.",
+        "size": "Tamanho final",
+        "sizeDescription": "Usa WebP para reduzir o tamanho das prévias sem transparência. A conversão pode exigir mais da CPU."
+      },
+      "saveChanges": "Salvar alterações",
+      "saveSuccess": "Configurações avançadas salvas",
+      "loadFailed": "Não foi possível carregar as configurações avançadas",
+      "saveFailed": "Não foi possível salvar as configurações avançadas",
+      "resetOverride": "Restaurar valor herdado",
+      "resetFailed": "Não foi possível restaurar o valor herdado da configuração",
+      "resetSuccess": "{{label}}: valor herdado restaurado",
+      "sections": {
+        "smbBackends": "Backends SMB",
+        "preprocessors": "Pré-processadores",
+        "imageMagick": "ImageMagick",
+        "pdfCompatibility": "Compatibilidade com PDF",
+        "archiveDownloads": "Criação de arquivos compactados"
+      },
+      "fields": {
+        "value": "Valor",
+        "unit": "Unidade",
+        "seconds": "segundos"
+      },
+      "validation": {
+        "enterLabel": "Insira o valor de {{label}}",
+        "wholeNumber": "{{label}} deve ser um número inteiro",
+        "betweenRange": "{{label}} deve estar entre {{min}} e {{max}}",
+        "betweenRangeWithUnit": "{{label}} deve estar entre {{min}} e {{max}} {{unit}}"
+      },
+      "helperText": {
+        "integer": "{{description}} Padrão: {{defaultValue}}. Intervalo: {{minValue}} a {{maxValue}}.",
+        "byteSize": "{{description}} Padrão: {{defaultValue}}. Intervalo: {{minValue}} a {{maxValue}}."
+      }
+    },
+    "smbSettings": {
+      "loadFailed": "Não foi possível carregar as configurações de SMB",
+      "saveFailed": "Não foi possível salvar as configurações de SMB",
+      "saving": "Salvando a configuração de SMB",
+      "saved": "Configuração de SMB salva",
+      "connectionTimeoutError": "Insira um número inteiro de 5 a 120.",
+      "readChunkSizeError": "Insira um número inteiro no intervalo permitido para o tamanho do bloco.",
+      "sections": {
+        "protection": "Proteção",
+        "connectionBehavior": "Comportamento da conexão",
+        "fileStreaming": "Transferência contínua de arquivos"
+      },
+      "fields": {
+        "authenticationMode": "Modo de autenticação",
+        "encryptionMode": "Proteção do transporte",
+        "connectionTimeout": "Tempo limite de conexão",
+        "readChunkSize": "Tamanho do bloco de leitura SMB"
+      },
+      "helper": {
+        "authenticationMode": "O modo automático usa Kerberos quando disponível e recorre ao NTLM caso contrário. Para impedir o uso de NTLM, escolha Kerberos obrigatório.",
+        "encryptionMode": "A assinatura é sempre obrigatória. A opção Somente assinatura permite conexões SMB 2 sem criptografia. Exija criptografia para impedir que terceiros na rede leiam o tráfego SMB.",
+        "connectionTimeout": "Tempo máximo para estabelecer uma conexão de transporte SMB.",
+        "readChunkSize": "Bytes lidos por operação de transferência contínua de arquivos."
+      },
+      "options": {
+        "negotiate": "Automático (Kerberos ou NTLM)",
+        "kerberosRequired": "Kerberos obrigatório",
+        "signingOnly": "Somente assinatura (compatível com SMB 2)",
+        "encryptionRequired": "Assinatura e criptografia (SMB 3 ou posterior)"
+      },
+      "source": {
+        "default": "Padrão integrado",
+        "database": "Valor definido no sistema",
+        "configFile": "Arquivo de configuração"
+      }
+    }
+  },
+  "fileBrowser": {
+    "chrome": {
+      "statusBar": {
+        "itemCount_one": "{{count}} item",
+        "itemCount_many": "{{count}} itens",
+        "itemCount_other": "{{count}} itens",
+        "noSelection": "Nenhuma seleção",
+        "linkTargetMissing": "Destino do atalho não encontrado",
+        "linkTargetAccessDenied": "Acesso negado ao destino do atalho",
+        "linkTargetUnresolvable": "Não foi possível localizar o destino do atalho",
+        "linkTargetLocalDrivesOnly": "Só é possível localizar destinos de atalhos nas unidades locais",
+        "linkTargetUnmappedDrive": "O destino do atalho não está nas unidades disponíveis",
+        "linkTargetUnsupported": "O destino do atalho não é um arquivo nem uma pasta"
+      },
+      "mobileMenu": {
+        "logoutAriaLabel": "Terminar sessão",
+        "openSettingsAriaLabel": "Abrir configurações",
+        "navigateRootAriaLabel": "Ir à pasta raiz",
+        "selectConnectionAriaLabel": "Selecionar conexão",
+        "openKeyboardShortcutsAriaLabel": "Abrir atalhos de teclado",
+        "openDocumentationAriaLabel": "Abrir documentação",
+        "systemHealth": "Estado do sistema",
+        "openSystemHealthAriaLabel": "Estado do sistema: {{status}}. {{headline}}"
+      },
+      "sort": {
+        "fields": {
+          "type": "Tipo",
+          "name": "Nome",
+          "size": "Tamanho",
+          "modified": "Modificação"
+        },
+        "ariaLabel": "Opções de ordenação",
+        "direction": {
+          "ascending": "Crescente",
+          "descending": "Decrescente"
+        }
+      },
+      "dualPaneToggle": {
+        "label": "Painéis",
+        "ariaLabel": "Alternar visualização com dois painéis"
+      },
+      "toolbar": {
+        "help": "Ajuda",
+        "openSettings": "Abrir configurações",
+        "systemHealthTooltip": "Estado do sistema: {{status}}. {{headline}}"
+      },
+      "mobileToolbar": {
+        "navigateUpTitle": "Navegar para cima",
+        "openMenu": "Abrir menu",
+        "navigateUpAriaLabel": "Ir à pasta acima"
+      },
+      "breadcrumb": {
+        "navigateRoot": "Ir à pasta raiz",
+        "navigateTo": "Ir para {{path}}"
+      },
+      "connectionSelector": {
+        "placeholder": "Selecionar conexão"
+      },
+      "viewMode": {
+        "ariaLabel": "Opções de visualização",
+        "options": {
+          "list": "Lista",
+          "details": "Detalhes"
+        }
+      },
+      "alerts": {
+        "folderNotFound": "A pasta «{{name}}» não foi encontrada. Pode ter sido movida ou excluída.",
+        "folderNotFoundSummary": "Pasta não encontrada. Pode ter sido movida ou excluída.",
+        "fileNotFoundSummary": "Arquivo não encontrado. Pode ter sido movido ou excluído.",
+        "fileFailure": {
+          "missing": "O arquivo «{{name}}» não foi encontrado. Pode ter sido movido ou excluído.",
+          "not_file": "Este destino não é um arquivo normal. Selecione outro arquivo.",
+          "access_denied": "O acesso a este arquivo foi negado. Verifique as suas permissões e tente novamente.",
+          "timeout": "O pedido do arquivo excedeu o tempo limite. Verifique a conexão e tente novamente.",
+          "unavailable": "O arquivo está indisponível. Verifique a conexão e tente novamente.",
+          "pairing": "O emparelhamento para unidades locais não está disponível. Abra as configurações de Unidades locais e emparelhe novamente este navegador.",
+          "cancelled": "O pedido do arquivo foi cancelado.",
+          "unknown": "Não foi possível abrir o arquivo. Verifique a conexão e tente novamente."
+        },
+        "folderRecovered": "A pasta «{{name}}» não foi encontrada. Em vez dela, foi aberta «{{parent}}».",
+        "folderRecoveredSummary": "Pasta não encontrada. Em vez dela, foi aberta «{{parent}}».",
+        "folderAccessDenied": "Não tem permissão para abrir esta pasta.",
+        "notAFolder": "Este item não é uma pasta.",
+        "connectionUnavailable": "A conexão está indisponível. Verifique as configurações de conexão e tente novamente.",
+        "directoryMonitoringTimeout": "O monitoramento da pasta não começou a tempo. Atualize a pasta para tentar novamente.",
+        "leftPane": "Painel esquerdo",
+        "rightPane": "Painel direito",
+        "localDrivePairingRejected": "{{connection}}: o Sambee Companion rejeitou o emparelhamento deste navegador. Recarregue o Sambee para aplicar eventuais atualizações. Se ainda falhar, abra Unidades locais para verificar o emparelhamento.",
+        "localDrivePairingRequired": "{{connection}}: este navegador não está emparelhado com o Sambee Companion. Abra Unidades locais para emparelhá-lo.",
+        "welcomeTitle": "Bem-vindo ao Sambee!",
+        "adminOnboardingPrefix": "Para começar, ",
+        "adminOnboardingLink": "adicione o seu primeiro compartilhamento de rede SMB",
+        "adminOnboardingSuffix": ". Assim poderá navegar e ver arquivos no armazenamento de rede.",
+        "regularOnboarding": "O Sambee permite navegar e ver arquivos de compartilhamentos de rede. Entre em contato com um administrador para configurar esses compartilhamentos.",
+        "backendUnavailable": "A conexão com o backend foi perdida. A interface atual continua disponível, mas recarregamentos e atualizações em tempo real podem falhar até a conexão voltar.",
+        "backendReconnecting": "A restabelecer a conexão com o backend. As atualizações em tempo real podem sofrer um breve atraso.",
+        "loadingConnections": "A carregar conexões…",
+        "companionLaunchHint": "A abrir no Sambee Companion. Se nada acontecer, verifique se o Companion está instalado e em execução. Se o Companion precisar de iniciar sessão ou de uma recuperação, o Sambee voltará a abrir aqui com o próximo passo.",
+        "companionLifecycle": {
+          "renewal_required": "A sessão de edição do Companion expirou antes de concluir o arquivo. Abra novamente o arquivo no Sambee para continuar a editar.",
+          "auth_failed": "O Companion não conseguiu concluir o início de sessão no backend do Sambee. Se solicitado, conclua o início de sessão no Companion e reabra o arquivo no Sambee.",
+          "lock_lost": "O Companion perdeu o bloqueio de edição ativo deste arquivo. Reabra o arquivo no Sambee antes de continuar a editar.",
+          "recovery_required": "O Companion tem uma recuperação pendente para este arquivo. Resolva-a no Sambee ou no Companion antes de iniciar uma nova sessão de edição."
+        }
+      },
+      "helpMenu": {
+        "keyboardShortcuts": "Atalhos de teclado",
+        "documentation": "Documentação",
+        "issues": "Problemas",
+        "discussions": "Discussões"
+      }
+    },
+    "list": {
+      "emptyDirectory": "Esta pasta está vazia"
+    },
+    "archive": {
+      "download": "Baixar",
+      "buttonSkip": "Ignorar",
+      "buttonReplace": "Substituir",
+      "buttonRename": "Alterar nome",
+      "entryUnavailable": "Indisponível",
+      "createTitle": "Criar arquivo ZIP",
+      "extractTitle": "Extrair de arquivo ZIP",
+      "buttonCreate": "Criar arquivo compactado",
+      "collisionSizeLabel": "Tamanho",
+      "collisionModifiedLabel": "Modificação",
+      "destinationLabel": "Pasta de destino",
+      "collisionArchiveColumn": "Arquivo compactado",
+      "collisionArchiveMemberLabel": "Item no arquivo compactado",
+      "nameLabel": "Nome do arquivo compactado",
+      "createDescription_one": "Crie um ZIP na pasta de destino com 1 item selecionado.",
+      "createDescription_many": "Crie um ZIP na pasta de destino com {{count}} itens selecionados.",
+      "createDescription_other": "Crie um ZIP na pasta de destino com {{count}} itens selecionados.",
+      "progressCreating": "A criar arquivo compactado…",
+      "progressPreparing": "A preparar arquivo compactado…",
+      "progressProcessedMembers": "{{processed}} itens do arquivo compactado processados…",
+      "buttonCreating": "A criar arquivo compactado…",
+      "validationExtension": "O nome do arquivo compactado deve terminar em .zip.",
+      "errorGeneric": "Não foi possível criar o arquivo compactado.",
+      "createPartialOutputError": "Não foi possível criar o arquivo compactado. O novo ZIP pode estar incompleto.",
+      "createCancelled": "A criação do arquivo compactado foi cancelada.",
+      "buttonCancelCreation": "Cancelar criação do arquivo compactado",
+      "progressSourceArchive": "Arquivo compactado de origem",
+      "progressMembers": "{{completed}} de {{total}} itens",
+      "progressBytes": "{{processed}} de {{total}} bytes",
+      "interruptedAfterReload": "A operação com o arquivo compactado foi interrompida. Verifique o destino antes de tentar novamente.",
+      "browseError": "Não foi possível carregar o conteúdo do arquivo compactado.",
+      "downloadError": "Não foi possível baixar o item do arquivo compactado.",
+      "previewTitle": "Pré-visualizar {{name}}",
+      "previewLoading": "A carregar prévia",
+      "previewError": "Não foi possível carregar a prévia do item do arquivo compactado.",
+      "previewTooLarge": "Este item do arquivo compactado é demasiado grande para pré-visualizar. Transfira-o para o ver.",
+      "previewUnavailable": "Não é possível pré-visualizar este tipo de arquivo aqui. Transfira-o para o abrir noutra aplicação.",
+      "closeBrowser": "Fechar navegador do arquivo compactado",
+      "root": "Raiz do arquivo compactado",
+      "breadcrumbs": "Caminho no arquivo compactado",
+      "historyBack": "Voltar",
+      "historyForward": "Avançar",
+      "up": "Subir",
+      "more": "Carregar mais",
+      "extractDescriptionArchive": "Extraia o arquivo compactado para a pasta de destino.",
+      "extractDescriptionMember": "Extraia o item selecionado para a pasta de destino.",
+      "extractDescriptionMembers_one": "Extraia 1 item selecionado para a pasta de destino.",
+      "extractDescriptionMembers_many": "Extraia {{count}} itens selecionados para a pasta de destino.",
+      "extractDescriptionMembers_other": "Extraia {{count}} itens selecionados para a pasta de destino.",
+      "memberErrorTitle": "Resolver problema de extração",
+      "memberErrorPrompt": "Não foi possível extrair um item do arquivo compactado.",
+      "destinationNameLabel": "Nome no destino",
+      "buttonExtract": "Extrair",
+      "buttonExtracting": "A extrair…",
+      "buttonCancelExtraction": "Cancelar extração",
+      "buttonOpenDestination": "Abrir destino",
+      "buttonRetryMemberError": "Tentar extrair novamente",
+      "buttonIgnoreMemberError": "Ignorar item",
+      "validationDestinationEmpty": "Insira uma pasta de destino.",
+      "validationDestinationUnsafe": "Use um caminho relativo, sem segmentos vazios, «.» ou «..».",
+      "validationDestinationExists": "Escolha uma nova pasta de destino. A extração não substitui pastas existentes.",
+      "extractError": "Não foi possível extrair o arquivo compactado.",
+      "extractPartialOutputError": "Falha na extração. A pasta de destino pode conter arquivos incompletos.",
+      "extractSuccess": "Extração concluída.",
+      "summaryFilesExtracted": "Arquivos extraídos",
+      "summaryDirectoriesCreated": "Pastas criadas",
+      "summaryBytesWritten": "Bytes gravados",
+      "summaryFilesSkipped": "Arquivos ignorados",
+      "summaryFilesReplaced": "Arquivos substituídos",
+      "summaryPartialMembers": "Itens incompletos",
+      "extractPartialSuccess_one": "Extração concluída com 1 item ignorado.",
+      "extractPartialSuccess_many": "Extração concluída com {{count}} itens ignorados.",
+      "extractPartialSuccess_other": "Extração concluída com {{count}} itens ignorados.",
+      "extractEncryptedSkipped_one": "Foi ignorado 1 item protegido por criptografia.",
+      "extractEncryptedSkipped_many": "Foram ignorados {{count}} itens protegidos por criptografia.",
+      "extractEncryptedSkipped_other": "Foram ignorados {{count}} itens protegidos por criptografia.",
+      "extractUnsupportedCompressionSkipped_one": "Foi ignorado 1 item com compactação não suportada.",
+      "extractUnsupportedCompressionSkipped_many": "Foram ignorados {{count}} itens com compactação não suportada.",
+      "extractUnsupportedCompressionSkipped_other": "Foram ignorados {{count}} itens com compactação não suportada.",
+      "extractCancelled": "A extração foi cancelada.",
+      "extractInterrupted": "A extração foi interrompida. O destino pode conter dados incompletos.",
+      "extractConflictPending": "A extração aguarda uma decisão sobre o conflito.",
+      "collisionTitle": "Já existem arquivos",
+      "collisionPrompt": "Escolha o que fazer com estes arquivos que já existem no destino.",
+      "collisionListLabel": "Itens do arquivo compactado em conflito",
+      "collisionMore": "Mais {{count}} arquivos em conflito.",
+      "collisionDestinationPathLabel": "Caminho de destino",
+      "memberErrorTargetLabel": "Caminho de destino",
+      "collisionDestinationColumn": "Existente",
+      "collisionByteCount": "{{count}} bytes",
+      "collisionResolutionLabel": "Escolha como resolver",
+      "collisionChoiceSkip": "Ignorar este arquivo",
+      "collisionChoiceReplace": "Substituir este arquivo",
+      "collisionChoiceReplaceOlder": "Substituir apenas arquivos mais antigos do que a versão compactada",
+      "collisionChoiceRename": "Renomear arquivo extraído",
+      "collisionApplyRemaining": "Aplicar esta opção aos conflitos restantes",
+      "collisionContinue": "Continuar",
+      "memberErrorPartialOutputNote": "Foi criado um arquivo incompleto no destino. Tentar novamente reinicia a extração deste item.",
+      "buttonSkipAll": "Ignorar todos",
+      "buttonReplaceAll": "Substituir todos",
+      "buttonReplaceOlder": "Substituir apenas arquivos mais antigos",
+      "renameTargetLabel": "Novo caminho de destino"
+    },
+    "overwriteConflict": {
+      "resolutionSkip": "Ignorar",
+      "resolutionRename": "Alterar nome",
+      "labelIncoming": "Origem",
+      "labelSize": "Tamanho",
+      "labelModified": "Modificação",
+      "cancelExtraction": "Cancelar extração",
+      "resolutionLabel": "Escolha como resolver",
+      "continue": "Continuar",
+      "title": "O destino já existe",
+      "alreadyExists": "Já existe um item com este nome no destino:",
+      "folderConflict": "Um item existente impede a criação desta pasta no destino. Ignore a pasta ou mude o seu nome.",
+      "fileFolderConflict": "Uma pasta existente impede a criação deste arquivo no destino. Ignore o arquivo ou mude o seu nome.",
+      "skipFolder": "Ignorar pasta",
+      "renameFolder": "Alterar nome da pasta a transferir",
+      "labelPath": "Caminho",
+      "labelTargetName": "Nome no destino",
+      "labelExisting": "Destino",
+      "metadataLabel": "Detalhes do destino",
+      "resolutionOverwrite": "Sobrescrever",
+      "resolutionOverwriteOnlyOlder": "Sobrescrever apenas os mais antigos",
+      "applyToAll": "Aplicar esta opção aos conflitos restantes nesta operação",
+      "targetNameUnchanged": "Escolha outro nome para o destino.",
+      "noResolutionAvailable": "Não é possível resolver o conflito neste destino. Cancele a operação e tente novamente.",
+      "cancelCopy": "Cancelar cópia",
+      "cancelUpload": "Cancelar envio",
+      "cancelMove": "Cancelar movimentação",
+      "progressContext_one": "Item {{current}} de {{total}} • {{count}} conflito até agora",
+      "progressContext_many": "Item {{current}} de {{total}} • {{count}} conflitos até agora",
+      "progressContext_other": "Item {{current}} de {{total}} • {{count}} conflitos até agora"
+    },
+    "confirmDelete": {
+      "ariaLabelItem": "Item a eliminar",
+      "titleFile": "Excluir arquivo",
+      "titleDirectory": "Excluir pasta",
+      "titleMulti": "Excluir itens",
+      "confirmFile": "Este arquivo será excluído permanentemente:",
+      "confirmDirectory": "Esta pasta e o seu conteúdo serão excluídos permanentemente:",
+      "confirmMulti": "Os {{count}} itens a seguir serão excluídos permanentemente:",
+      "ariaLabelItems": "Itens a excluir",
+      "moreItems_one": "e mais 1 item",
+      "moreItems_many": "e mais {{count}} itens",
+      "moreItems_other": "e mais {{count}} itens",
+      "buttonDeleting": "A excluir…"
+    },
+    "commands": {
+      "categories": {
+        "settings": "Configurações",
+        "navigation": "Navegação",
+        "view": "Visualização",
+        "files": "Arquivos",
+        "panes": "Painéis",
+        "help": "Ajuda"
+      },
+      "items": {
+        "fileSearch": {
+          "title": "Pesquisa de arquivos",
+          "description": "Pesquisar arquivos recentes e arquivos na pasta ativa"
+        },
+        "quickNav": {
+          "title": "Abrir modo de navegação",
+          "description": "Ir a pastas a partir da barra rápida"
+        },
+        "commandPalette": {
+          "title": "Mostrar comandos",
+          "description": "Abrir a paleta de comandos do navegador de arquivos"
+        },
+        "open": {
+          "title": "Abrir item em foco"
+        },
+        "navigateUp": {
+          "title": "Subir uma pasta"
+        },
+        "refresh": {
+          "title": "Atualizar lista de arquivos"
+        },
+        "rename": {
+          "title": "Renomear item em foco"
+        },
+        "delete": {
+          "title": "Excluir item em foco"
+        },
+        "newDirectory": {
+          "title": "Criar pasta"
+        },
+        "newFile": {
+          "title": "Criar arquivo"
+        },
+        "createArchive": {
+          "title": "Criar arquivo ZIP"
+        },
+        "extractArchive": {
+          "title": "Extrair de arquivo ZIP"
+        },
+        "openInApp": {
+          "title": "Abrir arquivo em foco na aplicação nativa"
+        },
+        "openInViewerPicker": {
+          "title": "Escolher visualizador do Sambee para o arquivo em foco"
+        },
+        "openInNativePicker": {
+          "title": "Escolher aplicação nativa para o arquivo em foco"
+        },
+        "toggleDualPane": {
+          "title": "Alternar visualização com dois painéis"
+        },
+        "openLocationInNewTab": {
+          "title": "Abrir local atual em nova aba"
+        },
+        "matchLeftPaneLocation": {
+          "title": "Usar o local do painel direito no esquerdo"
+        },
+        "matchRightPaneLocation": {
+          "title": "Usar o local do painel esquerdo no direito"
+        },
+        "focusLeftPane": {
+          "title": "Colocar o foco no painel esquerdo"
+        },
+        "focusRightPane": {
+          "title": "Colocar o foco no painel direito"
+        },
+        "switchPane": {
+          "title": "Trocar painel ativo"
+        },
+        "newTab": {
+          "title": "Nova aba de pasta"
+        },
+        "closeTab": {
+          "title": "Fechar aba de pasta"
+        },
+        "undoCloseTab": {
+          "title": "Reabrir aba de pasta fechada"
+        },
+        "previousTab": {
+          "title": "Aba de pasta anterior"
+        },
+        "nextTab": {
+          "title": "Próxima aba de pasta"
+        },
+        "copyToOtherPane": {
+          "title": "Copiar para o outro painel"
+        },
+        "moveToOtherPane": {
+          "title": "Mover para o outro painel"
+        },
+        "openSettings": {
+          "title": "Abrir configurações"
+        },
+        "openConnectionsSettings": {
+          "title": "Abrir configurações de conexões"
+        },
+        "openSystemHealth": {
+          "title": "Abrir estado do sistema"
+        },
+        "showHelp": {
+          "title": "Mostrar atalhos de teclado"
+        }
+      }
+    },
+    "viewerPicker": {
+      "viewers": {
+        "text": "Editor de texto",
+        "image": "Visualizador de imagens",
+        "pdf": "Visualizador de PDF",
+        "markdown": "Visualizador de Markdown"
+      },
+      "openInNativeApp": "Abrir na aplicação nativa",
+      "title": "Escolher visualizador",
+      "fileLabel": "Arquivo a abrir",
+      "open": "Abrir",
+      "openWithoutSaving": "Abrir sem salvar",
+      "alwaysUse": "Usar sempre este visualizador para este tipo de arquivo",
+      "default": "Padrão",
+      "nativeDescription": "Usar a aplicação do computador em vez de um visualizador do Sambee"
+    },
+    "search": {
+      "modes": {
+        "fileSearch": "Pesquisa de arquivos",
+        "navigate": "Navegar",
+        "quickNav": "Navegação rápida",
+        "commands": "Comandos"
+      },
+      "statusDetails": {
+        "source": "Origem",
+        "title": "Estado da pesquisa de pastas",
+        "linkSuffix": " (<details>detalhes</details>).",
+        "impact": "Os resultados da pesquisa podem não incluir pastas dentro destes locais.",
+        "incomplete": "Só é apresentada uma amostra dos locais afetados. Pode haver mais pastas afetadas.",
+        "locations": "Locais afetados",
+        "location": "Local",
+        "reason": "Motivo",
+        "containingDirectory": "Pasta que contém o item",
+        "unavailable": "Estes detalhes já não estão disponíveis. Atualize o estado.",
+        "failed": "Não foi possível carregar os detalhes do estado. Verifique a conexão com a origem e reabra esta janela.",
+        "reasons": {
+          "access_denied": "Acesso negado",
+          "unsupported_encoding": "Não foi possível ler o nome de uma pasta",
+          "unsafe_traversal": "Falha na verificação de segurança da pasta",
+          "scan_failed": "Não foi possível ler uma pasta"
+        },
+        "actions": {
+          "access_denied": "Verifique se a conta usada na origem tem permissão para ler esta pasta.",
+          "unsupported_encoding": "Verifique se os nomes das pastas têm caracteres não suportados ou são demasiado longos.",
+          "unsafe_traversal": "Verifique se a pasta mudou durante a verificação. Se o problema persistir, reconecte a origem.",
+          "scan_failed": "Verifique se a pasta existe e se pode ser lida. Restabeleça a conexão com a origem, se necessário."
+        }
+      },
+      "modeSelectorAriaLabel": "Alternar modo da barra rápida",
+      "placeholders": {
+        "directory": "Navegar até qualquer pasta",
+        "command": "Executar um comando",
+        "smart": "Vá a qualquer pasta ou digite > para ver os comandos",
+        "fileSearch": "Pesquisar arquivos recentes e da pasta atual"
+      },
+      "footer": {
+        "navigate": "navegar",
+        "open": "abrir",
+        "removeRecent": "Remover item recente",
+        "removeRecentDirectory": "Remover pasta recente",
+        "run": "executar",
+        "commands": "comandos",
+        "close": "fechar"
+      },
+      "itemTypes": {
+        "directory": "Pasta",
+        "file": "Arquivo"
+      },
+      "results": {
+        "none": "Nenhum resultado para «{{query}}»",
+        "failed": "Não foi possível concluir a pesquisa. Tente novamente.",
+        "removeFailed": "Não foi possível remover este item recente. Tente novamente.",
+        "count_one": "{{count}} resultado",
+        "count_many": "{{count}} resultados",
+        "count_other": "{{count}} resultados",
+        "countTruncated": "Mais de {{count}} resultados",
+        "commandCount_one": "{{count}} comando",
+        "commandCount_many": "{{count}} comandos",
+        "commandCount_other": "{{count}} comandos",
+        "directoriesIndexed_one": "{{count}} pasta indexada",
+        "directoriesIndexed_many": "{{count}} pastas indexadas",
+        "directoriesIndexed_other": "{{count}} pastas indexadas"
+      },
+      "status": {
+        "connectionStatus": "{{connection}}: {{message}}",
+        "indexingPending": "A indexar…",
+        "indexing": "A indexar… ({{count}} pastas encontradas)",
+        "updating": "A atualizar o índice… ({{count}} pastas)",
+        "updatingProgress": "A atualizar o índice… ({{done}} de cerca de {{total}} pastas verificadas)",
+        "startingIndex": "A iniciar a indexação…",
+        "indexCoveragePartial": "não foi possível indexar todas as pastas.",
+        "indexCoverageUncertain": "O índice de pastas não está verificado. Está pendente uma nova verificação.",
+        "legacyDirectorySearch": "A pesquisa de pastas com vários termos não está confirmada para esta origem. Pesquise um só termo ou verifique o suporte no backend e no Companion.",
+        "historyUnavailable": "As pastas recentes não estão disponíveis. Verifique a conexão com o backend e tente novamente.",
+        "fileHistoryUnavailable": "Os arquivos recentes não estão disponíveis. Verifique a conexão com o backend e tente novamente.",
+        "indexUnavailable": "A pesquisa de pastas não está disponível. Verifique a conexão com a origem e tente novamente."
+      },
+      "groups": {
+        "recentFiles": "Arquivos recentes",
+        "recentDirectories": "Pastas recentes",
+        "directories": "Pastas",
+        "currentDirectory": "Pasta atual"
+      },
+      "belowMinimum": "Digite pelo menos {{count}} caracteres para pesquisar"
+    },
+    "shortcuts": {
+      "fileSearch": "Pesquisar arquivos recentes e da pasta atual",
+      "copyToOtherPane": "Copiar para o outro painel",
+      "copyToOtherPaneInDualPane": "Copiar para o outro painel (modo de dois painéis)",
+      "createArchive": "Criar arquivo ZIP",
+      "download": "Baixar itens selecionados",
+      "createDirectory": "Criar pasta",
+      "createFile": "Criar arquivo",
+      "deleteItem": "Excluir arquivo ou pasta",
+      "extractArchive": "Extrair arquivo ZIP",
+      "moveToOtherPane": "Mover para o outro painel",
+      "moveToOtherPaneInDualPane": "Mover para o outro painel (modo de dois painéis)",
+      "navigateDown": "Navegar para baixo",
+      "navigateUp": "Subir uma pasta",
+      "navigateUpRow": "Navegar para cima",
+      "openConnectionSelector": "Abrir seletor de conexões",
+      "openInCompanion": "Abrir o arquivo selecionado na aplicação nativa",
+      "openNativePicker": "Escolher uma aplicação nativa para o arquivo selecionado",
+      "openQuickNavigation": "Abrir navegação rápida",
+      "openSelectedItem": "Abrir o arquivo selecionado no Sambee.",
+      "openSettings": "Abrir configurações",
+      "openSmartNavigation": "Abrir modo de navegação",
+      "openViewerPicker": "Escolher um visualizador do Sambee para o arquivo selecionado",
+      "refresh": "Atualizar lista de arquivos",
+      "renameItem": "Renomear arquivo ou pasta",
+      "selectAllFiles": "Selecionar todos os arquivos",
+      "selectAndMoveDown": "Selecionar e descer",
+      "selectAndMoveUp": "Selecionar e subir",
+      "selectToFirst": "Selecionar do item em foco até ao primeiro",
+      "selectToLast": "Selecionar do item em foco até ao último",
+      "showCommands": "Mostrar comandos",
+      "showHelp": "Mostrar atalhos de teclado",
+      "switchActivePane": "Trocar painel ativo",
+      "previousTab": "Selecionar aba de pasta anterior",
+      "nextTab": "Selecionar próxima aba de pasta",
+      "newTab": "Nova aba de pasta",
+      "closeTab": "Fechar aba de pasta selecionada",
+      "openLocationInNewTab": "Abrir local atual em nova aba",
+      "matchLeftPaneLocation": "Usar o local do painel direito no esquerdo",
+      "matchRightPaneLocation": "Usar o local do painel esquerdo no direito",
+      "toggleDualPane": "Alternar visualização com dois painéis",
+      "toggleSelectionAndMoveDown": "Alternar seleção e descer",
+      "upload": "Enviar arquivos para a pasta atual"
+    },
+    "copyMove": {
+      "labelDestination": "Pasta",
+      "labelFilename": "Novo nome",
+      "warnEmptyFilename": "O nome é obrigatório.",
+      "descriptionCopySingle": "Copie este item para a pasta de destino.",
+      "descriptionCopyMultiple_one": "Copie este item para a pasta de destino.",
+      "descriptionCopyMultiple_many": "Copie {{count}} itens selecionados para a pasta de destino.",
+      "descriptionCopyMultiple_other": "Copie {{count}} itens selecionados para a pasta de destino.",
+      "descriptionMoveSingle": "Mova este item para a pasta de destino.",
+      "descriptionMoveMultiple_one": "Mova este item para a pasta de destino.",
+      "descriptionMoveMultiple_many": "Mova {{count}} itens selecionados para a pasta de destino.",
+      "descriptionMoveMultiple_other": "Mova {{count}} itens selecionados para a pasta de destino.",
+      "errorSameFilename": "Já existe um item com este nome na pasta de destino.",
+      "errorSameDirectory": "A pasta de destino é igual à pasta de origem.",
+      "buttonCopying": "A copiar…",
+      "buttonMoving": "A mover…",
+      "progressCopy": "A copiar {{current}} de {{total}}…",
+      "progressMove": "A mover {{current}} de {{total}}…",
+      "errorGeneric": "A operação falhou. Alguns itens podem não ter sido processados."
+    },
+    "row": {
+      "itemTypes": {
+        "file": "Arquivo",
+        "folder": "Pasta"
+      },
+      "openInCompanionApp": "Abrir na aplicação nativa",
+      "openInNativeApp": "Abrir na aplicação nativa",
+      "openInBrowserViewer": "Abrir no Sambee",
+      "chooseBrowserViewer": "Escolher visualizador do Sambee",
+      "chooseNativeApp": "Escolher aplicação nativa",
+      "shortcutSuffix": " (atalho)",
+      "shortcutTargetSuffix": " (destino do atalho: {{target}})",
+      "unsavedLocalDraft": "Rascunho local não salvo disponível",
+      "unsavedLocalDraftSuffix": ": rascunho local não salvo disponível",
+      "selectedSuffix": " (selecionado)"
+    },
+    "operationContext": {
+      "file": "Arquivo",
+      "sourceItem": "Item de origem",
+      "destinationDirectory": "Pasta de destino",
+      "archive": "Arquivo compactado",
+      "archiveMember": "Item no arquivo compactado",
+      "selectedItems": "Itens selecionados"
+    },
+    "toolbar": {
+      "uploadChoiceFiles": "Arquivos",
+      "newFolder": "Nova pasta",
+      "newFile": "Novo arquivo",
+      "upload": "Enviar",
+      "uploadChoiceFolder": "Pasta",
+      "uploadFiles": "Enviar arquivos",
+      "uploadFolder": "Enviar pasta",
+      "createArchive": "Criar arquivo compactado",
+      "extractArchive": "Extrair arquivo compactado",
+      "refresh": "Atualizar",
+      "more": "Mais"
+    },
+    "createItem": {
+      "titleFile": "Novo arquivo",
+      "inputLabel": "Nome",
+      "titleDirectory": "Nova pasta",
+      "descriptionFile": "Crie o novo arquivo na pasta de destino.",
+      "descriptionDirectory": "Crie a nova pasta na pasta de destino.",
+      "buttonCreating": "A criar…"
+    },
+    "transfers": {
+      "downloadFailed": "Falha ao baixar. Tente novamente.",
+      "downloadSizeLimitExceeded": "O ZIP selecionado excede o limite de tamanho para transferências temporárias.",
+      "preparingArchive": "A preparar arquivo compactado",
+      "downloading": "A preparar transferência",
+      "preparingUpload": "A preparar envio",
+      "dropToUpload": "Solte para enviar",
+      "dropUnavailable": "Não é possível enviar para esta pasta",
+      "dropBusy": "Conclua primeiro o envio atual",
+      "dropUnsupported": "Este navegador não permite soltar pastas aqui. Use Enviar",
+      "uploadComplete_one": "{{count}} arquivo enviado",
+      "uploadComplete_many": "{{count}} arquivos enviados",
+      "uploadComplete_other": "{{count}} arquivos enviados",
+      "uploadSkipped_one": "{{count}} ignorado",
+      "uploadSkipped_many": "{{count}} ignorados",
+      "uploadSkipped_other": "{{count}} ignorados",
+      "uploadFailed_one": "{{count}} com falha",
+      "uploadFailed_many": "{{count}} com falha",
+      "uploadFailed_other": "{{count}} com falha",
+      "uploadUnknown_one": "{{count}} com resultado incerto",
+      "uploadUnknown_many": "{{count}} com resultado incerto",
+      "uploadUnknown_other": "{{count}} com resultado incerto",
+      "uploadCancelled_one": "{{count}} cancelado",
+      "uploadCancelled_many": "{{count}} cancelados",
+      "uploadCancelled_other": "{{count}} cancelados",
+      "uploadSummaryWithIssues": "{{summary}} · {{issues}}",
+      "uploadDestinationChanged": "Envio cancelado porque o destino mudou. Escolha uma pasta e tente novamente.",
+      "uploadInspectDestination": "Resultado incerto. Verifique o destino antes de tentar novamente",
+      "uploadFolders": "Pastas: {{created}} criadas, {{merged}} mescladas, {{skipped}} ignoradas",
+      "uploadPartial": "Envio cancelado. Os arquivos e pastas já transferidos ficam no destino.",
+      "uploadFolderFailed_one": "{{count}} pasta com falha",
+      "uploadFolderFailed_many": "{{count}} pastas com falha",
+      "uploadFolderFailed_other": "{{count}} pastas com falha",
+      "uploadProgress": "A enviar {{name}} ({{current}}/{{total}}) · {{bytes}} / {{size}} · {{completed}} concluídos, {{skipped}} ignorados, {{failed}} com falha",
+      "uploadSending": "A enviar {{name}} ({{current}}/{{total}}) · A transferir · {{completed}} concluídos, {{skipped}} ignorados, {{failed}} com falha",
+      "uploadPublishing": "A enviar {{name}} ({{current}}/{{total}}) · A publicar · {{completed}} concluídos, {{skipped}} ignorados, {{failed}} com falha",
+      "uploadRemaining_one": "Envio não iniciado para {{count}} arquivo",
+      "uploadRemaining_many": "Envio não iniciado para {{count}} arquivos",
+      "uploadRemaining_other": "Envio não iniciado para {{count}} arquivos"
+    },
+    "compactActions": {
+      "clearSelection": "Limpar seleção",
+      "createNewItem": "Criar item",
+      "deselect": "Desmarcar",
+      "moreActionsFor": "Mais ações para {{name}}",
+      "select": "Selecionar",
+      "selectedCount_one": "{{count}} item selecionado",
+      "selectedCount_many": "{{count}} itens selecionados",
+      "selectedCount_other": "{{count}} itens selecionados",
+      "selectionCleared": "Seleção limpa",
+      "selectionActions": "Ações da seleção"
+    },
+    "share": {
+      "filesOnly": "Só é possível compartilhar arquivos. Remova as pastas da seleção.",
+      "selectFiles": "Selecione um ou mais arquivos para compartilhar.",
+      "preparing_one": "Baixando {{count}} arquivo para compartilhar…",
+      "preparing_many": "Baixando {{count}} arquivos para compartilhar…",
+      "preparing_other": "Baixando {{count}} arquivos para compartilhar…",
+      "ready_one": "{{count}} arquivo pronto para compartilhar",
+      "ready_many": "{{count}} arquivos prontos para compartilhar",
+      "ready_other": "{{count}} arquivos prontos para compartilhar",
+      "sharing": "A abrir as opções de compartilhamento…",
+      "rejected": "O navegador não conseguiu compartilhar estes arquivos. Baixe-os para o dispositivo",
+      "fileTypeRejected": "Este navegador pode não permitir compartilhar estes tipos de arquivo. Baixe-os e tente compartilhar pelo gerenciador de arquivos do dispositivo.",
+      "downloadNext": "Baixar {{current}}/{{count}}",
+      "downloadFailed": "Não foi possível baixar o arquivo"
+    },
+    "archiveMembers": {
+      "encrypted": "Este item do arquivo compactado está protegido por criptografia. Para pré-visualizar ou extrair, use uma ferramenta de descompactação e forneça a senha.",
+      "unsupportedCompression": "O Sambee não suporta o método de compactação deste item. Use outra ferramenta para pré-visualizar ou extrair.",
+      "unavailable": "Este item do arquivo compactado está indisponível. Use outra ferramenta para o inspecionar."
+    },
+    "unavailableShortcuts": {
+      "archiveContentImmutable": "Não é possível modificar o conteúdo do arquivo compactado.",
+      "archiveExtractionUnavailable": "Não é possível extrair este arquivo compactado para o destino atual.",
+      "companionUnavailable": "Conecte o Sambee Companion antes de criar um arquivo compactado com arquivos locais.",
+      "destinationUnavailable": "Este local não pode receber arquivos.",
+      "dualPaneRequired": "Para copiar, use o modo de dois painéis.",
+      "interactionBlocked": "Esta ação não está disponível enquanto outra visualização estiver aberta.",
+      "readOnlyLocation": "Este local é somente de leitura.",
+      "selectArchiveToExtract": "Selecione um arquivo compactado para extrair.",
+      "selectItemToDelete": "Selecione um item para excluir.",
+      "selectItemToRename": "Selecione um item para renomear.",
+      "selectItemsToArchive": "Selecione itens que possam ser adicionados a um arquivo compactado.",
+      "selectItemsToCopy": "Selecione um ou mais itens para copiar.",
+      "selectItemsToDownload": "Selecione um ou mais itens para baixar.",
+      "selectItemsToMove": "Selecione um ou mais itens para mover.",
+      "sourceUnavailable": "Esta ação não está disponível para o item selecionado.",
+      "locationUnavailable": "Aguarde o carregamento do local do painel. Se falhar, selecione Atualizar ou escolha outro local.",
+      "lastTabProtected": "Mantenha pelo menos uma aba aberta em cada painel"
+    },
+    "tabs": {
+      "groupAriaLabel": "Abas de pastas",
+      "leftPaneGroupAriaLabel": "Abas de pastas do painel esquerdo",
+      "rightPaneGroupAriaLabel": "Abas de pastas do painel direito",
+      "newTab": "Nova aba",
+      "allTabsAriaLabel": "Todas as abas ({{total}})",
+      "allTabsOverflowAriaLabel": "Todas as abas ({{total}}, {{hidden}} ocultas)",
+      "selectTabAriaLabel": "{{name}} — {{location}}",
+      "closeTabAriaLabel": "Fechar aba {{name}} ({{location}})",
+      "closeTab": "Fechar aba",
+      "closeBackgroundTabTooltip": "Fechar aba ({{shortcut}} fecha a aba selecionada)",
+      "closeMenuTabTooltip": "Fechar aba ({{shortcut}} fecha a aba em foco)",
+      "closedNotice": "Aba fechada",
+      "undo": "Desfazer",
+      "selectedAnnouncement": "{{name}}, aba {{index}} de {{total}}",
+      "listInstructions": "Use as setas esquerda e direita para trocar de aba de pasta, {{newTabShortcut}} para abrir uma nova aba e {{closeTabShortcut}} para fechar a aba selecionada.",
+      "restorationUnavailableNotice": "Nesta sessão do navegador, não é possível restaurar as abas após recarregar a página."
+    },
+    "rename": {
+      "titleFile": "Renomear arquivo",
+      "titleDirectory": "Renomear pasta",
+      "inputLabel": "Novo nome",
+      "description": "Escolha um novo nome para este item.",
+      "validationSame": "O nome não mudou.",
+      "buttonRenaming": "A renomear…"
+    },
+    "nameDialog": {
+      "validationEmpty": "O nome é obrigatório.",
+      "validationInvalidChars": "Remova estes caracteres não suportados: \\ / : * ? \" < > |.",
+      "validationDotNames": "«.» e «..» são nomes de pasta reservados.",
+      "validationTrailing": "Os nomes não podem terminar com espaço ou ponto."
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "Cancelar",
+      "close": "Fechar",
+      "companionRecovery": "Recuperação com o Companion",
+      "connectionStatus": "Estado da conexão",
+      "copy": "Copiar",
+      "create": "Criar",
+      "delete": "Excluir",
+      "discard": "Descartar",
+      "download": "Baixar",
+      "edit": "Editar",
+      "logout": "Terminar sessão",
+      "move": "Mover",
+      "nextNotice": "Próxima notificação",
+      "print": "Imprimir",
+      "rename": "Alterar nome",
+      "replace": "Substituir",
+      "retry": "Tentar novamente",
+      "monitoringStopped": "Atualizações automáticas interrompidas",
+      "save": "Salvar",
+      "share": "Compartilhar",
+      "skip": "Ignorar"
+    },
+    "labels": {
+      "connection": "Conexão",
+      "itemToDelete": "Item a excluir",
+      "root": "Raiz",
+      "settings": "Configurações"
+    },
+    "navigation": {
+      "goBack": "Voltar"
+    },
+    "search": {
+      "action": "Pesquisar",
+      "placeholder": "Pesquisar",
+      "clear": "Limpar pesquisa",
+      "previousMatch": "Resultado anterior",
+      "nextMatch": "Próximo resultado"
+    }
+  },
+  "keyboardShortcutsHelp": {
+    "groups": {
+      "search": "Pesquisar",
+      "general": "Geral",
+      "navigation": "Navegação",
+      "selection": "Seleção",
+      "fileActions": "Ações de arquivos",
+      "editing": "Edição",
+      "view": "Visualização",
+      "panes": "Painéis e disposição"
+    },
+    "defaultTitle": "Atalhos de teclado",
+    "emptyState": "Não há atalhos de teclado disponíveis",
+    "noSearchResults": "Não foram encontrados atalhos de teclado correspondentes",
+    "searchAriaLabel": "Pesquisar atalhos de teclado",
+    "searchPlaceholder": "Pesquisar atalhos",
+    "resultsAriaLabel": "Resultados da pesquisa de atalhos de teclado",
+    "closeAriaLabel": "Fechar atalhos de teclado",
+    "titles": {
+      "fileBrowser": "Atalhos do navegador de arquivos",
+      "pdfViewer": "Atalhos do visualizador de PDF",
+      "imageViewer": "Atalhos do visualizador de imagens",
+      "markdownViewer": "Atalhos do visualizador de Markdown",
+      "markdownEditor": "Atalhos do editor de Markdown",
+      "textEditor": "Atalhos do editor de texto"
+    }
+  },
+  "themeSelector": {
+    "openButtonLabel": "Alterar tema",
+    "dialogTitle": "Escolher tema",
+    "previewPrimaryColor": "Cor principal",
+    "modes": {
+      "light": "Claro",
+      "dark": "Escuro"
+    },
+    "builtInThemes": {
+      "sambeeLight": {
+        "name": "Sambee claro",
+        "description": "Tema claro padrão da aplicação"
+      },
+      "sambeeDark": {
+        "name": "Sambee escuro",
+        "description": "Tema escuro padrão da aplicação"
+      }
+    }
+  },
+  "systemHealth": {
+    "statuses": {
+      "unknown": "Desconhecido",
+      "notAvailable": "Não disponível",
+      "ok": "OK",
+      "warning": "Aviso",
+      "error": "Erro",
+      "informational": "Informativo"
+    },
+    "availability": {
+      "unsupported": "Não disponível",
+      "available": "Atual",
+      "collecting": "A recolher dados",
+      "not_mounted": "Indisponível (montagem não configurada)",
+      "permission_denied": "Permissão negada",
+      "offline": "Offline",
+      "timeout": "Tempo limite excedido",
+      "stale": "Dados antigos",
+      "invalid": "Leitura inválida",
+      "unavailable": "Erro na coleta de dados"
+    },
+    "dialogTitle": "Estado do sistema",
+    "overview": {
+      "ok": "Nenhum problema encontrado",
+      "warning": "Requer atenção",
+      "error": "Ação necessária",
+      "unknown": "Algumas verificações estão indisponíveis",
+      "partialChecks": "Algumas verificações estão indisponíveis.",
+      "attentionHelp": "Verifique os itens destacados abaixo.",
+      "connectionHelp": "Não foi possível atualizar as verificações do servidor. O Sambee tenta novamente de forma automática. Se o problema persistir, verifique a conexão de rede.",
+      "server": "Servidor",
+      "container": "Contêiner",
+      "containerApplicationData": "Armazenamento: dados da aplicação",
+      "containerTemporaryStorage": "Armazenamento: dados temporários",
+      "containerCombinedStorage": "Armazenamento: dados da aplicação e dados temporários",
+      "connectionStorage": "Armazenamento da conexão",
+      "localDrive": "Unidade local",
+      "localDrives": "Unidades locais",
+      "smb": "Conexão SMB",
+      "hostMemory": "Memória",
+      "containerMemory": "Memória",
+      "systemLoad": "Carga média (normalizada)",
+      "percentUsed": "{{percent}}% em uso",
+      "bytesUsed": "{{used}} em uso",
+      "memoryUsed": "{{used}} em uso ({{percent}}%)",
+      "spaceFree": "{{available}} livres ({{percent}}%)",
+      "noLimit": "Sem limite definido",
+      "oldData": "Desatualizado",
+      "checking": "A verificar",
+      "localDriveHelp": "Verifique o Companion em Configurações > Unidades locais."
+    },
+    "summary": {
+      "sectionTitle": "Resumo",
+      "severityLabel": "Estado geral",
+      "coverageLabel": "Cobertura",
+      "coverageComplete": "Completa para as verificações ativas",
+      "coverageIncomplete": "Cobertura incompleta",
+      "lastUpdatedLabel": "Última atualização",
+      "neverUpdated": "A aguardar a primeira verificação",
+      "refreshing": "A atualizar verificações do estado do sistema",
+      "policyRetrying": "Não foi possível atualizar as permissões de monitoramento do sistema. O Sambee tentará novamente.",
+      "backendRetrying": "Algumas verificações do servidor ou de SMB não retornaram dados atuais. O Sambee tentará novamente.",
+      "companionRetrying": "O Companion não retornou dados atuais das unidades. O Sambee tentará novamente.",
+      "backendUnavailableHeadline": "Os dados do estado do servidor estão indisponíveis. O Sambee tentará novamente.",
+      "localDriveErrorHeadline": "Uma unidade local tem espaço livre em nível crítico.",
+      "localDriveErrorsHeadline": "{{count}} unidades locais têm espaço livre em nível crítico.",
+      "localDriveWarningHeadline": "Uma unidade local tem pouco espaço livre.",
+      "localDriveWarningsHeadline": "{{count}} unidades locais têm pouco espaço livre.",
+      "localDriveUnknownHeadline": "Os dados de espaço das unidades locais estão indisponíveis ou ainda não chegaram do Companion."
+    },
+    "sections": {
+      "backendHost": "Host do backend",
+      "containerRuntime": "Ambiente de contêineres do backend",
+      "storage": "Espaço livre de armazenamento"
+    },
+    "metrics": {
+      "hostMemory": "Memória do host",
+      "systemLoad": "Carga do sistema normalizada",
+      "cpuTemperature": "Temperatura da CPU",
+      "containerMemory": "Memória ativa do contêiner",
+      "load1m": "1 min",
+      "load5mEvaluated": "5 min (avaliada)",
+      "load15m": "15 min",
+      "logicalCpuMetadata": "{{count}} CPUs lógicas",
+      "memoryCapacity": "{{total}} no total · {{available}} disponível",
+      "memoryLimit": "Limite de memória: {{limit}}",
+      "noMemoryLimit": "Não há limite de memória para o contêiner. Os alertas percentuais estão desativados.",
+      "hostMemoryPercent": "A percentagem tem como base a memória total do host.",
+      "containerMemoryScope": "Inclui todos os processos no contêiner, não só o Sambee. Exclui o cache de arquivos e inclui a memória compartilhada e a do kernel.",
+      "fileCache": "Cache de arquivos: {{cache}}",
+      "storageCapacity": "Capacidade: {{total}}",
+      "usedValue": "{{percent}}% em uso ({{used}} de {{total}}, {{available}} disponível)",
+      "workingSetFinite": "{{percent}}% do limite ({{used}} de memória ativa de um limite de {{limit}})",
+      "workingSetUnlimited": "{{used}} de memória ativa — Sem limite configurado.",
+      "storageValue": "{{percent}}% disponível, {{available}} de {{total}}",
+      "thresholdsHigh": "Aviso ≥ {{warning}}, erro ≥ {{error}}",
+      "thresholdsLow": "Aviso ≤ {{warning}}, erro ≤ {{error}}",
+      "detectedLimits": "Limites detectados: aviso {{warning}}, crítico {{error}}",
+      "effectiveThresholds": "Limites efetivos: aviso {{warning}} ({{warningOrigin}}), erro {{error}} ({{errorOrigin}})",
+      "sourceLabel": "Origem: {{source}}",
+      "ageSeconds": "Há {{seconds}} s",
+      "staleTag": "Dados antigos (há {{seconds}} s)",
+      "actualFreeNote": "Espaço físico livre total no compartilhamento: {{actual}}",
+      "updateCompanion": "Atualize o Companion para mostrar o espaço nas unidades.",
+      "pairingLost": "O Companion não conseguiu verificar o emparelhamento. Abra Configurações > Unidades locais e emparelhe novamente, se necessário.",
+      "localDriveAction": "Libere espaço ou escolha outro local."
+    }
+  }
+}

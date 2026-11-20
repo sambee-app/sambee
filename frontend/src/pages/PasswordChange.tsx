@@ -1,5 +1,6 @@
 import { Alert, Button, Container, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { useTranslation } from "react-i18next";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { FormGroup, FormRow, FormSurface, formOutlinedControlSx } from "../components/Form/FormLayout";
 import { SettingsPasswordVisibilityToggle } from "../components/Settings/SettingsPasswordVisibilityToggle";
@@ -18,11 +19,12 @@ import {
 import { getApiErrorMessage } from "../utils/apiErrors";
 
 export function PasswordChangeGate({ ready }: { ready: boolean }) {
+  const { t } = useTranslation();
   const location = useLocation();
   const required = useSyncExternalStore(subscribePasswordChange, isPasswordChangeRequired);
   const [identityEpoch, setIdentityEpoch] = useState(0);
   const [checkedEpoch, setCheckedEpoch] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ detail: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => authSession.subscribeToIdentity(() => setIdentityEpoch((value) => value + 1)), []);
@@ -42,7 +44,7 @@ export function PasswordChangeGate({ ready }: { ready: boolean }) {
       },
       (failure: unknown) => {
         logger.warn("Account access check failed; retry the account check", { error: failure, attempt }, "auth");
-        if (active) setError(getApiErrorMessage(failure, "Your account could not be checked. Try again."));
+        if (active) setError({ detail: getApiErrorMessage(failure, "") });
       }
     );
     return () => {
@@ -56,21 +58,22 @@ export function PasswordChangeGate({ ready }: { ready: boolean }) {
   if (error) {
     return (
       <Container maxWidth="sm" sx={{ py: 4 }}>
-        <Alert severity="error">{error}</Alert>
-        <Button onClick={() => setAttempt((value) => value + 1)}>Try again</Button>
+        <Alert severity="error">{error.detail || t("auth.passwordChange.checkFailed")}</Alert>
+        <Button onClick={() => setAttempt((value) => value + 1)}>{t("auth.passwordChange.retry")}</Button>
       </Container>
     );
   }
   if (!ready || checkedEpoch !== identityEpoch)
     return (
       <Container role="status" sx={{ py: 4 }}>
-        Checking account...
+        {t("auth.passwordChange.checking")}
       </Container>
     );
   return <Outlet />;
 }
 
 export default function PasswordChange() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const requestedPath = sanitizeReturnPath(new URLSearchParams(location.search).get("return_path"));
@@ -82,7 +85,7 @@ export default function PasswordChange() {
   const [confirmation, setConfirmation] = useState("");
   const [visible, setVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ detail: string; kind: "checkForChangeFailed" | "changeFailed" } | null>(null);
   const mismatch = confirmation !== "" && confirmation !== newPassword;
 
   useEffect(() => {
@@ -97,7 +100,7 @@ export default function PasswordChange() {
       },
       (failure: unknown) => {
         logger.warn("Password-change account check failed; sign in again or retry", { error: failure, attempt }, "auth");
-        if (active) setError(getApiErrorMessage(failure, "Your account could not be checked. Sign in again or retry."));
+        if (active) setError({ detail: getApiErrorMessage(failure, ""), kind: "checkForChangeFailed" });
       }
     );
     return () => {
@@ -120,7 +123,7 @@ export default function PasswordChange() {
       sessionStorage.setItem(PASSWORD_CHANGED_MARKER, "1");
       await signOut();
     } catch (failure) {
-      setError(getApiErrorMessage(failure, "The password could not be changed. Try again."));
+      setError({ detail: getApiErrorMessage(failure, ""), kind: "changeFailed" });
     } finally {
       setSubmitting(false);
     }
@@ -129,27 +132,29 @@ export default function PasswordChange() {
   return (
     <Container maxWidth="sm" sx={{ py: 6 }}>
       <Typography component="h1" variant="h5" sx={{ mb: 2 }}>
-        Change password
+        {t("auth.passwordChange.title")}
       </Typography>
-      <Typography sx={{ mb: 3 }}>Your administrator requires you to change your local Sambee password before continuing.</Typography>
+      <Typography sx={{ mb: 3 }}>{t("auth.passwordChange.required")}</Typography>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
+          {error.detail || t(`auth.passwordChange.${error.kind}`)}
         </Alert>
       )}
-      {!checked && !error && <Typography role="status">Checking account...</Typography>}
+      {!checked && !error && <Typography role="status">{t("auth.passwordChange.checking")}</Typography>}
       {checked && (
         <form onSubmit={(event) => void submit(event)}>
           <FormSurface>
             <FormGroup>
-              {[
-                { label: "Current password", value: currentPassword, setValue: setCurrentPassword, autocomplete: "current-password" },
-                { label: "New password", value: newPassword, setValue: setNewPassword, autocomplete: "new-password" },
-                { label: "Confirm new password", value: confirmation, setValue: setConfirmation, autocomplete: "new-password" },
-              ].map((field, index) => (
-                <FormRow key={field.label} sx={{ gridTemplateColumns: { md: "minmax(0, 1fr)" } }}>
+              {(
+                [
+                  { key: "current", value: currentPassword, setValue: setCurrentPassword, autocomplete: "current-password" },
+                  { key: "new", value: newPassword, setValue: setNewPassword, autocomplete: "new-password" },
+                  { key: "confirmation", value: confirmation, setValue: setConfirmation, autocomplete: "new-password" },
+                ] as const
+              ).map((field, index) => (
+                <FormRow key={field.key} sx={{ gridTemplateColumns: { md: "minmax(0, 1fr)" } }}>
                   <TextField
-                    label={field.label}
+                    label={t(`auth.passwordChange.${field.key}`)}
                     value={field.value}
                     onChange={(event) => field.setValue(event.target.value)}
                     type={visible ? "text" : "password"}
@@ -160,15 +165,15 @@ export default function PasswordChange() {
                     disabled={submitting}
                     sx={formOutlinedControlSx}
                     error={index === 2 && mismatch}
-                    helperText={index === 2 && mismatch ? "The passwords do not match." : undefined}
+                    helperText={index === 2 && mismatch ? t("auth.passwordChange.mismatch") : undefined}
                     slotProps={{
                       input: {
                         endAdornment: (
                           <SettingsPasswordVisibilityToggle
                             visible={visible}
                             onToggle={() => setVisible((value) => !value)}
-                            showLabel="Show passwords"
-                            hideLabel="Hide passwords"
+                            showLabel={t("auth.passwordChange.show")}
+                            hideLabel={t("auth.passwordChange.hide")}
                           />
                         ),
                       },
@@ -180,22 +185,22 @@ export default function PasswordChange() {
           </FormSurface>
           <Stack direction="row" spacing={2} sx={{ mt: 3, justifyContent: "flex-end" }}>
             <Button variant="outlined" disabled={submitting} onClick={() => void signOut()}>
-              Sign out
+              {t("auth.passwordChange.signOut")}
             </Button>
             <Button
               type="submit"
               variant="contained"
               disabled={submitting || !currentPassword || !newPassword || !confirmation || mismatch}
             >
-              {submitting ? "Changing password..." : "Change password"}
+              {t(submitting ? "auth.passwordChange.changing" : "auth.passwordChange.title")}
             </Button>
           </Stack>
         </form>
       )}
       {!checked && error && (
         <Stack direction="row" spacing={2}>
-          <Button onClick={() => void signOut()}>Sign out</Button>
-          <Button onClick={() => setAttempt((value) => value + 1)}>Try again</Button>
+          <Button onClick={() => void signOut()}>{t("auth.passwordChange.signOut")}</Button>
+          <Button onClick={() => setAttempt((value) => value + 1)}>{t("auth.passwordChange.retry")}</Button>
         </Stack>
       )}
     </Container>

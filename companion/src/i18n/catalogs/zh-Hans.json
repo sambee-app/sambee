@@ -1,0 +1,241 @@
+{
+  "native": {
+    "trayPreferences": "偏好设置…",
+    "trayQuit": "退出 Sambee Companion",
+    "noOperations": "没有正在进行的操作",
+    "editing": "正在编辑：{{filename}}",
+    "uploading": "正在上传（{{percent}}）：{{filename}}",
+    "uploadFailed": "上传失败：{{filename}}",
+    "downloading": "正在下载：{{filename}}",
+    "preferencesTitle": "Sambee Companion — 偏好设置",
+    "pairingTitle": "Sambee Companion — 配对请求",
+    "appPickerTitle": "Sambee Companion — 选择应用",
+    "editingTitle": "Sambee — 正在编辑",
+    "authenticationTitle": "Sambee 身份验证"
+  },
+  "pairing": {
+    "idleMessage": "正在等待配对请求。",
+    "eyebrow": "授权浏览器来源",
+    "title": "确认浏览器请求的来源",
+    "closeTitle": "关闭",
+    "body": "此服务器将访问本地驱动器，并管理 Companion 的主题、语言和地区设置以及文件夹搜索策略。配对后，此服务器将接管设置管理。",
+    "labels": {
+      "requestingOrigin": "请求来源",
+      "verificationCode": "验证码"
+    },
+    "hint": "只有当 Sambee 的配对对话框中显示相同的验证码时，才可批准配对。",
+    "actions": {
+      "reject": "拒绝",
+      "codesMatch": "验证码一致",
+      "close": "立即关闭"
+    },
+    "approved": {
+      "title": "已发送批准",
+      "body": "{{origin}} 的验证码一致。",
+      "hint": "正在等待 Sambee 保存对此来源的信任设置。"
+    },
+    "success": {
+      "title": "已批准此来源",
+      "body": "此服务器现在可以访问本地驱动器并管理 Companion 设置。",
+      "hint": "此窗口即将自动关闭。"
+    }
+  },
+  "app": {
+    "title": "Sambee Companion",
+    "idleMessage": "正在系统托盘中运行。没有正在进行的编辑操作。"
+  },
+  "doneEditing": {
+    "waitingForContext": "正在等待编辑信息…",
+    "openedIn": "打开应用：{{appName}}",
+    "statusLabel": "状态：",
+    "modifiedAt": "修改时间：{{time}}",
+    "unchanged": "未修改",
+    "parseConflictError": "无法读取冲突信息",
+    "authRefreshedRetryUpload": "身份验证已刷新。请再次长按“完成编辑”以重试上传。",
+    "lifecycle": {
+      "renewalRequired": "Companion 未能在编辑会话过期前续期。请从 Sambee 重新打开文件，再尝试保存。",
+      "authFailed": "Companion 无法确认此编辑会话仍获授权。请从 Sambee 重新打开文件，开始新的编辑会话。",
+      "lockLost": "服务器上的编辑锁已失效。请从 Sambee 重新打开文件，再尝试上传。",
+      "recoveryRequired": "此编辑会话已过期，无法继续。请从 Sambee 重新打开文件，开始新的恢复流程。"
+    },
+    "buttons": {
+      "doneUpload": "✓ 完成编辑 — 长按上传",
+      "retryUpload": "✓ 完成编辑 — 长按重试上传",
+      "reopenRequired": "会话已过期 — 从 Sambee 重新打开",
+      "authFailed": "身份验证失败 — 从 Sambee 重新打开",
+      "lockLost": "编辑锁已失效 — 从 Sambee 重新打开",
+      "recoveryRequired": "需要恢复 — 从 Sambee 重新打开",
+      "doneClose": "✓ 完成编辑 — 长按关闭",
+      "uploading": "✓ 正在上传…",
+      "closing": "✓ 正在关闭…",
+      "discardHold": "长按放弃更改"
+    },
+    "aria": {
+      "confirmUpload": "长按 {{seconds}} 秒以确认上传",
+      "retryUpload": "长按 {{seconds}} 秒以在重新验证身份后重试上传",
+      "confirmClose": "长按 {{seconds}} 秒以关闭并释放编辑锁",
+      "discardChanges": "长按 {{seconds}} 秒以放弃更改",
+      "actionUnavailable": "请先从 Sambee 重新打开文件，再执行此操作",
+      "reopenInBrowser": "在浏览器中打开 Sambee 以开始新的编辑会话",
+      "uploadProgress": "上传进度"
+    }
+  },
+  "conflictDialog": {
+    "title": "⚠ 检测到冲突",
+    "body": "在你编辑期间，另一位用户修改了服务器上的文件。",
+    "labels": {
+      "yourDownload": "你下载的版本：",
+      "serverVersion": "服务器版本："
+    },
+    "actions": {
+      "overwrite": "覆盖服务器版本",
+      "saveCopy": "另存为副本",
+      "cancel": "取消"
+    },
+    "authRefreshedRetry": "身份验证已刷新。请再次选择“覆盖服务器版本”或“另存为副本”以重试上传。",
+    "lifecycle": {
+      "renewalRequired": "上传获得授权之前，编辑会话已过期。请关闭此对话框，并从 Sambee 重新打开文件。",
+      "authFailed": "Companion 无法确认此编辑会话仍获授权。请关闭此对话框，并从 Sambee 重新打开文件。",
+      "lockLost": "服务器上的编辑锁已失效。请关闭此对话框，并从 Sambee 重新打开文件。",
+      "recoveryRequired": "此编辑会话已过期，无法继续。请关闭此对话框，并从 Sambee 重新打开文件。"
+    }
+  },
+  "largeFileWarning": {
+    "title": "⚠ 大文件",
+    "body": "此文件的大小为 {{sizeMb}} MB（上限：{{limitMb}} MB）。下载和同步大文件可能较慢，并会占用大量磁盘空间。",
+    "actions": {
+      "continue": "仍要继续",
+      "cancel": "取消"
+    }
+  },
+  "appPicker": {
+    "title": "选择用于打开此 .{{extension}} 文件的应用",
+    "loading": "正在加载可用应用…",
+    "browseDialogTitle": "浏览并选择应用",
+    "empty": "找不到可打开 .{{extension}} 文件的已注册应用。",
+    "sectionDefault": "默认应用",
+    "sectionSuggested": "建议的应用",
+    "sectionMoreOptions": "更多选项",
+    "defaultBadge": "（默认）",
+    "alwaysUse": "始终使用此应用打开 .{{extension}} 文件",
+    "browseButton": "浏览以选择其他应用…",
+    "chooseAnotherApp": "选择其他应用",
+    "iconAlt": "{{appName}} 图标"
+  },
+  "preferences": {
+    "title": "偏好设置",
+    "loading": "正在加载偏好设置…",
+    "closeTitle": "关闭",
+    "sections": {
+      "pairedBrowsers": "受信任的浏览器来源",
+      "localization": "语言和地区",
+      "editingBehavior": "编辑行为",
+      "startup": "启动",
+      "updates": "更新",
+      "notifications": "通知",
+      "tempFileCleanup": "临时文件清理"
+    },
+    "pairedBrowsersHint": "这些受信任的浏览器来源可以通过 Companion 访问本地驱动器。移除来源后，该来源必须重新请求授权。",
+    "pairedBrowsersEmpty": "此 Companion 目前不信任任何浏览器来源。",
+    "directoryPolicy": {
+      "title": "受管理的设置",
+      "loading": "正在加载文件夹搜索策略的状态。",
+      "unavailable": "无法获取文件夹搜索策略。请稍候再刷新状态，或重新启动 Companion。",
+      "active": "已配对的服务器管理 Companion 设置。若要更换管理服务器，请与另一台服务器配对。",
+      "defaults": "尚未选择设置管理服务器。目前使用默认设置或上次有效的设置。请与所需的服务器配对。",
+      "owner": "设置管理服务器",
+      "revision": "生效的修订版本",
+      "refresh": "刷新策略状态"
+    },
+    "localizationStatusHint": "显示上次从受信任的 Sambee 浏览器来源同步的语言和地区设置。",
+    "localizationStatus": {
+      "syncedBadge": "已从浏览器同步",
+      "languageLabel": "语言",
+      "regionalLocaleLabel": "地区设置",
+      "updatedAtLabel": "上次更新",
+      "sourceOriginLabel": "同步来源",
+      "empty": "尚未从浏览器同步语言和地区设置。"
+    },
+    "unpairTitle": "移除受信任的来源",
+    "unpairButton": "移除",
+    "conflictResolutionLabel": "上传冲突处理",
+    "conflictResolutionHint": "服务器上的文件在编辑期间发生更改时应执行的操作。",
+    "conflictActions": {
+      "ask": "每次询问",
+      "overwrite": "始终覆盖服务器上的版本",
+      "saveCopy": "始终另存为新副本"
+    },
+    "startupLabel": "登录系统时启动 Sambee Companion",
+    "startupHint": "建议使用本地驱动器时启用此选项。只有 Companion 正在运行时，浏览器才能访问本地驱动器。",
+    "updateChannelLabel": "更新渠道",
+    "updateChannelHint": "选择 Companion 用于自动更新的发布渠道。",
+    "updateChannels": {
+      "stable": "稳定版",
+      "beta": "测试版",
+      "test": "内部测试版"
+    },
+    "preReleaseWarning": "{{channel}}渠道的版本可能包含尚未完成的功能，或导致原有功能出现问题。",
+    "confirmUpdateChannel": {
+      "title": "切换更新渠道？",
+      "body": "从稳定版切换到{{channel}}渠道后，可能会安装测试不够充分的预览版本。",
+      "confirm": "切换渠道"
+    },
+    "updateActions": {
+      "checkNow": "检查更新",
+      "checking": "正在检查…",
+      "install": "安装更新",
+      "installing": "正在安装…"
+    },
+    "updateStatus": {
+      "statusLabel": "更新状态",
+      "lastChecked": "上次检查：{{time}}",
+      "currentVersionLabel": "当前版本",
+      "latestVersionLabel": "可用版本",
+      "publishedAtLabel": "发布时间",
+      "errorLabel": "详细信息",
+      "upToDate": "当前已是{{channel}}渠道的最新版本。",
+      "updateAvailable": "{{channel}}渠道有可用更新：{{version}}。",
+      "installing": "正在安装{{channel}}渠道的更新 {{version}}。",
+      "installed": "已安装更新 {{version}}。如果应用没有自动重新启动，请手动重新启动。",
+      "checkFailed": "无法检查{{channel}}渠道的更新。",
+      "unknownVersion": "未知",
+      "unknownError": "未知错误"
+    },
+    "notificationsLabel": "显示桌面通知",
+    "notificationsHint": "上传成功或失败等编辑事件发生时显示系统通知。",
+    "retentionLabel": "临时文件保留天数",
+    "retentionHint": "启动时自动删除回收站中超过此期限的临时文件。可设置为 1 至 90 天。",
+    "savedIndicator": "已保存 ✓",
+    "confirmUnpair": {
+      "title": "移除受信任的来源？",
+      "body": "{{origin}} 将无法访问本地驱动器，直到它向此 Companion 重新请求授权。",
+      "unpairing": "正在移除…"
+    }
+  },
+  "recovery": {
+    "title": "发现未保存的文件",
+    "subtitle_other": "之前的会话中有 {{count}} 个文件需要处理。",
+    "detail": "{{remotePath}} — 修改时间：{{localModified}}",
+    "authRefreshedRetryUpload": "身份验证已刷新。请再次单击“上传”以重试将此文件发送到服务器。",
+    "lifecycle": {
+      "renewalRequired": "恢复的编辑会话在上传前已过期。请从 Sambee 重新打开文件，或放弃此临时副本。",
+      "authFailed": "Companion 无法确认恢复的编辑会话仍获授权。请从 Sambee 重新打开文件，或放弃此临时副本。",
+      "lockLost": "恢复的编辑会话已失去服务器上的编辑锁。请从 Sambee 重新打开文件，或放弃此临时副本。",
+      "recoveryRequired": "恢复的编辑会话已过期，无法继续。请从 Sambee 重新打开文件，或放弃此临时副本。"
+    },
+    "actions": {
+      "upload": "上传",
+      "retryUpload": "重试上传",
+      "discard": "放弃",
+      "later": "稍后处理",
+      "dismissAll": "关闭所有提示"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "取消",
+      "close": "关闭",
+      "open": "打开"
+    }
+  }
+}

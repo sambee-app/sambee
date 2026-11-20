@@ -1,11 +1,13 @@
 import { Alert, Box, Button, CircularProgress, Container, Typography } from "@mui/material";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { useRemoveLocationFragment } from "../hooks/useRemoveLocationFragment";
 import { exchangeOidcGrant, setOidcExchangePending } from "../services/api";
 import { completeAuthentication, notifyOidcLogin } from "../services/oidcAuth";
 
 export default function OidcCallback() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const removeLocationFragment = useEffectEvent(useRemoveLocationFragment());
   const [error, setError] = useState(false);
@@ -50,19 +52,19 @@ export default function OidcCallback() {
   if (!error) {
     return (
       <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
-        <CircularProgress aria-label="Completing sign in" />
+        <CircularProgress aria-label={t("auth.oidcCallback.progress")} />
       </Box>
     );
   }
 
   return (
     <Container maxWidth="sm" sx={{ py: 10 }}>
-      <Alert severity="error">Sign in could not be completed.</Alert>
+      <Alert severity="error">{t("auth.oidcCallback.failed")}</Alert>
       <Typography component="h1" variant="h5" sx={{ mt: 3 }}>
-        Sign in unavailable
+        {t("auth.oidcCallback.title")}
       </Typography>
       <Button variant="contained" sx={{ mt: 3 }} onClick={() => navigate("/login", { replace: true })}>
-        Try again
+        {t("auth.oidcCallback.retry")}
       </Button>
     </Container>
   );

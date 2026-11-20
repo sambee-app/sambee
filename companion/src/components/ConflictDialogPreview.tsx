@@ -1,6 +1,7 @@
 import { useMemo, useState } from "preact/hooks";
 import { ConflictDialog, type ConflictInfo } from "./ConflictDialog";
 import { DialogPreviewLayout, type PreviewThemeMode } from "./DialogPreviewLayout";
+import { usePreviewSettings } from "./usePreviewSettings";
 
 type PreviewActionResult = "success" | "error";
 
@@ -11,9 +12,14 @@ const PREVIEW_CONFLICT: ConflictInfo = {
   server_modified: "2026-04-24 12:21:47",
   server_url: "https://sambee.example.test",
 };
+const LONG_PREVIEW_CONFLICT: ConflictInfo = {
+  ...PREVIEW_CONFLICT,
+  filename: "Jahresabschlusszusammenstellungsdokumentation_Quartalsbudget_2026.xlsx",
+};
 
 /** Browser-only preview for the conflict dialog. */
 export function ConflictDialogPreview() {
+  const previewSettings = usePreviewSettings();
   const [themeMode, setThemeMode] = useState<PreviewThemeMode>("light");
   const [actionResult, setActionResult] = useState<PreviewActionResult>("success");
   const [visible, setVisible] = useState(true);
@@ -41,6 +47,7 @@ export function ConflictDialogPreview() {
       themeMode={themeMode}
       onThemeModeChange={setThemeMode}
       onReset={resetPreview}
+      settings={previewSettings}
       controls={
         <label class="dialog-preview__field">
           <span>Action result</span>
@@ -55,9 +62,9 @@ export function ConflictDialogPreview() {
       }
     >
       {visible ? (
-        <div class="dialog-preview__inline-window" key={instanceKey}>
+        <div key={`${instanceKey}-${previewSettings.dataVariant}`}>
           <ConflictDialog
-            conflict={PREVIEW_CONFLICT}
+            conflict={previewSettings.dataVariant === "long" ? LONG_PREVIEW_CONFLICT : PREVIEW_CONFLICT}
             onResolved={() => {
               setVisible(false);
             }}

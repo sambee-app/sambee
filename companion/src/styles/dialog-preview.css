@@ -1,30 +1,36 @@
 .dialog-preview {
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--accent-color, #f4c430) 12%, transparent), transparent 28%),
     linear-gradient(180deg, color-mix(in srgb, var(--bg-default, #fbf9f4) 86%, white), var(--bg-default, #fbf9f4));
 }
 
+.dialog-preview__controls {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 1rem;
+  width: min(calc(100% - 2rem), 1000px);
+  margin: 1rem auto 0;
+}
+
 .dialog-preview__nav {
-  position: fixed;
-  top: 1rem;
-  left: 1rem;
-  z-index: 210;
+  min-width: 0;
 }
 
 .dialog-preview__toolbar {
-  position: fixed;
-  top: 1rem;
-  right: 1rem;
-  left: 7.75rem;
-  z-index: 200;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 0.75rem;
-  width: min(calc(100% - 2rem), 860px);
-  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.875rem 1rem;
   border: 1px solid color-mix(in srgb, var(--border-color, #d1d5db) 80%, transparent);
   border-radius: 8px;
@@ -35,7 +41,9 @@
 
 .dialog-preview__group {
   display: flex;
+  flex: 1;
   flex-wrap: wrap;
+  min-width: 0;
   gap: 0.75rem;
 }
 
@@ -50,6 +58,8 @@
 }
 
 .dialog-preview__field select {
+  width: 100%;
+  min-width: 0;
   min-height: 36px;
   padding: 0.45rem 0.625rem;
   border: 1px solid var(--border-color, #d1d5db);
@@ -77,10 +87,18 @@
 }
 
 .dialog-preview__viewport {
+  position: relative;
   display: grid;
+  flex: 1;
   place-items: center;
-  min-height: 100vh;
-  padding: 6rem 1rem 2rem;
+  min-height: 20rem;
+  padding: 2rem 1rem;
+  box-sizing: border-box;
+}
+
+.dialog-preview .dialog-overlay {
+  position: absolute;
+  inset: 0;
 }
 
 .dialog-preview__inline-window {
@@ -204,21 +222,27 @@
 }
 
 @media (max-width: 720px) {
+  .dialog-preview__controls {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
   .dialog-preview__nav {
-    position: static;
     display: flex;
     justify-content: center;
-    padding: 1rem 1rem 0;
   }
 
   .dialog-preview__toolbar {
-    top: 4.75rem;
-    left: 1rem;
-    width: auto;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .dialog-preview__group {
     width: 100%;
+  }
+
+  .dialog-preview__toolbar-btn {
+    align-self: flex-end;
   }
 
   .dialog-preview__field {

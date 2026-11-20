@@ -1,0 +1,1841 @@
+{
+  "viewer": {
+    "pdfPassword": {
+      "title": "PDF 잠금 해제",
+      "description": "이 PDF를 보려면 비밀번호를 입력하세요.",
+      "open": "PDF 열기",
+      "label": "PDF 비밀번호",
+      "show": "비밀번호 표시",
+      "hide": "비밀번호 숨기기"
+    },
+    "slowImage": "이 이미지를 불러오는 데 평소보다 오래 걸립니다.",
+    "slowPdf": "이 PDF를 불러오는 데 평소보다 오래 걸립니다.",
+    "pdfLoadFailed": "PDF 문서를 불러오지 못했습니다.",
+    "renderingFailed": "이 문서를 화면에 표시하지 못했습니다. 다시 시도하려면 파일을 닫았다가 다시 여세요.",
+    "renderingPrintPending": "문서를 아직 불러오는 중입니다. 인쇄 대화 상자를 닫고 문서를 다 불러오면 다시 시도하세요.",
+    "printTitle": "인쇄 또는 PDF로 저장",
+    "printError": "인쇄 대화 상자를 열 수 없습니다. 브라우저 메뉴에서 ‘인쇄’를 선택하세요.",
+    "helpTitles": {
+      "pdf": "PDF 뷰어 단축키",
+      "image": "이미지 뷰어 단축키",
+      "markdown": "Markdown 뷰어 단축키"
+    },
+    "fallback": {
+      "failedTitle": "뷰어 사용 불가",
+      "unsupportedTitle": "지원되지 않는 뷰어",
+      "closeAriaLabel": "뷰어 오류 닫기",
+      "failedMessageWithError": "{{message}} 뷰어 코드를 불러올 수 없습니다.",
+      "failedMessageGeneric": "뷰어 코드를 불러올 수 없습니다. 백엔드 또는 리소스 호스트를 일시적으로 사용할 수 없을 때 이 문제가 발생할 수 있습니다.",
+      "unsupportedMessage": "현재 프런트엔드 환경에서는 이 파일 유형에 사용할 수 있는 뷰어가 없습니다.",
+      "stillAvailable": "파일 브라우저는 계속 사용할 수 있습니다. 이 대화 상자를 닫고 앱의 다른 곳에서 작업을 계속할 수 있습니다.",
+      "retry": "다시 시도"
+    },
+    "controls": {
+      "previous": "이전",
+      "next": "다음",
+      "previousPage": "이전 페이지",
+      "nextPage": "다음 페이지",
+      "previousImage": "이전 이미지",
+      "nextImage": "다음 이미지",
+      "zoomIn": "확대",
+      "zoomOut": "축소",
+      "rotateLeft": "왼쪽으로 회전",
+      "rotateRight": "오른쪽으로 회전",
+      "shareUnavailable": "이 기기 또는 브라우저에서는 공유할 수 없습니다.",
+      "searchUnavailable": "검색할 수 없습니다. PDF에 텍스트 레이어가 없습니다(스캔 이미지일 수 있음).",
+      "pdfSearchPlaceholder": "PDF에서 검색…"
+    },
+    "edit": {
+      "lockFailed": "편집 모드로 전환할 수 없습니다. {{message}}",
+      "lockFailedReason": "편집 잠금을 확보하지 못했습니다.",
+      "saveFailed": "Markdown 변경 사항을 저장하지 못했습니다.",
+      "commandFailed": "{{action}} 작업을 실행하지 못했습니다. {{message}}",
+      "commandFailedReason": "편집기에서 명령을 거부했습니다.",
+      "discardConfirm": "저장하지 않은 변경 사항을 버리시겠습니까?",
+      "closeConfirm": "저장하지 않은 변경 사항이 있습니다. 그래도 뷰어를 닫으시겠습니까?",
+      "editorLabel": "Markdown 편집기",
+      "editorLoadTitle": "편집기를 불러오지 못함",
+      "editorLoadMessage": "Markdown 편집기를 불러올 수 없습니다. 초안은 아직 메모리에 남아 있습니다. 편집기를 다시 열거나 읽기 전용 미리 보기로 돌아가세요.",
+      "editorLoadFailedReason": "편집기 코드를 불러올 수 없습니다.",
+      "editorCrashTitle": "편집기 사용 불가",
+      "editorCrashMessage": "Markdown 편집기에서 내부 오류가 발생했습니다. 초안은 아직 메모리에 남아 있습니다. 편집기를 다시 열거나 읽기 전용 미리 보기로 돌아가세요.",
+      "retryEditor": "편집기 다시 열기",
+      "returnToPreview": "미리 보기로 돌아가기",
+      "unsavedIndicator": "저장 안 됨",
+      "unsavedIndicatorAria": "저장하지 않은 변경 사항",
+      "unsavedChangesTitle": "저장하지 않은 변경 사항",
+      "unsavedChangesExitMessage": "편집 모드를 종료하기 전에 변경 사항을 저장하시겠습니까?",
+      "unsavedChangesCloseMessage": "뷰어를 닫기 전에 변경 사항을 저장하시겠습니까?",
+      "recovery": {
+        "title": "저장하지 않은 로컬 초안 있음",
+        "description": "저장하지 않은 로컬 초안이 있습니다.",
+        "newerDescription": "저장하지 않은 로컬 초안이 있으며, 저장된 파일보다 더 최근에 수정되었습니다.",
+        "savedFile": "저장된 파일",
+        "localDraft": "로컬 초안",
+        "unknown": "알 수 없음",
+        "discard": "초안 버리기",
+        "resume": "편집 계속",
+        "tooLargeWarning": "편집 내용이 너무 커서 초안을 복구할 수 없습니다.",
+        "storageUnavailableWarning": "이 브라우저 세션에서는 초안을 복구할 수 없습니다."
+      },
+      "searchUnavailable": "공통 뷰어 도구 모음의 검색은 고급 텍스트 편집 모드에서만 사용할 수 있습니다.",
+      "caseSensitive": "대소문자 구분",
+      "caseSensitiveShortcut": "대소문자 구분(Alt+C)",
+      "find": "찾기",
+      "findReplace": "찾기 및 바꾸기",
+      "findWithHistory": "검색(기록: ⇅)",
+      "invalidRegularExpression": "올바르지 않은 정규식",
+      "matchOptions": "일치 옵션",
+      "nextMatch": "다음 검색 결과",
+      "previousMatch": "이전 검색 결과",
+      "regularExpression": "정규식 사용",
+      "regularExpressionShortcut": "정규식 사용(Alt+R)",
+      "replaceAll": "모두 바꾸기",
+      "replacing": "일치 항목을 바꾸는 중…",
+      "replacementFailed": "바꾸기에 실패했습니다. ‘모두 바꾸기’를 다시 시도하세요.",
+      "replaceCurrent": "현재 일치 항목 바꾸기",
+      "wholeWord": "단어 단위로 일치",
+      "wholeWordShortcut": "단어 단위로 일치(Alt+W)",
+      "bold": "굵게",
+      "removeBold": "굵게 해제",
+      "italic": "기울임꼴",
+      "replace": "바꾸기",
+      "replaceWithHistory": "바꾸기(기록: ⇅)",
+      "toggleCaseSensitive": "대소문자 구분 전환",
+      "toggleWholeWord": "단어 단위 일치 전환",
+      "toggleRegularExpression": "정규식 사용 전환",
+      "toggleWordWrap": "자동 줄 바꿈 전환",
+      "removeItalic": "기울임꼴 해제",
+      "underline": "밑줄",
+      "removeUnderline": "밑줄 해제",
+      "undo": "실행 취소",
+      "redo": "다시 실행"
+    },
+    "text": {
+      "loadFailed": "파일을 불러오지 못했습니다.",
+      "lockFailed": "읽기 전용으로 열었습니다. {{message}}",
+      "lockFailedReason": "편집 잠금을 확보하지 못했습니다.",
+      "saveFailed": "텍스트 파일의 변경 사항을 저장하지 못했습니다.",
+      "editorLabel": "텍스트 편집기",
+      "editorCrashTitle": "텍스트 편집기 사용 불가",
+      "editorCrashMessage": "텍스트 편집기에서 내부 오류가 발생했습니다. 초안은 아직 메모리에 남아 있습니다. 편집기를 다시 열거나 파일을 닫으세요.",
+      "acquiring": "쓰기 권한 확인 중…",
+      "retryEditing": "편집 다시 시도",
+      "lockedNotification": "다른 세션에서 이 파일을 편집 중입니다. 여기서 파일을 읽을 수 있습니다. 다른 편집기가 닫히면 <retryIcon/> 버튼으로 편집을 다시 시도하세요.",
+      "heartbeatFailed": "편집 잠금을 갱신할 수 없습니다. 연결을 확인하세요. 저장하려면 잠금을 다시 확보해야 할 수 있습니다.",
+      "readOnlyReasons": {
+        "read-only": "이 위치는 읽기 전용입니다.",
+        "locked": "다른 세션에서 이 파일을 편집 중입니다. 여기서 파일을 읽거나 잠금이 해제된 후 편집을 다시 시도할 수 있습니다.",
+        "permission-denied": "이 파일에 대한 쓰기 권한이 없습니다.",
+        "unsupported": "이 소스는 편집을 지원하지 않습니다.",
+        "unavailable": "일시적으로 파일에 쓸 수 없습니다. 계속 읽거나 편집을 다시 시도할 수 있습니다.",
+        "lost": "편집 잠금이 더 이상 유효하지 않습니다. 초안은 보존되었습니다. 새 잠금을 확보하려면 편집을 다시 시도하세요.",
+        "conflict": "초안이 편집 잠금으로 보호되지 않는 동안 저장된 파일이 변경되었습니다."
+      },
+      "conflictTitle": "파일이 변경됨",
+      "conflictDescription": "저장된 파일이 초안의 원본과 다릅니다. 편집기에 남길 내용을 선택하세요. 초안을 유지하더라도 ‘저장’을 선택하기 전에는 파일에 저장되지 않습니다.",
+      "useSavedFile": "저장된 파일 사용",
+      "keepDraft": "내 초안 유지",
+      "limitMessage": "이 파일의 크기({{currentSizeMb}} MB)가 텍스트 편집기 한도({{maxSizeMb}} MB)를 초과합니다. Sambee는 전체 기능을 갖춘 CodeMirror 편집기 대신 더 안전한 읽기 전용 모드로 파일을 열었습니다.",
+      "limitSearchUnavailable": "대용량 파일용 읽기 전용 모드에서는 검색할 수 없습니다."
+    },
+    "share": {
+      "preparing": "공유할 파일을 준비하는 중…",
+      "failed": "파일을 공유하지 못했습니다.",
+      "failedText": "텍스트를 공유하지 못했습니다.",
+      "unsupported": "이 기기 또는 브라우저에서는 공유할 수 없습니다.",
+      "payloadUnsupported": "이 브라우저에서는 이 첨부 데이터를 공유할 수 없습니다.",
+      "details": "공유 세부 정보",
+      "detailsAction": "세부 정보",
+      "copyDetails": "공유 세부 정보 복사",
+      "copySuccess": "공유 세부 정보를 복사했습니다.",
+      "copyError": "공유 세부 정보를 복사할 수 없습니다. 보고서 내용을 선택한 후 직접 복사하세요.",
+      "downloadSuggestion": "대신 파일을 다운로드한 후 기기의 파일 앱에서 공유하세요.",
+      "asFile": "파일로 공유",
+      "asText": "텍스트로 공유"
+    },
+    "shortcuts": {
+      "open": "열기",
+      "close": "닫기",
+      "download": "다운로드",
+      "edit": "편집",
+      "save": "저장",
+      "bold": "굵게",
+      "italic": "기울임꼴",
+      "createLink": "링크 만들기",
+      "insertTable": "표 삽입",
+      "insertThematicBreak": "구분선 삽입",
+      "inlineCode": "인라인 코드",
+      "insertCodeBlock": "코드 블록 삽입",
+      "showHelp": "키보드 단축키 표시",
+      "search": "검색",
+      "nextMatch": "다음 검색 결과",
+      "previousMatch": "이전 검색 결과",
+      "firstPage": "첫 페이지",
+      "lastPage": "마지막 페이지",
+      "firstImage": "첫 이미지",
+      "lastImage": "마지막 이미지",
+      "nextPage": "다음 페이지",
+      "previousPage": "이전 페이지",
+      "next": "다음",
+      "previous": "이전",
+      "zoomIn": "확대",
+      "zoomOut": "축소",
+      "resetZoom": "확대 비율 초기화",
+      "rotateRight": "오른쪽으로 회전",
+      "rotateLeft": "왼쪽으로 회전",
+      "toggleFullscreen": "전체 화면 전환"
+    }
+  },
+  "app": {
+    "loading": "불러오는 중…",
+    "errorBoundary": {
+      "title": "문제가 발생했습니다.",
+      "description": "예기치 않은 오류가 발생했습니다. 오류를 로그에 기록했습니다.",
+      "tryAgain": "다시 시도",
+      "reloadPage": "페이지 새로 고침",
+      "developmentDetails": "오류 세부 정보(개발 전용)"
+    },
+    "updateAvailable": {
+      "title": "업데이트 사용 가능",
+      "description": "더 최신 버전의 Sambee가 있습니다.",
+      "currentBuild": "현재 빌드: v{{version}} ({{commit}})",
+      "latestBuild": "최신 빌드: v{{version}} ({{commit}})",
+      "later": "나중에",
+      "reload": "지금 새로 고침"
+    }
+  },
+  "auth": {
+    "passwordChange": {
+      "title": "비밀번호 변경",
+      "required": "계속하려면 관리자의 요구에 따라 Sambee 로컬 비밀번호를 변경해야 합니다.",
+      "checking": "계정을 확인하는 중…",
+      "checkFailed": "계정을 확인할 수 없습니다. 다시 시도하세요.",
+      "checkForChangeFailed": "계정을 확인할 수 없습니다. 다시 로그인하거나 다시 시도하세요.",
+      "changeFailed": "비밀번호를 변경할 수 없습니다. 다시 시도하세요.",
+      "current": "현재 비밀번호",
+      "new": "새 비밀번호",
+      "confirmation": "새 비밀번호 확인",
+      "mismatch": "비밀번호가 일치하지 않습니다.",
+      "show": "비밀번호 표시",
+      "hide": "비밀번호 숨기기",
+      "signOut": "로그아웃",
+      "changing": "비밀번호를 변경하는 중…",
+      "retry": "다시 시도"
+    },
+    "oidcCallback": {
+      "progress": "로그인을 완료하는 중",
+      "failed": "로그인을 완료할 수 없습니다.",
+      "title": "로그인할 수 없음",
+      "retry": "다시 시도"
+    },
+    "login": {
+      "title": "Sambee 로그인",
+      "usernameLabel": "사용자 이름",
+      "passwordLabel": "비밀번호",
+      "submit": "로그인",
+      "submitWithPassword": "비밀번호로 로그인",
+      "submitWithOidc": "SSO로 로그인 ({{providerName}} OIDC)",
+      "invalidCredentials": "사용자 이름 또는 비밀번호가 올바르지 않습니다"
+    }
+  },
+  "settings": {
+    "appearancePage": {
+      "localizationTitle": "언어 및 지역",
+      "localizationDescription": "인터페이스 언어와 날짜 및 숫자의 표시 형식을 선택합니다.",
+      "languageLabel": "언어",
+      "languageDescription": "인터페이스에 표시할 언어를 선택합니다.",
+      "languageLoadFailed": "언어를 불러올 수 없어 영어로 표시합니다. 다시 시도하려면 해당 언어를 다시 선택하세요.",
+      "regionalLocaleLabel": "지역 설정",
+      "regionalLocaleDescription": "날짜, 시간, 숫자 형식 및 정렬에 사용할 지역을 선택합니다.",
+      "browserDefaultOption": "브라우저 기본값",
+      "themeTitle": "테마",
+      "themeDescription": "앱 테마와 기본 표시 방식을 선택합니다.",
+      "englishLanguageOption": "영어",
+      "pseudoLanguageOption": "의사 영어(현지화 테스트용)",
+      "pseudoLanguageShortLabel": "의사 영어",
+      "pseudoLanguageDescription": "의사 영어는 현지화 테스트용입니다.",
+      "themeScopes": {
+        "personal": "내 테마",
+        "site": "사이트 테마",
+        "builtIn": "기본 제공 테마"
+      },
+      "themeDefaultBadge": "기본값",
+      "themeSiteDefaultTitle": "사이트 기본값",
+      "themeSetDefault": "기본값으로 설정",
+      "themeDeleteTitle": "테마를 삭제할까요?",
+      "themeDeleteDescription": "{{themeName}}을(를) 삭제할까요? 이 테마를 선택한 사용자는 사이트 기본 테마를 사용하게 됩니다.",
+      "regionalLocaleOptions": {
+        "enUS": "영어(미국)",
+        "enGB": "영어(영국)",
+        "deDE": "독일어(독일)",
+        "frFR": "프랑스어(프랑스)",
+        "jaJP": "일본어(일본)",
+        "zhCN": "중국어(중국)",
+        "nlNL": "네덜란드어(네덜란드)",
+        "itIT": "이탈리아어(이탈리아)",
+        "koKR": "한국어(대한민국)",
+        "plPL": "폴란드어(폴란드)",
+        "ptPT": "포르투갈어(포르투갈)",
+        "esES": "스페인어(스페인)",
+        "svSE": "스웨덴어(스웨덴)"
+      },
+      "regionalSettingsPreviewTitle": "미리 보기"
+    },
+    "networkPage": {
+      "loading": "네트워크 설정을 불러오는 중…",
+      "loadFailed": "네트워크 설정을 불러올 수 없습니다.",
+      "saveFailed": "네트워크 설정을 저장할 수 없습니다.",
+      "publicUrl": {
+        "label": "공개 URL",
+        "help": "경로 없이 외부에서 접근할 수 있는 HTTPS 출처입니다. 변경하면 완료되지 않은 OIDC 로그인이 취소됩니다.",
+        "saving": "공개 URL을 저장하는 중…",
+        "saved": "공개 URL을 저장했습니다."
+      },
+      "trustedProxyCidrs": {
+        "label": "신뢰할 수 있는 프록시의 CIDR",
+        "help": "한 줄에 CIDR 하나를 입력하세요. 직접 운영하는 역방향 프록시가 클라이언트 IP 주소를 전달하는 경우가 아니면 비워 두세요.",
+        "saving": "신뢰할 수 있는 프록시의 CIDR을 저장하는 중…",
+        "saved": "신뢰할 수 있는 프록시의 CIDR을 저장했습니다."
+      }
+    },
+    "saveStatus": {
+      "saving": "설정을 저장하는 중…",
+      "saved": "설정을 저장했습니다."
+    },
+    "shell": {
+      "title": "설정",
+      "closeAriaLabel": "설정 닫기",
+      "categoriesAriaLabel": "설정 범주",
+      "expandItemAriaLabel": "{{label}} 펼치기",
+      "collapseItemAriaLabel": "{{label}} 접기",
+      "versionLabel": "버전",
+      "buildLabel": "빌드",
+      "commitLabel": "커밋",
+      "unknownValue": "알 수 없음"
+    },
+    "sections": {
+      "personal": "개인",
+      "administration": "관리"
+    },
+    "categories": {
+      "appearance": {
+        "label": "모양",
+        "description": "앱 테마와 언어 동작을 설정합니다."
+      },
+      "account": {
+        "label": "계정",
+        "description": "사용자 정보, 비밀번호, 세션 및 로그아웃을 관리합니다."
+      },
+      "fileBrowser": {
+        "label": "파일 브라우저",
+        "description": "파일 브라우저의 기본 동작을 설정합니다."
+      },
+      "textEditor": {
+        "label": "텍스트 편집기",
+        "description": "일반 텍스트 편집기의 기본값과 안전 제한을 설정합니다."
+      },
+      "imageViewer": {
+        "label": "이미지 뷰어",
+        "description": "데스크톱에서 이미지가 전환되는 방식을 설정합니다. 터치로 탐색하는 방식은 바뀌지 않습니다."
+      },
+      "connections": {
+        "label": "연결",
+        "description": "공유 및 개인 SMB 연결을 관리합니다."
+      },
+      "adminUsers": {
+        "label": "사용자 관리",
+        "description": "계정을 만들고 역할을 할당하며 비밀번호 재설정을 요청합니다."
+      },
+      "adminAuthentication": {
+        "label": "인증",
+        "description": "로그인 방식을 설정합니다(<guide>OpenID Connect 설정 가이드</guide> 참조)."
+      },
+      "adminNetwork": {
+        "label": "네트워크",
+        "description": "Sambee의 외부 URL과 신뢰할 수 있는 역방향 프록시를 설정합니다."
+      },
+      "adminSystem": {
+        "label": "시스템",
+        "description": "압축 파일 생성 한도를 관리합니다."
+      },
+      "adminImageViewer": {
+        "label": "이미지 뷰어",
+        "description": "이미지 변환 및 처리 한도를 설정합니다."
+      },
+      "adminPdfViewer": {
+        "label": "PDF 뷰어",
+        "description": "PDF 호환성, 캐시 및 처리 한도를 설정합니다."
+      },
+      "adminSmb": {
+        "label": "SMB",
+        "description": "SMB 백엔드의 보안 정책 및 실행 한도를 설정합니다."
+      },
+      "adminFileSearch": {
+        "label": "파일 검색",
+        "description": "파일 검색 기록, 결과 수 제한 및 제외 항목을 설정합니다."
+      },
+      "adminDirectorySearch": {
+        "label": "폴더 검색",
+        "description": "백엔드와 모든 Companion 기기의 폴더 색인 리소스 및 검증을 설정합니다."
+      },
+      "adminHealthMonitoring": {
+        "label": "상태 모니터링",
+        "description": "시스템 상태를 볼 수 있는 역할과 알림 임계값을 설정합니다."
+      },
+      "adminAbout": {
+        "label": "정보",
+        "description": "Sambee 빌드, 소프트웨어 및 하드웨어 정보를 확인합니다."
+      }
+    },
+    "imageViewerPage": {
+      "transitionDescription": "슬라이드 전환을 선택하면 마우스나 키보드로 탐색할 때 이미지가 미끄러지듯 전환됩니다. 애니메이션 없음을 선택하면 효과 없이 전환됩니다. 터치로 밀어서 탐색할 때는 항상 슬라이드 효과가 적용됩니다.",
+      "transition": "전환 효과",
+      "carousel": "슬라이드 전환",
+      "none": "애니메이션 없음"
+    },
+    "directorySearch": {
+      "loadFailed": "폴더 검색 정책을 불러올 수 없습니다. 백엔드 연결을 확인한 후 다시 시도하세요.",
+      "saveFailed": "이 폴더 검색 설정을 저장할 수 없습니다. 값과 백엔드 연결을 확인한 후 다시 시도하세요.",
+      "backendTitle": "백엔드 폴더 색인",
+      "companionTitle": "Companion 폴더 색인",
+      "deviceTitle": "이 기기의 폴더 검색",
+      "refresh": "상태 새로 고침"
+    },
+    "healthMonitoring": {
+      "loadFailed": "상태 모니터링 설정을 불러올 수 없습니다. 백엔드 연결을 확인한 후 다시 시도하세요.",
+      "saveFailed": "이 상태 모니터링 설정을 저장할 수 없습니다. 값을 확인한 후 다시 시도하세요.",
+      "cpuRefreshFailed": "설정은 저장했지만 CPU 온도 세부 정보를 새로 고칠 수 없습니다. 정보를 업데이트하려면 ‘다시 시도’를 선택하세요.",
+      "saving": "설정을 저장하는 중…",
+      "saved": "설정을 저장했습니다.",
+      "sections": {
+        "visibility": "모니터링 및 표시",
+        "memoryThresholds": "메모리 임계값",
+        "loadThresholds": "정규화된 평균 부하 임계값",
+        "storageThresholds": "저장 공간 여유 용량 임계값",
+        "cpuTemperature": "CPU 온도 임계값"
+      },
+      "fields": {
+        "enabled": "상태 모니터링 사용",
+        "enabledDescription": "리소스를 확인하고 선택한 역할에 시스템 상태를 표시합니다.",
+        "stateOn": "켜짐",
+        "stateOff": "꺼짐",
+        "audience": "상태 정보 표시 대상",
+        "audienceDescription": "시스템 상태를 볼 수 있는 역할입니다. 뷰어 역할은 제외됩니다.",
+        "audienceOptions": {
+          "admins": "관리자",
+          "editors": "편집자",
+          "both": "관리자 및 편집자"
+        },
+        "memoryWarning": "메모리 경고 임계값(%)",
+        "memoryWarningDescription": "사용률이 이 값 이상으로 60초간 유지되면 경고합니다. 호스트 메모리와 메모리 제한이 있는 컨테이너에 적용되며, 파일 캐시는 제외합니다.",
+        "memoryError": "메모리 오류 임계값(%)",
+        "memoryErrorDescription": "사용률이 이 값 이상으로 60초간 유지되면 오류를 표시합니다. 메모리 제한이 없는 컨테이너에는 백분율 알림이 적용되지 않습니다.",
+        "loadWarning": "평균 부하 경고 임계값",
+        "loadWarningDescription": "5분 평균 부하를 논리 CPU 수로 나눈 값이 이 값 이상이면 경고합니다. CPU 사용률이 아닙니다.",
+        "loadError": "평균 부하 오류 임계값",
+        "loadErrorDescription": "정규화된 5분 평균 부하가 이 값 이상이면 오류를 표시합니다.",
+        "spaceWarning": "저장 공간 여유 용량 경고 임계값(%)",
+        "spaceWarningDescription": "여유 공간의 비율이 이 값 이하면 경고합니다.",
+        "spaceError": "저장 공간 여유 용량 오류 임계값(%)",
+        "spaceErrorDescription": "여유 공간의 비율이 이 값 이하이거나 남은 공간이 없으면 오류를 표시합니다.",
+        "cpuDetectedWarning": "감지된 경고 한계",
+        "cpuDetectedError": "감지된 위험 한계",
+        "cpuWarningOverride": "경고 임계값(°C)",
+        "cpuWarningOverrideDescription": "자동으로 설정하려면 비워 두세요. 직접 설정하려면 0.1 °C 단위로 경고 임계값을 입력하세요.",
+        "cpuErrorOverride": "오류 임계값(°C)",
+        "cpuErrorOverrideDescription": "자동으로 설정하려면 비워 두세요. 직접 설정하려면 0.1 °C 단위로 오류 임계값을 입력하세요.",
+        "automaticPlaceholder": "자동",
+        "returnToAutomatic": "자동으로 되돌리기",
+        "reconfirmOverride": "수동 설정 다시 확인",
+        "notAvailable": "사용할 수 없음",
+        "originHardware": "하드웨어",
+        "originKernelPolicy": "커널 온도 관리 정책",
+        "originAdminOverride": "관리자 수동 설정",
+        "exceedsDetectedWarning": "경고: 수동 경고 임계값({{override}})이 감지된 한계({{detected}})를 초과합니다. 호스트 하드웨어 보호 기능에는 변경이 없습니다.",
+        "exceedsDetectedError": "경고: 수동 오류 임계값({{override}})이 감지된 위험 한계({{detected}})를 초과합니다. 호스트 하드웨어 보호 기능에는 변경이 없습니다."
+      },
+      "validation": {
+        "memoryRange": "0.1~100.0 사이의 백분율을 0.1 단위로 입력하세요.",
+        "memoryPairWarningAboveError": "메모리 경고 임계값은 오류 임계값({{other}}%)을 초과할 수 없습니다. 오류 임계값을 먼저 높이세요.",
+        "memoryPairErrorBelowWarning": "메모리 오류 임계값은 경고 임계값({{other}}%)보다 낮을 수 없습니다. 경고 임계값을 먼저 낮추세요.",
+        "loadRange": "0.01 이상의 유한한 수를 0.01 단위로 입력하세요.",
+        "loadPairWarningAboveError": "부하 경고 임계값은 오류 임계값({{other}})을 초과할 수 없습니다. 오류 임계값을 먼저 높이세요.",
+        "loadPairErrorBelowWarning": "부하 오류 임계값은 경고 임계값({{other}})보다 낮을 수 없습니다. 경고 임계값을 먼저 낮추세요.",
+        "spaceRange": "0.0~99.9 사이의 백분율을 0.1 단위로 입력하세요.",
+        "spacePairWarningBelowError": "여유 공간 경고 임계값은 오류 임계값({{other}}%)보다 낮을 수 없습니다. 오류 임계값을 먼저 낮추세요.",
+        "spacePairErrorAboveWarning": "여유 공간 오류 임계값은 경고 임계값({{other}}%)을 초과할 수 없습니다. 경고 임계값을 먼저 높이세요.",
+        "cpuRange": "0 °C보다 높은 온도를 0.1 °C 단위로 입력하세요. 자동으로 설정하려면 필드를 비워 두세요.",
+        "cpuPairWarningAboveError": "CPU 경고 임계값은 현재 적용되는 오류 임계값({{other}})을 초과할 수 없습니다. 오류 임계값을 먼저 높이거나 지우세요.",
+        "cpuPairErrorBelowWarning": "CPU 오류 임계값은 현재 적용되는 경고 임계값({{other}})보다 낮을 수 없습니다. 경고 임계값을 먼저 낮추거나 지우세요."
+      }
+    },
+    "companionSync": {
+      "results": {
+        "defaults_active": "내장 기본값 사용 중",
+        "synchronized": "동기화 완료",
+        "synchronizing": "동기화 중",
+        "update_required": "업데이트 필요",
+        "authority_conflict": "다른 서버가 설정 관리 중",
+        "pairing_required": "페어링 필요",
+        "delivery_failed": "전달 실패: 마지막 유효 설정 사용 중"
+      },
+      "defaults_active": "페어링된 서버에서 설정을 받을 때까지 내장 기본값을 사용합니다.",
+      "synchronized": "설정을 동기화했습니다.",
+      "synchronizing": "설정을 동기화하는 중입니다. 마지막 유효 설정이 계속 적용됩니다.",
+      "update_required": "설정 공유 기능을 사용하려면 Sambee와 Companion을 업데이트하세요.",
+      "languageUpdateRequired": "이 언어를 사용하려면 Sambee Companion을 업데이트한 후 다시 시도하세요. Companion은 마지막 유효 언어를 계속 사용합니다.",
+      "directoryPolicyUpdateRequired": "이 폴더 검색 정책 값을 사용하려면 Sambee Companion을 업데이트한 후 다시 시도하세요. 마지막 유효 정책과 폴더 검색은 계속 사용할 수 있습니다.",
+      "authority_conflict": "이 서버는 Companion 설정을 관리하지 않습니다. 설정을 관리할 서버를 변경하려면 원하는 서버를 다시 페어링하세요.",
+      "pairing_required": "Companion에서 이 브라우저를 인증할 수 없습니다. 설정 > 로컬 드라이브에서 이 브라우저를 페어링하세요. 이미 페어링했다면 다시 페어링하여 연결을 복구하세요. 다시 시도하거나 페어링에 성공할 때까지 설정 확인이 일시 중지됩니다.",
+      "delivery_failed": "설정을 전달하지 못했습니다. 연결을 확인한 후 다시 시도하세요. 마지막 유효 설정과 폴더 검색은 계속 사용할 수 있습니다.",
+      "authority": "설정 관리 서버: {{origin}}",
+      "sections": {
+        "theme": "테마",
+        "localization": "언어 및 지역",
+        "directory_index": "폴더 검색 정책"
+      }
+    },
+    "aboutPage": {
+      "applicationTitle": "앱",
+      "runtimeTitle": "소프트웨어",
+      "platformTitle": "하드웨어",
+      "versionLabel": "버전",
+      "buildLabel": "빌드",
+      "commitLabel": "커밋",
+      "startedLabel": "시작 시간",
+      "pythonLabel": "Python",
+      "architectureLabel": "아키텍처",
+      "cpuCountLabel": "논리 CPU",
+      "memoryLabel": "사용 가능한 메모리",
+      "copyAriaLabel": "정보 복사",
+      "copyTooltip": "정보 복사",
+      "copyAboutMenuItem": "앱 정보 복사",
+      "copyPublicSupportReportMenuItem": "공개 지원 보고서 복사",
+      "copySuccess": "앱 정보를 복사했습니다.",
+      "copyError": "앱 정보를 복사할 수 없습니다.",
+      "copyPublicSupportReportSuccess": "공개 지원 보고서를 복사했습니다.",
+      "copyPublicSupportReportError": "공개 지원 보고서를 복사할 수 없습니다.",
+      "unavailableValue": "확인할 수 없음",
+      "loadError": "앱 정보를 불러올 수 없습니다."
+    },
+    "connectionsSubgroups": {
+      "smb": {
+        "label": "SMB 연결",
+        "description": "공유 SMB 연결을 탐색하고 개인 공유를 관리합니다."
+      },
+      "localDrives": {
+        "label": "로컬 드라이브",
+        "description": "Sambee Companion을 페어링하고 로컬 드라이브 접근 권한을 관리하며 데스크톱 도우미를 설치합니다."
+      }
+    },
+    "fileBrowserPage": {
+      "quickNavigationTitle": "빠른 탐색",
+      "includeDotDirectoriesLabel": "빠른 탐색에 점으로 시작하는 폴더 포함",
+      "includeDotDirectoriesDescription": "빠른 탐색 결과에 .git, .cache처럼 이름이 점으로 시작하는 폴더를 표시합니다.",
+      "shortcutHintsLabel": "키보드 단축키 힌트",
+      "shortcutHintsDescription": "빠른 실행 표시줄에 키보드 단축키 힌트를 언제 표시할지 선택합니다.",
+      "shortcutHintsAuto": "자동",
+      "shortcutHintsAlways": "항상 표시",
+      "shortcutHintsNever": "표시 안 함",
+      "fileSelectionTitle": "파일 선택",
+      "touchFriendlyFileSelectionLabel": "터치에 최적화된 파일 선택",
+      "touchFriendlyFileSelectionDescription": "터치하기 쉬운 크기의 컨트롤과 제스처를 파일 선택에 언제 사용할지 지정합니다.",
+      "touchFriendlyFileSelectionAuto": "자동",
+      "touchFriendlyFileSelectionAlways": "항상 켜기",
+      "touchFriendlyFileSelectionNever": "끄기",
+      "fileSearchTitle": "파일 검색",
+      "clearRecentFiles": "최근 파일 기록 지우기",
+      "clearRecentFilesDescription": "서버에서 내 파일 검색 기록을 영구적으로 지웁니다. 파일이나 폴더에는 영향이 없습니다.",
+      "clearRecentFilesFailed": "최근 파일 기록을 지울 수 없습니다. 다시 시도하세요.",
+      "clearRecentDirectories": "최근 폴더 기록 지우기",
+      "clearRecentDirectoriesDescription": "서버에서 내 폴더 탐색 기록을 영구적으로 지웁니다. 파일이나 폴더에는 영향이 없습니다.",
+      "clearRecentDirectoriesFailed": "최근 폴더 기록을 지울 수 없습니다. 다시 시도하세요."
+    },
+    "textEditorPage": {
+      "limitsTitle": "제한",
+      "maxFileSizeLabel": "고급 편집기에서 열 수 있는 최대 파일 크기(MB)",
+      "maxFileSizeDescription": "이 한도를 넘는 파일은 CodeMirror 기반의 전체 기능 텍스트 편집기에서 열리지 않습니다. 매우 큰 파일을 편집할 때 속도가 느려지거나 메모리를 많이 쓰는 일을 방지합니다."
+    },
+    "connectionsPage": {
+      "smbSectionTitle": "SMB 연결",
+      "smbSectionDescription": "공유 연결을 탐색하고 개인 SMB 공유 연결을 관리합니다.",
+      "localDrivesSectionTitle": "로컬 드라이브",
+      "localDrivesSectionDescription": "Sambee Companion을 페어링하고 이 브라우저에서 로컬 드라이브 접근 권한을 관리합니다."
+    },
+    "localDrives": {
+      "menuActionLabel": "로컬 드라이브 관리…",
+      "headerTitle": "로컬 드라이브",
+      "headerDescription": "Sambee Companion을 페어링하고 이 브라우저에서 로컬 드라이브 접근 권한을 관리합니다.",
+      "intro": "이 브라우저의 Sambee Companion 페어링을 관리하고 이 컴퓨터의 로컬 드라이브에 접근할 수 있는지 확인합니다.",
+      "summaryTitle": "현재 상태",
+      "secureContextTitle": "로컬 드라이브를 사용하려면 Web Crypto를 지원하는 보안 브라우저가 필요합니다.",
+      "secureContextMessage": "페어링과 로컬 드라이브 접근에는 Web Crypto를 지원하는 보안 브라우저 환경이 필요합니다. HTTPS(로컬 개발 시 localhost)와 Web Crypto가 활성화된 브라우저를 사용하세요.",
+      "unsupportedMobileTitle": "로컬 드라이브를 사용하려면 데스크톱 브라우저가 필요합니다.",
+      "unsupportedMobileDescription": "iOS 또는 Android에서는 Sambee Companion을 사용할 수 없습니다.",
+      "unsupportedMobileAlert": "Companion을 설치하고 이 브라우저를 페어링하여 로컬 드라이브에 접근하려면 Windows, macOS 또는 Linux의 데스크톱 브라우저에서 Sambee를 사용하세요.",
+      "statusLabelReady": "준비됨",
+      "statusLabelActionRequired": "작업 필요",
+      "statusLabelUnavailable": "Companion 사용 불가",
+      "summaryReadyTitle": "로컬 드라이브를 사용할 수 있습니다.",
+      "summaryPairingRequiredTitle": "로컬 드라이브에 접근하려면 이 브라우저를 페어링하세요.",
+      "summaryPendingApprovalTitle": "Sambee Companion에서 승인을 완료하세요.",
+      "summaryRepairTitle": "이 브라우저의 페어링을 복구하세요.",
+      "summaryUpdateRequiredTitle": "Sambee Companion을 업데이트하세요.",
+      "summaryBrowserUpdateRequiredTitle": "Sambee를 업데이트하세요.",
+      "summaryVerificationUnavailableTitle": "로컬 드라이브 접근을 확인할 수 없습니다.",
+      "summaryUnavailableTitle": "이 컴퓨터에서 Sambee Companion을 시작하세요.",
+      "companionRunningChecklistLabel": "Companion 앱 실행 중",
+      "browserFullyPairedChecklistLabel": "이 브라우저 페어링 완료",
+      "accessSectionTitle": "로컬 접근",
+      "accessSectionDescription": "이 브라우저의 페어링을 관리하고 현재 로컬 드라이브에 접근할 수 있는지 확인합니다.",
+      "pairingSectionTitle": "이 브라우저 페어링",
+      "pairingSectionReady": "이 브라우저는 이미 Sambee Companion과 페어링되어 있습니다.",
+      "pairingSectionUnavailable": "이 컴퓨터에서 Sambee Companion을 시작한 후 이 화면으로 돌아와 브라우저를 페어링하세요.",
+      "pairingSectionRequired": "로컬 드라이브를 탐색하려면 Sambee Companion에서 페어링 요청을 승인하세요.",
+      "pairingSectionPendingApproval": "Sambee Companion에 이미 대기 중인 페어링 요청이 있습니다. 다시 페어링하기 전에 해당 요청을 승인하거나 거부하세요.",
+      "pairingSectionRepair": "먼저 이 페이지를 새로 고쳐 Sambee와 Companion의 연결을 갱신하세요. 그래도 로컬 드라이브에 접근할 수 없으면 이 브라우저를 다시 페어링하세요.",
+      "verificationSectionTitle": "로컬 접근 확인",
+      "verificationSectionDescription": "이 브라우저에서 여전히 로컬 드라이브에 접근할 수 있는지 간단히 확인합니다.",
+      "verificationSectionReady": "Sambee에서 로컬 파일을 열기 전에 접근 여부를 확인하세요.",
+      "verificationSectionBlocked": "먼저 페어링을 완료한 후 여기서 페어링을 테스트하세요.",
+      "troubleshootingSectionTitle": "이 브라우저의 페어링 관리",
+      "troubleshootingSectionDescription": "이 브라우저에 로컬 드라이브 접근 권한을 부여하는 페어링을 확인하거나 해제합니다.",
+      "troubleshootingSectionReady": "이 컴퓨터의 로컬 드라이브에 더 이상 접근하지 못하게 하려면 이 브라우저의 페어링을 해제하세요.",
+      "loadError": "Companion 상태를 불러오지 못했습니다.",
+      "pairingCreated": "로컬 드라이브 페어링을 완료했습니다.",
+      "pairingRemoved": "이 브라우저의 페어링을 해제했습니다.",
+      "pairingRemoveFailed": "페어링을 해제하지 못했습니다.",
+      "pairingTestSucceeded": "페어링을 확인했습니다. 이 브라우저에서 로컬 드라이브에 접근할 수 있습니다.",
+      "pairingTestFailed": "Companion에서 이 브라우저의 서명을 거부했습니다. 먼저 Sambee를 새로 고치세요. 그래도 테스트가 실패하면 이 브라우저를 다시 페어링하세요.",
+      "pairingTestUnavailable": "로컬 드라이브 접근을 확인할 수 없습니다. Companion이 실행 중인지 확인한 후 테스트를 다시 실행하세요.",
+      "reloadButton": "Sambee 새로 고침",
+      "statusUnavailable": "이 컴퓨터에서 Sambee Companion이 실행 중이 아닙니다. Companion을 시작한 후 여기로 돌아와 브라우저를 페어링하거나 로컬 드라이브 접근을 테스트하거나 Sambee에서 로컬 파일을 여세요.",
+      "statusPaired": "이 브라우저는 Sambee Companion과 페어링되었습니다. 이제 Sambee에서 로컬 파일을 탐색하고 열 수 있습니다.",
+      "statusPendingApproval": "이 브라우저의 페어링 요청이 Sambee Companion에서 승인을 기다리는 중입니다. 다시 시도하기 전에 Companion에서 해당 요청을 처리하세요.",
+      "statusRecoverable": "Companion에서 이 브라우저의 페어링을 확인할 수 없습니다. 먼저 Sambee를 새로 고쳐 업데이트를 적용하세요. 그래도 접근할 수 없으면 이 브라우저를 다시 페어링하세요.",
+      "statusUpdateRequired": "이 버전의 Companion은 이전 인증 프로토콜을 사용합니다. Companion을 업데이트하고 다시 시작한 후 Sambee를 새로 고치세요. 다시 페어링해도 버전 불일치는 해결되지 않습니다.",
+      "statusBrowserUpdateRequired": "Companion은 이 Sambee 페이지에서 지원하는 버전보다 최신 인증 프로토콜을 사용합니다. Sambee를 새로 고치고, 그래도 버전이 맞지 않으면 Sambee를 업데이트하세요. 다시 페어링해도 이 문제는 해결되지 않습니다.",
+      "statusVerificationUnavailable": "Companion에 연결할 수 있지만 페어링 상태를 확인할 수 없습니다. 다시 시도하세요.",
+      "statusUnpaired": "이 브라우저는 현재 Sambee Companion과 페어링되어 있지 않습니다.",
+      "downloadSectionTitle": "Sambee Companion 설치",
+      "downloadSectionDescription": "이 컴퓨터에 Sambee Companion이 설치되어 있지 않으면 다운로드하세요. 설치한 후 앱을 시작하고 여기로 돌아와 브라우저를 페어링하거나 로컬 드라이브 접근을 테스트하세요.",
+      "downloadSectionSourcePrefix": "출처",
+      "downloadVersionLabel": "사용 가능한 버전",
+      "downloadFeedSourceLabel": "배포 대상으로 지정된 최신 릴리스",
+      "downloadPinSourceLabel": "관리자가 지정한 버전",
+      "downloadPrimaryButton": "이 컴퓨터용 다운로드",
+      "downloadOtherPlatformsLabel": "다른 다운로드 옵션",
+      "downloadRecommendedLabel": "이 컴퓨터에 권장",
+      "downloadUnavailable": "지금은 다운로드 링크를 사용할 수 없습니다. 잠시 후 상태를 새로 고치고 다시 시도하세요.",
+      "downloadLoadFailed": "Companion 다운로드 정보를 확인하지 못했습니다.",
+      "testCurrentPairingButton": "현재 페어링 테스트",
+      "pairThisBrowserButton": "이 브라우저 페어링",
+      "waitingForApprovalButton": "승인 대기 중…",
+      "unpairThisBrowserButton": "이 브라우저 페어링 해제",
+      "testingButton": "테스트 중…",
+      "unpairingButton": "페어링 해제 중…",
+      "pairingDialog": {
+        "title": "Companion과 페어링",
+        "intro": "로컬 드라이브를 탐색하려면 이 브라우저를 Sambee Companion 앱과 페어링하세요. 이 컴퓨터에서 Companion이 실행 중인지 확인하세요.",
+        "verifyCodePrompt": "이 코드가 Companion 앱에 표시된 코드와 일치하는지 확인하세요.",
+        "verifyCodeHelp": "코드가 일치하면 아래에서 확인을 클릭하고 Companion에서 페어링을 승인하세요.",
+        "confirming": "Companion의 확인을 기다리는 중…",
+        "success": "페어링에 성공했습니다. 이제 로컬 드라이브를 사용할 수 있습니다.",
+        "startButton": "페어링 시작",
+        "confirmButton": "코드 일치 확인",
+        "cancelButton": "취소",
+        "doneButton": "완료",
+        "closeButton": "닫기",
+        "retryButton": "다시 시도",
+        "initiateFailed": "페어링을 시작하지 못했습니다. Companion 앱이 실행 중인지 확인하세요.",
+        "confirmFailed": "페어링에 실패했습니다. Companion에서 요청을 거부했거나 페어링 요청이 만료되었을 수 있습니다."
+      }
+    },
+    "connectionManagement": {
+      "headerTitle": "SMB 연결",
+      "headerDescription": "공유 연결을 탐색하고 개인 SMB 공유 연결을 관리합니다.",
+      "addConnectionButton": "연결 추가",
+      "addConnectionFabAriaLabel": "연결 추가",
+      "connectionActionsAriaLabel": "연결 작업",
+      "userLabel": "사용자:",
+      "pathLabel": "경로:",
+      "sharedSectionTitle": "공유 연결",
+      "sharedSectionEmpty": "사용 가능한 공유 연결이 없습니다.",
+      "privateSectionTitle": "내 연결",
+      "privateSectionEmpty": "아직 등록한 개인 연결이 없습니다.",
+      "emptyTitle": "설정된 연결 없음",
+      "emptyAdminDescription": "+ 버튼을 클릭하여 공유 또는 개인 SMB 연결을 만드세요.",
+      "emptyRegularDescription": "+ 버튼을 클릭하여 첫 개인 SMB 연결을 만드세요.",
+      "emptyViewerDescription": "아직 이 계정에서 사용할 수 있는 연결이 없습니다. 관리자에게 연결을 만들거나 공유해 달라고 요청하세요.",
+      "menuTest": "연결 테스트",
+      "menuEdit": "편집",
+      "menuDelete": "삭제",
+      "tooltipTest": "연결 테스트",
+      "tooltipEdit": "편집",
+      "tooltipDelete": "삭제",
+      "ariaTest": "연결 테스트",
+      "ariaEdit": "연결 편집",
+      "ariaDelete": "연결 삭제",
+      "columns": {
+        "port": "포트",
+        "type": "유형",
+        "actions": "작업"
+      },
+      "deleteDialogTitle": "연결 삭제",
+      "deleteDialogDescription": "이 연결을 삭제하시겠습니까?",
+      "notifications": {
+        "loadFailed": "연결을 불러오지 못했습니다.",
+        "savedPrivateInfo": "개인 연결로 저장했습니다. 연결을 공유하려면 관리자 권한이 필요합니다.",
+        "createdSuccess": "연결을 만들었습니다.",
+        "updatedSuccess": "연결을 업데이트했습니다.",
+        "deletedSuccess": "연결을 삭제했습니다.",
+        "deleteFailed": "연결을 삭제하지 못했습니다.",
+        "testFailed": "연결 테스트에 실패했습니다.",
+        "saveFailed": "연결을 저장하지 못했습니다."
+      },
+      "scope": {
+        "sharedChip": "공유",
+        "privateChip": "개인"
+      }
+    },
+    "connectionDialog": {
+      "titles": {
+        "add": "연결 추가",
+        "edit": "연결 편집"
+      },
+      "results": {
+        "success": "연결 성공",
+        "error": "연결 실패",
+        "errorDialogTitle": "연결 테스트 실패"
+      },
+      "labels": {
+        "name": "연결 이름",
+        "host": "호스트",
+        "shareName": "공유 이름",
+        "username": "사용자 이름",
+        "password": "비밀번호",
+        "pathPrefix": "경로 접두사",
+        "visibility": "공개 범위",
+        "accessMode": "접근 모드"
+      },
+      "sections": {
+        "access": "접근 권한"
+      },
+      "helpers": {
+        "name": "Sambee에서 이 연결을 식별할 이름입니다.",
+        "host": "SMB 서버의 IP 주소 또는 호스트 이름입니다.",
+        "shareName": "서버에 설정된 공유 이름입니다.",
+        "passwordAdd": "SMB 계정의 비밀번호입니다.",
+        "passwordEdit": "기존 비밀번호를 유지하려면 비워 두세요.",
+        "pathPrefix": "공유 내의 기본 경로입니다(선택 사항).",
+        "username": "필요한 경우 DOMAIN\\USER 형식을 사용하세요.",
+        "visibility": "개인 또는 공유 접근을 선택하세요.",
+        "visibilityAdmin": "관리자는 모든 사용자를 위한 공유 연결이나 자신만의 개인 연결을 만들 수 있습니다.",
+        "visibilityRegular": "공유 연결에는 관리자 권한이 필요합니다. 관리자 권한 없이 공유를 선택하면 서버에 개인 연결로 저장됩니다.",
+        "accessModeReadWrite": "읽기 전용 또는 읽기 및 쓰기 권한을 선택하세요.",
+        "accessModeReadOnly": "읽기 전용 또는 읽기 및 쓰기 권한을 선택하세요."
+      },
+      "errors": {
+        "nameRequired": "연결 이름을 입력하세요.",
+        "hostRequired": "호스트를 입력하세요.",
+        "shareNameRequired": "공유 이름을 입력하세요.",
+        "usernameRequired": "사용자 이름을 입력하세요.",
+        "passwordRequired": "비밀번호를 입력하세요."
+      },
+      "actions": {
+        "save": "저장"
+      },
+      "aria": {
+        "togglePassword": "비밀번호 표시 전환"
+      },
+      "visibility": {
+        "privateLabel": "나만 사용",
+        "privateDescription": "내 계정에만 표시됩니다. 모든 설정을 직접 관리할 수 있습니다.",
+        "sharedLabel": "모든 사용자와 공유",
+        "sharedDescription": "모든 사용자에게 표시됩니다. 관리자만 관리할 수 있습니다."
+      },
+      "accessMode": {
+        "readWriteLabel": "읽기 및 쓰기",
+        "readOnlyLabel": "읽기 전용"
+      }
+    },
+    "userManagement": {
+      "addUserButton": "사용자 추가",
+      "addUserFabAriaLabel": "사용자 추가",
+      "totalUsers_other": "사용자: {{count}}명",
+      "activeAdmins_other": "관리자: {{count}}명",
+      "emptyTitle": "사용자 없음",
+      "emptyDescription": "접근 권한을 위임하려면 첫 사용자 계정을 만드세요.",
+      "currentUserSuffix": "(나)",
+      "adminRole": "관리자",
+      "editorRole": "편집자",
+      "viewerRole": "뷰어",
+      "activeStatus": "활성",
+      "disabledStatus": "비활성",
+      "passwordResetPending": "비밀번호 변경 필요",
+      "roleSource": {
+        "localAssignment": "역할 출처: 로컬 할당",
+        "individualOverride": "역할 출처: 개별 지정",
+        "oidcDefault": "역할 출처: OIDC 기본값",
+        "oidcGroups": "역할 출처: OIDC 그룹",
+        "awaitingOidcSignIn": "역할 출처: OIDC 로그인 대기 중"
+      },
+      "createdAt": "생성: {{timestamp}}",
+      "expiresAt": "만료: {{timestamp}}",
+      "actions": {
+        "editUser": "사용자 편집",
+        "resetPassword": "비밀번호 재설정",
+        "deleteUser": "사용자 삭제",
+        "deleteSelfDisabled": "여기에서는 자신의 계정을 삭제할 수 없습니다.",
+        "saveChanges": "변경 사항 저장",
+        "createUser": "사용자 만들기",
+        "close": "닫기"
+      },
+      "aria": {
+        "editUser": "{{username}} 편집",
+        "resetPassword": "{{username}}의 비밀번호 재설정",
+        "deleteUser": "{{username}} 삭제"
+      },
+      "editor": {
+        "titleEdit": "사용자 편집",
+        "titleCreate": "사용자 만들기",
+        "descriptionEdit": "계정 정보와 접근 수준을 변경합니다. 비밀번호는 별도로 재설정합니다.",
+        "sections": {
+          "access": "접근 권한",
+          "credentials": "인증 정보"
+        },
+        "usernameLabel": "사용자 이름",
+        "usernameHelp": "고유한 로그인 이름입니다.",
+        "usernameTaken": "해당 사용자 이름을 사용하는 계정이 이미 있습니다.",
+        "nameLabel": "전체 이름",
+        "nameHelp": "화면에 표시되는 계정 이름입니다.",
+        "oidcNameHelp": "연결된 OIDC 제공자가 관리합니다.",
+        "emailLabel": "이메일",
+        "emailHelp": "연락용 이메일 주소입니다(선택 사항).",
+        "oidcEmailHelp": "연결된 OIDC 제공자가 관리합니다.",
+        "roleLabel": "역할",
+        "roleHelp": "접근 수준을 선택하세요.",
+        "oidcRoleHelp": "역할을 개별 지정하거나 연결된 OIDC 제공자에서 결정한 역할을 상속하도록 선택하세요.",
+        "oidcRoleUnavailableHelp": "역할을 개별 지정하세요. 제공자가 결정한 역할은 사용자가 다음에 OIDC로 로그인하면 사용할 수 있습니다.",
+        "roleOptions": {
+          "admin": "설정, 사용자 및 콘텐츠 관리",
+          "editor": "콘텐츠 수정",
+          "viewer": "콘텐츠 탐색"
+        },
+        "inheritedRole": "상속된 역할({{role}})",
+        "inheritedRoleDescription": "사용자의 최근 검증된 OIDC 그룹에서 결정한 역할을 사용합니다.",
+        "expiresAtLabel": "만료 시간",
+        "expiresAtHelp": "만료되지 않게 하려면 비워 두세요.",
+        "accountActiveLabel": "활성 계정",
+        "accountActiveHelp": "비활성 계정은 로그인할 수 없습니다.",
+        "initialPasswordLabel": "초기 비밀번호",
+        "initialPasswordHelp": "비워 두면 서버가 안전한 임시 비밀번호를 생성합니다.",
+        "showInitialPassword": "초기 비밀번호 표시",
+        "hideInitialPassword": "초기 비밀번호 숨기기",
+        "requirePasswordChangeLabel": "다음 비밀번호 로그인 시 변경 요구",
+        "requirePasswordChangeHelp": "비밀번호를 변경할 때까지 로컬 비밀번호로 접근할 수 없습니다. OIDC 로그인은 계속 사용할 수 있습니다.",
+        "switchOn": "켜짐",
+        "switchOff": "꺼짐"
+      },
+      "resetPasswordEditor": {
+        "title": "비밀번호 재설정",
+        "descriptionWithName": "{{username}}의 새 비밀번호를 설정합니다. 이 사용자는 모든 세션에서 즉시 로그아웃됩니다.",
+        "descriptionFallback": "이 사용자의 새 비밀번호를 설정합니다. 이 사용자는 모든 세션에서 즉시 로그아웃됩니다.",
+        "passwordLabel": "새 비밀번호",
+        "passwordHelp": "사용자가 다음 로그인에 사용할 비밀번호를 설정하세요.",
+        "showPassword": "새 비밀번호 표시",
+        "hidePassword": "새 비밀번호 숨기기",
+        "requirePasswordChangeLabel": "다음 비밀번호 로그인 시 변경 요구",
+        "requirePasswordChangeHelp": "비밀번호를 변경할 때까지 로컬 비밀번호로 접근할 수 없습니다. OIDC 로그인은 계속 사용할 수 있습니다.",
+        "passwordRequired": "새 비밀번호를 입력하세요.",
+        "submit": "비밀번호 설정"
+      },
+      "credentialsDialog": {
+        "usernameLabel": "사용자 이름",
+        "temporaryPasswordLabel": "임시 비밀번호",
+        "createTitle": "임시 비밀번호 생성 완료",
+        "createDescription": "이 임시 비밀번호를 안전하게 전달하세요. 사용자는 로그인한 후 비밀번호를 변경해야 합니다."
+      },
+      "deleteDialog": {
+        "title": "사용자 삭제",
+        "descriptionFallback": "이 사용자를 삭제하시겠습니까?"
+      },
+      "notifications": {
+        "loadFailed": "사용자 목록을 불러오지 못했습니다.",
+        "usernameRequired": "사용자 이름을 입력하세요.",
+        "userUpdated": "사용자 정보를 업데이트했습니다.",
+        "userCreated": "사용자를 만들었습니다.",
+        "updateFailed": "사용자 정보를 업데이트하지 못했습니다.",
+        "createFailed": "사용자를 만들지 못했습니다.",
+        "resetFailed": "비밀번호를 재설정하지 못했습니다.",
+        "userDeleted": "사용자를 삭제했습니다.",
+        "deleteFailed": "사용자를 삭제하지 못했습니다."
+      }
+    },
+    "advanced": {
+      "imageConversion": {
+        "label": "이미지 변환 기본 설정",
+        "description": "libvips 변환 등 백엔드 이미지 미리 보기에 적용됩니다. 로컬 드라이브의 이미지에는 적용되지 않습니다.",
+        "speed": "변환 속도 우선",
+        "speedDescription": "투명 영역이 없는 미리 보기를 더 빠르게 인코딩합니다. 파일 크기가 커질 수 있습니다.",
+        "size": "파일 크기 우선",
+        "sizeDescription": "투명 영역이 없는 미리 보기의 크기를 줄이기 위해 WebP를 사용합니다. 변환에 CPU 리소스가 더 많이 필요할 수 있습니다."
+      },
+      "saveChanges": "변경 사항 저장",
+      "saveSuccess": "고급 설정을 저장했습니다.",
+      "loadFailed": "고급 설정을 불러오지 못했습니다.",
+      "saveFailed": "고급 설정을 저장하지 못했습니다.",
+      "resetOverride": "수동 설정 초기화",
+      "resetFailed": "수동으로 지정한 설정을 초기화하지 못했습니다.",
+      "resetSuccess": "{{label}}: 상속된 값으로 초기화했습니다.",
+      "sections": {
+        "smbBackends": "SMB 백엔드",
+        "preprocessors": "전처리기",
+        "imageMagick": "ImageMagick",
+        "pdfCompatibility": "PDF 호환성",
+        "archiveDownloads": "압축 파일 생성"
+      },
+      "fields": {
+        "value": "값",
+        "unit": "단위",
+        "seconds": "초"
+      },
+      "validation": {
+        "enterLabel": "입력할 값: {{label}}",
+        "wholeNumber": "{{label}}: 정수여야 합니다.",
+        "betweenRange": "{{label}}: {{min}}~{{max}} 사이의 값이어야 합니다.",
+        "betweenRangeWithUnit": "{{label}}: {{min}}~{{max}} {{unit}} 사이의 값이어야 합니다."
+      },
+      "helperText": {
+        "integer": "{{description}} 기본값: {{defaultValue}}. 범위: {{minValue}}~{{maxValue}}.",
+        "byteSize": "{{description}} 기본값: {{defaultValue}}. 범위: {{minValue}}~{{maxValue}}."
+      }
+    },
+    "smbSettings": {
+      "loadFailed": "SMB 설정을 불러오지 못했습니다.",
+      "saveFailed": "SMB 설정을 저장하지 못했습니다.",
+      "saving": "SMB 설정을 저장하는 중…",
+      "saved": "SMB 설정을 저장했습니다.",
+      "connectionTimeoutError": "5~120 사이의 정수를 입력하세요.",
+      "readChunkSizeError": "허용된 청크 크기 범위 내의 정수를 입력하세요.",
+      "sections": {
+        "protection": "보호",
+        "connectionBehavior": "연결 동작",
+        "fileStreaming": "파일 스트리밍"
+      },
+      "fields": {
+        "authenticationMode": "인증 모드",
+        "encryptionMode": "전송 보호",
+        "connectionTimeout": "연결 시간 제한",
+        "readChunkSize": "SMB 읽기 청크 크기"
+      },
+      "helper": {
+        "authenticationMode": "자동 모드에서는 가능하면 Kerberos를 사용하고, 사용할 수 없으면 NTLM을 사용합니다. NTLM으로 전환하지 않으려면 ‘Kerberos 필수’를 선택하세요.",
+        "encryptionMode": "서명은 항상 필요합니다. ‘서명만 사용’을 선택하면 암호화되지 않은 SMB 2 연결도 허용됩니다. 네트워크에서 SMB 트래픽이 노출되지 않도록 하려면 암호화를 필수로 설정하세요.",
+        "connectionTimeout": "SMB 전송 연결을 설정하는 데 허용되는 최대 시간입니다.",
+        "readChunkSize": "파일 스트리밍 작업 한 번에 읽을 바이트 수입니다."
+      },
+      "options": {
+        "negotiate": "자동(Kerberos 또는 NTLM)",
+        "kerberosRequired": "Kerberos 필수",
+        "signingOnly": "서명만 사용(SMB 2 호환)",
+        "encryptionRequired": "서명 및 암호화(SMB 3 이상)"
+      },
+      "source": {
+        "default": "내장 기본값",
+        "database": "시스템에서 지정한 값",
+        "configFile": "구성 파일"
+      }
+    },
+    "fileSearch": {
+      "title": "파일 검색",
+      "saveChanges": "변경 사항 저장",
+      "resetToDefault": "기본값으로 초기화",
+      "loadFailed": "파일 검색 설정을 불러올 수 없습니다.",
+      "saveFailed": "파일 검색 설정을 저장할 수 없습니다.",
+      "resetFailed": "파일 검색 설정을 초기화할 수 없습니다.",
+      "retentionLimit": "보관할 최근 파일 및 폴더 수",
+      "retentionLimitError": "0~500 사이의 정수를 입력하세요.",
+      "resultLimit": "그룹당 결과 수",
+      "resultLimitError": "1~50 사이의 정수를 입력하세요.",
+      "excludedCategories": "제외할 파일 범주",
+      "excludedCategoriesHelp": "제외한 파일은 파일 검색 결과와 기록에 표시되지 않습니다.",
+      "excludeImages": "이미지 제외",
+      "excludeTemporaryBackup": "임시 파일 및 백업 파일 제외",
+      "excludedExtensions": "제외한 확장자",
+      "excludedExtensionsInputLabel": "제외할 확장자 추가",
+      "excludedExtensionsAdd": "확장자 추가",
+      "excludedExtensionsError": "최대 255자의 확장자를 그대로 입력하세요. 글로브 패턴과 경로는 사용할 수 없습니다.",
+      "excludedExtensionsDuplicateError": "이미 제외한 확장자입니다.",
+      "excludedExtensionsHelp": "확장자 하나를 그대로 입력하세요. 글로브 패턴과 경로는 지원하지 않습니다.",
+      "excludedExtensionsNormalization": "{{extension}} 형식으로 저장됩니다.",
+      "excludedExtensionsRemove": "{{extension}} 제거"
+    }
+  },
+  "fileBrowser": {
+    "chrome": {
+      "statusBar": {
+        "itemCount_other": "항목 {{count}}개",
+        "noSelection": "선택 없음",
+        "linkTargetMissing": "바로 가기 대상을 찾을 수 없음",
+        "linkTargetAccessDenied": "바로 가기 대상에 대한 접근 거부됨",
+        "linkTargetUnresolvable": "바로 가기 대상을 확인할 수 없음",
+        "linkTargetLocalDrivesOnly": "로컬 드라이브에서만 바로 가기 대상을 확인할 수 있음",
+        "linkTargetUnmappedDrive": "바로 가기 대상이 사용 가능한 드라이브 외부에 있음",
+        "linkTargetUnsupported": "바로 가기 대상이 파일이나 폴더가 아님"
+      },
+      "breadcrumb": {
+        "navigateRoot": "루트 폴더로 이동",
+        "navigateTo": "{{path}} 위치로 이동"
+      },
+      "connectionSelector": {
+        "placeholder": "연결 선택"
+      },
+      "mobileToolbar": {
+        "openMenu": "메뉴 열기",
+        "navigateUpTitle": "위로 이동",
+        "navigateUpAriaLabel": "상위 폴더로 이동"
+      },
+      "sort": {
+        "ariaLabel": "정렬 옵션",
+        "fields": {
+          "name": "이름",
+          "size": "크기",
+          "modified": "수정 날짜",
+          "type": "유형"
+        },
+        "direction": {
+          "ascending": "오름차순",
+          "descending": "내림차순"
+        }
+      },
+      "viewMode": {
+        "ariaLabel": "보기 모드 옵션",
+        "options": {
+          "list": "목록",
+          "details": "자세히"
+        }
+      },
+      "dualPaneToggle": {
+        "ariaLabel": "분할 보기 전환",
+        "label": "분할 보기"
+      },
+      "alerts": {
+        "folderNotFound": "‘{{name}}’ 폴더를 찾을 수 없습니다. 이동했거나 삭제되었을 수 있습니다.",
+        "folderNotFoundSummary": "폴더를 찾을 수 없습니다. 이동했거나 삭제되었을 수 있습니다.",
+        "fileNotFoundSummary": "파일을 찾을 수 없습니다. 이동했거나 삭제되었을 수 있습니다.",
+        "fileFailure": {
+          "missing": "‘{{name}}’ 파일을 찾을 수 없습니다. 이동했거나 삭제되었을 수 있습니다.",
+          "not_file": "이 대상은 일반 파일이 아닙니다. 다른 파일을 선택하세요.",
+          "access_denied": "이 파일에 대한 접근이 거부되었습니다. 권한을 확인한 후 다시 시도하세요.",
+          "timeout": "파일 요청 시간이 초과되었습니다. 연결을 확인한 후 다시 시도하세요.",
+          "unavailable": "파일을 사용할 수 없습니다. 연결을 확인한 후 다시 시도하세요.",
+          "pairing": "로컬 드라이브 페어링을 사용할 수 없습니다. 로컬 드라이브 설정을 열어 이 브라우저를 다시 페어링하세요.",
+          "cancelled": "파일 요청이 취소되었습니다.",
+          "unknown": "파일을 열 수 없습니다. 연결을 확인한 후 다시 시도하세요."
+        },
+        "folderRecovered": "‘{{name}}’ 폴더를 찾을 수 없습니다. 대신 ‘{{parent}}’ 폴더를 열었습니다.",
+        "folderRecoveredSummary": "폴더를 찾을 수 없습니다. 대신 ‘{{parent}}’ 폴더를 열었습니다.",
+        "folderAccessDenied": "이 폴더를 열 권한이 없습니다.",
+        "notAFolder": "이 항목은 폴더가 아닙니다.",
+        "connectionUnavailable": "연결을 사용할 수 없습니다. 연결 설정을 확인한 후 다시 시도하세요.",
+        "directoryMonitoringTimeout": "제한 시간 내에 폴더 모니터링이 시작되지 않았습니다. 다시 시도하려면 폴더를 새로 고치세요.",
+        "leftPane": "왼쪽 창",
+        "rightPane": "오른쪽 창",
+        "localDrivePairingRejected": "{{connection}}: Sambee Companion에서 이 브라우저의 페어링을 거부했습니다. Sambee를 새로 고쳐 업데이트를 적용하세요. 문제가 계속되면 ‘로컬 드라이브’를 열어 페어링을 확인하세요.",
+        "localDrivePairingRequired": "{{connection}}: 이 브라우저는 Sambee Companion과 페어링되지 않았습니다. ‘로컬 드라이브’를 열어 페어링하세요.",
+        "welcomeTitle": "Sambee에 오신 것을 환영합니다!",
+        "adminOnboardingPrefix": "사용을 시작하려면 ",
+        "adminOnboardingLink": "첫 SMB 네트워크 공유를 추가",
+        "adminOnboardingSuffix": "하세요. 네트워크 저장소의 파일을 탐색하고 볼 수 있습니다.",
+        "regularOnboarding": "Sambee에서 네트워크 공유의 파일을 탐색하고 볼 수 있습니다. 네트워크 공유를 설정하려면 관리자에게 문의하세요.",
+        "backendUnavailable": "백엔드 연결이 끊겼습니다. 현재 화면은 계속 사용할 수 있지만 연결이 복구될 때까지 새로 고침과 실시간 업데이트에 실패할 수 있습니다.",
+        "backendReconnecting": "백엔드에 다시 연결하는 중입니다. 실시간 업데이트가 잠시 지연될 수 있습니다.",
+        "loadingConnections": "연결을 불러오는 중…",
+        "companionLaunchHint": "Sambee Companion에서 여는 중입니다. 아무 일도 일어나지 않으면 Companion이 설치되어 실행 중인지 확인하세요. Companion에 로그인이나 복구가 필요하면 Sambee가 이 화면을 다시 열어 다음 단계를 안내합니다.",
+        "companionLifecycle": {
+          "renewal_required": "파일 편집을 마치기 전에 Companion 편집 세션이 만료되었습니다. 편집을 계속하려면 Sambee에서 파일을 다시 여세요.",
+          "auth_failed": "Companion에서 Sambee 백엔드 로그인을 완료할 수 없습니다. 안내가 표시되면 Companion에서 로그인을 완료한 후 Sambee에서 파일을 다시 여세요.",
+          "lock_lost": "Companion에서 이 파일의 편집 잠금을 잃었습니다. 편집을 계속하기 전에 Sambee에서 파일을 다시 여세요.",
+          "recovery_required": "Companion에 이 파일의 미완료 복구 항목이 있습니다. 새 편집 세션을 시작하기 전에 Sambee 또는 Companion에서 해당 항목을 처리하세요."
+        }
+      },
+      "mobileMenu": {
+        "selectConnectionAriaLabel": "연결 선택",
+        "navigateRootAriaLabel": "루트 폴더로 이동",
+        "openKeyboardShortcutsAriaLabel": "키보드 단축키 열기",
+        "openDocumentationAriaLabel": "문서 열기",
+        "openSettingsAriaLabel": "설정 열기",
+        "systemHealth": "시스템 상태",
+        "openSystemHealthAriaLabel": "시스템 상태: {{status}}. {{headline}}",
+        "logoutAriaLabel": "로그아웃"
+      },
+      "helpMenu": {
+        "keyboardShortcuts": "키보드 단축키",
+        "documentation": "문서",
+        "issues": "이슈",
+        "discussions": "토론"
+      },
+      "toolbar": {
+        "help": "도움말",
+        "openSettings": "설정 열기",
+        "systemHealthTooltip": "시스템 상태: {{status}}. {{headline}}"
+      }
+    },
+    "list": {
+      "emptyDirectory": "이 폴더는 비어 있습니다"
+    },
+    "search": {
+      "modeSelectorAriaLabel": "빠른 실행 표시줄 모드 전환",
+      "modes": {
+        "navigate": "탐색",
+        "quickNav": "빠른 탐색",
+        "commands": "명령",
+        "fileSearch": "파일 검색"
+      },
+      "placeholders": {
+        "directory": "원하는 폴더로 이동",
+        "command": "명령 실행",
+        "smart": "폴더로 이동하거나 >를 입력해 명령 실행",
+        "fileSearch": "최근 파일 및 현재 폴더의 파일 검색"
+      },
+      "footer": {
+        "navigate": "탐색",
+        "open": "열기",
+        "removeRecent": "최근 항목에서 제거",
+        "removeRecentDirectory": "최근 폴더에서 제거",
+        "run": "실행",
+        "commands": "명령",
+        "close": "닫기"
+      },
+      "itemTypes": {
+        "directory": "폴더",
+        "file": "파일"
+      },
+      "results": {
+        "none": "‘{{query}}’에 대한 검색 결과가 없습니다.",
+        "failed": "검색을 완료할 수 없습니다. 다시 시도하세요.",
+        "removeFailed": "이 항목을 최근 기록에서 제거할 수 없습니다. 다시 시도하세요.",
+        "count_other": "결과 {{count}}개",
+        "countTruncated": "결과 {{count}}개 이상",
+        "commandCount_other": "명령 {{count}}개",
+        "directoriesIndexed_other": "폴더 {{count}}개 색인 완료"
+      },
+      "status": {
+        "connectionStatus": "{{connection}}: {{message}}",
+        "indexingPending": "색인 생성 중…",
+        "indexing": "색인 생성 중… (폴더 {{count}}개 발견)",
+        "updating": "색인 업데이트 중… (폴더 {{count}}개)",
+        "updatingProgress": "색인 업데이트 중… (약 {{total}}개 중 {{done}}개 폴더 확인)",
+        "startingIndex": "색인 생성 시작 중…",
+        "indexCoveragePartial": "일부 폴더의 색인을 생성할 수 없었습니다.",
+        "indexCoverageUncertain": "폴더 색인이 검증되지 않았습니다. 다시 확인할 예정입니다.",
+        "legacyDirectorySearch": "이 소스에서 여러 검색어로 폴더를 검색할 수 있는지 확인되지 않았습니다. 검색어를 하나만 입력하거나 백엔드 및 Companion의 지원 여부를 확인하세요.",
+        "historyUnavailable": "최근 폴더 기록을 사용할 수 없습니다. 백엔드 연결을 확인한 후 다시 시도하세요.",
+        "fileHistoryUnavailable": "최근 파일 기록을 사용할 수 없습니다. 백엔드 연결을 확인한 후 다시 시도하세요.",
+        "indexUnavailable": "폴더 검색을 사용할 수 없습니다. 소스 연결을 확인한 후 다시 시도하세요."
+      },
+      "statusDetails": {
+        "title": "폴더 검색 상태",
+        "linkSuffix": " (<details>세부 정보</details>).",
+        "source": "소스",
+        "impact": "이 위치에 있는 폴더가 검색 결과에 포함되지 않을 수 있습니다.",
+        "incomplete": "영향을 받는 위치 중 일부만 표시합니다. 다른 폴더도 영향을 받을 수 있습니다.",
+        "locations": "영향을 받는 위치",
+        "location": "위치",
+        "reason": "이유",
+        "containingDirectory": "해당 위치를 포함하는 폴더",
+        "unavailable": "이 세부 정보를 더 이상 사용할 수 없습니다. 상태를 새로 고치세요.",
+        "failed": "상태 세부 정보를 불러올 수 없습니다. 소스 연결을 확인한 후 이 대화 상자를 다시 여세요.",
+        "reasons": {
+          "access_denied": "접근 거부됨",
+          "unsupported_encoding": "폴더 이름을 읽을 수 없음",
+          "unsafe_traversal": "폴더 안전성 검사 실패",
+          "scan_failed": "폴더를 읽을 수 없음"
+        },
+        "actions": {
+          "access_denied": "소스 계정에 이 폴더를 읽을 권한이 있는지 확인하세요.",
+          "unsupported_encoding": "폴더 이름에 지원되지 않는 문자가 있거나 이름이 너무 긴지 확인하세요.",
+          "unsafe_traversal": "검사 도중 폴더가 변경되었는지 확인하세요. 문제가 계속되면 소스에 다시 연결하세요.",
+          "scan_failed": "폴더가 존재하고 읽을 수 있는지 확인하세요. 필요하면 소스에 다시 연결하세요."
+        }
+      },
+      "groups": {
+        "recentFiles": "최근 파일",
+        "recentDirectories": "최근 폴더",
+        "directories": "폴더",
+        "currentDirectory": "현재 폴더"
+      },
+      "belowMinimum": "검색하려면 {{count}}자 이상 입력하세요."
+    },
+    "commands": {
+      "categories": {
+        "navigation": "탐색",
+        "files": "파일",
+        "view": "보기",
+        "panes": "창",
+        "settings": "설정",
+        "help": "도움말"
+      },
+      "items": {
+        "quickNav": {
+          "title": "탐색 모드 열기",
+          "description": "빠른 실행 표시줄에서 폴더로 이동"
+        },
+        "fileSearch": {
+          "title": "파일 검색",
+          "description": "최근 파일 및 활성 폴더의 파일 검색"
+        },
+        "commandPalette": {
+          "title": "명령 표시",
+          "description": "파일 브라우저 명령 팔레트 열기"
+        },
+        "open": {
+          "title": "포커스된 항목 열기"
+        },
+        "navigateUp": {
+          "title": "상위 폴더로 이동"
+        },
+        "refresh": {
+          "title": "파일 목록 새로 고침"
+        },
+        "rename": {
+          "title": "포커스된 항목 이름 변경"
+        },
+        "delete": {
+          "title": "포커스된 항목 삭제"
+        },
+        "newDirectory": {
+          "title": "새 폴더 만들기"
+        },
+        "newFile": {
+          "title": "새 파일 만들기"
+        },
+        "createArchive": {
+          "title": "ZIP 압축 파일 만들기"
+        },
+        "extractArchive": {
+          "title": "ZIP 압축 풀기"
+        },
+        "openInApp": {
+          "title": "포커스된 파일을 데스크톱 앱에서 열기"
+        },
+        "openInViewerPicker": {
+          "title": "포커스된 파일에 사용할 Sambee 뷰어 선택"
+        },
+        "openInNativePicker": {
+          "title": "포커스된 파일에 사용할 데스크톱 앱 선택"
+        },
+        "toggleDualPane": {
+          "title": "분할 보기 전환"
+        },
+        "openLocationInNewTab": {
+          "title": "현재 위치를 새 탭에서 열기"
+        },
+        "matchLeftPaneLocation": {
+          "title": "왼쪽 창에 오른쪽 창의 위치 열기"
+        },
+        "matchRightPaneLocation": {
+          "title": "오른쪽 창에 왼쪽 창의 위치 열기"
+        },
+        "focusLeftPane": {
+          "title": "왼쪽 창으로 포커스 이동"
+        },
+        "focusRightPane": {
+          "title": "오른쪽 창으로 포커스 이동"
+        },
+        "switchPane": {
+          "title": "활성 창 전환"
+        },
+        "newTab": {
+          "title": "새 폴더 탭"
+        },
+        "closeTab": {
+          "title": "폴더 탭 닫기"
+        },
+        "undoCloseTab": {
+          "title": "닫은 폴더 탭 다시 열기"
+        },
+        "previousTab": {
+          "title": "이전 폴더 탭"
+        },
+        "nextTab": {
+          "title": "다음 폴더 탭"
+        },
+        "copyToOtherPane": {
+          "title": "다른 창으로 복사"
+        },
+        "moveToOtherPane": {
+          "title": "다른 창으로 이동"
+        },
+        "openSettings": {
+          "title": "설정 열기"
+        },
+        "openConnectionsSettings": {
+          "title": "연결 설정 열기"
+        },
+        "openSystemHealth": {
+          "title": "시스템 상태 열기"
+        },
+        "showHelp": {
+          "title": "키보드 단축키 표시"
+        }
+      }
+    },
+    "toolbar": {
+      "newFolder": "새 폴더",
+      "newFile": "새 파일",
+      "upload": "업로드",
+      "uploadChoiceFiles": "파일",
+      "uploadChoiceFolder": "폴더",
+      "uploadFiles": "파일 업로드",
+      "uploadFolder": "폴더 업로드",
+      "createArchive": "압축 파일 만들기",
+      "extractArchive": "압축 풀기",
+      "refresh": "새로 고침",
+      "more": "더 보기"
+    },
+    "transfers": {
+      "downloadFailed": "다운로드에 실패했습니다. 다시 시도하세요.",
+      "downloadSizeLimitExceeded": "선택한 ZIP이 임시 다운로드 크기 한도를 초과합니다.",
+      "preparingArchive": "압축 파일 준비 중",
+      "downloading": "다운로드 준비 중",
+      "preparingUpload": "업로드 준비 중",
+      "dropToUpload": "여기에 놓아 업로드",
+      "dropUnavailable": "이 폴더에는 업로드할 수 없습니다.",
+      "dropBusy": "진행 중인 업로드를 먼저 완료하세요.",
+      "dropUnsupported": "이 브라우저에서는 폴더를 끌어다 놓을 수 없습니다. 대신 ‘업로드’를 사용하세요.",
+      "uploadComplete_other": "파일 {{count}}개 업로드 완료",
+      "uploadSkipped_other": "{{count}}개 건너뜀",
+      "uploadFailed_other": "{{count}}개 실패",
+      "uploadUnknown_other": "{{count}}개 결과 불확실",
+      "uploadCancelled_other": "{{count}}개 취소됨",
+      "uploadSummaryWithIssues": "{{summary}} · {{issues}}",
+      "uploadDestinationChanged": "대상 위치가 변경되어 업로드를 취소했습니다. 폴더를 선택한 후 다시 시도하세요.",
+      "uploadInspectDestination": "결과를 확인할 수 없습니다. 다시 시도하기 전에 대상 위치를 확인하세요.",
+      "uploadFolders": "폴더 {{created}}개 생성, {{merged}}개 병합, {{skipped}}개 건너뜀",
+      "uploadPartial": "업로드를 취소했습니다. 이미 전송한 파일과 폴더는 대상 위치에 남아 있습니다.",
+      "uploadFolderFailed_other": "폴더 {{count}}개 실패",
+      "uploadProgress": "{{name}} 업로드 중 ({{current}}/{{total}}) · {{bytes}} / {{size}} · {{completed}}개 완료, {{skipped}}개 건너뜀, {{failed}}개 실패",
+      "uploadSending": "{{name}} 업로드 중 ({{current}}/{{total}}) · 전송 중 · {{completed}}개 완료, {{skipped}}개 건너뜀, {{failed}}개 실패",
+      "uploadPublishing": "{{name}} 업로드 중 ({{current}}/{{total}}) · 대상 위치에 저장 중 · {{completed}}개 완료, {{skipped}}개 건너뜀, {{failed}}개 실패",
+      "uploadRemaining_other": "파일 {{count}}개 시작 안 함"
+    },
+    "compactActions": {
+      "clearSelection": "선택 지우기",
+      "createNewItem": "새 항목 만들기",
+      "deselect": "선택 해제",
+      "moreActionsFor": "{{name}}의 추가 작업",
+      "select": "선택",
+      "selectedCount_other": "항목 {{count}}개 선택됨",
+      "selectionCleared": "선택을 지웠습니다.",
+      "selectionActions": "선택한 항목의 작업"
+    },
+    "share": {
+      "filesOnly": "파일만 공유할 수 있습니다. 선택 항목에서 폴더를 제외하세요.",
+      "selectFiles": "공유할 파일을 하나 이상 선택하세요.",
+      "preparing_other": "공유할 파일 {{count}}개 다운로드 중…",
+      "ready_other": "파일 {{count}}개 공유 준비 완료",
+      "sharing": "공유 메뉴를 여는 중…",
+      "rejected": "브라우저에서 이 파일을 공유할 수 없습니다. 대신 다운로드하세요.",
+      "fileTypeRejected": "이 브라우저에서는 이러한 파일 유형을 공유하지 못할 수 있습니다. 파일을 다운로드한 후 기기의 파일 앱에서 공유하세요.",
+      "downloadNext": "다운로드 {{current}}/{{count}}",
+      "downloadFailed": "파일을 다운로드하지 못했습니다."
+    },
+    "archiveMembers": {
+      "encrypted": "압축 파일의 이 항목은 암호화되어 있습니다. 미리 보거나 추출하려면 압축 도구에서 비밀번호를 입력하세요.",
+      "unsupportedCompression": "Sambee는 이 항목의 압축 방식을 지원하지 않습니다. 미리 보거나 추출하려면 다른 압축 도구를 사용하세요.",
+      "unavailable": "압축 파일의 이 항목을 사용할 수 없습니다. 다른 압축 도구로 확인하세요."
+    },
+    "row": {
+      "openInCompanionApp": "데스크톱 앱에서 열기",
+      "openInBrowserViewer": "Sambee에서 열기",
+      "chooseBrowserViewer": "Sambee 뷰어 선택",
+      "openInNativeApp": "데스크톱 앱에서 열기",
+      "chooseNativeApp": "데스크톱 앱 선택",
+      "itemTypes": {
+        "folder": "폴더",
+        "file": "파일"
+      },
+      "shortcutSuffix": " (바로 가기)",
+      "shortcutTargetSuffix": " (바로 가기 대상: {{target}})",
+      "unsavedLocalDraft": "저장하지 않은 로컬 초안 있음",
+      "unsavedLocalDraftSuffix": ": 저장하지 않은 로컬 초안 있음",
+      "selectedSuffix": " (선택됨)"
+    },
+    "viewerPicker": {
+      "title": "뷰어 선택",
+      "fileLabel": "열 파일",
+      "open": "열기",
+      "openWithoutSaving": "저장하지 않고 열기",
+      "alwaysUse": "이 파일 유형에 항상 이 뷰어 사용",
+      "default": "기본값",
+      "openInNativeApp": "데스크톱 앱에서 열기",
+      "nativeDescription": "Sambee 뷰어 대신 데스크톱 앱을 사용합니다.",
+      "viewers": {
+        "image": "이미지 뷰어",
+        "markdown": "Markdown 뷰어",
+        "pdf": "PDF 뷰어",
+        "text": "텍스트 편집기"
+      }
+    },
+    "shortcuts": {
+      "copyToOtherPane": "다른 창으로 복사",
+      "copyToOtherPaneInDualPane": "다른 창으로 복사(분할 보기)",
+      "createArchive": "ZIP 압축 파일 만들기",
+      "download": "선택 항목 다운로드",
+      "createDirectory": "새 폴더 만들기",
+      "createFile": "새 파일 만들기",
+      "deleteItem": "파일 또는 폴더 삭제",
+      "extractArchive": "ZIP 압축 풀기",
+      "fileSearch": "최근 파일 및 현재 폴더의 파일 검색",
+      "moveToOtherPane": "다른 창으로 이동",
+      "moveToOtherPaneInDualPane": "다른 창으로 이동(분할 보기)",
+      "navigateDown": "아래로 이동",
+      "navigateUp": "상위 폴더로 이동",
+      "navigateUpRow": "위로 이동",
+      "openConnectionSelector": "연결 선택 메뉴 열기",
+      "openInCompanion": "선택한 파일을 데스크톱 앱에서 열기",
+      "openNativePicker": "선택한 파일에 사용할 데스크톱 앱 선택",
+      "openQuickNavigation": "빠른 탐색 열기",
+      "openSelectedItem": "선택한 파일을 Sambee에서 열기",
+      "openSettings": "설정 열기",
+      "openSmartNavigation": "탐색 모드 열기",
+      "openViewerPicker": "선택한 파일에 사용할 Sambee 뷰어 선택",
+      "refresh": "파일 목록 새로 고침",
+      "renameItem": "파일 또는 폴더 이름 변경",
+      "selectAllFiles": "모든 파일 선택",
+      "selectAndMoveDown": "선택하고 아래로 이동",
+      "selectAndMoveUp": "선택하고 위로 이동",
+      "selectToFirst": "포커스된 항목부터 첫 항목까지 선택",
+      "selectToLast": "포커스된 항목부터 마지막 항목까지 선택",
+      "showCommands": "명령 표시",
+      "showHelp": "키보드 단축키 표시",
+      "switchActivePane": "활성 창 전환",
+      "previousTab": "이전 폴더 탭 선택",
+      "nextTab": "다음 폴더 탭 선택",
+      "newTab": "새 폴더 탭",
+      "closeTab": "선택한 폴더 탭 닫기",
+      "openLocationInNewTab": "현재 위치를 새 탭에서 열기",
+      "matchLeftPaneLocation": "왼쪽 창에 오른쪽 창의 위치 열기",
+      "matchRightPaneLocation": "오른쪽 창에 왼쪽 창의 위치 열기",
+      "toggleDualPane": "분할 보기 전환",
+      "toggleSelectionAndMoveDown": "선택 상태를 바꾸고 아래로 이동",
+      "upload": "현재 폴더에 파일 업로드"
+    },
+    "unavailableShortcuts": {
+      "archiveContentImmutable": "압축 파일의 내용을 수정할 수 없습니다.",
+      "archiveExtractionUnavailable": "이 압축 파일의 내용을 현재 대상 위치에 풀 수 없습니다.",
+      "companionUnavailable": "로컬 파일을 압축하기 전에 Sambee Companion에 연결하세요.",
+      "destinationUnavailable": "이 위치로 파일을 전송할 수 없습니다.",
+      "dualPaneRequired": "이 복사 작업에는 분할 보기가 필요합니다.",
+      "interactionBlocked": "다른 화면이 열린 상태에서는 이 작업을 할 수 없습니다.",
+      "readOnlyLocation": "이 위치는 읽기 전용입니다.",
+      "selectArchiveToExtract": "압축을 풀 파일을 선택하세요.",
+      "selectItemToDelete": "삭제할 항목을 선택하세요.",
+      "selectItemToRename": "이름을 변경할 항목을 선택하세요.",
+      "selectItemsToArchive": "압축 파일에 추가할 수 있는 항목을 선택하세요.",
+      "selectItemsToCopy": "복사할 항목을 하나 이상 선택하세요.",
+      "selectItemsToDownload": "다운로드할 항목을 하나 이상 선택하세요.",
+      "selectItemsToMove": "이동할 항목을 하나 이상 선택하세요.",
+      "sourceUnavailable": "선택한 항목에는 이 작업을 할 수 없습니다.",
+      "locationUnavailable": "창의 위치를 불러올 때까지 기다리세요. 불러오지 못하면 ‘새로 고침’을 사용하거나 다른 위치를 선택하세요.",
+      "lastTabProtected": "각 창에 탭을 하나 이상 열어 두세요."
+    },
+    "tabs": {
+      "groupAriaLabel": "폴더 탭",
+      "leftPaneGroupAriaLabel": "왼쪽 창의 폴더 탭",
+      "rightPaneGroupAriaLabel": "오른쪽 창의 폴더 탭",
+      "newTab": "새 탭",
+      "allTabsAriaLabel": "모든 탭({{total}}개)",
+      "allTabsOverflowAriaLabel": "모든 탭({{total}}개, 숨김 {{hidden}}개)",
+      "selectTabAriaLabel": "{{name}} — {{location}}",
+      "closeTabAriaLabel": "{{name}} 탭 닫기({{location}})",
+      "closeTab": "탭 닫기",
+      "closeBackgroundTabTooltip": "탭 닫기({{shortcut}} 단축키는 선택된 탭을 닫습니다.)",
+      "closeMenuTabTooltip": "탭 닫기({{shortcut}} 단축키는 포커스된 탭을 닫습니다.)",
+      "closedNotice": "탭을 닫았습니다.",
+      "undo": "실행 취소",
+      "selectedAnnouncement": "{{name}}, 탭 {{total}}개 중 {{index}}번째",
+      "listInstructions": "왼쪽 및 오른쪽 화살표 키로 폴더 탭을 전환하고, {{newTabShortcut}} 단축키로 새 탭을 열고, {{closeTabShortcut}} 단축키로 선택한 탭을 닫습니다.",
+      "restorationUnavailableNotice": "이 브라우저 세션에서는 새로 고침 후 탭을 복원할 수 없습니다."
+    },
+    "confirmDelete": {
+      "titleFile": "파일 삭제",
+      "titleDirectory": "폴더 삭제",
+      "titleMulti": "항목 삭제",
+      "confirmFile": "다음 파일이 영구적으로 삭제됩니다.",
+      "confirmDirectory": "다음 폴더와 그 내용이 영구적으로 삭제됩니다.",
+      "confirmMulti": "다음 항목 {{count}}개가 영구적으로 삭제됩니다.",
+      "ariaLabelItem": "삭제할 항목",
+      "ariaLabelItems": "삭제할 항목 목록",
+      "moreItems_other": "외 {{count}}개",
+      "buttonDeleting": "삭제 중…"
+    },
+    "operationContext": {
+      "file": "파일",
+      "sourceItem": "원본 항목",
+      "destinationDirectory": "대상 폴더",
+      "archive": "압축 파일",
+      "archiveMember": "압축 파일 내 항목",
+      "selectedItems": "선택한 항목"
+    },
+    "rename": {
+      "titleFile": "파일 이름 변경",
+      "titleDirectory": "폴더 이름 변경",
+      "inputLabel": "새 이름",
+      "description": "이 항목의 새 이름을 입력하세요.",
+      "validationSame": "이름이 변경되지 않았습니다.",
+      "buttonRenaming": "이름 변경 중…"
+    },
+    "createItem": {
+      "titleFile": "새 파일",
+      "titleDirectory": "새 폴더",
+      "inputLabel": "이름",
+      "descriptionFile": "대상 폴더에 새 파일을 만듭니다.",
+      "descriptionDirectory": "대상 폴더에 새 폴더를 만듭니다.",
+      "buttonCreating": "만드는 중…"
+    },
+    "archive": {
+      "createTitle": "ZIP 압축 파일 만들기",
+      "nameLabel": "압축 파일 이름",
+      "createDescription_other": "선택한 항목 {{count}}개를 압축하여 대상 폴더에 ZIP 파일을 만듭니다.",
+      "progressCreating": "압축 파일 생성 중…",
+      "progressPreparing": "압축 파일 준비 중…",
+      "progressProcessedMembers": "압축 파일 내 항목 {{processed}}개 처리함…",
+      "buttonCreate": "압축 파일 만들기",
+      "buttonCreating": "압축 파일 생성 중…",
+      "validationExtension": "압축 파일 이름은 .zip으로 끝나야 합니다.",
+      "errorGeneric": "압축 파일을 만들지 못했습니다.",
+      "createPartialOutputError": "압축 파일을 만들지 못했습니다. 새 ZIP 파일이 불완전할 수 있습니다.",
+      "createCancelled": "압축 파일 생성을 취소했습니다.",
+      "buttonCancelCreation": "압축 파일 생성 취소",
+      "progressSourceArchive": "원본 압축 파일",
+      "progressMembers": "항목 {{total}}개 중 {{completed}}개",
+      "progressBytes": "{{total}}바이트 중 {{processed}}바이트",
+      "interruptedAfterReload": "압축 작업이 중단되었습니다. 다시 시도하기 전에 대상 위치를 확인하세요.",
+      "browseError": "압축 파일의 내용을 불러올 수 없습니다.",
+      "downloadError": "압축 파일 내 항목을 다운로드할 수 없습니다.",
+      "download": "다운로드",
+      "previewTitle": "{{name}} 미리 보기",
+      "previewLoading": "미리 보기 불러오는 중…",
+      "previewError": "압축 파일 내 항목의 미리 보기를 불러올 수 없습니다.",
+      "previewTooLarge": "이 항목은 너무 커서 미리 볼 수 없습니다. 파일을 보려면 다운로드하세요.",
+      "previewUnavailable": "여기서 미리 볼 수 없는 파일 유형입니다. 다운로드한 후 다른 앱에서 여세요.",
+      "closeBrowser": "압축 파일 탐색기 닫기",
+      "root": "압축 파일 루트",
+      "breadcrumbs": "압축 파일 내 경로",
+      "historyBack": "뒤로",
+      "historyForward": "앞으로",
+      "up": "위로",
+      "more": "더 불러오기",
+      "entryUnavailable": "사용할 수 없음",
+      "extractTitle": "ZIP 압축 풀기",
+      "extractDescriptionArchive": "대상 폴더에 압축을 풉니다.",
+      "extractDescriptionMember": "선택한 항목을 대상 폴더에 풉니다.",
+      "extractDescriptionMembers_other": "선택한 항목 {{count}}개를 대상 폴더에 풉니다.",
+      "memberErrorTitle": "압축 풀기 문제 해결",
+      "memberErrorPrompt": "압축 파일에서 항목을 추출할 수 없습니다.",
+      "destinationLabel": "대상 폴더",
+      "destinationNameLabel": "대상 이름",
+      "buttonExtract": "압축 풀기",
+      "buttonExtracting": "압축 푸는 중…",
+      "buttonCancelExtraction": "압축 풀기 취소",
+      "buttonOpenDestination": "대상 위치 열기",
+      "buttonRetryMemberError": "이 항목 다시 시도",
+      "buttonIgnoreMemberError": "이 항목 건너뛰기",
+      "validationDestinationEmpty": "대상 폴더를 입력하세요.",
+      "validationDestinationUnsafe": "비어 있는 부분이나 ‘.’ 또는 ‘..’이 포함되지 않은 상대 폴더 경로를 사용하세요.",
+      "validationDestinationExists": "새 대상 폴더를 선택하세요. 압축을 풀 때 기존 폴더를 덮어쓰지 않습니다.",
+      "extractError": "압축을 풀지 못했습니다.",
+      "extractPartialOutputError": "압축을 풀지 못했습니다. 대상 폴더에 불완전한 파일이 있을 수 있습니다.",
+      "extractSuccess": "압축을 풀었습니다.",
+      "summaryFilesExtracted": "추출한 파일",
+      "summaryDirectoriesCreated": "만든 폴더",
+      "summaryBytesWritten": "기록한 바이트",
+      "summaryFilesSkipped": "건너뛴 파일",
+      "summaryFilesReplaced": "덮어쓴 파일",
+      "summaryPartialMembers": "일부만 추출한 항목",
+      "extractPartialSuccess_other": "항목 {{count}}개를 건너뛰고 압축 풀기를 완료했습니다.",
+      "extractEncryptedSkipped_other": "암호화된 항목 {{count}}개를 건너뛰었습니다.",
+      "extractUnsupportedCompressionSkipped_other": "지원하지 않는 압축 방식의 항목 {{count}}개를 건너뛰었습니다.",
+      "extractCancelled": "압축 풀기를 취소했습니다.",
+      "extractInterrupted": "압축 풀기가 중단되었습니다. 대상 위치에 일부 결과가 남아 있을 수 있습니다.",
+      "extractConflictPending": "압축 풀기를 계속하려면 파일 충돌 처리 방법을 선택하세요.",
+      "collisionTitle": "이미 있는 파일",
+      "collisionPrompt": "대상 위치에 이미 있는 파일을 처리하는 방법을 선택하세요.",
+      "collisionListLabel": "기존 파일과 충돌하는 압축 파일 내 항목",
+      "collisionMore": "충돌하는 파일 {{count}}개 더 있음",
+      "collisionArchiveMemberLabel": "압축 파일 내 항목",
+      "collisionDestinationPathLabel": "대상 경로",
+      "collisionArchiveColumn": "압축 파일 내 항목",
+      "collisionDestinationColumn": "기존 파일",
+      "collisionSizeLabel": "크기",
+      "collisionModifiedLabel": "수정 날짜",
+      "collisionByteCount": "{{count}}바이트",
+      "collisionResolutionLabel": "처리 방법 선택",
+      "collisionChoiceSkip": "이 파일 건너뛰기",
+      "collisionChoiceReplace": "이 파일 덮어쓰기",
+      "collisionChoiceReplaceOlder": "압축 파일 내 항목이 더 최신인 경우에만 기존 파일 모두 덮어쓰기",
+      "collisionChoiceRename": "추출할 파일의 이름 변경",
+      "collisionApplyRemaining": "나머지 충돌에도 이 선택 적용",
+      "collisionContinue": "계속",
+      "memberErrorTargetLabel": "대상 경로",
+      "memberErrorPartialOutputNote": "대상 위치에 불완전한 파일이 생성되었습니다. 다시 시도하면 이 항목의 추출을 처음부터 시작합니다.",
+      "buttonSkipAll": "모두 건너뛰기",
+      "buttonReplaceAll": "모두 덮어쓰기",
+      "buttonReplaceOlder": "더 오래된 파일만 덮어쓰기",
+      "buttonSkip": "건너뛰기",
+      "buttonReplace": "덮어쓰기",
+      "buttonRename": "이름 변경",
+      "renameTargetLabel": "새 대상 경로"
+    },
+    "nameDialog": {
+      "validationEmpty": "이름을 입력하세요.",
+      "validationInvalidChars": "지원하지 않는 다음 문자를 제거하세요: \\ / : * ? \" < > |.",
+      "validationDotNames": "‘.’과 ‘..’은 예약된 폴더 이름입니다.",
+      "validationTrailing": "이름은 공백이나 마침표로 끝날 수 없습니다."
+    },
+    "copyMove": {
+      "descriptionCopySingle": "이 항목을 대상 폴더로 복사합니다.",
+      "descriptionCopyMultiple_other": "선택한 항목 {{count}}개를 대상 폴더로 복사합니다.",
+      "descriptionMoveSingle": "이 항목을 대상 폴더로 이동합니다.",
+      "descriptionMoveMultiple_other": "선택한 항목 {{count}}개를 대상 폴더로 이동합니다.",
+      "labelDestination": "폴더",
+      "labelFilename": "새 이름",
+      "errorSameFilename": "대상 폴더에 이미 같은 이름의 항목이 있습니다.",
+      "errorSameDirectory": "대상 폴더가 원본 폴더와 같습니다.",
+      "warnEmptyFilename": "이름을 입력하세요.",
+      "buttonCopying": "복사 중…",
+      "buttonMoving": "이동 중…",
+      "progressCopy": "복사 중… ({{current}}/{{total}})",
+      "progressMove": "이동 중… ({{current}}/{{total}})",
+      "errorGeneric": "작업에 실패했습니다. 일부 항목이 처리되지 않았을 수 있습니다."
+    },
+    "overwriteConflict": {
+      "title": "대상 항목이 이미 있음",
+      "alreadyExists": "이 이름의 대상 항목이 이미 있습니다.",
+      "folderConflict": "대상 위치에 같은 이름의 항목이 있어 이 폴더를 추가할 수 없습니다. 폴더를 건너뛰거나 이름을 변경하세요.",
+      "fileFolderConflict": "대상 위치에 같은 이름의 폴더가 있어 이 파일을 추가할 수 없습니다. 파일을 건너뛰거나 이름을 변경하세요.",
+      "skipFolder": "폴더 건너뛰기",
+      "renameFolder": "가져올 폴더 이름 변경",
+      "labelPath": "경로",
+      "labelTargetName": "대상 이름",
+      "labelExisting": "대상",
+      "labelIncoming": "원본",
+      "labelSize": "크기",
+      "labelModified": "수정 날짜",
+      "metadataLabel": "대상 세부 정보",
+      "resolutionLabel": "처리 방법 선택",
+      "resolutionSkip": "건너뛰기",
+      "resolutionOverwrite": "덮어쓰기",
+      "resolutionOverwriteOnlyOlder": "더 오래된 항목만 덮어쓰기",
+      "resolutionRename": "이름 변경",
+      "applyToAll": "이 작업에서 남은 충돌에도 이 선택 적용",
+      "targetNameUnchanged": "다른 대상 이름을 선택하세요.",
+      "noResolutionAvailable": "이 대상의 충돌을 해결할 수 없습니다. 작업을 취소한 후 다시 시도하세요.",
+      "cancelCopy": "복사 취소",
+      "cancelUpload": "업로드 취소",
+      "cancelMove": "이동 취소",
+      "cancelExtraction": "압축 풀기 취소",
+      "continue": "계속",
+      "progressContext_other": "항목 {{current}}/{{total}} · 지금까지 충돌 {{count}}건"
+    }
+  },
+  "common": {
+    "actions": {
+      "cancel": "취소",
+      "close": "닫기",
+      "companionRecovery": "Companion 복구",
+      "connectionStatus": "연결 상태",
+      "copy": "복사",
+      "create": "만들기",
+      "delete": "삭제",
+      "discard": "변경 사항 버리기",
+      "download": "다운로드",
+      "edit": "편집",
+      "logout": "로그아웃",
+      "move": "이동",
+      "nextNotice": "다음 알림",
+      "print": "인쇄",
+      "rename": "이름 바꾸기",
+      "replace": "바꾸기",
+      "retry": "다시 시도",
+      "monitoringStopped": "자동 업데이트가 중지됨",
+      "save": "저장",
+      "share": "공유",
+      "skip": "건너뛰기"
+    },
+    "labels": {
+      "connection": "연결",
+      "itemToDelete": "삭제할 항목",
+      "root": "루트",
+      "settings": "설정"
+    },
+    "navigation": {
+      "goBack": "뒤로"
+    },
+    "search": {
+      "action": "검색",
+      "placeholder": "검색",
+      "clear": "검색 지우기",
+      "previousMatch": "이전 검색 결과",
+      "nextMatch": "다음 검색 결과"
+    }
+  },
+  "themeSelector": {
+    "openButtonLabel": "테마 변경",
+    "dialogTitle": "테마 선택",
+    "previewPrimaryColor": "기본 색상",
+    "modes": {
+      "light": "밝게",
+      "dark": "어둡게"
+    },
+    "builtInThemes": {
+      "sambeeLight": {
+        "name": "Sambee 밝은 테마",
+        "description": "앱의 기본 밝은 테마"
+      },
+      "sambeeDark": {
+        "name": "Sambee 어두운 테마",
+        "description": "앱의 기본 어두운 테마"
+      }
+    }
+  },
+  "keyboardShortcutsHelp": {
+    "defaultTitle": "키보드 단축키",
+    "emptyState": "사용할 수 있는 키보드 단축키가 없습니다.",
+    "noSearchResults": "일치하는 키보드 단축키가 없습니다.",
+    "searchAriaLabel": "키보드 단축키 검색",
+    "searchPlaceholder": "단축키 검색",
+    "resultsAriaLabel": "키보드 단축키 검색 결과",
+    "closeAriaLabel": "키보드 단축키 닫기",
+    "groups": {
+      "general": "일반",
+      "search": "검색",
+      "navigation": "탐색",
+      "selection": "선택",
+      "fileActions": "파일 작업",
+      "editing": "편집",
+      "view": "보기",
+      "panes": "창 및 레이아웃"
+    },
+    "titles": {
+      "fileBrowser": "파일 브라우저 단축키",
+      "pdfViewer": "PDF 뷰어 단축키",
+      "imageViewer": "이미지 뷰어 단축키",
+      "markdownViewer": "Markdown 뷰어 단축키",
+      "markdownEditor": "Markdown 편집기 단축키",
+      "textEditor": "텍스트 편집기 단축키"
+    }
+  },
+  "systemHealth": {
+    "dialogTitle": "시스템 상태",
+    "overview": {
+      "ok": "문제 없음",
+      "warning": "주의 필요",
+      "error": "조치 필요",
+      "unknown": "일부 검사를 수행할 수 없음",
+      "partialChecks": "일부 검사를 수행할 수 없습니다.",
+      "attentionHelp": "아래에 강조 표시된 항목을 확인하세요.",
+      "connectionHelp": "서버 검사 결과를 갱신할 수 없습니다. 자동으로 다시 검사합니다. 문제가 계속되면 네트워크 연결을 확인하세요.",
+      "server": "서버",
+      "container": "컨테이너",
+      "containerApplicationData": "저장 공간: 앱 데이터",
+      "containerTemporaryStorage": "저장 공간: 임시 데이터",
+      "containerCombinedStorage": "저장 공간: 앱 데이터 및 임시 데이터",
+      "connectionStorage": "연결의 저장 공간",
+      "localDrive": "로컬 드라이브",
+      "localDrives": "로컬 드라이브",
+      "smb": "SMB 연결",
+      "hostMemory": "메모리",
+      "systemLoad": "평균 부하(정규화)",
+      "containerMemory": "메모리",
+      "percentUsed": "{{percent}}% 사용 중",
+      "bytesUsed": "{{used}} 사용 중",
+      "memoryUsed": "{{used}} 사용 중({{percent}}%)",
+      "spaceFree": "{{available}} 남음({{percent}}%)",
+      "noLimit": "설정된 제한 없음",
+      "oldData": "오래된 정보",
+      "checking": "확인 중",
+      "localDriveHelp": "설정 > 로컬 드라이브에서 Companion을 확인하세요."
+    },
+    "statuses": {
+      "ok": "정상",
+      "warning": "경고",
+      "error": "오류",
+      "unknown": "알 수 없음",
+      "informational": "참고 정보",
+      "notAvailable": "사용할 수 없음"
+    },
+    "availability": {
+      "available": "최신 데이터",
+      "collecting": "수집 중",
+      "not_mounted": "사용할 수 없음(마운트를 설정하지 않음)",
+      "unsupported": "사용할 수 없음",
+      "permission_denied": "권한 거부됨",
+      "offline": "오프라인",
+      "timeout": "시간 초과",
+      "stale": "오래된 데이터",
+      "invalid": "유효하지 않은 측정값",
+      "unavailable": "수집 오류"
+    },
+    "summary": {
+      "sectionTitle": "요약",
+      "severityLabel": "전체 상태",
+      "coverageLabel": "검사 범위",
+      "coverageComplete": "활성 검사 모두 완료",
+      "coverageIncomplete": "일부 검사 결과 없음",
+      "lastUpdatedLabel": "마지막 업데이트",
+      "neverUpdated": "첫 검사 대기 중",
+      "refreshing": "상태 검사 결과를 새로 고치는 중…",
+      "policyRetrying": "상태 모니터링 권한 정보를 새로 고칠 수 없습니다. Sambee가 다시 시도합니다.",
+      "backendRetrying": "일부 서버 또는 SMB 검사에서 최신 측정값을 받지 못했습니다. Sambee가 다시 시도합니다.",
+      "companionRetrying": "Companion에서 최신 드라이브 측정값을 받지 못했습니다. Sambee가 다시 시도합니다.",
+      "backendUnavailableHeadline": "서버 상태 데이터를 사용할 수 없습니다. Sambee가 다시 시도합니다.",
+      "localDriveErrorHeadline": "로컬 드라이브 한 개의 여유 공간이 위험 수준으로 부족합니다.",
+      "localDriveErrorsHeadline": "로컬 드라이브 {{count}}개의 여유 공간이 위험 수준으로 부족합니다.",
+      "localDriveWarningHeadline": "로컬 드라이브 한 개의 여유 공간이 부족합니다.",
+      "localDriveWarningsHeadline": "로컬 드라이브 {{count}}개의 여유 공간이 부족합니다.",
+      "localDriveUnknownHeadline": "로컬 드라이브 공간 정보를 사용할 수 없거나 Companion의 응답을 기다리는 중입니다."
+    },
+    "sections": {
+      "backendHost": "백엔드 호스트",
+      "containerRuntime": "백엔드 컨테이너 런타임",
+      "storage": "저장 공간 여유 용량"
+    },
+    "metrics": {
+      "hostMemory": "호스트 메모리",
+      "systemLoad": "정규화된 시스템 부하",
+      "cpuTemperature": "CPU 온도",
+      "containerMemory": "컨테이너 작업 집합 메모리",
+      "load1m": "1분",
+      "load5mEvaluated": "5분(판정 기준)",
+      "load15m": "15분",
+      "logicalCpuMetadata": "논리 CPU {{count}}개",
+      "memoryCapacity": "전체 {{total}} · 사용 가능 {{available}}",
+      "memoryLimit": "메모리 제한: {{limit}}",
+      "noMemoryLimit": "컨테이너 메모리 제한이 설정되지 않아 백분율 알림이 꺼져 있습니다.",
+      "hostMemoryPercent": "백분율은 전체 호스트 메모리를 기준으로 합니다.",
+      "containerMemoryScope": "Sambee뿐 아니라 이 컨테이너의 모든 프로세스를 포함합니다. 파일 캐시는 제외하며 공유 메모리와 커널 메모리는 포함합니다.",
+      "fileCache": "파일 캐시: {{cache}}",
+      "storageCapacity": "용량: {{total}}",
+      "usedValue": "{{percent}}% 사용 중(전체 {{total}} 중 {{used}} 사용, {{available}} 사용 가능)",
+      "workingSetFinite": "제한의 {{percent}}% 사용 중(작업 집합 {{used}}, 제한 {{limit}})",
+      "workingSetUnlimited": "작업 집합 {{used}} — 설정된 메모리 제한 없음",
+      "storageValue": "{{percent}}% 사용 가능(전체 {{total}} 중 {{available}})",
+      "thresholdsHigh": "경고 ≥ {{warning}}, 오류 ≥ {{error}}",
+      "thresholdsLow": "경고 ≤ {{warning}}, 오류 ≤ {{error}}",
+      "detectedLimits": "감지된 한계: 경고 {{warning}}, 위험 {{error}}",
+      "effectiveThresholds": "적용되는 임계값: 경고 {{warning}}({{warningOrigin}}), 오류 {{error}}({{errorOrigin}})",
+      "sourceLabel": "출처: {{source}}",
+      "ageSeconds": "{{seconds}}초 전",
+      "staleTag": "오래된 데이터({{seconds}}초 전)",
+      "actualFreeNote": "공유의 전체 물리적 여유 공간: {{actual}}",
+      "updateCompanion": "드라이브 여유 공간을 표시하려면 Companion을 업데이트하세요.",
+      "pairingLost": "Companion에서 페어링을 확인할 수 없습니다. 설정 > 로컬 드라이브를 확인하고 필요한 경우 다시 페어링하세요.",
+      "localDriveAction": "공간을 확보하거나 다른 위치를 선택하세요."
+    }
+  }
+}
