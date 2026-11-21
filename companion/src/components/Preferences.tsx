@@ -52,9 +52,12 @@ type UpdateActionState =
 interface NativeDirectoryPolicyStatus {
   status: string;
   authoritative_origin: string | null;
+  results: {
+    localization: "delivery_failed" | "synchronized" | "defaults_active";
+  };
   sections: {
     directory_index?: { marker: string };
-    localization?: { result: string; origin: string | null };
+    localization?: { result: "delivery_failed" | "synchronized"; origin: string | null };
   };
   message: string | null;
 }
@@ -442,7 +445,7 @@ export function Preferences({ onClose }: PreferencesProps) {
       setPendingUnpairOrigin(null);
       setUnpairingOrigin(null);
     }
-  }, [pendingUnpairOrigin]);
+  }, [nativeSettingsStatus.load, pendingUnpairOrigin]);
 
   const handleCancelUnpair = useCallback(() => {
     if (unpairingOrigin) {
@@ -496,11 +499,12 @@ export function Preferences({ onClose }: PreferencesProps) {
     : null;
   const authority = nativeSettingsStatus.status?.authoritative_origin ?? null;
   const localizationSection = nativeSettingsStatus.status?.sections.localization;
+  const localizationResult = nativeSettingsStatus.status?.results.localization;
   const localizationBadge = !authority
     ? "none"
-    : localizationSection?.result === "delivery_failed"
+    : localizationResult === "delivery_failed"
       ? "failed"
-      : localizationSection?.result === "synchronized" && localizationSection.origin === authority
+      : localizationResult === "synchronized" && localizationSection?.origin === authority
         ? "synchronized"
         : "waiting";
   const localizationBadgeKey =
@@ -586,11 +590,6 @@ export function Preferences({ onClose }: PreferencesProps) {
         </div>
         <div class="preferences__field">
           <span class="preferences__hint">{translate("preferences.localizationStatusHint")}</span>
-          {localizationBadge === "failed" && nativeSettingsStatus.status?.message && (
-            <span class="preferences__hint" role="status">
-              {nativeSettingsStatus.status.message}
-            </span>
-          )}
           {syncedLocalization ? (
             <dl class="preferences__status-grid">
               <div class="preferences__status-row">

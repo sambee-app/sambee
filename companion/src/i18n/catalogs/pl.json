@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "Te zaufane źródła przeglądarki mają dostęp do dysków lokalnych przez Companion. Po usunięciu źródło musi ponownie poprosić o dostęp.",
     "pairedBrowsersEmpty": "Companion nie ufa obecnie żadnemu źródłu przeglądarki.",
+    "settingsSource": {
+      "label": "Źródło ustawień",
+      "none": "Brak serwera",
+      "managesSettings": "Zarządza ustawieniami"
+    },
     "directoryPolicy": {
       "title": "Ustawienia zarządzane",
       "loading": "Wczytywanie stanu zasad wyszukiwania folderów.",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "Pokazuje ostatnie ustawienia języka i regionu zsynchronizowane z zaufanego źródła Sambee w przeglądarce.",
     "localizationStatus": {
       "syncedBadge": "Zsynchronizowano z przeglądarki",
+      "waitingBadge": "Oczekiwanie",
+      "failedBadge": "Niepowodzenie",
+      "noneBadge": "Brak",
       "languageLabel": "Język",
       "regionalLocaleLabel": "Format regionalny",
       "updatedAtLabel": "Ostatnia aktualizacja",
-      "sourceOriginLabel": "Źródło synchronizacji",
+      "appliedFromLabel": "Zastosowano z",
       "empty": "Nie zsynchronizowano jeszcze ustawień języka i regionu z przeglądarki."
     },
     "unpairTitle": "Usuń zaufane źródło",

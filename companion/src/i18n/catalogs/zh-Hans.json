@@ -137,6 +137,11 @@
     },
     "pairedBrowsersHint": "这些受信任的浏览器来源可以通过 Companion 访问本地驱动器。移除来源后，该来源必须重新请求授权。",
     "pairedBrowsersEmpty": "此 Companion 目前不信任任何浏览器来源。",
+    "settingsSource": {
+      "label": "设置来源",
+      "none": "无服务器",
+      "managesSettings": "管理设置"
+    },
     "directoryPolicy": {
       "title": "受管理的设置",
       "loading": "正在加载文件夹搜索策略的状态。",
@@ -150,10 +155,13 @@
     "localizationStatusHint": "显示上次从受信任的 Sambee 浏览器来源同步的语言和地区设置。",
     "localizationStatus": {
       "syncedBadge": "已从浏览器同步",
+      "waitingBadge": "等待中",
+      "failedBadge": "失败",
+      "noneBadge": "无",
       "languageLabel": "语言",
       "regionalLocaleLabel": "地区设置",
       "updatedAtLabel": "上次更新",
-      "sourceOriginLabel": "同步来源",
+      "appliedFromLabel": "应用来源",
       "empty": "尚未从浏览器同步语言和地区设置。"
     },
     "unpairTitle": "移除受信任的来源",

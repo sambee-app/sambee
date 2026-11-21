@@ -137,6 +137,11 @@
     },
     "pairedBrowsersHint": "Diese vertrauenswürdigen Browser-Ursprünge können über Companion auf lokale Laufwerke zugreifen. Wenn Sie einen Ursprung entfernen, muss er den Zugriff erneut anfordern.",
     "pairedBrowsersEmpty": "Companion vertraut derzeit keinen Browser-Ursprüngen.",
+    "settingsSource": {
+      "label": "Einstellungsquelle",
+      "none": "Kein Server",
+      "managesSettings": "Verwaltet Einstellungen"
+    },
     "directoryPolicy": {
       "title": "Verwaltete Einstellungen",
       "loading": "Der Status der Regeln für die Ordnersuche wird geladen.",
@@ -150,10 +155,13 @@
     "localizationStatusHint": "Zeigt die Einstellungen für Sprache und Region, die zuletzt von einem vertrauenswürdigen Sambee-Browser-Ursprung synchronisiert wurden.",
     "localizationStatus": {
       "syncedBadge": "Aus dem Browser synchronisiert",
+      "waitingBadge": "Wartet",
+      "failedBadge": "Fehlgeschlagen",
+      "noneBadge": "Keine",
       "languageLabel": "Sprache",
       "regionalLocaleLabel": "Regionsformat",
       "updatedAtLabel": "Zuletzt aktualisiert",
-      "sourceOriginLabel": "Herkunft der Einstellungen",
+      "appliedFromLabel": "Angewendet von",
       "empty": "Es wurden noch keine Einstellungen für Sprache und Region aus dem Browser synchronisiert."
     },
     "unpairTitle": "Vertrauenswürdigen Ursprung entfernen",

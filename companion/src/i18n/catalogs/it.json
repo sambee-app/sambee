@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "Queste origini attendibili del browser possono accedere alle unità locali tramite Companion. Se rimuovi un’origine, dovrà richiedere di nuovo l’autorizzazione.",
     "pairedBrowsersEmpty": "Companion non considera attendibile alcuna origine del browser al momento.",
+    "settingsSource": {
+      "label": "Origine delle impostazioni",
+      "none": "Nessun server",
+      "managesSettings": "Gestisce le impostazioni"
+    },
     "directoryPolicy": {
       "title": "Impostazioni gestite",
       "loading": "Caricamento dello stato delle regole di ricerca delle cartelle.",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "Mostra le ultime impostazioni di lingua e area geografica sincronizzate da un’origine attendibile del browser per Sambee.",
     "localizationStatus": {
       "syncedBadge": "Sincronizzato dal browser",
+      "waitingBadge": "In attesa",
+      "failedBadge": "Non riuscito",
+      "noneBadge": "Nessuna",
       "languageLabel": "Lingua",
       "regionalLocaleLabel": "Formato regionale",
       "updatedAtLabel": "Ultimo aggiornamento",
-      "sourceOriginLabel": "Origine della sincronizzazione",
+      "appliedFromLabel": "Applicato da",
       "empty": "Non sono ancora state sincronizzate dal browser impostazioni di lingua e area geografica."
     },
     "unpairTitle": "Rimuovi l’origine attendibile",

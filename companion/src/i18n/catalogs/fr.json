@@ -137,6 +137,11 @@
     },
     "pairedBrowsersHint": "Ces origines de navigateur de confiance peuvent accéder aux lecteurs locaux par l’intermédiaire de Companion. Si vous supprimez une origine, elle doit demander une nouvelle autorisation.",
     "pairedBrowsersEmpty": "Companion ne fait actuellement confiance à aucune origine de navigateur.",
+    "settingsSource": {
+      "label": "Source des paramètres",
+      "none": "Aucun serveur",
+      "managesSettings": "Gère les paramètres"
+    },
     "directoryPolicy": {
       "title": "Paramètres gérés",
       "loading": "Chargement de l’état des règles de recherche de dossiers.",
@@ -150,10 +155,13 @@
     "localizationStatusHint": "Affiche les derniers paramètres de langue et de région synchronisés depuis une origine Sambee de confiance.",
     "localizationStatus": {
       "syncedBadge": "Synchronisé depuis le navigateur",
+      "waitingBadge": "En attente",
+      "failedBadge": "Échec",
+      "noneBadge": "Aucune",
       "languageLabel": "Langue",
       "regionalLocaleLabel": "Format régional",
       "updatedAtLabel": "Dernière mise à jour",
-      "sourceOriginLabel": "Origine de la synchronisation",
+      "appliedFromLabel": "Appliqué depuis",
       "empty": "Aucun paramètre de langue ou de région n’a encore été synchronisé depuis le navigateur."
     },
     "unpairTitle": "Supprimer l’origine de confiance",
