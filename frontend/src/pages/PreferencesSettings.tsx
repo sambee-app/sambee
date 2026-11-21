@@ -2,7 +2,7 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import StarIcon from "@mui/icons-material/Star";
-import { Box, Button, FormControl, InputLabel, MenuItem, Radio, Select, Typography } from "@mui/material";
+import { Box, Button, Divider, FormControl, InputLabel, MenuItem, Radio, Select, Typography } from "@mui/material";
 import type { SelectChangeEvent } from "@mui/material/Select";
 import axios from "axios";
 import type { TFunction } from "i18next";
@@ -538,48 +538,57 @@ export function AppearanceSettings() {
             </InputLabel>
             <Box
               sx={{
-                p: 2,
                 borderRadius: 1,
                 border: "1px solid",
                 borderColor: "divider",
+                overflow: "hidden",
               }}
             >
               <Box
                 component="dl"
                 sx={{
                   display: "grid",
-                  gridTemplateColumns: "auto minmax(0, 1fr)",
-                  gap: 0.75,
-                  mt: 0,
-                  mb: 1.5,
-                  color: "text.secondary",
+                  gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" },
+                  gap: 2,
+                  m: 0,
+                  p: 2,
                   overflowWrap: "anywhere",
                 }}
               >
-                <Typography component="dt" variant="body2">
-                  {t("settings.appearancePage.languageLabel")}
+                <Box>
+                  <Typography component="dt" variant="caption" sx={{ mb: 0.5, color: "text.secondary" }}>
+                    {t("settings.appearancePage.languageLabel")}
+                  </Typography>
+                  <Typography component="dd" variant="body2" sx={{ m: 0, fontWeight: 600 }}>
+                    <bdi lang={resolvedLanguage}>{getLanguageOptionLabel(t, resolvedLanguage)}</bdi>{" "}
+                    <Typography component="span" variant="inherit" sx={{ fontWeight: 400, color: "text.secondary" }}>
+                      (<bdi>{resolvedLanguage}</bdi>)
+                    </Typography>
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography component="dt" variant="caption" sx={{ mb: 0.5, color: "text.secondary" }}>
+                    {t("settings.appearancePage.regionalLocaleLabel")}
+                  </Typography>
+                  <Typography component="dd" variant="body2" sx={{ m: 0, fontWeight: 600 }}>
+                    <bdi>{regionalLocale}</bdi>
+                  </Typography>
+                </Box>
+              </Box>
+              <Divider />
+              <Box sx={{ p: 2, bgcolor: "action.hover", fontVariantNumeric: "tabular-nums" }}>
+                <Typography variant="body2">
+                  {formatLocalizedDateTime(PREVIEW_DATE, {
+                    dateStyle: "full",
+                    timeStyle: "short",
+                  })}
                 </Typography>
-                <Typography component="dd" variant="body2" sx={{ m: 0 }}>
-                  <bdi lang={resolvedLanguage}>{getLanguageOptionLabel(t, resolvedLanguage)}</bdi> (<bdi>{resolvedLanguage}</bdi>)
-                </Typography>
-                <Typography component="dt" variant="body2">
-                  {t("settings.appearancePage.regionalLocaleLabel")}
-                </Typography>
-                <Typography component="dd" variant="body2" sx={{ m: 0 }}>
-                  <bdi>{regionalLocale}</bdi>
+                <Typography variant="body2" sx={{ mt: 0.75 }}>
+                  {formatLocalizedNumber(1234567.89, {
+                    maximumFractionDigits: 2,
+                  })}
                 </Typography>
               </Box>
-              <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                {formatLocalizedDateTime(PREVIEW_DATE, {
-                  dateStyle: "full",
-                  timeStyle: "short",
-                })}
-              </Typography>
-              <Typography variant="body2" sx={{ mt: 0.75, color: "text.secondary" }}>
-                {formatLocalizedNumber(1234567.89, {
-                  maximumFractionDigits: 2,
-                })}
-              </Typography>
             </Box>
           </FormControl>
         </SettingsGroup>
