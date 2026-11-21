@@ -11,6 +11,7 @@ import { listen } from "@tauri-apps/api/event";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { type CompanionLocalizationState, getCurrentRegionalLocale, translate } from "../i18n";
+import { useI18n } from "../i18n/useI18n";
 import { log } from "../lib/logger";
 import { type CompanionUpdateStatus, fetchCompanionUpdateStatus, installCompanionUpdate } from "../lib/updateCheck";
 import type { CompanionUpdateChannel, UploadConflictAction, UserPreferences } from "../stores/userPreferences";
@@ -155,6 +156,7 @@ function getErrorMessage(error: unknown): string {
  * A brief "Saved" indicator flashes after each successful save.
  */
 export function Preferences({ onClose }: PreferencesProps) {
+  useI18n();
   const conflictActionLabels: Record<UploadConflictAction, string> = {
     ask: translate("preferences.conflictActions.ask"),
     overwrite: translate("preferences.conflictActions.overwrite"),
@@ -492,7 +494,7 @@ export function Preferences({ onClose }: PreferencesProps) {
   const isUpdateBusy = updateActionState.kind === "checking" || updateActionState.kind === "installing";
 
   const localizedUpdatedAt = syncedLocalization
-    ? new Date(syncedLocalization.updated_at).toLocaleString(getCurrentRegionalLocale(), {
+    ? new Date(syncedLocalization.updated_at).toLocaleString(syncedLocalization.regional_locale, {
         dateStyle: "medium",
         timeStyle: "short",
       })

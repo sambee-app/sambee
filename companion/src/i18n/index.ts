@@ -53,7 +53,7 @@ function readStoredLanguage(): string | undefined {
 }
 
 function canonicalizeLocale(locale?: string | null): string | null {
-  if (!locale) {
+  if (!locale || locale.toLowerCase() === "browser") {
     return null;
   }
 
@@ -122,16 +122,12 @@ function registerLocaleSideEffects(): void {
   });
 }
 
-function resolveRegionalLocale(locale?: string | null): string {
-  return (
-    canonicalizeLocale(locale === "browser" ? undefined : locale) ??
-    canonicalizeLocale(typeof navigator === "undefined" ? undefined : navigator.language) ??
-    DEFAULT_LANGUAGE
-  );
+function getDeviceRegionalLocale(): string {
+  return canonicalizeLocale(typeof navigator === "undefined" ? undefined : navigator.language) ?? DEFAULT_LANGUAGE;
 }
 
 function updateRegionalLocale(locale: string): void {
-  currentRegionalLocale = resolveRegionalLocale(locale);
+  currentRegionalLocale = locale;
   persistRegionalLocale(currentRegionalLocale);
 
   if (typeof window !== "undefined") {
@@ -156,8 +152,7 @@ export function getCurrentRegionalLocale(): string {
 }
 
 const initialLanguage = readStoredLanguage() ?? DEFAULT_LANGUAGE;
-currentRegionalLocale =
-  readStoredRegionalLocale() ?? resolveRegionalLocale(typeof navigator === "undefined" ? undefined : navigator.language);
+currentRegionalLocale = readStoredRegionalLocale() ?? getDeviceRegionalLocale();
 
 registerLocaleSideEffects();
 syncDocumentLanguage(initialLanguage);
@@ -210,9 +205,15 @@ export async function setLocale(language: string): Promise<void> {
 }
 
 export async function applyCompanionLocalization(state: CompanionLocalizationState): Promise<void> {
-  // Old servers can still send `browser`; only the paired browser can resolve it.
-  await setLocale(state.language === "browser" ? DEFAULT_LANGUAGE : state.language);
-  updateRegionalLocale(state.regional_locale);
+  const locale = canonicalizeLocale(state.regional_locale);
+  if (!locale) throw new Error(`Invalid synced regional locale: ${state.regional_locale}`);
+  await setLocale(state.language);
+  updateRegionalLocale(locale);
+}
+
+export async function clearCompanionLocalization(): Promise<void> {
+  await setLocale(DEFAULT_LANGUAGE);
+  updateRegionalLocale(getDeviceRegionalLocale());
 }
 
 export default i18n;

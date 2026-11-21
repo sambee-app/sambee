@@ -52,9 +52,9 @@
 }
 
 .preferences__close-btn:focus-visible {
-  outline: none;
+  outline: 2px solid var(--control-outline, #4b5563);
+  outline-offset: 2px;
   background: var(--surface-selected, rgba(244, 196, 48, 0.08));
-  box-shadow: 0 0 0 2px var(--accent-dark, #d4a020);
 }
 
 .preferences__close-btn:focus:not(:focus-visible) {
@@ -91,7 +91,7 @@
   padding: 0.18rem 0.45rem;
   border-radius: 999px;
   background: var(--surface-selected, rgba(244, 196, 48, 0.12));
-  color: var(--accent-dark, #8a6708);
+  color: var(--text-color, #1f262b);
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -102,7 +102,7 @@
   width: 0.42rem;
   height: 0.42rem;
   border-radius: 999px;
-  background: currentColor;
+  background: var(--accent-color, #f4c430);
   opacity: 0.85;
 }
 
@@ -153,21 +153,23 @@
   flex-shrink: 0;
 }
 
+.preferences__checkbox-row input[type="checkbox"]:focus-visible,
+.preferences__select:focus-visible,
+.preferences__number-input:focus-visible {
+  outline: 2px solid var(--control-outline, #4b5563);
+  outline-offset: 2px;
+}
+
 /* ── Select ────────────────────────────────────────────────────────────── */
 
 .preferences__select {
   padding: 0.375rem 0.5rem;
   font-size: 0.8125rem;
-  border: 1px solid var(--border-color, #d1d5db);
+  border: 1px solid var(--control-outline, #4b5563);
   border-radius: 4px;
   background: var(--bg-color, #fbf9f4);
   color: var(--text-color, #1f262b);
   cursor: pointer;
-}
-
-.preferences__select:focus {
-  outline: 2px solid var(--accent-color, #f4c430);
-  outline-offset: -1px;
 }
 
 /* ── Number input ──────────────────────────────────────────────────────── */
@@ -176,15 +178,10 @@
   width: 5rem;
   padding: 0.375rem 0.5rem;
   font-size: 0.8125rem;
-  border: 1px solid var(--border-color, #d1d5db);
+  border: 1px solid var(--control-outline, #4b5563);
   border-radius: 4px;
   background: var(--bg-color, #fbf9f4);
   color: var(--text-color, #1f262b);
-}
-
-.preferences__number-input:focus {
-  outline: 2px solid var(--accent-color, #f4c430);
-  outline-offset: -1px;
 }
 
 /* ── Server list ───────────────────────────────────────────────────────── */
@@ -293,8 +290,8 @@
 
 .preferences__saved-indicator {
   font-size: 0.75rem;
-  color: var(--accent-color, #f4c430);
-  font-weight: 500;
+  color: var(--text-color, #1f262b);
+  font-weight: 600;
 }
 
 /* ── Confirmation dialog ──────────────────────────────────────────────── */

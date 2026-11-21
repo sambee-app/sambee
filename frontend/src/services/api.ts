@@ -976,14 +976,14 @@ class ApiService {
 
   async getCompanionSettingsMetadata(options?: {
     signal?: AbortSignal;
-    params?: { browser_language: string };
+    params?: { browser_language: string; browser_regional_locale: string };
   }): Promise<CompanionSettingsMetadata> {
     return (await this.api.get<CompanionSettingsMetadata>("/admin/settings/companion", options)).data;
   }
 
   async issueCompanionSettingsGrant(
     binding: CompanionSettingsGrantBinding,
-    options?: { signal?: AbortSignal; params?: { browser_language: string } }
+    options?: { signal?: AbortSignal; params?: { browser_language: string; browser_regional_locale: string } }
   ): Promise<CompanionSettingsGrant> {
     return (await this.api.post<CompanionSettingsGrant>("/admin/settings/companion/grants", binding, options)).data;
   }

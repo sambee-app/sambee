@@ -3,6 +3,7 @@ import { AppPickerPreview } from "./components/AppPickerPreview";
 import { ConflictDialogPreview } from "./components/ConflictDialogPreview";
 import { DoneEditingWindowPreview } from "./components/DoneEditingWindowPreview";
 import { LargeFileWarningPreview } from "./components/LargeFileWarningPreview";
+import { PreferencesPreview } from "./components/PreferencesPreview";
 import { RecoveryDialogPreview } from "./components/RecoveryDialogPreview";
 
 export interface CompanionPreviewDefinition {
@@ -36,6 +37,12 @@ export const COMPANION_PREVIEWS: CompanionPreviewDefinition[] = [
     title: "Large File Warning",
     description: "Preview the large-file warning with theme, result, language, direction, text-length, and long-data controls.",
     component: LargeFileWarningPreview,
+  },
+  {
+    path: "/preview/preferences",
+    title: "Preferences",
+    description: "Preview Companion preferences with theme, localization status, and long-data controls.",
+    component: PreferencesPreview,
   },
   {
     path: "/preview/recovery-dialog",

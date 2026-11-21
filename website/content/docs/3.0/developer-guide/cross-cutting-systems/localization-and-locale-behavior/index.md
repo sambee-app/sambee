@@ -122,8 +122,9 @@ When the authority changes or becomes unavailable, Companion updates the setting
 
 Important rules:
 
-- The backend resolves a `browser` UI language from the browser language supplied with metadata and grant requests. Regional locale delivery preserves `browser`; Companion resolves it from its operating-system webview locale.
-- Send the browser-language query parameter only to the backend. Companion settings requests accept the abort signal but must not receive backend query options: authentication signs their exact request path and query.
+- The browser sends its resolved UI language and regional locale with metadata and grant requests. The backend uses each value only when the corresponding user preference is `browser`. The grant binds both values so redemption uses the same localization marker.
+- Send these query parameters only to the backend. Companion settings requests accept the abort signal but must not receive backend query options: authentication signs their exact request path and query.
+- Companion requires concrete locale tags in localization receipts. After an upgrade, it discards a saved localization section that contains `browser` and waits for the next sync. Other managed settings stay active.
 - Localization has its own canonical payload digest and user scope. An unchanged section is not written again.
 - Pairing, login, and an explicit persisted preference change can change the active user. Periodic checks and reconnects cannot switch users.
 - Rust persists localization atomically, and native windows mirror effective values into local storage for fast startup.

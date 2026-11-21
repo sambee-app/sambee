@@ -22,16 +22,14 @@
   --companion-btn-font-weight: 600;
   --companion-btn-shadow-rest: none;
   --companion-btn-shadow-hover: none;
-  --companion-btn-focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent-dark, #d4a020) 24%, transparent);
-  --companion-btn-primary-focus-ring: 0 0 0 1px var(--action-focus, var(--accent-dark, #d4a020));
   --companion-btn-secondary-bg: var(--action-selected, rgba(244, 196, 48, 0.16));
   --companion-btn-secondary-bg-hover: color-mix(in srgb, var(--accent-color, #f4c430) 18%, var(--bg-paper, #ffffff));
   --companion-btn-secondary-bg-focus: color-mix(in srgb, var(--accent-color, #f4c430) 20%, var(--bg-paper, #ffffff));
-  --companion-btn-secondary-border: color-mix(in srgb, var(--accent-dark, #d4a020) 32%, transparent);
+  --companion-btn-secondary-border: var(--control-outline, #4b5563);
   --companion-btn-danger-bg: color-mix(in srgb, var(--danger-color, #dc2626) 8%, var(--bg-paper, #ffffff));
   --companion-btn-danger-bg-hover: color-mix(in srgb, var(--danger-color, #dc2626) 12%, var(--bg-paper, #ffffff));
   --companion-btn-danger-bg-focus: color-mix(in srgb, var(--danger-color, #dc2626) 14%, var(--bg-paper, #ffffff));
-  --companion-btn-danger-border: color-mix(in srgb, var(--danger-color, #dc2626) 38%, transparent);
+  --companion-btn-danger-border: var(--danger-text, #991b1b);
   --companion-btn-primary-shadow-rest: 0 2px 8px rgba(31, 38, 43, 0.16);
   --companion-btn-primary-shadow-hover: 0 6px 14px rgba(31, 38, 43, 0.22);
 
@@ -127,8 +125,9 @@ p {
 .pairing-request__secondary-btn:focus-visible,
 .btn-primary:focus-visible,
 .btn-secondary:focus-visible {
-  outline: none;
-  box-shadow: var(--companion-btn-focus-ring), var(--companion-btn-shadow-hover);
+  outline: 2px solid var(--control-outline, #4b5563);
+  outline-offset: 2px;
+  box-shadow: var(--companion-btn-shadow-hover);
 }
 
 .dialog-btn:focus:not(:focus-visible),
@@ -159,7 +158,7 @@ p {
 .preferences__confirm-btn--ghost:hover:not(:disabled),
 .pairing-request__secondary-btn:hover:not(:disabled) {
   background: var(--companion-btn-secondary-bg-hover);
-  border-color: var(--accent-dark, #d4a020);
+  border-color: var(--companion-btn-secondary-border);
 }
 
 .dialog-btn--ghost:focus-visible,
@@ -168,7 +167,7 @@ p {
 .preferences__confirm-btn--ghost:focus-visible,
 .pairing-request__secondary-btn:focus-visible {
   background: var(--companion-btn-secondary-bg-focus);
-  border-color: var(--accent-dark, #d4a020);
+  border-color: var(--companion-btn-secondary-border);
 }
 
 .dialog-btn--primary,
@@ -201,7 +200,7 @@ p {
 .pairing-request__primary-btn:focus-visible,
 .btn-primary:focus-visible,
 .preferences__confirm-btn:not(.preferences__confirm-btn--ghost):not(.preferences__confirm-btn--danger):focus-visible {
-  box-shadow: var(--companion-btn-shadow-hover), var(--companion-btn-primary-focus-ring);
+  box-shadow: var(--companion-btn-shadow-hover);
 }
 
 .dialog-btn--danger,
@@ -210,7 +209,7 @@ p {
 .btn-secondary {
   background: var(--companion-btn-danger-bg);
   border-color: var(--companion-btn-danger-border);
-  color: var(--danger-text, #dc2626);
+  color: var(--danger-text, #991b1b);
 }
 
 .dialog-btn--danger:hover:not(:disabled),
@@ -218,7 +217,7 @@ p {
 .preferences__server-remove-btn:hover:not(:disabled),
 .btn-secondary:hover:not(:disabled) {
   background: var(--companion-btn-danger-bg-hover);
-  border-color: var(--danger-color, #dc2626);
+  border-color: var(--companion-btn-danger-border);
 }
 
 .dialog-btn--danger:focus-visible,
@@ -226,8 +225,7 @@ p {
 .preferences__server-remove-btn:focus-visible,
 .btn-secondary:focus-visible {
   background: var(--companion-btn-danger-bg-focus);
-  border-color: var(--danger-color, #dc2626);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger-color, #dc2626) 18%, transparent);
+  border-color: var(--companion-btn-danger-border);
 }
 
 html[data-theme="dark"] {

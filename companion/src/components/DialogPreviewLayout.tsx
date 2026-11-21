@@ -11,6 +11,7 @@ export type PreviewThemeMode = "light" | "dark";
 interface DialogPreviewLayoutProps {
   title: string;
   themeMode: PreviewThemeMode;
+  previewAccent?: string;
   onThemeModeChange: (mode: PreviewThemeMode) => void;
   onReset: () => void;
   settings: PreviewSettings;
@@ -22,6 +23,7 @@ interface DialogPreviewLayoutProps {
 export function DialogPreviewLayout({
   title,
   themeMode,
+  previewAccent,
   onThemeModeChange,
   onReset,
   settings,
@@ -29,8 +31,9 @@ export function DialogPreviewLayout({
   children,
 }: DialogPreviewLayoutProps) {
   useEffect(() => {
-    applyTheme(getDefaultTheme(themeMode));
-  }, [themeMode]);
+    const theme = getDefaultTheme(themeMode);
+    applyTheme(previewAccent ? { mode: themeMode, primary: { main: previewAccent } } : theme);
+  }, [themeMode, previewAccent]);
 
   return (
     <main

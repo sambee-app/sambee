@@ -119,7 +119,7 @@ describe("Preferences", () => {
       if (command === "get_synced_localization") {
         return Promise.resolve({
           language: "en-XA",
-          regional_locale: "en-GB",
+          regional_locale: "de-CH",
           updated_at: "2026-03-22T12:00:00.000Z",
           source_origin: "https://example.test",
         });
@@ -153,7 +153,15 @@ describe("Preferences", () => {
     expect(screen.getByText(translate("preferences.sections.updates"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.sections.notifications"))).toBeInTheDocument();
     expect(screen.getByText("en-XA")).toBeInTheDocument();
-    expect(screen.getByText("en-GB")).toBeInTheDocument();
+    expect(screen.getByText("de-CH")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new Date("2026-03-22T12:00:00.000Z").toLocaleString("de-CH", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      )
+    ).toBeInTheDocument();
     expect(screen.getAllByText("https://example.test")).toHaveLength(4);
 
     fireEvent.click(screen.getByRole("button", { name: translate("preferences.unpairButton") }));

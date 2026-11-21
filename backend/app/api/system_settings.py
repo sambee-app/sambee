@@ -15,7 +15,14 @@ from app.core.security import (
 )
 from app.core.system_setting_definitions import DirectoryIndexPolicyScope
 from app.db.database import get_immediate_session, get_session
-from app.models.companion_settings import SettingsGrantBinding, SettingsGrantRead, SettingsGrantRedeem, SettingsMetadata, SettingsReceipt
+from app.models.companion_settings import (
+    RegionalLocaleTag,
+    SettingsGrantBinding,
+    SettingsGrantRead,
+    SettingsGrantRedeem,
+    SettingsMetadata,
+    SettingsReceipt,
+)
 from app.models.health_monitoring import (
     HealthMonitoringSettingsRead,
     HealthMonitoringSettingsUpdate,
@@ -68,19 +75,21 @@ router = APIRouter()
 
 @router.get("/settings/companion", response_model=SettingsMetadata)
 def get_companion_settings(
+    browser_regional_locale: RegionalLocaleTag,
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
     browser_language: CatalogLanguage = "en",
 ) -> SettingsMetadata:
     from app.services.companion_settings import build_settings_metadata
 
-    return build_settings_metadata(current_user, session, browser_language)
+    return build_settings_metadata(current_user, session, browser_language, browser_regional_locale)
 
 
 @router.post("/settings/companion/grants", response_model=SettingsGrantRead)
 def post_companion_settings_grant(
     payload: SettingsGrantBinding,
     request: Request,
+    browser_regional_locale: RegionalLocaleTag,
     authentication: BrowserAuthentication = Depends(get_current_browser_authentication_with_auth_check),
     session: Session = Depends(get_immediate_session),
     browser_language: CatalogLanguage = "en",
@@ -90,7 +99,12 @@ def post_companion_settings_grant(
     if request.headers.get("origin") != payload.origin:
         raise HTTPException(status_code=403, detail="Settings origin does not match the browser. Retry from the paired server.")
     result = issue_directory_policy_grant(
-        payload, authentication.user, session, browser_session_id=authentication.oidc_browser_session_id, browser_language=browser_language
+        payload,
+        authentication.user,
+        session,
+        browser_session_id=authentication.oidc_browser_session_id,
+        browser_language=browser_language,
+        browser_regional_locale=browser_regional_locale,
     )
     assert isinstance(result, SettingsGrantRead)
     return result

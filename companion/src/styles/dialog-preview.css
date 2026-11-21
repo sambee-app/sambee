@@ -96,6 +96,14 @@
   box-sizing: border-box;
 }
 
+.dialog-preview .dialog-preview__inline-window--preferences {
+  width: min(100%, 520px);
+}
+
+.dialog-preview__inline-window--preferences .preferences {
+  min-width: 0;
+}
+
 .dialog-preview .dialog-overlay {
   position: absolute;
   inset: 0;

@@ -24,7 +24,7 @@ from app.core.directory_index_contract import (
 )
 from app.core.security import create_access_token, decode_access_token, is_user_expired
 from app.core.system_setting_definitions import DirectoryIndexPolicyScope
-from app.models.companion_settings import SettingsGrantBinding, SettingsGrantRead, SettingsGrantRedeem, SettingsReceipt
+from app.models.companion_settings import RegionalLocaleTag, SettingsGrantBinding, SettingsGrantRead, SettingsGrantRedeem, SettingsReceipt
 from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
 from app.models.system_settings import (
     DirectoryPolicyGrantBinding,
@@ -69,6 +69,7 @@ def issue_directory_policy_grant(
     *,
     browser_session_id: uuid.UUID | None = None,
     browser_language: CatalogLanguage = "en",
+    browser_regional_locale: str | None = None,
 ) -> DirectoryPolicyGrantRead | SettingsGrantRead:
     shared = isinstance(binding, SettingsGrantBinding)
     user = _delivery_user(session, administrator.id) if shared else _administrator(session, administrator.id)
@@ -96,13 +97,16 @@ def issue_directory_policy_grant(
     if isinstance(binding, SettingsGrantBinding):
         from app.services.companion_settings import build_settings_metadata
 
-        metadata = build_settings_metadata(user, session, browser_language)
+        if browser_regional_locale is None:
+            raise HTTPException(status_code=422, detail="Browser regional locale is required. Reload Sambee and sync again.")
+        metadata = build_settings_metadata(user, session, browser_language, browser_regional_locale)
         section_claims = {
             "settings_version": binding.version,
             "sections": {name: getattr(metadata, name).model_dump() for name in set(binding.sections)},
             "switch_user": binding.switch_user,
             "browser_session_id": str(browser_session_id) if browser_session_id else None,
             "browser_language": browser_language,
+            "browser_regional_locale": browser_regional_locale,
         }
     token = create_access_token(
         data={
@@ -213,9 +217,10 @@ def redeem_directory_policy_grant(binding: DirectoryPolicyGrantRedeem, session: 
 
         try:
             browser_language = TypeAdapter(CatalogLanguage).validate_python(claims.get("browser_language", "en"))
+            browser_regional_locale = TypeAdapter(RegionalLocaleTag).validate_python(claims.get("browser_regional_locale"))
         except ValidationError as error:
-            raise HTTPException(status_code=403, detail="Settings grant language is invalid. Request a new Companion grant.") from error
-        theme, localization, directory = build_settings_sections(user, session, browser_language)
+            raise HTTPException(status_code=403, detail="Settings grant localization is invalid. Reload Sambee and sync again.") from error
+        theme, localization, directory = build_settings_sections(user, session, browser_language, browser_regional_locale)
         available = {"theme": theme, "localization": localization, "directory_index": directory}
         selected = claims.get("sections")
         if (

@@ -37,7 +37,7 @@ fn catalogs() -> &'static BTreeMap<&'static str, Messages> {
 }
 
 pub fn has_catalog(language: &str) -> bool {
-    matches!(language, "en" | "en-XA" | "browser") || catalogs().contains_key(language)
+    matches!(language, "en" | "en-XA") || catalogs().contains_key(language)
 }
 
 pub struct NativeLocale {

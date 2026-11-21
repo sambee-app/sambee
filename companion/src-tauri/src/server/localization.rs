@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use chrono::Utc;
 use log::{info, warn};
@@ -10,6 +11,30 @@ use tauri::{AppHandle, Manager};
 use super::models::{CompanionLocalizationState, LocalizationSyncRequest};
 
 const LOCALIZATION_STATE_FILE: &str = "browser-localization.json";
+static REGIONAL_LOCALE_PATTERN: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(include_str!("../../../../shared/regional-locale-pattern.txt").trim()).expect("Valid regional locale pattern")
+});
+
+pub fn is_browser_default(value: &str) -> bool {
+    value.eq_ignore_ascii_case("browser")
+}
+
+pub fn valid_regional_locale(value: &str) -> bool {
+    const MAX_REGIONAL_LOCALE_LENGTH: usize = 128;
+    if value.len() > MAX_REGIONAL_LOCALE_LENGTH || is_browser_default(value) {
+        return false;
+    }
+    let Some(parts) = REGIONAL_LOCALE_PATTERN.captures(value) else {
+        return false;
+    };
+    let mut variants = HashSet::new();
+    let mut extensions = HashSet::new();
+    parts[1].split('-').skip(1).all(|part| variants.insert(part.to_ascii_lowercase()))
+        && parts[2]
+            .split('-')
+            .filter(|part| part.len() == 1)
+            .all(|part| extensions.insert(part.to_ascii_lowercase()))
+}
 
 #[derive(Default)]
 pub struct LocalizationState {
@@ -28,7 +53,17 @@ impl LocalizationState {
 
         let loaded = match fs::read_to_string(&path) {
             Ok(content) => match serde_json::from_str::<CompanionLocalizationState>(&content) {
-                Ok(state) => Some(state),
+                Ok(state) if !is_browser_default(&state.language) && valid_regional_locale(&state.regional_locale) => Some(state),
+                Ok(_) => {
+                    info!(
+                        "Ignoring obsolete browser localization in {}; waiting for a new settings receipt",
+                        path.display()
+                    );
+                    if let Err(error) = fs::remove_file(&path) {
+                        warn!("Could not remove obsolete browser localization from {}: {error}", path.display());
+                    }
+                    None
+                }
                 Err(err) => {
                     warn!("Failed to parse localization state from {}: {err}", path.display());
                     None

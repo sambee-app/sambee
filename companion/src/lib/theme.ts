@@ -148,6 +148,7 @@ function themeToVariables(theme: CompanionTheme): Record<string, string> {
     // UI chrome — borders, tracks, surfaces derived from mode
     "--border-color": isDark ? "#374151" : "#D1D5DB",
     "--border-color-light": isDark ? "#4B5563" : "#E5E7EB",
+    "--control-outline": isDark ? "#CBD5E1" : "#4B5563",
     "--track-color": isDark ? "#374151" : "#E5E7EB",
     "--surface-hover": isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
     "--surface-selected": isDark ? `${theme.primary.main}1A` : `${theme.primary.main}14`,
@@ -158,7 +159,7 @@ function themeToVariables(theme: CompanionTheme): Record<string, string> {
     "--danger-color": isDark ? "#EF4444" : "#DC2626",
     "--danger-bg": isDark ? "#450A0A" : "#FEF2F2",
     "--danger-border": isDark ? "#7F1D1D" : "#FECACA",
-    "--danger-text": isDark ? "#FCA5A5" : "#DC2626",
+    "--danger-text": isDark ? "#FCA5A5" : "#991B1B",
 
     // Success
     "--success-color": isDark ? "#22C55E" : "#16A34A",
