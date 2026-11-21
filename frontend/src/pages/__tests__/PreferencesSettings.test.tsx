@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setLocale } from "../../i18n";
+import { getCurrentLanguage, setLocale, setRegionalLocalePreference } from "../../i18n";
 import type { StoredTheme } from "../../services/api";
 import api from "../../services/api";
 import { render } from "../../test/utils/test-utils";
@@ -20,7 +20,7 @@ const {
   setRegionalLocalePreferenceMock: vi.fn(),
   themeCommitMock: vi.fn(),
   themeContextState: { isAdmin: false, currentThemeId: "sambee-light", storedThemes: [] as StoredTheme[], refreshThemes: vi.fn() },
-  localePreferenceState: { languagePreference: "browser" },
+  localePreferenceState: { languagePreference: "browser", regionalLocale: "en-US", regionalLocalePreference: "browser" },
   settingStates: {
     language: { error: null as string | null, pending: false, saved: false },
     regionalLocale: { error: null as string | null, pending: false, saved: false },
@@ -54,8 +54,8 @@ vi.mock("../../i18n/LocalePreferencesProvider", () => ({
   useLocalePreferences: () => ({
     languageLoadFailed: false,
     languagePreference: localePreferenceState.languagePreference,
-    regionalLocale: "en-US",
-    regionalLocalePreference: "browser",
+    regionalLocale: localePreferenceState.regionalLocale,
+    regionalLocalePreference: localePreferenceState.regionalLocalePreference,
     setLanguagePreference: setLanguagePreferenceMock,
     setRegionalLocalePreference: setRegionalLocalePreferenceMock,
   }),
@@ -79,7 +79,13 @@ vi.mock("../../services/userSettingsStore", () => ({
 }));
 
 describe("AppearanceSettings", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(async () => {
+    await act(async () => {
+      await setLocale("en");
+      await setRegionalLocalePreference("browser");
+    });
+    vi.restoreAllMocks();
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -87,6 +93,8 @@ describe("AppearanceSettings", () => {
     themeContextState.currentThemeId = "sambee-light";
     themeContextState.storedThemes = [];
     localePreferenceState.languagePreference = "browser";
+    localePreferenceState.regionalLocale = "en-US";
+    localePreferenceState.regionalLocalePreference = "browser";
     themeContextState.refreshThemes.mockResolvedValue(undefined);
     themeCommitMock.mockResolvedValue(undefined);
     setLanguagePreferenceMock.mockResolvedValue(undefined);
@@ -104,6 +112,33 @@ describe("AppearanceSettings", () => {
     expect(screen.getByRole("combobox", { name: "Language" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Regional settings" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  });
+
+  it("shows resolved browser defaults and updates the preview for independent locale changes", async () => {
+    vi.spyOn(navigator, "languages", "get").mockReturnValue(["en-GB"]);
+    await act(async () => {
+      await setLocale("browser");
+      await setRegionalLocalePreference("browser");
+    });
+    localePreferenceState.regionalLocale = "en-GB";
+    const { rerender } = render(<AppearanceSettings />);
+    const preview = screen.getByRole("group", { name: "Preview" });
+    const values = () => Array.from(preview.querySelectorAll("dd"), (element) => element.textContent);
+    expect(values()).toEqual(["English (en)", "en-GB"]);
+    expect(within(preview).getByText("1,234,567.89")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Language" })).toHaveTextContent("Browser default");
+    expect(screen.getByRole("combobox", { name: "Regional settings" })).toHaveTextContent("Browser default");
+
+    await act(async () => setLocale("ja"));
+    expect(getCurrentLanguage()).toBe("ja");
+    expect(values()).toEqual(["日本語 (ja)", "en-GB"]);
+
+    await act(async () => setRegionalLocalePreference("de-DE"));
+    localePreferenceState.regionalLocale = "de-DE";
+    localePreferenceState.regionalLocalePreference = "de-DE";
+    rerender(<AppearanceSettings />);
+    expect(values()).toEqual(["日本語 (ja)", "de-DE"]);
+    expect(within(preview).getByText("1.234.567,89")).toBeInTheDocument();
   });
 
   it("translates theme scopes and actions with the active locale", async () => {

@@ -336,7 +336,7 @@ class HealthMonitoringCoordinator:
         now_mono = self._clock_monotonic()
         with self._lock:
             self._cpu_temp.reset_source_state(source_id)
-            self._cpu_temp.reevaluate_overrides(overrides, now_mono)
+            self._cpu_temp.reevaluate_overrides(source_id, overrides, now_mono)
 
     def sample_host_once(
         self,

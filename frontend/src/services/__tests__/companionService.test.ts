@@ -212,6 +212,35 @@ describe("companionService shared settings", () => {
     localStorage.setItem("companion_secret", "shared-secret");
   });
 
+  it.each(["status", "challenge", "redeem"] as const)("keeps backend query options out of the signed %s request", async (operation) => {
+    const signal = new AbortController().signal;
+    const options = { signal, params: { browser_language: "de" } };
+    mockAxiosInstance.get.mockResolvedValue({ data: {} });
+    mockAxiosInstance.post.mockResolvedValue({ data: {} });
+    const signing = vi.spyOn(companionSession, "getSigningHeaders");
+
+    try {
+      if (operation === "status") await companionService.getSettingsStatus(options);
+      else if (operation === "challenge") await companionService.requestSettingsChallenge(options);
+      else await companionService.redeemSettingsGrant("opaque-grant", options);
+
+      const [path, config] =
+        operation === "status"
+          ? mockAxiosInstance.get.mock.calls[0]!
+          : [mockAxiosInstance.post.mock.calls[0]![0], mockAxiosInstance.post.mock.calls[0]![2]];
+      expect(signing).toHaveBeenCalledWith(operation === "status" ? "GET" : "POST", `http://localhost:21549/api${path}`);
+      expect(config).toEqual({
+        headers: expect.objectContaining({
+          "X-Companion-Secret": expect.any(String),
+          "X-Companion-Timestamp": expect.any(String),
+        }),
+        signal,
+      });
+    } finally {
+      signing.mockRestore();
+    }
+  });
+
   it("sends an authenticated opaque grant without browser settings values", async () => {
     mockAxiosInstance.post.mockResolvedValueOnce({
       data: {

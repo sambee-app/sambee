@@ -159,6 +159,35 @@ describe("shared Companion settings lifecycle", () => {
     expect(mocks.redeem).toHaveBeenCalledWith("grant", expect.objectContaining({ signal: expect.anything() }));
   });
 
+  it.each(["localization.language", "localization.regional_locale"])(
+    "delivers a persisted %s change with separate request options",
+    async (field) => {
+      companionSettingsSync.start();
+      await settle();
+      const desired = metadata();
+      desired.localization.marker = field;
+      const applied = status();
+      applied.sections.localization!.marker = desired.localization.marker;
+      mocks.metadata.mockResolvedValue(desired);
+      mocks.grant.mockResolvedValue({ ...desired, grant: "locale-grant", expires_in_seconds: 60 });
+      mocks.redeem.mockResolvedValue(applied);
+
+      notifyCompanionSettingsChanged(true);
+      await settle();
+
+      const signal = mocks.metadata.mock.calls[1]![0].signal;
+      expect(mocks.metadata).toHaveBeenLastCalledWith({ signal, params: { browser_language: "en" } });
+      expect(mocks.status).toHaveBeenLastCalledWith({ signal });
+      expect(mocks.challenge).toHaveBeenCalledWith({ signal });
+      expect(mocks.grant).toHaveBeenCalledWith(expect.objectContaining({ sections: ["localization"], switch_user: true }), {
+        signal,
+        params: { browser_language: "en" },
+      });
+      expect(mocks.redeem).toHaveBeenCalledWith("locale-grant", { signal });
+      expect(companionSettingsSync.getSnapshot().phase).toBe("synchronized");
+    }
+  );
+
   it.each([
     { status: 400, data: { detail: "Localization settings are invalid. Correct the server preferences and retry." } },
     { status: 409, data: { code: "companion_locale_update_required" } },

@@ -112,13 +112,16 @@ The user-facing preferences UI lives in:
 
 - `frontend/src/pages/PreferencesSettings.tsx`
 
+Its localization preview shows the resolved UI language and regional locale, including when browser defaults are selected, followed by date and number examples.
+
 ## Browser-to-Companion Localization Sync
 
 Localization uses [Shared Settings Delivery](../../companion-architecture/browser-to-companion-trust-model/#shared-settings-delivery) with theme and directory policy. Pairing selects the authoritative server. The backend builds localization from the authenticated user's stored preferences; the browser delivers only a grant.
 
 Important rules:
 
-- Delivery preserves `browser`. Companion resolves it from its operating-system webview locale, not from the remote browser.
+- The backend resolves a `browser` UI language from the browser language supplied with metadata and grant requests. Regional locale delivery preserves `browser`; Companion resolves it from its operating-system webview locale.
+- Send the browser-language query parameter only to the backend. Companion settings requests accept the abort signal but must not receive backend query options: authentication signs their exact request path and query.
 - Localization has its own canonical payload digest and user scope. An unchanged section is not written again.
 - Pairing, login, and an explicit persisted preference change can change the active user. Periodic checks and reconnects cannot switch users.
 - Rust persists localization atomically, and native windows mirror effective values into local storage for fast startup.

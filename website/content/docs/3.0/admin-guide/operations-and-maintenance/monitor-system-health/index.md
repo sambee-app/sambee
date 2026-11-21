@@ -29,7 +29,7 @@ Sambee does not collect or display host or container CPU usage percentages. All 
 | Host memory | `85.0%` used | `95.0%` used | Calculated from `/host/proc/meminfo` `MemAvailable`. Enters Warning or Error after 60 sustained seconds; recovers after 60 sustained seconds with a `5.0` percentage-point margin. |
 | Container memory without file cache | `85.0%` of limit | `95.0%` of limit | Calculated from the container's cgroup (`memory.current - (file - shmem)`). Includes shared and kernel memory. Uses the same 60-second entry and `5.0` percentage-point recovery rules when a finite container memory limit is set. |
 | Load average (normalized) | `0.75` | `0.90` | Displays normalized 1-, 5-, and 15-minute load divided by logical CPU count from `/host/proc/cpuinfo` (never raw load). Evaluates only the 5-minute value; enters on the first 5-second sample and recovers after two samples with a `0.10` margin. |
-| CPU temperature | Same-source high limit | Same-source critical limit | Enters Error immediately and Warning after two 5-second samples. Uses valid same-source hardware or kernel hysteresis on Automatic limits, or a `2.0 °C` recovery margin across two samples when hysteresis is absent or overridden. |
+| CPU temperature | Same-source high limit | Same-source critical limit | Enters Warning after 60 seconds of high readings or Error after 30 seconds of critical readings. Uses valid same-source hardware or kernel hysteresis on Automatic limits, or a `2.0 °C` recovery margin across two samples when hysteresis is absent or overridden. |
 | Available storage space | `10.0%` available | `5.0%` available | Enters Warning or Error on one reading (`0` available bytes enters Error immediately). Recovers after two consecutive readings with a `2.0` percentage-point margin. |
 
 When Warning and Error thresholds are equal, Error takes precedence at the shared boundary, and Error recovery requires moving strictly past the Error recovery boundary so status does not flap.
@@ -52,6 +52,8 @@ Windows Task Manager reports the WSL VM, not an individual Linux cgroup. To chec
 ## CPU Temperature Sources and Overrides
 
 CPU thermal collection requires the optional `/sys:/host/sys:ro` mount on native Linux hosts (see [Deploy Sambee with Docker](../../installation-and-deployment/deploy-sambee-with-docker/#optional-enable-linux-host-health-mounts)). Sambee never uses CPU-model lookup tables, guessed Celsius defaults, or writes to sysfs thermal or fan controls.
+
+Sambee samples the current temperature about every 5 seconds and does not average the readings. A reading below a threshold resets its entry timer. Failed readings and gaps longer than 15 seconds also reset the timers. The 30-second Error delay affects Sambee's status only; host thermal protection remains independent.
 
 Supported kernel interfaces:
 
