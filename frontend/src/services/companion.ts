@@ -353,12 +353,19 @@ class CompanionService {
 
   async getSettingsStatus(options?: { signal?: AbortSignal }): Promise<CompanionSettingsStatus> {
     const headers = await this.buildAuthHeaders("GET", "/settings");
-    return (await this.client.get<CompanionSettingsStatus>("/settings", { headers, ...options })).data;
+    return (
+      await this.client.get<CompanionSettingsStatus>("/settings", { headers, ...(options?.signal ? { signal: options.signal } : {}) })
+    ).data;
   }
 
   async requestSettingsChallenge(options?: { signal?: AbortSignal }): Promise<CompanionSettingsStatus> {
     const headers = await this.buildAuthHeaders("POST", "/settings/challenge");
-    return (await this.client.post<CompanionSettingsStatus>("/settings/challenge", undefined, { headers, ...options })).data;
+    return (
+      await this.client.post<CompanionSettingsStatus>("/settings/challenge", undefined, {
+        headers,
+        ...(options?.signal ? { signal: options.signal } : {}),
+      })
+    ).data;
   }
 
   async redeemSettingsGrant(grant: string, options?: { signal?: AbortSignal }): Promise<CompanionSettingsStatus> {
@@ -367,7 +374,7 @@ class CompanionService {
       await this.client.post<CompanionSettingsStatus>(
         "/settings/redeem",
         { version: COMPANION_SETTINGS_VERSION, grant },
-        { headers, ...options }
+        { headers, ...(options?.signal ? { signal: options.signal } : {}) }
       )
     ).data;
   }

@@ -20,7 +20,7 @@ import { settingsDestructiveButtonSx, settingsUtilityButtonSx } from "../compone
 import { getSettingsPageSurfaceColor } from "../components/Settings/settingsSurface";
 import { ThemeEditorDialog } from "../components/Settings/ThemeEditorDialog";
 import { useRestoreFocusAfterPending } from "../hooks/useRestoreFocusAfterPending";
-import { getAvailableLanguages } from "../i18n";
+import { getAvailableLanguages, getCurrentLanguage } from "../i18n";
 import { useLocalePreferences } from "../i18n/LocalePreferencesProvider";
 import { LANGUAGE_NAMES, type SupportedLanguage } from "../i18n/languages";
 import { PSEUDO_LANGUAGE } from "../i18n/resources";
@@ -135,8 +135,15 @@ export function AppearanceSettings() {
   const restoreLanguageFocus = useRestoreFocusAfterPending(languageSetting.pending);
   const restoreRegionalLocaleFocus = useRestoreFocusAfterPending(regionalLocaleSetting.pending);
   const { t } = useTranslation();
-  const { languageLoadFailed, languagePreference, regionalLocalePreference, setLanguagePreference, setRegionalLocalePreference } =
-    useLocalePreferences();
+  const {
+    languageLoadFailed,
+    languagePreference,
+    regionalLocale,
+    regionalLocalePreference,
+    setLanguagePreference,
+    setRegionalLocalePreference,
+  } = useLocalePreferences();
+  const resolvedLanguage = getCurrentLanguage();
   const availableLanguages = getAvailableLanguages();
   const selectedLanguage = languagePreference === "browser" || availableLanguages.includes(languagePreference) ? languagePreference : "en";
   const languageError = languageSetting.error ?? (languageLoadFailed ? t("settings.appearancePage.languageLoadFailed") : null);
@@ -537,6 +544,31 @@ export function AppearanceSettings() {
                 borderColor: "divider",
               }}
             >
+              <Box
+                component="dl"
+                sx={{
+                  display: "grid",
+                  gridTemplateColumns: "auto minmax(0, 1fr)",
+                  gap: 0.75,
+                  mt: 0,
+                  mb: 1.5,
+                  color: "text.secondary",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                <Typography component="dt" variant="body2">
+                  {t("settings.appearancePage.languageLabel")}
+                </Typography>
+                <Typography component="dd" variant="body2" sx={{ m: 0 }}>
+                  <bdi lang={resolvedLanguage}>{getLanguageOptionLabel(t, resolvedLanguage)}</bdi> (<bdi>{resolvedLanguage}</bdi>)
+                </Typography>
+                <Typography component="dt" variant="body2">
+                  {t("settings.appearancePage.regionalLocaleLabel")}
+                </Typography>
+                <Typography component="dd" variant="body2" sx={{ m: 0 }}>
+                  <bdi>{regionalLocale}</bdi>
+                </Typography>
+              </Box>
               <Typography variant="body2" sx={{ color: "text.secondary" }}>
                 {formatLocalizedDateTime(PREVIEW_DATE, {
                   dateStyle: "full",

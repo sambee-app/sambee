@@ -208,10 +208,11 @@ class CompanionSettingsSynchronizer {
       if (!check()) return;
       const synchronize = async () => {
         if (!check()) return;
-        const options = { signal: controller.signal, params: { browser_language: getBrowserLanguage() } };
+        const companionOptions = { signal: controller.signal };
+        const backendOptions = { ...companionOptions, params: { browser_language: getBrowserLanguage() } };
         const [metadata, status] = await Promise.all([
-          api.getCompanionSettingsMetadata(options),
-          companionService.getSettingsStatus(options),
+          api.getCompanionSettingsMetadata(backendOptions),
+          companionService.getSettingsStatus(companionOptions),
         ]);
         if (!check()) return;
         if (
@@ -241,7 +242,7 @@ class CompanionSettingsSynchronizer {
           message: null,
           sections: Object.fromEntries(sections.map((name) => [name, "synchronizing"])),
         });
-        const challenge = await companionService.requestSettingsChallenge(options);
+        const challenge = await companionService.requestSettingsChallenge(companionOptions);
         if (!check()) return;
         if (!challenge.challenge || challenge.authoritative_origin !== window.location.origin)
           throw new Error("Settings authority changed. Refresh settings status.");
@@ -254,10 +255,10 @@ class CompanionSettingsSynchronizer {
             sections,
             switch_user: switchUser,
           },
-          options
+          backendOptions
         );
         if (!check()) return;
-        const applied = await companionService.redeemSettingsGrant(grant.grant, options);
+        const applied = await companionService.redeemSettingsGrant(grant.grant, companionOptions);
         if (!check()) return;
         if (
           applied.authoritative_origin !== window.location.origin ||
