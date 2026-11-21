@@ -52,11 +52,16 @@ type UpdateActionState =
 interface NativeDirectoryPolicyStatus {
   status: string;
   authoritative_origin: string | null;
-  sections: { directory_index?: { marker: string } };
+  sections: {
+    directory_index?: { marker: string };
+    localization?: { result: string; origin: string | null };
+  };
   message: string | null;
 }
 
-function DirectoryPolicyPreferences() {
+const SETTINGS_STATUS_CHANGED_EVENT = "settings-status-changed";
+
+function useNativeSettingsStatus() {
   const [status, setStatus] = useState<NativeDirectoryPolicyStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -69,7 +74,23 @@ function DirectoryPolicyPreferences() {
   }, []);
   useEffect(() => {
     void load();
+    const unlisten = listen(SETTINGS_STATUS_CHANGED_EVENT, () => {
+      void load();
+    }).catch((err) => {
+      log.warn("Failed to subscribe to settings status updates:", err);
+      return null;
+    });
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      void unlisten.then((dispose) => dispose?.());
+    };
   }, [load]);
+  return { status, error, load };
+}
+
+function DirectoryPolicyPreferences({ status, error, load }: ReturnType<typeof useNativeSettingsStatus>) {
   return (
     <div class="preferences__section">
       <span class="preferences__section-title">{translate("preferences.directoryPolicy.title")}</span>
@@ -152,6 +173,7 @@ export function Preferences({ onClose }: PreferencesProps) {
   const [pendingUpdateChannel, setPendingUpdateChannel] = useState<CompanionUpdateChannel | null>(null);
   const [updateActionState, setUpdateActionState] = useState<UpdateActionState>({ kind: "idle" });
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
+  const nativeSettingsStatus = useNativeSettingsStatus();
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelUnpairButtonRef = useRef<HTMLButtonElement | null>(null);
   const cancelUpdateChannelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -407,7 +429,13 @@ export function Preferences({ onClose }: PreferencesProps) {
     setUnpairingOrigin(origin);
     try {
       await invoke("unpair_origin", { origin });
-      setPairedOrigins((current) => current.filter((entry) => entry !== origin));
+      const [origins, localization] = await Promise.all([
+        invoke<string[]>("get_paired_origins"),
+        invoke<CompanionLocalizationState | null>("get_synced_localization"),
+      ]);
+      setPairedOrigins(origins);
+      setSyncedLocalization(localization);
+      nativeSettingsStatus.load();
     } catch (err) {
       log.error("Failed to unpair origin:", err);
     } finally {
@@ -466,6 +494,23 @@ export function Preferences({ onClose }: PreferencesProps) {
         timeStyle: "short",
       })
     : null;
+  const authority = nativeSettingsStatus.status?.authoritative_origin ?? null;
+  const localizationSection = nativeSettingsStatus.status?.sections.localization;
+  const localizationBadge = !authority
+    ? "none"
+    : localizationSection?.result === "delivery_failed"
+      ? "failed"
+      : localizationSection?.result === "synchronized" && localizationSection.origin === authority
+        ? "synchronized"
+        : "waiting";
+  const localizationBadgeKey =
+    localizationBadge === "failed"
+      ? "preferences.localizationStatus.failedBadge"
+      : localizationBadge === "waiting"
+        ? "preferences.localizationStatus.waitingBadge"
+        : localizationBadge === "none"
+          ? "preferences.localizationStatus.noneBadge"
+          : "preferences.localizationStatus.syncedBadge";
 
   // ── Render ──────────────────────────────────────────────────────────
 
@@ -491,12 +536,25 @@ export function Preferences({ onClose }: PreferencesProps) {
       <div class="preferences__section">
         <span class="preferences__section-title">{translate("preferences.sections.pairedBrowsers")}</span>
         <div class="preferences__field">
+          <dl class="preferences__status-grid">
+            <div class="preferences__status-row">
+              <dt class="preferences__status-label">{translate("preferences.settingsSource.label")}</dt>
+              <dd class="preferences__status-value preferences__status-value--code">
+                {authority ?? translate("preferences.settingsSource.none")}
+              </dd>
+            </div>
+          </dl>
           <span class="preferences__hint">{translate("preferences.pairedBrowsersHint")}</span>
           {pairedOrigins.length > 0 ? (
             <div class="preferences__server-list">
               {pairedOrigins.map((origin) => (
                 <div key={origin} class="preferences__server-item">
-                  <span class="preferences__server-url">{origin}</span>
+                  <div>
+                    <span class="preferences__server-url">{origin}</span>
+                    {authority === origin && (
+                      <span class="preferences__status-badge">{translate("preferences.settingsSource.managesSettings")}</span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     class="preferences__server-remove-btn"
@@ -517,17 +575,22 @@ export function Preferences({ onClose }: PreferencesProps) {
 
       <hr class="preferences__divider" />
 
-      <DirectoryPolicyPreferences />
+      <DirectoryPolicyPreferences {...nativeSettingsStatus} />
       <hr class="preferences__divider" />
 
       {/* ── Localization Sync ── */}
       <div class="preferences__section">
         <div class="preferences__section-heading">
           <span class="preferences__section-title">{translate("preferences.sections.localization")}</span>
-          <span class="preferences__status-badge">{translate("preferences.localizationStatus.syncedBadge")}</span>
+          <span class="preferences__status-badge">{translate(localizationBadgeKey)}</span>
         </div>
         <div class="preferences__field">
           <span class="preferences__hint">{translate("preferences.localizationStatusHint")}</span>
+          {localizationBadge === "failed" && nativeSettingsStatus.status?.message && (
+            <span class="preferences__hint" role="status">
+              {nativeSettingsStatus.status.message}
+            </span>
+          )}
           {syncedLocalization ? (
             <dl class="preferences__status-grid">
               <div class="preferences__status-row">
@@ -543,7 +606,7 @@ export function Preferences({ onClose }: PreferencesProps) {
                 <dd class="preferences__status-value">{localizedUpdatedAt ?? syncedLocalization.updated_at}</dd>
               </div>
               <div class="preferences__status-row">
-                <dt class="preferences__status-label">{translate("preferences.localizationStatus.sourceOriginLabel")}</dt>
+                <dt class="preferences__status-label">{translate("preferences.localizationStatus.appliedFromLabel")}</dt>
                 <dd class="preferences__status-value preferences__status-value--code">{syncedLocalization.source_origin}</dd>
               </div>
             </dl>

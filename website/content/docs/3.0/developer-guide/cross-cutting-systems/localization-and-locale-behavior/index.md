@@ -118,6 +118,8 @@ Its localization preview shows the resolved UI language and regional locale, inc
 
 Localization uses [Shared Settings Delivery](../../companion-architecture/browser-to-companion-trust-model/#shared-settings-delivery) with theme and directory policy. Pairing selects the authoritative server. The backend builds localization from the authenticated user's stored preferences; the browser delivers only a grant.
 
+When the authority changes or becomes unavailable, Companion updates the settings status immediately in Preferences. The localization badge reports synchronized, waiting, failed, or no authority. Browser tabs check authority periodically and resume delivery automatically after their origin becomes the authority again.
+
 Important rules:
 
 - The backend resolves a `browser` UI language from the browser language supplied with metadata and grant requests. Regional locale delivery preserves `browser`; Companion resolves it from its operating-system webview locale.

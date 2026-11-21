@@ -73,7 +73,7 @@ describe("Preferences", () => {
         };
     });
     render(<Preferences onClose={vi.fn()} />);
-    expect(await screen.findByText("https://owner.example")).toBeInTheDocument();
+    expect((await screen.findAllByText("https://owner.example")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Reset Policy Owner" })).not.toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith("reset_native_directory_policy_owner");
   });
@@ -122,6 +122,14 @@ describe("Preferences", () => {
           source_origin: "https://example.test",
         });
       }
+      if (command === "get_native_directory_policy_status") {
+        return Promise.resolve({
+          status: "synchronized",
+          authoritative_origin: "https://example.test",
+          sections: { localization: { result: "synchronized", origin: "https://example.test" } },
+          message: null,
+        });
+      }
 
       return Promise.resolve(undefined);
     });
@@ -142,7 +150,7 @@ describe("Preferences", () => {
     expect(screen.getByText(translate("preferences.sections.notifications"))).toBeInTheDocument();
     expect(screen.getByText("en-XA")).toBeInTheDocument();
     expect(screen.getByText("en-GB")).toBeInTheDocument();
-    expect(screen.getAllByText("https://example.test")).toHaveLength(2);
+    expect(screen.getAllByText("https://example.test")).toHaveLength(4);
 
     fireEvent.click(screen.getByRole("button", { name: translate("preferences.unpairButton") }));
 

@@ -26,7 +26,7 @@ use http_body_util::BodyExt;
 use log::{info, warn};
 use reqwest::{Client, Response as ReqwestResponse};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
@@ -515,6 +515,7 @@ pub async fn pair_confirm(
 ) -> Result<Json<PairConfirmResponse>, ApiError> {
     let origin = resolve_pair_confirm_origin(&headers, body.origin.as_deref())?;
     let secret = state.pairing.confirm(&body.pairing_id, &origin).map_err(map_pair_confirm_error)?;
+    let _ = state.app.emit(super::pairing::SETTINGS_STATUS_CHANGED_EVENT, ());
 
     show_pairing_success(&state.app);
 
@@ -568,6 +569,7 @@ pub async fn pair_cancel(
 pub async fn delete_current_pairing(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<StatusCode, ApiError> {
     let origin = extract_origin(&headers)?;
     state.pairing.unpair(&origin).map_err(ApiError::BadRequest)?;
+    let _ = state.app.emit(super::pairing::SETTINGS_STATUS_CHANGED_EVENT, ());
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -5726,6 +5728,7 @@ pub async fn companion_settings_redeem(
             log::warn!("Settings delivery failure could not be recorded: {record_error}");
         }
     }
+    let _ = state.app.emit(super::pairing::SETTINGS_STATUS_CHANGED_EVENT, ());
     result.map(Json)
 }
 

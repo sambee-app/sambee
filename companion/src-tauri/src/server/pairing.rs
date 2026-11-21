@@ -26,6 +26,16 @@ const KEYRING_SERVICE: &str = "sambee-companion";
 /// Reserved keyring account used to persist the list of paired origins.
 const KEYRING_PAIRED_ORIGINS_ACCOUNT: &str = "__paired_origins__";
 const KEYRING_SETTINGS_AUTHORITY_ACCOUNT: &str = "__settings_authority__";
+pub const SETTINGS_STATUS_CHANGED_EVENT: &str = "settings-status-changed";
+
+/// Select the most recently paired remaining origin, excluding removed.
+fn fallback_authority<'a>(paired_origins: &'a [String], removed: Option<&str>) -> Option<&'a str> {
+    paired_origins
+        .iter()
+        .rev()
+        .find(|origin| removed.is_none_or(|removed| origin.as_str() != removed))
+        .map(String::as_str)
+}
 
 #[derive(Default)]
 pub struct SettingsAuthority {
@@ -91,11 +101,8 @@ impl PairingState {
             .map_err(|_| "Settings authority is unavailable. Restart the Companion.".to_owned())
     }
 
-    fn set_settings_authority(&self, origin: Option<&str>, removed_origin: Option<&str>) -> Result<(), String> {
+    fn set_settings_authority(&self, origin: Option<&str>) -> Result<(), String> {
         let mut authority = self.settings_authority()?;
-        if removed_origin.is_some_and(|removed| authority.origin.as_deref() != Some(removed)) {
-            return Ok(());
-        }
         let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_SETTINGS_AUTHORITY_ACCOUNT)
             .map_err(|error| format!("Settings authority storage is unavailable. Check the keychain: {error}"))?;
         let serialized = serde_json::to_string(&origin).map_err(|error| format!("Settings authority cannot be encoded: {error}"))?;
@@ -114,15 +121,20 @@ impl PairingState {
             Ok(value) => {
                 let origin: Option<String> = serde_json::from_str(&value)
                     .map_err(|error| format!("Settings authority is invalid. Pair the intended server again: {error}"))?;
-                let valid = origin.filter(|origin| self.is_origin_paired(origin));
-                self.set_settings_authority(valid.as_deref(), None)
+                let origins = self.get_paired_origins();
+                let selected = origin
+                    .as_deref()
+                    .filter(|origin| origins.iter().any(|paired| paired == origin))
+                    .and_then(|origin| origins.iter().find(|paired| paired.as_str() == origin).map(String::as_str))
+                    .or_else(|| fallback_authority(&origins, None));
+                self.set_settings_authority(selected)
             }
             Err(keyring::Error::NoEntry) => {
                 let origins = self.get_paired_origins();
                 let selected = legacy_origin
                     .filter(|origin| origins.iter().any(|paired| paired == origin))
-                    .or_else(|| if origins.len() == 1 { Some(origins[0].as_str()) } else { None });
-                self.set_settings_authority(selected, None)
+                    .or_else(|| fallback_authority(&origins, None));
+                self.set_settings_authority(selected)
             }
             Err(error) => Err(format!("Settings authority cannot be read. Unlock the keychain: {error}")),
         }
@@ -187,7 +199,14 @@ impl PairingState {
     /// Record an origin that has proven it holds a valid pairing secret.
     pub fn record_verified_origin(&self, origin: &str, reason: VerifiedOriginRecordReason) {
         let mut origins = self.paired_origins.lock().unwrap();
-        if origins.iter().any(|entry| entry == origin) {
+        if let Some(index) = origins.iter().position(|entry| entry == origin) {
+            if matches!(reason, VerifiedOriginRecordReason::PairingCompleted) {
+                origins.remove(index);
+                origins.push(origin.to_string());
+                if let Err(e) = store_paired_origins_in_keychain(&origins) {
+                    warn!("Failed to persist paired origins list after auth for {origin}: {e}");
+                }
+            }
             return;
         }
 
@@ -357,7 +376,7 @@ impl PairingState {
         // Add to cached paired origins
         self.record_verified_origin(&pairing.origin, VerifiedOriginRecordReason::PairingCompleted);
 
-        self.set_settings_authority(Some(&pairing.origin), None)?;
+        self.set_settings_authority(Some(&pairing.origin))?;
 
         info!("Pairing completed: origin={}", pairing.origin);
         Ok(secret_hex)
@@ -430,19 +449,30 @@ impl PairingState {
 
     /// Remove pairing for a specific origin.
     pub fn unpair(&self, origin: &str) -> Result<(), String> {
-        self.set_settings_authority(None, Some(origin))?;
-        // Remove from keychain
+        let origins = self.get_paired_origins();
+        let mut remaining = origins.clone();
+        remaining.retain(|paired| paired != origin);
+
+        let authority = self.settings_authority()?;
+        if authority.origin.as_deref() == Some(origin) {
+            drop(authority);
+            self.set_settings_authority(fallback_authority(&remaining, None))?;
+        } else if !origins.iter().any(|paired| paired == origin) {
+            return Ok(());
+        }
+
+        if let Err(e) = store_paired_origins_in_keychain(&remaining) {
+            warn!("Failed to persist paired origins list after unpair: {e}");
+        }
+
         if let Err(e) = delete_secret_from_keychain(origin) {
             warn!("Failed to remove secret from keychain for {origin}: {e}");
         }
 
-        // Remove from cached list
-        let mut origins = self.paired_origins.lock().unwrap();
-        origins.retain(|o| o != origin);
+        let mut cached_origins = self.paired_origins.lock().unwrap();
+        *cached_origins = remaining;
+        drop(cached_origins);
         self.download_intents.lock().unwrap().retain(|_, intent| intent.origin != origin);
-        if let Err(e) = store_paired_origins_in_keychain(&origins) {
-            warn!("Failed to persist paired origins list after unpair: {e}");
-        }
 
         info!("Unpaired origin: {origin}");
         Ok(())
@@ -597,5 +627,55 @@ mod tests {
         pairing.unpair("https://sambee.example").unwrap();
 
         assert_eq!(pairing.get_paired_origins(), vec!["https://other.example".to_string()]);
+    }
+
+    #[test]
+    fn fallback_authority_selects_the_last_remaining_origin() {
+        let origins = vec![
+            "https://first.example".to_string(),
+            "https://second.example".to_string(),
+            "https://third.example".to_string(),
+        ];
+        assert_eq!(fallback_authority(&[], None), None);
+        assert_eq!(fallback_authority(&origins, Some("https://third.example")), Some("https://second.example"));
+        assert_eq!(fallback_authority(&origins, Some("https://first.example")), Some("https://third.example"));
+    }
+
+    #[test]
+    fn repeated_pairing_moves_origin_to_the_end() {
+        let pairing = PairingState::new_with_limits(Duration::ZERO, 1);
+        pairing.record_verified_origin("https://first.example", VerifiedOriginRecordReason::PairingCompleted);
+        pairing.record_verified_origin("https://second.example", VerifiedOriginRecordReason::PairingCompleted);
+        pairing.record_verified_origin("https://first.example", VerifiedOriginRecordReason::PairingCompleted);
+
+        assert_eq!(
+            pairing.get_paired_origins(),
+            vec!["https://second.example".to_string(), "https://first.example".to_string()]
+        );
+    }
+
+    #[test]
+    fn unpair_moves_authority_to_most_recent_remaining_origin() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let pairing = PairingState::new_with_limits(Duration::ZERO, 1);
+        pairing.record_verified_origin("https://first.example", VerifiedOriginRecordReason::PairingCompleted);
+        pairing.record_verified_origin("https://second.example", VerifiedOriginRecordReason::PairingCompleted);
+        pairing.set_test_authority(Some("https://second.example"));
+
+        pairing.unpair("https://second.example").unwrap();
+
+        assert_eq!(pairing.settings_authority().unwrap().origin.as_deref(), Some("https://first.example"));
+    }
+
+    #[test]
+    fn migration_repairs_missing_authority_from_most_recent_pairing() {
+        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        let pairing = PairingState::new_with_limits(Duration::ZERO, 1);
+        pairing.record_verified_origin("https://first.example", VerifiedOriginRecordReason::PairingCompleted);
+        pairing.record_verified_origin("https://second.example", VerifiedOriginRecordReason::PairingCompleted);
+
+        pairing.migrate_settings_authority(None).unwrap();
+
+        assert_eq!(pairing.settings_authority().unwrap().origin.as_deref(), Some("https://second.example"));
     }
 }

@@ -338,6 +338,7 @@ impl DirectoryPolicyState {
             |origin, payload| apply_localization(app, localization, origin, payload),
         );
         app.state::<ThemeState>().initialize_managed_theme(managed_theme);
+        let _ = app.emit(crate::server::pairing::SETTINGS_STATUS_CHANGED_EVENT, ());
         result
     }
 

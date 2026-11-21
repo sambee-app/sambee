@@ -225,7 +225,6 @@ class CompanionSettingsSynchronizer {
           return;
         }
         if (status.authoritative_origin !== window.location.origin || status.status === "authority_conflict") {
-          this.blocked = true;
           this.publish({ phase: "authority_conflict", status, message: null, sections: {} });
           return;
         }
@@ -303,7 +302,7 @@ class CompanionSettingsSynchronizer {
             : isCompanionAuthSignatureMismatch(error) || isCompanionPairingMissing(error)
               ? "pairing_required"
               : "delivery_failed";
-      this.blocked = phase === "authority_conflict" || phase === "update_required" || phase === "pairing_required";
+      this.blocked = phase === "update_required" || phase === "pairing_required";
       this.publish({
         ...this.snapshot,
         phase,
@@ -317,7 +316,7 @@ class CompanionSettingsSynchronizer {
                 : errorMessage,
         sections: Object.fromEntries(Object.keys(this.snapshot.sections).map((name) => [name, phase])),
       });
-      delay = RETRY_DELAYS_MS[this.retries++] ?? CHECK_INTERVAL_MS;
+      delay = phase === "authority_conflict" ? CHECK_INTERVAL_MS : (RETRY_DELAYS_MS[this.retries++] ?? CHECK_INTERVAL_MS);
     } finally {
       if (this.controller === controller) this.controller = null;
       if (this.pending && this.running) void this.run();
