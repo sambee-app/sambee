@@ -24,6 +24,7 @@ from app.models.health_monitoring import (
     HealthSeverity,
     MemoryMetricRead,
     MetricAvailability,
+    PersistedCpuTempOverride,
     StorageSpaceSemantics,
     SystemLoadMetricRead,
 )
@@ -469,16 +470,27 @@ def test_cpu_thermal_intel_amd_raspberry_pi_hysteresis_multi_package_and_overrid
     assert summary.detected_error_millidegrees == 100000
     assert summary.detected_limit_origin == CpuTemperatureLimitOrigin.HARDWARE
 
-    # Warning requires 2 consecutive samples >= 85.0 C; Error is immediate on 1 sample >= 100.0 C
+    # Warning requires 60 seconds of readings >= 85.0 C.
     (pkg0_dir / "temp1_input").write_text("86000\n", encoding="utf-8")
     clock.advance(5)
     intel_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
+    assert intel_collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity == HealthSeverity.OK
+    for _ in range(11):
+        clock.advance(5)
+        intel_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
     assert intel_collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity == HealthSeverity.OK
     clock.advance(5)
     intel_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
     assert intel_collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity == HealthSeverity.WARNING
 
+    # Error requires 30 seconds of readings >= 100.0 C.
     (pkg0_dir / "temp1_input").write_text("100000\n", encoding="utf-8")
+    clock.advance(5)
+    intel_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
+    for _ in range(5):
+        clock.advance(5)
+        intel_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
+    assert intel_collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity == HealthSeverity.WARNING
     clock.advance(5)
     intel_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
     assert intel_collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity == HealthSeverity.ERROR
@@ -579,9 +591,9 @@ def test_cpu_thermal_intel_amd_raspberry_pi_hysteresis_multi_package_and_overrid
     assert rpi_summary.detected_error_millidegrees == 110000
     assert rpi_summary.detected_limit_origin == CpuTemperatureLimitOrigin.KERNEL_POLICY
 
-    # Verify thermal-zone delta hysteresis: enter Warning after 2 samples at 85 C, remain Warning at 81 C, clear at 80 C
+    # Verify thermal-zone delta hysteresis after sustained Warning at 85 C.
     (rpi_zone / "temp").write_text("85000\n", encoding="utf-8")
-    for _ in range(2):
+    for _ in range(13):
         clock.advance(5)
         rpi_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
     assert rpi_collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity == HealthSeverity.WARNING
@@ -623,12 +635,150 @@ def test_cpu_thermal_intel_amd_raspberry_pi_hysteresis_multi_package_and_overrid
     # Socket 0 enters Error while Socket 1 has hardware fault -> Error remains visible + incomplete_coverage=True!
     (dual_sys / "devices/platform/coretemp.0/hwmon/hwmon0/temp1_input").write_text("101000\n", encoding="utf-8")
     (sock1_dir / "temp1_fault").write_text("1\n", encoding="utf-8")
-    clock.advance(5)
-    dual_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
+    for _ in range(7):
+        clock.advance(5)
+        dual_collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
     fault_sum, _ = dual_collector.read_summary(overrides={}, now_monotonic=clock.mono)
     assert fault_sum.severity == HealthSeverity.ERROR
     assert fault_sum.label == "CPU package (Package id 0)"
     assert fault_sum.incomplete_coverage is True
+
+
+def test_cpu_temperature_spikes_and_sustained_entry(tmp_path: Path) -> None:
+    sensor = _write_hwmon_device(
+        tmp_path,
+        hwmon_index=0,
+        device_rel_path="devices/platform/coretemp.0",
+        driver_name="coretemp",
+        files={"temp1_label": "Package id 0", "temp1_input": "70000", "temp1_max": "85000", "temp1_crit": "100000"},
+    )
+    collector = CpuTemperatureCollector(sys_root=tmp_path)
+    clock = FakeClock()
+
+    def sample(temp: int, elapsed: float = 5) -> HealthSeverity:
+        (sensor / "temp1_input").write_text(f"{temp}\n", encoding="utf-8")
+        clock.advance(elapsed)
+        collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
+        return collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity
+
+    assert sample(100000) == HealthSeverity.OK
+    for _ in range(5):
+        assert sample(100000) == HealthSeverity.OK
+    assert sample(70000) == HealthSeverity.OK
+
+    # A critical spike must not reset a continuing warning-level breach.
+    for _ in range(7):
+        assert sample(85000) == HealthSeverity.OK
+    for _ in range(5):
+        assert sample(100000) == HealthSeverity.OK
+    assert sample(85000, 4) == HealthSeverity.OK
+    assert sample(85000, 1) == HealthSeverity.WARNING
+
+    # Falling below the critical threshold resets only the error timer.
+    for _ in range(6):
+        assert sample(100000) == HealthSeverity.WARNING
+    assert sample(99000) == HealthSeverity.WARNING
+    for _ in range(6):
+        assert sample(100000) == HealthSeverity.WARNING
+    assert sample(100000) == HealthSeverity.ERROR
+
+    # Error recovery is still evaluated independently of the entry timers.
+    assert sample(90000) == HealthSeverity.ERROR
+    assert sample(90000) == HealthSeverity.WARNING
+    assert sample(83000) == HealthSeverity.WARNING
+    assert sample(83000) == HealthSeverity.OK
+
+
+@pytest.mark.parametrize("interruption", ["failed_reading", "stale_gap"])
+def test_cpu_temperature_interrupted_entry_window_restarts(tmp_path: Path, interruption: str) -> None:
+    sensor = _write_hwmon_device(
+        tmp_path,
+        hwmon_index=0,
+        device_rel_path="devices/platform/coretemp.0",
+        driver_name="coretemp",
+        files={"temp1_label": "Package id 0", "temp1_input": "100000", "temp1_max": "85000", "temp1_crit": "100000"},
+    )
+    collector = CpuTemperatureCollector(sys_root=tmp_path)
+    clock = FakeClock()
+
+    def sample(elapsed: float = 5) -> HealthSeverity:
+        clock.advance(elapsed)
+        collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
+        return collector.read_summary(overrides={}, now_monotonic=clock.mono)[0].severity
+
+    for _ in range(6):
+        assert sample() == HealthSeverity.OK
+    if interruption == "failed_reading":
+        (sensor / "temp1_input").write_text("invalid\n", encoding="utf-8")
+        assert sample() == HealthSeverity.UNKNOWN
+        (sensor / "temp1_input").write_text("100000\n", encoding="utf-8")
+        assert sample() == HealthSeverity.OK
+    else:
+        assert sample(16) == HealthSeverity.OK
+    for _ in range(5):
+        assert sample() == HealthSeverity.OK
+    assert sample(4) == HealthSeverity.OK
+    assert sample(1) == HealthSeverity.ERROR
+
+    (sensor / "temp1_input").write_text("70000\n", encoding="utf-8")
+    assert sample() == HealthSeverity.ERROR
+    if interruption == "failed_reading":
+        (sensor / "temp1_input").write_text("invalid\n", encoding="utf-8")
+        assert sample() == HealthSeverity.UNKNOWN
+        (sensor / "temp1_input").write_text("70000\n", encoding="utf-8")
+        assert sample() == HealthSeverity.ERROR
+    else:
+        assert sample(16) == HealthSeverity.ERROR
+    assert sample() == HealthSeverity.OK
+
+
+def test_cpu_override_change_restarts_entry_without_reusing_other_package_sample(tmp_path: Path) -> None:
+    sensors = [
+        _write_hwmon_device(
+            tmp_path,
+            hwmon_index=index,
+            device_rel_path=f"devices/platform/coretemp.{index}",
+            driver_name="coretemp",
+            files={
+                "temp1_label": f"Package id {index}",
+                "temp1_input": "100000" if index == 0 else "70000",
+                "temp1_max": "85000",
+                "temp1_crit": "100000",
+            },
+        )
+        for index in range(2)
+    ]
+    collector = CpuTemperatureCollector(sys_root=tmp_path)
+    clock = FakeClock()
+    overrides: dict[str, PersistedCpuTempOverride] = {}
+
+    def sample() -> HealthSeverity:
+        clock.advance(5)
+        collector.sample(overrides=overrides, now_monotonic=clock.mono, now_utc=clock.utc)
+        return collector.read_summary(overrides=overrides, now_monotonic=clock.mono)[0].severity
+
+    for _ in range(6):
+        assert sample() == HealthSeverity.OK
+    assert sample() == HealthSeverity.ERROR
+    (sensors[0] / "temp1_input").write_text("70000\n", encoding="utf-8")
+    assert sample() == HealthSeverity.ERROR
+
+    sources, _, _ = collector.describe_sources_for_settings(overrides, now_monotonic=clock.mono)
+    source_id = next(source.source_id for source in sources if source.label == "CPU package (Package id 1)")
+    overrides[source_id] = PersistedCpuTempOverride(
+        source_id=source_id,
+        warning_override_millidegrees=65000,
+        observed_max_millidegrees=85000,
+        observed_crit_millidegrees=100000,
+    )
+    collector.reset_source_state(source_id)
+    collector.reevaluate_overrides(source_id, overrides, clock.mono)
+    assert collector.read_summary(overrides=overrides, now_monotonic=clock.mono)[0].severity == HealthSeverity.ERROR
+
+    # The cached reading before the override does not start the new timer.
+    for _ in range(12):
+        assert sample() == HealthSeverity.OK
+    assert sample() == HealthSeverity.WARNING
 
 
 def test_equal_and_close_threshold_recovery_formulas() -> None:
@@ -1130,7 +1280,7 @@ def test_cpu_package_failure_does_not_hide_unknown_or_known_faults(tmp_path: Pat
         )
     collector = CpuTemperatureCollector(sys_root=tmp_path)
     clock = FakeClock()
-    for _ in range(2):
+    for _ in range(13):
         collector.sample(overrides={}, now_monotonic=clock.mono, now_utc=clock.utc)
         clock.advance(5)
     thermal = collector.read_summary(overrides={}, now_monotonic=clock.mono)

@@ -37,6 +37,8 @@ MEMORY_HYSTERESIS_TENTHS_PERCENT = 50
 LOAD_HYSTERESIS_HUNDREDTHS = 10
 STORAGE_HYSTERESIS_TENTHS_PERCENT = 20
 CPU_TEMP_FALLBACK_HYSTERESIS_MILLIDEGREES = 2000
+CPU_TEMP_WARNING_SUSTAINED_SECONDS = 60.0
+CPU_TEMP_ERROR_SUSTAINED_SECONDS = 30.0
 CPU_DISCOVERY_INTERVAL_SECONDS = 60.0
 UNLIMITED_CGROUP_V1_SENTINEL_BYTES = 1 << 60
 MIN_PLAUSIBLE_SENSOR_MILLIDEGREES = -273_150
@@ -285,6 +287,8 @@ class SampleCountEvaluator:
         warning_entry_samples: int = 1,
         error_entry_samples: int = 1,
         recovery_samples: int = 2,
+        warning_entry_ready: bool = True,
+        error_entry_ready: bool = True,
     ) -> tuple[HealthSeverity, bool]:
         if self.policy_signature != signature:
             self.reset_for_policy(signature)
@@ -298,15 +302,15 @@ class SampleCountEvaluator:
         if self.committed_severity in {HealthSeverity.OK, HealthSeverity.INFORMATIONAL}:
             self.warning_clear_streak = 0
             self.error_clear_streak = 0
-            if has_error_threshold and self.error_entry_streak >= error_entry_samples:
+            if has_error_threshold and error_entry_ready and self.error_entry_streak >= error_entry_samples:
                 self.committed_severity = HealthSeverity.ERROR
-            elif has_warning_threshold and self.warning_entry_streak >= warning_entry_samples:
+            elif has_warning_threshold and warning_entry_ready and self.warning_entry_streak >= warning_entry_samples:
                 self.committed_severity = HealthSeverity.WARNING
             else:
                 self.committed_severity = HealthSeverity.OK
         elif self.committed_severity == HealthSeverity.WARNING:
             self.error_clear_streak = 0
-            if has_error_threshold and self.error_entry_streak >= error_entry_samples:
+            if has_error_threshold and error_entry_ready and self.error_entry_streak >= error_entry_samples:
                 self.committed_severity = HealthSeverity.ERROR
                 self.warning_clear_streak = 0
             elif not has_warning_threshold:
@@ -875,6 +879,19 @@ class CpuCandidateState:
     evaluator: SampleCountEvaluator = field(default_factory=SampleCountEvaluator)
     last_severity: HealthSeverity = HealthSeverity.UNKNOWN
     last_recovery_pending: bool = False
+    warning_breach_since: float | None = None
+    error_breach_since: float | None = None
+    last_evaluated_monotonic: float | None = None
+
+    def reset_entry_windows(self) -> None:
+        self.warning_breach_since = None
+        self.error_breach_since = None
+        self.last_evaluated_monotonic = None
+
+    def record_interruption(self) -> None:
+        self.reset_entry_windows()
+        self.evaluator.warning_clear_streak = 0
+        self.evaluator.error_clear_streak = 0
 
 
 class CpuTemperatureCollector:
@@ -897,6 +914,7 @@ class CpuTemperatureCollector:
         candidate = self._candidates.get(source_id)
         if candidate is not None:
             candidate.evaluator = SampleCountEvaluator()
+            candidate.reset_entry_windows()
 
     def _read_raspberry_pi_board(self, resolved_root: Path) -> str | None:
         compatible_path = resolved_root / "firmware" / "devicetree" / "base" / "compatible"
@@ -1385,6 +1403,7 @@ class CpuTemperatureCollector:
 
         if override_state == CpuTemperatureOverrideState.CONFLICT:
             state.evaluator = SampleCountEvaluator()
+            state.reset_entry_windows()
             return HealthSeverity.UNKNOWN, False
 
         assert reading.current_millidegrees is not None
@@ -1445,6 +1464,25 @@ class CpuTemperatureCollector:
             warn_clear_sig,
             err_clear_sig,
         )
+        assert reading.sampled_monotonic is not None
+        now_monotonic = reading.sampled_monotonic
+        if state.evaluator.policy_signature != signature:
+            state.reset_entry_windows()
+        elif state.last_evaluated_monotonic is not None and not (0 <= now_monotonic - state.last_evaluated_monotonic <= HOST_STALE_SECONDS):
+            state.record_interruption()
+
+        if eff_warn is not None and (is_warning or is_error):
+            if state.warning_breach_since is None:
+                state.warning_breach_since = now_monotonic
+        else:
+            state.warning_breach_since = None
+        if is_error:
+            if state.error_breach_since is None:
+                state.error_breach_since = now_monotonic
+        else:
+            state.error_breach_since = None
+        state.last_evaluated_monotonic = now_monotonic
+
         return state.evaluator.evaluate(
             signature=signature,
             has_warning_threshold=eff_warn is not None,
@@ -1453,30 +1491,38 @@ class CpuTemperatureCollector:
             is_error=is_error,
             clear_warning_met=clear_w_met,
             clear_error_met=clear_e_met,
-            warning_entry_samples=2,
-            error_entry_samples=1,
             recovery_samples=2,
+            warning_entry_ready=(
+                state.warning_breach_since is not None and now_monotonic - state.warning_breach_since >= CPU_TEMP_WARNING_SUSTAINED_SECONDS
+            ),
+            error_entry_ready=(
+                state.error_breach_since is not None and now_monotonic - state.error_breach_since >= CPU_TEMP_ERROR_SUSTAINED_SECONDS
+            ),
         )
 
     def ensure_discovered(self, now_monotonic: float) -> None:
         if self._last_discovery_monotonic is None or (now_monotonic - self._last_discovery_monotonic) >= CPU_DISCOVERY_INTERVAL_SECONDS:
             self._discover_sensors(now_monotonic)
 
-    def reevaluate_overrides(self, overrides: dict[str, PersistedCpuTempOverride], now_monotonic: float) -> None:
-        for source_id, state in self._candidates.items():
-            reading = state.last_reading
-            if (
-                reading is not None
-                and reading.failure_availability is None
-                and reading.current_millidegrees is not None
-                and reading.sampled_monotonic is not None
-                and (now_monotonic - reading.sampled_monotonic) <= HOST_STALE_SECONDS
-            ):
-                state.last_severity, state.last_recovery_pending = self._evaluate_candidate(
-                    state,
-                    reading,
-                    overrides.get(source_id),
-                )
+    def reevaluate_overrides(self, source_id: str, overrides: dict[str, PersistedCpuTempOverride], now_monotonic: float) -> None:
+        state = self._candidates.get(source_id)
+        if state is None:
+            return
+        reading = state.last_reading
+        if (
+            reading is not None
+            and reading.failure_availability is None
+            and reading.current_millidegrees is not None
+            and reading.sampled_monotonic is not None
+            and (now_monotonic - reading.sampled_monotonic) <= HOST_STALE_SECONDS
+        ):
+            state.last_severity, state.last_recovery_pending = self._evaluate_candidate(
+                state,
+                reading,
+                overrides.get(source_id),
+            )
+            # The cached reading predates the override and cannot start its entry window.
+            state.reset_entry_windows()
 
     def sample(
         self,
@@ -1494,6 +1540,7 @@ class CpuTemperatureCollector:
         for source_id, state in self._candidates.items():
             sensor = state.sensor
             if not sensor.sensor_dir.exists():
+                state.record_interruption()
                 failure = _failed_cpu_reading(
                     sensor, MetricAvailability.UNAVAILABLE, "Previously detected CPU temperature sensor is no longer present."
                 )
@@ -1519,6 +1566,7 @@ class CpuTemperatureCollector:
                 reading = self._read_hwmon_candidate(sensor, now_utc=now_utc, now_monotonic=now_monotonic)
 
             if reading.failure_availability is not None:
+                state.record_interruption()
                 prev = state.last_reading
                 if prev is not None and prev.current_millidegrees is not None:
                     reading.current_millidegrees = prev.current_millidegrees
