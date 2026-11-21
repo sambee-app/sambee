@@ -8029,7 +8029,7 @@ mod tests {
     use crate::server::models::{ArchiveContractVersion, ArchiveCreationResponse, FileType, PublicPairingStatus};
     #[cfg(unix)]
     use crate::server::models::{LinkKind, LinkTargetState, LinkTargetType};
-    use crate::server::pairing::{PairingState, VerifiedOriginRecordReason};
+    use crate::server::pairing::PairingState;
     use crate::server::target_resolution::TargetResolutionPolicy;
 
     #[test]
@@ -8054,6 +8054,8 @@ mod tests {
     #[test]
     fn unpair_revokes_only_its_download_intents() {
         let pairing = PairingState::new();
+        pairing.set_test_authority(Some("https://first.example"));
+        pairing.set_test_authority(Some("https://second.example"));
         *pairing.download_intents.lock().unwrap() = std::collections::HashMap::from([
             (
                 "revoked".to_string(),
@@ -8076,8 +8078,10 @@ mod tests {
                 },
             ),
         ]);
-        pairing.unpair("https://first.example").unwrap();
-        pairing.record_verified_origin("https://first.example", VerifiedOriginRecordReason::PairingCompleted);
+        pairing.unpair_for_test("https://first.example").unwrap();
+        assert!(!pairing.is_origin_paired("https://first.example"));
+        assert!(pairing.is_origin_paired("https://second.example"));
+        pairing.set_test_authority(Some("https://first.example"));
         assert!(matches!(
             super::consume_download_intent(&pairing.download_intents, "revoked"),
             Err(ApiError::NotFound(_))

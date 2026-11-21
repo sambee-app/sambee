@@ -477,6 +477,15 @@ impl PairingState {
 
     /// Remove pairing for a specific origin.
     pub fn unpair(&self, origin: &str) -> Result<(), String> {
+        self.unpair_with(origin, store_paired_origins_in_keychain, delete_secret_from_keychain)
+    }
+
+    fn unpair_with(
+        &self,
+        origin: &str,
+        store_origins: impl FnOnce(&[String]) -> Result<(), String>,
+        delete_secret: impl FnOnce(&str) -> Result<(), String>,
+    ) -> Result<(), String> {
         let _origin_updates = self
             .origin_updates
             .lock()
@@ -493,11 +502,11 @@ impl PairingState {
             return Ok(());
         }
 
-        if let Err(e) = store_paired_origins_in_keychain(&remaining) {
+        if let Err(e) = store_origins(&remaining) {
             warn!("Failed to persist paired origins list after unpair: {e}");
         }
 
-        if let Err(e) = delete_secret_from_keychain(origin) {
+        if let Err(e) = delete_secret(origin) {
             warn!("Failed to remove secret from keychain for {origin}: {e}");
         }
 
@@ -508,6 +517,13 @@ impl PairingState {
 
         info!("Unpaired origin: {origin}");
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn unpair_for_test(&self, origin: &str) -> Result<(), String> {
+        // Changing the authority requires keychain access.
+        assert_ne!(self.settings_authority()?.origin.as_deref(), Some(origin));
+        self.unpair_with(origin, |_| Ok(()), |_| Ok(()))
     }
 }
 
