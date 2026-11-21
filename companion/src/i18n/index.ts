@@ -52,7 +52,7 @@ function readStoredLanguage(): string | undefined {
   }
 }
 
-function canonicalizeLocale(locale?: string | null): string | null {
+export function canonicalizeLocale(locale?: string | null): string | null {
   if (!locale || locale.toLowerCase() === "browser") {
     return null;
   }

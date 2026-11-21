@@ -71,3 +71,7 @@ def test_companion_build_input_changes_require_a_build() -> None:
         "base",
         "head",
     )
+
+
+def test_shared_regional_locale_pattern_change_requires_a_build() -> None:
+    assert companion_build_required.requires_companion_build({"shared/regional-locale-pattern.txt"}, make_reader({}), "base", "head")

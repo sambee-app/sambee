@@ -125,11 +125,13 @@ Important rules:
 - The browser sends its resolved UI language and regional locale with metadata and grant requests. The backend uses each value only when the corresponding user preference is `browser`. The grant binds both values so redemption uses the same localization marker.
 - Send these query parameters only to the backend. Companion settings requests accept the abort signal but must not receive backend query options: authentication signs their exact request path and query.
 - Companion requires concrete locale tags in localization receipts. After an upgrade, it discards a saved localization section that contains `browser` and waits for the next sync. Other managed settings stay active.
+- If an open browser tab omits the regional locale after a server upgrade, reload Sambee. If Companion reports that the server sent unresolved localization, update the server and sync again. Automatic retries stop in both cases.
 - Localization has its own canonical payload digest and user scope. An unchanged section is not written again.
 - Pairing, login, and an explicit persisted preference change can change the active user. Periodic checks and reconnects cannot switch users.
 - Rust persists localization atomically, and native windows mirror effective values into local storage for fast startup.
 - Open windows receive localization update events. A new window reads the current native state.
 - The stored update timestamp is diagnostic data, not an ordering credential.
+- If the webview cannot use the synced regional locale to format the update timestamp, Preferences shows the original timestamp.
 - A failed section keeps its last valid values and reports delivery failure independently of directory search.
 
 The separate localhost localization endpoint is retired. Incompatible clients must update; do not restore a parallel synchronizer.

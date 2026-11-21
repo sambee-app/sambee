@@ -20,8 +20,6 @@
 }
 
 .preview-index-link:focus-visible {
-  outline: none;
-  box-shadow:
-    var(--companion-btn-focus-ring),
-    0 6px 18px rgba(0, 0, 0, 0.08);
+  outline: 2px solid var(--control-outline, #4b5563);
+  outline-offset: 2px;
 }

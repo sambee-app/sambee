@@ -73,10 +73,19 @@ from app.services.system_settings import (
 router = APIRouter()
 
 
+def _require_browser_regional_locale(browser_regional_locale: RegionalLocaleTag | None = None) -> str:
+    if browser_regional_locale is None:
+        raise HTTPException(
+            status_code=status.HTTP_426_UPGRADE_REQUIRED,
+            detail="Browser regional locale is required. Reload Sambee and sync again.",
+        )
+    return browser_regional_locale
+
+
 @router.get("/settings/companion", response_model=SettingsMetadata)
 def get_companion_settings(
-    browser_regional_locale: RegionalLocaleTag,
     current_user: User = Depends(get_current_user_with_auth_check),
+    browser_regional_locale: str = Depends(_require_browser_regional_locale),
     session: Session = Depends(get_session),
     browser_language: CatalogLanguage = "en",
 ) -> SettingsMetadata:
@@ -89,8 +98,8 @@ def get_companion_settings(
 def post_companion_settings_grant(
     payload: SettingsGrantBinding,
     request: Request,
-    browser_regional_locale: RegionalLocaleTag,
     authentication: BrowserAuthentication = Depends(get_current_browser_authentication_with_auth_check),
+    browser_regional_locale: str = Depends(_require_browser_regional_locale),
     session: Session = Depends(get_immediate_session),
     browser_language: CatalogLanguage = "en",
 ) -> SettingsGrantRead:

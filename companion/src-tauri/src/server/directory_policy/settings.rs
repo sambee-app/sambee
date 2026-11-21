@@ -10,6 +10,7 @@ use base64::Engine;
 use tauri::Emitter;
 
 const SETTINGS_VERSION: u32 = 1;
+const SETTINGS_UPDATE_REQUIRED: &str = "settings_update_required";
 const OBSOLETE_LOCALIZATION: &str = "The server sent unresolved localization settings. Update the Sambee server, then sync again.";
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
@@ -218,7 +219,7 @@ impl Receipt {
         if let Some(section) = &self.localization {
             validate_marker(section, true)?;
             if section.payload.has_browser_default() {
-                return Err(failure(OBSOLETE_LOCALIZATION));
+                return Err(ApiError::bad_request_code(OBSOLETE_LOCALIZATION, SETTINGS_UPDATE_REQUIRED));
             }
             if !(section.payload.language == "en-XA" || UI_LANGUAGES.contains(&section.payload.language.as_str()))
                 || !valid_regional_locale(&section.payload.regional_locale)
@@ -487,7 +488,7 @@ impl DirectoryPolicyState {
         if delivery.version != SETTINGS_VERSION {
             return Err(ApiError::bad_request_code(
                 "Settings protocol is unsupported. Update the browser and Companion.",
-                "settings_update_required",
+                SETTINGS_UPDATE_REQUIRED,
             ));
         }
         if delivery.grant.is_empty() || delivery.grant.len() > MAX_GRANT_BYTES {
@@ -570,7 +571,7 @@ impl DirectoryPolicyState {
         if matches!(response.status().as_u16(), 404 | 426) {
             return Err(ApiError::bad_request_code(
                 "The backend settings protocol is incompatible. Update Sambee and Companion.",
-                "settings_update_required",
+                SETTINGS_UPDATE_REQUIRED,
             ));
         }
         if !response.status().is_success() {
@@ -592,7 +593,7 @@ impl DirectoryPolicyState {
         serde_json::from_slice(&bytes).map_err(|_| {
             ApiError::bad_request_code(
                 "Settings receipt is incompatible. Update Sambee and Companion.",
-                "settings_update_required",
+                SETTINGS_UPDATE_REQUIRED,
             )
         })
     }
@@ -863,14 +864,24 @@ mod tests {
             value.localization.as_mut().unwrap().payload.language = language.to_owned();
             assert!(value.validate().is_ok(), "{language}");
         }
-        for language in ["browser", "zh-Hant", "pt-BR", "en-US", "invalid"] {
+        for language in ["zh-Hant", "pt-BR", "en-US", "invalid"] {
             value.localization.as_mut().unwrap().payload.language = language.to_owned();
             assert!(value.validate().is_err(), "{language}");
         }
         value.localization.as_mut().unwrap().payload.language = "de".to_owned();
-        for locale in ["browser", "de_CH", "de-CH-u", "de-1901-1901", "de-u-nu-latn-u-ca-gregory"] {
+        for locale in ["de_CH", "de-CH-u", "de-1901-1901", "de-u-nu-latn-u-ca-gregory"] {
             value.localization.as_mut().unwrap().payload.regional_locale = locale.to_owned();
-            assert!(value.validate().is_err(), "{locale}");
+            assert!(matches!(value.validate(), Err(ApiError::BadRequest(_))), "{locale}");
+        }
+        for (language, locale) in [("browser", "de-CH"), ("de", "browser")] {
+            let payload = &mut value.localization.as_mut().unwrap().payload;
+            payload.language = language.to_owned();
+            payload.regional_locale = locale.to_owned();
+            assert!(matches!(
+                value.validate(),
+                Err(ApiError::BadRequestWithCode { code: "settings_update_required", message })
+                    if message == OBSOLETE_LOCALIZATION
+            ));
         }
         value.localization.as_mut().unwrap().payload.regional_locale = "de-CH".to_owned();
         value.localization.as_mut().unwrap().user_scope = Some(uuid::Uuid::new_v4().to_string());

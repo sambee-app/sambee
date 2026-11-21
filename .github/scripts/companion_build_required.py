@@ -35,6 +35,7 @@ PACKAGE_LOCK_FILES = frozenset(
 )
 COMPANION_BUILD_INPUT_FILES = frozenset(
     {
+        "shared/regional-locale-pattern.txt",
         "scripts/sync-version",
         "scripts/check_tauri_version_alignment.py",
         ".github/workflows/verify-companion-build.yml",

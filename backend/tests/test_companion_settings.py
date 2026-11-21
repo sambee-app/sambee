@@ -81,6 +81,17 @@ def test_metadata_rejects_invalid_browser_locale(client, auth_headers_user, loca
     assert client.get(SETTINGS, headers=auth_headers_user, params={"browser_regional_locale": locale}).status_code == 422
 
 
+def test_settings_requests_without_browser_locale_tell_browser_to_reload(client, auth_headers_user):
+    binding = {**_policy_grant_binding(), "version": 1, "sections": ["localization"]}
+    headers = {**auth_headers_user, "Origin": binding["origin"]}
+    for response in (client.get(SETTINGS, headers=headers), client.post(f"{SETTINGS}/grants", headers=headers, json=binding)):
+        assert response.status_code == 426
+        assert "Reload Sambee" in response.json()["detail"]
+
+    invalid = client.post(f"{SETTINGS}/grants", headers=headers, json=binding, params={"browser_regional_locale": "de_CH"})
+    assert invalid.status_code == 422
+
+
 def test_browser_region_change_updates_only_localization_marker(client, auth_headers_user):
     def metadata(locale):
         response = client.get(SETTINGS, headers=auth_headers_user, params={"browser_language": "de", "browser_regional_locale": locale})

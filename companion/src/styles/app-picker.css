@@ -256,8 +256,8 @@
 }
 
 .app-picker__always-use input[type="checkbox"]:focus-visible {
-  outline: none;
-  box-shadow: var(--companion-btn-focus-ring);
+  outline: 2px solid var(--control-outline, #4b5563);
+  outline-offset: 2px;
 }
 
 /* ─── Actions ─── */

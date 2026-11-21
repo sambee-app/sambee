@@ -172,6 +172,35 @@ describe("Preferences", () => {
     expect(screen.getAllByRole("button", { name: translate("preferences.unpairButton") }).length).toBeGreaterThan(0);
   });
 
+  it("shows the original timestamp when the synced locale is not supported by Intl", async () => {
+    const updatedAt = "2026-03-22T12:00:00.000Z";
+    getUserPreferencesMock.mockResolvedValue({
+      allowedServers: [],
+      uploadConflictAction: "ask",
+      autoStartOnLogin: false,
+      showNotifications: true,
+      companionUpdateChannel: "stable",
+      tempFileRetentionDays: 7,
+    } satisfies UserPreferences);
+    isAutostartEnabledMock.mockResolvedValue(false);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_paired_origins") return [];
+      if (command === "get_synced_localization") {
+        return {
+          language: "de",
+          regional_locale: "de-CH-t-en-d0",
+          updated_at: updatedAt,
+          source_origin: "https://example.test",
+        };
+      }
+    });
+
+    render(<Preferences onClose={vi.fn()} />);
+
+    expect(await screen.findByText(updatedAt)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: translate("preferences.title") })).toBeInTheDocument();
+  });
+
   it("shows translated pending text while unpairing", async () => {
     await setLocale("en-XA");
 
