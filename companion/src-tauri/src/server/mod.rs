@@ -214,6 +214,10 @@ fn build_router(state: Arc<AppState>) -> Router {
             "/api/browse/{drive}/directories",
             axum::routing::get(handlers::browse_search_directories),
         )
+        .route(
+            "/api/browse/{drive}/directories/status",
+            axum::routing::get(handlers::directory_search_status),
+        )
         .route("/api/browse/{drive}/lock", axum::routing::post(handlers::browse_acquire_edit_lock))
         .route(
             "/api/browse/{drive}/lock/heartbeat",

@@ -22,7 +22,7 @@ import { BROWSER_SHORTCUTS } from "../../../config/keyboardShortcuts";
 import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
 import { logger } from "../../../services/logger";
 import { publishRecentDirectoriesChanged } from "../../../services/recentDirectoriesSync";
-import type { DirectorySearchResult, RecentDirectory, RecentDirectorySearchResponse } from "../../../types";
+import type { DirectorySearchResult, DirectorySearchStatus, RecentDirectory, RecentDirectorySearchResponse } from "../../../types";
 import { normalizeQuerySeparators } from "./normalizeQuerySeparators";
 import {
   bestSearchRelevance,
@@ -43,7 +43,8 @@ import type { SearchProvider, SearchResult, SearchResultItem, SearchResultsUpdat
 
 /** Debounce delay in milliseconds for directory search */
 const DIRECTORY_SEARCH_DEBOUNCE_MS = 160;
-const DIRECTORY_REFRESH_INTERVAL_MS = 500;
+const DIRECTORY_STATUS_INTERVAL_MS = 1_000;
+const DIRECTORY_RESULT_REFRESH_MIN_MS = 2_000;
 const DIRECTORY_RECOVERY_INTERVAL_MS = 5_000;
 const DIRECTORY_MIN_RETRY_MS = 1_000;
 const DIRECTORY_MAX_RETRY_MS = 60_000;
@@ -259,11 +260,12 @@ export function useDirectorySearchProvider(
   const [failureDetail, setFailureDetail] = useState<string | undefined>();
   const [legacyIndex, setLegacyIndex] = useState(false);
   const indexFailureRef = useRef(false);
-  const indexResponseRef = useRef<DirectorySearchResult | null>(null);
+  const indexResponseRef = useRef<DirectorySearchStatus | null>(null);
   const activeIndexQueryRef = useRef(false);
   const terminalIndexRef = useRef(false);
   const retryDelayRef = useRef(DIRECTORY_RECOVERY_INTERVAL_MS);
-  const indexResultsRef = useRef<{ query: string; response: DirectorySearchResult } | null>(null);
+  const indexResultsRef = useRef<{ query: string; response: DirectorySearchResult; searchedAt: number } | null>(null);
+  const statusUnsupportedRef = useRef(false);
   const recentResponseRef = useRef<{ query: string; limit: number; response: RecentDirectorySearchResponse } | null>(null);
   const includeDotDirectories = options.includeDotDirectories ?? false;
   const recentDirectoryResultLimit = options.resultLimit ?? MAX_RECENT_DIRECTORY_RESULT_LIMIT;
@@ -275,14 +277,14 @@ export function useDirectorySearchProvider(
   const activationControllerRef = useRef<AbortController | null>(null);
   const sourceBindingRef = useRef({ connectionId, history, includeDotDirectories, sourceRevision });
 
-  const updateIndexStatus = useCallback((response: DirectorySearchResult) => {
+  const updateIndexStatus = useCallback((response: DirectorySearchStatus, lastVerifiedAt?: number | null) => {
     setCacheState(response.cache_state);
     setDirectoryCount(response.directory_count);
     setCoverageStatus((previous) =>
       previous?.coverage === response.coverage &&
       previous?.coverage_issue_count === response.coverage_issue_count &&
       previous?.issue_details_available === response.issue_details_available &&
-      previous?.last_verified_at_ms === response.last_verified_at_ms &&
+      (lastVerifiedAt === undefined || previous?.last_verified_at_ms === lastVerifiedAt) &&
       previous?.status_message === response.status_message &&
       previous?.monitoring_state === response.monitoring_state &&
       previous?.retry_after_ms === response.retry_after_ms &&
@@ -296,7 +298,7 @@ export function useDirectorySearchProvider(
             coverage: response.coverage,
             coverage_issue_count: response.coverage_issue_count,
             issue_details_available: response.issue_details_available,
-            last_verified_at_ms: response.last_verified_at_ms,
+            last_verified_at_ms: lastVerifiedAt === undefined ? previous?.last_verified_at_ms : lastVerifiedAt,
             status_message: response.status_message,
             monitoring_state: response.monitoring_state,
             retry_after_ms: response.retry_after_ms,
@@ -313,6 +315,7 @@ export function useDirectorySearchProvider(
     recentResponseRef.current = null;
     indexResponseRef.current = null;
     indexResultsRef.current = null;
+    statusUnsupportedRef.current = false;
     terminalIndexRef.current = false;
     indexFailureRef.current = false;
     setSourceFailure(null);
@@ -343,7 +346,7 @@ export function useDirectorySearchProvider(
   // fetchResults
   //
   const fetchResults = useCallback(
-    async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate): Promise<SearchResult[]> => {
+    async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate, refresh = false): Promise<SearchResult[]> => {
       // Normalise backslashes to forward slashes for cross-directory search
       const normalizedQuery = normalizeDirectoryQuery(query);
       const terms = searchTerms(normalizedQuery);
@@ -360,7 +363,8 @@ export function useDirectorySearchProvider(
       if (!isCurrent()) return [];
       setSourceFailure(indexFailureRef.current ? "index" : null);
       let recentResponse: RecentDirectorySearchResponse = { results: [], result_limit: recentDirectoryResultLimit };
-      let directorySearchResult = indexResultsRef.current?.query === normalizedQuery ? indexResultsRef.current.response : null;
+      const lastSearch = indexResultsRef.current?.query === normalizedQuery ? indexResultsRef.current : null;
+      let directorySearchResult = queryIndex ? (lastSearch?.response ?? null) : null;
 
       const mergeResults = (): SearchResult[] => {
         const recentPaths = new Set(recentResponse.results.map((directory) => `${directory.connection_id}\u0000${directory.path}`));
@@ -453,24 +457,52 @@ export function useDirectorySearchProvider(
         recentDirectoriesRef.current = new Map(response.results.map((directory) => [directory.id, directory]));
         publishPartialResults();
       });
-      const indexRequest = !terminalIndexRef.current
-        ? history.searchDirectories(connectionId, queryIndex ? normalizedQuery : "", { includeDotDirectories, signal }).then((response) => {
-            if (!isCurrent()) return;
-            indexSettled = true;
-            directorySearchResult = queryIndex ? response : null;
-            indexResultsRef.current = queryIndex ? { query: normalizedQuery, response } : null;
-            indexResponseRef.current = response;
-            indexFailureRef.current = false;
-            terminalIndexRef.current =
-              response.search_contract_version != null && response.search_contract_version !== SEARCH_CONTRACT_VERSION;
-            setLegacyIndex(terms.length > 1 && response.search_contract_version !== SEARCH_CONTRACT_VERSION);
-            updateIndexStatus(response);
-            setTotalMatches(response.total_matches);
-            if (queryIndex) {
-              publishPartialResults();
+      const fetchIndex = async () => {
+        if (refresh && !statusUnsupportedRef.current) {
+          const status = await history.getDirectorySearchStatus(connectionId, { signal }).catch((error: unknown) => {
+            // Older Companions support search but not the status route.
+            if ((error as { response?: { status?: number } })?.response?.status !== 404) throw error;
+            if (isCurrent()) statusUnsupportedRef.current = true;
+            return null;
+          });
+          if (!isCurrent()) return;
+          if (status) {
+            const previousPhase = indexResponseRef.current?.scan_progress?.phase;
+            const finished = status.scan_progress?.phase === "idle" && previousPhase !== undefined && previousPhase !== "idle";
+            indexResponseRef.current = status;
+            updateIndexStatus(status);
+            const revisionChanged = status.accepted_revision !== lastSearch?.response.accepted_revision;
+            if (
+              status.cache_state !== "empty" &&
+              lastSearch &&
+              !indexFailureRef.current &&
+              !finished &&
+              (!revisionChanged || performance.now() - lastSearch.searchedAt < DIRECTORY_RESULT_REFRESH_MIN_MS)
+            ) {
+              indexSettled = true;
+              return;
             }
-          })
-        : Promise.resolve();
+          }
+        }
+        const response = await history.searchDirectories(connectionId, queryIndex ? normalizedQuery : "", {
+          includeDotDirectories,
+          signal,
+        });
+        if (!isCurrent()) return;
+        indexSettled = true;
+        directorySearchResult = queryIndex ? response : null;
+        indexResultsRef.current = { query: normalizedQuery, response, searchedAt: performance.now() };
+        indexResponseRef.current = response;
+        indexFailureRef.current = false;
+        terminalIndexRef.current = response.search_contract_version != null && response.search_contract_version !== SEARCH_CONTRACT_VERSION;
+        setLegacyIndex(terms.length > 1 && response.search_contract_version !== SEARCH_CONTRACT_VERSION);
+        updateIndexStatus(response, response.last_verified_at_ms ?? null);
+        setTotalMatches(response.total_matches);
+        if (queryIndex) {
+          publishPartialResults();
+        }
+      };
+      const indexRequest = terminalIndexRef.current ? Promise.resolve() : fetchIndex();
       const [recentOutcome, indexOutcome] = await Promise.allSettled([recentRequest, indexRequest]);
       if (!isCurrent()) return [];
       if (indexOutcome.status === "rejected") {
@@ -603,9 +635,11 @@ export function useDirectorySearchProvider(
     if (indexFailureRef.current) return retryDelayRef.current;
     if (!response || response.search_contract_version !== SEARCH_CONTRACT_VERSION) return null;
     if (response.retry_after_ms != null && response.retry_after_ms > 0) return directoryRetryDelay(response.retry_after_ms);
-    if (response.scan_progress && response.scan_progress.phase !== "idle") return DIRECTORY_REFRESH_INTERVAL_MS;
+    if (response.scan_progress && response.scan_progress.phase !== "idle") return DIRECTORY_STATUS_INTERVAL_MS;
     if (response.cache_state === "opening" || response.cache_state === "building" || response.cache_state === "updating")
-      return DIRECTORY_REFRESH_INTERVAL_MS;
+      return DIRECTORY_STATUS_INTERVAL_MS;
+    const lastSearch = indexResultsRef.current;
+    if (lastSearch && response.accepted_revision !== lastSearch.response.accepted_revision) return DIRECTORY_STATUS_INTERVAL_MS;
     return response.cache_state === "empty" ||
       response.status_message ||
       response.coverage === "uncertain" ||
@@ -637,7 +671,7 @@ export function useDirectorySearchProvider(
           setSourceFailure(null);
           setFailureDetail(undefined);
           terminalIndexRef.current = result.search_contract_version != null && result.search_contract_version !== SEARCH_CONTRACT_VERSION;
-          updateIndexStatus(result);
+          updateIndexStatus(result, result.last_verified_at_ms ?? null);
         }
       })
       .catch((error: unknown) => {

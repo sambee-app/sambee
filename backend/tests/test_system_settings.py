@@ -112,6 +112,20 @@ def test_directory_index_policy_shorter_healthy_override_loads(client, auth_head
     assert policy["policy"]["degraded_verification_seconds"] == DIRECTORY_INDEX_CONTRACT.policy["degraded_verification_seconds"].default
 
 
+@pytest.mark.parametrize("scope", ["backend", "companion"])
+def test_directory_monitoring_retention_defaults_and_bounds(client, auth_headers_admin, scope):
+    url = f"/api/admin/settings/directory-index/{scope}"
+    name = "monitoring_retention_seconds"
+    field = DIRECTORY_INDEX_CONTRACT.policy[name]
+    initial = client.get(url, headers=auth_headers_admin).json()
+    assert initial["policy"][name] == field.default
+    for value in (field.minimum - 1, field.maximum + 1):
+        assert client.put(url, headers=auth_headers_admin, json={"field": name, "value": value}).status_code == 422
+    for value in (field.minimum, field.maximum):
+        assert client.put(url, headers=auth_headers_admin, json={"field": name, "value": value}).status_code == 200
+        assert client.get(url, headers=auth_headers_admin).json()["policy"][name] == value
+
+
 def test_directory_index_policy_rejects_extra_browser_values(client, auth_headers_admin):
     response = client.put(
         "/api/admin/settings/directory-index/companion",

@@ -108,6 +108,8 @@ class InvalidationReason(str, Enum):
         return self is not InvalidationReason.STALLED_READ
 
 
+EXPECTED_INVALIDATION_REASONS = frozenset({InvalidationReason.LIFECYCLE, InvalidationReason.WATCHER_START})
+
 # Scan configuration
 SCAN_TIMEOUT_SECONDS = 30.0  # Timeout for single scandir call
 
@@ -456,7 +458,8 @@ class DirectoryScanCoordinator:
     def invalidate(self, reason: InvalidationReason) -> None:
         with self.lock:
             self.invalidation_count += 1
-            logger.info(
+            log = logger.debug if reason in EXPECTED_INVALIDATION_REASONS else logger.info
+            log(
                 "Directory scan invalidated.",
                 extra={
                     "event": "directory_scan_invalidated",
@@ -1457,6 +1460,10 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._owning_loop: asyncio.AbstractEventLoop | None = None
         self._last_access = time.monotonic()
         self._last_access_at_ms = int(time.time() * 1000)
+        self._dormant = False
+        self._dormant_since: float | None = None
+        self._verified_at = self._last_access
+        self._verification_running = False
         self._reclamation_pending = False
         self._source_available = threading.Event()
         self._source_probe_completed = threading.Event()
@@ -1486,18 +1493,45 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     def touch(self) -> None:
         with self.coordinator.lock:
             self._last_access = time.monotonic()
+            self._dormant = False
+            self._dormant_since = None
         self._last_access_at_ms = int(time.time() * 1000)
 
-    def can_release_idle(self) -> bool:
+    def _idle_without_work(self) -> bool:
         with self._workers:
             return (
                 time.monotonic() - self._last_access >= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"]
                 and not self._active_workers
+                and (self._scan_task is None or self._scan_task.done())
+                and not self._verification_running
                 and not self._scan_running.is_set()
                 and not self.index.has_active_queries
                 and not self.index.has_pending_scan()
                 and not self.coordinator.pending
             )
+
+    def _monitoring_healthy(self) -> bool:
+        return (
+            self._opened.is_set()
+            and self._source_available.is_set()
+            and self.monitoring_state == "healthy"
+            and not self.index.needs_fts_repair
+        )
+
+    def can_go_dormant(self) -> bool:
+        return not self._dormant and self._idle_without_work() and self._monitoring_healthy()
+
+    def should_release(self, *, over_cap: bool = False) -> bool:
+        return self._idle_without_work() and (
+            not self._monitoring_healthy()
+            or time.monotonic() - self._last_access >= self.policy.monitoring_retention_seconds
+            or (self._dormant and (over_cap or self._verification_due(self._verified_at)))
+        )
+
+    def _release_dormant_memory(self) -> None:
+        with self.coordinator.lock:
+            if self._dormant and not self._maintenance_blocked():
+                self.index.release_memory()
 
     def _maintenance_blocked(self) -> bool:
         return (
@@ -1600,7 +1634,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             raise
 
     async def start_scan(self) -> None:
-        if self._stop_event.is_set() or time.monotonic() < self._resource_retry_at:
+        if self._opened.is_set() or self._stop_event.is_set() or time.monotonic() < self._resource_retry_at:
             return
         if self._scan_task is not None and not self._scan_task.done():
             return
@@ -1805,6 +1839,15 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 for parent, code in sorted(self.coordinator.issue_details)
             ]
             return details, self.coordinator.issue_details_incomplete
+
+    def has_directory_issue_details(self) -> bool:
+        with self.coordinator.lock:
+            return bool(self.coordinator.issue_details)
+
+    def index_status(self) -> DirectoryIndexSearch:
+        if self._opened.is_set() and self._source_available.is_set():
+            return self.index.cached_status()
+        return DirectoryIndexSearch((), 0, 0, 0, "partial", None, "empty")
 
     def _record_item_issue(self, token: ScanReadToken, generation: int, code: str, *, reconcile: bool, path: str | None = None) -> None:
         self.coordinator.record_issue(token, generation, code, reconcile=reconcile, path=path)
@@ -2644,6 +2687,15 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._connection_cache = replacement
 
     async def _run_rescan(self) -> None:
+        if self._dormant or self._verification_running:
+            return
+        self._verification_running = True
+        try:
+            await self._run_rescan_work()
+        finally:
+            self._verification_running = False
+
+    async def _run_rescan_work(self) -> None:
         now = time.monotonic()
         if (
             not self._opened.is_set()
@@ -2708,7 +2760,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             self._schedule_retry()
 
     async def _periodic_rescan_loop(self) -> None:
-        verified_at = time.monotonic()
+        self._verified_at = time.monotonic()
         while not self._stop_event.is_set():
             try:
                 await asyncio.sleep(OBSERVATION_POLL_SECONDS)
@@ -2718,14 +2770,15 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     await self.start_scan()
                     return
                 if self._opened.is_set():
-                    if self.index.needs_fts_repair or not self._source_available.is_set():
+                    if not self._dormant and (self.index.needs_fts_repair or not self._source_available.is_set()):
                         await self._run_rescan()
-                        verified_at = time.monotonic()
+                        self._verified_at = time.monotonic()
                         continue
                     await self._blocking(self.coordinator.apply_pending)
-                    if self._verification_due(verified_at):
+                    # Leave a due dormant source for the manager to release.
+                    if not self._dormant and self._verification_due(self._verified_at):
                         await self._run_rescan()
-                        verified_at = time.monotonic()
+                        self._verified_at = time.monotonic()
                     await self._run_reconciliation()
                     response = await self._blocking(self.index.status)
                     self._directory_count = response.directory_count
@@ -2805,10 +2858,23 @@ class DirectoryCacheManager:
         self._retiring_caches: set[SQLiteConnectionDirectoryCache] = set()
 
     async def release_idle_caches(self) -> None:
+        entered = []
         with self._lock:
-            expired = [
-                cache for cache in self._caches.values() if isinstance(cache, SQLiteConnectionDirectoryCache) and cache.can_release_idle()
-            ]
+            caches = [cache for cache in self._caches.values() if isinstance(cache, SQLiteConnectionDirectoryCache)]
+            for cache in caches:
+                if cache.can_go_dormant():
+                    cache._dormant = True
+                    cache._dormant_since = time.monotonic()
+                    entered.append(cache)
+            expired = {cache for cache in caches if cache.should_release()}
+            retained = sorted(
+                (cache for cache in caches if cache._dormant and cache not in expired),
+                key=lambda cache: cache._last_access,
+                reverse=True,
+            )
+            expired.update(
+                cache for cache in retained[DIRECTORY_INDEX_CONTRACT.limits["max_dormant_sources"] :] if cache.should_release(over_cap=True)
+            )
             for cache in expired:
                 self._caches.pop(cache.connection_id)
                 self._retiring_caches.add(cache)
@@ -2817,6 +2883,9 @@ class DirectoryCacheManager:
             closing = asyncio.gather(*(self._finish_idle_cache(cache) for cache in expired))
             closing.add_done_callback(lambda completed: completed.exception() if not completed.cancelled() else None)
             await wait_for_worker(closing)
+        for cache in entered:
+            if cache not in expired:
+                await cache._blocking(cache._release_dormant_memory)
 
     async def _finish_idle_cache(self, cache: SQLiteConnectionDirectoryCache) -> None:
         await asyncio.to_thread(cache._finish_stop)

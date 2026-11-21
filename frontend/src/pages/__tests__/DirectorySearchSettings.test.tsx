@@ -141,6 +141,15 @@ describe("DirectorySearchSettings", () => {
     );
   });
 
+  it("shows idle change-monitoring retention for both scopes", async () => {
+    render(<DirectorySearchSettings />);
+    const fields = await screen.findAllByLabelText("Idle change-monitoring retention");
+    expect(fields).toHaveLength(2);
+    for (const field of fields) {
+      expect(field).toHaveValue(String(contract.policy.monitoring_retention_seconds.default));
+    }
+  });
+
   it("keeps invalid drafts local and associates a failed save with the Companion field", async () => {
     const user = userEvent.setup();
     vi.mocked(api.updateDirectoryIndexSettings).mockRejectedValue({

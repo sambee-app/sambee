@@ -29,7 +29,14 @@ use super::directory_index::{
 use super::directory_traversal::NativeIdentity;
 use super::directory_traversal::{source_error, NativeIo, NativeParent, NativeRoot, TraversalIssue, MOUNT_BOUNDARY_CAPABILITY_ERROR};
 use super::drives::{volume_evidence, VolumeChange, VolumeEvidence};
-use super::models::{DirectoryIssueDetail, DirectorySearchResult, ScanProgress};
+use super::models::{DirectoryIssueDetail, DirectorySearchResult, DirectorySearchStatus, ScanProgress};
+
+fn wire_count(value: i64) -> Result<usize, IndexError> {
+    if !(0..=MAX_WIRE_INTEGER).contains(&value) {
+        return Err(IndexError::Invalid("Directory response integer exceeds the supported API range."));
+    }
+    usize::try_from(value).map_err(|_| IndexError::Invalid("Directory count exceeds the supported API range."))
+}
 
 const CONTRACT_JSON: &str = include_str!("../../../../shared/directory-index/contract.json");
 const STALLED_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -85,6 +92,10 @@ fn contract() -> Result<&'static Contract, IndexError> {
     if contract.version != POLICY_VERSION
         || contract.scan_progress.fields != ["phase", "parents_done", "parents_queued", "directories_found", "started_at_ms"]
         || contract.scan_progress.phases != ["building", "updating", "idle"]
+        || !matches!(
+            (contract.policy.get("monitoring_retention_seconds"), contract.limits.get("idle_release_seconds")),
+            (Some(retention), Some(idle)) if retention.minimum >= *idle
+        )
     {
         return Err(IndexError::Invalid(
             "Unsupported directory policy contract. Reinstall the companion.",
@@ -108,10 +119,20 @@ pub struct DirectoryPolicy {
     pub version: u32,
     pub disk_budget_bytes: i64,
     pub inactive_retention_seconds: i64,
+    #[serde(default = "default_monitoring_retention_seconds")]
+    pub monitoring_retention_seconds: i64,
     pub max_retained_inactive_sources: i64,
     pub page_cache_kib: i64,
     pub healthy_verification_seconds: i64,
     pub degraded_verification_seconds: i64,
+}
+
+// Policies saved by older versions do not contain the retention field.
+fn default_monitoring_retention_seconds() -> i64 {
+    contract()
+        .ok()
+        .and_then(|contract| contract.policy.get("monitoring_retention_seconds"))
+        .map_or(0, |field| field.default)
 }
 
 impl DirectoryPolicy {
@@ -134,6 +155,7 @@ impl DirectoryPolicy {
         for (name, value) in [
             ("disk_budget_bytes", self.disk_budget_bytes),
             ("inactive_retention_seconds", self.inactive_retention_seconds),
+            ("monitoring_retention_seconds", self.monitoring_retention_seconds),
             ("max_retained_inactive_sources", self.max_retained_inactive_sources),
             ("page_cache_kib", self.page_cache_kib),
             ("healthy_verification_seconds", self.healthy_verification_seconds),
@@ -604,6 +626,10 @@ impl InvalidationReason {
     fn loses_observations(self) -> bool {
         !matches!(self, Self::StalledRead)
     }
+
+    fn is_expected(self) -> bool {
+        matches!(self, Self::Lifecycle | Self::WatcherStart)
+    }
 }
 
 impl Observations {
@@ -671,7 +697,12 @@ impl Observations {
         self.required_pending.store(true, Ordering::Release);
         self.observation_lost |= matches!(reason, InvalidationReason::ObservationLoss | InvalidationReason::ReadCapacity);
         self.invalidation_count = self.invalidation_count.saturating_add(1);
-        log::info!(
+        log::log!(
+            if reason.is_expected() {
+                log::Level::Debug
+            } else {
+                log::Level::Info
+            },
             "event=directory_scan_invalidated invalidation_reason={} invalidation_count={}",
             reason.as_str(),
             self.invalidation_count
@@ -949,6 +980,7 @@ struct SourceStatus {
     verified: Instant,
     accessed: Instant,
     accessed_at_ms: Option<i64>,
+    dormant: bool,
     retry_at: Instant,
     failure_delay: Duration,
     verification_jitter: u8,
@@ -1087,6 +1119,42 @@ impl LocalSource {
         Ok(())
     }
 
+    fn monitoring_healthy(&self) -> Result<bool, IndexError> {
+        let reliable = lock(&self.volume)?.monitoring_reliable();
+        let watcher_present = lock(&self.watcher)?.is_some();
+        Ok(reliable && watcher_present && !self.watcher_failed.load(Ordering::Acquire) && !lock(&self.observations)?.verification_required)
+    }
+
+    fn can_release_idle(&self) -> Result<bool, IndexError> {
+        if self.capability_failed.load(Ordering::Acquire)
+            || self.busy.load(Ordering::Acquire)
+            || self.flush_busy.load(Ordering::Acquire)
+            || self.active_queries.load(Ordering::Acquire) != 0
+        {
+            return Ok(false);
+        }
+        {
+            let observations = lock(&self.observations)?;
+            if !observations.pending.is_empty() || !observations.producers.is_empty() {
+                return Ok(false);
+            }
+        }
+        Ok(!lock(&self.writer)?
+            .as_ref()
+            .map(DirectoryIndex::has_pending_scan)
+            .transpose()?
+            .unwrap_or(false))
+    }
+
+    fn verification_due(&self, policy: &DirectoryPolicy, now: Instant) -> Result<bool, IndexError> {
+        let interval = self.effective_verification_seconds(policy)?;
+        let initialized = lock(&self.reader)?.is_some();
+        let due = lock(&self.status)?.verification_due(now, Duration::from_secs(interval as u64), initialized);
+        #[cfg(feature = "recovery-verification")]
+        let due = due || self.verification_scan_requested.load(Ordering::Acquire);
+        Ok(due)
+    }
+
     fn ensure_available(&self) -> Result<(), IndexError> {
         if self.media_unavailable.load(Ordering::Acquire) {
             return Err(std::io::Error::new(
@@ -1109,6 +1177,7 @@ impl LocalSource {
         let mut status = lock(&self.status)?;
         status.accessed = now;
         status.accessed_at_ms = Some(accessed_at_ms);
+        status.dormant = false;
         Ok(())
     }
 
@@ -1160,6 +1229,7 @@ impl LocalSource {
                 verified: now,
                 accessed: now,
                 accessed_at_ms: None,
+                dormant: false,
                 retry_at: now,
                 failure_delay: Duration::ZERO,
                 verification_jitter,
@@ -4027,33 +4097,52 @@ impl LocalDirectoryManager {
         let mut retired = Vec::new();
         let sources: Vec<_> = {
             let mut sources = lock(&self.sources)?;
-            sources.retain(|_, source| {
-                let expired = source
-                    .status
-                    .try_lock()
-                    .map(|status| status.accessed.elapsed() >= Duration::from_secs(limit("idle_release_seconds").unwrap_or(600) as u64))
-                    .unwrap_or(false);
-                let pending = source
-                    .writer
-                    .lock()
-                    .ok()
-                    .and_then(|writer| writer.as_ref().map(DirectoryIndex::has_pending_scan))
-                    .transpose()
-                    .unwrap_or(Some(true))
-                    .unwrap_or(false);
-                if expired
-                    && !pending
-                    && !source.capability_failed.load(Ordering::Acquire)
-                    && !source.busy.load(Ordering::Acquire)
-                    && !source.flush_busy.load(Ordering::Acquire)
-                    && Arc::strong_count(source) == 1
-                {
-                    source.stop();
-                    retired.push(Arc::clone(source));
-                    return false;
+            let now = Instant::now();
+            let idle_after = Duration::from_secs(limit("idle_release_seconds")? as u64);
+            let retention = Duration::from_secs(policy.monitoring_retention_seconds as u64);
+            let mut expired = HashSet::new();
+            let mut dormant = Vec::new();
+            for (drive, source) in sources.iter() {
+                let (accessed, was_dormant) = {
+                    let status = lock(&source.status)?;
+                    (status.accessed, status.dormant)
+                };
+                let idle = now.saturating_duration_since(accessed);
+                if idle < idle_after {
+                    continue;
                 }
-                true
-            });
+                let can_release = Arc::strong_count(source) == 1 && source.can_release_idle()?;
+                if !can_release {
+                    if was_dormant {
+                        dormant.push((accessed, drive.clone(), false, false));
+                    }
+                    continue;
+                }
+                if !source.monitoring_healthy()? || idle >= retention || source.verification_due(&policy, now)? {
+                    expired.insert(drive.clone());
+                    continue;
+                }
+                lock(&source.status)?.dormant = true;
+                dormant.push((accessed, drive.clone(), true, !was_dormant));
+            }
+            dormant.sort_unstable_by(|a, b| b.cmp(a));
+            let cap = limit("max_dormant_sources")?;
+            for (position, (_, drive, can_release, entered)) in dormant.into_iter().enumerate() {
+                if can_release && position >= cap {
+                    expired.insert(drive);
+                } else if entered {
+                    let source = &sources[&drive];
+                    if let Some(index) = lock(&source.writer)?.as_ref() {
+                        index.release_memory()?;
+                    }
+                }
+            }
+            for drive in expired {
+                if let Some(source) = sources.remove(&drive) {
+                    source.stop();
+                    retired.push(source);
+                }
+            }
             sources.values().cloned().collect()
         };
         for source in retired {
@@ -4109,10 +4198,14 @@ impl LocalDirectoryManager {
                     tauri::async_runtime::spawn(async move {
                         let result = tokio::task::spawn_blocking(move || {
                             let _ownership = ownership;
-                            let result = task_source
-                                .recover_watcher()
-                                .and_then(|()| task_source.flush(&budget))
-                                .and_then(|()| task_source.reconcile(&budget, &scans));
+                            let result = (|| {
+                                if lock(&task_source.status)?.dormant {
+                                    return Ok(());
+                                }
+                                task_source.recover_watcher()
+                            })()
+                            .and_then(|()| task_source.flush(&budget))
+                            .and_then(|()| task_source.reconcile(&budget, &scans));
                             if let Err(error) = &result {
                                 task_source.fail(error, &budget);
                             } else {
@@ -4129,21 +4222,15 @@ impl LocalDirectoryManager {
                     source.flush_busy.store(false, Ordering::Release);
                 }
             }
-            let interval = source.effective_verification_seconds(&policy)?;
-            let status = lock(&source.status)?;
-            let due = status.verification_due(
-                Instant::now(),
-                Duration::from_secs(interval as u64),
-                lock(&source.reader)?.is_some(),
-            );
-            drop(status);
+            if lock(&source.status)?.dormant {
+                continue;
+            }
+            let due = source.verification_due(&policy, Instant::now())?;
             let resumable = lock(&source.writer)?
                 .as_ref()
                 .map(DirectoryIndex::has_resumable_scan)
                 .transpose()?
                 .unwrap_or(false);
-            #[cfg(feature = "recovery-verification")]
-            let due = due || source.verification_scan_requested.load(Ordering::Acquire);
             if due || resumable {
                 self.start_scan(&source)?;
             }
@@ -4175,6 +4262,69 @@ impl LocalDirectoryManager {
             .collect();
         details.sort_by(|left, right| (&left.path, left.code).cmp(&(&right.path, right.code)));
         Ok((details, observations.issue_details_incomplete))
+    }
+
+    fn make_search_status(
+        source: Option<&LocalSource>,
+        result: Option<&super::directory_index::DirectoryIndexSearch>,
+    ) -> Result<(DirectorySearchStatus, bool), IndexError> {
+        let mut response = DirectorySearchStatus {
+            cache_state: "empty".into(),
+            directory_count: 0,
+            search_contract_version: cfg!(any(target_os = "linux", target_os = "windows")).then_some(SEARCH_CONTRACT_VERSION),
+            accepted_revision: None,
+            coverage: None,
+            coverage_issue_count: 0,
+            issue_details_available: false,
+            status_message: None,
+            monitoring_state: None,
+            retry_after_ms: None,
+            scan_progress: None,
+        };
+        let Some(source) = source else { return Ok((response, false)) };
+        let observations = lock(&source.observations)?;
+        let details_incomplete = observations.issue_details_incomplete;
+        if let Some(result) = result {
+            wire_count(result.accepted_revision)?;
+            response.directory_count = wire_count(result.directory_count)?;
+            response.accepted_revision = Some(result.accepted_revision);
+            response.coverage = Some(result.coverage.clone());
+            response.coverage_issue_count = wire_count(result.issue_count)?;
+            response.issue_details_available =
+                result.coverage == "partial" && result.issue_count > 0 && !observations.issue_details.is_empty();
+        } else {
+            response.accepted_revision = Some(0);
+            response.coverage = Some("partial".into());
+        }
+        drop(observations);
+        let status = lock(&source.status)?;
+        response.cache_state = status.state.into();
+        response.status_message = status.message.clone();
+        response.monitoring_state = Some(
+            if source.watcher_failed.load(Ordering::Acquire) {
+                "unavailable"
+            } else if result.is_none() {
+                "starting"
+            } else if source.watcher_reconciling.load(Ordering::Acquire) {
+                "recovering"
+            } else {
+                "healthy"
+            }
+            .into(),
+        );
+        response.retry_after_ms = status.retry_after_ms();
+        response.scan_progress = status.scan_progress.clone();
+        Ok((response, details_incomplete))
+    }
+
+    pub fn search_status(&self, drive: &str, root: &Path) -> Result<DirectorySearchStatus, IndexError> {
+        let source = lock(&self.sources)?.get(drive).filter(|source| source.root_path == root).cloned();
+        let Some(source) = source else {
+            return Ok(Self::make_search_status(None, None)?.0);
+        };
+        source.touch()?;
+        let snapshot = lock(&source.status)?.index_status.clone();
+        Ok(Self::make_search_status(Some(&source), snapshot.as_ref())?.0)
     }
 
     pub async fn search(
@@ -4245,33 +4395,15 @@ impl LocalDirectoryManager {
         self.start_scan_if_cold(&source)?;
         let reader = lock(&source.reader)?.clone();
         let Some(reader) = reader else {
-            let status = lock(&source.status)?;
             return Ok(DirectorySearchResult {
+                status: Self::make_search_status(Some(&source), None)?.0,
                 results: Vec::new(),
                 total_matches: 0,
-                cache_state: status.state.into(),
-                directory_count: 0,
-                search_contract_version: cfg!(any(target_os = "linux", target_os = "windows")).then_some(SEARCH_CONTRACT_VERSION),
                 match_ranks: HashMap::new(),
                 matched_term_counts: HashMap::new(),
-                accepted_revision: Some(0),
-                coverage: Some("partial".into()),
-                coverage_issue_count: 0,
-                issue_details_available: false,
                 issue_details: None,
                 issue_details_incomplete: false,
                 last_verified_at_ms: None,
-                status_message: status.message.clone(),
-                monitoring_state: Some(
-                    if source.watcher_failed.load(Ordering::Acquire) {
-                        "unavailable"
-                    } else {
-                        "starting"
-                    }
-                    .into(),
-                ),
-                retry_after_ms: status.retry_after_ms(),
-                scan_progress: status.scan_progress.clone(),
             });
         };
         let result = if query.trim().is_empty() {
@@ -4317,22 +4449,12 @@ impl LocalDirectoryManager {
             result?
         };
         source.ensure_available()?;
-        let observations = lock(&source.observations)?;
-        let has_details = result.coverage == "partial" && result.issue_count > 0 && !observations.issue_details.is_empty();
-        let details_incomplete = observations.issue_details_incomplete;
-        drop(observations);
-        let status = lock(&source.status)?;
-        let wire_count = |value: i64| -> Result<usize, IndexError> {
-            if !(0..=MAX_WIRE_INTEGER).contains(&value) {
-                return Err(IndexError::Invalid("Directory response integer exceeds the supported API range."));
-            }
-            usize::try_from(value).map_err(|_| IndexError::Invalid("Directory count exceeds the supported API range."))
-        };
-        wire_count(result.accepted_revision)?;
+        let (status, details_incomplete) = Self::make_search_status(Some(&source), Some(&result))?;
         if let Some(verified) = result.last_verified_at_ms {
             wire_count(verified)?;
         }
         Ok(DirectorySearchResult {
+            status,
             match_ranks: result.results.iter().map(|row| (row.path.clone(), row.match_rank)).collect(),
             matched_term_counts: result
                 .results
@@ -4341,29 +4463,9 @@ impl LocalDirectoryManager {
                 .collect(),
             results: result.results.into_iter().map(|row| row.path).collect(),
             total_matches: wire_count(result.total_matches)?,
-            directory_count: wire_count(result.directory_count)?,
-            cache_state: status.state.into(),
-            search_contract_version: cfg!(any(target_os = "linux", target_os = "windows")).then_some(SEARCH_CONTRACT_VERSION),
-            accepted_revision: Some(result.accepted_revision),
-            coverage: Some(result.coverage),
-            coverage_issue_count: wire_count(result.issue_count)?,
-            issue_details_available: has_details,
             issue_details: None,
             issue_details_incomplete: details_incomplete,
             last_verified_at_ms: result.last_verified_at_ms,
-            status_message: status.message.clone(),
-            monitoring_state: Some(
-                if source.watcher_failed.load(Ordering::Acquire) {
-                    "unavailable"
-                } else if source.watcher_reconciling.load(Ordering::Acquire) {
-                    "recovering"
-                } else {
-                    "healthy"
-                }
-                .into(),
-            ),
-            retry_after_ms: status.retry_after_ms(),
-            scan_progress: status.scan_progress.clone(),
         })
     }
 
@@ -4700,6 +4802,113 @@ mod tests {
         manager.tick().unwrap();
         assert!(lock(&manager.sources).unwrap().is_empty());
         assert!(manager.try_listing_target("drive", &root).is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn healthy_idle_sources_keep_handles_and_release_in_access_order_or_when_due() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("storage")).unwrap();
+        let _updates = Arc::clone(&manager.updates)
+            .try_acquire_many_owned(manager.updates.available_permits() as u32)
+            .unwrap();
+        let cap = limit("max_dormant_sources").unwrap();
+        let idle = limit("idle_release_seconds").unwrap() as u64;
+        let now = Instant::now();
+        for number in 0..=cap {
+            let root = temporary.path().join(format!("root-{number}"));
+            std::fs::create_dir(&root).unwrap();
+            let source = LocalSource::new(root, manager.storage_directory());
+            source.scan(&manager.budget).unwrap();
+            assert!(source.monitoring_healthy().unwrap());
+            lock(&source.status).unwrap().accessed = now - Duration::from_secs(idle + number as u64 + 1);
+            lock(&manager.sources).unwrap().insert(number.to_string(), source);
+        }
+        manager.tick().unwrap();
+        assert_eq!(lock(&manager.sources).unwrap().len(), cap);
+        assert!(!lock(&manager.sources).unwrap().contains_key(&cap.to_string()));
+
+        for (drive, reason) in [("0", "verification"), ("1", "retention"), ("2", "watcher loss")] {
+            let source = Arc::clone(&lock(&manager.sources).unwrap()[drive]);
+            assert!(lock(&source.status).unwrap().dormant);
+            assert!(lock(&source.reader).unwrap().is_some());
+            assert!(lock(&source.root).unwrap().is_some());
+            let verified = lock(&source.status).unwrap().verified;
+            source.touch().unwrap();
+            manager.start_scan_if_cold(&source).unwrap();
+            assert!(!source.busy.load(Ordering::Acquire));
+            assert_eq!(lock(&source.status).unwrap().verified, verified);
+            lock(&source.status).unwrap().accessed = now - Duration::from_secs(idle + 1);
+            drop(source);
+            manager.tick().unwrap();
+
+            let source = Arc::clone(&lock(&manager.sources).unwrap()[drive]);
+            assert!(lock(&source.status).unwrap().dormant);
+            let policy = manager.budget.policy().unwrap();
+            match reason {
+                "verification" => {
+                    lock(&source.status).unwrap().verified -= Duration::from_secs(policy.healthy_verification_seconds as u64);
+                }
+                "retention" => {
+                    lock(&source.status).unwrap().accessed = now - Duration::from_secs(policy.monitoring_retention_seconds as u64 + 1);
+                }
+                _ => {
+                    source.lose_watcher().unwrap();
+                }
+            }
+            drop(source);
+            manager.tick().unwrap();
+            assert!(!lock(&manager.sources).unwrap().contains_key(drive), "{reason}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn directory_status_route_uses_existing_snapshot_and_touches_source() {
+        use axum::{body::Body, http::Request, routing::get, Router};
+        use tower::ServiceExt;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("reports")).unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("storage")).unwrap();
+        let drive = uuid::Uuid::new_v4().to_string();
+        super::super::drives::register_test_drive_path(drive.clone(), root.clone());
+        let router = Router::new()
+            .route(
+                "/api/browse/{drive}/directories/status",
+                get(super::super::handlers::directory_search_status),
+            )
+            .with_state(super::super::handlers::DirectoryMutationState(Arc::clone(&manager)));
+        let status = || async {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/browse/{drive}/directories/status"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024).await.unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        };
+        assert_eq!(status().await["cache_state"], "empty");
+        assert!(lock(&manager.sources).unwrap().is_empty());
+
+        let source = LocalSource::new(root, manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        lock(&source.status).unwrap().dormant = true;
+        lock(&manager.sources).unwrap().insert(drive.clone(), Arc::clone(&source));
+        let response = status().await;
+        assert_eq!(response["directory_count"], 1);
+        assert_eq!(response["cache_state"], "ready");
+        assert!(response.get("results").is_none());
+        assert!(response.get("total_matches").is_none());
+        assert_eq!(response.as_object().unwrap().len(), 11);
+        assert!(!lock(&source.status).unwrap().dormant);
     }
 
     fn feedback_entry(parent: &str, children: &[&str]) -> ListingFeedbackEntry {
@@ -8828,6 +9037,7 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
         let before = reader.search("stable incoming", 3, false, &cancelled, false).unwrap();
         let verified = lock(&source.status).unwrap().verified;
+        lock(&source.status).unwrap().dormant = true;
         let manager = Arc::new(LocalDirectoryManager {
             sources: Mutex::new(HashMap::from([("fixture".into(), Arc::clone(&source))])),
             listing_discards: ListingDiscards::default(),

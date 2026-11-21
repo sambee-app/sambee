@@ -20,6 +20,63 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("getDirectoryResultPresentation", () => {
+  it("polls status, limits searches to changed revisions, and refreshes on completion or release", async () => {
+    const clock = vi.spyOn(performance, "now").mockReturnValue(0);
+    try {
+      const search = vi.mocked(api.searchDirectories).mockClear();
+      const poll = vi.mocked(api.getDirectorySearchStatus).mockClear();
+      vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+      const progress = { phase: "building" as const, parents_done: 1, parents_queued: 2, directories_found: 1, started_at_ms: 1 };
+      const building = {
+        cache_state: "building" as const,
+        directory_count: 1,
+        search_contract_version: SEARCH_CONTRACT_VERSION,
+        accepted_revision: 1,
+        scan_progress: progress,
+      };
+      search.mockResolvedValue({ ...building, results: ["reports-old"], total_matches: 1 });
+      const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+      const signal = new AbortController().signal;
+      const fetch = async (refresh: boolean) => {
+        let paths: string[] = [];
+        await act(async () => {
+          const rows = await result.current.fetchResults("reports", signal, undefined, refresh);
+          paths = rows.filter((row) => row.kind === "result").map((row) => row.value);
+        });
+        return paths;
+      };
+      expect(await fetch(false)).toContain("directory:reports-old");
+      poll.mockResolvedValueOnce({ ...building, scan_progress: { ...progress, directories_found: 2 } });
+      clock.mockReturnValue(1000);
+      expect(await fetch(true)).toContain("directory:reports-old");
+      expect(result.current.getStatusInfo()?.label).toContain("2 directories found");
+      expect(poll).toHaveBeenCalledWith("connection-1", { signal });
+      expect(search).toHaveBeenCalledTimes(1);
+
+      const changed = { ...building, accepted_revision: 2 };
+      poll.mockResolvedValue(changed);
+      clock.mockReturnValue(1999);
+      await fetch(true);
+      expect(search).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(2000);
+      search.mockResolvedValueOnce({ ...changed, results: ["reports-new"], total_matches: 1 });
+      expect(await fetch(true)).toContain("directory:reports-new");
+      expect(search).toHaveBeenCalledTimes(2);
+
+      const idle = { ...changed, cache_state: "ready" as const, scan_progress: { ...progress, phase: "idle" as const } };
+      poll.mockResolvedValueOnce(idle);
+      search.mockResolvedValueOnce({ ...idle, results: ["reports-final"], total_matches: 1 });
+      expect(await fetch(true)).toContain("directory:reports-final");
+      expect(result.current.getRefreshIntervalMs?.()).toBeNull();
+
+      poll.mockResolvedValueOnce({ cache_state: "empty", directory_count: 0 });
+      await fetch(true);
+      expect(search).toHaveBeenCalledTimes(4);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it.each([false, true])("links named partial coverage only when details exist (%s)", async (available) => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
     const response = {
@@ -97,7 +154,7 @@ describe("getDirectoryResultPresentation", () => {
       await result.current.fetchResults("reports", new AbortController().signal);
     });
     expect(result.current.getStatusInfo()).toEqual({ label: `connection-1: ${label}`, showSpinner: true });
-    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+    expect(result.current.getRefreshIntervalMs?.()).toBe(1000);
   });
 
   it.each([
@@ -123,7 +180,7 @@ describe("getDirectoryResultPresentation", () => {
         await result.current.fetchResults("reports", new AbortController().signal);
       });
       expect(result.current.getStatusInfo()).toBeNull();
-      expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+      expect(result.current.getRefreshIntervalMs?.()).toBe(1000);
       vi.mocked(api.searchDirectories).mockResolvedValue({
         results: [],
         total_matches: 0,
@@ -294,9 +351,9 @@ describe("getDirectoryResultPresentation", () => {
   });
 
   it.each([
-    { cache_state: "opening", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
-    { cache_state: "building", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
-    { cache_state: "updating", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 500 },
+    { cache_state: "opening", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 1000 },
+    { cache_state: "building", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 1000 },
+    { cache_state: "updating", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 1000 },
     { cache_state: "ready", search_contract_version: SEARCH_CONTRACT_VERSION, expected: null },
     { cache_state: "empty", search_contract_version: SEARCH_CONTRACT_VERSION, expected: 5000 },
     {
@@ -333,20 +390,20 @@ describe("getDirectoryResultPresentation", () => {
     await act(async () => {
       await result.current.fetchResults("reports", new AbortController().signal);
     });
-    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+    expect(result.current.getRefreshIntervalMs?.()).toBe(1000);
 
     await act(async () => {
       await result.current.fetchResults("r", new AbortController().signal);
     });
     expect(api.searchDirectories).toHaveBeenCalledTimes(2);
     expect(api.searchDirectories).toHaveBeenLastCalledWith("connection-1", "", expect.anything());
-    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+    expect(result.current.getRefreshIntervalMs?.()).toBe(1000);
 
     await act(async () => {
       await result.current.fetchResults("reports", new AbortController().signal);
     });
     expect(api.searchDirectories).toHaveBeenCalledTimes(3);
-    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+    expect(result.current.getRefreshIntervalMs?.()).toBe(1000);
   });
 
   it.each(["connection-1", "local-C"])("keeps one full-query request and source-specific legacy status for %s", async (connectionId) => {
@@ -401,7 +458,7 @@ describe("getDirectoryResultPresentation", () => {
     await act(async () => {
       await result.current.fetchResults("reports", new AbortController().signal);
     });
-    expect(result.current.getRefreshIntervalMs?.()).toBe(500);
+    expect(result.current.getRefreshIntervalMs?.()).toBe(1000);
     await act(async () => {
       await result.current.fetchResults("reports", new AbortController().signal);
     });

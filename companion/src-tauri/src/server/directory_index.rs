@@ -2232,6 +2232,18 @@ impl DirectoryIndex {
         self.reader().search(query, limit, include_dot, cancelled, force_scan)
     }
 
+    pub(super) fn release_memory(&self) -> Result<(), IndexError> {
+        self.writer.execute_batch("PRAGMA shrink_memory")?;
+        let readers = self
+            .readers
+            .lock()
+            .map_err(|_| IndexError::Invalid("Directory reader pool is unavailable. Restart the companion."))?;
+        for reader in readers.iter() {
+            reader.connection.execute_batch("PRAGMA shrink_memory")?;
+        }
+        Ok(())
+    }
+
     pub fn reader(&self) -> DirectoryIndexReader {
         DirectoryIndexReader {
             path: self.path.clone(),

@@ -648,25 +648,39 @@ pub struct DirectoryIssueDetail {
 }
 
 #[derive(Debug, Serialize)]
-pub struct DirectorySearchResult {
-    pub results: Vec<String>,
-    pub total_matches: usize,
+pub struct DirectorySearchStatus {
     pub cache_state: String,
     pub directory_count: usize,
     pub search_contract_version: Option<u32>,
-    pub match_ranks: std::collections::HashMap<String, i64>,
-    pub matched_term_counts: std::collections::HashMap<String, usize>,
     pub accepted_revision: Option<i64>,
     pub coverage: Option<String>,
     pub coverage_issue_count: usize,
     pub issue_details_available: bool,
-    pub issue_details: Option<Vec<DirectoryIssueDetail>>,
-    pub issue_details_incomplete: bool,
-    pub last_verified_at_ms: Option<i64>,
     pub status_message: Option<String>,
     pub monitoring_state: Option<String>,
     pub retry_after_ms: Option<u64>,
     pub scan_progress: Option<ScanProgress>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DirectorySearchResult {
+    #[serde(flatten)]
+    pub status: DirectorySearchStatus,
+    pub results: Vec<String>,
+    pub total_matches: usize,
+    pub match_ranks: std::collections::HashMap<String, i64>,
+    pub matched_term_counts: std::collections::HashMap<String, usize>,
+    pub issue_details: Option<Vec<DirectoryIssueDetail>>,
+    pub issue_details_incomplete: bool,
+    pub last_verified_at_ms: Option<i64>,
+}
+
+impl std::ops::Deref for DirectorySearchResult {
+    type Target = DirectorySearchStatus;
+
+    fn deref(&self) -> &Self::Target {
+        &self.status
+    }
 }
 
 /// Availability state for a Companion local-drive capacity reading.

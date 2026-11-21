@@ -127,6 +127,11 @@ class DirectoryIndexPolicy(StrictSettingUpdate):
         ge=DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].minimum,
         le=DIRECTORY_INDEX_CONTRACT.policy["inactive_retention_seconds"].maximum,
     )
+    monitoring_retention_seconds: int = Field(
+        default=DIRECTORY_INDEX_CONTRACT.policy["monitoring_retention_seconds"].default,
+        ge=DIRECTORY_INDEX_CONTRACT.policy["monitoring_retention_seconds"].minimum,
+        le=DIRECTORY_INDEX_CONTRACT.policy["monitoring_retention_seconds"].maximum,
+    )
     max_retained_inactive_sources: int = Field(
         default=DIRECTORY_INDEX_CONTRACT.policy["max_retained_inactive_sources"].default,
         ge=DIRECTORY_INDEX_CONTRACT.policy["max_retained_inactive_sources"].minimum,
@@ -171,6 +176,7 @@ class DirectoryIndexSettingUpdate(StrictSettingUpdate):
     field: Literal[
         "disk_budget_bytes",
         "inactive_retention_seconds",
+        "monitoring_retention_seconds",
         "max_retained_inactive_sources",
         "page_cache_kib",
         "healthy_verification_seconds",

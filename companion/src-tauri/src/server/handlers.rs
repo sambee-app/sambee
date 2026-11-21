@@ -5742,6 +5742,19 @@ pub struct DirectorySearchQuery {
     pub include_issue_details: Option<bool>,
 }
 
+/// Read existing index status without opening a source or searching its rows.
+pub async fn directory_search_status(
+    State(state): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+) -> Result<Json<DirectorySearchStatus>, ApiError> {
+    let root = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
+    state
+        .0
+        .search_status(&drive, &root)
+        .map(Json)
+        .map_err(|error| ApiError::Internal(error.to_string()))
+}
+
 /// `GET /api/browse/{drive}/directories` — search for directories on a local drive.
 ///
 /// Starts or joins a background catalogue and queries its committed rows.
