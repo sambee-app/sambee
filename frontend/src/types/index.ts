@@ -643,6 +643,9 @@ export interface DirectorySearchStatus {
   coverage_issue_count?: number;
   issue_details_available?: boolean;
   status_message?: string | null;
+  source_unavailable?: boolean;
+  source_removable?: boolean;
+  reopen_after_ms?: number | null;
   monitoring_state?: "starting" | "healthy" | "recovering" | "unavailable" | null;
   retry_after_ms?: number | null;
   scan_progress?: ScanProgress | null;

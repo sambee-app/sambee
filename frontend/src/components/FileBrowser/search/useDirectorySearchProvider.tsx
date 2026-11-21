@@ -55,12 +55,15 @@ function directoryRetryDelay(value: unknown): number {
     : DIRECTORY_RECOVERY_INTERVAL_MS;
 }
 
-function directoryFailure(error: unknown): { terminal: boolean; delay: number } {
+function directoryFailure(error: unknown, removable = false): { terminal: boolean; delay: number } {
   const response = (error as { response?: { status?: number; data?: { detail?: { recoverable?: boolean; retry_after_ms?: number } } } })
     ?.response;
   const detail = response?.data?.detail;
   return {
-    terminal: detail?.recoverable === false || [400, 401, 403, 404, 422, 501].includes(response?.status ?? 0),
+    terminal:
+      detail?.recoverable === false ||
+      [400, 401, 403, 422, 501].includes(response?.status ?? 0) ||
+      (response?.status === 404 && !removable),
     delay: directoryRetryDelay(detail?.retry_after_ms),
   };
 }
@@ -364,6 +367,7 @@ export function useDirectorySearchProvider(
       setSourceFailure(indexFailureRef.current ? "index" : null);
       let recentResponse: RecentDirectorySearchResponse = { results: [], result_limit: recentDirectoryResultLimit };
       const lastSearch = indexResultsRef.current?.query === normalizedQuery ? indexResultsRef.current : null;
+      let removable = indexResponseRef.current?.source_removable === true;
       let directorySearchResult = queryIndex ? (lastSearch?.response ?? null) : null;
 
       const mergeResults = (): SearchResult[] => {
@@ -438,6 +442,7 @@ export function useDirectorySearchProvider(
       let recentSettled = false;
       let indexSettled = !queryIndex || terminalIndexRef.current;
       const publishPartialResults = () => {
+        if (refresh && removable && !indexSettled) return;
         const merged = mergeResults();
         if ((recentSettled && indexSettled) || merged.some((row) => row.kind === "result")) {
           onUpdate?.(merged);
@@ -461,18 +466,34 @@ export function useDirectorySearchProvider(
         if (refresh && !statusUnsupportedRef.current) {
           const status = await history.getDirectorySearchStatus(connectionId, { signal }).catch((error: unknown) => {
             // Older Companions support search but not the status route.
-            if ((error as { response?: { status?: number } })?.response?.status !== 404) throw error;
+            // A known removable drive may also disappear from the drive list until reinserted.
+            if (removable || (error as { response?: { status?: number } })?.response?.status !== 404) throw error;
             if (isCurrent()) statusUnsupportedRef.current = true;
             return null;
           });
           if (!isCurrent()) return;
           if (status) {
+            removable ||= status.source_removable === true;
             const previousPhase = indexResponseRef.current?.scan_progress?.phase;
             const finished = status.scan_progress?.phase === "idle" && previousPhase !== undefined && previousPhase !== "idle";
             indexResponseRef.current = status;
             updateIndexStatus(status);
+            const reopenAfter = status.reopen_after_ms;
+            if (reopenAfter != null) {
+              // The drive letter may now point to a different volume.
+              directorySearchResult = null;
+              indexResultsRef.current = null;
+              if (reopenAfter > 0) {
+                indexSettled = true;
+                return;
+              }
+            } else if (status.source_unavailable) {
+              indexSettled = true;
+              return;
+            }
             const revisionChanged = status.accepted_revision !== lastSearch?.response.accepted_revision;
             if (
+              reopenAfter == null &&
               status.cache_state !== "empty" &&
               lastSearch &&
               !indexFailureRef.current &&
@@ -507,7 +528,11 @@ export function useDirectorySearchProvider(
       if (!isCurrent()) return [];
       if (indexOutcome.status === "rejected") {
         indexFailureRef.current = true;
-        const failure = directoryFailure(indexOutcome.reason);
+        if (removable) {
+          directorySearchResult = null;
+          indexResultsRef.current = null;
+        }
+        const failure = directoryFailure(indexOutcome.reason, removable);
         terminalIndexRef.current = failure.terminal;
         retryDelayRef.current = failure.delay;
       }
@@ -632,9 +657,11 @@ export function useDirectorySearchProvider(
   const getRefreshIntervalMs = useCallback((): number | null => {
     const response = indexResponseRef.current;
     if (!activeIndexQueryRef.current || terminalIndexRef.current) return null;
+    if (response?.reopen_after_ms != null && response.reopen_after_ms > 0) return directoryRetryDelay(response.reopen_after_ms);
     if (indexFailureRef.current) return retryDelayRef.current;
     if (!response || response.search_contract_version !== SEARCH_CONTRACT_VERSION) return null;
     if (response.retry_after_ms != null && response.retry_after_ms > 0) return directoryRetryDelay(response.retry_after_ms);
+    if (response.source_unavailable) return DIRECTORY_RECOVERY_INTERVAL_MS;
     if (response.scan_progress && response.scan_progress.phase !== "idle") return DIRECTORY_STATUS_INTERVAL_MS;
     if (response.cache_state === "opening" || response.cache_state === "building" || response.cache_state === "updating")
       return DIRECTORY_STATUS_INTERVAL_MS;
@@ -642,6 +669,7 @@ export function useDirectorySearchProvider(
     if (lastSearch && response.accepted_revision !== lastSearch.response.accepted_revision) return DIRECTORY_STATUS_INTERVAL_MS;
     return response.cache_state === "empty" ||
       response.status_message ||
+      response.source_removable ||
       response.coverage === "uncertain" ||
       (response.monitoring_state != null && response.monitoring_state !== "healthy")
       ? DIRECTORY_RECOVERY_INTERVAL_MS

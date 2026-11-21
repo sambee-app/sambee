@@ -77,6 +77,63 @@ describe("getDirectoryResultPresentation", () => {
     }
   });
 
+  it.each([false, true])("keeps polling unavailable sources without searching before recovery (removable: %s)", async (removable) => {
+    const search = vi.mocked(api.searchDirectories).mockClear();
+    const poll = vi.mocked(api.getDirectorySearchStatus).mockClear();
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    const ready = {
+      cache_state: "ready" as const,
+      directory_count: 3,
+      search_contract_version: SEARCH_CONTRACT_VERSION,
+      accepted_revision: 5,
+      source_removable: removable,
+    };
+    search.mockResolvedValue({ ...ready, results: ["reports-old"], total_matches: 1 });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+    const signal = new AbortController().signal;
+    const fetch = async (refresh: boolean) => {
+      let rows: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+      await act(async () => {
+        rows = await result.current.fetchResults("reports", signal, undefined, refresh);
+      });
+      return rows.map((row) => row.value);
+    };
+
+    expect(await fetch(false)).toContain("directory:reports-old");
+    expect(result.current.getRefreshIntervalMs?.()).toBe(removable ? 5000 : null);
+    const unavailable = {
+      ...ready,
+      source_unavailable: true,
+      status_message: "Source unavailable",
+      reopen_after_ms: removable ? 3000 : null,
+    };
+    poll.mockResolvedValueOnce(unavailable);
+    const pausedPaths = await fetch(true);
+    if (removable) expect(pausedPaths).not.toContain("directory:reports-old");
+    expect(result.current.footerInfo?.(0)).toContain("3");
+    expect(result.current.getRefreshIntervalMs?.()).toBe(removable ? 3000 : 5000);
+    expect(search).toHaveBeenCalledTimes(1);
+
+    if (removable) {
+      poll.mockResolvedValue({ ...unavailable, reopen_after_ms: 0 });
+      search.mockRejectedValueOnce({ response: { status: 503, data: { detail: { recoverable: true, retry_after_ms: 7000 } } } });
+      expect(await fetch(true)).not.toContain("directory:reports-old");
+      expect(result.current.getRefreshIntervalMs?.()).toBe(7000);
+      poll.mockRejectedValueOnce({ response: { status: 404 } });
+      expect(await fetch(true)).not.toContain("directory:reports-old");
+      expect(result.current.getRefreshIntervalMs?.()).toBe(5000);
+      expect(search).toHaveBeenCalledTimes(2);
+      search.mockResolvedValueOnce({ ...ready, results: ["reports-current"], total_matches: 1 });
+      expect(await fetch(true)).toContain("directory:reports-current");
+      expect(search).toHaveBeenCalledTimes(3);
+    } else {
+      poll.mockResolvedValueOnce(unavailable).mockResolvedValueOnce(ready);
+      expect(await fetch(true)).toContain("directory:reports-old");
+      await fetch(true);
+      expect(search).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it.each([false, true])("links named partial coverage only when details exist (%s)", async (available) => {
     vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
     const response = {

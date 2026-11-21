@@ -163,6 +163,7 @@ class DirectorySearchStatus(BaseModel):
     coverage_issue_count: int = Field(default=0, ge=0)
     issue_details_available: bool = False
     status_message: str | None = None
+    source_unavailable: bool = False
     monitoring_state: Literal["starting", "healthy", "recovering", "unavailable"] | None = None
     retry_after_ms: int | None = Field(default=None, ge=0)
     scan_progress: ScanProgress | None = None

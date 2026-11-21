@@ -1085,6 +1085,7 @@ def _directory_search_status(
         coverage_issue_count=response.issue_count,
         issue_details_available=has_details,
         status_message=cache.scan_error,
+        source_unavailable=cache.source_unavailable,
         monitoring_state=cache.monitoring_state,
         retry_after_ms=cache.retry_after_ms,
         scan_progress=cache.scan_progress,

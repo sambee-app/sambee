@@ -1377,8 +1377,12 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
     """Disk-backed SMB source with shared scan work and bounded observations."""
 
     @property
+    def source_unavailable(self) -> bool:
+        return self._source_probe_completed.is_set() and not self._source_available.is_set()
+
+    @property
     def scan_error(self) -> str | None:
-        if self._source_probe_completed.is_set() and not self._source_available.is_set():
+        if self.source_unavailable:
             return "Directory source root is unavailable. Restore source access and retry verification."
         if self._disk_budget_error is not None:
             return self._disk_budget_error
@@ -1845,7 +1849,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             return bool(self.coordinator.issue_details)
 
     def index_status(self) -> DirectoryIndexSearch:
-        if self._opened.is_set() and self._source_available.is_set():
+        if self._opened.is_set():
             return self.index.cached_status()
         return DirectoryIndexSearch((), 0, 0, 0, "partial", None, "empty")
 
@@ -2686,8 +2690,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._source_root = await self._blocking(self._source_root.replacement)
         self._connection_cache = replacement
 
-    async def _run_rescan(self) -> None:
-        if self._dormant or self._verification_running:
+    async def _run_rescan(self, *, recover_dormant: bool = False) -> None:
+        if self._verification_running or (self._dormant and not (recover_dormant and self.source_unavailable)):
             return
         self._verification_running = True
         try:
@@ -2723,6 +2727,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                 await self._blocking(self._probe_source_root, pool=pool)
                 root_checked = True
                 if now < self._next_full_pass_at and not resumable:
+                    self._reset_retry()
                     self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
                     return
                 if self.index.needs_fts_repair:
@@ -2770,6 +2775,13 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                     await self.start_scan()
                     return
                 if self._opened.is_set():
+                    if (
+                        self._dormant
+                        and self.source_unavailable
+                        and (self.coordinator.pending or await self._blocking(self.index.has_pending_scan))
+                    ):
+                        await self._run_rescan(recover_dormant=True)
+                        continue
                     if not self._dormant and (self.index.needs_fts_repair or not self._source_available.is_set()):
                         await self._run_rescan()
                         self._verified_at = time.monotonic()

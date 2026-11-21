@@ -2404,6 +2404,67 @@ async def test_backend_dormant_source_reopens_without_scan_and_releases_when_due
 
 
 @pytest.mark.asyncio
+async def test_dormant_smb_reprobes_an_unavailable_root_before_draining_reconciliation(smb_source_cache, smb_directory_server, monkeypatch):
+    from contextlib import asynccontextmanager
+    from time import monotonic
+
+    from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+    from app.services import directory_cache
+
+    cache = smb_source_cache
+    smb_directory_server.directories["base"] = [("retained", 16)]
+    smb_directory_server.directories["base\\retained"] = []
+    cache.index.write_paths(["retained"])
+    assert cache.index.finish_generation(1)
+    cache._watcher_ready.set()
+    cache.coordinator.verification_required = False
+    cache._last_access -= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] + 1
+    manager = directory_cache.DirectoryCacheManager()
+    manager._caches[cache.connection_id] = cache
+    await manager.release_idle_caches()
+    assert cache._dormant
+    accessed = cache._last_access
+    cache.index.queue_reconciliation_parent(1, "")
+    cache._next_full_pass_at = monotonic() + 30
+    online = False
+
+    @asynccontextmanager
+    async def connect(**_kwargs):
+        if not online:
+            raise OSError("Injected unavailable SMB session.")
+        yield
+
+    monkeypatch.setattr(directory_cache, "get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connect)))
+    with pytest.raises(OSError, match="unavailable SMB session"):
+        await cache._run_reconciliation()
+    assert cache.source_unavailable
+    assert not cache.should_release()
+    online = True
+
+    ticks = 0
+
+    async def tick(_delay):
+        nonlocal ticks
+        ticks += 1
+        if ticks > 2:
+            raise asyncio.CancelledError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            directory_cache,
+            "asyncio",
+            SimpleNamespace(sleep=tick, CancelledError=asyncio.CancelledError, get_running_loop=asyncio.get_running_loop),
+        )
+        await cache._periodic_rescan_loop()
+    assert not cache.source_unavailable
+    assert not cache.index.has_pending_scan()
+    assert cache._dormant and cache._last_access == accessed
+    cache._observation_lost()
+    await manager.release_idle_caches()
+    assert manager.get_cache(cache.connection_id) is None
+
+
+@pytest.mark.asyncio
 async def test_backend_dormant_cap_releases_oldest_access(monkeypatch):
     import time
 
@@ -5623,12 +5684,23 @@ def test_directory_status_reads_existing_snapshot_and_touches_source(sqlite_cach
         "coverage_issue_count",
         "issue_details_available",
         "status_message",
+        "source_unavailable",
         "monitoring_state",
         "retry_after_ms",
         "scan_progress",
     }
     assert response.json()["directory_count"] == 1
+    assert response.json()["source_unavailable"] is False
     assert not sqlite_cache._dormant and sqlite_cache._last_access > before
+    sqlite_cache._source_available.clear()
+    unavailable = client.get(url, headers=auth_headers_user)
+    assert unavailable.status_code == 200
+    snapshot = response.json()
+    assert unavailable.json() == {
+        **snapshot,
+        "source_unavailable": True,
+        "status_message": sqlite_cache.scan_error,
+    }
     search.assert_not_called()
     create.assert_not_called()
 

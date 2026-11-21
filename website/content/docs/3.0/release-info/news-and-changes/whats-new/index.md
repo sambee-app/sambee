@@ -24,6 +24,7 @@ Sambee now shows the system health status in the top-right corner. In the built-
 
 ### Improvements
 
+- Directory search: Reopening search after 10 minutes of inactivity no longer triggers a full verification scan. The healthy verification interval defaults to 24 hours and is configurable in settings.
 - The quick bar's mode (navigate/search/command) is now visualized with a pill button.
 - Fixed result menu flickering while typing in directory navigation mode.
 
@@ -41,4 +42,3 @@ Sambee now shows the system health status in the top-right corner. In the built-
 
 - Sambee now opts out of automatic page translation in Chrome because translation may cause UI errors. To change the interface language, use **Settings** > **Appearance** > **Localization** > **Language**.
 - Companion settings sync: Pairing a new browser now moves Companion settings authority to that browser. When a browser is unpaired, authority moves to the most recently paired browser that remains. Companion repairs a missing or stale authority after restart, and browser tabs resume settings delivery automatically when they become the authority again.
-- Directory search: Reopening search after 10 minutes of inactivity no longer triggers a full verification scan. The healthy verification interval defaults to 24 hours and is configurable in settings.

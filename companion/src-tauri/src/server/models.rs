@@ -657,6 +657,10 @@ pub struct DirectorySearchStatus {
     pub coverage_issue_count: usize,
     pub issue_details_available: bool,
     pub status_message: Option<String>,
+    pub source_unavailable: bool,
+    pub source_removable: bool,
+    /// Time until a search can reopen paused media, or zero when it can retry now.
+    pub reopen_after_ms: Option<u64>,
     pub monitoring_state: Option<String>,
     pub retry_after_ms: Option<u64>,
     pub scan_progress: Option<ScanProgress>,

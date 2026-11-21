@@ -34,6 +34,7 @@
 
 - All end-user, admin, developer, and website docs live in `website/content/docs/`.
 - For all docs changes, follow the `docs-update` skill.
+- When updating "what's new" documents, focus on the benefit for the user/admin/customer. But don't bullshit. Be clear and point out what improved.
 
 ## Dependencies
 
