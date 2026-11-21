@@ -241,7 +241,7 @@ Startup validates identity and consistency before exposing rows. Damaged search 
 
 Retries are bounded. Search and status requests update last-access time, not observations or deadlines. Listing hints do not count as access. After 10 minutes without access, a healthy source can become dormant. It releases unused SQLite memory but keeps its watcher, writer, and reconciliation active. The next search makes it active without a full pass.
 
-Idle cleanup releases a source if monitoring is not healthy, the retention time expires, or full verification is due. The manager also keeps at most eight dormant sources, releasing the least recently used first. Release waits for workers, queries, pending scans, and pending observations to drain. The next access to a released source reopens it and requests verification. Shutdown retains storage and root ownership until admitted work finishes, including cancelled requests.
+Idle cleanup releases a source if monitoring is not healthy, the retention time expires, or full verification is due. The manager also keeps at most eight dormant sources, releasing the least recently used first. Release waits for workers, queries, pending scans, and pending observations to drain. If a dormant source's root becomes unavailable while reconciliation work is queued, the periodic loop probes the root again without making the source active. When the root is available again, the queued work can drain and release can continue. The next access to a released source reopens it and requests verification. Shutdown retains storage and root ownership until admitted work finishes, including cancelled requests.
 
 Backend scans wait for both resource-failure and observation-retry gates. `retry_after_ms` reports the earlier of that combined scan deadline and the next watcher retry. Queries do not move deadlines. Local stale reads use the one-second observation retry.
 
@@ -267,18 +267,26 @@ I/O logs report per-pass differences from source-owned counters: `smb_round_trip
 
 ### Quick-Bar Status Contract
 
-`GET /api/browse/{connection_id}/directories/status` returns the existing index status and accepted revision without running a search. A missing index returns `cache_state: "empty"` without opening the source. During a scan the quick bar checks status once per second. It searches again only when the committed revision changes and at least two seconds have passed since the last search. It also searches when the scan becomes idle or the source needs to reopen. Request logs use the operation name `directory_search_status`.
+`GET /api/browse/{connection_id}/directories/status` returns the existing index status and accepted revision without running a search. A missing index returns `cache_state: "empty"` without opening the source. During a scan the quick bar checks status once per second. It searches again only when the committed revision changes and at least two seconds have passed since the last search. It also searches when the scan becomes idle or paused removable media can reopen. Request logs use the operation name `directory_search_status`.
 
 Work state, coverage, verification time, and monitoring health are separate. `monitoring_state` is `starting`, `healthy`, `recovering`, or `unavailable`. `retry_after_ms` is relative to response receipt. Missing/null fields do not prove healthy monitoring.
+
+Source availability uses these fields:
+
+- `source_unavailable`: The source root or removable volume is unavailable. Status keeps the last accepted count, coverage, and revision, so the quick bar does not search only because the revision appears to change. The backend reports this state after a failed SMB root probe and recovers in the background.
+- `source_removable`: The source is removable media. Only Companion sets it.
+- `reopen_after_ms`: Companion sets this field only for paused removable media. A positive value is the remaining pause. Zero means a search can check the volume and reopen the source now.
 
 | Response or condition | Quick-bar behavior |
 |---|---|
 | Building or updating, without a retry delay | Show active work and check status again |
 | Paused work with a retry delay | Show the status message without an active-work spinner; wait before checking |
 | Empty data, uncertain coverage, or unavailable monitoring | Keep history available and continue bounded status checks |
-| Recoverable request failure | Keep accepted results for the same query, show failure, and retry |
-| Terminal or unsupported request failure | Stop automatic retries until reactivation or a source change |
-| Ready, healthy data without a warning | Stop periodic status checks |
+| Unavailable source without `reopen_after_ms` | Keep accepted results and count, show the status message, and check status again after `retry_after_ms` or five seconds without searching |
+| Paused removable media | Clear index results because the drive can hold a different volume; wait for `reopen_after_ms`, then search when it is zero |
+| Recoverable request failure | Keep accepted results for the same query, show failure, and retry; clear index results for removable media |
+| Terminal or unsupported request failure | Stop automatic retries until reactivation or a source change; a 404 for known removable media is recoverable because the drive can be missing until reinserted |
+| Ready, healthy data without a warning | Stop periodic status checks; removable media keeps five-second status checks while the menu is open |
 | Closed menu or hidden page | Stop periodic checks; reject stale responses when the query or source changes |
 
 Empty-query activation initializes status/history without a minimum search length. Retry delays are clamped to 1-60 seconds with a five-second fallback. Use `recoverable` and `retry_after_ms`, never message text, for recovery. Older responses without the shared search contract do not enable periodic checks. Source, history-client, storage-capability, and request-sequence bindings reject stale results and timing.
