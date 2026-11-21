@@ -69,6 +69,8 @@ pub struct PairingState {
     pending: Mutex<HashMap<String, PendingPairing>>,
     /// Timestamp of the last pairing-window creation.
     last_initiated_at: Mutex<Option<Instant>>,
+    /// Serializes paired-origin and settings-authority updates.
+    origin_updates: Mutex<()>,
     /// Origins that have completed pairing (cached from keychain).
     paired_origins: Mutex<Vec<String>>,
     authority: Mutex<SettingsAuthority>,
@@ -115,6 +117,10 @@ impl PairingState {
     }
 
     pub fn migrate_settings_authority(&self, legacy_origin: Option<&str>) -> Result<(), String> {
+        let _origin_updates = self
+            .origin_updates
+            .lock()
+            .map_err(|_| "Pairing state is unavailable. Restart the Companion.".to_owned())?;
         let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_SETTINGS_AUTHORITY_ACCOUNT)
             .map_err(|error| format!("Settings authority storage is unavailable: {error}"))?;
         match entry.get_password() {
@@ -144,6 +150,7 @@ impl PairingState {
         Self {
             pending: Mutex::new(HashMap::new()),
             last_initiated_at: Mutex::new(None),
+            origin_updates: Mutex::new(()),
             paired_origins: Mutex::new(Vec::new()),
             authority: Mutex::new(SettingsAuthority::default()),
             download_intents: Mutex::new(HashMap::new()),
@@ -170,6 +177,7 @@ impl PairingState {
         Self {
             pending: Mutex::new(HashMap::new()),
             last_initiated_at: Mutex::new(None),
+            origin_updates: Mutex::new(()),
             paired_origins: Mutex::new(Vec::new()),
             authority: Mutex::new(SettingsAuthority::default()),
             download_intents: Mutex::new(HashMap::new()),
@@ -198,6 +206,22 @@ impl PairingState {
 
     /// Record an origin that has proven it holds a valid pairing secret.
     pub fn record_verified_origin(&self, origin: &str, reason: VerifiedOriginRecordReason) {
+        let _origin_updates = match self.origin_updates.lock() {
+            Ok(guard) => guard,
+            Err(error) => {
+                warn!("Failed to record verified origin {origin}: pairing state is unavailable: {error}");
+                return;
+            }
+        };
+        self.record_verified_origin_locked(origin, reason);
+    }
+
+    fn record_verified_origin_locked(&self, origin: &str, reason: VerifiedOriginRecordReason) {
+        if matches!(reason, VerifiedOriginRecordReason::RecoveredFromAuthenticatedRequest) && get_secret_from_keychain(origin).is_err() {
+            warn!("Skipped recovery of paired origin {origin}: its pairing secret is no longer available");
+            return;
+        }
+
         let mut origins = self.paired_origins.lock().unwrap();
         if let Some(index) = origins.iter().position(|entry| entry == origin) {
             if matches!(reason, VerifiedOriginRecordReason::PairingCompleted) {
@@ -362,6 +386,10 @@ impl PairingState {
         }
 
         drop(pending); // Release lock before keychain operations
+        let _origin_updates = self
+            .origin_updates
+            .lock()
+            .map_err(|_| "Pairing state is unavailable. Restart the Companion.".to_owned())?;
 
         // Generate shared secret
         let secret_bytes: Vec<u8> = (0..32).map(|_| rand_byte()).collect();
@@ -374,7 +402,7 @@ impl PairingState {
         }
 
         // Add to cached paired origins
-        self.record_verified_origin(&pairing.origin, VerifiedOriginRecordReason::PairingCompleted);
+        self.record_verified_origin_locked(&pairing.origin, VerifiedOriginRecordReason::PairingCompleted);
 
         self.set_settings_authority(Some(&pairing.origin))?;
 
@@ -449,6 +477,10 @@ impl PairingState {
 
     /// Remove pairing for a specific origin.
     pub fn unpair(&self, origin: &str) -> Result<(), String> {
+        let _origin_updates = self
+            .origin_updates
+            .lock()
+            .map_err(|_| "Pairing state is unavailable. Restart the Companion.".to_owned())?;
         let origins = self.get_paired_origins();
         let mut remaining = origins.clone();
         remaining.retain(|paired| paired != origin);
@@ -548,6 +580,7 @@ fn rand_byte() -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Barrier};
     use std::thread::sleep;
 
     use super::*;
@@ -637,8 +670,14 @@ mod tests {
             "https://third.example".to_string(),
         ];
         assert_eq!(fallback_authority(&[], None), None);
-        assert_eq!(fallback_authority(&origins, Some("https://third.example")), Some("https://second.example"));
-        assert_eq!(fallback_authority(&origins, Some("https://first.example")), Some("https://third.example"));
+        assert_eq!(
+            fallback_authority(&origins, Some("https://third.example")),
+            Some("https://second.example")
+        );
+        assert_eq!(
+            fallback_authority(&origins, Some("https://first.example")),
+            Some("https://third.example")
+        );
     }
 
     #[test]
@@ -655,16 +694,43 @@ mod tests {
     }
 
     #[test]
-    fn unpair_moves_authority_to_most_recent_remaining_origin() {
+    fn concurrent_pairing_and_unpairing_preserve_new_authority() {
         keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
-        let pairing = PairingState::new_with_limits(Duration::ZERO, 1);
-        pairing.record_verified_origin("https://first.example", VerifiedOriginRecordReason::PairingCompleted);
-        pairing.record_verified_origin("https://second.example", VerifiedOriginRecordReason::PairingCompleted);
-        pairing.set_test_authority(Some("https://second.example"));
+        let pairing = Arc::new(PairingState::new_with_limits(Duration::ZERO, 1));
+        let first = "https://first.example";
+        let second = "https://second.example";
+        let third = "https://third.example";
+        pairing.record_verified_origin(first, VerifiedOriginRecordReason::PairingCompleted);
+        pairing.record_verified_origin(second, VerifiedOriginRecordReason::PairingCompleted);
+        pairing.set_test_authority(Some(second));
 
-        pairing.unpair("https://second.example").unwrap();
+        let (pairing_id, _, _) = pairing.initiate(NONCE_C, third).unwrap();
+        pairing.companion_confirm(&pairing_id).unwrap();
 
-        assert_eq!(pairing.settings_authority().unwrap().origin.as_deref(), Some("https://first.example"));
+        let barrier = Arc::new(Barrier::new(3));
+        let pairing_to_confirm = Arc::clone(&pairing);
+        let confirm_barrier = Arc::clone(&barrier);
+        let confirm = std::thread::spawn(move || {
+            confirm_barrier.wait();
+            pairing_to_confirm.confirm(&pairing_id, third).unwrap();
+        });
+
+        let pairing_to_unpair = Arc::clone(&pairing);
+        let unpair_barrier = Arc::clone(&barrier);
+        let unpair = std::thread::spawn(move || {
+            unpair_barrier.wait();
+            pairing_to_unpair.unpair(second).unwrap();
+        });
+
+        barrier.wait();
+        confirm.join().unwrap();
+        unpair.join().unwrap();
+
+        assert_eq!(pairing.get_paired_origins(), vec![first.to_string(), third.to_string()]);
+        assert_eq!(pairing.settings_authority().unwrap().origin.as_deref(), Some(third));
+
+        pairing.record_verified_origin(second, VerifiedOriginRecordReason::RecoveredFromAuthenticatedRequest);
+        assert_eq!(pairing.get_paired_origins(), vec![first.to_string(), third.to_string()]);
     }
 
     #[test]
@@ -676,6 +742,9 @@ mod tests {
 
         pairing.migrate_settings_authority(None).unwrap();
 
-        assert_eq!(pairing.settings_authority().unwrap().origin.as_deref(), Some("https://second.example"));
+        assert_eq!(
+            pairing.settings_authority().unwrap().origin.as_deref(),
+            Some("https://second.example")
+        );
     }
 }
