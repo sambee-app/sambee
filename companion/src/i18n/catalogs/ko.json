@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "신뢰할 수 있는 이 브라우저 출처는 Companion을 통해 로컬 드라이브에 액세스할 수 있습니다. 출처를 제거하면 해당 출처가 권한을 다시 요청해야 합니다.",
     "pairedBrowsersEmpty": "Companion이 신뢰하는 브라우저 출처가 없습니다.",
+    "settingsSource": {
+      "label": "설정 원본",
+      "none": "서버 없음",
+      "managesSettings": "설정 관리"
+    },
     "directoryPolicy": {
       "title": "관리되는 설정",
       "loading": "폴더 검색 정책 상태를 불러오는 중입니다.",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "신뢰할 수 있는 Sambee 브라우저 출처에서 마지막으로 동기화한 언어 및 지역 설정을 표시합니다.",
     "localizationStatus": {
       "syncedBadge": "브라우저에서 동기화됨",
+      "waitingBadge": "대기 중",
+      "failedBadge": "실패",
+      "noneBadge": "없음",
       "languageLabel": "언어",
       "regionalLocaleLabel": "지역 형식",
       "updatedAtLabel": "마지막 업데이트",
-      "sourceOriginLabel": "동기화 출처",
+      "appliedFromLabel": "적용 출처",
       "empty": "브라우저에서 동기화된 언어 및 지역 설정이 아직 없습니다."
     },
     "unpairTitle": "신뢰할 수 있는 출처 제거",

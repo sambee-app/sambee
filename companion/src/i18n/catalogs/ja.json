@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "これらの信頼済みのオリジンは、Companion を通じてローカルドライブにアクセスできます。オリジンを削除すると、そのオリジンから再度許可を求める必要があります。",
     "pairedBrowsersEmpty": "信頼済みのブラウザーオリジンはありません。",
+    "settingsSource": {
+      "label": "設定元",
+      "none": "サーバーなし",
+      "managesSettings": "設定を管理"
+    },
     "directoryPolicy": {
       "title": "管理対象の設定",
       "loading": "フォルダー検索ポリシーの状態を読み込み中です。",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "信頼済みの Sambee のブラウザーオリジンから最後に同期された言語と地域の設定を表示します。",
     "localizationStatus": {
       "syncedBadge": "ブラウザーから同期済み",
+      "waitingBadge": "待機中",
+      "failedBadge": "失敗",
+      "noneBadge": "なし",
       "languageLabel": "言語",
       "regionalLocaleLabel": "地域形式",
       "updatedAtLabel": "最終更新",
-      "sourceOriginLabel": "同期元のオリジン",
+      "appliedFromLabel": "適用元",
       "empty": "ブラウザーから言語と地域の設定がまだ同期されていません。"
     },
     "unpairTitle": "信頼済みのオリジンを削除",

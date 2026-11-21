@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../i18n";
 import type { UserPreferences } from "../../stores/userPreferences";
@@ -68,12 +68,14 @@ describe("Preferences", () => {
         return {
           status: "synchronized",
           authoritative_origin: "https://owner.example",
+          results: { localization: "defaults_active" },
           sections: { directory_index: { marker: "3" } },
           message: null,
         };
     });
     render(<Preferences onClose={vi.fn()} />);
-    expect(await screen.findByText("https://owner.example")).toBeInTheDocument();
+    expect((await screen.findAllByText("https://owner.example")).length).toBeGreaterThan(0);
+    expect(await screen.findByText(translate("preferences.localizationStatus.waitingBadge"))).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reset Policy Owner" })).not.toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalledWith("reset_native_directory_policy_owner");
   });
@@ -122,6 +124,15 @@ describe("Preferences", () => {
           source_origin: "https://example.test",
         });
       }
+      if (command === "get_native_directory_policy_status") {
+        return Promise.resolve({
+          status: "synchronized",
+          authoritative_origin: "https://example.test",
+          results: { localization: "synchronized" },
+          sections: { localization: { result: "synchronized", origin: "https://example.test" } },
+          message: null,
+        });
+      }
 
       return Promise.resolve(undefined);
     });
@@ -136,13 +147,14 @@ describe("Preferences", () => {
     expect(screen.getByText(translate("preferences.sections.pairedBrowsers"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.sections.localization"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.localizationStatus.syncedBadge"))).toBeInTheDocument();
+    expect(screen.getByText(translate("preferences.localizationStatus.appliedFromLabel"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.sections.editingBehavior"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.sections.startup"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.sections.updates"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.sections.notifications"))).toBeInTheDocument();
     expect(screen.getByText("en-XA")).toBeInTheDocument();
     expect(screen.getByText("en-GB")).toBeInTheDocument();
-    expect(screen.getAllByText("https://example.test")).toHaveLength(2);
+    expect(screen.getAllByText("https://example.test")).toHaveLength(4);
 
     fireEvent.click(screen.getByRole("button", { name: translate("preferences.unpairButton") }));
 
@@ -233,6 +245,139 @@ describe("Preferences", () => {
     });
 
     expect(screen.getByText("No browser localization has been synchronized yet.")).toBeInTheDocument();
+    expect(screen.getByText(translate("preferences.localizationStatus.noneBadge"))).toBeInTheDocument();
+  });
+
+  it("shows a localization failure before any localization has been applied", async () => {
+    const prefs: UserPreferences = {
+      allowedServers: [],
+      uploadConflictAction: "ask",
+      autoStartOnLogin: false,
+      showNotifications: true,
+      companionUpdateChannel: "stable",
+      tempFileRetentionDays: 7,
+    };
+
+    getUserPreferencesMock.mockResolvedValue(prefs);
+    isAutostartEnabledMock.mockResolvedValue(false);
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_paired_origins") return Promise.resolve([]);
+      if (command === "get_synced_localization") return Promise.resolve(null);
+      if (command === "get_native_directory_policy_status") {
+        return Promise.resolve({
+          status: "delivery_failed",
+          authoritative_origin: "https://example.test",
+          results: { localization: "delivery_failed" },
+          sections: {},
+          message: "Localization delivery failed.",
+        });
+      }
+
+      return Promise.resolve(undefined);
+    });
+
+    render(<Preferences onClose={vi.fn()} />);
+
+    expect(await screen.findByText(translate("preferences.localizationStatus.failedBadge"))).toBeInTheDocument();
+    expect(await screen.findByText("Localization delivery failed.")).toBeInTheDocument();
+  });
+
+  it("refreshes settings authority when the native status event fires", async () => {
+    const prefs: UserPreferences = {
+      allowedServers: [],
+      uploadConflictAction: "ask",
+      autoStartOnLogin: false,
+      showNotifications: true,
+      companionUpdateChannel: "stable",
+      tempFileRetentionDays: 7,
+    };
+    let authority = "https://first.example";
+    let statusChangedListener: ((event: { event: string; id: number; payload: null }) => void) | undefined;
+
+    getUserPreferencesMock.mockResolvedValue(prefs);
+    isAutostartEnabledMock.mockResolvedValue(false);
+    listenMock.mockImplementation((_event, listener) => {
+      statusChangedListener = listener;
+      return Promise.resolve(vi.fn());
+    });
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_paired_origins") return Promise.resolve(["https://first.example", "https://second.example"]);
+      if (command === "get_synced_localization") return Promise.resolve(null);
+      if (command === "get_native_directory_policy_status") {
+        return Promise.resolve({
+          status: "synchronized",
+          authoritative_origin: authority,
+          results: { localization: "defaults_active" },
+          sections: {},
+          message: null,
+        });
+      }
+
+      return Promise.resolve(undefined);
+    });
+
+    render(<Preferences onClose={vi.fn()} />);
+    expect((await screen.findAllByText("https://first.example")).length).toBeGreaterThan(0);
+
+    authority = "https://second.example";
+    await act(async () => {
+      statusChangedListener?.({ event: "settings-status-changed", id: 1, payload: null });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://second.example").length).toBeGreaterThan(0);
+      expect(screen.getByText(translate("preferences.settingsSource.managesSettings"))).toBeInTheDocument();
+    });
+  });
+
+  it("reloads paired origins and authority after unpairing", async () => {
+    const prefs: UserPreferences = {
+      allowedServers: [],
+      uploadConflictAction: "ask",
+      autoStartOnLogin: false,
+      showNotifications: true,
+      companionUpdateChannel: "stable",
+      tempFileRetentionDays: 7,
+    };
+    let unpaired = false;
+    let pairedOriginReads = 0;
+    getUserPreferencesMock.mockResolvedValue(prefs);
+    isAutostartEnabledMock.mockResolvedValue(false);
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_paired_origins") {
+        pairedOriginReads += 1;
+        return Promise.resolve(unpaired ? ["https://first.example"] : ["https://first.example", "https://second.example"]);
+      }
+      if (command === "get_synced_localization") return Promise.resolve(null);
+      if (command === "get_native_directory_policy_status") {
+        return Promise.resolve({
+          status: "synchronized",
+          authoritative_origin: unpaired ? "https://first.example" : "https://second.example",
+          results: { localization: "defaults_active" },
+          sections: {},
+          message: null,
+        });
+      }
+      if (command === "unpair_origin") {
+        unpaired = true;
+        return Promise.resolve(undefined);
+      }
+
+      return Promise.resolve(undefined);
+    });
+
+    render(<Preferences onClose={vi.fn()} />);
+    await screen.findAllByText("https://second.example");
+    fireEvent.click(screen.getAllByRole("button", { name: translate("preferences.unpairButton") })[1]!);
+    await screen.findByRole("heading", { name: translate("preferences.confirmUnpair.title") });
+    const unpairButtons = await screen.findAllByRole("button", { name: translate("preferences.unpairButton") });
+    fireEvent.click(unpairButtons[unpairButtons.length - 1]!);
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://first.example").length).toBeGreaterThan(0);
+      expect(screen.queryByText("https://second.example")).not.toBeInTheDocument();
+    });
+    expect(pairedOriginReads).toBeGreaterThan(1);
   });
 
   it("requires confirmation before switching away from stable update channel", async () => {

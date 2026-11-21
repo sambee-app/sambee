@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use log::info;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
-use crate::server::pairing::PairingState;
+use crate::server::pairing::{PairingState, SETTINGS_STATUS_CHANGED_EVENT};
 
 /// Mark a pending pairing as approved on the companion side.
 #[tauri::command]
@@ -41,8 +41,9 @@ pub fn get_paired_origins(pairing_state: State<'_, Arc<PairingState>>) -> Vec<St
 
 /// Remove a previously trusted browser origin.
 #[tauri::command]
-pub fn unpair_origin(pairing_state: State<'_, Arc<PairingState>>, origin: String) -> Result<(), String> {
+pub fn unpair_origin(app: AppHandle, pairing_state: State<'_, Arc<PairingState>>, origin: String) -> Result<(), String> {
     pairing_state.unpair(&origin)?;
+    let _ = app.emit(SETTINGS_STATUS_CHANGED_EVENT, ());
     info!("Trusted browser origin removed from companion preferences: {}", origin);
     Ok(())
 }

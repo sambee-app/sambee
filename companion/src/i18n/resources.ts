@@ -160,6 +160,11 @@ export const EN_TRANSLATIONS = {
     pairedBrowsersHint:
       "These trusted browser origins can access local drives through this companion. Removing one forces that origin to request approval again.",
     pairedBrowsersEmpty: "No browser origins are currently trusted by this companion.",
+    settingsSource: {
+      label: "Settings source",
+      none: "No server",
+      managesSettings: "Manages settings",
+    },
     directoryPolicy: {
       title: "Managed Settings",
       loading: "Directory policy status is loading.",
@@ -174,10 +179,13 @@ export const EN_TRANSLATIONS = {
     localizationStatusHint: "Shows the last localization synchronized from a trusted Sambee browser origin.",
     localizationStatus: {
       syncedBadge: "Synced from browser",
+      waitingBadge: "Waiting",
+      failedBadge: "Failed",
+      noneBadge: "None",
       languageLabel: "Language",
       regionalLocaleLabel: "Regional locale",
       updatedAtLabel: "Last updated",
-      sourceOriginLabel: "Source origin",
+      appliedFromLabel: "Applied from",
       empty: "No browser localization has been synchronized yet.",
     },
     unpairTitle: "Remove trusted origin",

@@ -284,14 +284,20 @@ describe("shared Companion settings lifecycle", () => {
     expect(mocks.grant).toHaveBeenCalledWith(expect.objectContaining({ switch_user: true }), expect.anything());
   });
 
-  it("does not continuously retry an authority conflict", async () => {
+  it("continues checking and delivers when authority moves back", async () => {
     mocks.status.mockResolvedValue({ ...status(), authoritative_origin: "https://other.example", status: "authority_conflict" });
     companionSettingsSync.start();
     await settle();
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(mocks.metadata).toHaveBeenCalledOnce();
+    expect(mocks.status.mock.calls.length).toBeGreaterThan(1);
     expect(mocks.grant).not.toHaveBeenCalled();
-    expect(companionSettingsSync.getSnapshot().phase).toBe("authority_conflict");
+    const recovered = status();
+    recovered.sections.theme!.marker = "old";
+    mocks.status.mockResolvedValue(recovered);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settle();
+    expect(mocks.grant).toHaveBeenCalled();
+    expect(companionSettingsSync.getSnapshot().phase).toBe("synchronized");
   });
 
   it("reports update required for an incompatible Companion", async () => {

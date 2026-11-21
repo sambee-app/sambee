@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "Dessa betrodda webbläsarursprung kan komma åt lokala enheter via Companion. Om du tar bort ett ursprung måste det begära åtkomst igen.",
     "pairedBrowsersEmpty": "Companion litar för närvarande inte på något webbläsarursprung.",
+    "settingsSource": {
+      "label": "Inställningskälla",
+      "none": "Ingen server",
+      "managesSettings": "Hanterar inställningar"
+    },
     "directoryPolicy": {
       "title": "Hanterade inställningar",
       "loading": "Läser in status för reglerna för mappsökning.",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "Visar de senaste språk- och regioninställningarna som synkroniserades från ett betrott Sambee-ursprung i webbläsaren.",
     "localizationStatus": {
       "syncedBadge": "Synkroniserat från webbläsaren",
+      "waitingBadge": "Väntar",
+      "failedBadge": "Misslyckades",
+      "noneBadge": "Ingen",
       "languageLabel": "Språk",
       "regionalLocaleLabel": "Regionalt format",
       "updatedAtLabel": "Senast uppdaterat",
-      "sourceOriginLabel": "Synkroniseringens ursprung",
+      "appliedFromLabel": "Tillämpat från",
       "empty": "Inga språk- och regioninställningar har ännu synkroniserats från webbläsaren."
     },
     "unpairTitle": "Ta bort betrott ursprung",

@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "Estos orígenes de navegador de confianza pueden acceder a las unidades locales a través de Companion. Si quitas un origen, deberá solicitar autorización de nuevo.",
     "pairedBrowsersEmpty": "Companion todavía no confía en ningún origen de navegador.",
+    "settingsSource": {
+      "label": "Origen de configuración",
+      "none": "Ningún servidor",
+      "managesSettings": "Administra la configuración"
+    },
     "directoryPolicy": {
       "title": "Configuración administrada",
       "loading": "Cargando el estado de las reglas de búsqueda de carpetas.",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "Muestra la última configuración de idioma y región sincronizada desde un origen de navegador de confianza de Sambee.",
     "localizationStatus": {
       "syncedBadge": "Sincronizado desde el navegador",
+      "waitingBadge": "En espera",
+      "failedBadge": "Error",
+      "noneBadge": "Ninguno",
       "languageLabel": "Idioma",
       "regionalLocaleLabel": "Formato regional",
       "updatedAtLabel": "Última actualización",
-      "sourceOriginLabel": "Origen de la sincronización",
+      "appliedFromLabel": "Aplicado desde",
       "empty": "Todavía no se ha sincronizado la configuración de idioma y región desde el navegador."
     },
     "unpairTitle": "Quitar origen de confianza",

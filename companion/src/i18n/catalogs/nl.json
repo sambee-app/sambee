@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "Deze vertrouwde browserherkomsten hebben via Companion toegang tot lokale schijven. Als je een herkomst verwijdert, moet die opnieuw om toestemming vragen.",
     "pairedBrowsersEmpty": "Companion vertrouwt momenteel geen browserherkomsten.",
+    "settingsSource": {
+      "label": "Instellingenbron",
+      "none": "Geen server",
+      "managesSettings": "Beheert instellingen"
+    },
     "directoryPolicy": {
       "title": "Beheerde instellingen",
       "loading": "De status van het zoekbeleid voor mappen wordt geladen.",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "Toont welke taal- en regio-instellingen voor het laatst zijn gesynchroniseerd vanuit een vertrouwde browserherkomst van Sambee.",
     "localizationStatus": {
       "syncedBadge": "Gesynchroniseerd vanuit de browser",
+      "waitingBadge": "Wachten",
+      "failedBadge": "Mislukt",
+      "noneBadge": "Geen",
       "languageLabel": "Taal",
       "regionalLocaleLabel": "Regionale notatie",
       "updatedAtLabel": "Laatst bijgewerkt",
-      "sourceOriginLabel": "Herkomst van de synchronisatie",
+      "appliedFromLabel": "Toegepast vanuit",
       "empty": "Er zijn nog geen taal- en regio-instellingen gesynchroniseerd vanuit de browser."
     },
     "unpairTitle": "Vertrouwde herkomst verwijderen",

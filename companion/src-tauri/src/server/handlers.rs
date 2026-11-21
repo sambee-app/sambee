@@ -26,7 +26,7 @@ use http_body_util::BodyExt;
 use log::{info, warn};
 use reqwest::{Client, Response as ReqwestResponse};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, ReadBuf};
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
@@ -515,6 +515,7 @@ pub async fn pair_confirm(
 ) -> Result<Json<PairConfirmResponse>, ApiError> {
     let origin = resolve_pair_confirm_origin(&headers, body.origin.as_deref())?;
     let secret = state.pairing.confirm(&body.pairing_id, &origin).map_err(map_pair_confirm_error)?;
+    let _ = state.app.emit(super::pairing::SETTINGS_STATUS_CHANGED_EVENT, ());
 
     show_pairing_success(&state.app);
 
@@ -568,6 +569,7 @@ pub async fn pair_cancel(
 pub async fn delete_current_pairing(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<StatusCode, ApiError> {
     let origin = extract_origin(&headers)?;
     state.pairing.unpair(&origin).map_err(ApiError::BadRequest)?;
+    let _ = state.app.emit(super::pairing::SETTINGS_STATUS_CHANGED_EVENT, ());
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -5726,6 +5728,7 @@ pub async fn companion_settings_redeem(
             log::warn!("Settings delivery failure could not be recorded: {record_error}");
         }
     }
+    let _ = state.app.emit(super::pairing::SETTINGS_STATUS_CHANGED_EVENT, ());
     result.map(Json)
 }
 
@@ -8026,7 +8029,7 @@ mod tests {
     use crate::server::models::{ArchiveContractVersion, ArchiveCreationResponse, FileType, PublicPairingStatus};
     #[cfg(unix)]
     use crate::server::models::{LinkKind, LinkTargetState, LinkTargetType};
-    use crate::server::pairing::{PairingState, VerifiedOriginRecordReason};
+    use crate::server::pairing::PairingState;
     use crate::server::target_resolution::TargetResolutionPolicy;
 
     #[test]
@@ -8051,6 +8054,8 @@ mod tests {
     #[test]
     fn unpair_revokes_only_its_download_intents() {
         let pairing = PairingState::new();
+        pairing.set_test_authority(Some("https://first.example"));
+        pairing.set_test_authority(Some("https://second.example"));
         *pairing.download_intents.lock().unwrap() = std::collections::HashMap::from([
             (
                 "revoked".to_string(),
@@ -8073,8 +8078,10 @@ mod tests {
                 },
             ),
         ]);
-        pairing.unpair("https://first.example").unwrap();
-        pairing.record_verified_origin("https://first.example", VerifiedOriginRecordReason::PairingCompleted);
+        pairing.unpair_for_test("https://first.example").unwrap();
+        assert!(!pairing.is_origin_paired("https://first.example"));
+        assert!(pairing.is_origin_paired("https://second.example"));
+        pairing.set_test_authority(Some("https://first.example"));
         assert!(matches!(
             super::consume_download_intent(&pairing.download_intents, "revoked"),
             Err(ApiError::NotFound(_))

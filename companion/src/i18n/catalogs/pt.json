@@ -55,6 +55,11 @@
     },
     "pairedBrowsersHint": "Estas origens confiáveis do navegador podem acessar unidades locais por meio de Companion. Ao remover uma origem, ela precisará pedir autorização novamente.",
     "pairedBrowsersEmpty": "Companion ainda não confia em nenhuma origem do navegador.",
+    "settingsSource": {
+      "label": "Origem das configurações",
+      "none": "Nenhum servidor",
+      "managesSettings": "Gerencia as configurações"
+    },
     "directoryPolicy": {
       "title": "Configurações geridas",
       "loading": "Carregando o estado da política de pesquisa de pastas.",
@@ -68,10 +73,13 @@
     "localizationStatusHint": "Mostra as últimas configurações de idioma e região sincronizadas a partir de uma origem confiável do navegador para Sambee.",
     "localizationStatus": {
       "syncedBadge": "Sincronizado a partir do navegador",
+      "waitingBadge": "Aguardando",
+      "failedBadge": "Falhou",
+      "noneBadge": "Nenhuma",
       "languageLabel": "Idioma",
       "regionalLocaleLabel": "Formato regional",
       "updatedAtLabel": "Última atualização",
-      "sourceOriginLabel": "Origem da sincronização",
+      "appliedFromLabel": "Aplicado de",
       "empty": "Ainda não houve sincronização do idioma e da região a partir do navegador."
     },
     "unpairTitle": "Remover origem confiável",
