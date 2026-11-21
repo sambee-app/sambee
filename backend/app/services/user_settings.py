@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from datetime import datetime, timezone
 from json import JSONDecodeError
@@ -11,6 +10,7 @@ from typing import Literal, cast, get_args
 from sqlmodel import Session, col, select
 
 from app.core.logging import get_logger
+from app.core.regional_locale import require_regional_locale
 from app.core.user_setting_definitions import (
     DEFAULT_FILE_BROWSER_VIEW_MODE,
     DEFAULT_IMAGE_VIEWER_TRANSITION,
@@ -54,7 +54,6 @@ VALID_IMAGE_VIEWER_TRANSITIONS = {"carousel", "none"}
 MIN_TEXT_EDITOR_MAX_FILE_SIZE_BYTES = 65_536
 MAX_TEXT_EDITOR_MAX_FILE_SIZE_BYTES = 104_857_600
 VALID_LANGUAGE_PREFERENCES = {*get_args(CatalogLanguage), DEFAULT_LANGUAGE_PREFERENCE, "en-XA"}
-REGIONAL_LOCALE_PATTERN = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
 BUILT_IN_THEME_IDS_PATHS = (
     Path(__file__).resolve().parents[3] / "shared" / "built_in_theme_ids.json",
     Path(__file__).resolve().parents[2] / "shared" / "built_in_theme_ids.json",
@@ -101,10 +100,7 @@ def _normalize_regional_locale(raw_value: str | None) -> str:
     if normalized == DEFAULT_REGIONAL_LOCALE_PREFERENCE:
         return DEFAULT_REGIONAL_LOCALE_PREFERENCE
 
-    if REGIONAL_LOCALE_PATTERN.fullmatch(normalized):
-        return normalized
-
-    raise ValueError("Regional locale must be a valid locale identifier like en-US")
+    return require_regional_locale(normalized)
 
 
 def _parse_regional_locale_preference(raw_value: str | None) -> str:

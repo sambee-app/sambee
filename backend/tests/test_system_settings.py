@@ -147,9 +147,12 @@ def test_directory_policy_origin_accepts_exact_utf8_byte_limit():
     assert len(binding.origin.encode("utf-8")) == MAX_DIRECTORY_POLICY_ORIGIN_BYTES
 
 
+COMPANION_GRANT_URL = "/api/admin/settings/companion/grants?browser_regional_locale=en-US"
+
+
 def test_directory_policy_grant_is_single_use_and_returns_backend_policy(client, auth_headers_admin):
     binding = _policy_grant_binding()
-    issued = client.post("/api/admin/settings/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
+    issued = client.post(COMPANION_GRANT_URL, headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
     assert issued.status_code == 200
     redeem = {**binding, "grant": issued.json()["grant"]}
     desired = client.get("/api/admin/settings/directory-index/companion", headers=auth_headers_admin)
@@ -168,7 +171,7 @@ def test_directory_policy_grant_limits_each_user(client, auth_headers_admin, mon
     monkeypatch.setattr(directory_policy_grants, "MAX_DIRECTORY_POLICY_GRANTS_PER_USER", 1)
     binding = _policy_grant_binding()
     headers = {**auth_headers_admin, "Origin": binding["origin"]}
-    endpoint = "/api/admin/settings/companion/grants"
+    endpoint = COMPANION_GRANT_URL
     assert client.post(endpoint, headers=headers, json=binding).status_code == 200
     response = client.post(endpoint, headers=headers, json=binding)
     assert response.status_code == 429
@@ -235,7 +238,7 @@ def test_directory_policy_grant_rechecks_current_administrator(client, auth_head
     from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
 
     binding = _policy_grant_binding()
-    issued = client.post("/api/admin/settings/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
+    issued = client.post(COMPANION_GRANT_URL, headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
     assert issued.status_code == 200
     if permission_change == "role":
         admin_user.role = UserRole.EDITOR
@@ -256,7 +259,7 @@ def test_directory_policy_grant_ledger_expiry_and_browser_tokens_are_refused(cli
     from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
 
     binding = _policy_grant_binding()
-    issued = client.post("/api/admin/settings/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
+    issued = client.post(COMPANION_GRANT_URL, headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding)
     assert issued.status_code == 200
     ordinary = client.post("/api/admin/settings/companion/grants/redeem", json={**binding, "grant": admin_token})
     assert ordinary.status_code in {401, 403, 426}
@@ -275,9 +278,7 @@ def test_directory_policy_grant_ledger_expiry_and_browser_tokens_are_refused(cli
 )
 def test_directory_policy_grant_rejects_changed_bindings(client, auth_headers_admin, field, value):
     binding = _policy_grant_binding()
-    issued = client.post(
-        "/api/admin/settings/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
-    ).json()
+    issued = client.post(COMPANION_GRANT_URL, headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding).json()
     binding[field] = value
     assert client.post("/api/admin/settings/companion/grants/redeem", json={**binding, "grant": issued["grant"]}).status_code == 403
 
@@ -287,9 +288,7 @@ def test_directory_policy_grant_refuses_signed_claim_substitution_without_consum
     from app.core.security import create_access_token, decode_access_token
 
     binding = _policy_grant_binding()
-    issued = client.post(
-        "/api/admin/settings/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
-    ).json()
+    issued = client.post(COMPANION_GRANT_URL, headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding).json()
     claims = decode_access_token(issued["grant"])
     assert claims is not None
     claims[claim] = "substituted"
@@ -300,9 +299,7 @@ def test_directory_policy_grant_refuses_signed_claim_substitution_without_consum
 
 def test_directory_policy_grant_cannot_authenticate_browser_or_deliver_extra_policy(client, auth_headers_admin):
     binding = _policy_grant_binding()
-    issued = client.post(
-        "/api/admin/settings/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
-    ).json()
+    issued = client.post(COMPANION_GRANT_URL, headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding).json()
     assert client.get("/api/auth/me", headers={"Authorization": "Bearer " + issued["grant"]}).status_code == 401
     assert (
         client.post(
@@ -315,21 +312,14 @@ def test_directory_policy_grant_cannot_authenticate_browser_or_deliver_extra_pol
 
 def test_directory_policy_grant_accepts_nonadministrator_and_rejects_nonloopback_http(client, auth_headers_user):
     binding = _policy_grant_binding()
-    assert (
-        client.post(
-            "/api/admin/settings/companion/grants", headers={**auth_headers_user, "Origin": binding["origin"]}, json=binding
-        ).status_code
-        == 200
-    )
+    assert client.post(COMPANION_GRANT_URL, headers={**auth_headers_user, "Origin": binding["origin"]}, json=binding).status_code == 200
     binding["origin"] = "http://untrusted.example"
     assert client.post("/api/admin/settings/companion/grants/redeem", json={**binding, "grant": "invalid"}).status_code == 422
 
 
 def test_directory_policy_grant_rejects_changed_desired_revision(client, auth_headers_admin):
     binding = _policy_grant_binding()
-    issued = client.post(
-        "/api/admin/settings/companion/grants", headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding
-    ).json()
+    issued = client.post(COMPANION_GRANT_URL, headers={**auth_headers_admin, "Origin": binding["origin"]}, json=binding).json()
     client.put("/api/admin/settings/directory-index/companion", headers=auth_headers_admin, json={"field": "page_cache_kib", "value": 1024})
     assert client.post("/api/admin/settings/companion/grants/redeem", json={**binding, "grant": issued["grant"]}).status_code == 409
 

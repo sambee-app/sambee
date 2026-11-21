@@ -214,7 +214,7 @@ describe("companionService shared settings", () => {
 
   it.each(["status", "challenge", "redeem"] as const)("keeps backend query options out of the signed %s request", async (operation) => {
     const signal = new AbortController().signal;
-    const options = { signal, params: { browser_language: "de" } };
+    const options = { signal, params: { browser_language: "de", browser_regional_locale: "de-CH" } };
     mockAxiosInstance.get.mockResolvedValue({ data: {} });
     mockAxiosInstance.post.mockResolvedValue({ data: {} });
     const signing = vi.spyOn(companionSession, "getSigningHeaders");

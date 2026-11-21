@@ -353,7 +353,7 @@ fn load(path: &Path) -> Result<PersistedPolicy, ApiError> {
             "Settings storage exceeds its limit. Restore private settings storage and restart Companion.",
         ));
     }
-    let stored: PersistedPolicy = serde_json::from_slice(&bytes)
+    let mut stored: PersistedPolicy = serde_json::from_slice(&bytes)
         .map_err(|_| failure("Settings storage is invalid. Restore private settings storage and restart Companion."))?;
     if stored.version != POLICY_VERSION {
         return Err(failure(
@@ -379,7 +379,15 @@ fn load(path: &Path) -> Result<PersistedPolicy, ApiError> {
             .validate()
             .map_err(|_| failure("Saved policy values are invalid. Restore private settings storage and restart Companion."))?;
     }
+    let localization_discarded = stored.managed.discard_obsolete_localization();
     stored.managed.validate()?;
+    if localization_discarded {
+        if let Some(directory) = path.parent() {
+            if let Err(error) = save(directory, &stored) {
+                log::warn!("Could not save the removal of obsolete localization: {error}");
+            }
+        }
+    }
     Ok(stored)
 }
 

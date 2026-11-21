@@ -78,6 +78,10 @@ function resolveRegionalLocale(localePreference: RegionalLocalePreference): stri
     return canonicalizeLocale(localePreference) ?? DEFAULT_LANGUAGE;
   }
 
+  return getBrowserRegionalLocale();
+}
+
+export function getBrowserRegionalLocale(): string {
   for (const locale of getBrowserLocales()) {
     const canonicalized = canonicalizeLocale(locale);
     if (canonicalized) {

@@ -1,6 +1,6 @@
 [package]
 name = "sambee-companion"
-version = "3.0.5"
+version = "3.0.6"
 edition = "2021"
 description = "Sambee Companion — opens files from Sambee in native desktop editors"
 authors = []
@@ -35,6 +35,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 log = "0.4"
 env_logger = "0.11"
+regex = "1"
 thiserror = "2"
 mime_guess = "2"
 

@@ -119,7 +119,7 @@ describe("Preferences", () => {
       if (command === "get_synced_localization") {
         return Promise.resolve({
           language: "en-XA",
-          regional_locale: "en-GB",
+          regional_locale: "de-CH",
           updated_at: "2026-03-22T12:00:00.000Z",
           source_origin: "https://example.test",
         });
@@ -153,7 +153,15 @@ describe("Preferences", () => {
     expect(screen.getByText(translate("preferences.sections.updates"))).toBeInTheDocument();
     expect(screen.getByText(translate("preferences.sections.notifications"))).toBeInTheDocument();
     expect(screen.getByText("en-XA")).toBeInTheDocument();
-    expect(screen.getByText("en-GB")).toBeInTheDocument();
+    expect(screen.getByText("de-CH")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        new Date("2026-03-22T12:00:00.000Z").toLocaleString("de-CH", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      )
+    ).toBeInTheDocument();
     expect(screen.getAllByText("https://example.test")).toHaveLength(4);
 
     fireEvent.click(screen.getByRole("button", { name: translate("preferences.unpairButton") }));
@@ -162,6 +170,35 @@ describe("Preferences", () => {
     expect(screen.getByText(translate("preferences.confirmUnpair.body", { origin: "https://example.test" }))).toBeInTheDocument();
     expect(screen.getByRole("button", { name: translate("common.actions.cancel") })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: translate("preferences.unpairButton") }).length).toBeGreaterThan(0);
+  });
+
+  it("shows the original timestamp when the synced locale is not supported by Intl", async () => {
+    const updatedAt = "2026-03-22T12:00:00.000Z";
+    getUserPreferencesMock.mockResolvedValue({
+      allowedServers: [],
+      uploadConflictAction: "ask",
+      autoStartOnLogin: false,
+      showNotifications: true,
+      companionUpdateChannel: "stable",
+      tempFileRetentionDays: 7,
+    } satisfies UserPreferences);
+    isAutostartEnabledMock.mockResolvedValue(false);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_paired_origins") return [];
+      if (command === "get_synced_localization") {
+        return {
+          language: "de",
+          regional_locale: "de-CH-t-en-d0",
+          updated_at: updatedAt,
+          source_origin: "https://example.test",
+        };
+      }
+    });
+
+    render(<Preferences onClose={vi.fn()} />);
+
+    expect(await screen.findByText(updatedAt)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: translate("preferences.title") })).toBeInTheDocument();
   });
 
   it("shows translated pending text while unpairing", async () => {

@@ -5,7 +5,7 @@ import { App } from "./App";
 import { DoneEditingWindow } from "./components/DoneEditingWindow";
 import { PairingWindow } from "./components/PairingWindow";
 import { PreviewHome } from "./components/PreviewHome";
-import { applyCompanionLocalization, type CompanionLocalizationState } from "./i18n";
+import { applyCompanionLocalization, type CompanionLocalizationState, clearCompanionLocalization } from "./i18n";
 import { applyFallbackTheme, applyThemeFromBase64 } from "./lib/theme";
 import { scheduleUpdateCheck } from "./lib/updateCheck";
 import { COMPANION_PREVIEWS } from "./previews";
@@ -27,7 +27,7 @@ applyFallbackTheme();
 
 const path = window.location.pathname;
 const isBrowserPreviewRuntime = !("__TAURI_INTERNALS__" in window);
-const activePreview = COMPANION_PREVIEWS.find((preview) => preview.path === path) ?? null;
+const activePreview = isBrowserPreviewRuntime ? (COMPANION_PREVIEWS.find((preview) => preview.path === path) ?? null) : null;
 const isPreviewHome = isBrowserPreviewRuntime && path === "/";
 const isPreviewRoute = activePreview !== null;
 
@@ -60,7 +60,10 @@ if (!isBrowserPreviewRuntime) {
       });
     });
     const state = await invoke<CompanionLocalizationState | null>("get_synced_localization");
-    if (!updateReceived && state) await applyCompanionLocalization(state);
+    if (!updateReceived) {
+      if (state) await applyCompanionLocalization(state);
+      else await clearCompanionLocalization();
+    }
   };
   void hydrateLocalization().catch((error) => {
     console.warn("Could not read synced Companion localization; keeping the last applied language", error);

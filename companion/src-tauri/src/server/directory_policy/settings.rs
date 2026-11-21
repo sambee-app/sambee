@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::native_i18n::{has_catalog, UI_LANGUAGES};
-use crate::server::localization::LocalizationState;
+use crate::server::localization::{is_browser_default, valid_regional_locale, LocalizationState};
 use crate::server::models::LocalizationSyncRequest;
 use crate::server::pairing::{PairingState, SettingsAuthority};
 use crate::ThemeState;
@@ -10,6 +10,8 @@ use base64::Engine;
 use tauri::Emitter;
 
 const SETTINGS_VERSION: u32 = 1;
+const SETTINGS_UPDATE_REQUIRED: &str = "settings_update_required";
+const OBSOLETE_LOCALIZATION: &str = "The server sent unresolved localization settings. Update the Sambee server, then sync again.";
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -69,6 +71,12 @@ struct Receipt {
     theme: Option<Section<Theme>>,
     localization: Option<Section<Localization>>,
     directory_index: Option<Section<DirectoryPolicy>>,
+}
+
+impl Localization {
+    fn has_browser_default(&self) -> bool {
+        is_browser_default(&self.language) || is_browser_default(&self.regional_locale)
+    }
 }
 
 #[derive(Deserialize)]
@@ -210,25 +218,11 @@ impl Receipt {
         }
         if let Some(section) = &self.localization {
             validate_marker(section, true)?;
-            let locale = &section.payload.regional_locale;
-            if !(matches!(section.payload.language.as_str(), "browser" | "en-XA")
-                || UI_LANGUAGES.contains(&section.payload.language.as_str()))
-                || locale.is_empty()
-                || locale.len() > 128
-                || (locale != "browser"
-                    && !locale.split('-').enumerate().all(|(index, part)| {
-                        (if index == 0 {
-                            (2..=3).contains(&part.len())
-                        } else {
-                            (2..=8).contains(&part.len())
-                        }) && part.bytes().all(|byte| {
-                            if index == 0 {
-                                byte.is_ascii_alphabetic()
-                            } else {
-                                byte.is_ascii_alphanumeric()
-                            }
-                        })
-                    }))
+            if section.payload.has_browser_default() {
+                return Err(ApiError::bad_request_code(OBSOLETE_LOCALIZATION, SETTINGS_UPDATE_REQUIRED));
+            }
+            if !(section.payload.language == "en-XA" || UI_LANGUAGES.contains(&section.payload.language.as_str()))
+                || !valid_regional_locale(&section.payload.regional_locale)
             {
                 return Err(failure(
                     "Localization settings are invalid. Correct the server preferences and retry.",
@@ -251,6 +245,18 @@ impl Receipt {
 }
 
 impl ManagedSettings {
+    pub(super) fn discard_obsolete_localization(&mut self) -> bool {
+        let obsolete = self.localization.as_ref().is_some_and(|applied| {
+            let payload = &applied.section.payload;
+            payload.has_browser_default() || !valid_regional_locale(&payload.regional_locale)
+        });
+        if obsolete {
+            self.localization = None;
+            log::info!("Discarded obsolete managed localization; waiting for a new settings receipt");
+        }
+        obsolete
+    }
+
     fn validate_user_update(&self, receipt: &Receipt) -> Result<(), ApiError> {
         let scope = self
             .theme
@@ -482,7 +488,7 @@ impl DirectoryPolicyState {
         if delivery.version != SETTINGS_VERSION {
             return Err(ApiError::bad_request_code(
                 "Settings protocol is unsupported. Update the browser and Companion.",
-                "settings_update_required",
+                SETTINGS_UPDATE_REQUIRED,
             ));
         }
         if delivery.grant.is_empty() || delivery.grant.len() > MAX_GRANT_BYTES {
@@ -509,12 +515,23 @@ impl DirectoryPolicyState {
             (challenge, generation, state.stored.companion_id)
         };
         let receipt: Receipt = Self::fetch_settings_receipt(origin, companion_id, &challenge, &delivery.grant).await?;
-        receipt.validate()?;
         if receipt.companion_id != companion_id || receipt.challenge != challenge || receipt.origin != origin {
             return Err(failure("Settings receipt does not match this request. Request a new grant."));
         }
         {
             let _authority = require_authority(pairing, origin, Some(generation))?;
+            if let Err(error) = receipt.validate() {
+                if receipt
+                    .localization
+                    .as_ref()
+                    .is_some_and(|section| section.payload.has_browser_default())
+                {
+                    self.available_state()?
+                        .failed_sections
+                        .insert("localization", OBSOLETE_LOCALIZATION.to_owned());
+                }
+                return Err(error);
+            }
             self.apply_settings(receipt, app, localization)?;
         }
         self.settings_status(Some(origin), pairing)
@@ -554,7 +571,7 @@ impl DirectoryPolicyState {
         if matches!(response.status().as_u16(), 404 | 426) {
             return Err(ApiError::bad_request_code(
                 "The backend settings protocol is incompatible. Update Sambee and Companion.",
-                "settings_update_required",
+                SETTINGS_UPDATE_REQUIRED,
             ));
         }
         if !response.status().is_success() {
@@ -576,7 +593,7 @@ impl DirectoryPolicyState {
         serde_json::from_slice(&bytes).map_err(|_| {
             ApiError::bad_request_code(
                 "Settings receipt is incompatible. Update Sambee and Companion.",
-                "settings_update_required",
+                SETTINGS_UPDATE_REQUIRED,
             )
         })
     }
@@ -706,11 +723,7 @@ fn apply_localization(app: &AppHandle, localization: &LocalizationState, origin:
             app,
             origin,
             LocalizationSyncRequest {
-                language: if payload.language == "browser" {
-                    "en".to_owned()
-                } else {
-                    payload.language.clone()
-                },
+                language: payload.language.clone(),
                 regional_locale: payload.regional_locale.clone(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
             },
@@ -836,20 +849,18 @@ mod tests {
     }
 
     #[test]
-    fn accepts_stored_browser_localization_but_refuses_mixed_user_scopes() {
+    fn requires_resolved_localization_and_matching_user_scopes() {
         let mut value = receipt();
         value.localization = Some(Section {
             version: SETTINGS_VERSION,
             marker: "d".repeat(64),
             user_scope: value.theme.as_ref().unwrap().user_scope.clone(),
             payload: Localization {
-                language: "browser".to_owned(),
-                regional_locale: "browser".to_owned(),
+                language: "de".to_owned(),
+                regional_locale: "de-CH-u-nu-latn".to_owned(),
             },
         });
-        for language in [
-            "browser", "en", "en-XA", "zh-Hans", "nl", "fr", "de", "it", "ko", "ja", "pl", "pt", "es", "sv",
-        ] {
+        for language in ["en", "en-XA", "zh-Hans", "nl", "fr", "de", "it", "ko", "ja", "pl", "pt", "es", "sv"] {
             value.localization.as_mut().unwrap().payload.language = language.to_owned();
             assert!(value.validate().is_ok(), "{language}");
         }
@@ -857,9 +868,71 @@ mod tests {
             value.localization.as_mut().unwrap().payload.language = language.to_owned();
             assert!(value.validate().is_err(), "{language}");
         }
-        value.localization.as_mut().unwrap().payload.language = "browser".to_owned();
+        value.localization.as_mut().unwrap().payload.language = "de".to_owned();
+        for locale in ["de_CH", "de-CH-u", "de-1901-1901", "de-u-nu-latn-u-ca-gregory"] {
+            value.localization.as_mut().unwrap().payload.regional_locale = locale.to_owned();
+            assert!(matches!(value.validate(), Err(ApiError::BadRequest(_))), "{locale}");
+        }
+        for (language, locale) in [("browser", "de-CH"), ("de", "browser")] {
+            let payload = &mut value.localization.as_mut().unwrap().payload;
+            payload.language = language.to_owned();
+            payload.regional_locale = locale.to_owned();
+            assert!(matches!(
+                value.validate(),
+                Err(ApiError::BadRequestWithCode { code: "settings_update_required", message })
+                    if message == OBSOLETE_LOCALIZATION
+            ));
+        }
+        value.localization.as_mut().unwrap().payload.regional_locale = "de-CH".to_owned();
         value.localization.as_mut().unwrap().user_scope = Some(uuid::Uuid::new_v4().to_string());
         assert!(value.validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn obsolete_localization_is_discarded_on_restart_and_replaced_by_next_sync() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("cache")).unwrap();
+        let configuration = temporary.path().join("configuration");
+        let policy = DirectoryPolicyState::open(configuration.clone(), &manager).unwrap();
+        let pairing = PairingState::new();
+        let mut desired = receipt();
+        pairing.set_test_authority(Some(&desired.origin));
+        desired.localization = Some(Section {
+            version: SETTINGS_VERSION,
+            marker: "d".repeat(64),
+            user_scope: desired.theme.as_ref().unwrap().user_scope.clone(),
+            payload: Localization {
+                language: "de".to_owned(),
+                regional_locale: "de-CH".to_owned(),
+            },
+        });
+        policy.apply_settings_with(desired.clone(), |_| Ok(()), |_, _| Ok(())).unwrap();
+        {
+            let mut state = policy.state.lock().unwrap();
+            state.stored.managed.localization.as_mut().unwrap().section.payload.regional_locale = "browser".to_owned();
+            save(&configuration, &state.stored).unwrap();
+        }
+        drop(policy);
+        let policy = DirectoryPolicyState::open(configuration, &manager).unwrap();
+        let status = policy.settings_status(None, &pairing).unwrap();
+        assert_eq!(status.results["localization"], "defaults_active");
+        assert!(!status.sections.contains_key("localization"));
+        assert!(status.sections.contains_key("theme"));
+        assert!(status.sections.contains_key("directory_index"));
+        policy
+            .apply_settings_with(
+                desired,
+                |_| Ok(()),
+                |_, value| {
+                    assert_eq!(value.regional_locale, "de-CH");
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            policy.settings_status(None, &pairing).unwrap().results["localization"],
+            "synchronized"
+        );
     }
 
     #[test]

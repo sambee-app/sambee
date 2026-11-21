@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - companion/**
+      - shared/regional-locale-pattern.txt
       - VERSION
       - scripts/sync-version
       - scripts/check_tauri_version_alignment.py

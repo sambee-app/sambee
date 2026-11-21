@@ -52,12 +52,6 @@
   overflow-wrap: anywhere;
 }
 
-.app-picker__extension {
-  font-family: monospace;
-  font-weight: 700;
-  color: var(--accent-dark, #d4a020);
-}
-
 .app-picker__content {
   display: flex;
   flex: 0 0 auto;
@@ -262,8 +256,8 @@
 }
 
 .app-picker__always-use input[type="checkbox"]:focus-visible {
-  outline: none;
-  box-shadow: var(--companion-btn-focus-ring);
+  outline: 2px solid var(--control-outline, #4b5563);
+  outline-offset: 2px;
 }
 
 /* ─── Actions ─── */

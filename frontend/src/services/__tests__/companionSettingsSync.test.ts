@@ -176,12 +176,12 @@ describe("shared Companion settings lifecycle", () => {
       await settle();
 
       const signal = mocks.metadata.mock.calls[1]![0].signal;
-      expect(mocks.metadata).toHaveBeenLastCalledWith({ signal, params: { browser_language: "en" } });
+      expect(mocks.metadata).toHaveBeenLastCalledWith({ signal, params: { browser_language: "en", browser_regional_locale: "en-US" } });
       expect(mocks.status).toHaveBeenLastCalledWith({ signal });
       expect(mocks.challenge).toHaveBeenCalledWith({ signal });
       expect(mocks.grant).toHaveBeenCalledWith(expect.objectContaining({ sections: ["localization"], switch_user: true }), {
         signal,
-        params: { browser_language: "en" },
+        params: { browser_language: "en", browser_regional_locale: "en-US" },
       });
       expect(mocks.redeem).toHaveBeenCalledWith("locale-grant", { signal });
       expect(companionSettingsSync.getSnapshot().phase).toBe("synchronized");
@@ -198,16 +198,42 @@ describe("shared Companion settings lifecycle", () => {
     mocks.redeem.mockRejectedValue({ response });
     companionSettingsSync.start();
     await settle();
-    expect(mocks.metadata).toHaveBeenCalledWith(expect.objectContaining({ params: { browser_language: "en" } }));
+    expect(mocks.metadata).toHaveBeenCalledWith(
+      expect.objectContaining({ params: { browser_language: "en", browser_regional_locale: "en-US" } })
+    );
     expect(mocks.grant).toHaveBeenCalledWith(
       expect.objectContaining({ sections: ["localization"] }),
-      expect.objectContaining({ params: { browser_language: "en" } })
+      expect.objectContaining({ params: { browser_language: "en", browser_regional_locale: "en-US" } })
     );
     expect(companionSettingsSync.getSnapshot()).toMatchObject({
       phase: "update_required",
       message: "Update Sambee Companion to use this language, then retry. The last valid Companion language remains active.",
       status: { sections: { localization: { marker: "old" } } },
     });
+  });
+
+  it("syncs a browser region change without a catalog language change", async () => {
+    const browserLocales = vi.spyOn(navigator, "languages", "get").mockReturnValue(["de-DE"]);
+    try {
+      companionSettingsSync.start();
+      await settle();
+      expect(mocks.grant).not.toHaveBeenCalled();
+      browserLocales.mockReturnValue(["de-CH"]);
+      const desired = metadata();
+      desired.localization.marker = "de-CH";
+      mocks.metadata.mockResolvedValue(desired);
+      const applied = status();
+      applied.sections.localization!.marker = desired.localization.marker;
+      mocks.redeem.mockResolvedValue(applied);
+      window.dispatchEvent(new Event("languagechange"));
+      await settle();
+      expect(mocks.grant).toHaveBeenCalledWith(
+        expect.objectContaining({ sections: ["localization"], switch_user: false }),
+        expect.objectContaining({ params: { browser_language: "de", browser_regional_locale: "de-CH" } })
+      );
+    } finally {
+      browserLocales.mockRestore();
+    }
   });
 
   it("retries failed restored sections even when their markers match", async () => {

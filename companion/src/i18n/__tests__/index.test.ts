@@ -42,30 +42,36 @@ describe("companion i18n", () => {
   });
 
   it("applies browser-synced localization and mirrors the regional locale", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("en-US");
     await applyCompanionLocalization({
-      language: "en-XA",
-      regional_locale: "en-GB",
+      language: "de",
+      regional_locale: "de-CH-u-nu-latn",
       updated_at: "2026-03-22T12:00:00.000Z",
       source_origin: "https://sambee.example.test",
     });
 
-    expect(translate("preferences.title")).toBe("[Ṕŕéƒéŕéńćéš]");
-    expect(getCurrentRegionalLocale()).toBe("en-GB");
-    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("en-XA");
-    expect(window.localStorage.getItem(REGIONAL_LOCALE_STORAGE_KEY)).toBe("en-GB");
+    expect(getCurrentLanguage()).toBe("de");
+    expect(getCurrentRegionalLocale()).toBe("de-CH-u-nu-latn");
+    expect(window.localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("de");
+    expect(window.localStorage.getItem(REGIONAL_LOCALE_STORAGE_KEY)).toBe("de-CH-u-nu-latn");
   });
 
-  it("uses English for a legacy browser language but keeps system regional formats", async () => {
-    vi.spyOn(navigator, "language", "get").mockReturnValue("de-DE");
-    await applyCompanionLocalization({
-      language: "browser",
-      regional_locale: "browser",
-      updated_at: "2026-11-04T00:00:00Z",
-      source_origin: "https://sambee.example",
-    });
-    expect(getCurrentLanguage()).toBe("en");
-    expect(getCurrentRegionalLocale()).toBe(Intl.getCanonicalLocales(navigator.language)[0]);
-    expect(window.localStorage.getItem(REGIONAL_LOCALE_STORAGE_KEY)).not.toBe("browser");
+  it.each([
+    ["browser", "de-CH"],
+    ["de", "browser"],
+  ])("rejects unresolved localization (%s, %s)", async (language, regional_locale) => {
+    const originalLanguage = getCurrentLanguage();
+    const originalLocale = getCurrentRegionalLocale();
+    await expect(
+      applyCompanionLocalization({
+        language,
+        regional_locale,
+        updated_at: "2026-11-04T00:00:00Z",
+        source_origin: "https://sambee.example",
+      })
+    ).rejects.toThrow();
+    expect(getCurrentLanguage()).toBe(originalLanguage);
+    expect(getCurrentRegionalLocale()).toBe(originalLocale);
   });
 
   it("starts in English before a sync and uses the last applied language offline", async () => {

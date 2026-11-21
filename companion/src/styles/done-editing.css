@@ -64,7 +64,7 @@
 }
 
 .file-status--modified {
-  color: var(--accent-color, #f4c430);
+  color: var(--text-color, #1f262b);
 }
 
 /* ── Error message ─────────────────────────────────────────────────────── */

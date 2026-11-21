@@ -10,7 +10,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { disable as disableAutostart, enable as enableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { type CompanionLocalizationState, getCurrentRegionalLocale, translate } from "../i18n";
+import { type CompanionLocalizationState, canonicalizeLocale, getCurrentRegionalLocale, translate } from "../i18n";
+import { useI18n } from "../i18n/useI18n";
 import { log } from "../lib/logger";
 import { type CompanionUpdateStatus, fetchCompanionUpdateStatus, installCompanionUpdate } from "../lib/updateCheck";
 import type { CompanionUpdateChannel, UploadConflictAction, UserPreferences } from "../stores/userPreferences";
@@ -155,6 +156,7 @@ function getErrorMessage(error: unknown): string {
  * A brief "Saved" indicator flashes after each successful save.
  */
 export function Preferences({ onClose }: PreferencesProps) {
+  useI18n();
   const conflictActionLabels: Record<UploadConflictAction, string> = {
     ask: translate("preferences.conflictActions.ask"),
     overwrite: translate("preferences.conflictActions.overwrite"),
@@ -491,12 +493,14 @@ export function Preferences({ onClose }: PreferencesProps) {
   const showInstallButton = updateActionState.kind === "available" || updateActionState.kind === "installing";
   const isUpdateBusy = updateActionState.kind === "checking" || updateActionState.kind === "installing";
 
-  const localizedUpdatedAt = syncedLocalization
-    ? new Date(syncedLocalization.updated_at).toLocaleString(getCurrentRegionalLocale(), {
-        dateStyle: "medium",
-        timeStyle: "short",
-      })
-    : null;
+  const syncedRegionalLocale = canonicalizeLocale(syncedLocalization?.regional_locale);
+  const localizedUpdatedAt =
+    syncedLocalization && syncedRegionalLocale
+      ? new Date(syncedLocalization.updated_at).toLocaleString(syncedRegionalLocale, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : null;
   const authority = nativeSettingsStatus.status?.authoritative_origin ?? null;
   const localizationSection = nativeSettingsStatus.status?.sections.localization;
   const localizationResult = nativeSettingsStatus.status?.results.localization;

@@ -1,14 +1,17 @@
 """Versioned, section-specific Companion settings delivery contract."""
 
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 
+from pydantic import AfterValidator, StringConstraints
 from sqlmodel import Field
 
+from app.core.regional_locale import MAX_REGIONAL_LOCALE_LENGTH, require_regional_locale
 from app.models.system_settings import DirectoryIndexPolicy, DirectoryPolicyGrantBinding, DirectoryPolicyGrantRedeem, StrictSettingUpdate
-from app.models.user_settings import LocalizationUserSettingsRead
+from app.models.user_settings import CatalogLanguage
 
 SETTINGS_VERSION: Final[Literal[1]] = 1
 SectionName = Literal["theme", "localization", "directory_index"]
+RegionalLocaleTag = Annotated[str, StringConstraints(max_length=MAX_REGIONAL_LOCALE_LENGTH), AfterValidator(require_regional_locale)]
 
 
 class CompanionPrimaryColor(StrictSettingUpdate):
@@ -31,8 +34,13 @@ class ThemeSection(SectionMarker):
     payload: CompanionTheme
 
 
+class CompanionLocalization(StrictSettingUpdate):
+    language: CatalogLanguage | Literal["en-XA"]
+    regional_locale: RegionalLocaleTag
+
+
 class LocalizationSection(SectionMarker):
-    payload: LocalizationUserSettingsRead
+    payload: CompanionLocalization
 
 
 class DirectoryIndexSection(SectionMarker):

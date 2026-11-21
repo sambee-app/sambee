@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { getBrowserLanguage, translate } from "../i18n";
+import { getBrowserLanguage, getBrowserRegionalLocale, translate } from "../i18n";
 import { isApiError } from "../types";
 import {
   COMPANION_SETTINGS_SECTIONS,
@@ -209,7 +209,10 @@ class CompanionSettingsSynchronizer {
       const synchronize = async () => {
         if (!check()) return;
         const companionOptions = { signal: controller.signal };
-        const backendOptions = { ...companionOptions, params: { browser_language: getBrowserLanguage() } };
+        const backendOptions = {
+          ...companionOptions,
+          params: { browser_language: getBrowserLanguage(), browser_regional_locale: getBrowserRegionalLocale() },
+        };
         const [metadata, status] = await Promise.all([
           api.getCompanionSettingsMetadata(backendOptions),
           companionService.getSettingsStatus(companionOptions),
