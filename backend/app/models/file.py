@@ -152,13 +152,9 @@ class DirectoryIssueDetail(BaseModel):
     scope: Literal["directory", "contents"] = "contents"
 
 
-class DirectorySearchResult(BaseModel):
-    """Response model for directory search (quick navigate)."""
+class DirectorySearchStatus(BaseModel):
+    """Status of a directory index without query results."""
 
-    results: List[str]
-    match_ranks: dict[str, int] = Field(default_factory=dict)
-    matched_term_counts: dict[str, int] = Field(default_factory=dict)
-    total_matches: int
     cache_state: str
     directory_count: int
     search_contract_version: Literal[1] | None = None
@@ -166,10 +162,20 @@ class DirectorySearchResult(BaseModel):
     coverage: str | None = None
     coverage_issue_count: int = Field(default=0, ge=0)
     issue_details_available: bool = False
-    issue_details: list[DirectoryIssueDetail] | None = None
-    issue_details_incomplete: bool = False
-    last_verified_at_ms: int | None = Field(default=None, ge=0)
     status_message: str | None = None
+    source_unavailable: bool = False
     monitoring_state: Literal["starting", "healthy", "recovering", "unavailable"] | None = None
     retry_after_ms: int | None = Field(default=None, ge=0)
     scan_progress: ScanProgress | None = None
+
+
+class DirectorySearchResult(DirectorySearchStatus):
+    """Response model for directory search (quick navigate)."""
+
+    results: List[str]
+    match_ranks: dict[str, int] = Field(default_factory=dict)
+    matched_term_counts: dict[str, int] = Field(default_factory=dict)
+    total_matches: int
+    issue_details: list[DirectoryIssueDetail] | None = None
+    issue_details_incomplete: bool = False
+    last_verified_at_ms: int | None = Field(default=None, ge=0)

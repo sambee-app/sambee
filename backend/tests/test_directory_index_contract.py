@@ -2363,6 +2363,139 @@ def test_directory_disk_accounting_rejects_links_without_reading_target(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["verification", "retention", "observation_loss"])
+async def test_backend_dormant_source_reopens_without_scan_and_releases_when_due(sqlite_cache, monkeypatch, reason):
+    import time
+    from unittest.mock import Mock
+
+    from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+    from app.services.directory_cache import DirectoryCacheManager
+
+    cache = sqlite_cache
+    manager = DirectoryCacheManager()
+    manager._caches[cache.connection_id] = cache
+    cache._watcher_ready.set()
+    cache.coordinator.verification_required = False
+    idle = DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] + 1
+    scan = Mock()
+    monkeypatch.setattr(cache, "_scan_disk_queue", scan)
+    cache._last_access -= idle
+    await manager.release_idle_caches()
+    assert cache._dormant
+    reopened = await manager.get_or_create_cache(
+        cache.connection_id, cache.host, cache.share_name, cache.username, cache.password, cache.port
+    )
+    assert reopened is cache and not cache._dormant
+    await cache.start_scan()
+    assert cache._scan_task is None
+
+    cache._last_access -= idle
+    await manager.release_idle_caches()
+    assert cache._dormant
+    if reason == "verification":
+        cache._verified_at -= cache.policy.healthy_verification_seconds
+    elif reason == "retention":
+        cache._last_access = time.monotonic() - cache.policy.monitoring_retention_seconds - 1
+    else:
+        cache._observation_lost()
+    await manager.release_idle_caches()
+    assert manager.get_cache(cache.connection_id) is None
+    scan.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_dormant_smb_reprobes_an_unavailable_root_before_draining_reconciliation(smb_source_cache, smb_directory_server, monkeypatch):
+    from contextlib import asynccontextmanager
+    from time import monotonic
+
+    from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+    from app.services import directory_cache
+
+    cache = smb_source_cache
+    smb_directory_server.directories["base"] = [("retained", 16)]
+    smb_directory_server.directories["base\\retained"] = []
+    cache.index.write_paths(["retained"])
+    assert cache.index.finish_generation(1)
+    cache._watcher_ready.set()
+    cache.coordinator.verification_required = False
+    cache._last_access -= DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] + 1
+    manager = directory_cache.DirectoryCacheManager()
+    manager._caches[cache.connection_id] = cache
+    await manager.release_idle_caches()
+    assert cache._dormant
+    accessed = cache._last_access
+    cache.index.queue_reconciliation_parent(1, "")
+    cache._next_full_pass_at = monotonic() + 30
+    online = False
+
+    @asynccontextmanager
+    async def connect(**_kwargs):
+        if not online:
+            raise OSError("Injected unavailable SMB session.")
+        yield
+
+    monkeypatch.setattr(directory_cache, "get_connection_pool", AsyncMock(return_value=SimpleNamespace(get_connection=connect)))
+    with pytest.raises(OSError, match="unavailable SMB session"):
+        await cache._run_reconciliation()
+    assert cache.source_unavailable
+    assert not cache.should_release()
+    online = True
+
+    ticks = 0
+
+    async def tick(_delay):
+        nonlocal ticks
+        ticks += 1
+        if ticks > 2:
+            raise asyncio.CancelledError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            directory_cache,
+            "asyncio",
+            SimpleNamespace(sleep=tick, CancelledError=asyncio.CancelledError, get_running_loop=asyncio.get_running_loop),
+        )
+        await cache._periodic_rescan_loop()
+    assert not cache.source_unavailable
+    assert not cache.index.has_pending_scan()
+    assert cache._dormant and cache._last_access == accessed
+    cache._observation_lost()
+    await manager.release_idle_caches()
+    assert manager.get_cache(cache.connection_id) is None
+
+
+@pytest.mark.asyncio
+async def test_backend_dormant_cap_releases_oldest_access(monkeypatch):
+    import time
+
+    from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT
+    from app.services.directory_cache import DirectoryCacheManager, SQLiteConnectionDirectoryCache
+
+    manager = DirectoryCacheManager()
+    cap = DIRECTORY_INDEX_CONTRACT.limits["max_dormant_sources"]
+    now = time.monotonic()
+    sources = []
+    for number in range(cap + 1):
+        source = SQLiteConnectionDirectoryCache(str(number), "host", "share", "user", "password")
+        source._opened.set()
+        source._source_available.set()
+        source._watcher_ready.set()
+        source.index._fts_ready = True
+        source.coordinator.verification_required = False
+        source._last_access = now - DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] - number - 1
+        monkeypatch.setattr(source.index, "has_pending_scan", lambda: False)
+        monkeypatch.setattr(source.index, "reconciliation_generation", lambda: None)
+        monkeypatch.setattr(source.index, "release_memory", lambda: None)
+        monkeypatch.setattr(source, "_finish_stop", lambda: None)
+        manager._caches[source.connection_id] = source
+        sources.append(source)
+
+    await manager.release_idle_caches()
+    assert all(manager.get_cache(source.connection_id) is source and source._dormant for source in sources[:-1])
+    assert manager.get_cache(sources[-1].connection_id) is None
+
+
+@pytest.mark.asyncio
 async def test_backend_idle_release_preserves_sources_with_actual_work(sqlite_cache, monkeypatch):
     import time
 
@@ -2374,6 +2507,7 @@ async def test_backend_idle_release_preserves_sources_with_actual_work(sqlite_ca
     stopped = []
     monkeypatch.setattr(sqlite_cache, "_finish_stop", lambda: stopped.append(sqlite_cache.connection_id))
     sqlite_cache._last_access = time.monotonic() - DIRECTORY_INDEX_CONTRACT.limits["idle_release_seconds"] - 1
+    sqlite_cache._watcher_ready.clear()
     sqlite_cache._scan_running.set()
     await manager.release_idle_caches()
     assert not stopped
@@ -2418,6 +2552,7 @@ async def test_failed_initialization_keeps_bounded_retry_eligibility(sqlite_cach
 async def test_cold_scan_reports_opening_until_initialization_finishes(sqlite_cache, monkeypatch, next_state):
     from app.services.directory_cache import CacheState
 
+    sqlite_cache._opened.clear()
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -4274,7 +4409,10 @@ def test_smb_reconciliation_worker_prunes_missing_subtrees_and_discovers_childre
     sqlite_cache.index.write_paths(["parent", "parent/Exact", "parent/old", "parent/old/leaf", "outside"])
     assert sqlite_cache.index.finish_generation(1)
     before = sqlite_cache.index.search("")
-    sqlite_cache.index.queue_reconciliation_parent(1, "parent")
+    sqlite_cache._dormant = True
+    last_access = sqlite_cache._last_access
+    sqlite_cache.observe_parent("parent")
+    sqlite_cache.coordinator.apply_pending()
     sqlite_cache._reconcile_disk_queue()
     assert sqlite_cache.index.reconciliation_generation() is None
     assert sqlite_cache.index.search("old").total_matches == 0
@@ -4283,6 +4421,7 @@ def test_smb_reconciliation_worker_prunes_missing_subtrees_and_discovers_childre
     assert sqlite_cache.index.search("outside").total_matches == 1
     assert sqlite_cache.index.search("file").total_matches == 0
     assert sqlite_cache.index.search("").last_verified_at_ms == before.last_verified_at_ms
+    assert sqlite_cache._dormant and sqlite_cache._last_access == last_access
     assert not sqlite_cache._scan_running.is_set()
     assert not sqlite_cache.coordinator._producers
     sqlite_cache._request_stop()
@@ -5511,6 +5650,81 @@ def test_root_unavailable_api_returns_specific_service_error(sqlite_cache, monke
     assert "root is unavailable" in response.json()["detail"]["message"]
     assert response.json()["detail"]["recoverable"] is True
     assert "Restore source access" in response.json()["detail"]["message"]
+
+
+def test_directory_status_reads_existing_snapshot_and_touches_source(sqlite_cache, monkeypatch, client, auth_headers_user, test_connection):
+    from unittest.mock import Mock
+
+    get_cache = Mock(return_value=None)
+    create = Mock(side_effect=AssertionError("Status must not create a source"))
+    manager = SimpleNamespace(get_cache=get_cache, get_or_create_cache=create)
+    monkeypatch.setattr("app.services.directory_cache.get_directory_cache_manager", lambda: manager)
+    url = f"/api/browse/{test_connection.id}/directories/status"
+    missing = client.get(url, headers=auth_headers_user)
+    assert missing.status_code == 200
+    assert missing.json()["cache_state"] == "empty"
+    assert missing.json()["directory_count"] == 0
+    get_cache.assert_called_once_with(str(test_connection.id))
+
+    sqlite_cache._source_revision = test_connection.updated_at.isoformat()
+    sqlite_cache.index.write_paths(["accepted"])
+    sqlite_cache._dormant = True
+    before = sqlite_cache._last_access
+    get_cache.return_value = sqlite_cache
+    search = Mock(side_effect=AssertionError("Status must not search"))
+    monkeypatch.setattr(sqlite_cache.index, "search", search)
+    response = client.get(url, headers=auth_headers_user)
+    assert response.status_code == 200
+    assert set(response.json()) == {
+        "cache_state",
+        "directory_count",
+        "search_contract_version",
+        "accepted_revision",
+        "coverage",
+        "coverage_issue_count",
+        "issue_details_available",
+        "status_message",
+        "source_unavailable",
+        "monitoring_state",
+        "retry_after_ms",
+        "scan_progress",
+    }
+    assert response.json()["directory_count"] == 1
+    assert response.json()["source_unavailable"] is False
+    assert not sqlite_cache._dormant and sqlite_cache._last_access > before
+    sqlite_cache._source_available.clear()
+    unavailable = client.get(url, headers=auth_headers_user)
+    assert unavailable.status_code == 200
+    snapshot = response.json()
+    assert unavailable.json() == {
+        **snapshot,
+        "source_unavailable": True,
+        "status_message": sqlite_cache.scan_error,
+    }
+    search.assert_not_called()
+    create.assert_not_called()
+
+
+def test_expected_directory_invalidations_log_at_debug(sqlite_cache, caplog):
+    import logging
+
+    from app.services.directory_cache import InvalidationReason
+
+    with caplog.at_level(logging.DEBUG, logger="app.services.directory_cache"):
+        for reason in InvalidationReason:
+            sqlite_cache.coordinator.invalidate(reason)
+    assert {
+        record.invalidation_reason: record.levelno
+        for record in caplog.records
+        if getattr(record, "event", None) == "directory_scan_invalidated"
+    } == {
+        "lifecycle": logging.DEBUG,
+        "watcher_start": logging.DEBUG,
+        "observation_loss": logging.INFO,
+        "source_rebind": logging.INFO,
+        "read_capacity": logging.INFO,
+        "stalled_read": logging.INFO,
+    }
 
 
 def test_sqlite_source_warm_search_does_not_traverse(sqlite_cache, monkeypatch):

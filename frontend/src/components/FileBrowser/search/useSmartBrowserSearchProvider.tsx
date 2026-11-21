@@ -69,7 +69,7 @@ export function useSmartBrowserSearchProvider({ directoryProvider, commandsProvi
   );
 
   const fetchResults = useCallback(
-    async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate): Promise<SearchResult[]> => {
+    async (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate, refresh?: boolean): Promise<SearchResult[]> => {
       if (query.startsWith(COMMAND_PREFIX)) {
         setIsCommandQuery(true);
         const commandQuery = query.slice(COMMAND_PREFIX.length).trimStart();
@@ -90,7 +90,8 @@ export function useSmartBrowserSearchProvider({ directoryProvider, commandsProvi
       const directoryResults = await directoryProvider.fetchResults(
         query,
         signal,
-        onUpdate ? (results) => onUpdate(prefixResults("directory", results)) : undefined
+        onUpdate ? (results) => onUpdate(prefixResults("directory", results)) : undefined,
+        refresh
       );
       return prefixResults("directory", directoryResults);
     },

@@ -1,4 +1,10 @@
-import type { DirectorySearchResult, FileEntry, RecentDirectorySearchResponse, RecentFileSearchResponse } from "../types";
+import type {
+  DirectorySearchResult,
+  DirectorySearchStatus,
+  FileEntry,
+  RecentDirectorySearchResponse,
+  RecentFileSearchResponse,
+} from "../types";
 import api from "./api";
 
 export interface BrowserHistoryService {
@@ -15,6 +21,7 @@ export interface BrowserHistoryService {
     query: string,
     options: { includeDotDirectories: boolean; includeIssueDetails?: boolean; signal: AbortSignal }
   ): Promise<DirectorySearchResult>;
+  getDirectorySearchStatus(connectionId: string, options: { signal: AbortSignal }): Promise<DirectorySearchStatus>;
 }
 
 export const browserHistoryService: BrowserHistoryService = {
@@ -31,4 +38,5 @@ export const browserHistoryService: BrowserHistoryService = {
   },
   removeRecentDirectory: (recordId) => api.removeRecentDirectory(recordId),
   searchDirectories: (connectionId, query, options) => api.searchDirectories(connectionId, query, options),
+  getDirectorySearchStatus: (connectionId, options) => api.getDirectorySearchStatus(connectionId, options),
 };

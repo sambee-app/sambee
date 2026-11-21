@@ -282,6 +282,7 @@ export type DirectoryIndexPolicyScope = "backend" | "companion";
 export const DIRECTORY_INDEX_POLICY_FIELDS = [
   "disk_budget_bytes",
   "inactive_retention_seconds",
+  "monitoring_retention_seconds",
   "max_retained_inactive_sources",
   "page_cache_kib",
   "healthy_verification_seconds",
@@ -633,25 +634,31 @@ export interface DirectoryIssueDetail {
   scope?: "directory" | "contents";
 }
 
-export interface DirectorySearchResult {
+export interface DirectorySearchStatus {
   search_contract_version?: number | null;
-  results: string[];
-  match_ranks?: Record<string, number>;
-  total_matches: number;
   cache_state: "empty" | "opening" | "building" | "ready" | "updating";
   directory_count: number;
-  matched_term_counts?: Record<string, number>;
   accepted_revision?: number | null;
   coverage?: "partial" | "complete" | "uncertain" | null;
   coverage_issue_count?: number;
   issue_details_available?: boolean;
-  issue_details?: DirectoryIssueDetail[] | null;
-  issue_details_incomplete?: boolean;
-  last_verified_at_ms?: number | null;
   status_message?: string | null;
+  source_unavailable?: boolean;
+  source_removable?: boolean;
+  reopen_after_ms?: number | null;
   monitoring_state?: "starting" | "healthy" | "recovering" | "unavailable" | null;
   retry_after_ms?: number | null;
   scan_progress?: ScanProgress | null;
+}
+
+export interface DirectorySearchResult extends DirectorySearchStatus {
+  results: string[];
+  match_ranks?: Record<string, number>;
+  total_matches: number;
+  matched_term_counts?: Record<string, number>;
+  issue_details?: DirectoryIssueDetail[] | null;
+  issue_details_incomplete?: boolean;
+  last_verified_at_ms?: number | null;
 }
 
 export interface EditLockInfo {

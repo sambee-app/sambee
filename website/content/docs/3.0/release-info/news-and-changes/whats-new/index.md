@@ -24,6 +24,7 @@ Sambee now shows the system health status in the top-right corner. In the built-
 
 ### Improvements
 
+- Directory search: Reopening search after 10 minutes of inactivity no longer triggers a full verification scan. The healthy verification interval defaults to 24 hours and is configurable in settings.
 - The quick bar's mode (navigate/search/command) is now visualized with a pill button.
 - Fixed result menu flickering while typing in directory navigation mode.
 

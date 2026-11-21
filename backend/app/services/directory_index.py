@@ -799,6 +799,14 @@ class DirectoryIndex:
                     if target == selected:
                         self._revision(connection)
 
+    def release_memory(self) -> None:
+        with self._writer_lock:
+            if self._closing or self._active_queries or self._writer is None:
+                return
+            self._writer.execute("PRAGMA shrink_memory")
+            for reader, _identity in self._readers:
+                reader.execute("PRAGMA shrink_memory")
+
     def status(self) -> DirectoryIndexSearch:
         with self._writer_lock:
             count, revision, coverage, verified, issues = required_row(

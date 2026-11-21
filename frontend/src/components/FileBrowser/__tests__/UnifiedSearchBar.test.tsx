@@ -289,12 +289,22 @@ describe("UnifiedSearchBar", () => {
     const history = {
       ...browserHistoryService,
       searchRecentDirectories: vi.fn().mockResolvedValue({ result_limit: 10, results: [] }),
+      getDirectorySearchStatus: vi.fn(async () => {
+        if (phase === "failed") throw { response: { status: 503, data: { detail: { recoverable: true, retry_after_ms: retryMs } } } };
+        return {
+          cache_state: "ready" as const,
+          directory_count: 1,
+          accepted_revision: phase === "healthy" ? 2 : 1,
+          search_contract_version: SEARCH_CONTRACT_VERSION,
+        };
+      }),
       searchDirectories: vi.fn(async () => {
         if (phase === "failed") throw { response: { status: 503, data: { detail: { recoverable: true, retry_after_ms: retryMs } } } };
         return {
           results: phase === "healthy" ? ["Recovered Reports"] : [],
           total_matches: phase === "healthy" ? 1 : 0,
           directory_count: 1,
+          accepted_revision: phase === "healthy" ? 2 : 1,
           cache_state: "ready" as const,
           monitoring_state: phase === "healthy" ? ("healthy" as const) : ("unavailable" as const),
           retry_after_ms: phase === "healthy" ? null : retryMs,

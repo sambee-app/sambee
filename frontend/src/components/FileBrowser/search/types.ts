@@ -132,7 +132,7 @@ export interface SearchProvider {
    * @param signal AbortSignal for cancellation
    * @returns Array of search results
    */
-  fetchResults: (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate) => Promise<SearchResult[]>;
+  fetchResults: (query: string, signal: AbortSignal, onUpdate?: SearchResultsUpdate, refresh?: boolean) => Promise<SearchResult[]>;
 
   getRefreshIntervalMs?: () => number | null;
 

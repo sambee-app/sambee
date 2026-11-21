@@ -28,6 +28,7 @@ CONTRACT_PATH = next((path for path in CONTRACT_PATH_CANDIDATES if path.is_file(
 POLICY_FIELDS = (
     "disk_budget_bytes",
     "inactive_retention_seconds",
+    "monitoring_retention_seconds",
     "max_retained_inactive_sources",
     "page_cache_kib",
     "healthy_verification_seconds",
@@ -59,6 +60,7 @@ LIMIT_FIELDS = frozenset(
         "status_publication_ms",
         "event_coalescing_ms",
         "idle_release_seconds",
+        "max_dormant_sources",
         "minimum_full_pass_spacing_seconds",
         "inactive_cleanup_interval_seconds",
         "max_pending_observations",
@@ -137,6 +139,8 @@ def load_directory_index_contract(path: Path = CONTRACT_PATH) -> DirectoryIndexC
         if field.minimum > field.maximum or field.step > field.maximum - field.minimum:
             raise ValueError("Directory-index policy bounds are inconsistent. Restore the shared contract file.")
         parsed[name] = field
+    if parsed["monitoring_retention_seconds"].minimum < limits["idle_release_seconds"]:
+        raise ValueError("Minimum monitoring retention must cover the idle release interval. Restore the shared contract file.")
     if parsed["degraded_verification_seconds"].default > parsed["healthy_verification_seconds"].default:
         raise ValueError("Default degraded verification must not exceed default healthy verification. Restore the shared contract file.")
     return DirectoryIndexContract(MappingProxyType(limits), MappingProxyType(parsed))

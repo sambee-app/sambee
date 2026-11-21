@@ -620,7 +620,9 @@ export function UnifiedSearchBar({
           setSearchError(false);
           setRemoveError(false);
         }
-        const fetchedResults = await activeProvider.fetchResults(searchQuery, controller.signal, publishInterimResults);
+        const fetchedResults = quiet
+          ? await activeProvider.fetchResults(searchQuery, controller.signal, publishInterimResults, true)
+          : await activeProvider.fetchResults(searchQuery, controller.signal, publishInterimResults);
         publishFinalResults(fetchedResults);
         if (isCurrent()) {
           acceptedQueryRef.current = searchQuery;

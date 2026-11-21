@@ -26,6 +26,7 @@ from app.api.companion import (
     _raise_companion_operation_error,
     _validate_operation_lock_scope,
 )
+from app.core.directory_index_contract import CONTRACT_VERSION
 from app.core.logging import get_logger, set_user
 from app.core.security import (
     decrypt_password,
@@ -48,6 +49,7 @@ from app.models.file import (
     DirectoryIssueDetail,
     DirectoryListing,
     DirectorySearchResult,
+    DirectorySearchStatus,
     FileInfo,
     FileType,
     RenameRequest,
@@ -74,6 +76,7 @@ from app.models.transfer_operation import (
     TransferOperationRead,
 )
 from app.models.user import User
+from app.services import directory_cache
 from app.services.archive.execution import resolve_archive_inspection_topology_plan
 from app.services.archive.temporary_download import (
     DOWNLOAD_FILENAME,
@@ -99,7 +102,8 @@ from app.services.cross_connection import (
     cross_connection_move,
     final_target_policy_check,
 )
-from app.services.directory_index import MAX_QUERY_BYTES
+from app.services.directory_cache import SQLiteConnectionDirectoryCache
+from app.services.directory_index import MAX_QUERY_BYTES, DirectoryIndexSearch, search_terms
 from app.services.history_common import (
     LOCAL_DRIVE_PREFIX,
     directory_match_rank,
@@ -1069,6 +1073,44 @@ async def get_file_info(
 #
 # search_directories
 #
+def _directory_search_status(
+    cache: SQLiteConnectionDirectoryCache, response: DirectoryIndexSearch, *, has_details: bool
+) -> DirectorySearchStatus:
+    return DirectorySearchStatus(
+        cache_state=cache.state.value,
+        directory_count=response.directory_count,
+        search_contract_version=CONTRACT_VERSION,
+        accepted_revision=response.accepted_revision,
+        coverage=response.coverage,
+        coverage_issue_count=response.issue_count,
+        issue_details_available=has_details,
+        status_message=cache.scan_error,
+        source_unavailable=cache.source_unavailable,
+        monitoring_state=cache.monitoring_state,
+        retry_after_ms=cache.retry_after_ms,
+        scan_progress=cache.scan_progress,
+    )
+
+
+@router.get("/{connection_id}/directories/status", response_model=DirectorySearchStatus)
+async def directory_search_status(
+    connection_id: uuid.UUID,
+    current_user: User = Depends(get_current_user_with_auth_check),
+    session: Session = Depends(get_session),
+) -> DirectorySearchStatus:
+    """Read existing directory-index status without opening a source or running search."""
+    set_user(current_user.username)
+    connection = _get_connection_or_404(session, current_user, connection_id)
+    cache = directory_cache.get_directory_cache_manager().get_cache(str(connection_id))
+    if not isinstance(cache, SQLiteConnectionDirectoryCache) or cache._source_revision != connection.updated_at.isoformat():
+        return DirectorySearchStatus(cache_state="empty", directory_count=0, search_contract_version=CONTRACT_VERSION)
+    cache.touch()
+    response = cache.index_status()
+    return _directory_search_status(
+        cache, response, has_details=response.coverage == "partial" and response.issue_count > 0 and cache.has_directory_issue_details()
+    )
+
+
 @router.get("/{connection_id}/directories", response_model=DirectorySearchResult)
 async def search_directories(
     connection_id: uuid.UUID,
@@ -1090,18 +1132,13 @@ async def search_directories(
 
     connection = _get_connection_or_404(session, current_user, connection_id)
 
-    from app.core.directory_index_contract import CONTRACT_VERSION
-    from app.services.directory_index import search_terms
-
     try:
         search_terms(q.replace("\\", "/"))
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
     try:
-        from app.services.directory_cache import SQLiteConnectionDirectoryCache, get_directory_cache_manager
-
-        cache_manager = get_directory_cache_manager()
+        cache_manager = directory_cache.get_directory_cache_manager()
         cache = await cache_manager.get_or_create_cache(
             connection_id=str(connection_id),
             host=connection.host,
@@ -1130,20 +1167,10 @@ async def search_directories(
                 match_ranks={row.path: row.match_rank for row in response.results},
                 matched_term_counts={row.path: row.matched_term_count for row in response.results},
                 total_matches=response.total_matches,
-                cache_state=cache.state.value,
-                directory_count=response.directory_count,
-                search_contract_version=CONTRACT_VERSION,
-                accepted_revision=response.accepted_revision,
-                coverage=response.coverage,
-                coverage_issue_count=response.issue_count,
-                issue_details_available=bool(details),
+                **_directory_search_status(cache, response, has_details=bool(details)).model_dump(),
                 issue_details=[DirectoryIssueDetail.model_validate(detail) for detail in details] if include_issue_details else None,
                 issue_details_incomplete=incomplete,
                 last_verified_at_ms=response.last_verified_at_ms,
-                status_message=cache.scan_error,
-                monitoring_state=cache.monitoring_state,
-                retry_after_ms=cache.retry_after_ms,
-                scan_progress=cache.scan_progress,
             )
 
         results, total_matches = await asyncio.to_thread(cache.search, q, include_dot_directories=include_dot_directories) if q else ([], 0)

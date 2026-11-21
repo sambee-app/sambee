@@ -34,6 +34,7 @@ import type {
   DirectoryIndexSettingUpdate,
   DirectoryListing,
   DirectorySearchResult,
+  DirectorySearchStatus,
   EditLockInfo,
   EditLockStatus,
   FileInfo,
@@ -1645,6 +1646,16 @@ class ApiService {
         ...(options?.includeIssueDetails ? { include_issue_details: true } : {}),
       },
       signal: options?.signal,
+    });
+    return response.data;
+  }
+
+  async getDirectorySearchStatus(connectionId: string, options: { signal: AbortSignal }): Promise<DirectorySearchStatus> {
+    const segment = getBrowseSegment(connectionId);
+    const { client, extraConfig } = await this.getClientConfig(connectionId);
+    const response = await client.get<DirectorySearchStatus>(`/browse/${segment}/directories/status`, {
+      ...extraConfig,
+      signal: options.signal,
     });
     return response.data;
   }
