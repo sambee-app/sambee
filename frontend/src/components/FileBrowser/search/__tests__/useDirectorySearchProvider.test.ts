@@ -7,6 +7,7 @@ import { createBrowserContentServices } from "../../../../services/browserConten
 import { type BrowserHistoryService, browserHistoryService } from "../../../../services/browserHistoryService";
 import { CompanionSession } from "../../../../services/companionSession";
 import { SambeeThemeProvider } from "../../../../theme/ThemeContext";
+import { formatLocalizedDateTime } from "../../../../utils/localeFormatting";
 import { SEARCH_CONTRACT_VERSION } from "../recentHistory";
 import { getDirectoryResultPresentation, useDirectorySearchProvider } from "../useDirectorySearchProvider";
 
@@ -189,6 +190,39 @@ describe("getDirectoryResultPresentation", () => {
       source: "FS1",
       message: "This source is not permitted.",
     });
+  });
+
+  it.each([
+    { check: new Date(2026, 10, 23, 23, 59, 45), dateStyle: undefined, poll: 5_000 },
+    { check: new Date(2026, 10, 24, 0, 0, 5), dateStyle: "medium", poll: 5_000 },
+    { check: null, dateStyle: undefined, poll: 1_000 },
+  ] as const)("shows verification status while idle ($check)", async ({ check, dateStyle, poll }) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2026, 10, 23, 23, 59, 30));
+      vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+      vi.mocked(api.searchDirectories).mockResolvedValue({
+        results: [],
+        total_matches: 0,
+        cache_state: "ready",
+        directory_count: 7,
+        coverage: "uncertain",
+        next_verification_at_ms: check?.getTime() ?? 0,
+        search_contract_version: SEARCH_CONTRACT_VERSION,
+      });
+      const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn()), { wrapper });
+      await act(async () => {
+        await result.current.fetchResults("reports", new AbortController().signal);
+      });
+      const label = check
+        ? `Next check: ${formatLocalizedDateTime(check, { dateStyle, timeStyle: "medium" })}.`
+        : "Waiting to start verification.";
+      expect(result.current.getStatusInfo()?.label).toBe(`connection-1: Directory index is not verified. ${label}`);
+      expect(result.current.getStatusInfo()?.showSpinner).toBe(false);
+      expect(result.current.getRefreshIntervalMs?.()).toBe(poll);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

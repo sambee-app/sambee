@@ -1088,6 +1088,7 @@ def _directory_search_status(
         source_unavailable=cache.source_unavailable,
         monitoring_state=cache.monitoring_state,
         retry_after_ms=cache.retry_after_ms,
+        next_verification_at_ms=cache.next_verification_at_ms,
         scan_progress=cache.scan_progress,
     )
 
