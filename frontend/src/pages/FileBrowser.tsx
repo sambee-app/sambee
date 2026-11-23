@@ -147,6 +147,7 @@ import {
   type BrowseRouteState,
   type BrowseRouteTarget,
   buildBrowseRouteTarget,
+  getBrowseParentPath,
   parseBrowseRoute,
   resolveBrowseRouteState,
   resolveBrowseRouteTarget,
@@ -159,7 +160,7 @@ import { ACTIVE_PANE_QUERY_KEY, ACTIVE_PANE_STORAGE_KEY, RIGHT_PANE_QUERY_KEY } 
 import { useBrowserDownload } from "./FileBrowser/useBrowserDownload";
 import { useBrowserUpload } from "./FileBrowser/useBrowserUpload";
 import { useFileBrowserPane } from "./FileBrowser/useFileBrowserPane";
-import { useWorkspaceTabClaim, WorkspaceTabClaimContext } from "./FileBrowser/useWorkspaceTabClaim";
+import { useWorkspaceTabClaim, useWorkspaceTabUserScope, WorkspaceTabClaimContext } from "./FileBrowser/useWorkspaceTabClaim";
 import { WorkspaceViewer, type WorkspaceViewerHandle } from "./FileBrowser/WorkspaceViewer";
 import {
   getStoredWorkspaceRoute,
@@ -226,11 +227,6 @@ function mapContentOperationReason(reason: ContentOperationReason | undefined): 
     default:
       return "unsupported-source";
   }
-}
-
-function parentPath(path: string): string {
-  const separatorIndex = path.lastIndexOf("/");
-  return separatorIndex < 0 ? "" : path.slice(0, separatorIndex);
 }
 
 function fileName(path: string): string {
@@ -1152,7 +1148,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                 item.handle.kind !== "virtual" ||
                 item.handle.location.providerId !== "zip" ||
                 item.handle.location.source.path !== sourceLocation.source.path ||
-                parentPath(item.handle.path) !== sourceLocation.path
+                getBrowseParentPath(item.handle.path) !== sourceLocation.path
             )
           )
             return unavailableFileListShortcut("unsupported-source");
@@ -1161,7 +1157,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         if (
           selected.some(
             (item) =>
-              item.handle.location.connectionId !== sourceLocation.connectionId || parentPath(item.handle.path) !== sourceLocation.path
+              item.handle.location.connectionId !== sourceLocation.connectionId ||
+              getBrowseParentPath(item.handle.path) !== sourceLocation.path
           )
         )
           return unavailableFileListShortcut("unsupported-source");
@@ -1203,7 +1200,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       if (sourceIsArchive || archiveExtractionSource === null) return unavailableFileListShortcut("unsupported-source");
       const extractionDestination = isDualMode
         ? destination
-        : physicalLocation(archiveExtractionSource.source.connectionId, parentPath(archiveExtractionSource.source.path));
+        : physicalLocation(archiveExtractionSource.source.connectionId, getBrowseParentPath(archiveExtractionSource.source.path));
       return getArchiveExtractionShortcutAvailability(archiveExtractionSource, extractionDestination);
     },
     [
@@ -2972,7 +2969,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       const physicalDir =
         location.kind === "physical"
           ? { connectionId: location.connectionId, path: location.path }
-          : { connectionId: location.connectionId, path: parentPath(location.source.path) };
+          : { connectionId: location.connectionId, path: getBrowseParentPath(location.source.path) };
 
       for (const candidatePane of [leftPane, rightPane]) {
         const activeMatches =
@@ -3473,7 +3470,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       const destination =
         destinationOverride?.location ??
         (usesSiblingDirectory
-          ? physicalLocation(location.source.connectionId, parentPath(location.source.path))
+          ? physicalLocation(location.source.connectionId, getBrowseParentPath(location.source.path))
           : destinationPane.currentLocation);
       if (!getArchiveExtractionShortcutAvailability(location, destination).available || destination.kind !== "physical") {
         return;
@@ -3508,7 +3505,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       if (!source) return;
       const destination = isDualModeRef.current
         ? (invocation.destination ?? getCapturedDestination(invocation.paneId))
-        : { paneId: invocation.paneId, location: physicalLocation(source.source.connectionId, parentPath(source.source.path)) };
+        : { paneId: invocation.paneId, location: physicalLocation(source.source.connectionId, getBrowseParentPath(source.source.path)) };
       activateOperationPane(invocation.paneId);
       handleArchiveExtractionRequest(FULL_ARCHIVE_EXTRACTION_SCOPE, source, destination);
     },
@@ -5395,7 +5392,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                   {
                     kind: "physical",
                     connectionId: uploadConflict ? uploadConflict.connectionId : copyMoveDestination!.connectionId,
-                    path: parentPath((uploadConflict?.info ?? conflictInfo)!.existing_file.path),
+                    path: getBrowseParentPath((uploadConflict?.info ?? conflictInfo)!.existing_file.path),
                   },
                   (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId
                 )
@@ -5509,6 +5506,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
 });
 
 const Browser: React.FC = () => {
+  const userScope = useWorkspaceTabUserScope();
   const location = useLocation();
   const navigate = useNavigate();
   const params = useParams<{ targetType: string; targetId: string; "*": string }>();
@@ -5535,7 +5533,15 @@ const Browser: React.FC = () => {
     [params.targetType, params.targetId, params["*"]]
   );
 
-  return <BrowserWorkspace params={directoryParams} location={directoryLocation} getLocation={getLocation} navigate={navigateWorkspace} />;
+  return (
+    <BrowserWorkspace
+      key={JSON.stringify(userScope)}
+      params={directoryParams}
+      location={directoryLocation}
+      getLocation={getLocation}
+      navigate={navigateWorkspace}
+    />
+  );
 };
 
 export default Browser;

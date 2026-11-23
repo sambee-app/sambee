@@ -12,9 +12,11 @@ import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { requireTestValue } from "../../test/helpers/assertions";
 import { mockWebLocks } from "../../test/mocks/webLocks";
+import { renderWithStyles } from "../../test/utils/renderWithStyles";
 import { FileType } from "../../types";
 import { setApplePlatformForTesting } from "../../utils/platform";
 import {
+  type PersistedWorkspaceTabsRecord,
   readPaneTabHistoryState,
   resetPaneTabsStorageStateForTesting,
   WORKSPACE_PAGE_ID_KEY,
@@ -29,8 +31,21 @@ import {
 } from "./FileBrowser.test.utils";
 
 const mockUseCompanion = vi.fn<() => UseCompanionResult>();
+const { appRouter } = vi.hoisted(() => ({
+  appRouter: { current: null as ReturnType<typeof import("react-router-dom").createMemoryRouter> | null },
+}));
 
 vi.mock("../../services/api");
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return {
+    ...actual,
+    createBrowserRouter(routes: Parameters<typeof actual.createMemoryRouter>[0]) {
+      appRouter.current = actual.createMemoryRouter(routes, { initialEntries: ["/browse/smb/test-server-1"] });
+      return appRouter.current;
+    },
+  };
+});
 vi.mock("@tanstack/react-virtual", () => import("../../__mocks__/@tanstack/react-virtual"));
 vi.mock("../../hooks/useCompanion", () => ({
   useCompanion: () => mockUseCompanion(),
@@ -357,6 +372,75 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     await waitFor(() => expect(screen.getByTestId("router-location")).toHaveTextContent(url));
     expect(screen.getByTestId("pane-tab-item-left-1")).toBeInTheDocument();
     expect(screen.getByTestId("pane-tab-item-right-1")).toBeInTheDocument();
+  });
+
+  it("keeps the root lock off the browse route and restores only the newly signed-in account's tabs", async () => {
+    const browseUrl = "/browse/smb/test-server-1";
+    const { default: App } = await import("../../App");
+    const router = requireTestValue(appRouter.current);
+    const otherScope = "user-2";
+    const otherKey = `${WORKSPACE_TAB_RECORD_PREFIX}other-page`;
+    const otherRecord: PersistedWorkspaceTabsRecord = {
+      schemaVersion: 2,
+      userScope: otherScope,
+      updatedAt: Date.now(),
+      paneMode: "single",
+      activePaneId: "left",
+      left: {
+        selectedTabId: "other-root",
+        tabs: [
+          { id: "other-root", kind: "smb", targetId: "test-server-1", path: "" },
+          { id: "other-folder", kind: "smb", targetId: "test-server-1", path: "Other workspace" },
+        ],
+      },
+      right: null,
+    };
+    localStorage.setItem(otherKey, JSON.stringify(otherRecord));
+    type Account = Awaited<ReturnType<typeof api.getCurrentAccount>>;
+    const accountChecks: Array<ReturnType<typeof deferred<Account>>> = [];
+    vi.spyOn(api, "getCurrentAccount").mockImplementation(() => {
+      const check = deferred<Account>();
+      accountChecks.push(check);
+      return check.promise;
+    });
+    const finishAccountCheck = async (index: number) => {
+      await waitFor(() => expect(accountChecks).toHaveLength(index + 1));
+      await act(async () => {
+        requireTestValue(accountChecks[index]).resolve({ password_change_required: false } as Account);
+      });
+    };
+    try {
+      await act(async () => {
+        renderWithStyles(<App />);
+      });
+      await finishAccountCheck(0);
+      fireEvent.click(await screen.findByTestId("pane-tab-add-left"));
+      fireEvent.click(screen.getByTestId("pane-tab-add-left"));
+      const originalKey = WORKSPACE_TAB_RECORD_PREFIX + sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
+      const originalRecord = requireTestValue(localStorage.getItem(originalKey));
+      expect(JSON.parse(originalRecord).left.tabs).toHaveLength(3);
+
+      await act(() => router.navigate("/unknown-workspace-test-route"));
+      expect(screen.queryByTestId("pane-tab-bar-left")).not.toBeInTheDocument();
+      expect((await navigator.locks.query()).held).toContainEqual({ name: originalKey });
+      await act(() => router.navigate(browseUrl));
+      await finishAccountCheck(1);
+      expect(await screen.findByTestId("pane-tab-item-left-2")).toBeInTheDocument();
+
+      await act(() => authSession.setAuthenticated(createMockAuthToken({ user_id: otherScope }), false));
+      expect(screen.queryByTestId("pane-tab-bar-left")).not.toBeInTheDocument();
+      await finishAccountCheck(2);
+
+      expect(await screen.findByRole("button", { name: /^Other workspace —/ })).toBeInTheDocument();
+      expect(screen.queryByTestId("pane-tab-item-left-2")).not.toBeInTheDocument();
+      expect((await navigator.locks.query()).held).toContainEqual({ name: otherKey });
+      expect((await navigator.locks.query()).held).not.toContainEqual({ name: originalKey });
+      expect(JSON.parse(requireTestValue(localStorage.getItem(originalKey))).left.tabs).toHaveLength(3);
+      fireEvent.click(screen.getByTestId("pane-tab-add-left"));
+      await waitFor(() => expect(JSON.parse(requireTestValue(localStorage.getItem(otherKey))).left.tabs).toHaveLength(3));
+    } finally {
+      cleanup();
+    }
   });
 
   it("exposes all 5 tab actions in the keyboard command palette", async () => {

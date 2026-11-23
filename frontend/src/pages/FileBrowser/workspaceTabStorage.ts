@@ -7,6 +7,7 @@ import {
   type BrowseRouteState,
   type BrowseRouteTarget,
   buildBrowseRouteTarget,
+  getBrowseParentPath,
   resolveBrowseRouteTarget,
   serializeBrowseRoute,
 } from "./routing";
@@ -717,7 +718,7 @@ function restoreTab(entry: StoredTab, connections: Connections, unresolvedTarget
   if (!resolved) unresolvedTargets.set(entry.id, target);
   else unresolvedTargets.delete(entry.id);
   const archive = target.virtualLocation;
-  const path = archive ? archive.sourcePath.slice(0, Math.max(0, archive.sourcePath.lastIndexOf("/"))) : target.path;
+  const path = archive ? getBrowseParentPath(archive.sourcePath) : target.path;
   return createEmptyTabSession(entry.id, {
     connectionId,
     currentPath: normalizeLocalDrivePath(connectionId, path),

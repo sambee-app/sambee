@@ -65,7 +65,7 @@ function AppContent() {
   const browseMatch = useMatch("/browse/:targetType/:targetId/*");
   const browseIndex = useMatch("/browse");
   const settingsMatch = useMatch("/settings/*");
-  const hasWorkspace =
+  const shouldStartWorkspace =
     location.pathname === "/" || Boolean(browseMatch || browseIndex) || (settingsMatch !== null && readWorkspacePageId() !== null);
   const workspaceClaim = useWorkspaceTabClaim(
     parseBrowseRoute({
@@ -74,7 +74,7 @@ function AppContent() {
       path: browseMatch?.params["*"],
       searchParams: new URLSearchParams(location.search),
     }),
-    hasWorkspace,
+    shouldStartWorkspace,
     true
   );
 
