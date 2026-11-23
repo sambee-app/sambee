@@ -648,6 +648,7 @@ export interface DirectorySearchStatus {
   reopen_after_ms?: number | null;
   monitoring_state?: "starting" | "healthy" | "recovering" | "unavailable" | null;
   retry_after_ms?: number | null;
+  next_verification_at_ms?: number | null;
   scan_progress?: ScanProgress | null;
 }
 

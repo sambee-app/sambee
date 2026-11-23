@@ -957,6 +957,9 @@ export const EN_TRANSLATIONS = {
         startingIndex: "Starting index...",
         indexCoveragePartial: "not all directories could be indexed.",
         indexCoverageUncertain: "Directory index is not verified. A new check is pending.",
+        indexCoverageUnverified: "Directory index is not verified.",
+        indexVerificationScheduled: "Next check: {{time}}.",
+        indexVerificationWaiting: "Waiting to start verification.",
         legacyDirectorySearch:
           "Multi-term directory search is not confirmed for this source. Search one directory term or check backend and companion support.",
         historyUnavailable: "Recent directories are unavailable. Check the backend connection and retry.",

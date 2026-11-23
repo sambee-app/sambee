@@ -41,6 +41,7 @@ fn wire_count(value: i64) -> Result<usize, IndexError> {
 const CONTRACT_JSON: &str = include_str!("../../../../shared/directory-index/contract.json");
 const STALLED_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const FAILURE_RETRY_MIN: Duration = Duration::from_secs(30);
+const MUTATION_WARNING_INTERVAL: Duration = Duration::from_secs(60);
 const FAILURE_RETRY_MAX: Duration = Duration::from_secs(300);
 const FAILURE_RETRY_JITTER_PERCENT: u8 = 10;
 const PERIODIC_VERIFICATION_JITTER_PERCENT: u8 = 10;
@@ -537,6 +538,7 @@ struct Observations {
     pending: VecDeque<(u64, DirectoryMutation, usize)>,
     bytes: usize,
     verification_required: bool,
+    recovery_required: bool,
     observation_lost: bool,
     required_pending: Arc<AtomicBool>,
     invalidation_count: u64,
@@ -695,7 +697,9 @@ impl Observations {
 
     fn invalidate_for(&mut self, reason: InvalidationReason) -> Result<(), IndexError> {
         self.required_pending.store(true, Ordering::Release);
-        self.observation_lost |= matches!(reason, InvalidationReason::ObservationLoss | InvalidationReason::ReadCapacity);
+        let lost = matches!(reason, InvalidationReason::ObservationLoss | InvalidationReason::ReadCapacity);
+        self.observation_lost |= lost;
+        self.recovery_required |= lost || matches!(reason, InvalidationReason::SourceRebind);
         self.invalidation_count = self.invalidation_count.saturating_add(1);
         log::log!(
             if reason.is_expected() {
@@ -987,6 +991,7 @@ struct SourceStatus {
     stalled: bool,
     watcher_retry_at: Instant,
     watcher_failure_delay: Duration,
+    mutation_warning_at: Instant,
     scan_progress: Option<ScanProgress>,
     index_status: Option<super::directory_index::DirectoryIndexSearch>,
     scan_generation: Option<i64>,
@@ -1016,10 +1021,19 @@ impl SourceStatus {
         self.retry_at = now + delay;
     }
 
-    fn verification_due(&self, now: Instant, interval: Duration, initialized: bool) -> bool {
+    fn verification_deadline(&self, interval: Duration, initialized: bool) -> Instant {
         let percent = 100 - self.verification_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1);
         let interval = interval.mul_f64(f64::from(percent) / 100.0);
-        now >= self.retry_at && (!initialized || !self.failure_delay.is_zero() || now.saturating_duration_since(self.verified) >= interval)
+        if !initialized || !self.failure_delay.is_zero() {
+            self.retry_at
+        } else {
+            self.retry_at.max(self.verified + interval)
+        }
+    }
+
+    #[cfg(test)]
+    fn verification_due(&self, now: Instant, interval: Duration, initialized: bool) -> bool {
+        now >= self.verification_deadline(interval, initialized)
     }
 
     fn complete_pass(&mut self, now: Instant) {
@@ -1149,12 +1163,24 @@ impl LocalSource {
     }
 
     fn verification_due(&self, policy: &DirectoryPolicy, now: Instant) -> Result<bool, IndexError> {
-        let interval = self.effective_verification_seconds(policy)?;
-        let initialized = lock(&self.reader)?.is_some();
-        let due = lock(&self.status)?.verification_due(now, Duration::from_secs(interval as u64), initialized);
+        let due = now >= self.verification_deadline(policy)?;
         #[cfg(feature = "recovery-verification")]
         let due = due || self.verification_scan_requested.load(Ordering::Acquire);
         Ok(due)
+    }
+
+    fn verification_deadline(&self, policy: &DirectoryPolicy) -> Result<Instant, IndexError> {
+        let interval = Duration::from_secs(self.effective_verification_seconds(policy)? as u64);
+        let recovery = lock(&self.observations)?.recovery_required;
+        let initialized = lock(&self.reader)?.is_some();
+        let status = lock(&self.status)?;
+        let periodic = status.verification_deadline(interval, initialized);
+        if recovery && initialized {
+            let recovery_at = status.verified + Duration::from_secs(limit("minimum_full_pass_spacing_seconds")? as u64);
+            Ok(periodic.min(recovery_at.max(status.retry_at)))
+        } else {
+            Ok(periodic)
+        }
     }
 
     fn ensure_available(&self) -> Result<(), IndexError> {
@@ -1240,6 +1266,7 @@ impl LocalSource {
                 stalled: false,
                 watcher_retry_at: now,
                 watcher_failure_delay: Duration::ZERO,
+                mutation_warning_at: now,
                 scan_progress: None,
                 index_status: None,
                 scan_generation: None,
@@ -1572,27 +1599,31 @@ impl LocalSource {
             return Ok(());
         }
         active.take();
-        if !self.watcher_failed.load(Ordering::Acquire) {
+        let was_failed = self.watcher_failed.load(Ordering::Acquire);
+        if !was_failed {
             self.invalidate_for(InvalidationReason::WatcherStart)?;
         }
         self.watcher_failed.store(false, Ordering::Release);
         self.watcher_reconciling.store(true, Ordering::Release);
         let weak = Arc::downgrade(self);
-        let outcome = notify::recommended_watcher(move |event| {
-            if let Some(source) = weak.upgrade() {
-                if source.observe(event).is_err() {
-                    let _ = source.lose_watcher();
+        let register = |mode| -> Result<RecommendedWatcher, notify::Error> {
+            let weak = weak.clone();
+            let mut watcher = notify::recommended_watcher(move |event| {
+                if let Some(source) = weak.upgrade() {
+                    if source.observe(event).is_err() {
+                        let _ = source.lose_watcher();
+                    }
                 }
-            }
-        })
-        .and_then(|mut watcher| {
-            watcher.watch(&self.root_path, RecursiveMode::Recursive)?;
+            })?;
+            watcher.watch(&self.root_path, mode)?;
             Ok(watcher)
-        });
-        match outcome {
+        };
+        match register(RecursiveMode::Recursive) {
             Ok(watcher) => {
                 *active = Some(watcher);
-                self.invalidate_for(InvalidationReason::WatcherStart)?;
+                let mut observations = lock(&self.observations)?;
+                observations.invalidate_for(InvalidationReason::WatcherStart)?;
+                observations.recovery_required |= was_failed;
                 let mut status = lock(&self.status)?;
                 status.watcher_failure_delay = Duration::ZERO;
                 status.watcher_retry_at = Instant::now();
@@ -1602,8 +1633,20 @@ impl LocalSource {
                     self.session
                 );
             }
-            Err(_) => {
+            Err(error) => {
                 self.watcher_failed.store(true, Ordering::Release);
+                // Recursive registration can fail on an unreadable child. Use a fresh
+                // root-only watcher; the partial registration is not safe to reuse.
+                #[cfg(target_os = "linux")]
+                match register(RecursiveMode::NonRecursive) {
+                    Ok(watcher) => {
+                        *active = Some(watcher);
+                    }
+                    Err(error) => log::debug!(
+                        "Directory root-only watcher registration failed: os_code={:?}",
+                        watcher_os_code(&error)
+                    ),
+                }
                 let mut status = lock(&self.status)?;
                 status.watcher_failure_delay = if status.watcher_failure_delay.is_zero() {
                     FAILURE_RETRY_MIN
@@ -1619,8 +1662,8 @@ impl LocalSource {
                 status.message = Some("Directory monitoring is unavailable. Background verification remains active.".to_owned());
                 if status.watcher_failure_delay == FAILURE_RETRY_MIN {
                     log::warn!(
-                        "event=directory_watcher_unavailable operation=directory_index stage=watcher source_id={} generation_id={} retry_after_ms={} error_type=NotifyError",
-                        self.source_id, self.session, delay.as_millis()
+                        "event=directory_watcher_unavailable operation=directory_index stage=watcher source_id={} generation_id={} retry_after_ms={} root_only={} error_type=NotifyError os_code={:?}",
+                        self.source_id, self.session, delay.as_millis(), active.is_some(), watcher_os_code(&error)
                     );
                 }
             }
@@ -2149,16 +2192,17 @@ impl LocalSource {
         let mut status = lock(&self.status)?;
         status.index_status = Some(writer.status()?);
         status.state = "ready";
-        if !status.failure_delay.is_zero() {
-            log::info!(
-                "event=directory_verification_recovered operation=directory_index stage=verification source_id={} generation_id={}",
-                self.source_id,
-                self.session
-            );
-        }
-        status.complete_pass(Instant::now());
         if complete {
+            if !status.failure_delay.is_zero() {
+                log::info!(
+                    "event=directory_verification_recovered operation=directory_index stage=verification source_id={} generation_id={}",
+                    self.source_id,
+                    self.session
+                );
+            }
+            status.complete_pass(Instant::now());
             observations.verification_required = false;
+            observations.recovery_required = false;
             lock(&self.listing_feedback)?.clear_suppression();
             if self.watcher_reconciling.swap(false, Ordering::AcqRel) && !self.watcher_failed.load(Ordering::Acquire) {
                 log::info!(
@@ -3518,6 +3562,29 @@ enum MutationScope {
     Ancestors,
 }
 
+fn mutation_relative_path(root: &Path, path: &Path) -> Result<String, &'static str> {
+    // Handlers can pass a canonical target, but source identity uses the original root.
+    let relative = match path.strip_prefix(root) {
+        Ok(relative) => relative,
+        Err(_) => {
+            let canonical = root.canonicalize().map_err(|_| "root_resolution_failed")?;
+            path.strip_prefix(canonical).map_err(|_| "outside_source")?
+        }
+    };
+    let relative = relative.to_str().ok_or("unsupported_encoding")?;
+    #[cfg(windows)]
+    return Ok(relative.replace('\\', "/"));
+    #[cfg(not(windows))]
+    Ok(relative.to_owned())
+}
+
+fn watcher_os_code(error: &notify::Error) -> Option<i32> {
+    match &error.kind {
+        notify::ErrorKind::Io(error) => error.raw_os_error(),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ListingDiscard {
     Busy,
@@ -3869,50 +3936,51 @@ impl LocalDirectoryManager {
     }
 
     fn mutation_observation(&self, drive: &str, root: &Path, path: &Path, scope: MutationScope) -> Option<MutationObservation> {
-        let observation = (|| {
-            let source = lock(&self.sources)?.get(drive).cloned();
-            let Some(source) = source.filter(|source| source.root_path == root && !source.stopped.load(Ordering::Acquire)) else {
-                return Ok(None);
-            };
-            let prepare = (|| {
-                let relative = path
-                    .strip_prefix(root)
-                    .ok()
-                    .and_then(|path| path.to_str())
-                    .ok_or(IndexError::Invalid(
-                        "Directory mutation is outside its bound source or uses unsupported encoding.",
-                    ))?;
-                #[cfg(windows)]
-                let relative = relative.replace('\\', "/");
-                let relative = relative.to_owned();
-                if !relative.is_empty() || scope != MutationScope::Ancestors {
-                    validate_directory_path(&relative)?;
-                }
-                if relative.len() > limit("max_observation_bytes")? {
-                    return Err(IndexError::Invalid("Directory mutation path exceeds the observation byte limit."));
-                }
-                Ok(MutationObservation {
-                    read: source.begin_read()?,
-                    parent: relative.rsplit_once('/').map_or("", |(parent, _)| parent).to_owned(),
-                    subtree: (scope == MutationScope::Subtree).then_some(relative),
-                    ancestors: scope == MutationScope::Ancestors,
-                })
-            })();
-            match prepare {
-                Ok(observation) => {
-                    observation.observe();
-                    Ok(Some(observation))
-                }
-                Err(error) => {
-                    source.invalidate()?;
-                    Err(error)
-                }
-            }
-        })();
-        match observation {
-            Ok(observation) => observation,
+        let source = match lock(&self.sources) {
+            Ok(sources) => sources.get(drive).cloned(),
             Err(_) => {
-                log::warn!("Directory mutation observation is unavailable. Check drive access and retry verification.");
+                log::warn!("event=directory_mutation_observation_unavailable reason=source_registry Restart Companion.");
+                return None;
+            }
+        };
+        let source = source.filter(|source| source.root_path == root && !source.stopped.load(Ordering::Acquire))?;
+        let prepare = (|| {
+            let relative = mutation_relative_path(root, path)?;
+            if !relative.is_empty() || scope != MutationScope::Ancestors {
+                validate_directory_path(&relative).map_err(|_| "invalid_path")?;
+            }
+            if relative.len() > limit("max_observation_bytes").map_err(|_| "observation_limit")? {
+                return Err("path_too_long");
+            }
+            Ok(MutationObservation {
+                read: source.begin_read().map_err(|_| "read_unavailable")?,
+                parent: relative.rsplit_once('/').map_or("", |(parent, _)| parent).to_owned(),
+                subtree: (scope == MutationScope::Subtree).then_some(relative),
+                ancestors: scope == MutationScope::Ancestors,
+            })
+        })();
+        match prepare {
+            Ok(observation) => {
+                observation.observe();
+                Some(observation)
+            }
+            Err(reason) => {
+                let invalidated = source.invalidate().is_ok();
+                let now = Instant::now();
+                if let Ok(mut status) = lock(&source.status) {
+                    if now >= status.mutation_warning_at {
+                        status.mutation_warning_at = now + MUTATION_WARNING_INTERVAL;
+                        log::warn!(
+                            "event=directory_mutation_observation_unavailable source_id={} reason={reason} invalidated={invalidated}",
+                            source.source_id
+                        );
+                    }
+                } else {
+                    log::error!(
+                        "event=directory_mutation_observation_unavailable source_id={} reason=source_status",
+                        source.source_id
+                    );
+                }
                 None
             }
         }
@@ -4313,6 +4381,7 @@ impl LocalDirectoryManager {
     }
 
     fn make_search_status(
+        &self,
         source: Option<&LocalSource>,
         result: Option<&super::directory_index::DirectoryIndexSearch>,
     ) -> Result<(DirectorySearchStatus, bool), IndexError> {
@@ -4330,6 +4399,7 @@ impl LocalDirectoryManager {
             reopen_after_ms: None,
             monitoring_state: None,
             retry_after_ms: None,
+            next_verification_at_ms: None,
             scan_progress: None,
         };
         let Some(source) = source else { return Ok((response, false)) };
@@ -4373,17 +4443,41 @@ impl LocalDirectoryManager {
         );
         response.retry_after_ms = status.retry_after_ms();
         response.scan_progress = status.scan_progress.clone();
+        drop(status);
+        if !response.source_unavailable
+            && !source.capability_failed.load(Ordering::Acquire)
+            && result.is_some()
+            && response.cache_state == "ready"
+            && !source.busy.load(Ordering::Acquire)
+            && (response.coverage.as_deref() == Some("uncertain") || response.monitoring_state.as_deref() != Some("healthy"))
+        {
+            let mut deadline = source.verification_deadline(&self.budget.policy()?)?;
+            let resumable = lock(&source.writer)?
+                .as_ref()
+                .map(DirectoryIndex::has_resumable_scan)
+                .transpose()?
+                .unwrap_or(false);
+            if resumable {
+                deadline = lock(&source.status)?.retry_at;
+            } else if let Some(spacing) = *lock(&source.next_full_pass)? {
+                deadline = deadline.max(spacing);
+            }
+            response.next_verification_at_ms = Some(match deadline.checked_duration_since(Instant::now()) {
+                Some(delay) if !delay.is_zero() => epoch_milliseconds()?.saturating_add(delay.as_millis() as i64),
+                _ => 0,
+            });
+        }
         Ok((response, details_incomplete))
     }
 
     pub fn search_status(&self, drive: &str, root: &Path) -> Result<DirectorySearchStatus, IndexError> {
         let source = lock(&self.sources)?.get(drive).filter(|source| source.root_path == root).cloned();
         let Some(source) = source else {
-            return Ok(Self::make_search_status(None, None)?.0);
+            return Ok(self.make_search_status(None, None)?.0);
         };
         source.touch()?;
         let snapshot = lock(&source.status)?.index_status.clone();
-        Ok(Self::make_search_status(Some(&source), snapshot.as_ref())?.0)
+        Ok(self.make_search_status(Some(&source), snapshot.as_ref())?.0)
     }
 
     pub async fn search(
@@ -4460,7 +4554,7 @@ impl LocalDirectoryManager {
         let reader = lock(&source.reader)?.clone();
         let Some(reader) = reader else {
             return Ok(DirectorySearchResult {
-                status: Self::make_search_status(Some(&source), None)?.0,
+                status: self.make_search_status(Some(&source), None)?.0,
                 results: Vec::new(),
                 total_matches: 0,
                 match_ranks: HashMap::new(),
@@ -4513,7 +4607,7 @@ impl LocalDirectoryManager {
             result?
         };
         source.ensure_available()?;
-        let (status, details_incomplete) = Self::make_search_status(Some(&source), Some(&result))?;
+        let (status, details_incomplete) = self.make_search_status(Some(&source), Some(&result))?;
         if let Some(verified) = result.last_verified_at_ms {
             wire_count(verified)?;
         }
@@ -5043,7 +5137,8 @@ mod tests {
         assert_eq!(response["cache_state"], "ready");
         assert!(response.get("results").is_none());
         assert!(response.get("total_matches").is_none());
-        assert_eq!(response.as_object().unwrap().len(), 14);
+        assert_eq!(response.as_object().unwrap().len(), 15);
+        assert_eq!(response["next_verification_at_ms"], Value::Null);
         assert!(!lock(&source.status).unwrap().dormant);
         source.pause_for_removal().unwrap();
         let paused = status().await;
@@ -6654,6 +6749,70 @@ mod tests {
     }
 
     #[test]
+    fn real_observation_loss_requests_early_verification_without_shortening_backoff() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root, manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        let policy = manager.budget.policy().unwrap();
+        let verified = lock(&source.status).unwrap().verified;
+        let spacing = Duration::from_secs(limit("minimum_full_pass_spacing_seconds").unwrap() as u64);
+        let early = verified + spacing;
+        assert!(!source.verification_due(&policy, early).unwrap());
+        source.invalidate().unwrap();
+        source.flush(&manager.budget).unwrap();
+        assert!(!source.verification_due(&policy, early - Duration::from_millis(1)).unwrap());
+        assert!(source.verification_due(&policy, early).unwrap());
+        source.invalidate().unwrap();
+        assert_eq!(source.verification_deadline(&policy).unwrap(), early);
+        lock(&source.status).unwrap().retry_at = early + spacing;
+        assert!(!source.verification_due(&policy, early).unwrap());
+        assert!(source.verification_due(&policy, early + spacing).unwrap());
+        let snapshot = lock(&source.status).unwrap().index_status.clone().unwrap();
+        let (status, _) = manager.make_search_status(Some(&source), Some(&snapshot)).unwrap();
+        assert_eq!(status.coverage.as_deref(), Some("uncertain"));
+        assert!(status.next_verification_at_ms.unwrap() > epoch_milliseconds().unwrap());
+        source.scan(&manager.budget).unwrap();
+        assert!(!lock(&source.observations).unwrap().recovery_required);
+        assert!(!source.verification_due(&policy, early + spacing).unwrap());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unreadable_child_leaves_root_only_monitoring_until_recursive_watch_recovers() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("root");
+        let denied = root.join("denied");
+        std::fs::create_dir_all(&denied).unwrap();
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0)).unwrap();
+        if std::fs::read_dir(&denied).is_ok() {
+            return; // A privileged test process can watch this child.
+        }
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root, manager.storage_directory());
+        source.scan(&manager.budget).unwrap();
+        assert!(lock(&source.watcher).unwrap().is_some());
+        assert!(!source.monitoring_healthy().unwrap());
+        assert!(!lock(&source.observations).unwrap().recovery_required);
+        assert_eq!(lock(&source.status).unwrap().index_status.as_ref().unwrap().coverage, "partial");
+        let epoch = lock(&source.observations).unwrap().epoch;
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now();
+        source.recover_watcher().unwrap();
+        assert_eq!(lock(&source.observations).unwrap().epoch, epoch);
+        assert!(lock(&source.watcher).unwrap().is_some());
+        std::fs::set_permissions(denied, std::fs::Permissions::from_mode(0o700)).unwrap();
+        lock(&source.status).unwrap().watcher_retry_at = Instant::now();
+        source.recover_watcher().unwrap();
+        assert!(lock(&source.observations).unwrap().recovery_required);
+        source.scan(&manager.budget).unwrap();
+        assert!(source.monitoring_healthy().unwrap());
+    }
+
+    #[test]
     fn watcher_startup_failure_retries_without_reinitializing_writer() {
         let temporary = tempfile::tempdir().unwrap();
         let root_path = temporary.path().join("root");
@@ -6872,6 +7031,47 @@ mod tests {
             source.stopped.store(true, Ordering::Release);
             source.close_idle(&manager.budget).unwrap();
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mutation_observation_accepts_canonical_target_under_symlinked_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let real = temporary.path().join("real");
+        let alias = temporary.path().join("alias");
+        std::fs::create_dir_all(real.join("parent/target")).unwrap();
+        std::os::unix::fs::symlink(real, &alias).unwrap();
+        assert_canonical_mutation_is_observed(temporary.path(), &alias);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn mutation_observation_accepts_verbatim_target_under_dos_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let canonical = temporary.path().canonicalize().unwrap();
+        let dos_root = PathBuf::from(canonical.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
+        std::fs::create_dir_all(dos_root.join("parent/target")).unwrap();
+        assert_canonical_mutation_is_observed(temporary.path(), &dos_root);
+    }
+
+    #[cfg(any(target_os = "linux", windows))]
+    fn assert_canonical_mutation_is_observed(namespace: &Path, root: &Path) {
+        let target = root.join("parent/target").canonicalize().unwrap();
+        assert!(target.strip_prefix(root).is_err());
+        let manager = LocalDirectoryManager::new_without_maintenance(namespace.join("private")).unwrap();
+        let source = LocalSource::new(root.to_path_buf(), manager.storage_directory());
+        *lock(&source.root).unwrap() = Some(Arc::new(NativeRoot::open(&root.canonicalize().unwrap()).unwrap()));
+        lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+        manager
+            .run_observed_operation("drive", root, &target, || std::fs::remove_dir(&target))
+            .unwrap();
+        let observations = lock(&source.observations).unwrap();
+        assert!(!observations.verification_required);
+        assert_eq!(observations.pending.len(), 2);
+        assert!(observations
+            .pending
+            .iter()
+            .all(|(_, mutation, _)| { matches!(mutation, DirectoryMutation::ReadParent { path } if path == "parent") }));
     }
 
     #[tokio::test]

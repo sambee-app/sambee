@@ -663,6 +663,8 @@ pub struct DirectorySearchStatus {
     pub reopen_after_ms: Option<u64>,
     pub monitoring_state: Option<String>,
     pub retry_after_ms: Option<u64>,
+    /// Earliest scheduled verification as Unix time, or zero when ready to start.
+    pub next_verification_at_ms: Option<i64>,
     pub scan_progress: Option<ScanProgress>,
 }
 

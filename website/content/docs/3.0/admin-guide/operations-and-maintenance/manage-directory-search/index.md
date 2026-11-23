@@ -14,9 +14,9 @@ The disk budget and cache target are not hard disk or process-memory limits. Lea
 
 Change monitoring keeps the index current. Full verification is a safety net for missed changes. The defaults are 24 hours when monitoring is healthy and 30 minutes when monitoring is unavailable, uncertain, or known to be unreliable. A full verification always runs after a restart and after monitoring recovers.
 
-Normal watcher events and listing feedback check the affected parent folders. Ordinary changes do not request another full pass. Lost observations, exhausted read capacity, stalled reads, or a source reconnect request verification. These rules apply to SMB and local drives.
+Normal watcher events and listing feedback check the affected parent folders. Ordinary changes do not request another full pass. After lost observations, exhausted read capacity, or a source reconnect, the active index can verify before the regular interval. Repeated gaps share one recovery request. The minimum time between full passes, retry delays, and scan capacity still apply. A stalled read keeps its scan slot until it exits. These rules apply to SMB and local drives.
 
-On Linux, Companion network and FUSE drives always use the degraded interval because native monitoring cannot report changes from other clients. The backend treats SMB change notification as reliable while its watcher is ready. For older NAS or Samba servers with unreliable change notification, set a shorter healthy interval manually.
+On Linux, Companion network and FUSE drives always use the degraded interval because native monitoring cannot report changes from other clients. If recursive monitoring fails but the root can still be watched, Companion monitors changes directly under the root and uses the degraded interval to check deeper folders. The backend treats SMB change notification as reliable while its watcher is ready. For older NAS or Samba servers with unreliable change notification, set a shorter healthy interval manually.
 
 The healthy interval can be 60 seconds to 30 days. The degraded interval can be 30 seconds to 24 hours. A degraded value above the healthy value has no effect: both runtimes use the shorter value when monitoring is degraded. Existing administrator values are not changed during an upgrade.
 
@@ -47,6 +47,8 @@ To change authority, pair the intended server again. Unpairing the authoritative
 If index growth pauses, restore free disk space or increase the relevant disk budget.
 
 Indexes are reused after a restart. Retained results remain unverified until background verification completes. A temporary disconnection keeps the index; restore source access to resume work.
+
+Directory search can show the next check time or tell you that verification is waiting to start. A scheduled time is an estimate. The check can start later if scan capacity is busy.
 
 ### SMB Verification and Recovery
 
