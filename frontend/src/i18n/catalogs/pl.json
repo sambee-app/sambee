@@ -1149,6 +1149,9 @@
         "startingIndex": "Rozpoczynanie indeksowania…",
         "indexCoveragePartial": "nie udało się zindeksować wszystkich folderów.",
         "indexCoverageUncertain": "Indeks folderów nie został zweryfikowany. Oczekuje na ponowne sprawdzenie.",
+        "indexCoverageUnverified": "Indeks folderów nie został zweryfikowany.",
+        "indexVerificationScheduled": "Następne sprawdzenie: {{time}}.",
+        "indexVerificationWaiting": "Oczekiwanie na rozpoczęcie weryfikacji.",
         "legacyDirectorySearch": "Nie potwierdzono wyszukiwania folderów według kilku słów w tym źródle. Użyj jednego słowa lub sprawdź obsługę na serwerze i w Companion.",
         "historyUnavailable": "Ostatnie foldery są niedostępne. Sprawdź połączenie z serwerem i spróbuj ponownie.",
         "fileHistoryUnavailable": "Ostatnie pliki są niedostępne. Sprawdź połączenie z serwerem i spróbuj ponownie.",
@@ -1507,7 +1510,7 @@
       "undo": "Cofnij",
       "selectedAnnouncement": "{{name}}, karta {{index}} z {{total}}",
       "listInstructions": "Użyj strzałek w lewo i w prawo, aby przełączać karty folderów, {{newTabShortcut}}, aby otworzyć nową kartę, oraz {{closeTabShortcut}}, aby zamknąć wybraną kartę.",
-      "restorationUnavailableNotice": "W tej sesji przeglądarki nie można przywrócić kart po odświeżeniu."
+      "restorationUnavailableNotice": "Sambee nie zapisał ostatnich zmian na kartach folderów. Sprawdź, czy witryna może zapisywać dane i czy jest wolne miejsce."
     },
     "confirmDelete": {
       "titleFile": "Usuń plik",

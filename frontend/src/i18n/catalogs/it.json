@@ -1143,6 +1143,9 @@
         "startingIndex": "Avvio dell’indicizzazione…",
         "indexCoveragePartial": "non è stato possibile indicizzare tutte le cartelle.",
         "indexCoverageUncertain": "L’indice delle cartelle non è verificato. È in attesa di un nuovo controllo.",
+        "indexCoverageUnverified": "L’indice delle cartelle non è verificato.",
+        "indexVerificationScheduled": "Prossimo controllo: {{time}}.",
+        "indexVerificationWaiting": "In attesa di avviare la verifica.",
         "legacyDirectorySearch": "La ricerca di cartelle con più termini non è confermata per questa origine. Cerca un solo termine o controlla il supporto nel backend e in Companion.",
         "historyUnavailable": "Cartelle recenti non disponibili. Controlla la connessione al backend e riprova.",
         "fileHistoryUnavailable": "File recenti non disponibili. Controlla la connessione al backend e riprova.",
@@ -1491,7 +1494,7 @@
       "undo": "Annulla",
       "selectedAnnouncement": "{{name}}, scheda {{index}} di {{total}}",
       "listInstructions": "Usa le frecce sinistra e destra per cambiare scheda cartella, {{newTabShortcut}} per aprire una nuova scheda e {{closeTabShortcut}} per chiudere quella selezionata.",
-      "restorationUnavailableNotice": "In questa sessione del browser non è possibile ripristinare le schede dopo aver ricaricato la pagina."
+      "restorationUnavailableNotice": "Sambee non ha potuto salvare le ultime modifiche alle schede delle cartelle. Verifica che il sito possa memorizzare dati e che ci sia spazio libero."
     },
     "confirmDelete": {
       "titleFile": "Elimina file",

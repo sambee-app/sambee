@@ -1137,6 +1137,9 @@
         "startingIndex": "Startar indexering…",
         "indexCoveragePartial": "alla mappar kunde inte indexeras.",
         "indexCoverageUncertain": "Mappindexet är inte verifierat. En ny kontroll väntar.",
+        "indexCoverageUnverified": "Mappindexet är inte verifierat.",
+        "indexVerificationScheduled": "Nästa kontroll: {{time}}.",
+        "indexVerificationWaiting": "Väntar på att kontrollen ska starta.",
         "legacyDirectorySearch": "Mappsökning med flera sökord har inte bekräftats för den här källan. Sök med ett ord eller kontrollera stödet på servern och i Companion.",
         "historyUnavailable": "Senaste mappar är inte tillgängliga. Kontrollera serveranslutningen och försök igen.",
         "fileHistoryUnavailable": "Senaste filer är inte tillgängliga. Kontrollera serveranslutningen och försök igen.",
@@ -1475,7 +1478,7 @@
       "undo": "Ångra",
       "selectedAnnouncement": "{{name}}, flik {{index}} av {{total}}",
       "listInstructions": "Använd vänster och höger piltangent för att byta mappflik, {{newTabShortcut}} för att öppna en ny flik och {{closeTabShortcut}} för att stänga den valda fliken.",
-      "restorationUnavailableNotice": "Flikar kan inte återställas efter ny inläsning i den här webbläsarsessionen."
+      "restorationUnavailableNotice": "Sambee kunde inte spara de senaste ändringarna i dina mappflikar. Kontrollera att webbplatsen får lagra data och att det finns ledigt utrymme."
     },
     "confirmDelete": {
       "titleFile": "Ta bort fil",

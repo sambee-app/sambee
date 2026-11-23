@@ -1170,6 +1170,9 @@
         "startingIndex": "Iniciando la indexación…",
         "indexCoveragePartial": "no se pudieron indexar todas las carpetas.",
         "indexCoverageUncertain": "No se ha verificado el índice de carpetas. Hay una comprobación pendiente.",
+        "indexCoverageUnverified": "No se ha verificado el índice de carpetas.",
+        "indexVerificationScheduled": "Próxima comprobación: {{time}}.",
+        "indexVerificationWaiting": "A la espera de iniciar la verificación.",
         "legacyDirectorySearch": "No se ha confirmado que este origen admita búsquedas de carpetas con varios términos. Busca con un solo término o comprueba si el servidor y Companion admiten esta función.",
         "historyUnavailable": "Las carpetas recientes no están disponibles. Comprueba la conexión al servidor y vuelve a intentarlo.",
         "fileHistoryUnavailable": "Los archivos recientes no están disponibles. Comprueba la conexión al servidor y vuelve a intentarlo.",
@@ -1518,7 +1521,7 @@
       "undo": "Deshacer",
       "selectedAnnouncement": "{{name}}, pestaña {{index}} de {{total}}",
       "listInstructions": "Usa las flechas izquierda y derecha para cambiar de pestaña de carpeta, {{newTabShortcut}} para abrir una nueva y {{closeTabShortcut}} para cerrar la seleccionada.",
-      "restorationUnavailableNotice": "En esta sesión del navegador, no se pueden restaurar las pestañas después de recargar."
+      "restorationUnavailableNotice": "Sambee no pudo guardar los últimos cambios en las pestañas de carpetas. Comprueba que se permite almacenar datos del sitio y que hay espacio libre."
     },
     "confirmDelete": {
       "titleFile": "Eliminar archivo",
