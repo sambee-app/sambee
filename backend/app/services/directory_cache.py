@@ -172,6 +172,7 @@ SCAN_SEEN_CHILD_BYTES = MAX_OBSERVATION_BYTES
 SQLITE_CACHE_SUBDIR = "sqlite"
 SQLITE_CACHE_EXTENSION = ".sqlite3"
 OBSERVATION_POLL_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["event_coalescing_ms"] / 1000
+MINIMUM_FULL_PASS_SPACING_SECONDS = DIRECTORY_INDEX_CONTRACT.limits["minimum_full_pass_spacing_seconds"]
 OBSERVATION_RETRY_SECONDS = 1.0
 CONTINUOUS_CHANGE_STALE_TURNS = 3
 WORKER_POLL_SECONDS = SQL_BUSY_TIMEOUT_MS / 1000
@@ -246,6 +247,7 @@ class DirectoryScanCoordinator:
         self.last_reason: InvalidationReason | None = None
         self.invalidation_count = 0
         self.observation_lost = False
+        self.recovery_required = False
         self.observed_reads_blocked = False
         self.observed_ready: Callable[[], bool] = lambda: False
         self._scan_group: dict[int, _PendingScanParent] | None = None
@@ -469,8 +471,9 @@ class DirectoryScanCoordinator:
             )
             self.last_reason = reason
             self.observed_reads_blocked = reason in (InvalidationReason.OBSERVATION_LOSS, InvalidationReason.READ_CAPACITY)
-            if reason in (InvalidationReason.OBSERVATION_LOSS, InvalidationReason.READ_CAPACITY):
+            if self.observed_reads_blocked:
                 self.observation_lost = True
+            self.recovery_required |= self.observed_reads_blocked or reason is InvalidationReason.SOURCE_REBIND
             self.epoch += 1
             self.barriers.clear()
             self.barrier_bytes = 0
@@ -776,6 +779,8 @@ class DirectoryScanCoordinator:
             # The finished pass re-read the gap; coverage issues are reported separately.
             self.observation_lost = False
             if accepted:
+                self.observed_reads_blocked = False
+                self.recovery_required = False
                 self._uncertain_pending = False
                 self.last_reason = None
             return accepted
@@ -1418,6 +1423,21 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         pending = [deadline - now for deadline in deadlines if deadline is not None and deadline > now]
         return max(1, int(min(pending) * 1000)) if pending else None
 
+    @property
+    def next_verification_at_ms(self) -> int | None:
+        if (
+            not self._opened.is_set()
+            or self._last_scan_time is None
+            or self.source_unavailable
+            or self._verification_running
+            or self._scan_running.is_set()
+            or self.monitoring_state == "healthy"
+        ):
+            return None
+        deadline = self._verification_deadline(None if self.index.needs_fts_repair else self._verified_at)
+        delay = deadline - time.monotonic()
+        return int((time.time() + delay) * 1000) if delay > 0 else 0
+
     def __init__(
         self,
         connection_id: str,
@@ -1773,7 +1793,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self.coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
 
     def _observation_started(self) -> None:
-        reason = InvalidationReason.OBSERVATION_LOSS if self._watcher_ever_ready else InvalidationReason.WATCHER_START
+        recovering = self._watcher_ever_ready or self._last_scan_time is not None
+        reason = InvalidationReason.OBSERVATION_LOSS if recovering else InvalidationReason.WATCHER_START
         self.coordinator.invalidate(reason)
         self._watcher_ever_ready = True
 
@@ -2531,6 +2552,8 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                                 continue
                             invalidation_reason = self.coordinator.last_reason
                             complete = self.coordinator.accept_generation(baseline, generation)
+                            if complete:
+                                self._verified_at = time.monotonic()
                         self._state = CacheState.READY
                         self._coverage_incomplete = not complete
                         if complete:
@@ -2663,17 +2686,28 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._verification_error = None
         self._update_error = None
 
+    def _verification_deadline(self, verified_at: float | None, *, allow_source_probe: bool = False) -> float:
+        """Combine retry, periodic verification, and new-pass spacing gates."""
+        deadline = max(self._resource_retry_at, self._verification_retry_at or 0.0)
+        # Startup, source probes, and repair do not wait for the periodic interval.
+        if verified_at is not None and not self._failure_retry_delay and self._verification_retry_at is None:
+            interval = self.policy.effective_verification_seconds(
+                degraded=self.coordinator.verification_required or not self._watcher_ready.is_set()
+            )
+            delay = interval * (100 - self._retry_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1)) / 100
+            if self.coordinator.recovery_required:
+                delay = min(delay, MINIMUM_FULL_PASS_SPACING_SECONDS)
+            deadline = max(deadline, verified_at + delay)
+        if (
+            self._next_full_pass_at > deadline
+            and not (allow_source_probe and not self._source_available.is_set())
+            and not self.index.has_resumable_scan()
+        ):
+            return self._next_full_pass_at
+        return deadline
+
     def _verification_due(self, verified_at: float, *, now: float | None = None) -> bool:
-        current = time.monotonic() if now is None else now
-        interval = self.policy.effective_verification_seconds(
-            degraded=self.coordinator.verification_required or not self._watcher_ready.is_set()
-        )
-        delay = interval * (100 - self._retry_jitter % (PERIODIC_VERIFICATION_JITTER_PERCENT + 1)) / 100
-        return current >= self._resource_retry_at and (
-            bool(self._failure_retry_delay)
-            or (self._verification_retry_at is not None and current >= self._verification_retry_at)
-            or current >= verified_at + delay
-        )
+        return (time.monotonic() if now is None else now) >= self._verification_deadline(verified_at)
 
     async def _refresh_connection_generation(self) -> None:
         replacement = get_smb_connection_cache(self.connection_id)
@@ -2690,26 +2724,22 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         self._source_root = await self._blocking(self._source_root.replacement)
         self._connection_cache = replacement
 
-    async def _run_rescan(self, *, recover_dormant: bool = False) -> None:
+    async def _run_rescan(self, *, recover_dormant: bool = False, scheduled: bool = False) -> None:
         if self._verification_running or (self._dormant and not (recover_dormant and self.source_unavailable)):
             return
         self._verification_running = True
         try:
-            await self._run_rescan_work()
+            await self._run_rescan_work(scheduled=scheduled)
         finally:
             self._verification_running = False
 
-    async def _run_rescan_work(self) -> None:
-        now = time.monotonic()
+    async def _run_rescan_work(self, *, scheduled: bool) -> None:
+        verified_at = self._verified_at if scheduled else None
         if (
             not self._opened.is_set()
             or self._scan_running.is_set()
-            or now < self._resource_retry_at
-            or (self._verification_retry_at is not None and now < self._verification_retry_at)
+            or time.monotonic() < self._verification_deadline(verified_at, allow_source_probe=True)
         ):
-            return
-        resumable = await self._blocking(self.index.has_resumable_scan)
-        if now < self._next_full_pass_at and not resumable and self._source_available.is_set():
             return
         self._state = CacheState.UPDATING if self._directory_count else CacheState.BUILDING
         root_checked = False
@@ -2726,14 +2756,14 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             ):
                 await self._blocking(self._probe_source_root, pool=pool)
                 root_checked = True
-                if now < self._next_full_pass_at and not resumable:
+                if time.monotonic() < self._verification_deadline(verified_at):
                     self._reset_retry()
                     self._state = CacheState.READY if self._directory_count else CacheState.EMPTY
                     return
                 if self.index.needs_fts_repair:
                     await self._blocking(self._repair_fts_work)
-                if not resumable:
-                    self._next_full_pass_at = time.monotonic() + DIRECTORY_INDEX_CONTRACT.limits["minimum_full_pass_spacing_seconds"]
+                if not self.index.has_resumable_scan():
+                    self._next_full_pass_at = time.monotonic() + MINIMUM_FULL_PASS_SPACING_SECONDS
                 await self._blocking(self._scan_disk_queue, pool=pool)
             self._reset_retry()
         except asyncio.CancelledError:
@@ -2765,7 +2795,6 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             self._schedule_retry()
 
     async def _periodic_rescan_loop(self) -> None:
-        self._verified_at = time.monotonic()
         while not self._stop_event.is_set():
             try:
                 await asyncio.sleep(OBSERVATION_POLL_SECONDS)
@@ -2784,13 +2813,11 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
                         continue
                     if not self._dormant and (self.index.needs_fts_repair or not self._source_available.is_set()):
                         await self._run_rescan()
-                        self._verified_at = time.monotonic()
                         continue
                     await self._blocking(self.coordinator.apply_pending)
                     # Leave a due dormant source for the manager to release.
                     if not self._dormant and self._verification_due(self._verified_at):
-                        await self._run_rescan()
-                        self._verified_at = time.monotonic()
+                        await self._run_rescan(scheduled=True)
                     await self._run_reconciliation()
                     response = await self._blocking(self.index.status)
                     self._directory_count = response.directory_count

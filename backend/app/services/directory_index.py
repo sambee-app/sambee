@@ -294,6 +294,7 @@ class DirectoryIndexSearch:
     last_verified_at_ms: int | None
     query_plan: Literal["empty", "trigram", "scan"]
     issue_count: int = 0
+    resumable_scan: bool = False
 
 
 class DirectoryIndex:
@@ -809,13 +810,14 @@ class DirectoryIndex:
 
     def status(self) -> DirectoryIndexSearch:
         with self._writer_lock:
-            count, revision, coverage, verified, issues = required_row(
+            count, revision, coverage, verified, issues, resumable = required_row(
                 self._connection().execute(
-                    "SELECT g.indexed_count, m.accepted_revision, g.coverage, m.last_verified_at_ms, g.issue_count "
+                    "SELECT g.indexed_count, m.accepted_revision, g.coverage, m.last_verified_at_ms, g.issue_count, "
+                    "EXISTS(SELECT 1 FROM generations WHERE scan_active = 1 OR state = 'building') "
                     "FROM source_metadata m JOIN generations g ON g.id = m.selected_generation WHERE m.id = 1"
                 )
             )
-            return DirectoryIndexSearch((), 0, count, revision, coverage, verified, "empty", issues)
+            return DirectoryIndexSearch((), 0, count, revision, coverage, verified, "empty", issues, bool(resumable))
 
     def _refresh_status_snapshot(self) -> None:
         self._status_snapshot = self.status()
@@ -855,13 +857,8 @@ class DirectoryIndex:
             )
 
     def has_resumable_scan(self) -> bool:
-        """Return whether the selected build or verification pass can continue."""
-        with self._writer_lock:
-            return bool(
-                required_row(
-                    self._connection().execute("SELECT EXISTS(SELECT 1 FROM generations WHERE scan_active = 1 OR state = 'building')")
-                )[0]
-            )
+        """Check committed scan state without waiting for the writer."""
+        return self.cached_status().resumable_scan
 
     def has_pending_scan(self) -> bool:
         """Keep source ownership while persisted scan work remains."""

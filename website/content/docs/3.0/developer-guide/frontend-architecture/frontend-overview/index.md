@@ -31,7 +31,7 @@ The file browser is the center of the main product UI.
 
 - It supports single-pane and dual-pane workflows with independent ordered folder-tab collections per pane.
 - It separates lightweight tab-session state (`pages/FileBrowser/tabSessions.ts`) from one active browsing runtime and virtualizer per pane (`pages/FileBrowser/useFileBrowserPane.ts`), rather than mounting hidden browser trees for background tabs.
-- It keeps the visible URL focused on each visible pane's selected location while attaching selected tab IDs to namespaced router history state (`sambeePaneTabs`) and persisting minimal tab descriptors in session-scoped `sessionStorage` (`pages/FileBrowser/tabSessionStorage.ts`) keyed by validated `userScope` (preserving anonymous records across unauthenticated startup refresh `401` responses while clearing account-owned records on auth clear and clearing all records on explicit sign-out).
+- It keeps the URL focused on selected locations in visible panes and tracks selected tabs in router history (`sambeePaneTabs`). It saves minimal tab descriptors per page in user-scoped `localStorage` (`pages/FileBrowser/workspaceTabStorage.ts`). Records survive session expiry but are removed on explicit sign-out.
 - It captures source tab identity, item handles, and destination location when operations start so later tab switches or closes never retarget an in-flight write, and limits live WebSocket directory subscriptions to visible selected locations while routing change invalidations to retained sessions.
 
 That is why frontend changes in the file browser often have broader user impact than they first appear to.

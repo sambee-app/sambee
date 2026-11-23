@@ -1450,7 +1450,7 @@
       "undo": "撤销",
       "selectedAnnouncement": "{{name}}，第 {{index}} 个标签页，共 {{total}} 个",
       "listInstructions": "使用左右方向键切换文件夹标签页，按 {{newTabShortcut}} 新建标签页，按 {{closeTabShortcut}} 关闭所选标签页。",
-      "restorationUnavailableNotice": "此浏览器会话不支持在重新加载后恢复标签页。"
+      "restorationUnavailableNotice": "Sambee 无法保存文件夹标签页的最新更改。请确认站点可以存储数据，并且有可用空间。"
     },
     "commands": {
       "categories": {
@@ -1586,6 +1586,9 @@
         "startingIndex": "正在启动索引…",
         "indexCoveragePartial": "部分文件夹无法建立索引。",
         "indexCoverageUncertain": "文件夹索引尚未验证，正在等待再次检查。",
+        "indexCoverageUnverified": "文件夹索引尚未验证。",
+        "indexVerificationScheduled": "下次检查：{{time}}。",
+        "indexVerificationWaiting": "正在等待开始验证。",
         "legacyDirectorySearch": "尚未确认此来源支持多词文件夹搜索。请使用单个搜索词，或检查后端和 Companion 是否支持此功能。",
         "historyUnavailable": "最近访问的文件夹不可用。请检查后端连接后重试。",
         "fileHistoryUnavailable": "最近使用的文件不可用。请检查后端连接后重试。",

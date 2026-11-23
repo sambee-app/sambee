@@ -530,6 +530,21 @@ def test_first_watcher_readiness_invalidates_without_observation_loss_status(sql
     assert "observations were lost" in cache.scan_error
 
 
+def test_late_watcher_recovery_restores_observed_reads(sqlite_cache, monkeypatch):
+    cache = sqlite_cache
+    monkeypatch.setattr("smbclient.scandir", lambda *args, **kwargs: (entry for entry in ()))
+    cache._scan_disk_queue()
+    assert cache.last_scan_time is not None
+    cache._observation_started()
+    cache._watcher_ready.set()
+    assert cache.coordinator.observed_reads_blocked
+
+    cache._scan_disk_queue()
+
+    assert not cache.coordinator.verification_required
+    assert not cache.coordinator.observed_reads_blocked
+
+
 def test_status_priority_and_recovery_follow_current_conditions(sqlite_cache, monkeypatch):
     cache = sqlite_cache
     cache._watcher_ready.set()
@@ -5506,17 +5521,53 @@ def test_reconciled_observation_keeps_healthy_verification_interval(sqlite_cache
     assert not sqlite_cache.coordinator.verification_required
 
 
-def test_observation_loss_keeps_degraded_verification_interval(sqlite_cache):
-    from app.services.directory_cache import InvalidationReason
+def test_observation_loss_requests_early_verification_without_shortening_backoff(sqlite_cache):
+    from app.services.directory_cache import MINIMUM_FULL_PASS_SPACING_SECONDS, InvalidationReason
 
     sqlite_cache.coordinator.verification_required = False
     sqlite_cache._watcher_ready.set()
     sqlite_cache._retry_jitter = 0
     sqlite_cache.coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
     assert sqlite_cache.coordinator.verification_required
-    deadline = sqlite_cache.policy.degraded_verification_seconds
-    assert not sqlite_cache._verification_due(0, now=deadline - 1)
+    deadline = MINIMUM_FULL_PASS_SPACING_SECONDS
+    assert not sqlite_cache._verification_due(0, now=deadline - 0.001)
     assert sqlite_cache._verification_due(0, now=deadline)
+    sqlite_cache.coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
+    assert sqlite_cache._verification_due(0, now=deadline)
+    sqlite_cache._schedule_retry(now=deadline)
+    assert not sqlite_cache._verification_due(0, now=deadline)
+    assert sqlite_cache._verification_due(0, now=sqlite_cache._resource_retry_at)
+
+
+def test_smb_reports_scheduled_verification_and_waiting_to_start(sqlite_cache, monkeypatch):
+    from app.services.directory_cache import MINIMUM_FULL_PASS_SPACING_SECONDS, InvalidationReason
+
+    monkeypatch.setattr("app.services.directory_cache.time.monotonic", lambda: 100.0)
+    monkeypatch.setattr("app.services.directory_cache.time.time", lambda: 10_000.0)
+    sqlite_cache._opened.set()
+    sqlite_cache._watcher_ready.set()
+    sqlite_cache._last_scan_time = 10_000.0
+    sqlite_cache._verified_at = 100.0
+    assert sqlite_cache.index.finish_generation(1)
+    sqlite_cache.coordinator.verification_required = False
+    assert sqlite_cache.next_verification_at_ms is None
+    sqlite_cache.coordinator.invalidate(InvalidationReason.OBSERVATION_LOSS)
+    assert sqlite_cache.next_verification_at_ms == (10_000 + MINIMUM_FULL_PASS_SPACING_SECONDS) * 1000
+    sqlite_cache._verified_at -= MINIMUM_FULL_PASS_SPACING_SECONDS
+    sqlite_cache._next_full_pass_at = 110.0
+    assert sqlite_cache.next_verification_at_ms == 10_010_000
+    assert not sqlite_cache._verification_due(sqlite_cache._verified_at, now=109.999)
+    assert sqlite_cache._verification_due(sqlite_cache._verified_at, now=110.0)
+
+    sqlite_cache.index.prepare_scan()
+    sqlite_cache._verification_retry_at = 102.0
+    assert sqlite_cache.next_verification_at_ms == 10_002_000
+    assert not sqlite_cache._verification_due(sqlite_cache._verified_at, now=101.999)
+    assert sqlite_cache._verification_due(sqlite_cache._verified_at, now=102.0)
+    sqlite_cache._verification_retry_at = None
+    assert sqlite_cache.next_verification_at_ms == 0
+    sqlite_cache._verification_running = True
+    assert sqlite_cache.next_verification_at_ms is None
 
 
 def test_failed_verification_backoff_is_due_before_the_full_pass_interval(sqlite_cache):
@@ -5687,6 +5738,7 @@ def test_directory_status_reads_existing_snapshot_and_touches_source(sqlite_cach
         "source_unavailable",
         "monitoring_state",
         "retry_after_ms",
+        "next_verification_at_ms",
         "scan_progress",
     }
     assert response.json()["directory_count"] == 1

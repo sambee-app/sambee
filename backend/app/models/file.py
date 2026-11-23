@@ -166,6 +166,7 @@ class DirectorySearchStatus(BaseModel):
     source_unavailable: bool = False
     monitoring_state: Literal["starting", "healthy", "recovering", "unavailable"] | None = None
     retry_after_ms: int | None = Field(default=None, ge=0)
+    next_verification_at_ms: int | None = Field(default=None, ge=0)
     scan_progress: ScanProgress | None = None
 
 

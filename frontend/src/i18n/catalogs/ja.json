@@ -1131,6 +1131,9 @@
         "startingIndex": "インデックスの作成を開始中…",
         "indexCoveragePartial": "一部のフォルダーをインデックスに登録できませんでした。",
         "indexCoverageUncertain": "フォルダーインデックスは未検証です。次の確認を待っています。",
+        "indexCoverageUnverified": "フォルダーインデックスは未検証です。",
+        "indexVerificationScheduled": "次回の確認：{{time}}。",
+        "indexVerificationWaiting": "検証の開始を待っています。",
         "legacyDirectorySearch": "この接続先では複数の語句によるフォルダー検索への対応が確認できていません。語句を 1 つだけ指定して検索するか、バックエンドと Companion の対応状況を確認してください。",
         "historyUnavailable": "最近のフォルダー履歴を利用できません。バックエンドへの接続を確認して再試行してください。",
         "fileHistoryUnavailable": "最近のファイル履歴を利用できません。バックエンドへの接続を確認して再試行してください。",
@@ -1459,7 +1462,7 @@
       "undo": "元に戻す",
       "selectedAnnouncement": "{{name}}、{{total}} 個中 {{index}} 番目のタブ",
       "listInstructions": "左右の矢印キーでフォルダータブを切り替え、{{newTabShortcut}} で新しいタブを開き、{{closeTabShortcut}} で選択中のタブを閉じます。",
-      "restorationUnavailableNotice": "このブラウザーセッションでは、再読み込み後にタブを復元できません。"
+      "restorationUnavailableNotice": "Sambee はフォルダーのタブへの最新の変更を保存できませんでした。サイトデータの保存が許可されており、空き容量があることを確認してください。"
     },
     "confirmDelete": {
       "titleFile": "ファイルを削除",

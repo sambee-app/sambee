@@ -1305,6 +1305,9 @@
         "startingIndex": "Indexering starten…",
         "indexCoveragePartial": "niet alle mappen konden worden geïndexeerd.",
         "indexCoverageUncertain": "De mapindex is niet geverifieerd. Er volgt een nieuwe controle.",
+        "indexCoverageUnverified": "De mapindex is niet geverifieerd.",
+        "indexVerificationScheduled": "Volgende controle: {{time}}.",
+        "indexVerificationWaiting": "De controle is nog niet gestart.",
         "legacyDirectorySearch": "Zoeken naar mappen met meerdere termen is voor deze bron niet bevestigd. Zoek met één term of controleer of de backend en Companion dit ondersteunen.",
         "historyUnavailable": "Recente mappen zijn niet beschikbaar. Controleer de verbinding met de backend en probeer het opnieuw.",
         "fileHistoryUnavailable": "Recente bestanden zijn niet beschikbaar. Controleer de verbinding met de backend en probeer het opnieuw.",
@@ -1651,7 +1654,7 @@
       "undo": "Ongedaan maken",
       "selectedAnnouncement": "{{name}}, tabblad {{index}} van {{total}}",
       "listInstructions": "Gebruik Pijl-links en Pijl-rechts om tussen maptabbladen te wisselen. Gebruik {{newTabShortcut}} om een nieuw tabblad te openen en {{closeTabShortcut}} om het geselecteerde tabblad te sluiten.",
-      "restorationUnavailableNotice": "Tabbladen herstellen na het opnieuw laden is niet beschikbaar in deze browsersessie."
+      "restorationUnavailableNotice": "Sambee kon de laatste wijzigingen aan je maptabbladen niet opslaan. Controleer of de site gegevens mag opslaan en of er vrije ruimte is."
     },
     "rename": {
       "titleFile": "Bestandsnaam wijzigen",
