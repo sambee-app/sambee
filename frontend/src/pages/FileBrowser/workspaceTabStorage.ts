@@ -161,36 +161,74 @@ function hasWorkspaceRecords(): boolean {
   return false;
 }
 
-export function readWorkspacePageId(): string | null {
+function parsePageIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter(nonempty);
+  return nonempty(value) ? [value] : [];
+}
+
+export function readWorkspacePageIds(): string[] {
   try {
-    const id = sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
-    if (id) return id;
+    const raw = sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
+    if (raw) {
+      // Older versions stored a single ID as plain text.
+      const ids = parsePageIds(raw.startsWith("[") ? parseJson(raw) : raw);
+      if (ids.length > 0) return ids;
+    }
   } catch (error) {
     logger.debug("Cannot read the workspace page ID from session storage", { error }, "browser");
   }
   const state: unknown = window.history.state;
-  const id = isObject(state) ? state[WORKSPACE_PAGE_HISTORY_KEY] : null;
-  return nonempty(id) ? id : null;
+  return parsePageIds(isObject(state) ? state[WORKSPACE_PAGE_HISTORY_KEY] : null);
 }
 
-export function stampWorkspacePageHistory(pageId: string | null): void {
-  if (!pageId) return;
+export function stampWorkspacePageHistory(pageIds = readWorkspacePageIds()): void {
+  if (pageIds.length === 0) return;
   const state: unknown = window.history.state;
-  if (isObject(state) && state[WORKSPACE_PAGE_HISTORY_KEY] === pageId) return;
+  const previous = isObject(state) ? state[WORKSPACE_PAGE_HISTORY_KEY] : null;
+  if (Array.isArray(previous) && previous.length === pageIds.length && pageIds.every((id, index) => id === previous[index])) return;
   try {
-    window.history.replaceState({ ...(isObject(state) ? state : {}), [WORKSPACE_PAGE_HISTORY_KEY]: pageId }, "");
+    window.history.replaceState({ ...(isObject(state) ? state : {}), [WORKSPACE_PAGE_HISTORY_KEY]: pageIds }, "");
   } catch (error) {
     logger.debug("Cannot update the workspace page ID in history", { error }, "browser");
   }
 }
 
-function rememberPageId(pageId: string): void {
+function rememberPageId(pageId: string, scope: UserScope): void {
+  // Keep opaque references only. The record supplies the account scope.
+  const pageIds = [pageId];
+  const seenScopes = new Set([scope]);
+  for (const id of readWorkspacePageIds()) {
+    if (id === pageId) continue;
+    const record = readRecord(id);
+    if (!record || seenScopes.has(record.userScope)) continue;
+    seenScopes.add(record.userScope);
+    pageIds.push(id);
+  }
   try {
-    sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, pageId);
+    sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, JSON.stringify(pageIds));
   } catch (error) {
     logger.debug("Cannot store the workspace page ID in session storage", { error }, "browser");
   }
-  stampWorkspacePageHistory(pageId);
+  stampWorkspacePageHistory(pageIds);
+}
+
+function findReferencedPage(pageIds: readonly string[], scope: UserScope): string | undefined {
+  return pageIds.find((id) => readRecord(id)?.userScope === scope);
+}
+
+function rankClosedWorkspaceCandidates(scope: UserScope, route: WorkspaceRoute, live: ReadonlySet<string>, locks: LockManager | undefined) {
+  const identity = getWorkspaceBrowseIdentity(route);
+  return (
+    listRecords(scope)
+      // Web Locks check liveness atomically at claim time; only HTTP uses the snapshot.
+      .filter(({ pageId }) => locks || !live.has(pageId))
+      .map(({ pageId, record }) => ({
+        pageId,
+        updatedAt: record.updatedAt,
+        matchesURL: getWorkspaceBrowseIdentity(getStoredWorkspaceRoute(record)) === identity,
+      }))
+      .sort((a, b) => Number(b.matchesURL) - Number(a.matchesURL) || b.updatedAt - a.updatedAt)
+  );
 }
 
 function compactTab(id: string, target: BrowseRouteTarget, sortBy?: SortField, sortDirection?: "asc" | "desc"): StoredTab {
@@ -462,7 +500,7 @@ export async function claimWorkspaceTabs(
   route: WorkspaceRoute,
   signal: AbortSignal
 ): Promise<WorkspaceTabClaim> {
-  const reference = readWorkspacePageId();
+  const references = readWorkspacePageIds();
   const locks = navigator.locks;
   const channel = openChannel();
   let scope: UserScope | undefined;
@@ -530,7 +568,7 @@ export async function claimWorkspaceTabs(
   let pendingRetry = false;
   let latestJson: string | null = null;
   const write = (json: string): boolean => {
-    if (stopped || !pageId || scope !== authSession.getUserId()) return false;
+    if (stopped || !pageId || scope === undefined || scope !== authSession.getUserId()) return false;
     let key = WORKSPACE_TAB_RECORD_PREFIX + pageId;
     // A sign-out in another page can delete the record before its broadcast arrives.
     if (storedJson !== null) {
@@ -545,7 +583,7 @@ export async function claimWorkspaceTabs(
         pageId = randomUuid();
         key = WORKSPACE_TAB_RECORD_PREFIX + pageId;
         storedJson = null;
-        rememberPageId(pageId);
+        rememberPageId(pageId, scope);
       }
     }
     localStorage.setItem(key, json);
@@ -596,8 +634,8 @@ export async function claimWorkspaceTabs(
       scope = resolvedScope;
       if (signOuts.has(scope)) stop();
       if (!stopped) {
-        const referenced = reference ? readRecord(reference) : null;
-        if (reference && referenced?.userScope === scope) {
+        const reference = findReferencedPage(references, scope);
+        if (reference) {
           if (await own(reference, live)) {
             const current = readRecord(reference);
             if (current?.userScope === scope) {
@@ -624,14 +662,9 @@ export async function claimWorkspaceTabs(
           });
         }
         if (!pageId && !stopped) {
-          const identity = getWorkspaceBrowseIdentity(route);
-          const candidates = listRecords(scope).filter(({ pageId: id }) => locks || !live.has(id));
-          const rank = (candidate: PersistedWorkspaceTabsRecord) =>
-            Number(getWorkspaceBrowseIdentity(getStoredWorkspaceRoute(candidate)) === identity);
-          candidates.sort((a, b) => rank(b.record) - rank(a.record) || b.record.updatedAt - a.record.updatedAt);
-          for (const candidate of candidates) {
-            if (await own(candidate.pageId, live)) {
-              const current = readRecord(candidate.pageId);
+          for (const { pageId: candidateId } of rankClosedWorkspaceCandidates(scope, route, live, locks)) {
+            if (await own(candidateId, live)) {
+              const current = readRecord(candidateId);
               if (current?.userScope === scope) {
                 record = current;
                 fromClosed = true;
@@ -645,7 +678,7 @@ export async function claimWorkspaceTabs(
         }
         if (!pageId && !stopped) await own(randomUuid(), live);
         if (pageId && !stopped) {
-          rememberPageId(pageId);
+          rememberPageId(pageId, scope);
           live.add(pageId);
           await pruneClosed(scope, locks, live);
         }

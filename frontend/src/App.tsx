@@ -26,7 +26,7 @@ import { CompanionSettingsSync } from "./i18n/CompanionSettingsSync";
 import { LocalePreferencesProvider } from "./i18n/LocalePreferencesProvider";
 import { parseBrowseRoute } from "./pages/FileBrowser/routing";
 import { useWorkspaceTabClaim, WorkspaceTabClaimContext } from "./pages/FileBrowser/useWorkspaceTabClaim";
-import { readWorkspacePageId, stampWorkspacePageHistory } from "./pages/FileBrowser/workspaceTabStorage";
+import { readWorkspacePageIds, stampWorkspacePageHistory } from "./pages/FileBrowser/workspaceTabStorage";
 import PasswordChange, { PasswordChangeGate } from "./pages/PasswordChange";
 import { startControlledReauthentication } from "./services/api";
 import { authSession } from "./services/authSession";
@@ -66,7 +66,7 @@ function AppContent() {
   const browseIndex = useMatch("/browse");
   const settingsMatch = useMatch("/settings/*");
   const shouldStartWorkspace =
-    location.pathname === "/" || Boolean(browseMatch || browseIndex) || (settingsMatch !== null && readWorkspacePageId() !== null);
+    location.pathname === "/" || Boolean(browseMatch || browseIndex) || (settingsMatch !== null && readWorkspacePageIds().length > 0);
   const workspaceClaim = useWorkspaceTabClaim(
     parseBrowseRoute({
       targetType: browseMatch?.params.targetType,
@@ -80,7 +80,7 @@ function AppContent() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: each router entry needs the page ID, even when the owner is unchanged
   useEffect(() => {
-    stampWorkspacePageHistory(workspaceClaim?.pageId ?? readWorkspacePageId());
+    stampWorkspacePageHistory();
   }, [location, workspaceClaim]);
 
   useFocusTrap(appRef);

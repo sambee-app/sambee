@@ -12,6 +12,7 @@ import {
   LEGACY_PANE_TABS_KEY,
   MAX_CLOSED_WORKSPACE_TAB_RECORDS,
   type PersistedWorkspaceTabsRecord,
+  readWorkspacePageIds,
   resetPaneTabsStorageStateForTesting,
   resolveRestoredWorkspaceTabs,
   WORKSPACE_PAGE_HISTORY_KEY,
@@ -92,7 +93,7 @@ describe("workspace tab storage", () => {
     const claim = await original.result;
     claim.save(state, vi.fn());
     expect(Object.keys(sessionStorage)).toEqual([WORKSPACE_PAGE_ID_KEY]);
-    expect(history.state).toEqual({ usr: { caller: true }, key: "router", idx: 4, [WORKSPACE_PAGE_HISTORY_KEY]: claim.pageId });
+    expect(history.state).toEqual({ usr: { caller: true }, key: "router", idx: 4, [WORKSPACE_PAGE_HISTORY_KEY]: [claim.pageId] });
     expect(claim.record?.left.tabs).toEqual([
       { id: "folder", kind: "smb", targetId: "demo", path: "folder" },
       { id: "drive", kind: "local", targetId: "d", path: "drive" },
@@ -136,6 +137,53 @@ describe("workspace tab storage", () => {
     const [one, two] = await Promise.all([open(route(target("match"))), open(route(target("match")))]);
     expect([one.pageId, two.pageId]).toEqual(["older-match", "newest"]);
     expect(one.fromClosed && two.fromClosed).toBe(true);
+  });
+
+  it("restores each expired window's own background tabs when both windows have the same URL", async () => {
+    const incoming = route(target("shared"));
+    const recordA = seed("window-a", 1, "shared");
+    const recordB = seed("window-b", 2, "shared");
+    recordA.left.tabs.push({ id: "background-a", ...target("Private folder A") });
+    recordB.left.tabs.push({ id: "background-b", ...target("Private folder B") });
+    localStorage.setItem(key("window-a"), JSON.stringify(recordA));
+    localStorage.setItem(key("window-b"), JSON.stringify(recordB));
+
+    // Simulate two windows with shared localStorage and independent session and history state.
+    async function expire(pageId: string) {
+      sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, pageId);
+      history.replaceState({ [WORKSPACE_PAGE_HISTORY_KEY]: pageId }, "");
+      const owner = start(incoming);
+      expect((await owner.result).pageId).toBe(pageId);
+      authSession.clear();
+      owner.close();
+      const anonymous = start(incoming);
+      expect((await anonymous.result).pageId).not.toBe(pageId);
+      (await anonymous.result).save(state, vi.fn());
+      const expired = { session: sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY)!, history: history.state };
+      anonymous.close();
+      authSession.setAuthenticated(createMockAuthToken({ user_id: "alice" }), false);
+      return expired;
+    }
+
+    const windowA = await expire("window-a");
+    const windowB = await expire("window-b");
+
+    // Window A signs in first. A fallback based on recency would select window B.
+    sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, windowA.session);
+    history.replaceState(null, "");
+    const restoredA = await open(incoming);
+    expect(restoredA.pageId).toBe("window-a");
+    expect(restoredA.fromClosed).toBe(false);
+    expect(restoredA.record?.left.tabs).toEqual(recordA.left.tabs);
+    expect(readWorkspacePageIds()[0]).toBe("window-a");
+
+    // Window B also gets its own tabs when only browser history survives.
+    sessionStorage.clear();
+    history.replaceState(windowB.history, "");
+    const restoredB = await open(incoming);
+    expect(restoredB.pageId).toBe("window-b");
+    expect(restoredB.fromClosed).toBe(false);
+    expect(restoredB.record?.left.tabs).toEqual(recordB.left.tabs);
   });
 
   it("selects an existing folder or adds a new one when claiming a closed workspace", async () => {

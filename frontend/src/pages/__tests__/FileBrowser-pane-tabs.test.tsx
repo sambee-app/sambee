@@ -18,8 +18,8 @@ import { setApplePlatformForTesting } from "../../utils/platform";
 import {
   type PersistedWorkspaceTabsRecord,
   readPaneTabHistoryState,
+  readWorkspacePageIds,
   resetPaneTabsStorageStateForTesting,
-  WORKSPACE_PAGE_ID_KEY,
   WORKSPACE_TAB_RECORD_PREFIX,
 } from "../FileBrowser/workspaceTabStorage";
 import {
@@ -330,7 +330,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     fireEvent.click(await screen.findByTestId("pane-tab-add-left"));
     fireEvent.click(screen.getByTestId("pane-tab-add-left"));
     fireEvent.click(screen.getByTestId("pane-tab-add-right"));
-    const id = sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
+    const [id] = readWorkspacePageIds();
     expect(id).not.toBeNull();
     const key = WORKSPACE_TAB_RECORD_PREFIX + id;
     await waitFor(() => expect(JSON.parse(localStorage.getItem(key)!).left.tabs).toHaveLength(3));
@@ -340,7 +340,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     await renderBrowserAndFlush(url);
     await screen.findByTestId("pane-tab-item-left-2");
     expect(screen.getByTestId("pane-tab-item-right-1")).toBeInTheDocument();
-    expect(sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY)).toBe(id);
+    expect(readWorkspacePageIds()[0]).toBe(id);
     const saves = writes.mock.calls.filter(([savedKey]) => savedKey === key);
     expect(saves.length).toBeGreaterThan(0);
     expect(JSON.parse(saves[0]![1]).left.tabs).toHaveLength(3);
@@ -354,7 +354,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     await renderBrowserAndFlush(url);
     fireEvent.click(await screen.findByTestId("pane-tab-add-left"));
     fireEvent.click(screen.getByTestId("pane-tab-add-right"));
-    const id = sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
+    const [id] = readWorkspacePageIds();
     const key = WORKSPACE_TAB_RECORD_PREFIX + id;
     await waitFor(() => expect(JSON.parse(localStorage.getItem(key)!).right.tabs).toHaveLength(2));
     await act(() => authSession.clear());
@@ -416,7 +416,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
       await finishAccountCheck(0);
       fireEvent.click(await screen.findByTestId("pane-tab-add-left"));
       fireEvent.click(screen.getByTestId("pane-tab-add-left"));
-      const originalKey = WORKSPACE_TAB_RECORD_PREFIX + sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
+      const originalKey = WORKSPACE_TAB_RECORD_PREFIX + readWorkspacePageIds()[0];
       const originalRecord = requireTestValue(localStorage.getItem(originalKey));
       expect(JSON.parse(originalRecord).left.tabs).toHaveLength(3);
 
