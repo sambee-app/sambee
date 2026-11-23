@@ -1,7 +1,17 @@
 import { ThemeProvider } from "@mui/material";
 import CssBaseline from "@mui/material/CssBaseline";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { createBrowserRouter, createRoutesFromElements, Navigate, Outlet, Route, RouterProvider, useOutletContext } from "react-router-dom";
+import {
+  createBrowserRouter,
+  createRoutesFromElements,
+  Navigate,
+  Outlet,
+  Route,
+  RouterProvider,
+  useLocation,
+  useMatch,
+  useOutletContext,
+} from "react-router-dom";
 import AppUpdatePrompt from "./components/AppUpdatePrompt";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { SettingsCategoryContent } from "./components/Settings/SettingsCategoryContent";
@@ -14,6 +24,9 @@ import { useFocusTrap } from "./hooks/useFocusTrap";
 import { translate } from "./i18n";
 import { CompanionSettingsSync } from "./i18n/CompanionSettingsSync";
 import { LocalePreferencesProvider } from "./i18n/LocalePreferencesProvider";
+import { parseBrowseRoute } from "./pages/FileBrowser/routing";
+import { useWorkspaceTabClaim, WorkspaceTabClaimContext } from "./pages/FileBrowser/useWorkspaceTabClaim";
+import { readWorkspacePageIds, stampWorkspacePageHistory } from "./pages/FileBrowser/workspaceTabStorage";
 import PasswordChange, { PasswordChangeGate } from "./pages/PasswordChange";
 import { startControlledReauthentication } from "./services/api";
 import { authSession } from "./services/authSession";
@@ -48,6 +61,28 @@ function AppContent() {
   const appRef = useRef<HTMLDivElement>(null);
   const [authBootstrapComplete, setAuthBootstrapComplete] = useState(authSession.isBootstrapComplete());
   const backendAvailability = useBackendAvailability();
+  const location = useLocation();
+  const browseMatch = useMatch("/browse/:targetType/:targetId/*");
+  const browseIndex = useMatch("/browse");
+  const settingsMatch = useMatch("/settings/*");
+  const shouldStartWorkspace =
+    location.pathname === "/" || Boolean(browseMatch || browseIndex) || (settingsMatch !== null && readWorkspacePageIds().length > 0);
+  const workspaceClaim = useWorkspaceTabClaim(
+    parseBrowseRoute({
+      targetType: browseMatch?.params.targetType,
+      targetId: browseMatch?.params.targetId,
+      path: browseMatch?.params["*"],
+      searchParams: new URLSearchParams(location.search),
+    }),
+    shouldStartWorkspace,
+    true
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: each router entry needs the page ID, even when the owner is unchanged
+  useEffect(() => {
+    stampWorkspacePageHistory();
+  }, [location, workspaceClaim]);
+
   useFocusTrap(appRef);
   useDraftRecoveryCleanup();
 
@@ -79,7 +114,9 @@ function AppContent() {
       <CompanionSettingsSync />
       <div ref={appRef}>
         <Suspense fallback={<div>{translate("app.loading")}</div>}>
-          <Outlet context={authBootstrapComplete} />
+          <WorkspaceTabClaimContext.Provider value={workspaceClaim}>
+            <Outlet context={authBootstrapComplete} />
+          </WorkspaceTabClaimContext.Provider>
         </Suspense>
       </div>
     </ThemeProvider>

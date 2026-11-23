@@ -65,6 +65,7 @@ import {
   useQuickNavIncludeDotDirectoriesPreference,
   writeSelectedConnectionIdPreference,
 } from "./preferences";
+import { getBrowseParentPath } from "./routing";
 import {
   closeTabInCollection,
   createInitialTabCollection,
@@ -2917,9 +2918,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       if (!currentArchive.virtualPath) {
         closeArchive();
       } else {
-        const parentPath = currentArchive.virtualPath.includes("/")
-          ? currentArchive.virtualPath.slice(0, currentArchive.virtualPath.lastIndexOf("/"))
-          : "";
+        const parentPath = getBrowseParentPath(currentArchive.virtualPath);
         navigateArchiveToPath(parentPath);
       }
       return;
@@ -3606,9 +3605,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
           continue;
         }
         if (session.archiveLocation !== null) {
-          const archiveParent = session.archiveLocation.archivePath.includes("/")
-            ? session.archiveLocation.archivePath.slice(0, session.archiveLocation.archivePath.lastIndexOf("/"))
-            : "";
+          const archiveParent = getBrowseParentPath(session.archiveLocation.archivePath);
           if (archiveParent === changedPath) {
             session.invalidated = true;
           }
@@ -4025,7 +4022,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     navigationAbortRef.current = controller;
     let parent = missingPath;
     while (parent && !controller.signal.aborted) {
-      parent = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : "";
+      parent = getBrowseParentPath(parent);
       const location = physicalLocation(targetConnectionId, parent);
       try {
         const listing = await providerRegistry.get(location).list(location, { signal: controller.signal });
@@ -4104,7 +4101,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         await providerRegistry.get(location).list(location, { pageSize: ARCHIVE_ROUTE_RESOLUTION_PAGE_SIZE });
       }
 
-      const physicalPath = archivePath.includes("/") ? archivePath.slice(0, archivePath.lastIndexOf("/")) : "";
+      const physicalPath = getBrowseParentPath(archivePath);
       const archiveLocation = { providerId, archivePath, virtualPath };
       return {
         physicalPath,
@@ -4149,7 +4146,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
                   throw ancestorError;
                 }
               }
-              existingPath = existingPath.includes("/") ? existingPath.slice(0, existingPath.lastIndexOf("/")) : "";
+              existingPath = getBrowseParentPath(existingPath);
             }
             return { physicalPath: existingPath, archiveLocation: null, canonicalPath: existingPath };
           }

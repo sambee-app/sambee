@@ -11,6 +11,11 @@ export const BROWSE_TARGET_KIND_LOCAL = "local";
 
 export type BrowseTargetKind = typeof BROWSE_TARGET_KIND_SMB | typeof BROWSE_TARGET_KIND_LOCAL;
 
+/** Returns the parent of a slash-delimited browse path, or the root for a top-level entry. */
+export function getBrowseParentPath(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf("/")));
+}
+
 export const VIEWER_QUERY_KEYS = ["file", "viewer", "mode", "pane", "virtual"] as const;
 export const WORKSPACE_QUERY_KEYS = [...VIEWER_QUERY_KEYS, "settings"] as const;
 const VIEWER_IDS: readonly string[] = ["image", "markdown", "pdf", "text"];

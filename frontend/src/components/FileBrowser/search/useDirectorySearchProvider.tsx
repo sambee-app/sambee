@@ -23,6 +23,7 @@ import { type BrowserHistoryService, browserHistoryService } from "../../../serv
 import { logger } from "../../../services/logger";
 import { publishRecentDirectoriesChanged } from "../../../services/recentDirectoriesSync";
 import type { DirectorySearchResult, DirectorySearchStatus, RecentDirectory, RecentDirectorySearchResponse } from "../../../types";
+import { formatLocalizedDateTime } from "../../../utils/localeFormatting";
 import { normalizeQuerySeparators } from "./normalizeQuerySeparators";
 import {
   bestSearchRelevance,
@@ -256,6 +257,7 @@ export function useDirectorySearchProvider(
     | "status_message"
     | "monitoring_state"
     | "retry_after_ms"
+    | "next_verification_at_ms"
     | "scan_progress"
     | "issue_details_available"
   > | null>(null);
@@ -291,6 +293,7 @@ export function useDirectorySearchProvider(
       previous?.status_message === response.status_message &&
       previous?.monitoring_state === response.monitoring_state &&
       previous?.retry_after_ms === response.retry_after_ms &&
+      previous?.next_verification_at_ms === response.next_verification_at_ms &&
       previous?.scan_progress?.phase === response.scan_progress?.phase &&
       previous?.scan_progress?.parents_done === response.scan_progress?.parents_done &&
       previous?.scan_progress?.parents_queued === response.scan_progress?.parents_queued &&
@@ -305,6 +308,7 @@ export function useDirectorySearchProvider(
             status_message: response.status_message,
             monitoring_state: response.monitoring_state,
             retry_after_ms: response.retry_after_ms,
+            next_verification_at_ms: response.next_verification_at_ms,
             scan_progress: response.scan_progress,
           }
     );
@@ -606,9 +610,27 @@ export function useDirectorySearchProvider(
         showSpinner: false,
       };
     }
+    const progress = coverageStatus?.scan_progress;
+    const nextCheck = coverageStatus?.next_verification_at_ms;
+    if (nextCheck != null && cacheState === "ready" && (!progress || progress.phase === "idle")) {
+      const now = new Date();
+      const checkDate = new Date(nextCheck);
+      const checkStatus =
+        nextCheck > now.getTime()
+          ? t("fileBrowser.search.status.indexVerificationScheduled", {
+              time: formatLocalizedDateTime(checkDate, {
+                dateStyle: checkDate.toDateString() === now.toDateString() ? undefined : "medium",
+                timeStyle: "medium",
+              }),
+            })
+          : t("fileBrowser.search.status.indexVerificationWaiting");
+      const issue =
+        coverageStatus?.status_message ??
+        (coverageStatus?.coverage === "uncertain" ? t("fileBrowser.search.status.indexCoverageUnverified") : null);
+      return { label: issue ? `${issue} ${checkStatus}` : checkStatus, showSpinner: false };
+    }
     if (coverageStatus?.status_message) return { label: coverageStatus.status_message, showSpinner: !!working };
     if (cacheState === "opening") return null;
-    const progress = coverageStatus?.scan_progress;
     if (progress && progress.phase !== "idle") {
       return {
         label:
@@ -660,6 +682,11 @@ export function useDirectorySearchProvider(
     if (response?.reopen_after_ms != null && response.reopen_after_ms > 0) return directoryRetryDelay(response.reopen_after_ms);
     if (indexFailureRef.current) return retryDelayRef.current;
     if (!response || response.search_contract_version !== SEARCH_CONTRACT_VERSION) return null;
+    if (response.next_verification_at_ms != null) {
+      return response.next_verification_at_ms > Date.now()
+        ? Math.min(DIRECTORY_RECOVERY_INTERVAL_MS, directoryRetryDelay(response.next_verification_at_ms - Date.now()))
+        : DIRECTORY_STATUS_INTERVAL_MS;
+    }
     if (response.retry_after_ms != null && response.retry_after_ms > 0) return directoryRetryDelay(response.retry_after_ms);
     if (response.source_unavailable) return DIRECTORY_RECOVERY_INTERVAL_MS;
     if (response.scan_progress && response.scan_progress.phase !== "idle") return DIRECTORY_STATUS_INTERVAL_MS;
