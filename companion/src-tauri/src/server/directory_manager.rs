@@ -6788,9 +6788,11 @@ mod tests {
         let root = temporary.path().join("root");
         let denied = root.join("denied");
         std::fs::create_dir_all(&denied).unwrap();
-        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0)).unwrap();
-        if std::fs::read_dir(&denied).is_ok() {
-            return; // A privileged test process can watch this child.
+        std::fs::set_permissions(&denied, std::fs::Permissions::from_mode(0o000)).unwrap();
+        match std::fs::read_dir(&denied) {
+            Ok(_) => return, // A privileged test process can watch this child.
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {}
+            Err(error) => panic!("Expected permission denied when reading the test directory: {error}"),
         }
         let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
         let source = LocalSource::new(root, manager.storage_directory());
