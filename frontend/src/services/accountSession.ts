@@ -1,4 +1,4 @@
-import { clearPaneTabsSessionStorage } from "../pages/FileBrowser/tabSessionStorage";
+import { clearSignedOutWorkspaceTabs } from "../pages/FileBrowser/workspaceTabStorage";
 import { authSession } from "./authSession";
 import { clearBrowserRecoverySnapshot } from "./browserRecoverySnapshot";
 import { clearCurrentUserDrafts } from "./draftRecovery";
@@ -6,7 +6,7 @@ import { OIDC_ATTEMPT_MARKER, OIDC_LOGOUT_MARKER, OIDC_RETURN_PATH_MARKER } from
 
 export function clearCurrentBrowserSession(): void {
   clearBrowserRecoverySnapshot();
-  clearPaneTabsSessionStorage();
+  clearSignedOutWorkspaceTabs(authSession.getUserId());
   clearCurrentUserDrafts();
   authSession.clear();
   sessionStorage.removeItem(OIDC_ATTEMPT_MARKER);

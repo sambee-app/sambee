@@ -12,7 +12,7 @@ To switch between single-pane and dual-pane mode:
 
 Use <kbd>Tab</kbd> to move focus between the panes. To focus a specific pane, use **Focus Left Pane** or **Focus Right Pane** in command search (<kbd>Ctrl</kbd> + <kbd>P</kbd>). **Focus Right Pane** also opens dual-pane mode if only one pane is visible.
 
-Each pane keeps its own folder tabs and selected tab. Shared toolbar actions, keyboard shortcuts, and quick-bar navigation apply to the active pane's selected tab without changing the other pane. When you return to single-pane mode or narrow the browser window, Sambee keeps the right pane's tabs in memory for the current session and restores them when dual-pane mode reopens. See [Open Connections and Browse Folders](../connect-to-an-smb-share/#keep-multiple-folders-open-with-tabs).
+Each pane keeps its own folder tabs and selected tab. Shared toolbar actions, keyboard shortcuts, and quick-bar navigation apply to the active pane's selected tab without changing the other pane. When you return to single-pane mode or narrow the browser window, Sambee keeps your right-pane tabs and shows them again when dual-pane mode reopens. [Automatic folder tab recovery](../connect-to-an-smb-share/#keep-multiple-folders-open-with-tabs) also keeps these hidden tabs.
 
 ## Match Pane Locations
 

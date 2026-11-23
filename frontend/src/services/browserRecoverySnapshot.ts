@@ -1,6 +1,7 @@
 import { buildBrowseRouteTarget, parseBrowseRoute } from "../pages/FileBrowser/routing";
 import type { ArchiveLocation, FileBrowserPaneRecoverySnapshot, PaneId, PaneMode } from "../pages/FileBrowser/types";
 import type { Connection } from "../types";
+import { authSession } from "./authSession";
 
 const BROWSER_RECOVERY_SNAPSHOT_KEY = "sambee:browser-recovery-snapshot";
 const BROWSER_RECOVERY_SNAPSHOT_TTL_MS = 30 * 60_000;
@@ -46,13 +47,14 @@ function isRecoveryPaneSnapshot(value: unknown): value is FileBrowserPaneRecover
   );
 }
 
-function isBrowserRecoverySnapshot(value: unknown): value is BrowserRecoverySnapshot {
+function isBrowserRecoverySnapshot(value: unknown): value is BrowserRecoverySnapshot & { userScope: string | null } {
   if (typeof value !== "object" || value === null) {
     return false;
   }
 
-  const snapshot = value as Partial<BrowserRecoverySnapshot>;
+  const snapshot = value as Partial<BrowserRecoverySnapshot & { userScope: string | null }>;
   return (
+    (snapshot.userScope === null || typeof snapshot.userScope === "string") &&
     typeof snapshot.savedAt === "number" &&
     typeof snapshot.routeUrl === "string" &&
     (snapshot.activePaneId === "left" || snapshot.activePaneId === "right") &&
@@ -65,7 +67,7 @@ function isBrowserRecoverySnapshot(value: unknown): value is BrowserRecoverySnap
 
 export function saveBrowserRecoverySnapshot(snapshot: BrowserRecoverySnapshot): void {
   try {
-    sessionStorage.setItem(BROWSER_RECOVERY_SNAPSHOT_KEY, JSON.stringify(snapshot));
+    sessionStorage.setItem(BROWSER_RECOVERY_SNAPSHOT_KEY, JSON.stringify({ ...snapshot, userScope: authSession.getUserId() }));
   } catch {
     // Ignore storage failures; recovery snapshots are best-effort only.
   }
@@ -83,6 +85,8 @@ export function loadBrowserRecoverySnapshot(routeUrl?: string): BrowserRecoveryS
       clearBrowserRecoverySnapshot();
       return null;
     }
+
+    if (parsed.userScope !== authSession.getUserId()) return null;
 
     if (Date.now() - parsed.savedAt > BROWSER_RECOVERY_SNAPSHOT_TTL_MS) {
       clearBrowserRecoverySnapshot();

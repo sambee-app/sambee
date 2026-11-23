@@ -1307,7 +1307,8 @@ export const EN_TRANSLATIONS = {
       selectedAnnouncement: "{{name}}, tab {{index}} of {{total}}",
       listInstructions:
         "Use Left and Right Arrow to switch folder tabs, {{newTabShortcut}} to open a new tab, and {{closeTabShortcut}} to close the selected tab.",
-      restorationUnavailableNotice: "Tab restoration after reload is unavailable in this browser session.",
+      restorationUnavailableNotice:
+        "Sambee could not save your latest folder tab changes. Check that site storage is allowed and has free space.",
     },
     chrome: {
       breadcrumb: {

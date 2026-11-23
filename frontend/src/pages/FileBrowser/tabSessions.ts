@@ -6,6 +6,8 @@ import type { ArchiveLocation, NavigationHistoryEntry, PaneId, SortField } from 
 
 /** Default cap on inactive tab sessions retaining full item listings per pane. */
 export const DEFAULT_MAX_INACTIVE_RETAINED_TAB_LISTINGS = 32;
+export const DEFAULT_TAB_SORT_FIELD = "name";
+export const DEFAULT_TAB_SORT_DIRECTION = "asc";
 
 /** Lightweight public summary of a tab in a pane's ordered collection. */
 export interface PaneTabSummary {
@@ -111,8 +113,8 @@ export function createEmptyTabSession(id: string = randomUuid(), overrides: Part
     focusedIndex: 0,
     focusedItemIdentity: null,
     scrollOffset: 0,
-    sortBy: "name",
-    sortDirection: "asc",
+    sortBy: DEFAULT_TAB_SORT_FIELD,
+    sortDirection: DEFAULT_TAB_SORT_DIRECTION,
     navigationHistory: new Map(),
     archiveNavigationHistory: new Map(),
     error: null,

@@ -1521,7 +1521,7 @@
       "undo": "Deshacer",
       "selectedAnnouncement": "{{name}}, pestaña {{index}} de {{total}}",
       "listInstructions": "Usa las flechas izquierda y derecha para cambiar de pestaña de carpeta, {{newTabShortcut}} para abrir una nueva y {{closeTabShortcut}} para cerrar la seleccionada.",
-      "restorationUnavailableNotice": "En esta sesión del navegador, no se pueden restaurar las pestañas después de recargar."
+      "restorationUnavailableNotice": "Sambee no pudo guardar los últimos cambios en las pestañas de carpetas. Comprueba que se permite almacenar datos del sitio y que hay espacio libre."
     },
     "confirmDelete": {
       "titleFile": "Eliminar archivo",

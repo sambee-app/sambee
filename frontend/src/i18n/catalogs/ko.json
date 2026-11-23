@@ -1462,7 +1462,7 @@
       "undo": "실행 취소",
       "selectedAnnouncement": "{{name}}, 탭 {{total}}개 중 {{index}}번째",
       "listInstructions": "왼쪽 및 오른쪽 화살표 키로 폴더 탭을 전환하고, {{newTabShortcut}} 단축키로 새 탭을 열고, {{closeTabShortcut}} 단축키로 선택한 탭을 닫습니다.",
-      "restorationUnavailableNotice": "이 브라우저 세션에서는 새로 고침 후 탭을 복원할 수 없습니다."
+      "restorationUnavailableNotice": "Sambee가 최신 폴더 탭 변경 사항을 저장하지 못했습니다. 사이트 데이터 저장이 허용되어 있고 여유 공간이 있는지 확인하세요."
     },
     "confirmDelete": {
       "titleFile": "파일 삭제",
