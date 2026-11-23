@@ -6,11 +6,11 @@ import { mockWebLocks } from "../../../test/mocks/webLocks";
 import type { BrowseRouteTarget } from "../routing";
 import { createEmptyTabSession } from "../tabSessions";
 import {
+  CLOSED_WORKSPACE_TAB_BUDGET_BYTES,
   claimWorkspaceTabs,
   getStoredWorkspaceRoute,
   getWorkspaceBrowseIdentity,
   LEGACY_PANE_TABS_KEY,
-  MAX_CLOSED_WORKSPACE_TAB_RECORDS,
   type PersistedWorkspaceTabsRecord,
   readWorkspacePageIds,
   resetPaneTabsStorageStateForTesting,
@@ -226,17 +226,45 @@ describe("workspace tab storage", () => {
     }
   });
 
-  it("prunes oldest closed records at startup and retries quota failures without pruning live records", async () => {
-    seed("live", 0);
+  it("keeps more than 50 small closed workspaces when they fit the account's budget", async () => {
+    const closedCount = 64;
+    for (let index = 0; index <= closedCount; index += 1) seed(`small-${index}`, index);
+    const owner = await open();
+    expect(owner.pageId).toBe(`small-${closedCount}`);
+    expect(localStorage.length).toBe(closedCount + 1);
+  });
+
+  it("prunes oldest closed workspaces until the account fits its budget, excluding live and foreign records", async () => {
+    seed("live", 0, "x".repeat(CLOSED_WORKSPACE_TAB_BUDGET_BYTES / 2));
     sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, "live");
     await open();
-    for (let index = 1; index <= MAX_CLOSED_WORKSPACE_TAB_RECORDS + 2; index += 1) seed(`closed-${index}`, index);
-    sessionStorage.removeItem(WORKSPACE_PAGE_ID_KEY);
+    seed("foreign", 0, "x".repeat(CLOSED_WORKSPACE_TAB_BUDGET_BYTES / 2), "bob");
+    seed("oldest", 1);
+    seed("next-oldest", 2);
+    const remaining = seed("recent", 3, "");
+    const remainingLength = key("recent").length + JSON.stringify(remaining).length;
+    remaining.left.tabs[0]!.path = "x".repeat(CLOSED_WORKSPACE_TAB_BUDGET_BYTES / 2 - remainingLength);
+    localStorage.setItem(key("recent"), JSON.stringify(remaining));
+    seed("claim", 4, "match");
+    sessionStorage.clear();
     history.replaceState(null, "");
+
+    expect((await open(route(target("match")))).pageId).toBe("claim");
+    expect(localStorage.getItem(key("oldest"))).toBeNull();
+    expect(localStorage.getItem(key("next-oldest"))).toBeNull();
+    expect(localStorage.getItem(key("recent"))).not.toBeNull();
+    expect(localStorage.getItem(key("live"))).not.toBeNull();
+    expect(localStorage.getItem(key("foreign"))).not.toBeNull();
+  });
+
+  it("reclaims space and retries a quota failure even when closed workspaces are under budget", async () => {
+    seed("live", 0);
+    seed("foreign", 0, "private", "bob");
+    seed("oldest", 1);
+    seed("recent", 2);
+    sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, "live");
     const owner = await open();
-    expect(owner.pageId).toBe(`closed-${MAX_CLOSED_WORKSPACE_TAB_RECORDS + 2}`);
-    expect(localStorage.getItem(key("closed-1"))).toBeNull();
-    expect(localStorage.getItem(key("closed-2"))).not.toBeNull();
+    expect(localStorage.getItem(key("oldest"))).not.toBeNull();
     const setItem = vi.spyOn(localStorage, "setItem").mockImplementationOnce(() => {
       throw new DOMException("Full", "QuotaExceededError");
     });
@@ -244,8 +272,10 @@ describe("workspace tab storage", () => {
     owner.save({ ...state, leftTabs: [tab("new")], leftSelectedTabId: "new" }, notify);
     await vi.waitFor(() => expect(localStorage.getItem(key(owner.pageId))).toContain('"id":"new"'));
     expect(setItem).toHaveBeenCalledTimes(2);
-    expect(localStorage.getItem(key("closed-2"))).toBeNull();
+    expect(localStorage.getItem(key("oldest"))).toBeNull();
+    expect(localStorage.getItem(key("recent"))).not.toBeNull();
     expect(localStorage.getItem(key("live"))).not.toBeNull();
+    expect(localStorage.getItem(key("foreign"))).not.toBeNull();
     expect(notify).not.toHaveBeenCalled();
   });
 

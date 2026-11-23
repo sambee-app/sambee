@@ -26,7 +26,8 @@ export const WORKSPACE_TAB_RECORD_PREFIX = "sambee:workspace-tabs:";
 export const WORKSPACE_PAGE_ID_KEY = "sambee:workspace-page-id";
 export const WORKSPACE_PAGE_HISTORY_KEY = "sambeeWorkspacePageId";
 export const PANE_TAB_HISTORY_STATE_KEY = "sambeePaneTabs";
-export const MAX_CLOSED_WORKSPACE_TAB_RECORDS = 50;
+export const CLOSED_WORKSPACE_TAB_BUDGET_BYTES = 256 * 1024;
+const UTF16_BYTES_PER_CODE_UNIT = 2;
 export const WORKSPACE_TAB_CHANNEL = "sambee-workspace-tabs";
 const LIVENESS_WAIT_MS = 250;
 
@@ -132,24 +133,32 @@ function parseJson(raw: string): unknown {
   }
 }
 
-function readRecord(pageId: string): PersistedWorkspaceTabsRecord | null {
-  const raw = localStorage.getItem(WORKSPACE_TAB_RECORD_PREFIX + pageId);
+function estimateStorageBytes(length: number): number {
+  return length * UTF16_BYTES_PER_CODE_UNIT;
+}
+
+function readStoredRecord(key: string) {
+  const raw = localStorage.getItem(key);
   if (raw === null) return null;
   const parsed = parseJson(raw);
-  if (isStoredRecord(parsed)) return parsed;
-  logger.warn("Ignoring invalid workspace tab record", { pageId }, "browser");
+  if (isStoredRecord(parsed)) return { record: parsed, estimatedBytes: estimateStorageBytes(key.length + raw.length) };
+  logger.warn("Ignoring invalid workspace tab record", { pageId: key.slice(WORKSPACE_TAB_RECORD_PREFIX.length) }, "browser");
   return null;
 }
 
+function readRecord(pageId: string): PersistedWorkspaceTabsRecord | null {
+  return readStoredRecord(WORKSPACE_TAB_RECORD_PREFIX + pageId)?.record ?? null;
+}
+
 function listRecords(scope: UserScope) {
-  const records: { pageId: string; record: PersistedWorkspaceTabsRecord }[] = [];
+  const records: { pageId: string; record: PersistedWorkspaceTabsRecord; estimatedBytes: number }[] = [];
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
     if (!key?.startsWith(WORKSPACE_TAB_RECORD_PREFIX)) continue;
     const pageId = key.slice(WORKSPACE_TAB_RECORD_PREFIX.length);
     if (!pageId) continue;
-    const record = readRecord(pageId);
-    if (record?.userScope === scope) records.push({ pageId, record });
+    const stored = readStoredRecord(key);
+    if (stored?.record.userScope === scope) records.push({ pageId, ...stored });
   }
   return records;
 }
@@ -462,23 +471,34 @@ function tryHold(locks: LockManager, pageId: string): Promise<(() => void) | nul
   });
 }
 
-async function pruneClosed(scope: UserScope, locks: LockManager | undefined, live: Set<string>, extraBytes = 0): Promise<void> {
-  const closed = listRecords(scope)
-    .filter(({ pageId }) => !live.has(pageId))
-    .sort((a, b) => a.record.updatedAt - b.record.updatedAt);
-  let excess = Math.max(0, closed.length - MAX_CLOSED_WORKSPACE_TAB_RECORDS);
-  for (const { pageId, record } of closed) {
-    if (excess <= 0 && extraBytes <= 0) break;
+async function pruneClosed(scope: UserScope, locks: LockManager | undefined, live: ReadonlySet<string>, bytesToFree = 0): Promise<void> {
+  const closed = listRecords(scope).filter(({ pageId }) => !live.has(pageId));
+  let closedBytes = closed.reduce((sum, { estimatedBytes }) => sum + estimatedBytes, 0);
+  if (closedBytes <= CLOSED_WORKSPACE_TAB_BUDGET_BYTES && bytesToFree <= 0) return;
+
+  closed.sort((a, b) => a.record.updatedAt - b.record.updatedAt);
+  for (const { pageId, record, estimatedBytes } of closed) {
+    if (closedBytes <= CLOSED_WORKSPACE_TAB_BUDGET_BYTES && bytesToFree <= 0) break;
     // Recheck ownership under the same lock used to claim a record.
     const release = locks ? await tryHold(locks, pageId) : () => {};
-    if (!release) continue;
+    if (!release) {
+      closedBytes -= estimatedBytes;
+      continue;
+    }
     try {
-      const current = readRecord(pageId);
-      if (current?.userScope !== scope || current.updatedAt !== record.updatedAt) continue;
       const key = WORKSPACE_TAB_RECORD_PREFIX + pageId;
-      extraBytes -= key.length + (localStorage.getItem(key)?.length ?? 0);
+      const current = readStoredRecord(key);
+      if (current?.record.userScope !== scope) {
+        closedBytes -= estimatedBytes;
+        continue;
+      }
+      if (current.record.updatedAt !== record.updatedAt) {
+        closedBytes += current.estimatedBytes - estimatedBytes;
+        continue;
+      }
       localStorage.removeItem(key);
-      excess -= 1;
+      closedBytes -= estimatedBytes;
+      bytesToFree -= current.estimatedBytes;
     } finally {
       release();
     }
@@ -614,8 +634,10 @@ export async function claimWorkspaceTabs(
           const live = await findLivePages(locks, channel);
           if (stopped || !pageId) return;
           live.add(pageId);
-          const currentLength = localStorage.getItem(WORKSPACE_TAB_RECORD_PREFIX + pageId)?.length ?? 0;
-          await pruneClosed(retryScope, locks, live, Math.max(1, (latestJson?.length ?? 0) - currentLength));
+          const key = WORKSPACE_TAB_RECORD_PREFIX + pageId;
+          const current = localStorage.getItem(key);
+          const growth = (latestJson?.length ?? 0) + (current === null ? key.length : -current.length);
+          await pruneClosed(retryScope, locks, live, estimateStorageBytes(Math.max(1, growth)));
           if (latestJson) write(latestJson);
         } catch (retryError) {
           notify(reportUnavailable(retryError));
