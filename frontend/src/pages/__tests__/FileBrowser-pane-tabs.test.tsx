@@ -324,6 +324,20 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     void firstMount;
   });
 
+  it("warns when workspace storage is full and keeps the new tab open", async () => {
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    const addTab = await screen.findByTestId("pane-tab-add-left");
+    const { setItem } = localStorage;
+    vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
+      if (key.startsWith(WORKSPACE_TAB_RECORD_PREFIX)) throw new DOMException("Full", "QuotaExceededError");
+      setItem.call(localStorage, key, value);
+    });
+
+    fireEvent.click(addTab);
+    expect(await screen.findByText(/could not save your latest folder tab changes/i)).toBeInTheDocument();
+    expect(screen.getByTestId("pane-tab-item-left-1")).toHaveAttribute("data-selected", "true");
+  });
+
   it("reopens both panes from history without sessionStorage and never writes an early single-tab record", async () => {
     const url = "/browse/smb/test-server-1?p2=smb/test-server-2";
     await renderBrowserAndFlush(url);

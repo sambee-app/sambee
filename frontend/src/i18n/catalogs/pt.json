@@ -1679,7 +1679,7 @@
       "undo": "Desfazer",
       "selectedAnnouncement": "{{name}}, aba {{index}} de {{total}}",
       "listInstructions": "Use as setas esquerda e direita para trocar de aba de pasta, {{newTabShortcut}} para abrir uma nova aba e {{closeTabShortcut}} para fechar a aba selecionada.",
-      "restorationUnavailableNotice": "As abas de pastas não serão restauradas se você recarregar a página ou fechar esta janela. Permita que o Sambee armazene dados do site."
+      "restorationUnavailableNotice": "O Sambee não conseguiu salvar as alterações mais recentes nas abas de pastas. Verifique se o site pode armazenar dados e se há espaço livre."
     },
     "rename": {
       "titleFile": "Renomear arquivo",

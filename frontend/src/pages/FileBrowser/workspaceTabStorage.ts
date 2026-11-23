@@ -471,16 +471,16 @@ function tryHold(locks: LockManager, pageId: string): Promise<(() => void) | nul
   });
 }
 
-async function pruneClosed(scope: UserScope, locks: LockManager | undefined, live: ReadonlySet<string>, bytesToFree = 0): Promise<void> {
+async function pruneClosed(scope: UserScope, locks: LockManager, live: ReadonlySet<string>): Promise<void> {
   const closed = listRecords(scope).filter(({ pageId }) => !live.has(pageId));
   let closedBytes = closed.reduce((sum, { estimatedBytes }) => sum + estimatedBytes, 0);
-  if (closedBytes <= CLOSED_WORKSPACE_TAB_BUDGET_BYTES && bytesToFree <= 0) return;
+  if (closedBytes <= CLOSED_WORKSPACE_TAB_BUDGET_BYTES) return;
 
   closed.sort((a, b) => a.record.updatedAt - b.record.updatedAt);
   for (const { pageId, record, estimatedBytes } of closed) {
-    if (closedBytes <= CLOSED_WORKSPACE_TAB_BUDGET_BYTES && bytesToFree <= 0) break;
+    if (closedBytes <= CLOSED_WORKSPACE_TAB_BUDGET_BYTES) break;
     // Recheck ownership under the same lock used to claim a record.
-    const release = locks ? await tryHold(locks, pageId) : () => {};
+    const release = await tryHold(locks, pageId);
     if (!release) {
       closedBytes -= estimatedBytes;
       continue;
@@ -498,7 +498,6 @@ async function pruneClosed(scope: UserScope, locks: LockManager | undefined, liv
       }
       localStorage.removeItem(key);
       closedBytes -= estimatedBytes;
-      bytesToFree -= current.estimatedBytes;
     } finally {
       release();
     }
@@ -585,8 +584,6 @@ export async function claimWorkspaceTabs(
     return true;
   };
 
-  let pendingRetry = false;
-  let latestJson: string | null = null;
   const write = (json: string): boolean => {
     if (stopped || !pageId || scope === undefined || scope !== authSession.getUserId()) return false;
     let key = WORKSPACE_TAB_RECORD_PREFIX + pageId;
@@ -617,34 +614,10 @@ export async function claimWorkspaceTabs(
 
   const save = (next: PersistedWorkspaceTabsRecord, notify: (unavailable: boolean) => void): boolean => {
     record = next;
-    const json = JSON.stringify(next);
-    latestJson = json;
     try {
-      return write(json);
+      return write(JSON.stringify(next));
     } catch (error) {
-      if (!(error instanceof DOMException) || error.name !== "QuotaExceededError" || scope === undefined) {
-        notify(reportUnavailable(error));
-        return false;
-      }
-      if (pendingRetry) return false;
-      pendingRetry = true;
-      const retryScope = scope;
-      void (async () => {
-        try {
-          const live = await findLivePages(locks, channel);
-          if (stopped || !pageId) return;
-          live.add(pageId);
-          const key = WORKSPACE_TAB_RECORD_PREFIX + pageId;
-          const current = localStorage.getItem(key);
-          const growth = (latestJson?.length ?? 0) + (current === null ? key.length : -current.length);
-          await pruneClosed(retryScope, locks, live, estimateStorageBytes(Math.max(1, growth)));
-          if (latestJson) write(latestJson);
-        } catch (retryError) {
-          notify(reportUnavailable(retryError));
-        } finally {
-          pendingRetry = false;
-        }
-      })();
+      notify(reportUnavailable(error));
       return false;
     }
   };
@@ -701,8 +674,11 @@ export async function claimWorkspaceTabs(
         if (!pageId && !stopped) await own(randomUuid(), live);
         if (pageId && !stopped) {
           rememberPageId(pageId, scope);
-          live.add(pageId);
-          await pruneClosed(scope, locks, live);
+          // A page that misses the channel query may still own its record.
+          if (locks) {
+            live.add(pageId);
+            await pruneClosed(scope, locks, live);
+          }
         }
       }
     } catch (error) {

@@ -1423,7 +1423,7 @@
       "undo": "Rückgängig",
       "selectedAnnouncement": "{{name}}, Tab {{index}} von {{total}}",
       "listInstructions": "Wechseln Sie mit der linken und rechten Pfeiltaste zwischen den Ordner-Tabs. Mit {{newTabShortcut}} öffnen Sie einen neuen Tab und mit {{closeTabShortcut}} schließen Sie den ausgewählten Tab.",
-      "restorationUnavailableNotice": "Ordnertabs werden nach dem Neuladen oder Schließen dieses Fensters nicht wiederhergestellt. Erlauben Sie Sambee den Zugriff auf den Website-Speicher."
+      "restorationUnavailableNotice": "Sambee konnte die letzten Änderungen an Ihren Ordnertabs nicht speichern. Prüfen Sie, ob Website-Speicher erlaubt und genügend Speicherplatz verfügbar ist."
     },
     "search": {
       "modeSelectorAriaLabel": "Modus der Schnellleiste wechseln",

@@ -257,25 +257,30 @@ describe("workspace tab storage", () => {
     expect(localStorage.getItem(key("foreign"))).not.toBeNull();
   });
 
-  it("reclaims space and retries a quota failure even when closed workspaces are under budget", async () => {
+  it("preserves the last saved workspace and closed workspaces when a save exceeds quota", async () => {
     seed("live", 0);
     seed("foreign", 0, "private", "bob");
     seed("oldest", 1);
     seed("recent", 2);
     sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, "live");
     const owner = await open();
-    expect(localStorage.getItem(key("oldest"))).not.toBeNull();
-    const setItem = vi.spyOn(localStorage, "setItem").mockImplementationOnce(() => {
+    const getSavedRecords = () => ["live", "foreign", "oldest", "recent"].map((id) => localStorage.getItem(key(id)));
+    const originalRecords = getSavedRecords();
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation(() => {
       throw new DOMException("Full", "QuotaExceededError");
     });
     const notify = vi.fn();
-    owner.save({ ...state, leftTabs: [tab("new")], leftSelectedTabId: "new" }, notify);
-    await vi.waitFor(() => expect(localStorage.getItem(key(owner.pageId))).toContain('"id":"new"'));
-    expect(setItem).toHaveBeenCalledTimes(2);
-    expect(localStorage.getItem(key("oldest"))).toBeNull();
-    expect(localStorage.getItem(key("recent"))).not.toBeNull();
-    expect(localStorage.getItem(key("live"))).not.toBeNull();
-    expect(localStorage.getItem(key("foreign"))).not.toBeNull();
+    const next = { ...state, leftTabs: [tab("new")], leftSelectedTabId: "new" };
+    owner.save(next, notify);
+    expect(notify).toHaveBeenCalledWith(true);
+    expect(owner.record?.left.selectedTabId).toBe("new");
+    expect(getSavedRecords()).toEqual(originalRecords);
+
+    setItem.mockRestore();
+    notify.mockClear();
+    owner.save(next, notify);
+    expect(localStorage.getItem(key("live"))).toContain('"selectedTabId":"new"');
+    expect(getSavedRecords().slice(1)).toEqual(originalRecords.slice(1));
     expect(notify).not.toHaveBeenCalled();
   });
 
@@ -305,6 +310,29 @@ describe("workspace tab storage", () => {
     expect(getWorkspaceBrowseIdentity(getStoredWorkspaceRoute(claim.record!))).toBe(identity);
     expect(sessionStorage.getItem(LEGACY_PANE_TABS_KEY)).toBeNull();
     expect(localStorage.getItem(key(claim.pageId))).not.toContain("workspaceRouteIdentity");
+  });
+
+  it("keeps an over-budget workspace whose page cannot answer a channel liveness query", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined });
+    const frozenRecord = seed("frozen", 1, "x".repeat(CLOSED_WORKSPACE_TAB_BUDGET_BYTES / 2));
+    sessionStorage.setItem(WORKSPACE_PAGE_ID_KEY, "frozen");
+    const frozen = await open();
+    seed("closed", 2, "match");
+    sessionStorage.clear();
+    history.replaceState(null, "");
+
+    // Drop replies to model a page that cannot respond until it resumes.
+    const { postMessage } = BroadcastChannel.prototype;
+    const channelSend = vi.spyOn(BroadcastChannel.prototype, "postMessage").mockImplementation(function (this: BroadcastChannel, data) {
+      if (data.type !== "liveness-reply") postMessage.call(this, data);
+    });
+    expect((await open(route(target("match")))).pageId).toBe("closed");
+    expect(channelSend).toHaveBeenCalledWith(expect.objectContaining({ type: "liveness-reply", pageId: "frozen" }));
+    expect(localStorage.getItem(key("frozen"))).toBe(JSON.stringify(frozenRecord));
+    channelSend.mockRestore();
+
+    frozen.save({ ...state, leftTabs: [tab("resumed")], leftSelectedTabId: "resumed" }, vi.fn());
+    expect(localStorage.getItem(key("frozen"))).toContain('"selectedTabId":"resumed"');
   });
 
   it("uses channel liveness on plain HTTP and stops saving on a remote sign-out", async () => {

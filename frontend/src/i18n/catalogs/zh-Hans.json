@@ -1450,7 +1450,7 @@
       "undo": "撤销",
       "selectedAnnouncement": "{{name}}，第 {{index}} 个标签页，共 {{total}} 个",
       "listInstructions": "使用左右方向键切换文件夹标签页，按 {{newTabShortcut}} 新建标签页，按 {{closeTabShortcut}} 关闭所选标签页。",
-      "restorationUnavailableNotice": "重新加载页面或关闭此窗口后，文件夹标签页将不会恢复。请允许 Sambee 存储站点数据。"
+      "restorationUnavailableNotice": "Sambee 无法保存文件夹标签页的最新更改。请确认站点可以存储数据，并且有可用空间。"
     },
     "commands": {
       "categories": {

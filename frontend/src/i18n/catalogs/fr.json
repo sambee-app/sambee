@@ -1459,7 +1459,7 @@
       "undo": "Annuler",
       "selectedAnnouncement": "{{name}}, onglet {{index}} sur {{total}}",
       "listInstructions": "Utilisez les flèches gauche et droite pour passer d’un onglet à l’autre, {{newTabShortcut}} pour ouvrir un nouvel onglet et {{closeTabShortcut}} pour fermer l’onglet sélectionné.",
-      "restorationUnavailableNotice": "Les onglets de dossiers ne seront pas restaurés après le rechargement de la page ou la fermeture de cette fenêtre. Autorisez Sambee à stocker les données du site."
+      "restorationUnavailableNotice": "Sambee n’a pas pu enregistrer les dernières modifications de vos onglets de dossiers. Vérifiez que le stockage des données du site est autorisé et qu’il reste de l’espace."
     },
     "confirmDelete": {
       "titleFile": "Supprimer le fichier",
