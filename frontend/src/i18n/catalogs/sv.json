@@ -1478,7 +1478,7 @@
       "undo": "Ångra",
       "selectedAnnouncement": "{{name}}, flik {{index}} av {{total}}",
       "listInstructions": "Använd vänster och höger piltangent för att byta mappflik, {{newTabShortcut}} för att öppna en ny flik och {{closeTabShortcut}} för att stänga den valda fliken.",
-      "restorationUnavailableNotice": "Flikar kan inte återställas efter ny inläsning i den här webbläsarsessionen."
+      "restorationUnavailableNotice": "Mappflikar återställs inte om du laddar om sidan eller stänger det här fönstret. Tillåt att Sambee lagrar webbplatsdata."
     },
     "confirmDelete": {
       "titleFile": "Ta bort fil",

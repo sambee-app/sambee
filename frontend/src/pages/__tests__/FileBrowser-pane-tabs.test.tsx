@@ -11,9 +11,15 @@ import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettin
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { requireTestValue } from "../../test/helpers/assertions";
+import { mockWebLocks } from "../../test/mocks/webLocks";
 import { FileType } from "../../types";
 import { setApplePlatformForTesting } from "../../utils/platform";
-import { readPaneTabHistoryState, resetPaneTabsStorageStateForTesting } from "../FileBrowser/tabSessionStorage";
+import {
+  readPaneTabHistoryState,
+  resetPaneTabsStorageStateForTesting,
+  WORKSPACE_PAGE_ID_KEY,
+  WORKSPACE_TAB_RECORD_PREFIX,
+} from "../FileBrowser/workspaceTabStorage";
 import {
   mockDirectoryListing,
   mockEmptyDirectory,
@@ -47,12 +53,14 @@ function deferred<T>() {
 
 describe("FileBrowser — Pane Tabs Integration", () => {
   beforeEach(() => {
+    mockWebLocks();
     vi.clearAllMocks();
     resetCurrentUserSettingsStoreForTests();
     resetPaneTabsStorageStateForTesting();
     setApplePlatformForTesting(false);
     sessionStorage.clear();
     localStorage.clear();
+    window.history.replaceState(null, "");
     authSession.setAuthenticated(createMockAuthToken({ access_token: "fake-token", user_id: "user-1" }), false);
     mockUseCompanion.mockReturnValue({
       status: "unavailable",
@@ -68,6 +76,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
   afterEach(() => {
     setApplePlatformForTesting(null);
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("keeps tab and breadcrumb controls non-focusable and restores file-list focus even when breadcrumb navigation fails", async () => {
@@ -298,6 +307,56 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     expect(screen.getByRole("button", { name: "Test Server 1 — Test Server 1:/" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Test Server 2 — Test Server 2:/" })).toHaveAttribute("aria-pressed", "true");
     void firstMount;
+  });
+
+  it("reopens both panes from history without sessionStorage and never writes an early single-tab record", async () => {
+    const url = "/browse/smb/test-server-1?p2=smb/test-server-2";
+    await renderBrowserAndFlush(url);
+    fireEvent.click(await screen.findByTestId("pane-tab-add-left"));
+    fireEvent.click(screen.getByTestId("pane-tab-add-left"));
+    fireEvent.click(screen.getByTestId("pane-tab-add-right"));
+    const id = sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
+    expect(id).not.toBeNull();
+    const key = WORKSPACE_TAB_RECORD_PREFIX + id;
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(key)!).left.tabs).toHaveLength(3));
+    cleanup();
+    sessionStorage.clear();
+    const writes = vi.spyOn(localStorage, "setItem");
+    await renderBrowserAndFlush(url);
+    await screen.findByTestId("pane-tab-item-left-2");
+    expect(screen.getByTestId("pane-tab-item-right-1")).toBeInTheDocument();
+    expect(sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY)).toBe(id);
+    const saves = writes.mock.calls.filter(([savedKey]) => savedKey === key);
+    expect(saves.length).toBeGreaterThan(0);
+    expect(JSON.parse(saves[0]![1]).left.tabs).toHaveLength(3);
+    writes.mockClear();
+    fireEvent(window, new Event("pagehide"));
+    expect(writes).toHaveBeenCalledWith(key, expect.stringContaining('"schemaVersion":2'));
+  });
+
+  it("keeps all tabs through session expiry and restores the closed workspace when /browse opens fresh", async () => {
+    const url = "/browse/smb/test-server-1/Documents?p2=smb%2Ftest-server-2";
+    await renderBrowserAndFlush(url);
+    fireEvent.click(await screen.findByTestId("pane-tab-add-left"));
+    fireEvent.click(screen.getByTestId("pane-tab-add-right"));
+    const id = sessionStorage.getItem(WORKSPACE_PAGE_ID_KEY);
+    const key = WORKSPACE_TAB_RECORD_PREFIX + id;
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(key)!).right.tabs).toHaveLength(2));
+    await act(() => authSession.clear());
+    cleanup();
+    history.replaceState(null, "");
+    expect(localStorage.getItem(key)).not.toBeNull();
+    await act(() => authSession.setAuthenticated(createMockAuthToken({ access_token: "new-token", user_id: "user-1" }), false));
+    await renderBrowserAndFlush(url);
+    await screen.findByTestId("pane-tab-item-left-1");
+    expect(screen.getByTestId("pane-tab-item-right-1")).toBeInTheDocument();
+    cleanup();
+    sessionStorage.clear();
+    history.replaceState(null, "");
+    await renderBrowserAndFlush("/browse");
+    await waitFor(() => expect(screen.getByTestId("router-location")).toHaveTextContent(url));
+    expect(screen.getByTestId("pane-tab-item-left-1")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-tab-item-right-1")).toBeInTheDocument();
   });
 
   it("exposes all 5 tab actions in the keyboard command palette", async () => {

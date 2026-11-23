@@ -1494,7 +1494,7 @@
       "undo": "Annulla",
       "selectedAnnouncement": "{{name}}, scheda {{index}} di {{total}}",
       "listInstructions": "Usa le frecce sinistra e destra per cambiare scheda cartella, {{newTabShortcut}} per aprire una nuova scheda e {{closeTabShortcut}} per chiudere quella selezionata.",
-      "restorationUnavailableNotice": "In questa sessione del browser non è possibile ripristinare le schede dopo aver ricaricato la pagina."
+      "restorationUnavailableNotice": "Le schede delle cartelle non verranno ripristinate dopo aver ricaricato la pagina o chiuso questa finestra. Consenti a Sambee di memorizzare i dati del sito."
     },
     "confirmDelete": {
       "titleFile": "Elimina file",

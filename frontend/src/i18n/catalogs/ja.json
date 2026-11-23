@@ -1462,7 +1462,7 @@
       "undo": "元に戻す",
       "selectedAnnouncement": "{{name}}、{{total}} 個中 {{index}} 番目のタブ",
       "listInstructions": "左右の矢印キーでフォルダータブを切り替え、{{newTabShortcut}} で新しいタブを開き、{{closeTabShortcut}} で選択中のタブを閉じます。",
-      "restorationUnavailableNotice": "このブラウザーセッションでは、再読み込み後にタブを復元できません。"
+      "restorationUnavailableNotice": "ページを再読み込みしたり、このウィンドウを閉じたりすると、フォルダーのタブは復元されません。Sambee のサイトデータの保存を許可してください。"
     },
     "confirmDelete": {
       "titleFile": "ファイルを削除",

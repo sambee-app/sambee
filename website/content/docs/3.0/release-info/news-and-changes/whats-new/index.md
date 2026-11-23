@@ -4,7 +4,7 @@ title = "What's New"
 
 ## Tabs
 
-Open multiple tabs for the locations you need most often and switch between them efficiently. Tabs are available in single-pane as well as in dual-pane mode and in all screen sizes, from phone to desktop. Keyboard shortcuts:
+Open multiple tabs for the locations you need most often and switch between them efficiently. Tabs are available in single-pane as well as in dual-pane mode and in all screen sizes, from phone to desktop. Tabs are restored automatically after a page reload, a browser restart, a browser tab reopen, or a new sign-in after session expiry. Keyboard shortcuts:
 
 - New tab: <kbd>Alt+Plus</kbd>
 - Close tab: <kbd>Alt+Minus</kbd>

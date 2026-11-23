@@ -149,25 +149,25 @@ import {
   buildBrowseRouteTarget,
   parseBrowseRoute,
   resolveBrowseRouteState,
+  resolveBrowseRouteTarget,
   serializeBrowseRoute,
   VIEWER_QUERY_KEYS,
 } from "./FileBrowser/routing";
-import {
-  getWorkspaceBrowseIdentity,
-  loadPaneTabsSessionStorage,
-  type PaneTabHistoryMetadata,
-  readPaneTabHistoryState,
-  resolveRestoredWorkspaceTabs,
-  savePaneTabsSessionStorage,
-  withPaneTabHistoryState,
-} from "./FileBrowser/tabSessionStorage";
 import type { ClosedPaneTabRecord } from "./FileBrowser/tabSessions";
 import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, ViewInfo, VirtualRouteLocation } from "./FileBrowser/types";
 import { ACTIVE_PANE_QUERY_KEY, ACTIVE_PANE_STORAGE_KEY, RIGHT_PANE_QUERY_KEY } from "./FileBrowser/types";
 import { useBrowserDownload } from "./FileBrowser/useBrowserDownload";
 import { useBrowserUpload } from "./FileBrowser/useBrowserUpload";
 import { useFileBrowserPane } from "./FileBrowser/useFileBrowserPane";
+import { useWorkspaceTabClaim, WorkspaceTabClaimContext } from "./FileBrowser/useWorkspaceTabClaim";
 import { WorkspaceViewer, type WorkspaceViewerHandle } from "./FileBrowser/WorkspaceViewer";
+import {
+  getStoredWorkspaceRoute,
+  type PaneTabHistoryMetadata,
+  readPaneTabHistoryState,
+  resolveRestoredWorkspaceTabs,
+  withPaneTabHistoryState,
+} from "./FileBrowser/workspaceTabStorage";
 
 // ============================================================================
 // Main Component
@@ -453,10 +453,10 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const theme = useTheme();
   const { t } = useTranslation();
   const initialRecoverySnapshotRef = React.useRef(loadBrowserRecoverySnapshot(location.pathname + actualLocation.search));
-  const initialPaneTabsSessionRef = React.useRef<ReturnType<typeof loadPaneTabsSessionStorage> | null>(null);
-  if (initialPaneTabsSessionRef.current === null) {
-    initialPaneTabsSessionRef.current = loadPaneTabsSessionStorage();
-  }
+  const appClaim = React.useContext(WorkspaceTabClaimContext);
+  const standaloneClaim = useWorkspaceTabClaim(currentRoute, appClaim === undefined);
+  const workspaceClaim = appClaim === undefined ? standaloneClaim : appClaim;
+  const [paneTabsHydrated, setPaneTabsHydrated] = useState(false);
   const hasHydratedPaneTabsRef = React.useRef(false);
   const unresolvedTabTargetsRef = React.useRef<Map<string, BrowseRouteTarget>>(new Map());
   const hasHydratedRecoverySnapshotRef = React.useRef(false);
@@ -465,9 +465,10 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     initialRecoverySnapshotRef.current === null ? "ready" : "pending"
   );
   const [closedTabRecord, setClosedTabRecord] = useState<ClosedPaneTabRecord | null>(null);
-  const [tabStorageUnavailableNotice, setTabStorageUnavailableNotice] = useState<boolean>(
-    () => initialPaneTabsSessionRef.current?.notifyUnavailable ?? false
-  );
+  const [tabStorageUnavailableNotice, setTabStorageUnavailableNotice] = useState(false);
+  useEffect(() => {
+    if (workspaceClaim?.notifyUnavailable) setTabStorageUnavailableNotice(true);
+  }, [workspaceClaim]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // Responsive Design
@@ -1373,30 +1374,39 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
 
   const restoreInitialRecoverySnapshot = useCallback(() => {
     const snapshot = initialRecoverySnapshotRef.current;
-    if (!snapshot || hasHydratedRecoverySnapshotRef.current) {
+    if (!snapshot || !workspaceClaim || hasHydratedRecoverySnapshotRef.current) {
       return;
     }
 
     hasHydratedRecoverySnapshotRef.current = true;
 
-    const savedTabsRecord = initialPaneTabsSessionRef.current?.record ?? null;
-    if (savedTabsRecord && !hasHydratedPaneTabsRef.current) {
+    const savedTabsRecord = workspaceClaim.record;
+    if (!hasHydratedPaneTabsRef.current) {
       hasHydratedPaneTabsRef.current = true;
-      const mergedRecoveryConnections = mergeConnections(snapshot.connections, companion.drives);
-      const restoredTabs = resolveRestoredWorkspaceTabs(savedTabsRecord, currentRoute, mergedRecoveryConnections);
-      unresolvedTabTargetsRef.current = restoredTabs.unresolvedTargets;
-      leftPane.hydrateTabs(restoredTabs.left, { focusList: false });
-      if (restoredTabs.right) {
-        rightPane.hydrateTabs(restoredTabs.right, { focusList: false });
+      if (savedTabsRecord) {
+        const mergedRecoveryConnections = mergeConnections(snapshot.connections, companion.drives);
+        const restoredTabs = resolveRestoredWorkspaceTabs(
+          savedTabsRecord,
+          currentRoute,
+          mergedRecoveryConnections,
+          workspaceClaim.fromClosed
+        );
+        unresolvedTabTargetsRef.current = restoredTabs.unresolvedTargets;
+        leftPane.hydrateTabs(restoredTabs.left, { focusList: false });
+        if (restoredTabs.right) {
+          rightPane.hydrateTabs(restoredTabs.right, { focusList: false });
+        }
       }
     }
+    workspaceClaim.markHydrated();
+    setPaneTabsHydrated(true);
 
     if (snapshot.routeUrl === getLocation().pathname + getLocation().search) {
       if (snapshot.left) leftPane.restoreRecoverySnapshot(snapshot.left);
       if (snapshot.right) rightPane.restoreRecoverySnapshot(snapshot.right);
     }
     setRecoveryPhase("ready");
-  }, [companion.drives, currentRoute, getLocation, leftPane, rightPane]);
+  }, [companion.drives, currentRoute, getLocation, leftPane, rightPane, workspaceClaim]);
 
   useEffect(() => {
     restoreInitialRecoverySnapshot();
@@ -1846,45 +1856,22 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         return;
       }
 
-      const savedTabsRecord = initialPaneTabsSessionRef.current?.record ?? null;
+      const savedTabsRecord = workspaceClaim?.record;
       if (savedTabsRecord) {
-        const merged = mergeConnections(loadedConnections, companion.drives);
-        const restored = resolveRestoredWorkspaceTabs(
-          savedTabsRecord,
-          { left: currentRoute.left, right: currentRoute.right, activePaneId: currentRoute.activePaneId },
-          merged
-        );
-        const restoredLeftSelected = restored.left.sessions.get(restored.left.selectedTabId);
-        const leftTarget = restoredLeftSelected
-          ? buildBrowseRouteTarget(
-              restoredLeftSelected.connectionId,
-              restoredLeftSelected.currentPath,
-              merged,
-              toVirtualRouteLocation(restoredLeftSelected.archiveLocation)
-            )
-          : null;
-        const restoredRightSelected = restored.right ? restored.right.sessions.get(restored.right.selectedTabId) : undefined;
-        const rightTarget =
-          restored.paneMode === "dual" && restoredRightSelected
-            ? buildBrowseRouteTarget(
-                restoredRightSelected.connectionId,
-                restoredRightSelected.currentPath,
-                merged,
-                toVirtualRouteLocation(restoredRightSelected.archiveLocation)
-              )
-            : null;
-        if (leftTarget) {
+        const savedRoute = getStoredWorkspaceRoute(savedTabsRecord);
+        if (resolveBrowseRouteTarget(savedRoute.left, loadedConnections)) {
+          const rightTarget = resolveBrowseRouteTarget(savedRoute.right, loadedConnections) ? savedRoute.right : null;
           navigateToBrowseState(
             {
-              left: leftTarget,
+              left: savedRoute.left,
               right: rightTarget,
-              activePaneId: rightTarget ? restored.activePaneId : "left",
+              activePaneId: rightTarget ? savedRoute.activePaneId : "left",
             },
             {
               replace: true,
               tabMetadata: {
-                leftTabId: restored.left.selectedTabId,
-                rightTabId: rightTarget && restored.right ? restored.right.selectedTabId : null,
+                leftTabId: savedTabsRecord.left.selectedTabId,
+                rightTabId: rightTarget ? (savedTabsRecord.right?.selectedTabId ?? null) : null,
               },
             }
           );
@@ -1912,15 +1899,23 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     },
     [
       companion.drives,
-      currentRoute.activePaneId,
       currentRoute.left,
       currentRoute.right,
       navigate,
       navigateToBrowseState,
       params.targetId,
       params.targetType,
+      workspaceClaim,
     ]
   );
+
+  const [bootstrapRoute, setBootstrapRoute] = useState<{ connections: Connection[]; selectedConnectionId: string | null } | null>(null);
+  useEffect(() => {
+    if (!workspaceClaim || !bootstrapRoute) return;
+    reconcileBootstrapRoute(bootstrapRoute.connections, bootstrapRoute.selectedConnectionId);
+    setBootstrapRoute(null);
+    setLoadingConnections(false);
+  }, [bootstrapRoute, reconcileBootstrapRoute, workspaceClaim]);
 
   /**
    * loadConnections
@@ -1932,6 +1927,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const loadConnections = useCallback(
     async (mode: "bootstrap" | "background-revalidate") => {
       const preserveVisibleUi = mode === "background-revalidate";
+      let bootstrapNeedsReconcile = false;
 
       try {
         if (!preserveVisibleUi) {
@@ -1962,7 +1958,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
           return;
         }
 
-        reconcileBootstrapRoute(data, persistedSelectedConnectionId);
+        bootstrapNeedsReconcile = true;
+        setBootstrapRoute({ connections: data, selectedConnectionId: persistedSelectedConnectionId });
       } catch (err: unknown) {
         logger.error("Error loading connections", { error: err }, "browser");
         if (preserveVisibleUi) return;
@@ -1978,12 +1975,12 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
           leftPane.setError("Failed to load connections. Please try again.");
         }
       } finally {
-        if (!preserveVisibleUi) {
+        if (!preserveVisibleUi && !bootstrapNeedsReconcile) {
           setLoadingConnections(false);
         }
       }
     },
-    [navigate, reconcileBootstrapRoute]
+    [navigate]
   );
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -2008,24 +2005,29 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
 
   const syncResolvedRoute = React.useEffectEvent(
     (nextResolvedRoute: typeof resolvedRoute, applyLeft: typeof leftApplyLocation, applyRight: typeof rightApplyLocation) => {
+      if (!workspaceClaim) return;
+      const initialHydration = !hasHydratedPaneTabsRef.current;
       if (!hasHydratedPaneTabsRef.current) {
         hasHydratedPaneTabsRef.current = true;
-        const savedTabsRecord = initialPaneTabsSessionRef.current?.record ?? null;
+        const savedTabsRecord = workspaceClaim.record;
         if (savedTabsRecord) {
-          const restoredTabs = resolveRestoredWorkspaceTabs(savedTabsRecord, currentRoute, allConnections);
+          const restoredTabs = resolveRestoredWorkspaceTabs(savedTabsRecord, currentRoute, allConnections, workspaceClaim.fromClosed);
           unresolvedTabTargetsRef.current = restoredTabs.unresolvedTargets;
           leftPaneRef.current.hydrateTabs(restoredTabs.left, { focusList: false });
           if (restoredTabs.right) {
             rightPaneRef.current.hydrateTabs(restoredTabs.right, { focusList: false });
           }
         }
+        workspaceClaim.markHydrated();
+        setPaneTabsHydrated(true);
       }
 
       const routeSyncToken = routeSyncTokenRef.current + 1;
       routeSyncTokenRef.current = routeSyncToken;
       const latestLocation = getLocation();
-      const historyTabMeta =
-        readPaneTabHistoryState(latestLocation.state) ?? tabHistoryByLocationKeyRef.current.get(latestLocation.key) ?? null;
+      const historyTabMeta = initialHydration
+        ? null
+        : (readPaneTabHistoryState(latestLocation.state) ?? tabHistoryByLocationKeyRef.current.get(latestLocation.key) ?? null);
 
       if (nextResolvedRoute.left || !leftPaneRef.current.connectionIdRef.current.startsWith("missing-smb:")) {
         applyLeft(nextResolvedRoute.left?.connectionId ?? "", nextResolvedRoute.left?.path ?? "", routeSyncToken, {
@@ -2045,7 +2047,11 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       setActivePaneId((currentActivePaneId) => (currentActivePaneId === nextActivePaneId ? currentActivePaneId : nextActivePaneId));
 
       setFileBrowserPaneModePreference(nextPaneMode);
-      localStorage.setItem(ACTIVE_PANE_STORAGE_KEY, nextActivePaneId);
+      try {
+        localStorage.setItem(ACTIVE_PANE_STORAGE_KEY, nextActivePaneId);
+      } catch (error) {
+        logger.debug("Cannot store the active pane preference", { error }, "browser");
+      }
 
       if (nextResolvedRoute.left) {
         tabHistoryByLocationKeyRef.current.set(latestLocation.key, {
@@ -2061,33 +2067,30 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   );
 
   useEffect(() => {
-    if (loadingConnections || recoveryPhase !== "ready") {
+    if (!workspaceClaim || loadingConnections || recoveryPhase !== "ready") {
       return;
     }
 
     syncResolvedRoute(resolvedRoute, leftApplyLocation, rightApplyLocation);
-  }, [leftApplyLocation, loadingConnections, recoveryPhase, resolvedRoute, rightApplyLocation]);
+  }, [leftApplyLocation, loadingConnections, recoveryPhase, resolvedRoute, rightApplyLocation, workspaceClaim]);
 
-  // Persist minimal pane-tab collections and order to sessionStorage for same-session reloads
-  useEffect(() => {
-    if (loadingConnections || recoveryPhase !== "ready" || !currentRoute.left) {
-      return;
-    }
-
-    const saveResult = savePaneTabsSessionStorage({
-      workspaceRouteIdentity: getWorkspaceBrowseIdentity(currentRoute),
-      paneMode,
-      activePaneId,
-      leftTabs: leftPane.tabs,
-      leftSelectedTabId: leftPane.selectedTabId,
-      rightTabs: rightPane.tabs,
-      rightSelectedTabId: rightPane.selectedTabId,
-      connections: allConnections,
-      fallbackTargets: unresolvedTabTargetsRef.current,
-    });
-    if (saveResult.notifyUnavailable) {
-      setTabStorageUnavailableNotice(true);
-    }
+  const persistWorkspace = useCallback(() => {
+    if (!workspaceClaim || !paneTabsHydrated || loadingConnections || recoveryPhase !== "ready" || !currentRoute.left) return;
+    workspaceClaim.save(
+      {
+        paneMode,
+        activePaneId,
+        leftTabs: leftPane.tabs,
+        leftSelectedTabId: leftPane.selectedTabId,
+        rightTabs: rightPane.tabs,
+        rightSelectedTabId: rightPane.selectedTabId,
+        connections: allConnections,
+        fallbackTargets: unresolvedTabTargetsRef.current,
+      },
+      (notify) => {
+        if (notify) setTabStorageUnavailableNotice(true);
+      }
+    );
   }, [
     activePaneId,
     allConnections,
@@ -2096,10 +2099,17 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     leftPane.tabs,
     loadingConnections,
     paneMode,
+    paneTabsHydrated,
     recoveryPhase,
     rightPane.selectedTabId,
     rightPane.tabs,
+    workspaceClaim,
   ]);
+  useEffect(() => {
+    persistWorkspace();
+    window.addEventListener("pagehide", persistWorkspace);
+    return () => window.removeEventListener("pagehide", persistWorkspace);
+  }, [persistWorkspace]);
 
   useEffect(() => {
     if (pendingPaneFocusRef.current !== activePaneId) {

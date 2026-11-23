@@ -1510,7 +1510,7 @@
       "undo": "Cofnij",
       "selectedAnnouncement": "{{name}}, karta {{index}} z {{total}}",
       "listInstructions": "Użyj strzałek w lewo i w prawo, aby przełączać karty folderów, {{newTabShortcut}}, aby otworzyć nową kartę, oraz {{closeTabShortcut}}, aby zamknąć wybraną kartę.",
-      "restorationUnavailableNotice": "W tej sesji przeglądarki nie można przywrócić kart po odświeżeniu."
+      "restorationUnavailableNotice": "Karty folderów nie zostaną przywrócone po odświeżeniu strony lub zamknięciu tego okna. Zezwól Sambee na zapisywanie danych witryny."
     },
     "confirmDelete": {
       "titleFile": "Usuń plik",
