@@ -337,6 +337,16 @@ def test_companion_recovery_verification_builds_before_smoke_and_keeps_evidence(
     smoke = next(index for index, step in enumerate(steps) if step.get("name") == "Run packaged-process recovery smoke test")
     assert build < native < smoke  # Tauri produces the assets that custom-protocol embeds in the native test build.
     assert "--features recovery-verification" in steps[build]["run"]
+    assert "--target x86_64-pc-windows-msvc" in steps[build]["run"]
+    native_run = steps[native]["run"]
+    # Both passes share the package's release profile and target so Cargo reuses its dependencies.
+    assert "@('--release', '--lib', '--target', 'x86_64-pc-windows-msvc')" in native_run
+    assert native_run.count("cargo test @buildArgs --features") == 2
+    assert "cargo test @buildArgs --features tauri/custom-protocol\n" in native_run
+    # Cargo succeeds when no test matches the filter, so the log must record the exact pass.
+    assert "$recoveryTest -- --exact" in native_run
+    assert "Tee-Object -FilePath $nativeTestLog" in native_run
+    assert "Select-String -LiteralPath $nativeTestLog -Pattern $passedTest -Quiet" in native_run
     assert "--source-sha '${{ github.sha }}' --run-id '${{ github.run_id }}'" in steps[smoke]["run"]
     assert steps[smoke]["timeout-minutes"] <= 5
     artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@"))
