@@ -214,7 +214,7 @@ jobs:
       run: cd frontend && npm run test:ci
 
     - name: Build production frontend
-      run: cd frontend && npm run build
+      run: cd frontend && npm run build:assets
 
     - name: Install browser dependencies
       run: cd frontend && npm run test:e2e:install -- --with-deps

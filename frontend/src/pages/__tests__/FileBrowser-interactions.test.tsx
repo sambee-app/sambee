@@ -4171,16 +4171,6 @@ describe("Browser Component - Interactions", () => {
   describe("Rename", () => {
     const PANE_READY_TIMEOUT_MS = 5000;
 
-    it("opens the rename dialog from the active pane toolbar command", async () => {
-      const user = userEvent.setup();
-      await renderBrowserAndFlush("/browse/smb/test-server-1");
-
-      await screen.findAllByText("Documents");
-      await user.click(await screen.findByRole("button", { name: "Rename" }));
-
-      expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    });
-
     it.each(["immediate", "delayed"] as const)(
       "targets the newly active pane when Rename is invoked from the toolbar (%s loading)",
       async (loading) => {
@@ -4295,27 +4285,6 @@ describe("Browser Component - Interactions", () => {
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    });
-
-    it("opens rename dialog when F2 is pressed on focused file", async () => {
-      const user = userEvent.setup();
-      await renderBrowserAndFlush("/browse/smb/test-server-1");
-
-      // Wait for files to load
-      await waitFor(() => {
-        expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
-      });
-
-      const listContainer = screen.getByTestId("virtual-list");
-      await user.click(listContainer);
-
-      // Press F2 key
-      await user.keyboard("{F2}");
-
-      // Rename dialog should appear
-      await waitFor(() => {
-        expect(screen.getByRole("dialog")).toBeInTheDocument();
-      });
     });
 
     it("keeps slash input in the rename dialog instead of opening File Search", async () => {

@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { API } from "typescript/unstable/sync";
@@ -76,7 +78,7 @@ describe("required frontend type correctness", () => {
   it("requires the real solution check before producing normal build assets", () => {
     const manifest = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
     expect(manifest.scripts.typecheck).toBe("tsc -b --noEmit");
-    expect(manifest.scripts.build).toMatch(/^npm run typecheck && /);
+    expect(manifest.scripts.build).toBe("npm run typecheck && npm run build:assets");
     const solution = JSON.parse(readFileSync(resolve(root, "tsconfig.json"), "utf8"));
     expect(solution.references).toEqual(projectNames.map((path) => ({ path: `./${path}` })));
   });

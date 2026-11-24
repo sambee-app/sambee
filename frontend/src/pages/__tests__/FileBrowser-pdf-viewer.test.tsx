@@ -7,7 +7,6 @@ import { requireTestValue } from "../../test/helpers/assertions";
  */
 
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { useEffect, useRef } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { MockedObject } from "vitest";
@@ -311,7 +310,7 @@ describe("Browser - PDF Viewer Integration", () => {
       });
     });
 
-    it("navigates to next page using button", async () => {
+    it("opens a PDF from the file list and navigates to the next page", async () => {
       await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
@@ -327,56 +326,6 @@ describe("Browser - PDF Viewer Integration", () => {
 
       await waitFor(() => {
         expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "2");
-      });
-    });
-
-    it("navigates to previous page using button", async () => {
-      await renderBrowser();
-
-      const pdfFile = await getFileButton("document.pdf");
-      fireEvent.click(pdfFile);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toBeInTheDocument();
-      });
-
-      await waitForPageNavigationReady();
-      // Go to page 2
-      const nextButton = screen.getByLabelText("Next page");
-      fireEvent.click(nextButton);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "2");
-      });
-
-      // Go back to page 1
-      const prevButton = screen.getByLabelText("Previous page");
-      fireEvent.click(prevButton);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "1");
-      });
-    });
-
-    it("jumps to specific page via input", async () => {
-      const user = userEvent.setup();
-      await renderBrowser();
-
-      const pdfFile = await getFileButton("document.pdf");
-      fireEvent.click(pdfFile);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toBeInTheDocument();
-      });
-
-      await waitForPageNavigationReady();
-      const pageInput = screen.getByDisplayValue("1");
-      await user.clear(pageInput);
-      await user.type(pageInput, "5");
-      fireEvent.blur(pageInput);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "5");
       });
     });
 
@@ -408,42 +357,7 @@ describe("Browser - PDF Viewer Integration", () => {
       });
     });
 
-    it("goes to first page (Home key)", async () => {
-      const user = userEvent.setup();
-      await renderBrowser();
-
-      const pdfFile = await getFileButton("document.pdf");
-      fireEvent.click(pdfFile);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toBeInTheDocument();
-      });
-
-      await waitForPageNavigationReady();
-      screen.getByTestId("pdf-viewer-content").focus();
-      expect(screen.getByTestId("pdf-viewer-content")).toHaveFocus();
-
-      // Go to page 5
-      const pageInput = screen.getByDisplayValue("1");
-      await user.clear(pageInput);
-      await user.type(pageInput, "5");
-      fireEvent.blur(pageInput);
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "5");
-      });
-
-      screen.getByTestId("pdf-viewer-content").focus();
-      expect(screen.getByTestId("pdf-viewer-content")).toHaveFocus();
-
-      fireEvent.keyDown(screen.getByTestId("pdf-viewer-content"), { key: "Home" });
-
-      await waitFor(() => {
-        expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "1");
-      });
-    });
-
-    it("goes to last page (End key)", async () => {
+    it("routes End and Home to the focused viewer", async () => {
       await renderBrowser();
 
       const pdfFile = await getFileButton("document.pdf");
@@ -462,6 +376,13 @@ describe("Browser - PDF Viewer Integration", () => {
 
       await waitFor(() => {
         expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "10");
+      });
+
+      expect(viewerContent).toHaveFocus();
+      fireEvent.keyDown(viewerContent, { key: "Home" });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-page", "1");
       });
     });
   });

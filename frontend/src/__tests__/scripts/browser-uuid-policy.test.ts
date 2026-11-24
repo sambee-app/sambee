@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { readdirSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {

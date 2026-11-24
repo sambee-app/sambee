@@ -38,6 +38,24 @@ def test_rust_toolchain_changes_supersede_old_main_cache() -> None:
     ]
 
 
+def test_keeps_latest_windows_verification_cache_separate_from_linux() -> None:
+    ref = "refs/pull/42/merge"
+    prefix = "v0-rust-companion-windows-verification-Windows-x64"
+    caches = [
+        cache(1, ref, f"{prefix}-c7b3ef7d-fa4e0e5f"),
+        cache(2, ref, f"{prefix}-c7b3ef7d-cd520792", "2026-10-03T01:00:00Z"),
+        cache(3, ref, RUST_NEW),
+    ]
+
+    decisions = cleanup.classify_caches(caches, {42}, set())
+
+    assert {entry["id"]: entry["reason"] for entry in decisions} == {
+        1: "delete: superseded cache",
+        2: "protected: current cache",
+        3: "protected: current cache",
+    }
+
+
 def test_retains_latest_per_ref_and_family_but_removes_closed_pr() -> None:
     caches = [
         cache(1, cleanup.MAIN_REF, RUST_OLD),

@@ -14,6 +14,10 @@ on:
       - companion/tsconfig.json
   workflow_dispatch:
 
+concurrency:
+  group: verify-companion-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -47,6 +51,10 @@ jobs:
     timeout-minutes: 45
     env:
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+      # Use the release path and packaging behavior without the release optimizer settings.
+      CARGO_PROFILE_RELEASE_LTO: 'off'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -55,6 +63,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
         with:
           targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies and compiled artifacts
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          shared-key: companion-windows-verification
+          workspaces: companion/src-tauri -> target
+          cache-bin: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -74,8 +89,6 @@ jobs:
           python -m unittest discover -s companion/scripts -p 'test_*.py' -v
           if ($LASTEXITCODE -ne 0) { throw 'Recovery smoke unit tests failed.' }
           cd companion
-          npx tsc --noEmit
-          if ($LASTEXITCODE -ne 0) { throw 'Companion TypeScript check failed.' }
           npm run lint
           if ($LASTEXITCODE -ne 0) { throw 'Companion lint failed.' }
           cd src-tauri

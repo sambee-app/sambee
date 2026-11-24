@@ -35,6 +35,7 @@ Keep new names short, stable, and grouped by what the workflow does rather than 
 | `Maintenance: Clean Up Actions Caches` | `.github/workflows/cleanup-actions-caches.yml` | Removes closed-PR caches and superseded known cache keys without disabling warm caches for active builds. |
 | `Maintenance: Signal Closed PR Cache Cleanup` | `.github/workflows/signal-closed-pr-cache-cleanup.yml` | Triggers cache cleanup after a pull request closes without granting the pull request write access. |
 | `Release: Build Companion Artifact` | `.github/workflows/build-companion.yml` | Builds companion release artifacts for a new unique version or prerelease candidate in the public distribution repository. |
+| `Verify Companion Build` | `.github/workflows/verify-companion-build.yml` | Builds an unsigned Windows installer for affected pull requests and runs a recovery smoke test against the packaged executable. |
 | `Release: Promote Companion Release` | `.github/workflows/promote-companion-release.yml` | Moves an existing companion release onto one or more update channels. |
 | `Deploy: Website` | `.github/workflows/website-deploy.yml` | Builds the website and deploys `website/public/` to Cloudflare Pages. |
 | `Security: Dependency Audit` | `.github/workflows/dependency-security.yml` | Runs scheduled and manual dependency vulnerability audits. |
@@ -64,7 +65,7 @@ In the backend job, regular tests run under `pytest-xdist` for throughput, while
 
 Backend pytest runs treat unexpected warnings as errors, including resource-cleanup warnings. The shared policy in `backend/pyproject.toml` applies to both local and CI runs, and warning summaries aren't suppressed. Tests that deliberately trigger a warning must assert it with `pytest.warns(...)`, matching the warning category and message. Fix application warnings rather than ignoring them. Unavoidable dependency exceptions must be narrowly scoped and documented; the current exception covers Starlette's TestClient reference to AnyIO's deprecated `BlockingPortal` alias. Remove that exception when the dependency no longer needs it.
 
-The `frontend` job requires a clean TypeScript check, runs Vitest, builds normal production assets, installs version-matched Playwright Chromium/Firefox binaries and their Linux dependencies, then runs `npm run test:browser:ci`. Both engines run on frontend pull requests, pushes, and manual dispatch. The same required checks run in release fallback when successful source CI cannot be reused.
+The `frontend` job requires a clean TypeScript check, runs Vitest, builds production assets with `npm run build:assets`, then installs version-matched Playwright Chromium/Firefox binaries and their Linux dependencies and runs `npm run test:browser:ci`. The asset command does not repeat the TypeScript check. Both engines run on frontend pull requests, pushes, and manual dispatch. The same required checks run in release fallback when successful source CI cannot be reused.
 
 The browser command requires exactly 20 production cases. In each engine, four scenarios run at desktop and narrow widths, and two more check Markdown print-link formatting in light and dark modes. The width scenarios check real normalization and syntax workers, entity decoding, native selection, focus, heading links, search, regex replacement with undo and redo, exact saved content, and cleanup when a file closes and opens again. Two development cases per engine exercise Vite's dependency-resolution path. Browser APIs and workers are real; backend responses are mocked at `http://localhost:3000/browse/smb/demo`. This isn't full-stack SMB E2E or evidence of physical printing, browser-menu Find, hardware IME, or assistive-technology behavior.
 
@@ -131,14 +132,19 @@ Current coverage includes:
 
 - backend Ruff checks and formatting validation.
 - frontend Biome validation.
-- companion Clippy, Rustfmt, and Biome validation.
+- companion Biome validation. The companion job in `CI: Test` runs Clippy and Rustfmt.
 
 Ruff's executable-script rules (`EXE`) also check Python files throughout the repository, including `.github/`. Any Python-file change selects backend lint, as do changes to the lint workflow or `scripts/test`. These checks fail CI and `./scripts/test` on errors; they aren't advisory. A script with a shebang must be executable. Files invoked explicitly through Python, and imported modules, don't need a shebang.
 
 The lint workflow does not run the local companion Windows GNU cross-check either.
-That cross-target validation is currently a local developer workflow check, while actual Windows artifact creation remains in the release workflow.
 
 The workflow also ends with one gate job so branch protection can depend on a stable result.
+
+## Verify Companion Build
+
+For pull requests that change packaging inputs, this workflow runs native Windows tests, builds an unsigned NSIS installer, and runs a recovery smoke test against the packaged executable. A new revision cancels earlier verification for the same pull request. Manual verification runs independently.
+
+Verification retains the release output path and packaging steps, but uses less Rust optimization and more parallel code generation. Its Windows Rust dependency cache is separate from Linux and release caches. These settings do not change signed release builds.
 
 ## Runner Distro Policy
 

@@ -5,6 +5,7 @@ on:
     workflows:
       - "CI: Test"
       - "CI: Lint"
+      - "Verify Companion Build"
       - "CI: Validate Docker Image"
       - "CI: Validate Devcontainer"
       - "Security: Docker Image Scan"
