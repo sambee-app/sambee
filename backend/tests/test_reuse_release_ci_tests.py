@@ -103,7 +103,10 @@ def test_ci_and_release_require_the_same_browser_contract(name: str, job: str) -
     assert len(browser_steps) == len(reuse_ci.FRONTEND_REQUIRED_STEPS)
     assert all(step["run"] == FRONTEND_COMMANDS[step["name"]] and not step.get("continue-on-error") for step in browser_steps)
     commands = [step.get("run") for step in steps]
-    assert "cd frontend && npm run build" in commands
+    typecheck = "cd frontend && npm run typecheck"
+    build = "cd frontend && npm run build:assets" if job == "frontend" else "cd frontend && npm run build"
+    browser = "cd frontend && npm run test:browser:ci"
+    assert commands.index(typecheck) < commands.index(build) < commands.index(browser)
     assert "cd frontend && npm run test:e2e:install -- --with-deps" in commands
     assert any(step.get("with", {}).get("path") == "frontend/test-results/ci/" and step["with"]["retention-days"] == 7 for step in steps)
 

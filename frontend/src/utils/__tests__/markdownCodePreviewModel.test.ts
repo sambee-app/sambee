@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import {
   CODE_PREVIEW_FRAGMENT_MAX_LINES,

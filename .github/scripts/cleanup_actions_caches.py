@@ -13,9 +13,7 @@ from http import HTTPStatus
 from typing import Any
 
 PR_REF = re.compile(r"^refs/pull/(\d+)/merge$")
-RUST_KEY = re.compile(
-    r"^(v\d+-rust-(?:lint-companion|companion)-[^-]+-[^-]+)-[0-9a-f]{8}-[0-9a-f]{8}$"
-)
+RUST_KEY = re.compile(r"^(v\d+-rust-(?:lint-companion|companion|companion-windows-verification)-[^-]+-[^-]+)-[0-9a-f]{8}-[0-9a-f]{8}$")
 MAIN_REF = "refs/heads/main"
 API_URL = "https://api.github.com"
 ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
