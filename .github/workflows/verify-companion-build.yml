@@ -51,7 +51,8 @@ jobs:
     timeout-minutes: 45
     env:
       CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
-      # Use the release path and packaging behavior without the release optimizer settings.
+      # Match the package's panic strategy to the test harness so Cargo can reuse dependencies.
+      CARGO_PROFILE_RELEASE_PANIC: 'unwind'
       CARGO_PROFILE_RELEASE_LTO: 'off'
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
       CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
@@ -91,12 +92,6 @@ jobs:
           cd companion
           npm run lint
           if ($LASTEXITCODE -ne 0) { throw 'Companion lint failed.' }
-          cd src-tauri
-          cargo test
-          if ($LASTEXITCODE -ne 0) { throw 'Native Rust tests failed.' }
-          cargo test --features recovery-verification server::directory_manager::tests -- --test-threads=2 2>&1 |
-            Tee-Object -FilePath ../recovery-report/native-tests.log
-          if ($LASTEXITCODE -ne 0) { throw 'Native recovery tests failed.' }
 
       - name: Assert verification-only secret boundary
         shell: pwsh
@@ -132,6 +127,26 @@ jobs:
           cd companion
           npm run tauri -- build --config $env:TAURI_CI_CONFIG --target x86_64-pc-windows-msvc --features recovery-verification --bundles nsis -v
           if ($LASTEXITCODE -ne 0) { throw 'Verification package build failed.' }
+
+      - name: Run native Windows tests
+        working-directory: companion/src-tauri
+        shell: pwsh
+        run: |
+          # Tauri has built the frontend assets required by custom-protocol.
+          $buildArgs = @('--release', '--lib', '--target', 'x86_64-pc-windows-msvc')
+          cargo test @buildArgs --features tauri/custom-protocol
+          if ($LASTEXITCODE -ne 0) { throw 'Native Rust tests failed.' }
+
+          $recoveryTest = 'server::directory_manager::tests::verification_controls_reconcile_gap_and_release_resources'
+          $nativeTestLog = '../recovery-report/native-tests.log'
+          cargo test @buildArgs --features 'tauri/custom-protocol,recovery-verification' $recoveryTest -- --exact --format pretty 2>&1 |
+            Tee-Object -FilePath $nativeTestLog
+          if ($LASTEXITCODE -ne 0) { throw 'Native recovery test failed. Inspect recovery-report/native-tests.log.' }
+
+          $passedTest = '^test ' + [regex]::Escape($recoveryTest) + ' \.\.\. ok$'
+          if (-not (Select-String -LiteralPath $nativeTestLog -Pattern $passedTest -Quiet)) {
+            throw "Expected native recovery test did not pass: $recoveryTest. Inspect recovery-report/native-tests.log."
+          }
 
       - name: Run packaged-process recovery smoke test
         timeout-minutes: 5
