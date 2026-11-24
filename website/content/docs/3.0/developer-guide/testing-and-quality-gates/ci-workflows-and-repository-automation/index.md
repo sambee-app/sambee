@@ -144,7 +144,9 @@ The workflow also ends with one gate job so branch protection can depend on a st
 
 For pull requests that change packaging inputs, this workflow runs native Windows tests, builds an unsigned NSIS installer, and runs a recovery smoke test against the packaged executable. A new revision cancels earlier verification for the same pull request. Manual verification runs independently.
 
-Verification retains the release output path and packaging steps, but uses less Rust optimization and more parallel code generation. Its Windows Rust dependency cache is separate from Linux and release caches. These settings do not change signed release builds.
+The package build produces the frontend assets before the native tests run. The package and tests use the same Windows target, Tauri custom protocol, and release profile. Verification uses less Rust optimization, more parallel code generation, and panic unwinding so Cargo can reuse dependencies between the package and the test harnesses. The full library suite runs without the recovery feature. A second pass runs only the recovery-specific test.
+
+The Windows Rust dependency cache is separate from Linux and release caches. These settings do not change signed release builds.
 
 ## Runner Distro Policy
 

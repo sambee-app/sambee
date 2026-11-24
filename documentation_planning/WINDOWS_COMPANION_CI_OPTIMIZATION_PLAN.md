@@ -2,7 +2,7 @@
 
 ## Goal
 
-Reduce the runtime of `windows-x64` in [Verify Companion Build](../.github/workflows/verify-companion-build.yml). Keep the full default-feature Windows test suite, the recovery-only native test, the unsigned NSIS installer, and the packaged-process smoke test. Validate the implementation locally. Do not add a benchmark workflow or dispatch GitHub Actions runs for experiments.
+Reduce the runtime of `windows-x64` in [Verify Companion Build](../.github/workflows/verify-companion-build.yml). Keep the full Windows library test suite without the recovery feature, the recovery-only native test, the unsigned NSIS installer, and the packaged-process smoke test. Validate the implementation locally. Do not add a benchmark workflow or dispatch GitHub Actions runs for experiments.
 
 ## Baseline
 
@@ -33,52 +33,31 @@ After the build, Cargo also runs the doc-tests, which contain 0 tests. The packa
 
 ## Implementation
 
-### 1. Run only the recovery-specific test in the second pass
+### 1. Share the release profile between the package and the tests
 
-- Keep the first `cargo test` command and its failure handling. Do not move the full suite to the recovery feature.
-- In [the verification workflow](../.github/workflows/verify-companion-build.yml), change the second command to select the library and use the exact test name:
+- Build the verification package first. The Tauri build hook produces the frontend assets required by `tauri/custom-protocol`.
+- Run both library test passes with `--release --lib --target x86_64-pc-windows-msvc` and enable `tauri/custom-protocol` to match the package. Set `CARGO_PROFILE_RELEASE_PANIC=unwind` at job scope to match the Rust test harness. Keep the shipping `panic = "abort"` setting in [Cargo.toml](../companion/src-tauri/Cargo.toml).
+- The test harnesses and application still compile separately. The local Windows MSVC Cargo unit graphs show that 606 of 607 registry dependency units in each test pass also occur in the package build. The exception is a test dependency, `filetime`. This is not a Windows timing measurement.
+- Verification now tests release behavior: it no longer runs with debug assertions or overflow checks. `--lib` omits the empty binary harness and doc-test run. If the package gains tests outside its library, add them to verification.
 
-  ```powershell
-  $recoveryTest = 'server::directory_manager::tests::verification_controls_reconcile_gap_and_release_resources'
-  $nativeTestLog = '../recovery-report/native-tests.log'
-  cargo test --lib --features recovery-verification $recoveryTest -- --exact --format pretty 2>&1 |
-    Tee-Object -FilePath $nativeTestLog
-  if ($LASTEXITCODE -ne 0) { throw 'Native recovery test failed. Inspect recovery-report/native-tests.log.' }
-  $passedTest = '^test ' + [regex]::Escape($recoveryTest) + ' \.\.\. ok$'
-  if (-not (Select-String -LiteralPath $nativeTestLog -Pattern $passedTest -Quiet)) {
-    throw "Expected native recovery test did not pass: $recoveryTest. Inspect recovery-report/native-tests.log."
-  }
-  ```
+### 2. Run only the recovery-specific test in the second pass
 
-- Keep artifact upload on failure. Cargo can exit successfully when an exact filter matches zero tests, so require the named test to pass in the log. The second pass no longer needs a test-thread limit because it selects one test.
-- If a later change adds another recovery-only native test, include it in verification and update the local test-list check. Do not restore the duplicate module-wide pass.
-
-### 2. Build only the library tests in the default pass
-
-- Change the first command to `cargo test --lib`. Keep its failure handling.
-- This removes the non-test library build (including the `cdylib` link and the `staticlib` archive), the empty binary test harness, and the empty doc-test run. It keeps all 531 tests, because all of them are in the library test harness.
-- Accept one reduction in compile coverage: the job no longer compiles the default-feature, non-test library in the debug profile. The NSIS package step still compiles `src/main.rs` and the non-test library (all three crate types) in the release profile. `recovery-verification` only adds code; no source uses `cfg(not(feature = "recovery-verification"))`. The only `cfg(not(test))` code ([handlers.rs](../companion/src-tauri/src/server/handlers.rs)) is therefore still compiled by the package step. No current code is compiled only when both `not(test)` and `debug_assertions` apply. If later code adds such a combination, or adds a `cfg(not(feature = "recovery-verification"))` gate, restore a non-test debug build.
-- Expect a small saving. The log shows about 2 seconds for the empty harness and doc-test runs. On a local 12-core Linux machine with `CARGO_INCREMENTAL=0`, a rebuild after a change to `src/lib.rs` took about 17–18 seconds with `--lib` and about 18.5–19 seconds without it. Cargo builds the extra units in parallel with the library test harness. The Windows saving is not measured.
-- If a later change adds a `tests/` directory or tests in `src/main.rs`, add `--tests` or `--bins` to the command. If it adds doc-tests, add a separate `cargo test --doc` command, because Cargo does not accept `--doc` together with `--lib`.
-
-### 3. Generate only line-table debug information for Windows CI tests
-
-- Set `CARGO_PROFILE_TEST_DEBUG: 'line-tables-only'` at the Windows verification job level, before the Rust cache action runs. This lets the cache action include the setting in its existing environment key.
-- This removes full type and variable debug information while retaining source locations for test backtraces. It does not disable debug assertions or overflow checks. Both test commands use the test profile. Cargo applies the selected profile to all units in the build, so dependencies also get the reduced debug information. The packaging step uses the release profile and is unchanged.
-- Leave the local defaults and shipping profile in [Cargo.toml](../companion/src-tauri/Cargo.toml) unchanged. Expect a cold Rust cache on the first run with the new profile setting. The time saved by removing debug information is not yet measured.
+- Keep the full library suite without `recovery-verification`. Enable that feature only for the second test pass and the unsigned package.
+- Select `verification_controls_reconcile_gap_and_release_resources` by its exact test name. Cargo can report success when no test matches. Require the named pass in `native-tests.log`, and keep artifact upload on failure.
+- If a later change adds another recovery-only native test, include it in verification. Do not restore the duplicate module-wide pass.
 
 ## Keep unchanged
 
 - **Runner and job count.** The [public Windows x64 runner](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories) provides four vCPUs. Cargo already defaults to the logical CPU count. Increasing `CARGO_BUILD_JOBS` does not add CPU capacity. Do not change the full suite's test concurrency, buy larger runners, or split the job in this change.
-- **Package compiler settings.** Keep LTO off, 16 codegen units, and optimization level 1 in verification. A lower optimization level or different linker needs measurement; the log does not identify a linker bottleneck. Do not combine test and package profiles: the [test harness uses unwinding](https://doc.rust-lang.org/cargo/reference/profiles.html#panic), while the package uses `panic = "abort"`, and their Cargo targets and features also differ.
+- **Package optimization settings.** Keep LTO off, 16 codegen units, and optimization level 1 in verification. A lower optimization level or different linker needs measurement; the log does not identify a linker bottleneck.
 - **Cache policy.** Keep the current Rust cache configuration. A cache saved on one PR's merge ref does not warm a different PR. A default-branch cache could improve restores, but adding default-branch builds has an unmeasured cost. Do not change the trigger, cache scope, or save policy in this plan. The 1:14 save cost occurs only after a cache miss: when the restore finds an exact key, the cache action reports `Cache up-to-date.` and does not save again. The Linux `companion` job in [the test workflow](../.github/workflows/test.yml) uses a different cache key and does not run `cargo test`, so it does not warm this job.
 - **Feature set of the default suite.** Do not run the default suite with `recovery-verification` to avoid the second build. The feature changes runtime behavior (for example, `verification_due` in the directory manager and extra server routes), and the shipping workflow builds without it.
 - **Verification evidence.** Keep the signer and updater-artifact checks, the same build outputs and `recovery-report` paths, and the smoke test of the packaged executable. Do not change the signed release workflow.
 
 ## Local validation before merge
 
-1. Run the existing [workflow configuration tests](../backend/tests/test_release_workflow_configuration.py). In a local Windows x64 checkout with the MSVC toolchain, compare `cargo test --lib -- --list` with `cargo test --lib --features recovery-verification -- --list`. Confirm that the exact selection covers every recovery-only test on the implementation revision.
-2. On that Windows machine, run the new default command (`cargo test --lib`) and the new recovery command with `CARGO_PROFILE_TEST_DEBUG=line-tables-only`. Confirm that the default test list is the same as before (531 tests) and that the recovery command reports `1 passed` and that `native-tests.log` contains the named pass. Run the PowerShell block with an unmatched test name to confirm it fails instead of accepting zero tests.
-3. Confirm from verbose local Cargo output that the native test builds use `-C debuginfo=line-tables-only`. Check that the unsigned package, smoke, and artifact steps are unchanged. If Windows validation is unavailable, report that limit; do not substitute a hosted experiment.
+1. Run the [workflow configuration tests](../backend/tests/test_release_workflow_configuration.py). Compare the Windows MSVC Cargo unit graphs for the package and the two test builds with the verification profile overrides.
+2. On a local Windows x64 machine with the MSVC toolchain, run the package build and both test passes in workflow order. Confirm that the full suite has the same test list and that `native-tests.log` records one pass. Check that a mistyped exact filter fails the PowerShell step. Confirm that the packaged-process smoke test passes.
+3. If Windows validation is unavailable, report that limit. Do not substitute a hosted experiment.
 
-There is no runtime target for this change. The acceptance criteria are removal of duplicate test execution, unused test-build targets, and full test debug information without losing the existing verification checks. Treat the first routine run after merge as normal CI, not an experiment.
+There is no runtime target for this change. Remove duplicate test execution and share compiled dependencies without losing the package and recovery checks. Treat the first routine run after merge as normal CI, not an experiment.

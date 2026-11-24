@@ -333,8 +333,9 @@ def test_companion_recovery_verification_builds_before_smoke_and_keeps_evidence(
     assert job["timeout-minutes"] <= 45
     steps = job["steps"]
     build = next(index for index, step in enumerate(steps) if step.get("name") == "Build Windows x64 package")
+    native = next(index for index, step in enumerate(steps) if step.get("name") == "Run native Windows tests")
     smoke = next(index for index, step in enumerate(steps) if step.get("name") == "Run packaged-process recovery smoke test")
-    assert build < smoke
+    assert build < native < smoke  # Tauri produces the assets that custom-protocol embeds in the native test build.
     assert "--features recovery-verification" in steps[build]["run"]
     assert "--source-sha '${{ github.sha }}' --run-id '${{ github.run_id }}'" in steps[smoke]["run"]
     assert steps[smoke]["timeout-minutes"] <= 5
@@ -342,9 +343,9 @@ def test_companion_recovery_verification_builds_before_smoke_and_keeps_evidence(
     assert artifact["if"] == "${{ always() }}"
     assert "${{ github.sha }}" in artifact["with"]["name"]
     assert "recovery-report/" in artifact["with"]["path"]
-    assert not any(
-        "recovery-verification" in step.get("run", "") for step in load_workflow("build-companion.yml")["jobs"]["build"]["steps"]
-    )
+    release = load_workflow("build-companion.yml")["jobs"]["build"]
+    assert not any("recovery-verification" in step.get("run", "") for step in release["steps"])
+    assert "CARGO_PROFILE_RELEASE_PANIC" not in release.get("env", {})
 
 
 def test_workflow_output_references_use_direct_dependencies() -> None:
