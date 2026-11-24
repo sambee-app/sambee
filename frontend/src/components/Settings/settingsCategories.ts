@@ -11,6 +11,7 @@ export const SETTINGS_CATEGORY_ORDER = [
   "admin-users",
   "admin-smb",
   "admin-file-search",
+  "admin-filesystem-search",
   "admin-directory-search",
   "admin-health-monitoring",
   "admin-system",

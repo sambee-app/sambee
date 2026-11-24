@@ -11,6 +11,7 @@ from sqlmodel import Session
 
 from app.models.connection import Connection
 from app.models.file import FileInfo, FileType
+from app.models.recent_directory import RecentDirectory
 from app.models.recent_file import RecentFile
 from app.models.user import User
 from app.services import recent_files
@@ -73,6 +74,88 @@ class TestRecentFileService:
 
 
 class TestRecentFilesApi:
+    @pytest.mark.parametrize("endpoint", ["recent-files", "recent-directories"])
+    @pytest.mark.parametrize("query", ["", "item"])
+    def test_scope_and_connection_filter_before_limit(
+        self, client: TestClient, auth_headers_user: dict[str, str], session: Session, regular_user: User, endpoint: str, query: str
+    ) -> None:
+        for connection, path, score in (
+            ("local-drive:c", "Docs/item-direct", 1),
+            ("local-drive:c", "Docs/sub/item-nested", 1),
+            ("local-drive:c", "DocsExtra/item-sibling", 100),
+            ("local-drive:c", "docs/item-case", 100),
+            ("local-drive:c", "item-root", 100),
+            ("local-drive:d", "Docs/item-other", 100),
+        ):
+            if endpoint == "recent-files":
+                record = RecentFile(
+                    user_id=regular_user.id, connection_id=connection, path=path, file_name=path.rsplit("/", 1)[-1], usage_score=score
+                )
+            else:
+                record = RecentDirectory(user_id=regular_user.id, connection_id=connection, path=path, usage_score=score)
+            session.add(record)
+        session.commit()
+
+        params = {"q": query, "connection_id": "local-drive:c", "scope_path": "Docs", "scope_mode": "subtree", "limit": 1}
+        response = client.get(f"/api/browse/{endpoint}", headers=auth_headers_user, params=params)
+        assert response.status_code == 200
+        assert response.json()["results"][0]["path"] in {"Docs/item-direct", "Docs/sub/item-nested"}
+
+        params.update(scope_mode="descendants_only", limit=50)
+        response = client.get(f"/api/browse/{endpoint}", headers=auth_headers_user, params=params)
+        assert [row["path"] for row in response.json()["results"]] == ["Docs/sub/item-nested"]
+
+        params.update(scope_path="", limit=50)
+        response = client.get(f"/api/browse/{endpoint}", headers=auth_headers_user, params=params)
+        assert {row["path"] for row in response.json()["results"]} == {
+            "Docs/item-direct",
+            "Docs/sub/item-nested",
+            "DocsExtra/item-sibling",
+            "docs/item-case",
+        }
+        response = client.get(
+            f"/api/browse/{endpoint}", headers=auth_headers_user, params={"connection_id": "local-drive:c", "q": query, "limit": 50}
+        )
+        assert {row["path"] for row in response.json()["results"]} == {
+            "Docs/item-direct",
+            "Docs/sub/item-nested",
+            "DocsExtra/item-sibling",
+            "docs/item-case",
+            "item-root",
+        }
+
+    def test_scoped_directory_query_does_not_match_scope_name(
+        self, client: TestClient, auth_headers_user: dict[str, str], session: Session, regular_user: User
+    ) -> None:
+        session.add(RecentDirectory(user_id=regular_user.id, connection_id="local-drive:c", path="Projects/Other"))
+        session.commit()
+        response = client.get(
+            "/api/browse/recent-directories",
+            headers=auth_headers_user,
+            params={"connection_id": "local-drive:c", "scope_path": "Projects", "scope_mode": "subtree", "q": "projects"},
+        )
+        assert response.status_code == 200
+        assert response.json()["results"] == []
+
+    @pytest.mark.parametrize("endpoint", ["recent-files", "recent-directories"])
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"scope_path": ""},
+            {"scope_mode": "subtree"},
+            {"scope_path": "", "scope_mode": "invalid"},
+            {"scope_path": "../outside", "scope_mode": "subtree"},
+            {"scope_path": "/absolute", "scope_mode": "subtree"},
+            {"scope_path": "folder//child", "scope_mode": "subtree"},
+        ],
+    )
+    def test_rejects_invalid_scope(
+        self, client: TestClient, auth_headers_user: dict[str, str], endpoint: str, params: dict[str, str]
+    ) -> None:
+        response = client.get(f"/api/browse/{endpoint}", headers=auth_headers_user, params=params)
+        assert response.status_code == 400
+        assert response.json()["detail"]
+
     @pytest.mark.parametrize("endpoint", ["recent-files", "recent-directories"])
     def test_rejects_excess_terms_with_actionable_error(self, client: TestClient, auth_headers_user: dict[str, str], endpoint: str) -> None:
         response = client.get(

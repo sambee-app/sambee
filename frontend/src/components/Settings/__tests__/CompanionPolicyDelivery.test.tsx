@@ -68,6 +68,14 @@ describe("Companion shared synchronization status", () => {
     const surface = screen.getByTestId("companion-settings-surface");
     expect(surface).toContainElement(screen.getByRole("status"));
     expect(surface).toHaveTextContent("Localization: Synchronized");
-    expect(surface).toHaveTextContent("Directory search policy: Built-in defaults");
+    expect(surface).toHaveTextContent("Directory indexing policy: Built-in defaults");
+  });
+
+  it("shows search policy delivery separately from other settings", () => {
+    snapshot.phase = "delivery_failed";
+    snapshot.sections = { theme: "synchronized", filesystem_search: "delivery_failed" };
+    render(<CompanionDirectoryStatus isAdmin={false} />);
+    expect(screen.getByText("File system search policy: Delivery failed; last valid settings active")).toBeInTheDocument();
+    expect(screen.getByText("Theme: Synchronized")).toBeInTheDocument();
   });
 });

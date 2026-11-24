@@ -86,10 +86,10 @@ describe("FileSearchSettings", () => {
     render(<FileSearchSettings />);
 
     const categoryGroup = await screen.findByRole("group", { name: "Exclude file categories" });
-    expect(screen.getAllByRole("heading", { name: "File Search" })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { name: "Recent Files" })).toHaveLength(1);
     expect(categoryGroup).toContainElement(screen.getByRole("checkbox", { name: "Exclude images" }));
     expect(categoryGroup).toContainElement(screen.getByRole("checkbox", { name: "Exclude temporary and backup files" }));
-    expect(screen.getByText("Excluded files are omitted from File Search results and history.")).toBeInTheDocument();
+    expect(screen.getByText("Excluded files are omitted from recent-file history and quick navigation.")).toBeInTheDocument();
     expect(screen.queryByText("Using built-in defaults.")).not.toBeInTheDocument();
     expect(screen.queryByText("Using the system override.")).not.toBeInTheDocument();
   });

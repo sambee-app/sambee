@@ -39,11 +39,12 @@ describe("settingsNavigation", () => {
           "admin-about",
           "admin-authentication",
           "admin-directory-search",
-          "admin-file-search",
+          "admin-filesystem-search",
           "admin-health-monitoring",
           "admin-image-viewer",
           "admin-network",
           "admin-pdf-viewer",
+          "admin-file-search",
           "admin-smb",
           "admin-system",
           "admin-users",
@@ -64,6 +65,7 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryByPath("/settings/admin/users")).toBe("admin-users");
     expect(getSettingsCategoryByPath("/settings/admin/smb")).toBe("admin-smb");
     expect(getSettingsCategoryByPath("/settings/admin/file-search")).toBe("admin-file-search");
+    expect(getSettingsCategoryByPath("/settings/admin/filesystem-search")).toBe("admin-filesystem-search");
     expect(getSettingsCategoryByPath("/settings/admin/directory-search")).toBe("admin-directory-search");
     expect(getSettingsCategoryByPath("/settings/admin/health-monitoring")).toBe("admin-health-monitoring");
     expect(getSettingsCategoryByPath("/settings/admin/system")).toBe("admin-system");
@@ -108,8 +110,9 @@ describe("settingsNavigation", () => {
     expect(getSettingsCategoryLabel("image-viewer")).toBe("Image Viewer");
     expect(getSettingsCategoryLabel("admin-image-viewer")).toBe("Image Viewer");
     expect(getSettingsCategoryLabel("admin-pdf-viewer")).toBe("PDF Viewer");
-    expect(getSettingsCategoryLabel("admin-file-search")).toBe("File Search");
-    expect(getSettingsCategoryLabel("admin-directory-search")).toBe("Directory Search");
+    expect(getSettingsCategoryLabel("admin-file-search")).toBe("Recent Files");
+    expect(getSettingsCategoryLabel("admin-directory-search")).toBe("Directory Indexing");
+    expect(getSettingsCategoryLabel("admin-filesystem-search")).toBe("File System Search");
     expect(getSettingsNavItemLabel("local-drives")).toBe("Local Drives");
     expect(getSettingsViewTitle("main")).toBe("Settings");
 

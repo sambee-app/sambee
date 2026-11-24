@@ -24,7 +24,15 @@ from app.core.directory_index_contract import (
 )
 from app.core.security import create_access_token, decode_access_token, is_user_expired
 from app.core.system_setting_definitions import DirectoryIndexPolicyScope
-from app.models.companion_settings import RegionalLocaleTag, SettingsGrantBinding, SettingsGrantRead, SettingsGrantRedeem, SettingsReceipt
+from app.models.companion_settings import (
+    RegionalLocaleTag,
+    SearchSettingsGrantRead,
+    SearchSettingsReceipt,
+    SettingsGrantBinding,
+    SettingsGrantRead,
+    SettingsGrantRedeem,
+    SettingsReceipt,
+)
 from app.models.companion_uri_token_jti import CompanionDirectoryPolicyGrant
 from app.models.system_settings import (
     DirectoryPolicyGrantBinding,
@@ -95,11 +103,15 @@ def issue_directory_policy_grant(
     expires = now + timedelta(seconds=DIRECTORY_POLICY_GRANT_SECONDS)
     section_claims: dict[str, object] = {}
     if isinstance(binding, SettingsGrantBinding):
-        from app.services.companion_settings import build_settings_metadata
+        from app.services.companion_settings import build_search_settings_metadata, build_settings_metadata
 
         if browser_regional_locale is None:
             raise HTTPException(status_code=422, detail="Browser regional locale is required. Reload Sambee and sync again.")
-        metadata = build_settings_metadata(user, session, browser_language, browser_regional_locale)
+        metadata = (
+            build_search_settings_metadata(user, session, browser_language, browser_regional_locale)
+            if "filesystem_search" in binding.sections
+            else build_settings_metadata(user, session, browser_language, browser_regional_locale)
+        )
         section_claims = {
             "settings_version": binding.version,
             "sections": {name: getattr(metadata, name).model_dump() for name in set(binding.sections)},
@@ -141,6 +153,8 @@ def issue_directory_policy_grant(
     )
     session.commit()
     if shared:
+        if isinstance(binding, SettingsGrantBinding) and "filesystem_search" in binding.sections:
+            return SearchSettingsGrantRead(**metadata.model_dump(), grant=token, expires_in_seconds=DIRECTORY_POLICY_GRANT_SECONDS)
         return SettingsGrantRead(**metadata.model_dump(), grant=token, expires_in_seconds=DIRECTORY_POLICY_GRANT_SECONDS)
     return DirectoryPolicyGrantRead(
         grant=token, expires_in_seconds=DIRECTORY_POLICY_GRANT_SECONDS, revision=policy.revision, backend_identity=identity
@@ -213,7 +227,7 @@ def redeem_directory_policy_grant(binding: DirectoryPolicyGrantRedeem, session: 
     current = build_directory_index_settings_read(DirectoryIndexPolicyScope.COMPANION, session)
     receipt = None
     if shared:
-        from app.services.companion_settings import build_settings_sections
+        from app.services.companion_settings import build_filesystem_search_section, build_settings_sections
 
         try:
             browser_language = TypeAdapter(CatalogLanguage).validate_python(claims.get("browser_language", "en"))
@@ -223,6 +237,8 @@ def redeem_directory_policy_grant(binding: DirectoryPolicyGrantRedeem, session: 
         theme, localization, directory = build_settings_sections(user, session, browser_language, browser_regional_locale)
         available = {"theme": theme, "localization": localization, "directory_index": directory}
         selected = claims.get("sections")
+        if isinstance(selected, dict) and "filesystem_search" in selected:
+            available["filesystem_search"] = build_filesystem_search_section(session)
         if (
             not isinstance(selected, dict)
             or not selected
@@ -233,7 +249,7 @@ def redeem_directory_policy_grant(binding: DirectoryPolicyGrantRedeem, session: 
         for name, marker in selected.items():
             if marker != available[name].model_dump(exclude={"payload"}):
                 raise HTTPException(status_code=409, detail="Companion settings changed during delivery. Request a new grant.")
-        receipt = SettingsReceipt(
+        receipt_values = dict(
             companion_id=binding.companion_id,
             challenge=binding.challenge,
             origin=binding.origin,
@@ -242,6 +258,11 @@ def redeem_directory_policy_grant(binding: DirectoryPolicyGrantRedeem, session: 
             theme=theme if "theme" in selected else None,
             localization=localization if "localization" in selected else None,
             directory_index=directory if "directory_index" in selected else None,
+        )
+        receipt = (
+            SearchSettingsReceipt.model_validate({**receipt_values, "filesystem_search": available["filesystem_search"]})
+            if "filesystem_search" in selected
+            else SettingsReceipt.model_validate(receipt_values)
         )
     elif current.revision != record.revision:
         raise HTTPException(

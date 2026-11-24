@@ -233,6 +233,12 @@ Automatic full passes have a minimum spacing of 30 seconds. Requests cannot bypa
 
 Lower budgets can pause growth, never trim active data. Only inactive, unowned indexes can be evicted. Disk/cache settings are not hard filesystem or process-memory ceilings.
 
+### Live File-System Search
+
+Live search is separate from index queries. The SMB endpoint admits a per-account and connection lease, retains the pooled source connection, and uses the safe directory reader to scan files and folders. A bounded worker pool and result queue protect other server work. Cancellation, authorization loss, and the overall deadline stop delivery; active reads and cleanup retain the lease until they finish.
+
+The shared file-system search contract defines request and NDJSON record shapes, matching rules, policy bounds, and the ZIP metadata cap. Both services use the shared Unicode case-folding table, independent of the installed Python version. Search uses the existing ZIP projection and pinned no-follow archive opens. It does not write index rows or change index progress. A missing terminal record means the stream was interrupted.
+
 See [Directory-Index Policy Delivery](../../companion-architecture/local-drive-and-save-back-pipeline/#directory-index-policy-delivery) for Companion ownership and [Manage Directory Search](../../../admin-guide/operations-and-maintenance/manage-directory-search/) for administration.
 
 ### Recovery and Shutdown

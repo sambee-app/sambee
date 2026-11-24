@@ -3,11 +3,12 @@ import logging
 import stat
 import uuid
 from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import PurePosixPath, PureWindowsPath
 from time import monotonic
-from typing import Any, Awaitable, BinaryIO, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Awaitable, BinaryIO, TypeVar, cast
 
 import smbclient
 from smbclient._io import SMBFileIO, SMBFileTransaction, query_info
@@ -34,6 +35,9 @@ from app.storage.smb_errors import SMBConnectionRetired, SMBMutationUncertain, S
 from app.storage.smb_pool import get_connection_pool, get_smb_connection_cache
 from app.utils.file_type_registry import get_mime_type
 from app.utils.worker_wait import wait_for_worker
+
+if TYPE_CHECKING:
+    from app.services.directory_traversal import SmbDirectoryRead
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +167,12 @@ class _SMBRandomAccessReader:
                 _retain_move_cleanup(self._cleanup)
             cleanup_task = self._cleanup
         await wait_for_worker(cleanup_task, SMB_FILE_CLOSE_TIMEOUT_SECONDS)
+
+    async def wait_closed(self) -> None:
+        """Wait for retained cleanup after the normal close timeout."""
+        if self._cleanup is None:
+            raise RuntimeError("The SMB reader must be closed before waiting for cleanup.")
+        await wait_for_worker(self._cleanup)
 
 
 class _SMBMoveSourceReader(_SMBRandomAccessReader):
@@ -434,6 +444,20 @@ class SMBBackend(StorageBackend):
             "connection_cache": self._connection_cache,
             **get_smbclient_policy_kwargs(),
         }
+
+    @asynccontextmanager
+    async def directory_search_context(self) -> AsyncIterator[tuple[str, dict[str, object]]]:
+        """Retain the pooled connection while a safe directory search uses it."""
+        pool = await get_connection_pool()
+        async with pool.get_connection(
+            host=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+            share_name=self.share_name,
+            connection_cache=self._connection_cache,
+        ):
+            yield self._build_smb_path(""), self._smb_auth_kwargs()
 
     #
     # connect
@@ -1022,6 +1046,46 @@ class SMBBackend(StorageBackend):
             share_access="rwd",
             operation_name="open_file_for_random_read",
         )
+
+    async def open_search_archive_reader(
+        self, parent: "SmbDirectoryRead", name: str, expected_id: bytes | None
+    ) -> tuple[_SMBRandomAccessReader, int]:
+        """Open an archive under a pinned parent without following file redirects."""
+        pool = await get_connection_pool()
+        connection_lease = pool.get_connection(
+            host=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+            share_name=self.share_name,
+            connection_cache=self._connection_cache,
+        )
+        await connection_lease.__aenter__()
+        future = asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: parent.open_search_file(name, expected_id, timeout=SMB_FILE_OPEN_TIMEOUT_SECONDS, **self._smb_auth_kwargs()),
+        )
+        try:
+            handle = await wait_for_worker(future, SMB_FILE_OPEN_TIMEOUT_SECONDS)
+        except BaseException:
+            try:
+                try:
+                    late_handle = await wait_for_worker(future)
+                except Exception as error:
+                    logger.warning("SMB search archive open failed during cleanup (%s).", type(error).__name__)
+                else:
+                    await asyncio.get_running_loop().run_in_executor(None, late_handle.close)
+            finally:
+                await connection_lease.__aexit__(None, None, None)
+            raise
+        size = handle.fd.end_of_file
+        if type(size) is not int or size < 0:
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, handle.close)
+            finally:
+                await connection_lease.__aexit__(None, None, None)
+            raise ValueError("The archive size is invalid. Check the source and retry.")
+        return _SMBRandomAccessReader(backend=self, smb_path=handle.name, handle=handle, connection_lease=connection_lease), size
 
     async def open_move_source_reader(self, path: str) -> MoveSourceReader:
         """Open an SMB source with delete access retained for post-commit move cleanup."""

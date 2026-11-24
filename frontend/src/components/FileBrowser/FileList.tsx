@@ -4,6 +4,7 @@ import React, { type ReactNode, useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ViewMode } from "../../pages/FileBrowser/types";
 import type { FileEntry } from "../../types";
+import { getFileRowIdentity } from "../../utils/fileEntries";
 import { type CompactItemAction, CompactItemActionsMenu } from "./CompactItemActionsMenu";
 import { COMPACT_SELECTION_DOCK_HEIGHT_PX } from "./CompactSelectionActions";
 import { FileRow } from "./FileRow";
@@ -172,7 +173,7 @@ export const FileList = React.memo(
                     useTouchSelectionControls={useTouchSelectionControls}
                     index={virtualItem.index}
                     isSelected={virtualItem.index === focusedIndex}
-                    isMultiSelected={selectedFiles.has(file.path)}
+                    isMultiSelected={selectedFiles.has(getFileRowIdentity(file))}
                     selectionMode={selectedFiles.size > 0}
                     onIconClick={onIconClick}
                     onDesktopBodyClick={onClearSelection ? () => onClearSelection() : undefined}

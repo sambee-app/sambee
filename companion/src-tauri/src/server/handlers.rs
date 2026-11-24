@@ -5740,6 +5740,8 @@ pub struct DirectorySearchQuery {
     /// Whether to include directories with dot-prefixed path segments.
     pub include_dot_directories: Option<bool>,
     pub include_issue_details: Option<bool>,
+    pub scope_path: Option<String>,
+    pub scope_mode: Option<String>,
 }
 
 /// Read existing index status without opening a source or searching its rows.
@@ -5768,19 +5770,22 @@ pub async fn browse_search_directories(
     let q = query.q.unwrap_or_default();
     let include_dot_directories = query.include_dot_directories.unwrap_or(false);
     super::directory_index::search_terms(&q).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    let scope = super::directory_index::SearchScope::parse(query.scope_path, query.scope_mode)
+        .map_err(|error| ApiError::BadRequest(error.to_string()))?;
     let details_drive = drive.clone();
-    let mut response = state
-        .0
-        .search(drive, base_path, q, include_dot_directories)
-        .await
-        .map_err(|error| match error {
-            super::directory_index::IndexError::QueryBusy => ApiError::TooManyRequests(error.to_string()),
-            super::directory_index::IndexError::Invalid(message) => ApiError::BadRequest(message.to_owned()),
-            super::directory_index::IndexError::Interrupted => {
-                ApiError::TooManyRequests("Directory query was cancelled or timed out. Retry the search.".to_owned())
-            }
-            _ => ApiError::Internal("Directory search failed. Check drive access and private local storage, then retry.".to_owned()),
-        })?;
+    let mut response = if scope.is_some() {
+        state.0.search_scoped(drive, base_path, q, include_dot_directories, scope).await
+    } else {
+        state.0.search(drive, base_path, q, include_dot_directories).await
+    }
+    .map_err(|error| match error {
+        super::directory_index::IndexError::QueryBusy => ApiError::TooManyRequests(error.to_string()),
+        super::directory_index::IndexError::Invalid(message) => ApiError::BadRequest(message.to_owned()),
+        super::directory_index::IndexError::Interrupted => {
+            ApiError::TooManyRequests("Directory query was cancelled or timed out. Retry the search.".to_owned())
+        }
+        _ => ApiError::Internal("Directory search failed. Check drive access and private local storage, then retry.".to_owned()),
+    })?;
     if query.include_issue_details.unwrap_or(false) {
         let (details, incomplete) = if response.issue_details_available {
             state

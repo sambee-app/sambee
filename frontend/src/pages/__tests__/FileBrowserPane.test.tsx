@@ -434,7 +434,7 @@ describe("FileBrowserPane", () => {
     it("uses fixed pixel dimensions for the visually hidden selection announcement", () => {
       render(<FileBrowserPane {...defaultProps()} />);
 
-      expect(screen.getByText("", { selector: "[aria-live='polite']" })).toHaveStyle({ height: "1px", width: "1px" });
+      expect(screen.getByTestId("pane-tab-live-region-left")).toHaveStyle({ height: "1px", width: "1px" });
     });
 
     it("renders breadcrumbs with connection name and path", () => {

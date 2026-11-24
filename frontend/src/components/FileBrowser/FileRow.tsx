@@ -172,7 +172,7 @@ export const FileRow = React.memo(
           : isShortcut
             ? t("fileBrowser.row.shortcutSuffix")
             : ""
-      }${hasUnsavedLocalDraft ? t("fileBrowser.row.unsavedLocalDraftSuffix") : ""}${isMultiSelected ? t("fileBrowser.row.selectedSuffix") : ""}`;
+      }${file.search_display_path ? `, ${file.search_display_path}` : ""}${hasUnsavedLocalDraft ? t("fileBrowser.row.unsavedLocalDraftSuffix") : ""}${isMultiSelected ? t("fileBrowser.row.selectedSuffix") : ""}`;
 
       // Compute the correct row style based on focused + multi-selected state
       const rowStyle =
@@ -191,7 +191,7 @@ export const FileRow = React.memo(
             component="span"
             noWrap
             title={unavailableMessage ?? file.name}
-            sx={{ ...rowTextSx, color: "text.primary", flex: linkTargetPath ? "0 1 auto" : 1, minWidth: 0 }}
+            sx={{ ...rowTextSx, color: "text.primary", flex: linkTargetPath || file.search_display_path ? "0 1 auto" : 1, minWidth: 0 }}
           >
             {file.name}
           </Typography>
@@ -208,6 +208,7 @@ export const FileRow = React.memo(
             </Tooltip>
           ) : null}
           {linkTargetPath ? <TargetPathLabel path={linkTargetPath} rowTextSx={rowTextSx} /> : null}
+          {file.search_display_path ? <TargetPathLabel path={file.search_display_path} rowTextSx={rowTextSx} /> : null}
         </Box>
       );
 
@@ -278,6 +279,7 @@ export const FileRow = React.memo(
         <div
           ref={ref}
           data-index={index}
+          data-file-row="true"
           title={unavailableMessage}
           style={{
             position: "absolute",
@@ -482,6 +484,7 @@ export const FileRow = React.memo(
     prev.isSelected === next.isSelected &&
     prev.isMultiSelected === next.isMultiSelected &&
     prev.file.name === next.file.name &&
+    prev.file.search_display_path === next.file.search_display_path &&
     prev.file.modified_at === next.file.modified_at &&
     prev.file.size === next.file.size &&
     prev.file.is_readable === next.file.is_readable &&

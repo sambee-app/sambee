@@ -40,6 +40,8 @@ import type {
   FileInfo,
   FileSearchSettingsRead,
   FileSearchSettingsUpdate,
+  FilesystemSearchSettings,
+  FilesystemSearchSettingUpdate,
   HealthMonitoringClientPolicy,
   HealthMonitoringSettings,
   HealthMonitoringSettingsUpdate,
@@ -84,6 +86,8 @@ import { COMPANION_BASE_URL } from "./companion";
 import { companionSession } from "./companionSession";
 import { notifyCompanionSettingsChanged } from "./companionSettingsEvents";
 import { snapshotRegisteredDrafts } from "./draftRecovery";
+import { COMPANION_SEARCH_UPDATE_REQUIRED, type FilesystemSearchRecord, type FilesystemSearchRequest } from "./filesystemSearchContract";
+import { consumeFilesystemSearchStream } from "./filesystemSearchStream";
 import { logger } from "./logger";
 import { sanitizeReturnPath } from "./oidcAuth";
 import { setPasswordChangeRequired } from "./passwordChange";
@@ -97,7 +101,35 @@ const COMPANION_TIMING_OTHER_ROUTE = "/{route}";
 export interface DirectorySearchOptions {
   includeDotDirectories?: boolean;
   includeIssueDetails?: boolean;
+  scope?: QuickNavigationScope;
   signal?: AbortSignal;
+}
+
+export interface QuickNavigationScope {
+  path: string;
+  mode: "subtree" | "descendants_only";
+}
+
+export interface HistorySearchOptions {
+  connectionId?: string;
+  scope?: QuickNavigationScope;
+}
+
+/** `detail` holds the server's own message, if it sent one. */
+export class FilesystemSearchStartError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly detail?: string
+  ) {
+    super(message);
+    this.name = "FilesystemSearchStartError";
+  }
+}
+
+function quickNavigationScopeParams(scope?: QuickNavigationScope) {
+  return scope ? { scope_path: scope.path, scope_mode: scope.mode } : {};
 }
 
 export interface StoredTheme {
@@ -975,16 +1007,32 @@ class ApiService {
     return response.data;
   }
 
+  async getFilesystemSearchSettings(): Promise<FilesystemSearchSettings> {
+    return (await this.api.get<FilesystemSearchSettings>("/admin/settings/filesystem-search")).data;
+  }
+
+  async updateFilesystemSearchSettings(
+    payload: FilesystemSearchSettingUpdate,
+    options?: { signal?: AbortSignal }
+  ): Promise<FilesystemSearchSettingUpdate> {
+    const result = (await this.api.put<FilesystemSearchSettingUpdate>("/admin/settings/filesystem-search", payload, options)).data;
+    notifyCompanionSettingsChanged();
+    return result;
+  }
+
   async getCompanionSettingsMetadata(options?: {
     signal?: AbortSignal;
-    params?: { browser_language: string; browser_regional_locale: string };
+    params?: { browser_language: string; browser_regional_locale: string; include_filesystem_search?: boolean };
   }): Promise<CompanionSettingsMetadata> {
     return (await this.api.get<CompanionSettingsMetadata>("/admin/settings/companion", options)).data;
   }
 
   async issueCompanionSettingsGrant(
     binding: CompanionSettingsGrantBinding,
-    options?: { signal?: AbortSignal; params?: { browser_language: string; browser_regional_locale: string } }
+    options?: {
+      signal?: AbortSignal;
+      params?: { browser_language: string; browser_regional_locale: string; include_filesystem_search?: boolean };
+    }
   ): Promise<CompanionSettingsGrant> {
     return (await this.api.post<CompanionSettingsGrant>("/admin/settings/companion/grants", binding, options)).data;
   }
@@ -1046,9 +1094,19 @@ class ApiService {
     return response.data;
   }
 
-  async searchRecentFiles(query: string, limit: number, signal?: AbortSignal): Promise<RecentFileSearchResponse> {
+  async searchRecentFiles(
+    query: string,
+    limit: number,
+    signal?: AbortSignal,
+    options?: HistorySearchOptions
+  ): Promise<RecentFileSearchResponse> {
     const response = await this.api.get<RecentFileSearchResponse>("/browse/recent-files", {
-      params: { q: query, limit },
+      params: {
+        q: query,
+        limit,
+        ...(options?.connectionId ? { connection_id: options.connectionId } : {}),
+        ...quickNavigationScopeParams(options?.scope),
+      },
       signal,
     });
     return response.data;
@@ -1077,9 +1135,19 @@ class ApiService {
     return response.data;
   }
 
-  async searchRecentDirectories(query: string, limit: number, signal?: AbortSignal): Promise<RecentDirectorySearchResponse> {
+  async searchRecentDirectories(
+    query: string,
+    limit: number,
+    signal?: AbortSignal,
+    options?: HistorySearchOptions
+  ): Promise<RecentDirectorySearchResponse> {
     const response = await this.api.get<RecentDirectorySearchResponse>("/browse/recent-directories", {
-      params: { q: query, limit },
+      params: {
+        q: query,
+        limit,
+        ...(options?.connectionId ? { connection_id: options.connectionId } : {}),
+        ...quickNavigationScopeParams(options?.scope),
+      },
       signal,
     });
     return response.data;
@@ -1644,6 +1712,7 @@ class ApiService {
         q: query,
         include_dot_directories: options?.includeDotDirectories ?? false,
         ...(options?.includeIssueDetails ? { include_issue_details: true } : {}),
+        ...quickNavigationScopeParams(options?.scope),
       },
       signal: options?.signal,
     });
@@ -2144,6 +2213,62 @@ class ApiService {
     }
     const token = authSession.getAccessToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async startFilesystemSearch(
+    request: FilesystemSearchRequest,
+    signal: AbortSignal,
+    onRecord: (record: FilesystemSearchRecord) => void | Promise<void>
+  ): Promise<Extract<FilesystemSearchRecord, { type: "terminal" }>> {
+    const connectionId = request.source.id;
+    const local = isLocalDrive(connectionId);
+    if (request.source.kind !== (local ? "local" : "smb")) {
+      throw new Error("The search source does not match the selected connection. Select the connection and try again.");
+    }
+    signal.throwIfAborted();
+    const url = `${getBaseUrl(connectionId)}/browse/${encodeURIComponent(getBrowseSegment(connectionId))}/filesystem-search`;
+    const headers = await this.getTransferFetchHeaders(connectionId, "POST", url);
+    signal.throwIfAborted();
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json", Accept: "application/x-ndjson" },
+      body: JSON.stringify(request),
+      signal,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      let payload: unknown;
+      try {
+        payload = JSON.parse(text);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+      }
+      const detail = payload && typeof payload === "object" && "detail" in payload ? payload.detail : undefined;
+      const needsCompanionUpdate = local && response.status === 404 && (detail === undefined || detail === "Not Found");
+      const serverMessage = needsCompanionUpdate
+        ? undefined
+        : typeof detail === "string"
+          ? detail
+          : detail && typeof detail === "object" && "message" in detail && typeof detail.message === "string"
+            ? detail.message
+            : undefined;
+      const message = needsCompanionUpdate
+        ? "This Companion does not support live search. Update Companion and try again."
+        : (serverMessage ?? `Search could not start (${response.status}). Check the source connection and try again.`);
+      const code = needsCompanionUpdate
+        ? COMPANION_SEARCH_UPDATE_REQUIRED
+        : detail && typeof detail === "object" && "code" in detail && typeof detail.code === "string"
+          ? detail.code
+          : undefined;
+      throw new FilesystemSearchStartError(message, response.status, code, serverMessage);
+    }
+    if (!response.body) {
+      throw new FilesystemSearchStartError(
+        "Search did not return a response stream. Check the source connection and try again.",
+        response.status
+      );
+    }
+    return consumeFilesystemSearchStream(response.body, onRecord);
   }
 
   private async fetchRawFileStream(connectionId: string, path: string, options: { signal?: AbortSignal } = {}): Promise<Response> {

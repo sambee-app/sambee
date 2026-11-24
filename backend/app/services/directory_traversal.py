@@ -5,7 +5,7 @@ import time
 from codecs import decode
 from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import PureWindowsPath
 from struct import error as StructError
 from struct import unpack_from
@@ -13,7 +13,7 @@ from threading import RLock
 from typing import Any
 from uuid import UUID
 
-from smbclient._io import SMBFileTransaction, query_info
+from smbclient._io import SMBFileIO, SMBFileTransaction, query_info
 from smbclient._pool import get_smb_tree
 from smbprotocol.exceptions import NoMoreFiles, NoSuchFile, SMBException, SMBResponseException
 from smbprotocol.file_info import FileAllInformation, FileFsVolumeInformation, FileInformationClass, FileInternalInformation
@@ -23,6 +23,7 @@ from smbprotocol.open import (
     CreateOptions,
     DirectoryAccessMask,
     FileAttributes,
+    FilePipePrinterAccessMask,
     ImpersonationLevel,
     Open,
     QueryDirectoryFlags,
@@ -55,12 +56,16 @@ OPTIONAL_INFORMATION_UNAVAILABLE = frozenset(
 )
 logger = logging.getLogger(__name__)
 DIRECTORY_NEXT_OFFSET = 0
+DIRECTORY_LAST_WRITE_TIME_OFFSET = 24
+DIRECTORY_END_OF_FILE_OFFSET = 40
 DIRECTORY_ATTRIBUTES_OFFSET = 56
 DIRECTORY_NAME_LENGTH_OFFSET = 60
 DIRECTORY_FILE_ID_OFFSET = 72
 DIRECTORY_NAME_OFFSET = 80
 DIRECTORY_RECORD_ALIGNMENT = 8
 UTF16_CODE_UNIT_BYTES = 2
+FILETIME_EPOCH = datetime(1601, 1, 1, tzinfo=UTC)
+FILETIME_TICKS_PER_MICROSECOND = 10
 
 
 class DirectoryTraversalError(OSError):
@@ -92,6 +97,15 @@ def _component(name: str) -> None:
     validate_directory_path(name)
     if any(character in UNSAFE_COMPONENT_CHARACTERS or ord(character) < 32 for character in name) or name.endswith((".", " ")):
         raise DirectoryTraversalError("Directory name cannot be read safely through SMB. Rename the entry and retry verification.")
+
+
+def validate_smb_search_path(path: str) -> None:
+    """Reject paths the safe SMB reader cannot traverse before starting a worker."""
+    _validate_traversal_path(path)
+    if path:
+        validate_directory_path(path)
+        for component in path.split("/"):
+            _component(component)
 
 
 @dataclass(frozen=True)
@@ -126,6 +140,8 @@ class SmbDirectoryEntry:
     name: str | None
     smb_info: SmbDirectoryEntryInformation
     file_id: bytes | None = None
+    size: int | None = None
+    modified_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -138,7 +154,7 @@ class SmbDirectoryBatch:
         return iter(self.entries)
 
 
-def parse_directory_records(data: bytes) -> SmbDirectoryBatch:
+def parse_directory_records(data: bytes, *, include_files: bool = False) -> SmbDirectoryBatch:
     """Read FILE_ID_FULL_DIRECTORY_INFORMATION without copying buffer tails."""
     view = memoryview(data)
     offset = 0
@@ -158,7 +174,8 @@ def parse_directory_records(data: bytes) -> SmbDirectoryBatch:
         name_start = offset + DIRECTORY_NAME_OFFSET
         if name_length > end - name_start:
             raise DirectoryTraversalError("Directory record name exceeds its record bounds. Retry source verification.")
-        if attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY:
+        is_directory = bool(attributes & FileAttributes.FILE_ATTRIBUTE_DIRECTORY)
+        if is_directory or (include_files and not attributes & FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT):
             if name_length % UTF16_CODE_UNIT_BYTES:
                 raise DirectoryTraversalError("Directory record name has an odd UTF-16 length. Retry source verification.")
             name: str | None
@@ -175,21 +192,32 @@ def parse_directory_records(data: bytes) -> SmbDirectoryBatch:
             except (UnicodeError, ValueError, DirectoryTraversalError):
                 name = None
             expected_id = None if file_id in SMB_UNAVAILABLE_FILE_IDS else file_id.to_bytes(8, "little")
-            entries.append(SmbDirectoryEntry(name, SmbDirectoryEntryInformation(attributes), expected_id))
+            size = None
+            modified_at = None
+            if not is_directory:
+                # Invalid optional metadata is reported as unknown so one entry cannot hide its siblings.
+                end_of_file = unpack_from("<q", view, offset + DIRECTORY_END_OF_FILE_OFFSET)[0]
+                size = end_of_file if end_of_file >= 0 else None
+                ticks = unpack_from("<Q", view, offset + DIRECTORY_LAST_WRITE_TIME_OFFSET)[0]
+                try:
+                    modified_at = FILETIME_EPOCH + timedelta(microseconds=ticks // FILETIME_TICKS_PER_MICROSECOND)
+                except OverflowError:
+                    modified_at = None
+            entries.append(SmbDirectoryEntry(name, SmbDirectoryEntryInformation(attributes), expected_id, size, modified_at))
         if not next_offset:
             break
         offset = end
     return SmbDirectoryBatch(tuple(entries))
 
 
-def _receive_directory(connection: Any, request: Any) -> SmbDirectoryBatch:
+def _receive_directory(connection: Any, request: Any, *, include_files: bool = False) -> SmbDirectoryBatch:
     response = connection.receive(request)
     parsed = SMB2QueryDirectoryResponse()
     try:
         parsed.unpack(response["data"].get_value())
     except (StructError, ValueError) as error:
         raise DirectoryTraversalError("Directory query response is truncated. Retry source verification.") from error
-    return parse_directory_records(parsed["buffer"].get_value())
+    return parse_directory_records(parsed["buffer"].get_value(), include_files=include_files)
 
 
 def _directory_tree(path: str, **session: Any) -> tuple[Any, str]:
@@ -366,7 +394,9 @@ class SmbDirectoryHandle:
                 raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
         return SmbDirectoryIdentity(server_guid, numbers[0], numbers[1], volume_serial, volume_created, numbers[2], native_name)
 
-    def records(self, check: Callable[[], None], *, pattern: str = "*") -> Generator[SmbDirectoryEntry, None, None]:
+    def records(
+        self, check: Callable[[], None], *, pattern: str = "*", include_files: bool = False
+    ) -> Generator[SmbDirectoryEntry, None, None]:
         flags = QueryDirectoryFlags.SMB2_RESTART_SCANS | QueryDirectoryFlags.SMB2_REOPEN
         while True:
             check()
@@ -391,7 +421,10 @@ class SmbDirectoryHandle:
                 )
                 tree = self.fd.tree_connect
                 request = connection.send(query, tree.session.session_id, tree.tree_connect_id)
-                records = _receive_directory(_NoFollowConnection(connection), request)
+                receiver = _NoFollowConnection(connection)
+                records = (
+                    _receive_directory(receiver, request, include_files=True) if include_files else _receive_directory(receiver, request)
+                )
             except (NoMoreFiles, NoSuchFile):
                 check()
                 return
@@ -416,6 +449,7 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
         retained: int = 0,
         safe_child_lookup: Callable[[str], bool] | None = None,
         local_verify: Callable[[], None] | None = None,
+        include_files: bool = False,
     ) -> None:
         self._handles = handles
         self._identities = identities
@@ -423,7 +457,8 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
         self._retained = retained
         self._safe_child_lookup = safe_child_lookup
         self._local_verify = local_verify
-        self._records = handles[-1].records(check)
+        self._include_files = include_files
+        self._records = handles[-1].records(check, include_files=True) if include_files else handles[-1].records(check)
 
     def __next__(self) -> SmbDirectoryEntry:
         while True:
@@ -448,6 +483,72 @@ class SmbDirectoryRead(Iterator[SmbDirectoryEntry]):
             return
         if not self._handles or not self._handles[-1].identity(self._check).same_binding(self._identities[-1]):
             raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
+
+    def compound_for_search(self, *, timeout: float) -> "SmbDirectoryRead":
+        """Use a compound listing while this read keeps the ancestor handles pinned."""
+        if not self._include_files or not self._handles or not self._identities:
+            raise DirectoryTraversalError("Search requires a pinned directory reader with file reporting enabled.")
+        identity = self._identities[-1]
+        if identity.file_id in SMB_UNAVAILABLE_FILE_IDS:
+            return self
+        self.verify()
+        handle = self._handles[-1]
+        compound = SmbCompoundDirectoryReader(
+            handle.fd.tree_connect,
+            identity.native_name.lstrip("\\"),
+            identity.file_id.to_bytes(8, "little"),
+            self._check,
+            credit_reserve=SCAN_CREDIT_RESERVE,
+            timeout=timeout,
+            fallback=lambda: self,
+            io=handle._io,
+            include_files=True,
+        )
+        return compound.result()
+
+    def open_search_file(self, name: str, expected_id: bytes | None, *, timeout: float, **session: Any) -> SMBFileIO:
+        """Open a regular file without following redirects while its parent stays pinned."""
+        _component(name)
+        if not self._include_files or not self._handles or not self._identities:
+            raise DirectoryTraversalError("Search requires a pinned parent directory.")
+        self.verify()
+        parent = self._handles[-1]
+        tree = parent.fd.tree_connect
+        native_parent = self._identities[-1].native_name.lstrip("\\")
+        native_path = f"{native_parent}\\{name}" if native_parent else name
+        path = str(PureWindowsPath(tree.share_name).joinpath(*native_path.split("\\")))
+        raw = SMBFileIO(path, mode="rb", share_access="rw", **session)
+        try:
+            if raw.fd.tree_connect is not tree or raw.fd.file_name != native_path:
+                raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
+            raw.fd.connection = _NoFollowConnection(raw.fd.connection, time.monotonic() + timeout)
+            raw.fd.create(
+                ImpersonationLevel.Impersonation,
+                FilePipePrinterAccessMask.FILE_READ_DATA | FilePipePrinterAccessMask.FILE_READ_ATTRIBUTES,
+                FileAttributes.FILE_ATTRIBUTE_NORMAL,
+                ShareAccess.FILE_SHARE_READ | ShareAccess.FILE_SHARE_WRITE,
+                CreateDisposition.FILE_OPEN,
+                CreateOptions.FILE_NON_DIRECTORY_FILE | CreateOptions.FILE_OPEN_REPARSE_POINT,
+            )
+            if raw.fd.file_attributes & (FileAttributes.FILE_ATTRIBUTE_REPARSE_POINT | FileAttributes.FILE_ATTRIBUTE_DIRECTORY):
+                raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
+            if expected_id is not None:
+                with SMBFileTransaction(raw) as transaction:
+                    query_info(transaction, FileInternalInformation)
+                (information,) = transaction.results
+                actual_id = information["index_number"].get_value()
+                if type(actual_id) is not int or actual_id.to_bytes(8, "little") != expected_id:
+                    raise DirectoryTraversalError("The archive changed during search. Start a new search and try again.")
+            self.verify()
+            raw.fd.connection = _NoFollowConnection(tree.session.connection)
+            return raw
+        except BaseException:
+            raw.fd.connection = _NoFollowConnection(tree.session.connection)
+            try:
+                raw.close()
+            except Exception as error:
+                logger.warning("Search file cleanup failed (%s).", type(error).__name__)
+            raise
 
     def has_directory_child(self, name: str) -> bool:
         if self._safe_child_lookup is not None:
@@ -501,16 +602,23 @@ class _NoFollowConnection:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._connection, name)
 
-    def receive(self, request: Any) -> Any:
-        if self._deadline is None:
-            return self._connection.receive(request, resolve_symlinks=False)
-        remaining = self._deadline - time.monotonic()
-        if remaining <= 0:
-            raise DirectoryPipelineTimeout("Directory pipeline response timed out. Retry verification after the connection recovers.")
+    def receive(self, request: Any, wait: bool = True, timeout: float | None = None, resolve_symlinks: bool = False) -> Any:
+        if resolve_symlinks:
+            raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
+        if self._deadline is not None:
+            remaining = self._deadline - time.monotonic()
+            if remaining <= 0:
+                raise DirectoryPipelineTimeout("Directory pipeline response timed out. Retry verification after the connection recovers.")
+            timeout = min(timeout, remaining) if timeout is not None else remaining
+        options: dict[str, Any] = {"resolve_symlinks": False}
+        if not wait:
+            options["wait"] = False
+        if timeout is not None:
+            options["timeout"] = timeout
         try:
-            return self._connection.receive(request, resolve_symlinks=False, timeout=remaining)
+            return self._connection.receive(request, **options)
         except SMBException as error:
-            if time.monotonic() >= self._deadline:
+            if self._deadline is not None and time.monotonic() >= self._deadline:
                 raise DirectoryPipelineTimeout("Directory pipeline response timed out. Retry after the connection recovers.") from error
             raise
 
@@ -531,6 +639,7 @@ class SmbCompoundDirectoryReader(SmbDirectoryRead):
         timeout: float | None = None,
         fallback: Callable[[], SmbDirectoryRead] | None = None,
         io: SmbDirectoryIo | None = None,
+        include_files: bool = False,
     ) -> None:
         self._check = check
         self._io = io if io is not None else SmbDirectoryIo()
@@ -538,6 +647,7 @@ class SmbCompoundDirectoryReader(SmbDirectoryRead):
         self._identities = []
         self._retained = 0
         self._safe_child_lookup = safe_child_lookup
+        self._include_files = include_files
         self._closed = False
         self.complete = False
         self._pending: tuple[Any, list[Any], list[Any], Any, str, bytes] | None = None
@@ -586,6 +696,8 @@ class SmbCompoundDirectoryReader(SmbDirectoryRead):
             return parsed.parse_buffer(FileInternalInformation)
 
         def receive_directory(request: Any) -> SmbDirectoryBatch:
+            if include_files:
+                return _receive_directory(descriptor.connection, request, include_files=True)
             return _receive_directory(descriptor.connection, request)
 
         actions = [
@@ -802,7 +914,9 @@ class SmbDirectoryRoot:
         with self._lock:
             self._verification_version += 1
 
-    def read(self, parent: str, check: Callable[[], None], *, full_root_check: bool = True, **session: Any) -> SmbDirectoryRead:
+    def read(
+        self, parent: str, check: Callable[[], None], *, full_root_check: bool = True, include_files: bool = False, **session: Any
+    ) -> SmbDirectoryRead:
         _validate_traversal_path(parent)
         _validate_traversal_path("/".join((*self._prefix, parent)) if parent else "/".join(self._prefix))
         if parent:
@@ -880,7 +994,7 @@ class SmbDirectoryRoot:
                 if self._binding is None:
                     self._binding = binding
                     self._held_handles = handles[: len(binding)]
-                    return SmbDirectoryRead(handles, identities, check, retained=len(binding))
+                    return SmbDirectoryRead(handles, identities, check, retained=len(binding), include_files=include_files)
                 elif not all(current.same_binding(expected) for current, expected in zip(binding, self._binding, strict=True)):
                     raise DirectoryBindingChangedError(SOURCE_BINDING_ERROR)
             return SmbDirectoryRead(
@@ -889,6 +1003,7 @@ class SmbDirectoryRoot:
                 read_check,
                 retained=retained,
                 local_verify=check_binding if retained and not parent else None,
+                include_files=include_files,
             )
         except BaseException:
             self.require_verification()
@@ -925,6 +1040,7 @@ class SmbDirectoryRoot:
         deferred: bool = False,
         credit_reserve: int = 0,
         timeout: float | None = None,
+        include_files: bool = False,
         **session: Any,
     ) -> SmbDirectoryRead:
         """Read one known parent while observation protects ancestor changes."""
@@ -966,8 +1082,11 @@ class SmbDirectoryRoot:
             deferred=deferred,
             credit_reserve=credit_reserve,
             timeout=timeout,
-            fallback=lambda: self._read_observed_loop(parent, expected_id, observed_check, safe_child_lookup, **session),
+            fallback=lambda: self._read_observed_loop(
+                parent, expected_id, observed_check, safe_child_lookup, include_files=include_files, **session
+            ),
             io=self.io,
+            include_files=include_files,
         )
         return compound if deferred else compound.result()
 
@@ -977,6 +1096,8 @@ class SmbDirectoryRoot:
         expected_id: bytes,
         observed_check: Callable[[], None],
         safe_child_lookup: Callable[[str], bool],
+        *,
+        include_files: bool = False,
         **session: Any,
     ) -> SmbDirectoryRead:
         root_identity = self._observed_binding(observed_check)
@@ -999,7 +1120,7 @@ class SmbDirectoryRoot:
             ):
                 raise DirectoryTraversalError(SOURCE_BINDING_ERROR)
 
-            return SmbDirectoryRead([handle], [identity], observed_check, safe_child_lookup=safe_child_lookup)
+            return SmbDirectoryRead([handle], [identity], observed_check, safe_child_lookup=safe_child_lookup, include_files=include_files)
         except BaseException:
             try:
                 handle.close()

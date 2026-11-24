@@ -8,12 +8,14 @@ from typing import Iterator
 from fastapi import HTTPException, status
 from sqlmodel import Session, col, select
 
+from app.core.search_scope import parse_search_scope
 from app.models.recent_directory import RecentDirectory, RecentDirectoryRead
 from app.models.user import User
 from app.services.directory_index import search_terms
 from app.services.history_common import (
     HISTORY_QUERY_BATCH_SIZE,
     LOCAL_DRIVE_PREFIX,
+    history_scope_filters,
     history_search_relevance,
     history_usage_score,
     normalize_history_search_text,
@@ -89,20 +91,33 @@ def _is_accessible_history_record(*, record: RecentDirectory, current_user: User
     return True
 
 
-def search_recent_directories(*, query: str, limit: int, current_user: User, session: Session) -> list[RecentDirectoryRead]:
+def search_recent_directories(
+    *,
+    query: str,
+    limit: int,
+    current_user: User,
+    session: Session,
+    connection_id: str | None = None,
+    scope_path: str | None = None,
+    scope_mode: str | None = None,
+) -> list[RecentDirectoryRead]:
     bounded_limit = max(1, min(limit, MAX_RECENT_DIRECTORY_RESULTS, get_file_search_settings(session).result_limit))
     terms = search_terms(query)
-    records = session.exec(
-        select(RecentDirectory).where(RecentDirectory.user_id == current_user.id).execution_options(yield_per=HISTORY_QUERY_BATCH_SIZE)
+    scope = parse_search_scope(scope_path, scope_mode)
+    statement = select(RecentDirectory).where(
+        RecentDirectory.user_id == current_user.id,
+        *history_scope_filters(col(RecentDirectory.path), col(RecentDirectory.connection_id), connection_id, scope),
     )
+    records = session.exec(statement.execution_options(yield_per=HISTORY_QUERY_BATCH_SIZE))
 
     now = datetime.now(timezone.utc)
 
     def matches() -> Iterator[tuple[int, int, RecentDirectory]]:
         try:
             for record in records:
+                match_path = record.path[len(scope.path) + 1 :] if scope is not None and scope.path else record.path
                 relevance = history_search_relevance(
-                    normalize_history_search_text(record.path), normalize_history_search_text(record.path.rsplit("/", 1)[-1]), terms
+                    normalize_history_search_text(match_path), normalize_history_search_text(record.path.rsplit("/", 1)[-1]), terms
                 )
                 if relevance is not None and _is_accessible_history_record(record=record, current_user=current_user, session=session):
                     yield *relevance, record

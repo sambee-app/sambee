@@ -2,7 +2,7 @@
 
 use super::{
     validate_windows_component as validate_name, windows_entry_name, windows_record_name_range, windows_reparse_kind, IndexError,
-    NativeChild, NativeIdentity, TraversalIssue, WindowsReparseKind,
+    NativeChild, NativeFileMetadata, NativeIdentity, NativeSearchChild, TraversalIssue, WindowsReparseKind,
 };
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -32,6 +32,9 @@ const FILE_ID_HALF_BYTES: usize = size_of::<u64>();
 const MAX_NATIVE_PATH_UNITS: usize = 32 * 1024;
 const ROOT_SHARE_MODE: FILE_SHARE_MODE = FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0);
 const SCAN_SHARE_MODE: FILE_SHARE_MODE = FILE_SHARE_MODE(ROOT_SHARE_MODE.0 | FILE_SHARE_DELETE.0);
+const FILETIME_UNIX_EPOCH_TICKS: i64 = 116_444_736_000_000_000;
+const FILETIME_TICKS_PER_SECOND: i64 = 10_000_000;
+const FILETIME_NANOSECONDS_PER_TICK: u32 = 100;
 
 fn query<T>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS, output: &mut T) -> Result<(), IndexError> {
     unsafe {
@@ -445,16 +448,62 @@ pub struct NativeParent<'root> {
 }
 
 impl NativeParent<'_> {
+    pub fn open_search_file(&self, name: &str) -> Result<File, IndexError> {
+        validate_name(name)?;
+        self.verify()?;
+        let parent = last(&self.files)?;
+        let expected = native_path(parent)?.join(name);
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ.0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(self.root.parent_path(&self.relative)?.join(name))?;
+        let info = attributes(&file)?;
+        if info.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY.0 | FILE_ATTRIBUTE_REPARSE_POINT.0) != 0
+            || windows_reparse_kind(info.ReparseTag) != WindowsReparseKind::Ordinary
+            || identity(&file)?.device != self.root.identity.device
+            || native_path(&file)? != expected
+        {
+            return Err(IndexError::Invalid("Search file is redirected or crosses a volume."));
+        }
+        self.verify()?;
+        Ok(file)
+    }
+
     pub fn verify(&self) -> Result<(), IndexError> {
         self.root.verify_held_parent(&self.relative, last(&self.files)?, self.identity)
     }
 
     pub fn children_with_ids(
         &self,
-        receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+        mut receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        self.children_with_files(None, |entry| {
+            receive(entry.map(|child| {
+                child.map(|child| match child {
+                    NativeSearchChild::Directory(directory) => directory,
+                    NativeSearchChild::File(_, _) => unreachable!("File reporting is disabled"),
+                })
+            }))
+        })
+    }
+
+    pub fn children_for_search(
+        &self,
+        should_read_file: &mut dyn FnMut(&str) -> bool,
+        receive: impl FnMut(Result<Option<NativeSearchChild>, TraversalIssue>) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        self.children_with_files(Some(should_read_file), receive)
+    }
+
+    fn children_with_files(
+        &self,
+        should_read_file: Option<&mut dyn FnMut(&str) -> bool>,
+        receive: impl FnMut(Result<Option<NativeSearchChild>, TraversalIssue>) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
         self.verify().map_err(super::source_error)?;
-        self.root.children_from_handles(&self.relative, &self.files, receive)
+        self.root
+            .children_from_handles(&self.relative, &self.files, should_read_file, receive)
     }
 
     #[cfg(test)]
@@ -773,7 +822,8 @@ impl NativeRoot {
         &self,
         parent: &str,
         files: &[File],
-        mut receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+        mut should_read_file: Option<&mut dyn FnMut(&str) -> bool>,
+        mut receive: impl FnMut(Result<Option<NativeSearchChild>, TraversalIssue>) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
         let file = last(files)?;
         let expected = identity(file)?;
@@ -785,7 +835,8 @@ impl NativeRoot {
             if native_name == [b'.' as u16] || native_name == [b'.' as u16, b'.' as u16] {
                 return Ok(true);
             }
-            if record.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0
+            let is_directory = record.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0;
+            if (!is_directory && should_read_file.is_none())
                 || record.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
                 || windows_reparse_kind(record.ReparsePointTag) != WindowsReparseKind::Ordinary
             {
@@ -806,7 +857,35 @@ impl NativeRoot {
                 receive(Err(TraversalIssue::UnsafeDirectory(name)))?;
                 return Ok(true);
             }
-            receive(Ok(Some((name, true, Some(record.FileId.Identifier.to_vec())))))?;
+            if is_directory {
+                receive(Ok(Some(NativeSearchChild::Directory((
+                    name,
+                    true,
+                    Some(record.FileId.Identifier.to_vec()),
+                )))))?;
+            } else if should_read_file.as_mut().is_some_and(|filter| filter(&name)) {
+                let Ok(size) = u64::try_from(record.EndOfFile) else {
+                    receive(Err(TraversalIssue::ScanFailed))?;
+                    return Ok(true);
+                };
+                if record.LastWriteTime < 0 {
+                    receive(Err(TraversalIssue::ScanFailed))?;
+                    return Ok(true);
+                }
+                let ticks = record.LastWriteTime - FILETIME_UNIX_EPOCH_TICKS;
+                let seconds = ticks.div_euclid(FILETIME_TICKS_PER_SECOND);
+                let nanoseconds = u32::try_from(ticks.rem_euclid(FILETIME_TICKS_PER_SECOND))
+                    .map_err(|_| IndexError::Invalid("File modification time is invalid. Retry the search."))?
+                    * FILETIME_NANOSECONDS_PER_TICK;
+                receive(Ok(Some(NativeSearchChild::File(
+                    name,
+                    NativeFileMetadata {
+                        size,
+                        modified_seconds: seconds,
+                        modified_nanoseconds: nanoseconds,
+                    },
+                ))))?;
+            }
             Ok(true)
         })?;
         self.verify_held_parent(parent, file, expected)
@@ -815,6 +894,32 @@ impl NativeRoot {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn search_reader_reports_selected_files() {
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temporary.path().join("folder")).unwrap();
+        std::fs::write(temporary.path().join("match.txt"), b"content").unwrap();
+        std::fs::write(temporary.path().join("other.txt"), b"ignored").unwrap();
+        let root = NativeRoot::open(temporary.path()).unwrap();
+        let parent = root.open_parent("").unwrap();
+        let mut rows = Vec::new();
+        parent
+            .children_for_search(&mut |name| name == "match.txt", |entry| {
+                if let Some(entry) = entry.unwrap() {
+                    rows.push(entry);
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert!(rows
+            .iter()
+            .any(|entry| matches!(entry, NativeSearchChild::Directory((name, true, _)) if name == "folder")));
+        assert!(rows
+            .iter()
+            .any(|entry| matches!(entry, NativeSearchChild::File(name, metadata) if name == "match.txt" && metadata.size == 7)));
+        assert_eq!(rows.len(), 2);
+    }
+
     #[test]
     fn scan_handles_allow_parent_rename_but_root_binding_blocks_it() {
         for checked_chain in [false, true] {

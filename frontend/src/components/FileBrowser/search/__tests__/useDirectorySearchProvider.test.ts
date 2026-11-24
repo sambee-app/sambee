@@ -21,6 +21,68 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("getDirectoryResultPresentation", () => {
+  it("sends connection and folder scope to history and the index", async () => {
+    const recent = vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    const search = vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: ["Docs/sub"],
+      total_matches: 1,
+      cache_state: "ready",
+      directory_count: 1,
+      scope_not_indexed: false,
+    });
+    const scope = { path: "Docs", mode: "descendants_only" as const };
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn(), { scope }), { wrapper });
+    const signal = new AbortController().signal;
+    await act(async () => {
+      await result.current.fetchResults("sub", signal);
+    });
+    expect(recent).toHaveBeenLastCalledWith("sub", 50, signal, { connectionId: "connection-1", scope });
+    expect(search).toHaveBeenLastCalledWith("connection-1", "sub", expect.objectContaining({ scope, signal }));
+  });
+
+  it("reports a missing scope instead of treating it as an ordinary empty index", async () => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: [],
+      total_matches: 0,
+      cache_state: "ready",
+      directory_count: 3,
+      scope_not_indexed: true,
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider("connection-1", vi.fn(), { scope: { path: "Docs", mode: "subtree" } }), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.fetchResults("reports", new AbortController().signal);
+    });
+    expect(result.current.getStatusInfo()?.label).toContain("This folder is not indexed yet.");
+  });
+
+  it.each([
+    ["local-drive:c", "Update Companion"],
+    ["connection-1", "Update the server"],
+  ])("does not display unscoped results from an older source (%s)", async (connectionId, expectedMessage) => {
+    vi.mocked(api.searchRecentDirectories).mockResolvedValue({ result_limit: 10, results: [] });
+    vi.mocked(api.getDirectorySearchStatus).mockResolvedValue({ cache_state: "ready", directory_count: 1 });
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: ["other/reports"],
+      total_matches: 1,
+      cache_state: "ready",
+      directory_count: 1,
+    });
+    const { result } = renderHook(() => useDirectorySearchProvider(connectionId, vi.fn(), { scope: { path: "Docs", mode: "subtree" } }), {
+      wrapper,
+    });
+    for (const refresh of [false, true]) {
+      let rows: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+      await act(async () => {
+        rows = await result.current.fetchResults("reports", new AbortController().signal, undefined, refresh);
+      });
+      expect(rows).toEqual([]);
+    }
+    expect(result.current.getStatusInfo()?.label).toContain(expectedMessage);
+  });
+
   it("polls status, limits searches to changed revisions, and refreshes on completion or release", async () => {
     const clock = vi.spyOn(performance, "now").mockReturnValue(0);
     try {
@@ -789,7 +851,7 @@ describe("getDirectoryResultPresentation", () => {
       await result.current.fetchResults("r", new AbortController().signal);
     });
 
-    expect(api.searchRecentDirectories).toHaveBeenCalledWith("r", 50, expect.any(AbortSignal));
+    expect(api.searchRecentDirectories).toHaveBeenCalledWith("r", 50, expect.any(AbortSignal), { connectionId: "connection-1" });
     expect(api.searchDirectories).toHaveBeenCalledWith("connection-1", "", expect.anything());
   });
 

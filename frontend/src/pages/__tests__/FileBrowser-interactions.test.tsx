@@ -1913,9 +1913,9 @@ describe("Browser Component - Interactions", () => {
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
       await user.keyboard("/");
-      await screen.findByRole("listbox");
+      await screen.findByPlaceholderText("Search files and folders");
 
-      listContainer.focus();
+      await user.keyboard("{Escape}{Escape}");
       await user.keyboard("{Enter}");
 
       await screen.findByText("Markdown Viewer");
@@ -1965,9 +1965,9 @@ describe("Browser Component - Interactions", () => {
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
       await user.keyboard("/");
-      await screen.findByRole("listbox");
+      await screen.findByPlaceholderText("Search files and folders");
 
-      listContainer.focus();
+      await user.keyboard("{Escape}{Escape}");
       await user.keyboard("{Enter}");
       await screen.findByRole("dialog");
 
@@ -2005,12 +2005,11 @@ describe("Browser Component - Interactions", () => {
       const virtualList = await screen.findByTestId("virtual-list");
       await user.click(virtualList);
       await user.keyboard("/");
-      await screen.findByRole("listbox");
+      await screen.findByPlaceholderText("Search files and folders");
 
+      await user.keyboard("{Escape}{Escape}");
       await user.keyboard("{Shift>}{Enter}{/Shift}");
       await screen.findByRole("dialog", { name: "Choose Viewer" });
-      expect(screen.getAllByRole("listbox")).toHaveLength(1);
-
       await user.keyboard("{Escape}");
 
       await waitFor(() => {
@@ -2649,7 +2648,7 @@ describe("Browser Component - Interactions", () => {
         await renderBrowserAndFlush("/browse/smb/test-server-1");
         await screen.findByRole("button", { name: "Folder: Pictures" });
         const list = screen.getByTestId("file-list-container");
-        const input = screen.getByPlaceholderText("Navigate to any directory");
+        const input = screen.getByPlaceholderText("Quick navigation");
         await user.click(input);
         await user.keyboard(`{Shift>}{${key}}{/Shift}`);
         expect(input).toHaveFocus();
@@ -2709,7 +2708,7 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{Control>}k{/Control}");
 
-      const quickBarInput = await screen.findByPlaceholderText("Navigate to any directory");
+      const quickBarInput = await screen.findByPlaceholderText("Quick navigation");
       expect(quickBarInput).toHaveFocus();
     });
 
@@ -2721,7 +2720,7 @@ describe("Browser Component - Interactions", () => {
         expect(screen.getAllByText("Documents").length).toBeGreaterThan(0);
       });
 
-      const quickBarInput = screen.getByPlaceholderText("Navigate to any directory");
+      const quickBarInput = screen.getByPlaceholderText("Quick navigation");
       await act(async () => {
         quickBarInput.focus();
       });
@@ -2761,13 +2760,13 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{Control>}k{/Control}");
 
-      const quickBarInput = await screen.findByPlaceholderText("Navigate to any directory");
+      const quickBarInput = await screen.findByPlaceholderText("Quick navigation");
       expect(quickBarInput).toHaveFocus();
       expect(screen.queryByText(/No results found for/i)).not.toBeInTheDocument();
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     });
 
-    it("searches recent directories and shows the minimum-character hint when a single-character quick nav query has no recent match", async () => {
+    it("shows the directory index minimum-character hint when a single-character query matches neither history nor the open folder", async () => {
       const user = userEvent.setup();
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
@@ -2777,12 +2776,37 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{Control>}k{/Control}");
 
-      const quickBarInput = await screen.findByPlaceholderText("Navigate to any directory");
-      await user.type(quickBarInput, "e");
+      const quickBarInput = await screen.findByPlaceholderText("Quick navigation");
+      await user.type(quickBarInput, "z");
 
       expect(await screen.findByText("Type at least 2 characters to search")).toBeInTheDocument();
       expect(screen.queryByText(/No results found for/i)).not.toBeInTheDocument();
-      expect(api.searchRecentDirectories).toHaveBeenCalledWith("e", 50, expect.any(AbortSignal));
+      expect(api.searchRecentDirectories).toHaveBeenCalledWith("z", 50, expect.any(AbortSignal), { connectionId: "conn-1" });
+    });
+
+    it("applies quick-navigation scope and item type before requesting results", async () => {
+      const user = userEvent.setup();
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
+      await user.keyboard("{Control>}k{/Control}");
+      const input = await screen.findByPlaceholderText("Quick navigation");
+      await user.type(input, "report");
+      await user.click(screen.getByRole("button", { name: "Search scope" }));
+      await user.click(screen.getByRole("menuitem", { name: "Current folder and subfolders" }));
+      await waitFor(() => {
+        expect(api.searchRecentDirectories).toHaveBeenCalledWith("report", 50, expect.any(AbortSignal), {
+          connectionId: "conn-1",
+          scope: { path: "", mode: "subtree" },
+        });
+      });
+      await user.click(screen.getByRole("button", { name: "Item type" }));
+      await user.click(screen.getByRole("menuitem", { name: "Files" }));
+      await waitFor(() => {
+        expect(api.searchRecentFiles).toHaveBeenCalledWith("report", 50, expect.any(AbortSignal), {
+          connectionId: "conn-1",
+          scope: { path: "", mode: "subtree" },
+        });
+      });
+      expect(input).toHaveValue("report");
     });
 
     it("keeps the quick-bar mode icon in sync with keyboard shortcuts and typing", async () => {
@@ -2794,7 +2818,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       await user.keyboard("{Control>}k{/Control}");
-      await screen.findByPlaceholderText("Navigate to any directory");
+      await screen.findByPlaceholderText("Quick navigation");
       const modeButton = screen.getByRole("button", { name: "Switch quick bar mode" });
       expect(within(modeButton).getByTestId("FolderOutlinedIcon")).toBeInTheDocument();
 
@@ -2809,7 +2833,7 @@ describe("Browser Component - Interactions", () => {
       await user.click(screen.getByTestId("virtual-list"));
       await user.keyboard("/");
 
-      const fileSearchInput = await screen.findByPlaceholderText("Search recent and current-directory files");
+      const fileSearchInput = await screen.findByPlaceholderText("Search files and folders");
       expect(within(modeButton).getByTestId("SearchIcon")).toBeInTheDocument();
 
       await user.type(fileSearchInput, "r");
@@ -2820,7 +2844,7 @@ describe("Browser Component - Interactions", () => {
       ["a same-tab history change", () => window.dispatchEvent(new Event(RECENT_FILES_CHANGED_EVENT))],
       ["window focus", () => window.dispatchEvent(new Event("focus"))],
       ["returning to a visible tab", () => document.dispatchEvent(new Event("visibilitychange"))],
-    ])("refreshes active File Search after %s", async (_description, triggerRefresh) => {
+    ])("does not fetch recent files for live search after %s", async (_description, triggerRefresh) => {
       const user = userEvent.setup();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       await renderBrowserAndFlush("/browse/smb/test-server-1");
@@ -2831,26 +2855,21 @@ describe("Browser Component - Interactions", () => {
 
       await user.click(screen.getByTestId("virtual-list"));
       await user.keyboard("/");
-      await screen.findByPlaceholderText("Search recent and current-directory files");
-      await waitFor(() => {
-        expect(api.searchRecentFiles).toHaveBeenCalledWith("", 50, expect.any(AbortSignal));
-      });
+      await screen.findByPlaceholderText("Search files and folders");
 
       const callsBeforeRefresh = vi.mocked(api.searchRecentFiles).mock.calls.length;
       await act(async () => {
         triggerRefresh();
       });
 
-      await waitFor(() => {
-        expect(api.searchRecentFiles).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
-      });
+      expect(api.searchRecentFiles).toHaveBeenCalledTimes(callsBeforeRefresh);
     });
 
     it.each([
       ["a same-tab history change", () => window.dispatchEvent(new Event(RECENT_FILES_CHANGED_EVENT))],
       ["window focus", () => window.dispatchEvent(new Event("focus"))],
       ["returning to a visible tab", () => document.dispatchEvent(new Event("visibilitychange"))],
-    ])("does not reopen focused but dismissed File Search after %s", async (_description, triggerRefresh) => {
+    ])("does not submit live search after %s", async (_description, triggerRefresh) => {
       const user = userEvent.setup();
       Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       await renderBrowserAndFlush("/browse/smb/test-server-1");
@@ -2858,21 +2877,15 @@ describe("Browser Component - Interactions", () => {
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
       await user.keyboard("/");
-      const fileSearchInput = await screen.findByPlaceholderText("Search recent and current-directory files");
-      await screen.findByRole("listbox");
-
-      await user.keyboard("{Escape}");
+      const fileSearchInput = await screen.findByPlaceholderText("Search files and folders");
       expect(fileSearchInput).toHaveFocus();
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-      const callsBeforeRefresh = vi.mocked(api.searchRecentFiles).mock.calls.length;
 
       await act(async () => {
         triggerRefresh();
       });
 
-      await waitFor(() => {
-        expect(api.searchRecentFiles).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
-      });
+      expect(api.startFilesystemSearch).not.toHaveBeenCalled();
       expect(fileSearchInput).toHaveFocus();
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     });
@@ -2891,9 +2904,9 @@ describe("Browser Component - Interactions", () => {
       });
 
       await user.keyboard("{Control>}k{/Control}");
-      await screen.findByPlaceholderText("Navigate to any directory");
+      await screen.findByPlaceholderText("Quick navigation");
       await waitFor(() => {
-        expect(api.searchRecentDirectories).toHaveBeenCalledWith("", 50, expect.any(AbortSignal));
+        expect(api.searchRecentDirectories).toHaveBeenCalledWith("", 50, expect.any(AbortSignal), { connectionId: "conn-1" });
       });
 
       const callsBeforeRefresh = vi.mocked(api.searchRecentDirectories).mock.calls.length;
@@ -2906,7 +2919,7 @@ describe("Browser Component - Interactions", () => {
       });
     });
 
-    it("does not reopen focused but dismissed Directory Navigation after a history refresh", async () => {
+    it("does not reopen dismissed Directory Navigation after a history refresh", async () => {
       const user = userEvent.setup();
       vi.mocked(api.searchRecentDirectories).mockResolvedValue({
         result_limit: 10,
@@ -2922,11 +2935,13 @@ describe("Browser Component - Interactions", () => {
       await renderBrowserAndFlush("/browse/smb/test-server-1");
 
       await user.keyboard("{Control>}k{/Control}");
-      const navigateInput = await screen.findByPlaceholderText("Navigate to any directory");
-      await screen.findByRole("listbox");
+      const input = await screen.findByPlaceholderText("Quick navigation");
+      await user.type(input, "Documents");
+      expect(await screen.findByRole("option", { name: /^Documents\b/ })).toBeVisible();
 
       await user.keyboard("{Escape}");
-      expect(navigateInput).toHaveFocus();
+      expect(input).toHaveValue("");
+      expect(screen.getByTestId("file-list-container")).toHaveFocus();
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
       const callsBeforeRefresh = vi.mocked(api.searchRecentDirectories).mock.calls.length;
 
@@ -2934,10 +2949,8 @@ describe("Browser Component - Interactions", () => {
         window.dispatchEvent(new Event(RECENT_DIRECTORIES_CHANGED_EVENT));
       });
 
-      await waitFor(() => {
-        expect(api.searchRecentDirectories).toHaveBeenCalledTimes(callsBeforeRefresh + 1);
-      });
-      expect(navigateInput).toHaveFocus();
+      expect(api.searchRecentDirectories).toHaveBeenCalledTimes(callsBeforeRefresh);
+      expect(screen.getByTestId("file-list-container")).toHaveFocus();
       expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     });
 
@@ -2949,7 +2962,7 @@ describe("Browser Component - Interactions", () => {
       const listContainer = await screen.findByTestId("virtual-list");
       await user.click(listContainer);
       await user.keyboard("/");
-      await screen.findByRole("listbox");
+      await screen.findByPlaceholderText("Search files and folders");
 
       await user.keyboard("{Escape}{Escape}");
       await waitFor(() => {
@@ -2977,7 +2990,7 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{Control>}k{/Control}");
 
-      const quickBarInput = await screen.findByPlaceholderText("Navigate to any directory");
+      const quickBarInput = await screen.findByPlaceholderText("Quick navigation");
       await user.type(quickBarInput, "abc");
       await user.keyboard("{Home}");
       await user.keyboard("x");
@@ -3045,7 +3058,7 @@ describe("Browser Component - Interactions", () => {
       await user.click(rightPane as HTMLElement);
       await user.keyboard("{Control>}k{/Control}");
 
-      const quickBarInput = screen.getByPlaceholderText("Navigate to any directory");
+      const quickBarInput = screen.getByPlaceholderText("Quick navigation");
       await user.type(quickBarInput, "Ri");
 
       await waitFor(() => {
@@ -3060,7 +3073,7 @@ describe("Browser Component - Interactions", () => {
       });
 
       await user.click(leftPane as HTMLElement);
-      await user.click(screen.getByPlaceholderText("Navigate to any directory"));
+      await user.click(screen.getByPlaceholderText("Quick navigation"));
       await user.keyboard("{Enter}");
 
       await waitFor(() => {
@@ -3099,7 +3112,7 @@ describe("Browser Component - Interactions", () => {
 
       await user.keyboard("{Control>}k{/Control}");
 
-      const quickBarInput = await screen.findByPlaceholderText("Navigate to any directory");
+      const quickBarInput = await screen.findByPlaceholderText("Quick navigation");
       await user.type(quickBarInput, "do");
 
       await waitFor(() => {
@@ -3133,7 +3146,7 @@ describe("Browser Component - Interactions", () => {
       await user.click(fileSearchCommand);
 
       await waitFor(() => {
-        const fileSearchInput = screen.getByPlaceholderText("Search recent and current-directory files");
+        const fileSearchInput = screen.getByPlaceholderText("Search files and folders");
         expect(fileSearchInput).toHaveFocus();
       });
     });
@@ -3143,10 +3156,10 @@ describe("Browser Component - Interactions", () => {
       {
         shortcut: "{Control>}p{/Control}",
         source: "Commands",
-        destination: "File Search",
-        placeholder: "Search recent and current-directory files",
+        destination: "Live search",
+        placeholder: "Search files and folders",
       },
-      { shortcut: "/", source: "File Search", destination: "Navigate", placeholder: "Navigate to any directory" },
+      { shortcut: "/", source: "Live search", destination: "Navigate", placeholder: "Quick navigation" },
     ])(
       "switches quick-bar modes from $source to $destination with the mode menu",
       async ({ shortcut, source, destination, placeholder }) => {
@@ -3343,7 +3356,7 @@ describe("Browser Component - Interactions", () => {
 
       expect(commandInput).toHaveFocus();
       expect((api.listDirectory as Mock).mock.calls.length).toBe(initialCallCount);
-      expect(screen.queryByPlaceholderText("Navigate to any directory")).not.toBeInTheDocument();
+      expect(screen.queryByPlaceholderText("Quick navigation")).not.toBeInTheDocument();
     });
 
     it("opens shortcuts dialog with ? key", async () => {

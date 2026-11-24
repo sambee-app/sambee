@@ -50,6 +50,8 @@ const INTERACTIVE_SHORTCUT_BLOCK_SELECTOR = [
   "a[href]",
   '[role="button"]',
   '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
   '[contenteditable="true"]',
 ].join(", ");
 

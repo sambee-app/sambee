@@ -20,6 +20,7 @@ from app.core.directory_index_contract import (
     MIN_DIRECTORY_POLICY_CHALLENGE_BYTES,
     POLICY_FIELDS,
 )
+from app.core.filesystem_search_policy import POLICY_BOUNDS
 from app.core.system_setting_definitions import (
     DIRECTORY_INDEX_ALL_SETTING_KEYS,
     HEALTH_MONITORING_ALL_SETTING_KEYS,
@@ -113,6 +114,61 @@ class SmbSettingsRead(SQLModel):
 
 class StrictSettingUpdate(SQLModel):
     model_config = SQLModelConfig(extra="forbid")
+
+
+class FilesystemSearchPolicy(StrictSettingUpdate):
+    concurrent_searches: int = Field(
+        default=POLICY_BOUNDS["concurrent_searches"].default,
+        ge=POLICY_BOUNDS["concurrent_searches"].minimum,
+        le=POLICY_BOUNDS["concurrent_searches"].maximum,
+    )
+    max_seconds: int = Field(
+        default=POLICY_BOUNDS["max_seconds"].default,
+        ge=POLICY_BOUNDS["max_seconds"].minimum,
+        le=POLICY_BOUNDS["max_seconds"].maximum,
+    )
+    max_results: int = Field(
+        default=POLICY_BOUNDS["max_results"].default,
+        ge=POLICY_BOUNDS["max_results"].minimum,
+        le=POLICY_BOUNDS["max_results"].maximum,
+    )
+
+    @field_validator("concurrent_searches", "max_seconds", "max_results", mode="before")
+    @classmethod
+    def validate_integer(cls, value: object) -> int:
+        if type(value) is not int:
+            raise ValueError("File-system search policy values must be integers.")
+        return value
+
+
+class FilesystemSearchFieldRead(SQLModel):
+    value: int
+    default_value: int
+    min_value: int
+    max_value: int
+    source: SystemSettingSource
+
+
+class FilesystemSearchSettingsRead(SQLModel):
+    policy: FilesystemSearchPolicy
+    fields: dict[str, FilesystemSearchFieldRead]
+
+
+class FilesystemSearchSettingUpdate(StrictSettingUpdate):
+    field: Literal["concurrent_searches", "max_seconds", "max_results"]
+    value: int
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def validate_integer(cls, value: object) -> int:
+        return FilesystemSearchPolicy.validate_integer(value)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "FilesystemSearchSettingUpdate":
+        bound = POLICY_BOUNDS[self.field]
+        if not bound.minimum <= self.value <= bound.maximum:
+            raise ValueError(f"{self.field} must be between {bound.minimum} and {bound.maximum}.")
+        return self
 
 
 class DirectoryIndexPolicy(StrictSettingUpdate):

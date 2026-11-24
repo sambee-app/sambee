@@ -1,5 +1,10 @@
 {
   "version": 1,
+  "quick_navigation_scope": {
+    "path_parameter": "scope_path",
+    "mode_parameter": "scope_mode",
+    "modes": ["subtree", "descendants_only"]
+  },
   "scan_progress": {
     "fields": ["phase", "parents_done", "parents_queued", "directories_found", "started_at_ms"],
     "phases": ["building", "updating", "idle"]

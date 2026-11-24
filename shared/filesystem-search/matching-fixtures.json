@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "invalid_queries": ["", " ", "\t\n"],
+  "matches": [
+    {"query": "annual report", "name": "2026 annual report.pdf", "case_sensitive": false, "expected": true},
+    {"query": "annual report", "name": "annual big report.pdf", "case_sensitive": false, "expected": false},
+    {"query": " report ", "name": "a report b", "case_sensitive": false, "expected": true},
+    {"query": " report ", "name": "report", "case_sensitive": false, "expected": false},
+    {"query": "*.pdf", "name": "report.pdf", "case_sensitive": false, "expected": true},
+    {"query": "*.pdf", "name": "report.pdf.bak", "case_sensitive": false, "expected": false},
+    {"query": "file?.txt", "name": "file😀.txt", "case_sensitive": false, "expected": true},
+    {"query": "file?.txt", "name": "fileab.txt", "case_sensitive": false, "expected": false},
+    {"query": "what\\?", "name": "what? today", "case_sensitive": false, "expected": true},
+    {"query": "a\\*b", "name": "xa*by", "case_sensitive": false, "expected": true},
+    {"query": "a\\\\b", "name": "xa\\by", "case_sensitive": false, "expected": true},
+    {"query": "a\\xb", "name": "xa\\xby", "case_sensitive": false, "expected": true},
+    {"query": "end\\", "name": "the end\\", "case_sensitive": false, "expected": true},
+    {"query": "a\\**", "name": "a*more", "case_sensitive": false, "expected": true},
+    {"query": "STRASSE", "name": "Straße.txt", "case_sensitive": false, "expected": true},
+    {"query": "STRASSE", "name": "Straße.txt", "case_sensitive": true, "expected": false},
+    {"query": "?", "name": "ß", "case_sensitive": false, "expected": true},
+    {"query": "??", "name": "ß", "case_sensitive": false, "expected": false},
+    {"query": "ss*", "name": "ß.txt", "case_sensitive": false, "expected": true},
+    {"query": "Ა", "name": "ა", "case_sensitive": false, "expected": true},
+    {"query": "ɤ", "name": "Ɤ", "case_sensitive": false, "expected": true},
+    {"query": "?ɤ", "name": "xꟋ", "case_sensitive": false, "expected": true},
+    {"query": "cafe", "name": "café", "case_sensitive": false, "expected": false},
+    {"query": "*a*a*a*b", "name": "aaaaab", "case_sensitive": true, "expected": true},
+    {"query": "*a*a*a*b", "name": "aaaaac", "case_sensitive": true, "expected": false}
+  ]
+}

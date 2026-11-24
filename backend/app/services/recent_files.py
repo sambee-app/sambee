@@ -9,11 +9,13 @@ from typing import Iterator
 from fastapi import HTTPException, status
 from sqlmodel import Session, col, select
 
+from app.core.search_scope import parse_search_scope
 from app.models.recent_file import RecentFile, RecentFileRead
 from app.models.user import User
 from app.services.directory_index import search_terms
 from app.services.history_common import (
     HISTORY_QUERY_BATCH_SIZE,
+    history_scope_filters,
     history_search_relevance,
     history_usage_score,
     normalize_history_search_text,
@@ -160,12 +162,24 @@ def record_recent_file(
     return RecentFileRead.model_validate(record)
 
 
-def search_recent_files(*, query: str, limit: int, current_user: User, session: Session) -> list[RecentFileRead]:
+def search_recent_files(
+    *,
+    query: str,
+    limit: int,
+    current_user: User,
+    session: Session,
+    connection_id: str | None = None,
+    scope_path: str | None = None,
+    scope_mode: str | None = None,
+) -> list[RecentFileRead]:
     bounded_limit = get_recent_file_result_limit(limit=limit, session=session)
     terms = search_terms(query)
-    records = session.exec(
-        select(RecentFile).where(RecentFile.user_id == current_user.id).execution_options(yield_per=HISTORY_QUERY_BATCH_SIZE)
+    scope = parse_search_scope(scope_path, scope_mode)
+    statement = select(RecentFile).where(
+        RecentFile.user_id == current_user.id,
+        *history_scope_filters(col(RecentFile.path), col(RecentFile.connection_id), connection_id, scope),
     )
+    records = session.exec(statement.execution_options(yield_per=HISTORY_QUERY_BATCH_SIZE))
     now = datetime.now(timezone.utc)
 
     def matches() -> Iterator[tuple[int, int, RecentFile]]:

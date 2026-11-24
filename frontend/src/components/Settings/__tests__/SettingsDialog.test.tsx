@@ -171,7 +171,7 @@ describe("SettingsDialog Component", () => {
     const connectionsOption = screen.getByRole("option", { name: /^connections$/i });
     const authenticationOption = await screen.findByRole("option", { name: /^authentication$/i });
     const userManagementOption = await screen.findByRole("option", { name: /user management/i });
-    const systemOption = await screen.findByRole("option", { name: /system/i });
+    const systemOption = await screen.findByRole("option", { name: /^system$/i });
     const aboutOption = await screen.findByRole("option", { name: /^about$/i });
 
     expect(appearanceOption).toBeInTheDocument();
@@ -183,7 +183,7 @@ describe("SettingsDialog Component", () => {
     expect(authenticationOption.querySelector("svg")).toBeInTheDocument();
     expect(userManagementOption).toBeInTheDocument();
     expect(systemOption).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /^directory search$/i }).querySelector("svg")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^directory indexing$/i }).querySelector("svg")).toBeInTheDocument();
     expect(aboutOption).toBeInTheDocument();
     expect(aboutOption.querySelector("svg")).toBeInTheDocument();
     expect(screen.getByText("Administration")).toBeInTheDocument();
@@ -205,7 +205,7 @@ describe("SettingsDialog Component", () => {
     expect(screen.getByRole("option", { name: /^connections$/i })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /local drives/i })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /user management/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /system/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^system$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /^about$/i })).not.toBeInTheDocument();
   });
 
@@ -449,7 +449,7 @@ describe("SettingsDialog Component", () => {
       expect(api.getCurrentUser).toHaveBeenCalled();
     });
 
-    const systemOption = await screen.findByRole("option", { name: /system/i });
+    const systemOption = await screen.findByRole("option", { name: /^system$/i });
     await user.click(systemOption);
 
     expect(await screen.findByText("System Settings Content")).toBeInTheDocument();
@@ -463,8 +463,14 @@ describe("SettingsDialog Component", () => {
     vi.mocked(api.getCurrentUser).mockResolvedValue({ id: "admin-id", username: "admin", role: "admin" });
     const user = userEvent.setup();
     renderWithTheme(<SettingsDialog open onClose={mockOnClose} />);
-    await user.click(await screen.findByRole("option", { name: /^directory search$/i }));
+    await user.click(await screen.findByRole("option", { name: /^directory indexing$/i }));
     expect(await screen.findByText("Directory Search Settings Content")).toBeInTheDocument();
+  });
+
+  it("does not render file-system search settings for regular users", async () => {
+    await act(async () => renderWithTheme(<SettingsCategoryContent item="admin-filesystem-search" isAdmin={false} />));
+    expect(scheduleSettingsPagePrefetch).toHaveBeenLastCalledWith(expect.not.arrayContaining(["admin-filesystem-search"]));
+    expect(screen.queryByText("Live Search Limits")).not.toBeInTheDocument();
   });
 
   it("switches to About when an admin clicks it", async () => {
@@ -510,7 +516,7 @@ describe("SettingsDialog Component", () => {
       expect(api.getCurrentUser).toHaveBeenCalled();
     });
 
-    await screen.findByRole("option", { name: /system/i });
+    await screen.findByRole("option", { name: /^system$/i });
 
     const appearanceOption = screen.getByRole("option", { name: /appearance/i });
     act(() => appearanceOption.focus());

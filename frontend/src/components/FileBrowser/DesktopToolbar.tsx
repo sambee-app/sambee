@@ -2,8 +2,9 @@ import { Box, Typography } from "@mui/material";
 import type React from "react";
 import { SambeeLogo } from "../SambeeLogo";
 import { DesktopToolbarActions, type ToolbarSystemHealthAction } from "./DesktopToolbarActions";
+import type { LiveSearchOptions } from "./LiveSearchOptions";
 import type { SearchProvider } from "./search/types";
-import type { UnifiedSearchBarModeOption } from "./UnifiedSearchBar";
+import type { UnifiedSearchBarModeOption, UnifiedSearchBarNavigationControls } from "./UnifiedSearchBar";
 import { UnifiedSearchBar } from "./UnifiedSearchBar";
 
 export interface ToolbarQuickBarProps {
@@ -23,6 +24,12 @@ export interface ToolbarQuickBarProps {
   disableTabFocus?: boolean;
   modeOptions?: UnifiedSearchBarModeOption[];
   showKeyboardHints?: boolean;
+  navigationControls?: UnifiedSearchBarNavigationControls;
+  liveSearchControls?: {
+    options: LiveSearchOptions;
+    onOptionsChange: (options: LiveSearchOptions) => void;
+    onSubmit: (query: string, options: LiveSearchOptions) => void;
+  };
 }
 
 interface DesktopToolbarProps extends ToolbarQuickBarProps {
@@ -54,6 +61,8 @@ export function DesktopToolbar({
   disableTabFocus,
   modeOptions,
   showKeyboardHints,
+  navigationControls,
+  liveSearchControls,
 }: DesktopToolbarProps) {
   return (
     <>
@@ -82,6 +91,8 @@ export function DesktopToolbar({
             disableTabFocus={disableTabFocus}
             modeOptions={modeOptions}
             showKeyboardHints={showKeyboardHints}
+            navigationControls={navigationControls}
+            liveSearchControls={liveSearchControls}
           />
         </Box>
       )}

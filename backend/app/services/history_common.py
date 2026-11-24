@@ -4,8 +4,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
+from sqlalchemy import func
+from sqlalchemy.sql.elements import ColumnElement, SQLColumnExpression
 from sqlmodel import Session
 
+from app.core.search_scope import SearchScope, SearchScopeMode
 from app.models.user import User
 from app.services.connection_access import get_accessible_connection_or_404
 from app.services.directory_index import normalize_search_text, single_term_rank
@@ -16,6 +19,23 @@ HISTORY_REPEAT_INTERVAL_SECONDS = 60
 HISTORY_SUBSTRING_MATCH_RANK = 3
 HISTORY_QUERY_BATCH_SIZE = 256
 SEARCH_CONTRACT_VERSION = 1
+
+
+def history_scope_filters(
+    path: SQLColumnExpression[str], connection: SQLColumnExpression[str], connection_id: str | None, scope: SearchScope | None
+) -> list[ColumnElement[bool]]:
+    """Build exact component filters before history ranking and result limits."""
+    filters: list[ColumnElement[bool]] = []
+    if connection_id is not None:
+        filters.append(connection == connection_id)
+    if scope is None:
+        return filters
+    if scope.path:
+        filters.extend((path > f"{scope.path}/", path < f"{scope.path}0"))
+    if scope.mode is SearchScopeMode.DESCENDANTS_ONLY:
+        prefix_length = len(scope.path) + 1 if scope.path else 0
+        filters.append(func.instr(func.substr(path, prefix_length + 1), "/") > 0)
+    return filters
 
 
 def history_usage_score(score: float, last_used: datetime, now: datetime) -> float:

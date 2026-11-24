@@ -22,9 +22,17 @@ Sambee now shows the system health status in the top-right corner. In the built-
 
 ## Quick Bar
 
+### Live File System Search
+
+Search for files and folders on SMB connections and local drives. Live search mode (<kbd>/</kbd>) starts a real-time search and displays matching files/folders in a results tab. Search can include ZIP members and works independently of directory indexing. Administrators can set scan time, result, and concurrency limits.
+
+### Quick Navigation
+
+Index-based directory navigation and recent file access have been combined into quick navigation (<kbd>Ctrl+K</kbd>), with scope and item-type controls.
+
 ### Improvements
 
-- Directory search: Reopening search after 10 minutes of inactivity no longer triggers a full verification scan. The healthy verification interval defaults to 24 hours and is configurable in settings.
+- Directory navigation: Reopening search after 10 minutes of inactivity no longer triggers a full verification scan. The healthy verification interval defaults to 24 hours and is configurable in settings.
 - The quick bar's mode (navigate/search/command) is now visualized with a pill button.
 - Fixed result menu flickering while typing in directory navigation mode.
 

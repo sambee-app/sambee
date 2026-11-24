@@ -15,6 +15,7 @@ const AuthenticationSettings = lazy(SETTINGS_PAGE_LOADERS["admin-authentication"
 const ConnectionsSettings = lazy(SETTINGS_PAGE_LOADERS.connections);
 const FileBrowserSettings = lazy(SETTINGS_PAGE_LOADERS["file-browser"]);
 const FileSearchSettings = lazy(SETTINGS_PAGE_LOADERS["admin-file-search"]);
+const FilesystemSearchSettings = lazy(SETTINGS_PAGE_LOADERS["admin-filesystem-search"]);
 const DirectorySearchSettings = lazy(SETTINGS_PAGE_LOADERS["admin-directory-search"]);
 const HealthMonitoringSettings = lazy(SETTINGS_PAGE_LOADERS["admin-health-monitoring"]);
 const LocalDrivesSettings = lazy(SETTINGS_PAGE_LOADERS["local-drives"]);
@@ -100,6 +101,8 @@ function SettingsCategoryPage({
       return isAdmin ? <SmbSettings dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-file-search":
       return isAdmin ? <FileSearchSettings /> : null;
+    case "admin-filesystem-search":
+      return isAdmin ? <FilesystemSearchSettings dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-directory-search":
       return isAdmin ? <DirectorySearchSettings dialogSafeHeader={dialogSafeHeader} /> : null;
     case "admin-health-monitoring":

@@ -22,8 +22,9 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use super::directory_index::{
     acquire_storage, epoch_milliseconds, open_directory_database, open_readonly_directory_database, search_terms, validate_directory_path,
-    validate_storage_files, DirectoryIndex, DirectoryIndexReader, DirectoryMutation, IndexError, ListingCheck, ListingDeadline, SourceKind,
-    StorageDirectory, APPLICATION_ID, ROW_BATCH_SIZE, SCHEMA_VERSION, SQL_BUSY_TIMEOUT,
+    validate_storage_files, DirectoryIndex, DirectoryIndexReader, DirectoryMutation, IndexError, ListingCheck, ListingDeadline,
+    SearchScope, SourceKind, StorageDirectory, APPLICATION_ID, ROW_BATCH_SIZE, SCHEMA_VERSION, SCOPE_MODE_DESCENDANTS_ONLY,
+    SCOPE_MODE_SUBTREE, SQL_BUSY_TIMEOUT,
 };
 #[cfg(test)]
 use super::directory_traversal::NativeIdentity;
@@ -64,6 +65,15 @@ struct Contract {
     limits: HashMap<String, i64>,
     policy: HashMap<String, PolicyField>,
     scan_progress: ProgressContract,
+    quick_navigation_scope: ScopeContract,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScopeContract {
+    path_parameter: String,
+    mode_parameter: String,
+    modes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +103,9 @@ fn contract() -> Result<&'static Contract, IndexError> {
     if contract.version != POLICY_VERSION
         || contract.scan_progress.fields != ["phase", "parents_done", "parents_queued", "directories_found", "started_at_ms"]
         || contract.scan_progress.phases != ["building", "updating", "idle"]
+        || contract.quick_navigation_scope.path_parameter != "scope_path"
+        || contract.quick_navigation_scope.mode_parameter != "scope_mode"
+        || contract.quick_navigation_scope.modes != [SCOPE_MODE_SUBTREE, SCOPE_MODE_DESCENDANTS_ONLY]
         || !matches!(
             (contract.policy.get("monitoring_retention_seconds"), contract.limits.get("idle_release_seconds")),
             (Some(retention), Some(idle)) if retention.minimum >= *idle
@@ -4487,14 +4500,27 @@ impl LocalDirectoryManager {
         query: String,
         include_dot: bool,
     ) -> Result<DirectorySearchResult, IndexError> {
+        self.search_scoped(drive, root, query, include_dot, None).await
+    }
+
+    pub async fn search_scoped(
+        self: &Arc<Self>,
+        drive: String,
+        root: PathBuf,
+        query: String,
+        include_dot: bool,
+        scope: Option<SearchScope>,
+    ) -> Result<DirectorySearchResult, IndexError> {
         search_terms(&query)?;
         let evidence_root = root.clone();
         let evidence = tokio::task::spawn_blocking(move || volume_evidence(&evidence_root))
             .await
             .map_err(|_| IndexError::Invalid("Drive evidence worker failed. Retry the search."))??;
-        self.search_with_evidence(drive, root, query, include_dot, evidence).await
+        self.search_with_evidence_scoped(drive, root, query, include_dot, evidence, scope)
+            .await
     }
 
+    #[cfg(test)]
     async fn search_with_evidence(
         self: &Arc<Self>,
         drive: String,
@@ -4502,6 +4528,19 @@ impl LocalDirectoryManager {
         query: String,
         include_dot: bool,
         evidence: VolumeEvidence,
+    ) -> Result<DirectorySearchResult, IndexError> {
+        self.search_with_evidence_scoped(drive, root, query, include_dot, evidence, None)
+            .await
+    }
+
+    async fn search_with_evidence_scoped(
+        self: &Arc<Self>,
+        drive: String,
+        root: PathBuf,
+        query: String,
+        include_dot: bool,
+        evidence: VolumeEvidence,
+        scope: Option<SearchScope>,
     ) -> Result<DirectorySearchResult, IndexError> {
         let source = {
             let mut sources = lock(&self.sources)?;
@@ -4557,6 +4596,7 @@ impl LocalDirectoryManager {
                 status: self.make_search_status(Some(&source), None)?.0,
                 results: Vec::new(),
                 total_matches: 0,
+                scope_not_indexed: false,
                 match_ranks: HashMap::new(),
                 matched_term_counts: HashMap::new(),
                 issue_details: None,
@@ -4564,7 +4604,7 @@ impl LocalDirectoryManager {
                 last_verified_at_ms: None,
             });
         };
-        let result = if query.trim().is_empty() {
+        let result = if query.trim().is_empty() && scope.is_none() {
             lock(&source.status)?.index_status.clone().ok_or(IndexError::QueryBusy)?
         } else {
             let permit = Arc::clone(&self.queries).try_acquire_owned().map_err(|_| IndexError::QueryBusy)?;
@@ -4585,7 +4625,7 @@ impl LocalDirectoryManager {
                     task_source.root_invalid.store(true, Ordering::Release);
                     return Err(error);
                 }
-                let response = reader.search(&query, DEFAULT_RESULT_LIMIT, include_dot, &cancelled, false)?;
+                let response = reader.search_scoped(&query, DEFAULT_RESULT_LIMIT, include_dot, &cancelled, false, scope.as_ref())?;
                 task_source.ensure_available()?;
                 if let Err(error) = root.verify() {
                     task_source.root_invalid.store(true, Ordering::Release);
@@ -4621,6 +4661,7 @@ impl LocalDirectoryManager {
                 .collect(),
             results: result.results.into_iter().map(|row| row.path).collect(),
             total_matches: wire_count(result.total_matches)?,
+            scope_not_indexed: result.scope_not_indexed,
             issue_details: None,
             issue_details_incomplete: details_incomplete,
             last_verified_at_ms: result.last_verified_at_ms,
@@ -4675,6 +4716,88 @@ mod tests {
             observations.pending.len(),
             observations.barriers.len(),
         )
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn live_search_is_independent_of_missing_and_active_index() {
+        let temporary = tempfile::tempdir_in(".").unwrap();
+        let root = temporary.path().join("root");
+        std::fs::create_dir_all(root.join("child")).unwrap();
+        std::fs::write(root.join("child/new.txt"), b"new").unwrap();
+        std::fs::write(root.join("first.txt"), b"first").unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("storage")).unwrap();
+        assert_eq!(manager.search_status("drive", &root).unwrap().cache_state, "empty");
+        assert_eq!(
+            super::super::filesystem_search_service::search_for_index_isolation_test(&root).await,
+            ["child/new.txt", "first.txt"]
+        );
+        assert_eq!(manager.search_status("drive", &root).unwrap().cache_state, "empty");
+        assert!(lock(&manager.sources).unwrap().is_empty());
+
+        let source = LocalSource::new(root.clone(), manager.storage_directory());
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        *lock(&source.io.search_read_gate).unwrap() = Some(super::super::directory_traversal::SearchReadGate {
+            relative: String::new(),
+            entered: entered_tx,
+            resume: resume_rx,
+        });
+        lock(&manager.sources).unwrap().insert("drive".into(), Arc::clone(&source));
+        manager.start_scan(&source).unwrap();
+        tokio::task::spawn_blocking(move || entered_rx.recv_timeout(Duration::from_secs(3)).unwrap())
+            .await
+            .unwrap();
+        assert!(source.busy.load(Ordering::Acquire));
+        let observations = observation_state(&source);
+        let scan_generation = lock(&source.status).unwrap().scan_generation.unwrap();
+        let (generation, revision, coverage, pending, counts) = {
+            let writer = lock(&source.writer).unwrap();
+            let index = writer.as_ref().unwrap();
+            let status = index.status().unwrap();
+            (
+                index.accepted_generation().unwrap(),
+                status.accepted_revision,
+                status.coverage,
+                index.pending_scan_paths(scan_generation, 10).unwrap(),
+                index.scan_counts(scan_generation).unwrap(),
+            )
+        };
+        assert!(generation.is_none());
+        assert_eq!(
+            super::super::filesystem_search_service::search_for_index_isolation_test(&root).await,
+            ["child/new.txt", "first.txt"]
+        );
+        super::super::filesystem_search_service::cancel_search_for_index_isolation_test(&root).await;
+        assert!(source.busy.load(Ordering::Acquire));
+        assert!(!source.stopped.load(Ordering::Acquire));
+        assert_eq!(observation_state(&source), observations);
+        assert_eq!(lock(&source.status).unwrap().scan_generation, Some(scan_generation));
+        {
+            let writer = lock(&source.writer).unwrap();
+            let index = writer.as_ref().unwrap();
+            assert_eq!(index.accepted_generation().unwrap(), generation);
+            let status = index.status().unwrap();
+            assert_eq!(status.accepted_revision, revision);
+            assert_eq!(status.coverage, coverage);
+            assert_eq!(index.pending_scan_paths(scan_generation, 10).unwrap(), pending);
+            assert_eq!(index.scan_counts(scan_generation).unwrap(), counts);
+        }
+        resume_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while source.busy.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("index did not finish after its reader resumed");
+        let writer = lock(&source.writer).unwrap();
+        let index = writer.as_ref().unwrap();
+        assert!(index.accepted_generation().unwrap().is_some());
+        assert!(index
+            .contains_directory(index.accepted_generation().unwrap().unwrap(), "child")
+            .unwrap());
+        assert!(!source.stopped.load(Ordering::Acquire));
     }
 
     #[test]
@@ -9110,6 +9233,62 @@ mod tests {
                 "total_cpu_seconds": process_cpu_seconds() - started_cpu
             })
         );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[tokio::test]
+    async fn scoped_directory_search_http_reports_missing_scope() {
+        use axum::{body::Body, http::Request, routing::get, Router};
+        use tower::ServiceExt;
+
+        const MAX_RESPONSE_BYTES: usize = 64 * 1024;
+        let temporary = tempfile::tempdir().unwrap();
+        let root_path = temporary.path().join("root");
+        std::fs::create_dir(&root_path).unwrap();
+        let manager = LocalDirectoryManager::new_without_maintenance(temporary.path().join("private")).unwrap();
+        let source = LocalSource::new(root_path.clone(), &manager.budget.namespace);
+        let mut index = DirectoryIndex::open(&source.index_path, SourceKind::Local, &json!({"root": "scope-fixture"})).unwrap();
+        index.write_paths(["documents".into(), "documents/work".into()], None).unwrap();
+        assert!(index.finish_generation(1, 0).unwrap());
+        *lock(&source.root).unwrap() = Some(Arc::new(NativeRoot::open(&root_path).unwrap()));
+        *lock(&source.reader).unwrap() = Some(index.reader());
+        *lock(&source.writer).unwrap() = Some(index);
+        lock(&source.status).unwrap().state = "ready";
+        source.busy.store(true, Ordering::Release);
+        let drive = format!("scope-{}", uuid::Uuid::new_v4());
+        super::super::drives::register_test_drive_path(drive.clone(), root_path);
+        lock(&manager.sources).unwrap().insert(drive.clone(), source);
+        let router = Router::new()
+            .route(
+                "/api/browse/{drive}/directories",
+                get(super::super::handlers::browse_search_directories),
+            )
+            .with_state(super::super::handlers::DirectoryMutationState(manager));
+        for (parameters, expected_status, missing) in [
+            ("q=work&scope_path=documents&scope_mode=subtree", axum::http::StatusCode::OK, false),
+            ("scope_path=missing&scope_mode=subtree", axum::http::StatusCode::OK, true),
+            ("scope_path=documents", axum::http::StatusCode::BAD_REQUEST, false),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(format!("/api/browse/{drive}/directories?{parameters}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected_status);
+            let body = axum::body::to_bytes(response.into_body(), MAX_RESPONSE_BYTES).await.unwrap();
+            let result: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            if expected_status.is_success() {
+                assert_eq!(result["scope_not_indexed"], missing);
+                if !missing {
+                    assert_eq!(result["results"], json!(["documents/work"]));
+                }
+            }
+        }
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]

@@ -18,9 +18,21 @@ pub struct NativeIo {
     #[cfg(all(test, target_os = "linux"))]
     pub(super) parent_read_gate: std::sync::Mutex<Option<std::sync::Arc<std::sync::Barrier>>>,
     #[cfg(all(test, target_os = "linux"))]
+    pub(super) search_read_gate: std::sync::Mutex<Option<SearchReadGate>>,
+    #[cfg(all(test, target_os = "linux"))]
     force_unknown_entry_types: std::sync::atomic::AtomicBool,
     #[cfg(all(test, target_os = "linux"))]
     unknown_entry_checks: AtomicU64,
+    /// Simulates kernels before 5.8, where statx does not report STATX_MNT_ID.
+    #[cfg(all(test, target_os = "linux"))]
+    force_missing_mount_ids: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(all(test, target_os = "linux"))]
+pub(super) struct SearchReadGate {
+    pub relative: String,
+    pub entered: std::sync::mpsc::Sender<()>,
+    pub resume: std::sync::mpsc::Receiver<()>,
 }
 
 #[cfg(test)]
@@ -242,6 +254,37 @@ impl NativeIdentity {
 }
 
 pub type NativeChild = (String, bool, Option<Vec<u8>>);
+#[cfg(target_os = "linux")]
+const NANOSECONDS_PER_SECOND: u32 = 1_000_000_000;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativeFileMetadata {
+    pub size: u64,
+    pub modified_seconds: i64,
+    pub modified_nanoseconds: u32,
+}
+
+#[cfg(target_os = "linux")]
+impl NativeFileMetadata {
+    /// Returns `None` for values that a regular file cannot have.
+    fn from_stat(size: impl TryInto<u64>, modified_seconds: i64, modified_nanoseconds: i64) -> Option<Self> {
+        let size = size.try_into().ok()?;
+        let modified_nanoseconds = u32::try_from(modified_nanoseconds)
+            .ok()
+            .filter(|value| *value < NANOSECONDS_PER_SECOND)?;
+        Some(Self {
+            size,
+            modified_seconds,
+            modified_nanoseconds,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum NativeSearchChild {
+    Directory(NativeChild),
+    File(String, NativeFileMetadata),
+}
 
 #[cfg(any(windows, test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -505,6 +548,18 @@ mod platform {
         Ok(unsafe { File::from_raw_fd(descriptor) })
     }
 
+    /// O_PATH pins the entry without opening its contents, so FIFOs and devices cannot block.
+    fn open_entry_at(parent: libc::c_int, name: &CStr, io: &super::NativeIo) -> io::Result<File> {
+        io.record_open();
+        #[cfg(test)]
+        io.record_open_target(|| super::NativeOpenTarget::Path(Path::new(std::ffi::OsStr::from_bytes(name.to_bytes())).to_owned()));
+        let descriptor = unsafe { libc::openat(parent, name.as_ptr(), libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC) };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(unsafe { File::from_raw_fd(descriptor) })
+    }
+
     /// statx reads the already-owned descriptor, not a path that can redirect the request.
     fn identity(file: &File) -> Result<NativeIdentity, IndexError> {
         let metadata = file.metadata()?;
@@ -689,6 +744,34 @@ mod platform {
     }
 
     impl NativeParent<'_> {
+        pub fn open_search_file(&self, name: &str) -> Result<File, IndexError> {
+            use std::os::fd::FromRawFd;
+
+            super::super::directory_index::validate_directory_path(name)?;
+            if name.contains('/') {
+                return Err(IndexError::Invalid("Search file name is invalid."));
+            }
+            self.verify()?;
+            let name = CString::new(name).map_err(|_| IndexError::Invalid("Search file name is invalid."))?;
+            let fd = unsafe {
+                libc::openat(
+                    self.file.as_raw_fd(),
+                    name.as_ptr(),
+                    libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+                )
+            };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            let file = unsafe { File::from_raw_fd(fd) };
+            let current = identity(&file)?;
+            if !file.metadata()?.is_file() || current.device != self.root.identity.device || current.mount != self.root.identity.mount {
+                return Err(IndexError::Invalid("Search file crosses a mount or is not a regular file."));
+            }
+            self.verify()?;
+            Ok(file)
+        }
+
         pub fn verify(&self) -> Result<(), IndexError> {
             if self.file.metadata()?.nlink() == 0 || identity(&self.file)? != self.identity {
                 return Err(IndexError::Invalid(
@@ -700,11 +783,54 @@ mod platform {
 
         pub fn children_with_ids(
             &self,
-            receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+            mut receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+        ) -> Result<(), IndexError> {
+            self.children_with_files(None, |entry| {
+                receive(entry.map(|child| {
+                    child.map(|child| match child {
+                        NativeSearchChild::Directory(directory) => directory,
+                        NativeSearchChild::File(_, _) => unreachable!("File reporting is disabled"),
+                    })
+                }))
+            })
+        }
+
+        pub fn children_for_search(
+            &self,
+            should_read_file: &mut dyn FnMut(&str) -> bool,
+            receive: impl FnMut(Result<Option<NativeSearchChild>, TraversalIssue>) -> Result<(), IndexError>,
+        ) -> Result<(), IndexError> {
+            self.children_with_files(Some(should_read_file), receive)?;
+            self.verify().map_err(super::source_error)
+        }
+
+        fn children_with_files(
+            &self,
+            should_read_file: Option<&mut dyn FnMut(&str) -> bool>,
+            receive: impl FnMut(Result<Option<NativeSearchChild>, TraversalIssue>) -> Result<(), IndexError>,
         ) -> Result<(), IndexError> {
             self.verify().map_err(super::source_error)?;
             #[cfg(test)]
             {
+                let search_gate = {
+                    let mut gate = self
+                        .root
+                        .io
+                        .search_read_gate
+                        .lock()
+                        .map_err(|_| IndexError::Invalid("Directory search gate is unavailable."))?;
+                    if gate.as_ref().is_some_and(|gate| gate.relative == self.relative) {
+                        gate.take()
+                    } else {
+                        None
+                    }
+                };
+                if let Some(gate) = search_gate {
+                    gate.entered.send(()).map_err(|_| IndexError::Interrupted)?;
+                    gate.resume
+                        .recv_timeout(std::time::Duration::from_secs(10))
+                        .map_err(|_| IndexError::Interrupted)?;
+                }
                 let gate = self
                     .root
                     .io
@@ -717,7 +843,8 @@ mod platform {
                     gate.wait();
                 }
             }
-            self.root.children_from_handle(&self.relative, &self.file, receive)
+            self.root
+                .children_from_handle(&self.relative, &self.file, should_read_file, receive)
         }
 
         #[cfg(test)]
@@ -1011,7 +1138,8 @@ mod platform {
             &self,
             parent: &str,
             file: &File,
-            mut receive: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+            mut should_read_file: Option<&mut dyn FnMut(&str) -> bool>,
+            mut receive: impl FnMut(Result<Option<NativeSearchChild>, TraversalIssue>) -> Result<(), IndexError>,
         ) -> Result<(), IndexError> {
             let parent_identity = identity(file).map_err(super::source_error)?;
             let descriptor = file
@@ -1049,9 +1177,11 @@ mod platform {
                 } else {
                     entry_type
                 };
+                let mut is_file = entry_type == libc::DT_REG;
                 match entry_type {
                     libc::DT_LNK => continue,
                     libc::DT_DIR | libc::DT_UNKNOWN => {}
+                    libc::DT_REG if should_read_file.is_some() => {}
                     _ => continue,
                 }
                 if entry_type == libc::DT_UNKNOWN {
@@ -1069,6 +1199,9 @@ mod platform {
                             if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
                                 return Err(IndexError::Interrupted);
                             }
+                            if should_read_file.is_some() {
+                                receive(Err(TraversalIssue::ScanFailed))?;
+                            }
                         } else {
                             receive(Err(io_issue(error)?))?;
                         }
@@ -1078,7 +1211,8 @@ mod platform {
                     if kind == libc::S_IFLNK {
                         continue;
                     }
-                    if kind != libc::S_IFDIR {
+                    is_file = kind == libc::S_IFREG;
+                    if kind != libc::S_IFDIR && !(is_file && should_read_file.is_some()) {
                         continue;
                     }
                 }
@@ -1088,6 +1222,9 @@ mod platform {
                 };
                 if super::validate_traversal_path(&self.path.join(parent).join(text)).is_err() {
                     receive(Err(TraversalIssue::UnsafeDirectory(text.to_owned())))?;
+                    continue;
+                }
+                if is_file && !should_read_file.as_mut().is_some_and(|filter| filter(text)) {
                     continue;
                 }
                 let mut extended = std::mem::MaybeUninit::<libc::statx>::zeroed();
@@ -1102,17 +1239,53 @@ mod platform {
                     )
                 };
                 if result == 0 {
-                    let metadata = unsafe { extended.assume_init() };
+                    #[cfg_attr(not(test), allow(unused_mut))]
+                    let mut metadata = unsafe { extended.assume_init() };
+                    #[cfg(test)]
+                    if self.io.force_missing_mount_ids.load(Ordering::Relaxed) {
+                        metadata.stx_mask &= !libc::STATX_MNT_ID;
+                    }
                     if metadata.stx_mask & mask == mask {
                         let kind = u32::from(metadata.stx_mode) & libc::S_IFMT;
+                        if is_file {
+                            if kind != libc::S_IFREG
+                                || libc::makedev(metadata.stx_dev_major, metadata.stx_dev_minor) != self.identity.device
+                                || metadata.stx_mnt_id != self.identity.mount
+                            {
+                                continue;
+                            }
+                            let mut file_metadata = std::mem::MaybeUninit::<libc::stat>::zeroed();
+                            if unsafe { libc::fstatat(descriptor, name.as_ptr(), file_metadata.as_mut_ptr(), libc::AT_SYMLINK_NOFOLLOW) }
+                                != 0
+                            {
+                                receive(Err(io_issue(io::Error::last_os_error())?))?;
+                                continue;
+                            }
+                            let file_metadata = unsafe { file_metadata.assume_init() };
+                            if file_metadata.st_mode & libc::S_IFMT != libc::S_IFREG
+                                || file_metadata.st_dev != self.identity.device
+                                || file_metadata.st_ino != metadata.stx_ino
+                            {
+                                receive(Err(TraversalIssue::ScanFailed))?;
+                                continue;
+                            }
+                            let Some(file_metadata) =
+                                NativeFileMetadata::from_stat(file_metadata.st_size, file_metadata.st_mtime, file_metadata.st_mtime_nsec)
+                            else {
+                                receive(Err(TraversalIssue::ScanFailed))?;
+                                continue;
+                            };
+                            receive(Ok(Some(NativeSearchChild::File(text.to_owned(), file_metadata))))?;
+                            continue;
+                        }
                         if kind == libc::S_IFDIR {
                             let same_mount = libc::makedev(metadata.stx_dev_major, metadata.stx_dev_minor) == self.identity.device
                                 && metadata.stx_mnt_id == self.identity.mount;
-                            receive(Ok(Some((
+                            receive(Ok(Some(NativeSearchChild::Directory((
                                 text.to_owned(),
                                 same_mount,
                                 Some(metadata.stx_ino.to_le_bytes().to_vec()),
-                            ))))?;
+                            )))))?;
                             if !same_mount {
                                 receive(Err(TraversalIssue::UnsafeDirectory(text.to_owned())))?;
                             }
@@ -1123,7 +1296,9 @@ mod platform {
                     let error = io::Error::last_os_error();
                     if !matches!(error.raw_os_error(), Some(libc::ENOSYS | libc::EINVAL | libc::EOPNOTSUPP)) {
                         if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) {
-                            if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
+                            if is_file {
+                                receive(Err(TraversalIssue::ScanFailed))?;
+                            } else if self.has_directory_child_with_check(parent, parent_identity, text, || receive(Ok(None)))? {
                                 return Err(IndexError::Interrupted);
                             }
                         } else {
@@ -1132,12 +1307,39 @@ mod platform {
                         continue;
                     }
                 }
-                match open_at(descriptor, name, &self.io).and_then(|child| identity(&child).map_err(io::Error::other)) {
-                    Ok(child) if child.device == self.identity.device && child.mount == self.identity.mount => {
-                        receive(Ok(Some((text.to_owned(), true, Some(child.file_id())))))?
+                if is_file {
+                    // Without statx mount IDs, check the pinned descriptor. identity() falls back to /proc/self/fdinfo.
+                    let file = match open_entry_at(descriptor, name, &self.io) {
+                        Ok(file) => file,
+                        Err(error) if matches!(error.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => {
+                            receive(Err(TraversalIssue::ScanFailed))?;
+                            continue;
+                        }
+                        Err(error) => {
+                            receive(Err(io_issue(error)?))?;
+                            continue;
+                        }
+                    };
+                    let child = identity(&file)?;
+                    let file_metadata = file.metadata()?;
+                    if !file_metadata.is_file() || child.device != self.identity.device || child.mount != self.identity.mount {
+                        continue;
                     }
+                    let Some(file_metadata) =
+                        NativeFileMetadata::from_stat(file_metadata.size(), file_metadata.mtime(), file_metadata.mtime_nsec())
+                    else {
+                        receive(Err(TraversalIssue::ScanFailed))?;
+                        continue;
+                    };
+                    receive(Ok(Some(NativeSearchChild::File(text.to_owned(), file_metadata))))?;
+                    continue;
+                }
+                match open_at(descriptor, name, &self.io).and_then(|child| identity(&child).map_err(io::Error::other)) {
+                    Ok(child) if child.device == self.identity.device && child.mount == self.identity.mount => receive(Ok(Some(
+                        NativeSearchChild::Directory((text.to_owned(), true, Some(child.file_id()))),
+                    )))?,
                     Ok(_) => {
-                        receive(Ok(Some((text.to_owned(), false, None))))?;
+                        receive(Ok(Some(NativeSearchChild::Directory((text.to_owned(), false, None)))))?;
                         receive(Err(TraversalIssue::UnsafeDirectory(text.to_owned())))?;
                     }
                     Err(error) => {
@@ -1147,7 +1349,7 @@ mod platform {
                             }
                             continue;
                         }
-                        receive(Ok(Some((text.to_owned(), false, None))))?;
+                        receive(Ok(Some(NativeSearchChild::Directory((text.to_owned(), false, None)))))?;
                         receive(Err(io_issue(error)?))?;
                     }
                 }
@@ -1192,6 +1394,10 @@ pub struct NativeParent<'root> {
 
 #[cfg(not(any(target_os = "linux", windows)))]
 impl NativeParent<'_> {
+    pub fn open_search_file(&self, _: &str) -> Result<std::fs::File, IndexError> {
+        Err(IndexError::Invalid("Safe file search is not available on this platform."))
+    }
+
     pub fn verify(&self) -> Result<(), IndexError> {
         self.root.verify()
     }
@@ -1199,6 +1405,14 @@ impl NativeParent<'_> {
     pub fn children_with_ids(
         &self,
         _: impl FnMut(Result<Option<NativeChild>, TraversalIssue>) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        self.verify()
+    }
+
+    pub fn children_for_search(
+        &self,
+        _: &mut dyn FnMut(&str) -> bool,
+        _: impl FnMut(Result<Option<NativeSearchChild>, TraversalIssue>) -> Result<(), IndexError>,
     ) -> Result<(), IndexError> {
         self.verify()
     }
@@ -1284,6 +1498,73 @@ mod tests {
     use super::*;
     use std::os::unix::ffi::OsStringExt;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn search_reader_reports_selected_files_and_excludes_links() {
+        let temporary = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temporary.path().join("folder")).unwrap();
+        std::fs::write(temporary.path().join("match.txt"), b"content").unwrap();
+        std::fs::write(temporary.path().join("other.txt"), b"ignored").unwrap();
+        symlink("match.txt", temporary.path().join("link.txt")).unwrap();
+        let io = std::sync::Arc::<NativeIo>::default();
+        let root = NativeRoot::open_with_io(temporary.path(), io.clone()).unwrap();
+
+        for (force_unknown, force_missing_mount_ids) in [(false, false), (true, false), (false, true), (true, true)] {
+            io.force_unknown_entry_types.store(force_unknown, Ordering::Relaxed);
+            io.force_missing_mount_ids.store(force_missing_mount_ids, Ordering::Relaxed);
+            let parent = root.open_parent("").unwrap();
+            let mut rows = Vec::new();
+            parent
+                .children_for_search(&mut |name| name == "match.txt", |entry| {
+                    if let Some(entry) = entry.unwrap() {
+                        rows.push(entry);
+                    }
+                    Ok(())
+                })
+                .unwrap();
+            assert!(rows
+                .iter()
+                .any(|entry| matches!(entry, NativeSearchChild::Directory((name, true, _)) if name == "folder")));
+            assert!(rows
+                .iter()
+                .any(|entry| matches!(entry, NativeSearchChild::File(name, metadata) if name == "match.txt" && metadata.size == 7)));
+            assert_eq!(rows.len(), 2);
+        }
+    }
+
+    #[test]
+    fn search_reader_reports_files_removed_after_matching() {
+        for (force_unknown, force_missing_mount_ids) in [(false, false), (true, false), (false, true)] {
+            let temporary = tempfile::tempdir().unwrap();
+            let file = temporary.path().join("match.txt");
+            std::fs::write(&file, b"content").unwrap();
+            let io = std::sync::Arc::<NativeIo>::default();
+            io.force_unknown_entry_types.store(force_unknown, Ordering::Relaxed);
+            io.force_missing_mount_ids.store(force_missing_mount_ids, Ordering::Relaxed);
+            let root = NativeRoot::open_with_io(temporary.path(), io).unwrap();
+            let parent = root.open_parent("").unwrap();
+            let mut issues = Vec::new();
+            parent
+                .children_for_search(
+                    &mut |name| {
+                        if name == "match.txt" {
+                            std::fs::remove_file(&file).unwrap();
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                    |entry| {
+                        if let Err(issue) = entry {
+                            issues.push(issue);
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(issues, vec![TraversalIssue::ScanFailed]);
+        }
+    }
 
     #[test]
     fn scan_parent_opens_skip_full_root_probes_until_requested() {

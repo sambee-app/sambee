@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::native_i18n::{has_catalog, UI_LANGUAGES};
+use crate::server::filesystem_search_contract::{default_policy as default_search_policy, Policy as SearchPolicy};
 use crate::server::localization::{is_browser_default, valid_regional_locale, LocalizationState};
 use crate::server::models::LocalizationSyncRequest;
 use crate::server::pairing::{PairingState, SettingsAuthority};
@@ -57,6 +58,7 @@ pub struct ManagedSettings {
     theme: Option<Applied<Theme>>,
     localization: Option<Applied<Localization>>,
     pub(super) directory_index: Option<Applied<DirectoryPolicy>>,
+    filesystem_search: Option<Applied<SearchPolicy>>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -71,6 +73,7 @@ struct Receipt {
     theme: Option<Section<Theme>>,
     localization: Option<Section<Localization>>,
     directory_index: Option<Section<DirectoryPolicy>>,
+    filesystem_search: Option<Section<SearchPolicy>>,
 }
 
 impl Localization {
@@ -196,7 +199,7 @@ impl Receipt {
         if self.version != SETTINGS_VERSION
             || self.backend_identity.len() != 64
             || !self.backend_identity.bytes().all(|byte| byte.is_ascii_hexdigit())
-            || (self.theme.is_none() && self.localization.is_none() && self.directory_index.is_none())
+            || (self.theme.is_none() && self.localization.is_none() && self.directory_index.is_none() && self.filesystem_search.is_none())
         {
             return Err(failure(
                 "Settings receipt is invalid or unsupported. Update the browser and Companion, then retry.",
@@ -239,6 +242,18 @@ impl Receipt {
             section.payload.validate().map_err(|_| {
                 failure("Directory settings are not supported. Update Sambee Companion, then retry. The last valid policy remains active.")
             })?;
+        }
+        if let Some(section) = &self.filesystem_search {
+            if section.version != SETTINGS_VERSION
+                || section.user_scope.is_some()
+                || section.marker.len() != 64
+                || !section.marker.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || !section.payload.validate()
+            {
+                return Err(failure(
+                    "File search policy is invalid. Correct server settings and retry. The last valid policy remains active.",
+                ));
+            }
         }
         Ok(())
     }
@@ -296,6 +311,7 @@ impl ManagedSettings {
             theme: None,
             localization: None,
             directory_index: None,
+            filesystem_search: None,
         };
         if let Some(applied) = &self.theme {
             Receipt {
@@ -318,11 +334,28 @@ impl ManagedSettings {
             }
             .validate()?;
         }
+        if let Some(applied) = &self.filesystem_search {
+            Receipt {
+                filesystem_search: Some(applied.section.clone()),
+                ..empty(&applied.origin, &applied.backend_identity)
+            }
+            .validate()?;
+        }
         Ok(())
     }
 }
 
 impl DirectoryPolicyState {
+    pub fn filesystem_search_policy(&self) -> Result<SearchPolicy, ApiError> {
+        let state = self.available_state()?;
+        Ok(state
+            .stored
+            .managed
+            .filesystem_search
+            .as_ref()
+            .map_or_else(default_search_policy, |section| section.section.payload))
+    }
+
     pub fn restore_managed(&self, app: &AppHandle, pairing: &PairingState, localization: &LocalizationState) -> Result<(), ApiError> {
         let state = self.available_state()?;
         let legacy = state
@@ -414,7 +447,10 @@ impl DirectoryPolicyState {
         if let Some(section) = &state.stored.managed.directory_index {
             sections.insert("directory_index", status_of(section));
         }
-        let results = ["theme", "localization", "directory_index"]
+        if let Some(section) = &state.stored.managed.filesystem_search {
+            sections.insert("filesystem_search", status_of(section));
+        }
+        let results = ["theme", "localization", "directory_index", "filesystem_search"]
             .into_iter()
             .map(|name| {
                 let result = if state.failed_sections.contains_key(name) {
@@ -628,6 +664,7 @@ impl DirectoryPolicyState {
             ("theme", receipt.theme.is_some()),
             ("localization", receipt.localization.is_some()),
             ("directory_index", receipt.directory_index.is_some()),
+            ("filesystem_search", receipt.filesystem_search.is_some()),
         ] {
             if supplied {
                 state
@@ -638,6 +675,26 @@ impl DirectoryPolicyState {
         let mut proposed = state.stored.clone();
         let identity = receipt.backend_identity.clone();
         let origin = receipt.origin.clone();
+        if let Some(section) = receipt.filesystem_search {
+            if let Some(old) = proposed.managed.filesystem_search.as_ref() {
+                if old.origin == origin
+                    && old.backend_identity == identity
+                    && old.section.marker == section.marker
+                    && old.section.payload != section.payload
+                {
+                    return Err(failure("File search policy changed without a new marker. Correct server settings."));
+                }
+            }
+            proposed.managed.filesystem_search = Some(Applied {
+                section,
+                origin: origin.clone(),
+                backend_identity: identity.clone(),
+            });
+            self.persist_with_recovery(&mut state, &proposed)
+                .map_err(|error| failure(&format!("File search settings were not saved. {error}")))?;
+            state.stored = proposed.clone();
+            state.failed_sections.remove("filesystem_search");
+        }
         if let Some(section) = receipt.directory_index {
             if directory_section_changed(proposed.managed.directory_index.as_ref(), &section, &origin, &identity)? || retry_directory {
                 proposed.managed.directory_index = Some(Applied {
@@ -775,6 +832,7 @@ mod tests {
                 user_scope: None,
                 payload: DirectoryPolicy::defaults().unwrap(),
             }),
+            filesystem_search: None,
         }
     }
 
@@ -846,6 +904,55 @@ mod tests {
         valid = receipt();
         valid.directory_index.as_mut().unwrap().marker = "-1".to_owned();
         assert!(valid.validate().is_err());
+    }
+
+    #[test]
+    fn validates_file_search_sections_and_accepts_legacy_receipts() {
+        let mut value = receipt();
+        let legacy = serde_json::to_value(&value).unwrap();
+        let mut legacy = legacy.as_object().unwrap().clone();
+        legacy.remove("filesystem_search");
+        assert!(serde_json::from_value::<Receipt>(legacy.into()).unwrap().validate().is_ok());
+        value.filesystem_search = Some(Section {
+            version: SETTINGS_VERSION,
+            marker: "a".repeat(64),
+            user_scope: None,
+            payload: default_search_policy(),
+        });
+        assert!(value.validate().is_ok());
+        value.filesystem_search.as_mut().unwrap().payload.max_results = 0;
+        assert!(value.validate().is_err());
+        value.filesystem_search.as_mut().unwrap().payload = default_search_policy();
+        value.filesystem_search.as_mut().unwrap().user_scope = Some(uuid::Uuid::new_v4().to_string());
+        assert!(value.validate().is_err());
+    }
+
+    #[test]
+    fn file_search_policy_survives_restart_and_rejects_marker_reuse() {
+        let temporary = tempfile::tempdir().unwrap();
+        let manager = LocalDirectoryManager::new(temporary.path().join("cache")).unwrap();
+        let configuration = temporary.path().join("configuration");
+        let state = DirectoryPolicyState::open(configuration.clone(), &manager).unwrap();
+        assert_eq!(state.filesystem_search_policy().unwrap(), default_search_policy());
+        let mut value = receipt();
+        value.theme = None;
+        value.directory_index = None;
+        let mut policy = default_search_policy();
+        policy.max_results = 123;
+        value.filesystem_search = Some(Section {
+            version: SETTINGS_VERSION,
+            marker: "a".repeat(64),
+            user_scope: None,
+            payload: policy,
+        });
+        value.validate().unwrap();
+        state.apply_settings_with(value.clone(), |_| Ok(()), |_, _| Ok(())).unwrap();
+        drop(state);
+        let state = DirectoryPolicyState::open(configuration, &manager).unwrap();
+        assert_eq!(state.filesystem_search_policy().unwrap(), policy);
+        value.filesystem_search.as_mut().unwrap().payload.max_results = 124;
+        assert!(state.apply_settings_with(value, |_| Ok(()), |_, _| Ok(())).is_err());
+        assert_eq!(state.filesystem_search_policy().unwrap(), policy);
     }
 
     #[test]
@@ -1002,6 +1109,7 @@ mod tests {
                     origin: desired.origin.clone(),
                     backend_identity: desired.backend_identity.clone(),
                 }),
+                filesystem_search: None,
             };
             save(&policy.directory, &state.stored).unwrap();
         }

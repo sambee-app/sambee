@@ -15,6 +15,13 @@ pub mod drive_capacity;
 pub mod drives;
 pub mod edit_locks;
 pub mod errors;
+mod filesystem_search_admission;
+mod filesystem_search_archive;
+pub mod filesystem_search_contract;
+mod filesystem_search_frontier;
+pub mod filesystem_search_matching;
+mod filesystem_search_physical;
+mod filesystem_search_service;
 pub mod handlers;
 pub mod links;
 pub mod localization;
@@ -67,6 +74,7 @@ pub struct AppState {
     pub directory_indexes: Arc<LocalDirectoryManager>,
     pub directory_policy: Arc<directory_policy::DirectoryPolicyState>,
     pub drive_capacity: Arc<drive_capacity::DriveCapacityCoordinator>,
+    filesystem_search_admission: filesystem_search_admission::SearchAdmission,
 }
 
 /// Start the local HTTP API server.
@@ -127,6 +135,7 @@ async fn run_server(
         directory_indexes,
         directory_policy,
         drive_capacity: drive_capacity::DriveCapacityCoordinator::new(),
+        filesystem_search_admission: filesystem_search_admission::SearchAdmission::default(),
     });
 
     let app = build_router(state);
@@ -188,6 +197,7 @@ fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/drives", axum::routing::get(handlers::list_drives))
         .route("/api/drives/capacity", axum::routing::get(handlers::list_drives_capacity))
         .route("/api/browse/{drive}/list", axum::routing::get(handlers::browse_list))
+        .merge(filesystem_search_routes())
         .route(
             "/api/browse/{drive}/archive/v2/list",
             axum::routing::get(handlers::browse_list_v2_archive),
@@ -272,7 +282,7 @@ fn build_router(state: Arc<AppState>) -> Router {
             "/api/browse/{drive}/archive/v2/relay/extraction/{operation_id}/status",
             axum::routing::get(handlers::browse_get_v2_relay_extraction_status),
         )
-        .layer(axum::middleware::from_fn_with_state(state.clone(), auth::require_auth));
+        .layer(axum::middleware::from_fn_with_state(state.pairing.clone(), auth::require_auth));
 
     // Viewer routes support both header-based and query-param auth so that
     // URLs can be used directly in <img src> / <iframe> attributes.
@@ -298,6 +308,17 @@ fn build_router(state: Arc<AppState>) -> Router {
     #[cfg(feature = "recovery-verification")]
     let router = router.merge(recovery_verification::routes().with_state(state));
     router
+}
+
+fn filesystem_search_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+    filesystem_search_service::SearchState: axum::extract::FromRef<S>,
+{
+    Router::new().route(
+        "/api/browse/{drive}/filesystem-search",
+        axum::routing::post(filesystem_search_service::start),
+    )
 }
 
 fn transfer_routes<S>() -> Router<S>

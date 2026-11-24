@@ -219,6 +219,8 @@ Common fixtures include:
 
 Use the shared fixtures instead of rebuilding the same setup in each test file.
 
+The file-system search API tests check incremental delivery over HTTP with a controlled scan. They do not verify delivery through a reverse proxy or a real SMB server.
+
 ## Performance Notes
 
 - backend tests use `pytest-xdist` for parallel execution in the normal workflow, but `@performance` tests run separately without xdist so timing assertions stay stable

@@ -7,6 +7,7 @@ from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, MAX_WIRE
 
 
 class SystemSettingKey(StrEnum):
+    FILESYSTEM_SEARCH_POLICY = "filesystem_search.policy"
     DIRECTORY_INDEX_BACKEND_POLICY_REVISION = "directory_index.backend.policy_revision"
     DIRECTORY_INDEX_COMPANION_POLICY_REVISION = "directory_index.companion.policy_revision"
     DIRECTORY_INDEX_BACKEND_DISK_BUDGET_BYTES = "directory_index.backend.disk_budget_bytes"

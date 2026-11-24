@@ -177,6 +177,7 @@ class DirectorySearchResult(DirectorySearchStatus):
     match_ranks: dict[str, int] = Field(default_factory=dict)
     matched_term_counts: dict[str, int] = Field(default_factory=dict)
     total_matches: int
+    scope_not_indexed: bool = False
     issue_details: list[DirectoryIssueDetail] | None = None
     issue_details_incomplete: bool = False
     last_verified_at_ms: int | None = Field(default=None, ge=0)

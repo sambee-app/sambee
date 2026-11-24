@@ -17,6 +17,7 @@ export interface PaneTabSummary {
   archiveLocation: ArchiveLocation | null;
   sortBy: SortField;
   sortDirection: "asc" | "desc";
+  searchTitle?: string;
 }
 
 /** Complete browsing state owned by an individual tab session. */
@@ -51,6 +52,8 @@ export interface TabSessionState {
   directoryMonitorError: string | null;
   directoryMonitorErrorSummary?: string;
   directoryMonitorErrorOccurrence: number;
+  searchSessionId?: string;
+  searchTitle?: string;
 }
 
 /** Ordered tab collection and per-tab session map for one pane. */
@@ -165,6 +168,7 @@ export function evictOverflowTabListings(
   const inactiveWithListings = collection.mruIds.filter((id) => {
     if (id === collection.selectedTabId) return false;
     const session = collection.sessions.get(id);
+    if (session?.searchSessionId) return false;
     return session ? hasRetainedListing(session) : false;
   });
 
@@ -322,12 +326,22 @@ export type CloseTabResult =
       selectionChanged: boolean;
     };
 
+export function getLastFolderTabId(tabs: Iterable<Pick<PaneTabSummary, "id" | "searchTitle">>): string | null {
+  let folderTabId: string | null = null;
+  for (const tab of tabs) {
+    if (tab.searchTitle !== undefined) continue;
+    if (folderTabId !== null) return null;
+    folderTabId = tab.id;
+  }
+  return folderTabId;
+}
+
 /**
- * Closes a tab while enforcing the last-tab rule and selecting the left neighbor
+ * Closes a tab while keeping the last folder tab and selecting the left neighbor
  * (or right neighbor when closing the first tab).
  */
 export function closeTabInCollection(collection: PaneTabCollection, targetTabId: string): CloseTabResult {
-  if (collection.orderedIds.length <= 1) {
+  if (collection.orderedIds.length <= 1 || getLastFolderTabId(collection.sessions.values()) === targetTabId) {
     return { closed: false, collection };
   }
 
@@ -455,6 +469,7 @@ export function toPaneTabSummaries(collection: PaneTabCollection): PaneTabSummar
         archiveLocation: session.archiveLocation ? { ...session.archiveLocation } : null,
         sortBy: session.sortBy,
         sortDirection: session.sortDirection,
+        searchTitle: session.searchTitle,
       },
     ];
   });
@@ -475,9 +490,10 @@ export function getPaneTabDisplayPath(tab: Pick<PaneTabSummary, "currentPath" | 
  * - At a connection or drive root: the connection or drive name.
  */
 export function getPaneTabLabel(
-  tab: Pick<PaneTabSummary, "connectionId" | "currentPath" | "archiveLocation">,
+  tab: Pick<PaneTabSummary, "connectionId" | "currentPath" | "archiveLocation" | "searchTitle">,
   connectionName: string
 ): string {
+  if (tab.searchTitle) return tab.searchTitle;
   if (tab.archiveLocation) {
     const activeArchivePath = tab.archiveLocation.virtualPath || tab.archiveLocation.archivePath;
     const segments = activeArchivePath.split("/").filter(Boolean);
@@ -496,9 +512,10 @@ export function getPaneTabLabel(
 
 /** Computes the complete connection and path string for tooltips and accessible names. */
 export function getPaneTabFullLocation(
-  tab: Pick<PaneTabSummary, "connectionId" | "currentPath" | "archiveLocation">,
+  tab: Pick<PaneTabSummary, "connectionId" | "currentPath" | "archiveLocation" | "searchTitle">,
   connectionName: string
 ): string {
+  if (tab.searchTitle) return tab.searchTitle;
   const displayPath = getPaneTabDisplayPath(tab);
   return formatConnectionPath(connectionName || tab.connectionId, displayPath);
 }

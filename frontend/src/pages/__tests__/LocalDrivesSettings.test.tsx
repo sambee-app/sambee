@@ -180,9 +180,23 @@ describe("LocalDrivesSettings", () => {
     expect(screen.getByTestId("local-drives-verification-surface").firstElementChild?.firstElementChild?.children).toHaveLength(2);
     expect(screen.getByTestId("local-drives-troubleshooting-surface").firstElementChild?.children).toHaveLength(2);
     expect(screen.getByText(LOCAL_DRIVES_PAGE_COPY.verificationSectionTitle)).toBeInTheDocument();
-    expect(screen.queryByText(LOCAL_DRIVES_PAGE_COPY.downloadSectionTitle)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("local-drives-download-surface")).not.toBeInTheDocument();
     expect(screen.queryByText(LOCAL_DRIVES_PAGE_COPY.pairingSectionTitle)).not.toBeInTheDocument();
     expect(screen.getByText(LOCAL_DRIVES_PAGE_COPY.statusPaired)).toBeInTheDocument();
+  });
+
+  it("offers download links when a paired user needs to update Companion", async () => {
+    const user = userEvent.setup();
+    mockGetPairStatus.mockResolvedValue({
+      current_origin: window.location.origin,
+      current_origin_paired: true,
+      status: "paired",
+    });
+    mockHasStoredSecret.mockReturnValue(true);
+    renderSettings();
+    await user.click(await screen.findByRole("button", { name: LOCAL_DRIVES_PAGE_COPY.downloadSectionTitle }));
+    expect(await screen.findByTestId("local-drives-download-surface")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /windows/i })).toHaveAttribute("href", "https://downloads.example.test/Sambee-Companion.exe");
   });
 
   it("shows a persistent inline success status after testing the current pairing", async () => {

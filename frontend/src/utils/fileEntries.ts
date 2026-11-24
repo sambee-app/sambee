@@ -2,6 +2,11 @@ import type { FileEntry } from "../types";
 
 const WINDOWS_SHORTCUT_EXTENSION = ".lnk";
 
+/** A browse row normally uses its path; search rows can share that path. */
+export function getFileRowIdentity(file: FileEntry): string {
+  return file.browser_identity ?? file.path;
+}
+
 /** Identifies explicit local links and Windows shortcuts discovered from their filename. */
 export function isShortcutFile(file: FileEntry): boolean {
   return file.link_kind !== undefined || file.name.toLowerCase().endsWith(WINDOWS_SHORTCUT_EXTENSION);

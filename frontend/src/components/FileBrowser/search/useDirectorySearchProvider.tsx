@@ -16,10 +16,11 @@
  * - Warm-up on activation to trigger cache building
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { BROWSER_SHORTCUTS } from "../../../config/keyboardShortcuts";
-import { type BrowserHistoryService, browserHistoryService } from "../../../services/browserHistoryService";
+import { isLocalDrive } from "../../../services/backendRouter";
+import { type BrowserHistoryService, browserHistoryService, type QuickNavigationScope } from "../../../services/browserHistoryService";
 import { logger } from "../../../services/logger";
 import { publishRecentDirectoriesChanged } from "../../../services/recentDirectoriesSync";
 import type { DirectorySearchResult, DirectorySearchStatus, RecentDirectory, RecentDirectorySearchResponse } from "../../../types";
@@ -224,6 +225,7 @@ interface DirectorySearchProviderOptions {
   onNavigateDirectory?: (connectionId: string, path: string, recordId?: string) => void;
   resultLimit?: number;
   history?: BrowserHistoryService;
+  scope?: QuickNavigationScope;
 }
 
 // ============================================================================
@@ -264,6 +266,7 @@ export function useDirectorySearchProvider(
   const [sourceFailure, setSourceFailure] = useState<"history" | "index" | null>(null);
   const [failureDetail, setFailureDetail] = useState<string | undefined>();
   const [legacyIndex, setLegacyIndex] = useState(false);
+  const [scopeStatus, setScopeStatus] = useState<"missing" | "unsupported" | null>(null);
   const indexFailureRef = useRef(false);
   const indexResponseRef = useRef<DirectorySearchStatus | null>(null);
   const activeIndexQueryRef = useRef(false);
@@ -276,11 +279,13 @@ export function useDirectorySearchProvider(
   const recentDirectoryResultLimit = options.resultLimit ?? MAX_RECENT_DIRECTORY_RESULT_LIMIT;
   const history = options.history ?? browserHistoryService;
   const sourceRevision = options.sourceRevision ?? 0;
+  const scopePath = options.scope?.path;
+  const scopeMode = options.scope?.mode;
   const recentDirectoriesRef = useRef(new Map<string, RecentDirectory>());
   const requestGenerationRef = useRef(0);
   const [clientGeneration, setClientGeneration] = useState(0);
   const activationControllerRef = useRef<AbortController | null>(null);
-  const sourceBindingRef = useRef({ connectionId, history, includeDotDirectories, sourceRevision });
+  const sourceBindingRef = useRef({ connectionId, history, includeDotDirectories, sourceRevision, scopePath, scopeMode });
 
   const updateIndexStatus = useCallback((response: DirectorySearchStatus, lastVerifiedAt?: number | null) => {
     setCacheState(response.cache_state);
@@ -314,11 +319,11 @@ export function useDirectorySearchProvider(
     );
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (sourceBindingRef.current.history !== history) {
       setClientGeneration((generation) => generation + 1);
     }
-    sourceBindingRef.current = { connectionId, history, includeDotDirectories, sourceRevision };
+    sourceBindingRef.current = { connectionId, history, includeDotDirectories, sourceRevision, scopePath, scopeMode };
     recentResponseRef.current = null;
     indexResponseRef.current = null;
     indexResultsRef.current = null;
@@ -329,13 +334,14 @@ export function useDirectorySearchProvider(
     setFailureDetail(undefined);
     setCacheState("opening");
     setCoverageStatus(null);
+    setScopeStatus(null);
     return () => {
       requestGenerationRef.current += 1;
       recentResponseRef.current = null;
       indexResponseRef.current = null;
       activationControllerRef.current?.abort();
     };
-  }, [connectionId, history, includeDotDirectories, sourceRevision]);
+  }, [connectionId, history, includeDotDirectories, sourceRevision, scopePath, scopeMode]);
 
   const getRecentDirectoryPresentation = useCallback(
     (directory: RecentDirectory, query: string): Pick<SearchResultItem, "primaryText" | "secondaryText" | "primaryHighlight"> => {
@@ -366,7 +372,9 @@ export function useDirectorySearchProvider(
         sourceBindingRef.current.connectionId === connectionId &&
         sourceBindingRef.current.history === history &&
         sourceBindingRef.current.sourceRevision === sourceRevision &&
-        sourceBindingRef.current.includeDotDirectories === includeDotDirectories;
+        sourceBindingRef.current.includeDotDirectories === includeDotDirectories &&
+        sourceBindingRef.current.scopePath === scopePath &&
+        sourceBindingRef.current.scopeMode === scopeMode;
       if (!isCurrent()) return [];
       setSourceFailure(indexFailureRef.current ? "index" : null);
       let recentResponse: RecentDirectorySearchResponse = { results: [], result_limit: recentDirectoryResultLimit };
@@ -380,7 +388,7 @@ export function useDirectorySearchProvider(
           .filter((path) => !recentPaths.has(`${connectionId}\u0000${path}`))
           .map((path) => ({
             kind: "result" as const,
-            id: `${DIRECTORY_PREFIX}${path}`,
+            id: JSON.stringify([connectionId, path]),
             value: `${DIRECTORY_PREFIX}${path}`,
             icon: "directory" as const,
             ...bestSearchRelevance(terms.length, getSearchRelevance(path, terms, path.split(PATH_SEPARATOR).at(-1) ?? path), {
@@ -406,7 +414,7 @@ export function useDirectorySearchProvider(
               : []),
             ...recentResponse.results.map((directory) => ({
               kind: "result" as const,
-              id: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
+              id: JSON.stringify([directory.connection_id, directory.path]),
               value: `${RECENT_DIRECTORY_PREFIX}${directory.id}`,
               icon: "recent-directory" as const,
               ...bestSearchRelevance(
@@ -457,7 +465,10 @@ export function useDirectorySearchProvider(
       const recentPromise =
         cachedHistory?.query === normalizedQuery && cachedHistory.limit === recentDirectoryResultLimit
           ? Promise.resolve(cachedHistory.response)
-          : history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal);
+          : history.searchRecentDirectories(normalizedQuery, recentDirectoryResultLimit, signal, {
+              connectionId,
+              ...(scopePath !== undefined && scopeMode !== undefined ? { scope: { path: scopePath, mode: scopeMode } } : {}),
+            });
       const recentRequest = recentPromise.then((response) => {
         if (!isCurrent()) return;
         recentSettled = true;
@@ -511,12 +522,15 @@ export function useDirectorySearchProvider(
         }
         const response = await history.searchDirectories(connectionId, queryIndex ? normalizedQuery : "", {
           includeDotDirectories,
+          ...(scopePath !== undefined && scopeMode !== undefined ? { scope: { path: scopePath, mode: scopeMode } } : {}),
           signal,
         });
         if (!isCurrent()) return;
         indexSettled = true;
-        directorySearchResult = queryIndex ? response : null;
-        indexResultsRef.current = { query: normalizedQuery, response, searchedAt: performance.now() };
+        const scopeUnsupported = scopePath !== undefined && response.scope_not_indexed === undefined;
+        setScopeStatus(scopeUnsupported ? "unsupported" : response.scope_not_indexed ? "missing" : null);
+        directorySearchResult = queryIndex && !scopeUnsupported ? response : null;
+        indexResultsRef.current = scopeUnsupported ? null : { query: normalizedQuery, response, searchedAt: performance.now() };
         indexResponseRef.current = response;
         indexFailureRef.current = false;
         terminalIndexRef.current = response.search_contract_version != null && response.search_contract_version !== SEARCH_CONTRACT_VERSION;
@@ -558,6 +572,8 @@ export function useDirectorySearchProvider(
       history,
       includeDotDirectories,
       recentDirectoryResultLimit,
+      scopeMode,
+      scopePath,
       sourceRevision,
       t,
       updateIndexStatus,
@@ -608,6 +624,21 @@ export function useDirectorySearchProvider(
       return {
         label: t(`fileBrowser.search.status.${sourceFailure}Unavailable`),
         showSpinner: false,
+      };
+    }
+    if (scopeStatus) {
+      return {
+        label: t(
+          `fileBrowser.search.status.${
+            scopeStatus === "missing"
+              ? "scopeNotIndexed"
+              : isLocalDrive(connectionId)
+                ? "scopeUnsupportedCompanion"
+                : "scopeUnsupportedServer"
+          }`
+        ),
+        showSpinner: false,
+        suppressEmpty: true,
       };
     }
     const progress = coverageStatus?.scan_progress;
@@ -674,7 +705,7 @@ export function useDirectorySearchProvider(
       default:
         return null;
     }
-  }, [cacheState, coverageStatus, directoryCount, legacyIndex, sourceFailure, t]);
+  }, [cacheState, connectionId, coverageStatus, directoryCount, legacyIndex, scopeStatus, sourceFailure, t]);
 
   const getRefreshIntervalMs = useCallback((): number | null => {
     const response = indexResponseRef.current;
@@ -717,6 +748,7 @@ export function useDirectorySearchProvider(
     history
       .searchDirectories(connectionId, "", {
         includeDotDirectories,
+        ...(scopePath !== undefined && scopeMode !== undefined ? { scope: { path: scopePath, mode: scopeMode } } : {}),
         signal: controller.signal,
       })
       .then((result: DirectorySearchResult) => {
@@ -725,6 +757,9 @@ export function useDirectorySearchProvider(
           indexFailureRef.current = false;
           setSourceFailure(null);
           setFailureDetail(undefined);
+          setScopeStatus(
+            scopePath !== undefined && result.scope_not_indexed === undefined ? "unsupported" : result.scope_not_indexed ? "missing" : null
+          );
           terminalIndexRef.current = result.search_contract_version != null && result.search_contract_version !== SEARCH_CONTRACT_VERSION;
           updateIndexStatus(result, result.last_verified_at_ms ?? null);
         }
@@ -740,7 +775,7 @@ export function useDirectorySearchProvider(
           logger.warn("Directory cache activation is unavailable", {}, "directory-search-provider");
         }
       });
-  }, [connectionId, history, includeDotDirectories, updateIndexStatus]);
+  }, [connectionId, history, includeDotDirectories, scopeMode, scopePath, updateIndexStatus]);
 
   const onDeactivate = useCallback(() => {
     activeIndexQueryRef.current = false;
@@ -780,7 +815,15 @@ export function useDirectorySearchProvider(
 
   return {
     id: "directory-search",
-    sourceKey: `${connectionId}:${includeDotDirectories}:${recentDirectoryResultLimit}:${clientGeneration}:${sourceRevision}`,
+    sourceKey: JSON.stringify([
+      connectionId,
+      includeDotDirectories,
+      recentDirectoryResultLimit,
+      clientGeneration,
+      sourceRevision,
+      scopePath,
+      scopeMode,
+    ]),
     modeId: "navigate",
     modeLabel: t("fileBrowser.search.modes.navigate"),
     placeholder: t("fileBrowser.search.placeholders.directory"),

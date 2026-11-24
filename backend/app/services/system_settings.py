@@ -21,6 +21,7 @@ import app.core.config as config_module
 import app.db.database as database_module
 from app import __version__
 from app.core.directory_index_contract import MAX_WIRE_INTEGER
+from app.core.filesystem_search_policy import POLICY_BOUNDS
 from app.core.logging import get_logger
 from app.core.system_setting_definitions import (
     DEFAULT_IMAGE_CONVERSION_PREFERENCE,
@@ -46,6 +47,10 @@ from app.models.system_settings import (
     FileSearchSettingsRead,
     FileSearchSettingsUpdate,
     FileSearchSettingsUpdateResult,
+    FilesystemSearchFieldRead,
+    FilesystemSearchPolicy,
+    FilesystemSearchSettingsRead,
+    FilesystemSearchSettingUpdate,
     ImageConversionPreferenceRead,
     ImageConversionPreferenceUpdate,
     IntegerSystemSettingRead,
@@ -381,6 +386,57 @@ def _encode_string_set(values: set[str]) -> str:
 def _begin_immediate_transaction(session: Session) -> None:
     if session.get_bind().dialect.name == "sqlite" and not session.in_transaction():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+
+
+class FilesystemSearchPolicyError(ValueError):
+    """The persisted file-system search policy cannot be used safely."""
+
+
+def build_filesystem_search_settings_read(session: Session) -> FilesystemSearchSettingsRead:
+    row = session.get(SystemSetting, SystemSettingKey.FILESYSTEM_SEARCH_POLICY.value)
+    try:
+        overrides = {} if row is None else json.loads(row.value)
+        if not isinstance(overrides, dict):
+            raise ValueError("Policy must be an object.")
+        policy = FilesystemSearchPolicy.model_validate(overrides)
+    except ValueError as exc:
+        raise FilesystemSearchPolicyError(
+            "Stored file-system search policy is invalid. Restore or remove the filesystem_search.policy database entry before searching."
+        ) from exc
+    fields = {
+        name: FilesystemSearchFieldRead(
+            value=getattr(policy, name),
+            default_value=bound.default,
+            min_value=bound.minimum,
+            max_value=bound.maximum,
+            source=SystemSettingSource.DATABASE if name in overrides else SystemSettingSource.DEFAULT,
+        )
+        for name, bound in POLICY_BOUNDS.items()
+    }
+    return FilesystemSearchSettingsRead(policy=policy, fields=fields)
+
+
+def get_filesystem_search_policy(session: Session | None = None) -> FilesystemSearchPolicy:
+    """Return a validated policy snapshot for admission of a new search."""
+    if session is not None:
+        return build_filesystem_search_settings_read(session).policy
+    with Session(database_module.engine) as own_session:
+        return build_filesystem_search_settings_read(own_session).policy
+
+
+def update_filesystem_search_settings(
+    payload: FilesystemSearchSettingUpdate, *, updated_by_user_id: uuid.UUID, session: Session
+) -> FilesystemSearchSettingUpdate:
+    _begin_immediate_transaction(session)
+    current = build_filesystem_search_settings_read(session)
+    row = session.get(SystemSetting, SystemSettingKey.FILESYSTEM_SEARCH_POLICY.value)
+    overrides = {} if row is None else json.loads(row.value)
+    overrides[payload.field] = payload.value
+    FilesystemSearchPolicy.model_validate(overrides)
+    if getattr(current.policy, payload.field) != payload.value:
+        _write_system_setting(session, SystemSettingKey.FILESYSTEM_SEARCH_POLICY, json.dumps(overrides, sort_keys=True), updated_by_user_id)
+    session.commit()
+    return payload
 
 
 def build_file_search_settings_read(session: Session) -> FileSearchSettingsRead:

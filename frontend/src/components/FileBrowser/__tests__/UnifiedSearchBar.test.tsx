@@ -3,9 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { browserHistoryService } from "../../../services/browserHistoryService";
+import { FILESYSTEM_SEARCH_QUERY_MAX_BYTES } from "../../../services/filesystemSearchContract";
 import { renderWithStyles } from "../../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../../theme/ThemeContext";
-import { type FileEntry, FileType } from "../../../types";
+import { DEFAULT_LIVE_SEARCH_OPTIONS } from "../LiveSearchOptions";
 import { getQuickBarResultRowHeight, QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT, QUICK_BAR_RESULT_ITEM_HEIGHT } from "../QuickBarResultRow";
 import { SEARCH_CONTRACT_VERSION } from "../search/recentHistory";
 import type { SearchProvider, SearchResultsUpdate } from "../search/types";
@@ -282,6 +283,280 @@ function renderWithProvider(component: React.ReactElement) {
 }
 
 describe("UnifiedSearchBar", () => {
+  it("validates a live query and submits its options without fetching dropdown results", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const fetchResults = vi.fn().mockResolvedValue([]);
+    renderWithProvider(
+      <UnifiedSearchBar
+        provider={{ ...noResultsProvider, fetchResults }}
+        liveSearchControls={{ options: DEFAULT_LIVE_SEARCH_OPTIONS, onOptionsChange: vi.fn(), onSubmit }}
+      />
+    );
+    const input = screen.getByPlaceholderText("Search");
+    await user.click(input);
+    await user.type(input, "  ");
+    await user.keyboard("{Enter}");
+    expect(screen.getByText("Enter a name or pattern to search.")).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.clear(input);
+    await user.type(input, " report ");
+    await user.keyboard("{Enter}");
+    expect(onSubmit).toHaveBeenCalledWith(" report ", DEFAULT_LIVE_SEARCH_OPTIONS);
+    expect(fetchResults).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("validates shared whitespace and UTF-8 byte limits before submitting live search", async () => {
+    const onSubmit = vi.fn();
+    renderWithProvider(
+      <UnifiedSearchBar
+        provider={noResultsProvider}
+        liveSearchControls={{ options: DEFAULT_LIVE_SEARCH_OPTIONS, onOptionsChange: vi.fn(), onSubmit }}
+      />
+    );
+    const input = screen.getByPlaceholderText("Search");
+    act(() => input.focus());
+    fireEvent.change(input, { target: { value: "\u001c" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText("Enter a name or pattern to search.")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: "\ufeff" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSubmit).toHaveBeenLastCalledWith("\ufeff", DEFAULT_LIVE_SEARCH_OPTIONS);
+    onSubmit.mockClear();
+    const boundary = "é".repeat(FILESYSTEM_SEARCH_QUERY_MAX_BYTES / 2);
+    fireEvent.change(input, { target: { value: `${boundary}é` } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(screen.getByText(/at most 1024 UTF-8 bytes/)).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: boundary } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledWith(boundary, DEFAULT_LIVE_SEARCH_OPTIONS);
+  });
+
+  it.each([
+    ["composition flag", { isComposing: true }],
+    ["IME process key code", { keyCode: 229 }],
+  ])("ignores Enter that the IME owns (%s)", (_label, imeEvent) => {
+    const onSubmit = vi.fn();
+    const onParentKeyDown = vi.fn();
+    renderWithProvider(
+      <UnifiedSearchBar
+        provider={noResultsProvider}
+        liveSearchControls={{ options: DEFAULT_LIVE_SEARCH_OPTIONS, onOptionsChange: vi.fn(), onSubmit }}
+      />
+    );
+    document.addEventListener("keydown", onParentKeyDown);
+    try {
+      const input = screen.getByPlaceholderText("Search");
+      act(() => input.focus());
+      fireEvent.change(input, { target: { value: "レポート" } });
+      fireEvent.keyDown(input, { key: "Enter", ...imeEvent });
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(onParentKeyDown).not.toHaveBeenCalled();
+      fireEvent.keyDown(input, { key: "a" });
+      expect(onParentKeyDown).toHaveBeenCalledOnce();
+      fireEvent.keyDown(input, { key: "Enter" });
+      expect(onSubmit).toHaveBeenCalledWith("レポート", DEFAULT_LIVE_SEARCH_OPTIONS);
+    } finally {
+      document.removeEventListener("keydown", onParentKeyDown);
+    }
+  });
+
+  it("opens live options without moving the caret and closes them before leaving the bar", async () => {
+    const user = userEvent.setup();
+    const onOptionsChange = vi.fn();
+    const onBlurToFileList = vi.fn();
+    const onArrowDownToFileList = vi.fn();
+    renderWithProvider(
+      <>
+        <UnifiedSearchBar
+          provider={noResultsProvider}
+          onBlurToFileList={onBlurToFileList}
+          onArrowDownToFileList={onArrowDownToFileList}
+          liveSearchControls={{ options: DEFAULT_LIVE_SEARCH_OPTIONS, onOptionsChange, onSubmit: vi.fn() }}
+        />
+        <button type="button">After quick bar</button>
+      </>
+    );
+    const input = screen.getByPlaceholderText("Search");
+    act(() => input.focus());
+    expect(screen.getByRole("menu", { name: "Search options" })).toBeInTheDocument();
+    expect(input).toHaveFocus();
+    await user.keyboard("annual report{ArrowDown}");
+    expect(input).toHaveValue("annual report");
+    expect(screen.getByRole("menuitem", { name: /Folder depth/ })).toHaveFocus();
+    expect(onArrowDownToFileList).not.toHaveBeenCalled();
+    await user.keyboard(" {ArrowUp} ");
+    expect(onOptionsChange).toHaveBeenCalledWith({ ...DEFAULT_LIVE_SEARCH_OPTIONS, folder_depth: "current" });
+    expect(screen.getByRole("menuitem", { name: /Folder depth/ })).toHaveFocus();
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Search inside ZIP files" }));
+    expect(onOptionsChange).toHaveBeenCalledWith({ ...DEFAULT_LIVE_SEARCH_OPTIONS, search_archives: true });
+    await user.keyboard("{Escape}");
+    expect(input).toHaveFocus();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onBlurToFileList).not.toHaveBeenCalled();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Search inside ZIP files" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Clear search" })).toHaveFocus();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "After quick bar" })).toHaveFocus();
+    await user.click(input);
+    await user.keyboard("{Escape}{Escape}");
+    expect(onBlurToFileList).toHaveBeenCalledOnce();
+  });
+
+  it("cycles focus through navigation controls and restores focus after closing a menu", async () => {
+    const user = userEvent.setup();
+    const onScopeChange = vi.fn();
+    const onBlurToFileList = vi.fn();
+    renderWithProvider(
+      <UnifiedSearchBar
+        provider={noResultsProvider}
+        onBlurToFileList={onBlurToFileList}
+        navigationControls={{ scope: "connection", itemType: "all", onScopeChange, onItemTypeChange: vi.fn() }}
+      />
+    );
+    const input = screen.getByPlaceholderText("Search");
+    act(() => input.focus());
+    const scope = screen.getByRole("button", { name: "Search scope" });
+    const itemType = screen.getByRole("button", { name: "Item type" });
+    expect(scope).toHaveAttribute("aria-description", "Current connection");
+    expect(itemType).toHaveAttribute("aria-description", "Files and folders");
+    await user.tab();
+    expect(scope).toHaveFocus();
+    await user.tab();
+    expect(itemType).toHaveFocus();
+    await user.tab();
+    expect(input).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(itemType).toHaveFocus();
+    await user.click(scope);
+    await user.click(screen.getByRole("menuitem", { name: "Current folder and subfolders" }));
+    expect(onScopeChange).toHaveBeenCalledWith("subtree");
+    await waitFor(() => expect(scope).toHaveFocus());
+    await user.type(input, "images");
+    await user.click(scope);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(scope).toHaveFocus());
+    expect(onBlurToFileList).not.toHaveBeenCalled();
+    expect(input).toHaveValue("images");
+    await user.keyboard("{Escape}");
+    expect(onBlurToFileList).toHaveBeenCalledOnce();
+    expect(input).toHaveValue("");
+  });
+
+  it("keeps live options open while typing, closes on outside click, and submits only on Enter", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onOptionsChange = vi.fn();
+    renderWithProvider(
+      <>
+        <UnifiedSearchBar
+          provider={noResultsProvider}
+          liveSearchControls={{ options: DEFAULT_LIVE_SEARCH_OPTIONS, onOptionsChange, onSubmit }}
+        />
+        <button type="button">Outside</button>
+      </>
+    );
+    const input = screen.getByRole("textbox", { name: "Search" });
+    await user.click(input);
+    await user.type(input, "report");
+    expect(screen.getByRole("menuitem", { name: /Folder depth/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Match case" }));
+    expect(onOptionsChange).toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Outside" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await user.click(input);
+    await user.keyboard("{Enter}");
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(input).toHaveAccessibleName("Search");
+  });
+
+  it("keeps navigation controls visible when a touch blurs the input before the click", async () => {
+    renderWithProvider(
+      <UnifiedSearchBar
+        provider={noResultsProvider}
+        navigationControls={{ scope: "connection", itemType: "all", onScopeChange: vi.fn(), onItemTypeChange: vi.fn() }}
+      />
+    );
+    const input = screen.getByRole("textbox", { name: "Search" });
+    await act(async () => {
+      input.focus();
+      await Promise.resolve();
+    });
+    const scope = screen.getByRole("button", { name: "Search scope" });
+    fireEvent.pointerDown(scope, { pointerType: "touch" });
+    fireEvent.blur(input, { relatedTarget: null });
+    expect(scope).toBeVisible();
+    fireEvent.click(scope);
+    expect(screen.getByRole("menuitem", { name: "Current connection" })).toBeInTheDocument();
+  });
+
+  it("keeps navigation controls visible on window blur but hides them when focus moves outside the bar", async () => {
+    renderWithProvider(
+      <>
+        <UnifiedSearchBar
+          provider={noResultsProvider}
+          navigationControls={{ scope: "connection", itemType: "all", onScopeChange: vi.fn(), onItemTypeChange: vi.fn() }}
+        />
+        <button type="button">Outside</button>
+      </>
+    );
+    const input = screen.getByRole("textbox", { name: "Search" });
+    await act(async () => {
+      input.focus();
+      fireEvent.blur(input, { relatedTarget: null });
+      fireEvent.blur(window);
+    });
+    expect(screen.getByRole("button", { name: "Search scope" })).toBeVisible();
+    const scope = screen.getByRole("button", { name: "Search scope" });
+    await act(async () => {
+      scope.focus();
+      fireEvent.blur(scope, { relatedTarget: null });
+    });
+    expect(scope).toBeVisible();
+    await act(async () => screen.getByRole("button", { name: "Outside" }).focus());
+    expect(screen.queryByRole("button", { name: "Search scope" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the query and refreshes when navigation options change", async () => {
+    const fetchResults = vi.fn().mockResolvedValue([]);
+    const provider = { ...noResultsProvider, id: "navigation-search", sourceKey: "before", fetchResults };
+    const { rerender } = renderWithProvider(<UnifiedSearchBar provider={provider} />);
+    const input = screen.getByPlaceholderText("Search");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "reports" } });
+    await waitFor(() => expect(fetchResults).toHaveBeenCalledWith("reports", expect.anything(), expect.anything()));
+    rerender(
+      <SambeeThemeProvider>
+        <UnifiedSearchBar provider={{ ...provider, sourceKey: "after" }} />
+      </SambeeThemeProvider>
+    );
+    expect(input).toHaveValue("reports");
+    await waitFor(() => expect(fetchResults.mock.calls.filter(([query]) => query === "reports").length).toBeGreaterThan(1));
+  });
+
+  it("does not show no-results feedback when the selected scope is not indexed", async () => {
+    const provider = {
+      ...noResultsProvider,
+      getStatusInfo: () => ({ label: "This folder is not indexed yet.", showSpinner: false, suppressEmpty: true }),
+    };
+    renderWithProvider(<UnifiedSearchBar provider={provider} />);
+    const input = screen.getByPlaceholderText("Search");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "reports" } });
+    expect(await screen.findByText("This folder is not indexed yet.")).toBeInTheDocument();
+    expect(screen.queryByText(/No results found/)).not.toBeInTheDocument();
+  });
+
   it.each(["connection-1", "local-C"])("completes activation, recovery, source switching, and dismissal for %s", async (connectionId) => {
     vi.useFakeTimers();
     const retryMs = 2000;
@@ -1082,7 +1357,7 @@ describe("UnifiedSearchBar", () => {
     expect(screen.getByText("2 results")).toBeInTheDocument();
     expect(screen.queryByText("4 results")).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Quarterly report Demo:/Reports" })).toHaveTextContent("Quarterly report");
-    expect(screen.getByTestId("HistoryOutlinedIcon")).toBeInTheDocument();
+    expect(screen.getAllByTestId("DescriptionOutlinedIcon")).toHaveLength(2);
     expect(screen.queryByText(/^Recent -/)).not.toBeInTheDocument();
     expect(getQuickBarResultRowHeight({ kind: "group-header", id: "header", value: "", label: "Group" })).toBe(
       QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT
@@ -1229,18 +1504,25 @@ describe("UnifiedSearchBar", () => {
   });
 
   it("fetches file history when the source updates during first activation", async () => {
-    const searchRecentFiles = vi.spyOn(browserHistoryService, "searchRecentFiles").mockResolvedValue({ results: [], result_limit: 50 });
-    const initialFiles: FileEntry[] = [];
-    const loadedFiles = [{ name: "report.txt", type: FileType.FILE }] as FileEntry[];
+    const searchRecentFiles = vi.spyOn(browserHistoryService, "searchRecentFiles").mockResolvedValue({
+      results: [
+        {
+          id: "report",
+          connection_id: "connection-1",
+          path: "report.txt",
+          file_name: "report.txt",
+          last_opened_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      result_limit: 50,
+    });
     function SearchHarness({ active }: { active: boolean }) {
       const fileProvider = useFileSearchProvider({
         connectionId: "connection-1",
         currentPath: "",
-        files: active ? loadedFiles : initialFiles,
         connectionName: "Demo",
         resultLimit: 50,
         getConnectionName: () => "Demo",
-        onOpenCurrentFile: vi.fn(),
         onOpenRecentFile: vi.fn(),
       });
       return <UnifiedSearchBar provider={active ? fileProvider : resultsProvider} activationToken={active ? 1 : 0} />;
@@ -1264,19 +1546,28 @@ describe("UnifiedSearchBar", () => {
     vi.spyOn(browserHistoryService, "searchRecentFiles").mockImplementation(
       () =>
         new Promise((resolve) => {
-          releaseHistory = () => resolve({ results: [], result_limit: 50 });
+          releaseHistory = () =>
+            resolve({
+              results: [
+                {
+                  id: "report",
+                  connection_id: "connection-1",
+                  path: "report.txt",
+                  file_name: "report.txt",
+                  last_opened_at: "2026-01-01T00:00:00Z",
+                },
+              ],
+              result_limit: 50,
+            });
         })
     );
-    const files = [{ name: "report.txt", type: FileType.FILE }] as FileEntry[];
     function SearchHarness() {
       const provider = useFileSearchProvider({
         connectionId: "connection-1",
         currentPath: "",
-        files,
         connectionName: "Demo",
         resultLimit: 50,
         getConnectionName: () => "Demo",
-        onOpenCurrentFile: vi.fn(),
         onOpenRecentFile: vi.fn(),
       });
       return <UnifiedSearchBar provider={provider} />;

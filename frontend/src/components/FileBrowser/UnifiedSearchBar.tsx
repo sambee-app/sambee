@@ -22,7 +22,9 @@
 
 import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import ClearIcon from "@mui/icons-material/Clear";
+import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
+import FolderSpecialOutlinedIcon from "@mui/icons-material/FolderSpecialOutlined";
 import KeyboardCommandKeyIcon from "@mui/icons-material/KeyboardCommandKey";
 import SearchIcon from "@mui/icons-material/Search";
 import {
@@ -50,16 +52,21 @@ import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRe
 import { flushSync } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { usePillButtonMenu } from "../../hooks/usePillButtonMenu";
-import { getSecondaryToolbarMenuPaperStyle } from "../../theme/commonStyles";
+import { FILESYSTEM_SEARCH_QUERY_MAX_BYTES, validateFilesystemSearchQuery } from "../../services/filesystemSearchContract";
+import { getPillButtonFocusVisibleBoxShadow, getSecondaryToolbarMenuPaperStyle } from "../../theme/commonStyles";
+import { focusLiveSearchOption, type LiveSearchOptions, LiveSearchOptionsPanel } from "./LiveSearchOptions";
 import { PillButtonTooltip } from "./PillButtonTooltip";
 import {
   getQuickBarResultRowHeight,
   QUICK_BAR_RESULT_ITEM_HEIGHT,
   QuickBarResultGroupHeader,
   QuickBarResultRow,
+  quickBarDropdownActiveRow,
+  quickBarDropdownRowPadding,
 } from "./QuickBarResultRow";
 import { SearchStatusDialog } from "./SearchStatusDialog";
 import type { SearchProvider, SearchResult, SearchSelectionAction, SearchSelectionBehavior, SearchStatusInfo } from "./search/types";
+import type { NavigationItemType, NavigationScope } from "./search/useNavigationSearchProvider";
 
 // ============================================================================
 // Constants
@@ -74,6 +81,9 @@ const DROPDOWN_WIDTH_PX = 700;
 /** Number of items to jump with Page Up/Down */
 const PAGE_JUMP_SIZE = 10;
 
+/** Legacy key code that browsers report for keys an IME processes (Safari reports it for the Enter that ends composition) */
+const IME_PROCESS_KEY_CODE = 229;
+
 const QUICK_BAR_COMPACT_CHROME = {
   "--quick-bar-inset": "10px",
   "--quick-bar-height": "44px",
@@ -86,6 +96,28 @@ const QUICK_BAR_DESKTOP_CHROME = {
 
 const QUICK_BAR_INSET = "var(--quick-bar-inset)";
 const QUICK_BAR_HEIGHT = "var(--quick-bar-height)";
+const QUICK_BAR_FOCUS_RING_INSET = "5px";
+
+const QUICK_BAR_CONTROL_SX = {
+  position: "relative",
+  height: QUICK_BAR_HEIGHT,
+  alignSelf: "center",
+  flexShrink: 0,
+  "&&.Mui-focusVisible": {
+    outline: "none",
+    "&::before": {
+      content: '""',
+      position: "absolute",
+      inset: QUICK_BAR_FOCUS_RING_INSET,
+      borderRadius: 1,
+      pointerEvents: "none",
+      boxShadow: getPillButtonFocusVisibleBoxShadow,
+      "@media (forced-colors: active)": {
+        outline: "2px solid Highlight",
+      },
+    },
+  },
+} as const;
 
 function getQuickBarModeIcon(modeId: string): React.ReactElement {
   switch (modeId) {
@@ -99,8 +131,7 @@ function getQuickBarModeIcon(modeId: string): React.ReactElement {
 }
 
 const QUICK_BAR_MODE_BUTTON_SX = {
-  position: "relative",
-  flexShrink: 0,
+  ...QUICK_BAR_CONTROL_SX,
   columnGap: 0.5,
   minWidth: 0,
   paddingBlock: 0,
@@ -131,15 +162,15 @@ const QUICK_BAR_MODE_BUTTON_SX = {
   },
 } as const;
 
-const QUICK_BAR_CLEAR_BUTTON_SX = {
-  minHeight: QUICK_BAR_HEIGHT,
-  paddingBlock: 0,
-  paddingInline: QUICK_BAR_INSET,
-} as const;
-
 const QUICK_BAR_MODE_MENU_ITEM_SX = {
   fontSize: "0.8125rem",
   lineHeight: 1.35,
+} as const;
+
+const QUICK_BAR_ICON_BUTTON_SX = {
+  ...QUICK_BAR_CONTROL_SX,
+  width: QUICK_BAR_HEIGHT,
+  borderRadius: 1,
 } as const;
 
 // ============================================================================
@@ -177,6 +208,19 @@ interface UnifiedSearchBarProps {
   suppressDropdown?: boolean;
   /** Whether keyboard shortcut hints are relevant in the current input context. */
   showKeyboardHints?: boolean;
+  navigationControls?: UnifiedSearchBarNavigationControls;
+  liveSearchControls?: {
+    options: LiveSearchOptions;
+    onOptionsChange: (options: LiveSearchOptions) => void;
+    onSubmit: (query: string, options: LiveSearchOptions) => void;
+  };
+}
+
+export interface UnifiedSearchBarNavigationControls {
+  scope: NavigationScope;
+  itemType: NavigationItemType;
+  onScopeChange: (scope: NavigationScope) => void;
+  onItemTypeChange: (itemType: NavigationItemType) => void;
 }
 
 export interface UnifiedSearchBarModeOption {
@@ -215,13 +259,15 @@ export function UnifiedSearchBar({
   onBlurToFileList,
   queryValue,
   onQueryValueChange,
-  disableDropdown = false,
+  disableDropdown: disableDropdownProp = false,
   onArrowDownToFileList,
   disableTabFocus,
   modeOptions,
   modeSelectorAriaLabel,
   suppressDropdown = false,
   showKeyboardHints = true,
+  navigationControls,
+  liveSearchControls,
 }: UnifiedSearchBarProps) {
   // ── State ──────────────────────────────────────────────────────────────
   const [internalQuery, setInternalQuery] = useState("");
@@ -236,6 +282,12 @@ export function UnifiedSearchBar({
   const [isFocused, setIsFocused] = useState(false);
   const [isSearchPending, setIsSearchPending] = useState(false);
   const [statusDialog, setStatusDialog] = useState<SearchStatusInfo | null>(null);
+  const [navigationMenu, setNavigationMenu] = useState<"scope" | "itemType" | null>(null);
+  const [navigationMenuAnchor, setNavigationMenuAnchor] = useState<HTMLElement | null>(null);
+  const [navigationControlFocused, setNavigationControlFocused] = useState(false);
+  const [liveQueryError, setLiveQueryError] = useState<ReturnType<typeof validateFilesystemSearchQuery>>(null);
+  const [liveOptionsOpen, setLiveOptionsOpen] = useState(false);
+  const disableDropdown = disableDropdownProp || liveSearchControls !== undefined;
 
   const theme = useTheme();
   const { t } = useTranslation();
@@ -262,6 +314,11 @@ export function UnifiedSearchBar({
   const pendingQueryRef = useRef<string>("");
   const providerRef = useRef(provider);
   const internalInputRef = useRef<HTMLInputElement>(null);
+  const scopeButtonRef = useRef<HTMLButtonElement>(null);
+  const itemTypeButtonRef = useRef<HTMLButtonElement>(null);
+  const liveOptionsListRef = useRef<HTMLUListElement>(null);
+  const liveOptionsFocusRequest = useRef<"first" | "last" | null>(null);
+  const suppressLiveOptionsOnFocusRef = useRef(false);
   const activatedRef = useRef(false);
   const lastResetProviderRef = useRef(provider);
   const lastActivationTokenRef = useRef(activationToken);
@@ -270,8 +327,8 @@ export function UnifiedSearchBar({
   const queryGenerationRef = useRef(0);
   const resultsRef = useRef<SearchResult[]>([]);
   resultsRef.current = results;
-  const selectedValueRef = useRef<string | undefined>(undefined);
-  selectedValueRef.current = results[selectedIndex]?.value;
+  const selectedIdRef = useRef<string | undefined>(undefined);
+  selectedIdRef.current = results[selectedIndex]?.id;
 
   const clearInterimTimer = useCallback(() => {
     if (interimTimerRef.current) {
@@ -311,6 +368,7 @@ export function UnifiedSearchBar({
 
   // Use external inputRef if provided, otherwise internal
   const effectiveInputRef = inputRef ?? internalInputRef;
+  const showNavigationControls = provider.modeId === "navigate" && navigationControls !== undefined;
 
   const getEffectiveMinQueryLength = useCallback(
     (value: string) => provider.getMinQueryLength?.(value) ?? provider.minQueryLength,
@@ -475,7 +533,7 @@ export function UnifiedSearchBar({
   ]);
 
   const endAdornment = useMemo(() => {
-    const showShortcutBadge = !query && !isFocused && !!kbdBadge;
+    const showShortcutBadge = !showNavigationControls && !query && !isFocused && !!kbdBadge;
 
     if (!query && !isLoading && !showShortcutBadge) {
       return undefined;
@@ -503,7 +561,7 @@ export function UnifiedSearchBar({
                 setSearchError(false);
                 effectiveInputRef.current?.focus();
               }}
-              sx={QUICK_BAR_CLEAR_BUTTON_SX}
+              sx={QUICK_BAR_ICON_BUTTON_SX}
               aria-label={t("common.search.clear")}
             >
               <ClearIcon sx={{ fontSize: useCompactLayout ? 24 : 18 }} />
@@ -514,7 +572,7 @@ export function UnifiedSearchBar({
         </Box>
       </InputAdornment>
     );
-  }, [effectiveInputRef, isFocused, isLoading, kbdBadge, query, setQuery, t, useCompactLayout]);
+  }, [effectiveInputRef, isFocused, isLoading, kbdBadge, query, setQuery, showNavigationControls, t, useCompactLayout]);
 
   // ── Search execution ───────────────────────────────────────────────────
 
@@ -554,8 +612,8 @@ export function UnifiedSearchBar({
         activeProvider.sourceKey === providerRef.current.sourceKey;
       const commitResults = (updatedResults: SearchResult[], isFinal: boolean) => {
         if (!isCurrent()) return;
-        const previousValue = selectedValueRef.current;
-        const previousIndex = updatedResults.findIndex((result) => result.kind === "result" && result.value === previousValue);
+        const previousId = selectedIdRef.current;
+        const previousIndex = updatedResults.findIndex((result) => result.kind === "result" && result.id === previousId);
         const firstIndex = updatedResults.findIndex((result) => result.kind === "result");
         const hasSelectable = firstIndex >= 0;
 
@@ -677,6 +735,7 @@ export function UnifiedSearchBar({
       const effectiveBelowMinimumMessage = getEffectiveBelowMinimumMessage(newQuery);
 
       setQuery(newQuery);
+      setLiveQueryError(null);
       setRemoveError(false);
 
       if (disableDropdown) {
@@ -814,9 +873,39 @@ export function UnifiedSearchBar({
     setIsLoading(false);
     setIsSearchPending(false);
     setIsDropdownOpen(false);
+    setLiveOptionsOpen(false);
+    liveOptionsFocusRequest.current = null;
+    setIsFocused(false);
+    setNavigationControlFocused(false);
     activatedRef.current = false;
     providerRef.current.onDeactivate?.();
   }, [clearInterimTimer]);
+
+  const exitQuickNavigation = useCallback(() => {
+    setQuery("");
+    setResults([]);
+    setSettledEmptyFeedback(null);
+    setHasSearched(false);
+    setSearchError(false);
+    setRemoveError(false);
+    dismissSearch();
+    onBlurToFileList?.();
+  }, [dismissSearch, onBlurToFileList, setQuery]);
+
+  const returnFromLiveOptions = useCallback(() => {
+    suppressLiveOptionsOnFocusRef.current = true;
+    effectiveInputRef.current?.focus();
+    suppressLiveOptionsOnFocusRef.current = false;
+    setLiveOptionsOpen(false);
+  }, [effectiveInputRef]);
+
+  useLayoutEffect(() => {
+    const edge = liveOptionsFocusRequest.current;
+    if (liveOptionsOpen && edge) {
+      liveOptionsFocusRequest.current = null;
+      focusLiveSearchOption(liveOptionsListRef.current, edge);
+    }
+  }, [liveOptionsOpen]);
 
   // ── Keyboard navigation ────────────────────────────────────────────────
 
@@ -825,6 +914,22 @@ export function UnifiedSearchBar({
   //
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
+      // Keys that confirm or edit IME text belong to the IME, not to quick navigation, live search, or parent shortcuts.
+      if (e.nativeEvent.isComposing || e.keyCode === IME_PROCESS_KEY_CODE) {
+        e.stopPropagation();
+        return;
+      }
+      if (liveSearchControls && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        e.preventDefault();
+        e.stopPropagation();
+        const edge = e.key === "ArrowDown" ? "first" : "last";
+        if (liveOptionsListRef.current) focusLiveSearchOption(liveOptionsListRef.current, edge);
+        else {
+          liveOptionsFocusRequest.current = edge;
+          setLiveOptionsOpen(true);
+        }
+        return;
+      }
       switch (e.key) {
         case "ArrowDown":
           if (disableDropdown) {
@@ -871,6 +976,18 @@ export function UnifiedSearchBar({
           break;
 
         case "Enter":
+          if (liveSearchControls) {
+            e.preventDefault();
+            const queryError = validateFilesystemSearchQuery(query);
+            if (queryError) {
+              setLiveQueryError(queryError);
+            } else {
+              setLiveQueryError(null);
+              setLiveOptionsOpen(false);
+              liveSearchControls.onSubmit(query, { ...liveSearchControls.options });
+            }
+            break;
+          }
           if (disableDropdown) {
             break;
           }
@@ -889,6 +1006,21 @@ export function UnifiedSearchBar({
 
         case "Escape":
           e.preventDefault();
+          if (liveSearchControls) {
+            e.stopPropagation();
+            if (liveOptionsOpen) {
+              setLiveOptionsOpen(false);
+            } else {
+              dismissSearch();
+              onBlurToFileList?.();
+            }
+            break;
+          }
+          if (showNavigationControls) {
+            e.stopPropagation();
+            exitQuickNavigation();
+            break;
+          }
           if (disableDropdown) {
             if (query) {
               setQuery("");
@@ -919,6 +1051,14 @@ export function UnifiedSearchBar({
           break;
 
         case "Tab":
+          if (liveSearchControls) {
+            break;
+          }
+          if (showNavigationControls) {
+            e.preventDefault();
+            (e.shiftKey ? itemTypeButtonRef : scopeButtonRef).current?.focus();
+            break;
+          }
           if (isDropdownOpen) {
             dismissSearch();
           }
@@ -928,17 +1068,21 @@ export function UnifiedSearchBar({
     [
       disableDropdown,
       dismissSearch,
+      exitQuickNavigation,
       findSelectableResultIndex,
       getSelectionAction,
       handleSelect,
       handleRemoveSelected,
       isDropdownOpen,
+      liveSearchControls,
+      liveOptionsOpen,
       onArrowDownToFileList,
       onBlurToFileList,
       query,
       results,
       selectedIndex,
       setQuery,
+      showNavigationControls,
     ]
   );
 
@@ -982,7 +1126,7 @@ export function UnifiedSearchBar({
       results.findIndex((result) => result.kind === "result"),
       0
     );
-    selectedValueRef.current = results[firstIndex]?.value;
+    selectedIdRef.current = results[firstIndex]?.id;
     setSelectedIndex(firstIndex);
     rowVirtualizer.scrollToOffset(0);
   });
@@ -1018,9 +1162,11 @@ export function UnifiedSearchBar({
   // handleClickAway
   //
   const handleClickAway = useCallback(() => {
-    if (statusDialog) return;
+    if (statusDialog || navigationMenu) return;
+    setLiveOptionsOpen(false);
+    setNavigationControlFocused(false);
     dismissSearch();
-  }, [dismissSearch, statusDialog]);
+  }, [dismissSearch, navigationMenu, statusDialog]);
 
   // ── Re-open on typing after click-away ─────────────────────────────────
   //
@@ -1029,6 +1175,8 @@ export function UnifiedSearchBar({
   const handleInputFocus = useCallback(() => {
     const newlyActivated = !activatedRef.current;
     setIsFocused(true);
+    if (liveSearchControls && !suppressLiveOptionsOnFocusRef.current) setLiveOptionsOpen(true);
+    suppressLiveOptionsOnFocusRef.current = false;
     handleFocus();
 
     if (suppressDropdown) {
@@ -1066,6 +1214,7 @@ export function UnifiedSearchBar({
     getEffectiveBelowMinimumMessage,
     getEffectiveMinQueryLength,
     handleFocus,
+    liveSearchControls,
     results.length,
     hasSearched,
     query,
@@ -1125,10 +1274,14 @@ export function UnifiedSearchBar({
     }
 
     const isInputFocused = document.activeElement === effectiveInputRef.current;
-    const nextQuery = providerChanged ? "" : query;
+    const preserveNavigationQuery = providerChanged && previousProvider.id === "navigation-search" && provider.id === "navigation-search";
+    const nextQuery = providerChanged && !preserveNavigationQuery ? "" : query;
     const effectiveMinQueryLength = getEffectiveMinQueryLength(nextQuery);
     const effectiveBelowMinimumMessage = getEffectiveBelowMinimumMessage(nextQuery);
-    const shouldSearchOnActivation = activationChanged && !disableDropdown && nextQuery.length >= effectiveMinQueryLength;
+    const shouldSearchOnActivation =
+      (activationChanged || (preserveNavigationQuery && activatedRef.current)) &&
+      !disableDropdown &&
+      nextQuery.length >= effectiveMinQueryLength;
     const shouldShowBelowMinimumOnActivation =
       activationChanged &&
       !disableDropdown &&
@@ -1154,7 +1307,7 @@ export function UnifiedSearchBar({
     setIsSearchPending(false);
     setIsDropdownOpen(shouldOpenOnActivation);
 
-    if (!isControlledQuery && providerChanged) {
+    if (!isControlledQuery && providerChanged && !preserveNavigationQuery) {
       setInternalQuery("");
     }
 
@@ -1237,6 +1390,10 @@ export function UnifiedSearchBar({
     }
   }, [isDropdownOpen, isModeMenuOpen]);
 
+  useEffect(() => {
+    if (!liveSearchControls) setLiveOptionsOpen(false);
+  }, [liveSearchControls]);
+
   // ── Derived state ──────────────────────────────────────────────────────
   const statusInfo = provider.getStatusInfo();
   const selectableResultCount = results.filter((result) => result.kind === "result").length;
@@ -1248,14 +1405,41 @@ export function UnifiedSearchBar({
     settledEmptyFeedback?.kind === "below-minimum" ? getEffectiveBelowMinimumMessage(settledEmptyFeedback.query) : undefined;
   const showBelowMinimum = results.length === 0 && !showSearchError && !showRemoveError && !!belowMinimumFeedbackMessage;
   const noResultsQuery = settledEmptyFeedback?.kind === "no-results" ? settledEmptyFeedback.query : undefined;
-  const showNoResults = results.length === 0 && !showSearchError && !showRemoveError && noResultsQuery !== undefined;
-  const showSearchProgress = query.length > 0 && statusInfo !== null;
+  const showNoResults =
+    results.length === 0 && !showSearchError && !showRemoveError && !statusInfo?.suppressEmpty && noResultsQuery !== undefined;
+  const showSearchProgress = statusInfo !== null && (query.length > 0 || !!statusInfo.suppressEmpty);
+  const handleNavigationControlKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, control: "scope" | "itemType") => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      exitQuickNavigation();
+    } else if (event.key === "Tab") {
+      event.preventDefault();
+      const target =
+        control === "scope"
+          ? event.shiftKey
+            ? effectiveInputRef
+            : itemTypeButtonRef
+          : event.shiftKey
+            ? scopeButtonRef
+            : effectiveInputRef;
+      target.current?.focus();
+    }
+  };
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <ClickAwayListener onClickAway={handleClickAway}>
       <Box
         ref={anchorRef}
+        onFocusCapture={showNavigationControls ? () => setNavigationControlFocused(true) : undefined}
+        onBlur={(event) => {
+          // A window blur has no in-page focus destination.
+          const next = event.relatedTarget;
+          if (!next || event.currentTarget.contains(next) || navigationMenu || isModeMenuOpen) return;
+          setNavigationControlFocused(false);
+          setLiveOptionsOpen(false);
+        }}
         sx={{
           position: "relative",
           boxSizing: "border-box",
@@ -1290,15 +1474,27 @@ export function UnifiedSearchBar({
               size="small"
               placeholder={provider.placeholder}
               value={query}
+              error={liveQueryError !== null}
+              helperText={
+                liveQueryError === "empty"
+                  ? t("fileBrowser.search.live.emptyQuery")
+                  : liveQueryError === "too-long"
+                    ? t("fileBrowser.search.live.queryTooLong", { max: FILESYSTEM_SEARCH_QUERY_MAX_BYTES })
+                    : undefined
+              }
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               onFocus={handleInputFocus}
-              onBlur={() => setIsFocused(false)}
+              onClick={liveSearchControls ? () => setLiveOptionsOpen(true) : undefined}
+              onBlur={(event) => {
+                if (event.relatedTarget) setIsFocused(false);
+              }}
               inputRef={effectiveInputRef}
               slotProps={{
                 htmlInput: {
                   ...(disableTabFocus ? { tabIndex: -1 } : {}),
                   "data-quick-bar-input": "true",
+                  "aria-label": provider.placeholder,
                 },
                 input: {
                   sx: {
@@ -1311,6 +1507,7 @@ export function UnifiedSearchBar({
               }}
               sx={{
                 flex: 1,
+                minWidth: 0,
                 "& .MuiInputBase-root.Mui-focused": {
                   outline: "none",
                 },
@@ -1330,22 +1527,119 @@ export function UnifiedSearchBar({
                 },
               }}
             />
+            {showNavigationControls && navigationControls && (
+              <Box
+                sx={{
+                  width: `calc(2 * ${QUICK_BAR_HEIGHT})`,
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                onPointerDownCapture={() => setNavigationControlFocused(true)}
+              >
+                {!(isFocused || navigationControlFocused || navigationMenu) && showKeyboardHints && !query && kbdBadge}
+                <PillButtonTooltip
+                  label={`${t("fileBrowser.search.navigation.scopeLabel")}: ${t(`fileBrowser.search.navigation.scope.${navigationControls.scope}`)}`}
+                >
+                  <span>
+                    <IconButton
+                      ref={scopeButtonRef}
+                      aria-label={t("fileBrowser.search.navigation.scopeLabel")}
+                      aria-description={t(`fileBrowser.search.navigation.scope.${navigationControls.scope}`)}
+                      aria-haspopup="menu"
+                      aria-expanded={navigationMenu === "scope"}
+                      onKeyDown={(event) => handleNavigationControlKeyDown(event, "scope")}
+                      onClick={(event) => {
+                        setNavigationMenuAnchor(event.currentTarget);
+                        setNavigationMenu("scope");
+                      }}
+                      size="small"
+                      sx={{
+                        ...QUICK_BAR_ICON_BUTTON_SX,
+                        display: isFocused || navigationControlFocused || navigationMenu ? "inline-flex" : "none",
+                      }}
+                    >
+                      <FolderSpecialOutlinedIcon aria-hidden="true" fontSize="small" />
+                    </IconButton>
+                  </span>
+                </PillButtonTooltip>
+                <PillButtonTooltip
+                  label={`${t("fileBrowser.search.navigation.itemTypeLabel")}: ${t(`fileBrowser.search.navigation.itemType.${navigationControls.itemType}`)}`}
+                >
+                  <span>
+                    <IconButton
+                      ref={itemTypeButtonRef}
+                      aria-label={t("fileBrowser.search.navigation.itemTypeLabel")}
+                      aria-description={t(`fileBrowser.search.navigation.itemType.${navigationControls.itemType}`)}
+                      aria-haspopup="menu"
+                      aria-expanded={navigationMenu === "itemType"}
+                      onKeyDown={(event) => handleNavigationControlKeyDown(event, "itemType")}
+                      onClick={(event) => {
+                        setNavigationMenuAnchor(event.currentTarget);
+                        setNavigationMenu("itemType");
+                      }}
+                      size="small"
+                      sx={{
+                        ...QUICK_BAR_ICON_BUTTON_SX,
+                        display: isFocused || navigationControlFocused || navigationMenu ? "inline-flex" : "none",
+                      }}
+                    >
+                      <FilterAltOutlinedIcon aria-hidden="true" fontSize="small" />
+                    </IconButton>
+                  </span>
+                </PillButtonTooltip>
+                <Menu anchorEl={navigationMenuAnchor} open={navigationMenu !== null} onClose={() => setNavigationMenu(null)}>
+                  {navigationMenu === "scope"
+                    ? (["connection", "subtree", "descendants_only"] as const).map((value) => (
+                        <MenuItem
+                          key={value}
+                          selected={navigationControls.scope === value}
+                          onClick={() => {
+                            navigationControls.onScopeChange(value);
+                            setNavigationMenu(null);
+                          }}
+                        >
+                          {t(`fileBrowser.search.navigation.scope.${value}`)}
+                        </MenuItem>
+                      ))
+                    : (["all", "directories", "files"] as const).map((value) => (
+                        <MenuItem
+                          key={value}
+                          selected={navigationControls.itemType === value}
+                          onClick={() => {
+                            navigationControls.onItemTypeChange(value);
+                            setNavigationMenu(null);
+                          }}
+                        >
+                          {t(`fileBrowser.search.navigation.itemType.${value}`)}
+                        </MenuItem>
+                      ))}
+                </Menu>
+              </Box>
+            )}
           </Box>
         </Paper>
 
-        {/* Dropdown results panel */}
+        {/* Quick-bar dropdown */}
         <Popper
           open={
             !statusDialog &&
+            !navigationMenu &&
+            !isModeMenuOpen &&
             !suppressDropdown &&
-            !disableDropdown &&
-            isDropdownOpen &&
-            (results.length > 0 || showNoResults || showSearchError || showRemoveError || showBelowMinimum || showSearchProgress)
+            (liveSearchControls
+              ? liveOptionsOpen
+              : !disableDropdown &&
+                isDropdownOpen &&
+                (results.length > 0 || showNoResults || showSearchError || showRemoveError || showBelowMinimum || showSearchProgress))
           }
+          disablePortal={Boolean(liveSearchControls)}
+          role={liveSearchControls ? "presentation" : undefined}
           anchorEl={anchorRef.current}
           placement="bottom"
           style={{
-            width: Math.min(DROPDOWN_WIDTH_PX, window.innerWidth - 16),
+            width: liveSearchControls ? "100%" : Math.min(DROPDOWN_WIDTH_PX, window.innerWidth - 16),
             zIndex: 1300,
           }}
           modifiers={[
@@ -1367,201 +1661,216 @@ export function UnifiedSearchBar({
               maxWidth: "100%",
             }}
           >
-            {/* Status indicator */}
-            {statusInfo && (
-              <Box
-                sx={{
-                  px: 2,
-                  py: 0.5,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 1,
-                  borderBottom: results.length > 0 || showBelowMinimum || showNoResults || showSearchError || showRemoveError ? 1 : 0,
-                  borderColor: "divider",
-                }}
-              >
-                {statusInfo.showSpinner && <CircularProgress size={14} />}
-                <Typography variant="caption" sx={{ color: "text.secondary", overflowWrap: "anywhere" }}>
-                  {statusInfo.loadDetails ? statusInfo.label.replace(/\.$/u, "") : statusInfo.label}
-                  {statusInfo.loadDetails && (
-                    <Trans
-                      i18nKey="fileBrowser.search.statusDetails.linkSuffix"
-                      components={{
-                        details: (
-                          <Link
-                            component="button"
-                            type="button"
-                            role="link"
-                            tabIndex={-1}
-                            underline="always"
-                            onPointerDown={(event) => event.preventDefault()}
-                            onClick={() => setStatusDialog(statusInfo)}
-                            sx={{ font: "inherit", verticalAlign: "baseline" }}
-                          />
-                        ),
-                      }}
-                    />
-                  )}
-                </Typography>
-              </Box>
-            )}
-
-            {/* Results list (virtualized) */}
-            {results.length > 0 && (
-              <Box
-                ref={setListContainer}
-                role="listbox"
-                sx={{
-                  maxHeight: resultsMaxHeight,
-                  overflowY: "auto",
-                  position: "relative",
-                }}
-              >
-                <Box
-                  sx={{
-                    height: rowVirtualizer.getTotalSize(),
-                    width: "100%",
-                    position: "relative",
-                  }}
-                >
-                  {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                    const result = results[virtualRow.index];
-                    if (!result) return null;
-                    if (result.kind === "group-header") {
-                      return (
-                        <Box
-                          key={result.id}
-                          sx={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            width: "100%",
-                            transform: `translateY(${virtualRow.start}px)`,
-                          }}
-                        >
-                          <QuickBarResultGroupHeader
-                            label={result.label}
-                            showDivider={virtualRow.index > 0}
-                            useCompactLayout={useCompactLayout}
-                          />
-                        </Box>
-                      );
-                    }
-                    return (
-                      <ListItemButton
-                        key={result.id}
-                        selected={virtualRow.index === selectedIndex}
-                        onClick={(event) => handleSelect(result.value, getSelectionAction(event))}
-                        onMouseEnter={() => setSelectedIndex(virtualRow.index)}
-                        sx={{
-                          py: 0.75,
-                          px: 2,
-                          position: "absolute",
-                          top: 0,
-                          left: 0,
-                          width: "100%",
-                          transform: `translateY(${virtualRow.start}px)`,
-                          "&.Mui-selected, &.Mui-selected:hover, &.Mui-selected.Mui-focusVisible": {
-                            backgroundColor: "action.selected",
-                          },
-                        }}
-                        role="option"
-                        aria-selected={virtualRow.index === selectedIndex}
-                      >
-                        <QuickBarResultRow result={result} useCompactLayout={useCompactLayout} />
-                      </ListItemButton>
-                    );
-                  })}
-                </Box>
-              </Box>
-            )}
-
-            {/* Below minimum query length hint */}
-            {showBelowMinimum && (
-              <Box sx={{ px: 2, py: 2, textAlign: "center" }}>
-                <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                  {belowMinimumFeedbackMessage}
-                </Typography>
-              </Box>
-            )}
-
-            {/* No results */}
-            {showNoResults && (
-              <Box sx={{ px: 2, py: 2, textAlign: "center" }}>
-                <Typography variant="body2" sx={{ color: "text.secondary" }}>
-                  {t("fileBrowser.search.results.none", { query: noResultsQuery })}
-                </Typography>
-              </Box>
-            )}
-
-            {showSearchError && (
-              <Box sx={{ px: 2, py: 2, textAlign: "center" }} role="alert">
-                <Typography variant="body2" sx={{ color: "error.main" }}>
-                  {t("fileBrowser.search.results.failed")}
-                </Typography>
-              </Box>
-            )}
-
-            {showRemoveError && (
-              <Box sx={{ px: 2, py: 2, textAlign: "center" }} role="alert">
-                <Typography variant="body2" sx={{ color: "error.main" }}>
-                  {t("fileBrowser.search.results.removeFailed")}
-                </Typography>
-              </Box>
-            )}
-
-            {/* Footer */}
-            {(footerHint || provider.footerInfo) && (
-              <Box
-                sx={{
-                  px: 2,
-                  py: 0.75,
-                  borderTop: 1,
-                  borderColor: "divider",
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 1,
-                  justifyContent: "space-between",
-                  backgroundColor: "action.selected",
-                }}
-              >
-                {!useCompactLayout && showKeyboardHints && footerHint && (
+            {liveSearchControls ? (
+              <LiveSearchOptionsPanel
+                options={liveSearchControls.options}
+                onChange={liveSearchControls.onOptionsChange}
+                listRef={liveOptionsListRef}
+                onEscape={returnFromLiveOptions}
+                onTab={returnFromLiveOptions}
+                useCompactLayout={useCompactLayout}
+                showKeyboardHints={!useCompactLayout && showKeyboardHints}
+              />
+            ) : (
+              <>
+                {/* Status indicator */}
+                {statusInfo && (
                   <Box
                     sx={{
+                      px: 2,
+                      py: 0.5,
                       display: "flex",
                       alignItems: "center",
-                      columnGap: 1.25,
-                      color: "text.secondary",
-                      flex: 1,
-                      fontSize: "0.75rem",
-                      minWidth: 0,
-                      rowGap: 0.5,
-                      flexWrap: "wrap",
-                      "& > span": {
-                        whiteSpace: "nowrap",
-                      },
-                      "& kbd": {
-                        fontFamily: "inherit",
-                        fontSize: "0.7rem",
-                        lineHeight: 1,
-                        px: 0.5,
-                        py: 0.25,
-                        borderRadius: 0.5,
-                        border: 1,
-                        borderColor: "divider",
-                        backgroundColor: "background.default",
-                      },
+                      gap: 1,
+                      borderBottom: results.length > 0 || showBelowMinimum || showNoResults || showSearchError || showRemoveError ? 1 : 0,
+                      borderColor: "divider",
                     }}
                   >
-                    {footerHint}
+                    {statusInfo.showSpinner && <CircularProgress size={14} />}
+                    <Typography variant="caption" sx={{ color: "text.secondary", overflowWrap: "anywhere" }}>
+                      {statusInfo.loadDetails ? statusInfo.label.replace(/\.$/u, "") : statusInfo.label}
+                      {statusInfo.loadDetails && (
+                        <Trans
+                          i18nKey="fileBrowser.search.statusDetails.linkSuffix"
+                          components={{
+                            details: (
+                              <Link
+                                component="button"
+                                type="button"
+                                role="link"
+                                tabIndex={-1}
+                                underline="always"
+                                onPointerDown={(event) => event.preventDefault()}
+                                onClick={() => setStatusDialog(statusInfo)}
+                                sx={{ font: "inherit", verticalAlign: "baseline" }}
+                              />
+                            ),
+                          }}
+                        />
+                      )}
+                    </Typography>
                   </Box>
                 )}
-                {provider.footerInfo && (
-                  <Typography variant="caption" sx={{ color: "text.secondary", flexShrink: 0, pt: 0.25 }}>
-                    {provider.footerInfo(selectableResultCount)}
-                  </Typography>
+
+                {/* Results list (virtualized) */}
+                {results.length > 0 && (
+                  <Box
+                    ref={setListContainer}
+                    role="listbox"
+                    sx={{
+                      maxHeight: resultsMaxHeight,
+                      overflowY: "auto",
+                      position: "relative",
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        height: rowVirtualizer.getTotalSize(),
+                        width: "100%",
+                        position: "relative",
+                      }}
+                    >
+                      {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const result = results[virtualRow.index];
+                        if (!result) return null;
+                        if (result.kind === "group-header") {
+                          return (
+                            <Box
+                              key={result.id}
+                              sx={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: "100%",
+                                transform: `translateY(${virtualRow.start}px)`,
+                              }}
+                            >
+                              <QuickBarResultGroupHeader
+                                label={result.label}
+                                showDivider={virtualRow.index > 0}
+                                useCompactLayout={useCompactLayout}
+                              />
+                            </Box>
+                          );
+                        }
+                        return (
+                          <ListItemButton
+                            key={result.id}
+                            selected={virtualRow.index === selectedIndex}
+                            onClick={(event) => handleSelect(result.value, getSelectionAction(event))}
+                            onMouseEnter={() => setSelectedIndex(virtualRow.index)}
+                            sx={{
+                              ...quickBarDropdownRowPadding,
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              transform: `translateY(${virtualRow.start}px)`,
+                              "&.Mui-selected, &.Mui-selected:hover, &.Mui-selected.Mui-focusVisible": quickBarDropdownActiveRow,
+                            }}
+                            role="option"
+                            aria-selected={virtualRow.index === selectedIndex}
+                          >
+                            <QuickBarResultRow
+                              result={result}
+                              useCompactLayout={useCompactLayout}
+                              showRecentBadge={Boolean(query.trim())}
+                            />
+                          </ListItemButton>
+                        );
+                      })}
+                    </Box>
+                  </Box>
                 )}
-              </Box>
+
+                {/* Below minimum query length hint */}
+                {showBelowMinimum && (
+                  <Box sx={{ px: 2, py: 2, textAlign: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      {belowMinimumFeedbackMessage}
+                    </Typography>
+                  </Box>
+                )}
+
+                {/* No results */}
+                {showNoResults && (
+                  <Box sx={{ px: 2, py: 2, textAlign: "center" }}>
+                    <Typography variant="body2" sx={{ color: "text.secondary" }}>
+                      {t("fileBrowser.search.results.none", { query: noResultsQuery })}
+                    </Typography>
+                  </Box>
+                )}
+
+                {showSearchError && (
+                  <Box sx={{ px: 2, py: 2, textAlign: "center" }} role="alert">
+                    <Typography variant="body2" sx={{ color: "error.main" }}>
+                      {t("fileBrowser.search.results.failed")}
+                    </Typography>
+                  </Box>
+                )}
+
+                {showRemoveError && (
+                  <Box sx={{ px: 2, py: 2, textAlign: "center" }} role="alert">
+                    <Typography variant="body2" sx={{ color: "error.main" }}>
+                      {t("fileBrowser.search.results.removeFailed")}
+                    </Typography>
+                  </Box>
+                )}
+
+                {/* Footer */}
+                {(footerHint || provider.footerInfo) && (
+                  <Box
+                    sx={{
+                      px: 2,
+                      py: 0.75,
+                      borderTop: 1,
+                      borderColor: "divider",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 1,
+                      justifyContent: "space-between",
+                      backgroundColor: "action.selected",
+                    }}
+                  >
+                    {!useCompactLayout && showKeyboardHints && footerHint && (
+                      <Box
+                        sx={{
+                          display: "flex",
+                          alignItems: "center",
+                          columnGap: 1.25,
+                          color: "text.secondary",
+                          flex: 1,
+                          fontSize: "0.75rem",
+                          minWidth: 0,
+                          rowGap: 0.5,
+                          flexWrap: "wrap",
+                          "& > span": {
+                            whiteSpace: "nowrap",
+                          },
+                          "& kbd": {
+                            fontFamily: "inherit",
+                            fontSize: "0.7rem",
+                            lineHeight: 1,
+                            px: 0.5,
+                            py: 0.25,
+                            borderRadius: 0.5,
+                            border: 1,
+                            borderColor: "divider",
+                            backgroundColor: "background.default",
+                          },
+                        }}
+                      >
+                        {footerHint}
+                      </Box>
+                    )}
+                    {provider.footerInfo && (
+                      <Typography variant="caption" sx={{ color: "text.secondary", flexShrink: 0, pt: 0.25 }}>
+                        {provider.footerInfo(selectableResultCount)}
+                      </Typography>
+                    )}
+                  </Box>
+                )}
+              </>
             )}
           </Paper>
         </Popper>

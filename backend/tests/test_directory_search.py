@@ -130,6 +130,18 @@ def test_directory_search_http_latency_measurement(client, mock_cache_manager, a
 class TestSearchDirectories:
     """Tests for GET /{connection_id}/directories endpoint."""
 
+    def test_scoped_search_and_missing_folder_status(self, client, auth_headers_user, test_connection, mock_cache_manager):
+        url = f"/api/browse/{test_connection.id}/directories"
+        response = client.get(url, headers=auth_headers_user, params={"q": "work", "scope_path": "documents", "scope_mode": "subtree"})
+        assert response.status_code == 200
+        assert response.json()["results"] == ["documents/work"]
+        assert response.json()["scope_not_indexed"] is False
+        missing = client.get(url, headers=auth_headers_user, params={"q": "", "scope_path": "missing", "scope_mode": "subtree"})
+        assert missing.status_code == 200
+        assert missing.json()["scope_not_indexed"] is True
+        invalid = client.get(url, headers=auth_headers_user, params={"scope_path": "documents"})
+        assert invalid.status_code == 400
+
     def test_legacy_search_does_not_advertise_index_contract(self, client, auth_headers_user, test_connection, mock_cache_manager):
         """Only the SQLite implementation can opt in to compatible quiet refresh."""
         cache = MagicMock(spec=ConnectionDirectoryCache)

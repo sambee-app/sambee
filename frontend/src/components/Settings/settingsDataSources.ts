@@ -34,6 +34,7 @@ export const SETTINGS_DATA_CACHE_KEYS = {
   adminSystem: "settings-data/admin-system",
   directoryIndexBackend: "settings-data/directory-index/backend",
   directoryIndexCompanion: "settings-data/directory-index/companion",
+  filesystemSearch: "settings-data/filesystem-search",
   adminHealthMonitoring: "settings-data/admin-health-monitoring",
   adminSmb: "settings-data/admin-smb",
   adminNetwork: "settings-data/admin-network",
@@ -210,6 +211,8 @@ export function prefetchSettingsDataForItem(item: SettingsNavItem) {
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminSystem, loadAdvancedSettingsData);
     case "admin-smb":
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminSmb, loadSmbSettingsData);
+    case "admin-filesystem-search":
+      return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.filesystemSearch, () => api.getFilesystemSearchSettings());
     case "admin-health-monitoring":
       return primeCachedAsyncData(SETTINGS_DATA_CACHE_KEYS.adminHealthMonitoring, loadHealthMonitoringSettingsData);
     case "admin-about":

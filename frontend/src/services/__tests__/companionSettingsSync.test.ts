@@ -53,6 +53,7 @@ function metadata(): CompanionSettingsMetadata {
     theme: { version: 1, marker: "theme", user_scope: "user" },
     localization: { version: 1, marker: "locale", user_scope: "user" },
     directory_index: { version: 1, marker: "0", user_scope: null },
+    filesystem_search: { version: 1, marker: "search", user_scope: null },
   };
 }
 function status(): CompanionSettingsStatus {
@@ -66,7 +67,7 @@ function status(): CompanionSettingsStatus {
     challenge: null,
     message: null,
     sections: Object.fromEntries(
-      (["theme", "localization", "directory_index"] as const).map((name) => [
+      (["theme", "localization", "directory_index", "filesystem_search"] as const).map((name) => [
         name,
         {
           ...desired[name],
@@ -76,6 +77,7 @@ function status(): CompanionSettingsStatus {
         },
       ])
     ),
+    results: { theme: "synchronized", localization: "synchronized", directory_index: "synchronized", filesystem_search: "synchronized" },
   };
 }
 async function settle() {
@@ -159,6 +161,53 @@ describe("shared Companion settings lifecycle", () => {
     expect(mocks.redeem).toHaveBeenCalledWith("grant", expect.objectContaining({ signal: expect.anything() }));
   });
 
+  it("delivers the authoritative search policy even when a different user owns preferences", async () => {
+    const native = status();
+    native.sections.filesystem_search!.marker = "old";
+    native.sections.theme!.user_scope = "previous-user";
+    native.sections.localization!.user_scope = "previous-user";
+    mocks.status.mockResolvedValue(native);
+    mocks.redeem.mockResolvedValue(status());
+    companionSettingsSync.start();
+    await settle();
+    expect(mocks.grant).toHaveBeenCalledWith(
+      expect.objectContaining({ sections: ["filesystem_search"], switch_user: false }),
+      expect.objectContaining({ params: expect.objectContaining({ include_filesystem_search: true }) })
+    );
+    expect(companionSettingsSync.getSnapshot().sections.filesystem_search).toBe("synchronized");
+  });
+
+  it.each(["backend", "companion"])("keeps legacy sync working when %s lacks search policy support", async (old) => {
+    const desired = metadata();
+    const native = status();
+    if (old === "backend") delete desired.filesystem_search;
+    else delete native.results!.filesystem_search;
+    native.sections.theme!.marker = "old-theme";
+    mocks.metadata.mockResolvedValue(desired);
+    mocks.status.mockResolvedValue(native);
+    mocks.redeem.mockResolvedValue(status());
+    companionSettingsSync.start();
+    await settle();
+    expect(mocks.grant).toHaveBeenCalledWith(expect.objectContaining({ sections: ["theme"] }), expect.anything());
+    expect(companionSettingsSync.getSnapshot().sections.filesystem_search).toBe("update_required");
+    expect(companionSettingsSync.getSnapshot().phase).toBe("update_required");
+    expect(companionSettingsSync.getSnapshot().message).toContain("Update Sambee and Companion to deliver file-system search limits");
+  });
+
+  it("retains the last policy status when search delivery fails", async () => {
+    const native = status();
+    native.sections.filesystem_search!.marker = "old";
+    mocks.status.mockResolvedValue(native);
+    mocks.redeem.mockRejectedValue(new Error("Cannot deliver policy. Retry."));
+    companionSettingsSync.start();
+    await settle();
+    expect(companionSettingsSync.getSnapshot()).toMatchObject({
+      phase: "delivery_failed",
+      sections: { filesystem_search: "delivery_failed", theme: "synchronized" },
+      status: { sections: { filesystem_search: { marker: "old" } } },
+    });
+  });
+
   it.each(["localization.language", "localization.regional_locale"])(
     "delivers a persisted %s change with separate request options",
     async (field) => {
@@ -176,12 +225,15 @@ describe("shared Companion settings lifecycle", () => {
       await settle();
 
       const signal = mocks.metadata.mock.calls[1]![0].signal;
-      expect(mocks.metadata).toHaveBeenLastCalledWith({ signal, params: { browser_language: "en", browser_regional_locale: "en-US" } });
+      expect(mocks.metadata).toHaveBeenLastCalledWith({
+        signal,
+        params: { browser_language: "en", browser_regional_locale: "en-US", include_filesystem_search: true },
+      });
       expect(mocks.status).toHaveBeenLastCalledWith({ signal });
       expect(mocks.challenge).toHaveBeenCalledWith({ signal });
       expect(mocks.grant).toHaveBeenCalledWith(expect.objectContaining({ sections: ["localization"], switch_user: true }), {
         signal,
-        params: { browser_language: "en", browser_regional_locale: "en-US" },
+        params: { browser_language: "en", browser_regional_locale: "en-US", include_filesystem_search: true },
       });
       expect(mocks.redeem).toHaveBeenCalledWith("locale-grant", { signal });
       expect(companionSettingsSync.getSnapshot().phase).toBe("synchronized");
@@ -199,11 +251,11 @@ describe("shared Companion settings lifecycle", () => {
     companionSettingsSync.start();
     await settle();
     expect(mocks.metadata).toHaveBeenCalledWith(
-      expect.objectContaining({ params: { browser_language: "en", browser_regional_locale: "en-US" } })
+      expect.objectContaining({ params: { browser_language: "en", browser_regional_locale: "en-US", include_filesystem_search: true } })
     );
     expect(mocks.grant).toHaveBeenCalledWith(
       expect.objectContaining({ sections: ["localization"] }),
-      expect.objectContaining({ params: { browser_language: "en", browser_regional_locale: "en-US" } })
+      expect.objectContaining({ params: { browser_language: "en", browser_regional_locale: "en-US", include_filesystem_search: true } })
     );
     expect(companionSettingsSync.getSnapshot()).toMatchObject({
       phase: "update_required",
@@ -229,7 +281,7 @@ describe("shared Companion settings lifecycle", () => {
       await settle();
       expect(mocks.grant).toHaveBeenCalledWith(
         expect.objectContaining({ sections: ["localization"], switch_user: false }),
-        expect.objectContaining({ params: { browser_language: "de", browser_regional_locale: "de-CH" } })
+        expect.objectContaining({ params: { browser_language: "de", browser_regional_locale: "de-CH", include_filesystem_search: true } })
       );
     } finally {
       browserLocales.mockRestore();
@@ -298,7 +350,7 @@ describe("shared Companion settings lifecycle", () => {
     desired.backend_identity = "new-backend";
     desired.theme.user_scope = "new-server-user";
     desired.localization.user_scope = "new-server-user";
-    expect(changedSettingsSections(desired, status(), false)).toEqual(["theme", "localization", "directory_index"]);
+    expect(changedSettingsSections(desired, status(), false)).toEqual(["theme", "localization", "directory_index", "filesystem_search"]);
   });
 
   it("permits an explicit preference change to update user scope", async () => {
@@ -522,6 +574,7 @@ describe("shared Companion settings lifecycle", () => {
     native.status = "delivery_failed";
     native.message = "Theme settings were not saved. Check private storage.";
     native.sections.theme!.result = "delivery_failed";
+    native.results!.theme = "delivery_failed";
     native.sections.theme!.user_scope = "other-user";
     native.sections.localization!.user_scope = "other-user";
     native.results = { theme: "delivery_failed", localization: "synchronized", directory_index: "synchronized" };
@@ -542,6 +595,7 @@ describe("shared Companion settings lifecycle", () => {
     native.status = "delivery_failed";
     native.message = "Theme settings were not saved. Check private storage.";
     native.sections.theme!.result = "delivery_failed";
+    native.results!.theme = "delivery_failed";
     native.sections.theme!.user_scope = "other-user";
     native.sections.localization!.user_scope = "other-user";
     const outdated = structuredClone(native);
