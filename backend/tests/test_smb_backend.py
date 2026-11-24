@@ -1302,6 +1302,46 @@ class TestRandomAccessReading:
     """Test operation-scoped SMB readers used by archive operations."""
 
     @pytest.mark.asyncio
+    async def test_search_archive_open_timeout_retains_lease_until_late_open_is_closed(self, monkeypatch):
+        started = Event()
+        finish = Event()
+        released = asyncio.Event()
+        handle = MagicMock(spec=["close", "fd", "name"])
+        parent = MagicMock()
+
+        def open_file(*_args, **_kwargs):
+            started.set()
+            assert finish.wait(2)
+            return handle
+
+        parent.open_search_file.side_effect = open_file
+
+        @asynccontextmanager
+        async def lease(**_kwargs):
+            try:
+                yield
+            finally:
+                released.set()
+
+        pool = MagicMock()
+        pool.get_connection = lease
+        backend = SMBBackend(host="server.local", share_name="share", username="user", password="pass")
+        monkeypatch.setattr("app.storage.smb.get_connection_pool", AsyncMock(return_value=pool))
+        monkeypatch.setattr("app.storage.smb.SMB_FILE_OPEN_TIMEOUT_SECONDS", 0.01)
+        opening = asyncio.create_task(backend.open_search_archive_reader(parent, "archive.zip", None))
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            await asyncio.sleep(0.05)
+            assert not opening.done()
+            assert not released.is_set()
+        finally:
+            finish.set()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(opening, 2)
+        handle.close.assert_called_once()
+        assert released.is_set()
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("cancelled", [False, True])
     @pytest.mark.parametrize("late_failure", [False, True])
     async def test_abandoned_read_keeps_handle_until_worker_exits(self, cancelled, late_failure):

@@ -516,6 +516,7 @@ export const BROWSER_SHORTCUTS = {
     },
     label: "/",
     helpGroup: "search",
+    allowInInputWithin: '[data-file-row="true"]',
   },
   COMMAND_PALETTE: {
     id: "command-palette",

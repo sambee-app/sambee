@@ -42,6 +42,7 @@ from smbprotocol.tree import TreeConnect
 
 from app.core.config import settings, static
 from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, ScanProgress
+from app.core.search_scope import SearchScope
 from app.models.system_settings import DirectoryIndexPolicy
 from app.services.directory_index import (
     ITEM_ISSUE_CODES,
@@ -1723,6 +1724,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
         *,
         include_dot_directories: bool = False,
         cancelled: threading.Event | None = None,
+        scope: SearchScope | None = None,
     ) -> DirectoryIndexSearch:
         self.touch()
         if self._stop_event.is_set():
@@ -1735,7 +1737,7 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             raise DirectorySourceUnavailableError(
                 "Directory source root is unavailable. Restore source access and retry the search after verification."
             )
-        if not query.strip():
+        if not query.strip() and scope is None:
             if cancelled is not None and cancelled.is_set():
                 raise InterruptedError("Directory search was cancelled. Retry the search.")
             return self.index.cached_status()
@@ -1743,7 +1745,11 @@ class SQLiteConnectionDirectoryCache(ConnectionDirectoryCache):
             raise TimeoutError("Directory query workers are busy. Wait briefly and retry the search.")
         try:
             response = self.index.search(
-                query.replace("\\", "/"), limit=max_results, include_dot_directories=include_dot_directories, cancelled=cancelled
+                query.replace("\\", "/"),
+                limit=max_results,
+                include_dot_directories=include_dot_directories,
+                cancelled=cancelled,
+                scope=scope,
             )
             if self._stop_event.is_set():
                 raise InterruptedError("Directory source was replaced or stopped. Retry the search on the current connection.")

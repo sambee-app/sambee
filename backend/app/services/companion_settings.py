@@ -12,7 +12,9 @@ from app.models.companion_settings import (
     CompanionLocalization,
     CompanionTheme,
     DirectoryIndexSection,
+    FilesystemSearchSection,
     LocalizationSection,
+    SearchSettingsMetadata,
     SectionMarker,
     SettingsMetadata,
     ThemeSection,
@@ -21,7 +23,7 @@ from app.models.theme import StoredTheme, ThemeDefinition
 from app.models.user import User
 from app.models.user_settings import CatalogLanguage
 from app.services.directory_policy_grants import backend_policy_identity
-from app.services.system_settings import build_directory_index_settings_read
+from app.services.system_settings import build_directory_index_settings_read, get_filesystem_search_policy
 from app.services.user_settings import build_current_user_settings_read
 
 BUILT_IN_THEMES = {
@@ -78,4 +80,19 @@ def build_settings_metadata(
         theme=SectionMarker.model_validate(theme.model_dump(exclude={"payload"})),
         localization=SectionMarker.model_validate(localization.model_dump(exclude={"payload"})),
         directory_index=SectionMarker.model_validate(directory.model_dump(exclude={"payload"})),
+    )
+
+
+def build_filesystem_search_section(session: Session) -> FilesystemSearchSection:
+    policy = get_filesystem_search_policy(session)
+    return FilesystemSearchSection(marker=section_digest(policy), payload=policy)
+
+
+def build_search_settings_metadata(
+    user: User, session: Session, browser_language: CatalogLanguage, browser_regional_locale: str
+) -> SearchSettingsMetadata:
+    metadata = build_settings_metadata(user, session, browser_language, browser_regional_locale)
+    section = build_filesystem_search_section(session)
+    return SearchSettingsMetadata(
+        **metadata.model_dump(), filesystem_search=SectionMarker.model_validate(section.model_dump(exclude={"payload"}))
     )

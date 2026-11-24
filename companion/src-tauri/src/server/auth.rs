@@ -23,6 +23,7 @@ use sha2::Sha256;
 use url::Url;
 
 use super::errors::ApiError;
+use super::pairing::PairingState;
 use super::AppState;
 
 /// Name of the header carrying the HMAC value.
@@ -143,7 +144,7 @@ fn is_legacy_browser_signature(secret: &str, timestamp: &str, signature: &str) -
 ///
 /// Extracts the `Origin` header to determine which pairing secret to use,
 /// then verifies the HMAC in `X-Companion-Secret` against the shared secret.
-pub async fn require_auth(State(state): State<Arc<AppState>>, request: Request<axum::body::Body>, next: Next) -> Response {
+pub async fn require_auth(State(pairing): State<Arc<PairingState>>, request: Request<axum::body::Body>, next: Next) -> Response {
     let log_context = AuthLogContext {
         auth_transport: "header",
         method: request.method().as_str(),
@@ -152,7 +153,7 @@ pub async fn require_auth(State(state): State<Arc<AppState>>, request: Request<a
 
     match extract_auth_credentials(&request) {
         Ok((origin, hmac_value, timestamp_str)) => {
-            match validate_hmac(&state, &origin, &hmac_value, &timestamp_str, request.uri(), &log_context) {
+            match validate_hmac(&pairing, &origin, &hmac_value, &timestamp_str, request.uri(), &log_context) {
                 Ok(()) => next.run(request).await,
                 Err(e) => e.into_response(),
             }
@@ -174,7 +175,14 @@ pub async fn require_auth_or_query(State(state): State<Arc<AppState>>, request: 
         path: request.uri().path(),
     };
     if let Ok((origin, hmac_value, timestamp_str)) = extract_auth_credentials(&request) {
-        return match validate_hmac(&state, &origin, &hmac_value, &timestamp_str, request.uri(), &header_log_context) {
+        return match validate_hmac(
+            &state.pairing,
+            &origin,
+            &hmac_value,
+            &timestamp_str,
+            request.uri(),
+            &header_log_context,
+        ) {
             Ok(()) => next.run(request).await,
             Err(e) => e.into_response(),
         };
@@ -204,7 +212,14 @@ pub async fn require_auth_or_query(State(state): State<Arc<AppState>>, request: 
         path: request.uri().path(),
     };
 
-    match validate_hmac(&state, &origin, &hmac_value, &timestamp_str, request.uri(), &query_log_context) {
+    match validate_hmac(
+        &state.pairing,
+        &origin,
+        &hmac_value,
+        &timestamp_str,
+        request.uri(),
+        &query_log_context,
+    ) {
         Ok(()) => next.run(request).await,
         Err(e) => e.into_response(),
     }
@@ -247,12 +262,12 @@ pub(super) fn validate_hmac_public(
     uri: &Uri,
     log_context: &AuthLogContext,
 ) -> Result<(), ApiError> {
-    validate_hmac(state, origin, hmac_value, timestamp_str, uri, log_context)
+    validate_hmac(&state.pairing, origin, hmac_value, timestamp_str, uri, log_context)
 }
 
 /// Validate HMAC credentials against the stored secret for an origin.
 fn validate_hmac(
-    state: &AppState,
+    pairing: &PairingState,
     origin: &str,
     hmac_value: &str,
     timestamp_str: &str,
@@ -262,7 +277,7 @@ fn validate_hmac(
     let origin = require_normalized_browser_origin(origin)?;
 
     // Get shared secret for this origin from pairing state
-    let secret = state.pairing.get_secret_for_origin(&origin).ok_or_else(|| {
+    let secret = pairing.get_secret_for_origin(&origin).ok_or_else(|| {
         warn!(
             "Auth rejected: no pairing found for origin {origin}; transport={}; method={}; path={}",
             log_context.auth_transport, log_context.method, log_context.path,
@@ -317,8 +332,8 @@ fn validate_hmac(
         return Err(ApiError::forbidden_code("Invalid authentication", AUTH_SIGNATURE_MISMATCH_CODE));
     }
 
-    if !state.pairing.is_origin_paired(&origin) {
-        state.pairing.record_verified_origin(
+    if !pairing.is_origin_paired(&origin) {
+        pairing.record_verified_origin(
             &origin,
             crate::server::pairing::VerifiedOriginRecordReason::RecoveredFromAuthenticatedRequest,
         );

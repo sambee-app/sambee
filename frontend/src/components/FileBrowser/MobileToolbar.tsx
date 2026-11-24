@@ -36,6 +36,8 @@ export function MobileToolbar({
   disableTabFocus,
   modeOptions,
   showKeyboardHints,
+  navigationControls,
+  liveSearchControls,
 }: MobileToolbarProps) {
   const { t } = useTranslation();
 
@@ -73,6 +75,8 @@ export function MobileToolbar({
             disableTabFocus={disableTabFocus}
             modeOptions={modeOptions}
             showKeyboardHints={showKeyboardHints}
+            navigationControls={navigationControls}
+            liveSearchControls={liveSearchControls}
           />
         </Box>
       ) : (

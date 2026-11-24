@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 pub const APPLICATION_ID: i64 = 1396853073;
@@ -510,6 +510,10 @@ fn unicode_contract() -> &'static UnicodeContract {
     CONTRACT.get_or_init(|| serde_json::from_str(UNICODE_CONTRACT).expect("Embedded search Unicode contract must pass contract tests"))
 }
 
+pub(super) fn is_search_whitespace(character: char) -> bool {
+    unicode_contract().whitespace.contains(&character)
+}
+
 fn is_word_character(character: char) -> bool {
     let codepoint = u32::from(character);
     unicode_contract()
@@ -645,6 +649,45 @@ pub fn validate_directory_path(path: &str) -> Result<(), IndexError> {
     Ok(())
 }
 
+#[derive(Clone, Debug)]
+pub struct SearchScope {
+    pub path: String,
+    pub mode: SearchScopeMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SearchScopeMode {
+    Subtree,
+    DescendantsOnly,
+}
+
+pub const SCOPE_MODE_SUBTREE: &str = "subtree";
+pub const SCOPE_MODE_DESCENDANTS_ONLY: &str = "descendants_only";
+
+impl SearchScope {
+    pub fn parse(path: Option<String>, mode: Option<String>) -> Result<Option<Self>, IndexError> {
+        let (path, mode) = match (path, mode) {
+            (None, None) => return Ok(None),
+            (Some(path), Some(mode)) => (path, mode),
+            _ => return Err(IndexError::Invalid("Provide both scope_path and scope_mode, or omit both.")),
+        };
+        let mode = match mode.as_str() {
+            SCOPE_MODE_SUBTREE => SearchScopeMode::Subtree,
+            SCOPE_MODE_DESCENDANTS_ONLY => SearchScopeMode::DescendantsOnly,
+            _ => return Err(IndexError::Invalid("Invalid scope_mode. Use subtree or descendants_only.")),
+        };
+        if path.chars().count() > MAX_QUERY_BYTES || path.chars().any(|character| character < ' ') {
+            return Err(IndexError::Invalid(
+                "Scope path is too long or contains control characters. Correct the path and retry.",
+            ));
+        }
+        if !path.is_empty() {
+            validate_directory_path(&path)?;
+        }
+        Ok(Some(Self { path, mode }))
+    }
+}
+
 pub(super) fn epoch_milliseconds() -> Result<i64, IndexError> {
     let elapsed = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -696,6 +739,7 @@ pub struct DirectoryIndexSearch {
     pub last_verified_at_ms: Option<i64>,
     pub query_plan: &'static str,
     pub issue_count: i64,
+    pub scope_not_indexed: bool,
 }
 
 pub struct DirectoryIndex {
@@ -1169,6 +1213,7 @@ impl DirectoryIndex {
                     last_verified_at_ms: row.get(3)?,
                     issue_count: row.get(4)?,
                     query_plan: "empty",
+                    scope_not_indexed: false,
                 })
             },
         )?)
@@ -2555,6 +2600,18 @@ impl DirectoryIndexReader {
         cancelled: &Arc<AtomicBool>,
         force_scan: bool,
     ) -> Result<DirectoryIndexSearch, IndexError> {
+        self.search_scoped(query, limit, include_dot, cancelled, force_scan, None)
+    }
+
+    pub fn search_scoped(
+        &self,
+        query: &str,
+        limit: usize,
+        include_dot: bool,
+        cancelled: &Arc<AtomicBool>,
+        force_scan: bool,
+        scope: Option<&SearchScope>,
+    ) -> Result<DirectoryIndexSearch, IndexError> {
         let terms = search_terms(query)?;
         if !(1..=MAX_RESULT_LIMIT).contains(&limit) {
             return Err(IndexError::Invalid("Directory result limit is outside the supported range."));
@@ -2592,7 +2649,19 @@ impl DirectoryIndexReader {
             last_verified_at_ms: verified,
             query_plan: "empty",
             issue_count,
+            scope_not_indexed: false,
         };
+        if let Some(scope) = scope.filter(|scope| !scope.path.is_empty()) {
+            let found: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM directories WHERE generation_id = ? AND path = ?)",
+                params![generation, scope.path],
+                |row| row.get(0),
+            )?;
+            if !found {
+                response.scope_not_indexed = true;
+                return Ok(response);
+            }
+        }
         if terms.is_empty() {
             return Ok(response);
         }
@@ -2609,18 +2678,44 @@ impl DirectoryIndexReader {
             .map(|term| format!("\"{}\"", term.replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(" OR ");
+        let mut parameters = vec![Value::Integer(generation), Value::Integer(i64::from(include_dot))];
+        if trigram {
+            parameters.push(Value::Text(expression));
+        }
+        if let Some(scope) = scope {
+            if !scope.path.is_empty() {
+                sql.push_str(" AND directories.path > ? AND directories.path < ?");
+                parameters.push(Value::Text(format!("{}/", scope.path)));
+                parameters.push(Value::Text(format!("{}0", scope.path)));
+            }
+            if scope.mode == SearchScopeMode::DescendantsOnly {
+                sql.push_str(" AND directories.depth > ?");
+                let depth = if scope.path.is_empty() {
+                    0
+                } else {
+                    i64::try_from(scope.path.bytes().filter(|byte| *byte == b'/').count() + 1)
+                        .map_err(|_| IndexError::Invalid("Scope path is too deep. Select a shorter path."))?
+                };
+                parameters.push(Value::Integer(depth));
+            }
+        }
+        let scope_key_length = scope
+            .filter(|scope| !scope.path.is_empty())
+            .map_or(0, |scope| normalize_search_text(&scope.path).len() + 1);
         let mut statement = transaction.prepare(&sql)?;
-        let mut rows = if trigram {
-            statement.query(params![generation, include_dot, expression])?
-        } else {
-            statement.query(params![generation, include_dot])?
-        };
+        let mut rows = statement.query(params_from_iter(parameters.iter()))?;
         let mut best = BinaryHeap::with_capacity(limit);
         while let Some(row) = rows.next()? {
             if interrupted() {
                 return Err(IndexError::Interrupted);
             }
-            let path_key: String = row.get(1)?;
+            let full_path_key: String = row.get(1)?;
+            let path_key = full_path_key
+                .get(scope_key_length..)
+                .ok_or(IndexError::Invalid(
+                    "Directory scope does not match the stored search key. Rebuild the index.",
+                ))?
+                .to_owned();
             let basename_key: String = row.get(2)?;
             let matched: Vec<_> = terms.iter().filter(|term| path_key.contains(term.as_str())).collect();
             if matched.is_empty() {
@@ -4206,6 +4301,54 @@ mod tests {
     use serde_json::json;
 
     const FIXTURES: &str = include_str!("../../../../shared/directory-index/search-fixtures.json");
+
+    #[test]
+    fn shared_scoped_fixtures_match_scan_and_trigram() {
+        let fixtures: serde_json::Value = serde_json::from_str(FIXTURES).unwrap();
+        let temporary = tempfile::tempdir().unwrap();
+        let mut index = DirectoryIndex::open(
+            &temporary.path().join("private").join("scope.sqlite3"),
+            SourceKind::Local,
+            &json!({"root": "fixture"}),
+        )
+        .unwrap();
+        let paths = fixtures["scope_paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| path.as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        index.write_paths(paths, None).unwrap();
+        let reader = index.reader();
+        for case in fixtures["scope_searches"].as_array().unwrap() {
+            let scope = SearchScope::parse(
+                Some(case["scope_path"].as_str().unwrap().to_owned()),
+                Some(case["scope_mode"].as_str().unwrap().to_owned()),
+            )
+            .unwrap();
+            let expected: HashSet<_> = case["expected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value.as_str().unwrap())
+                .collect();
+            for force_scan in [false, true] {
+                let result = reader
+                    .search_scoped(
+                        case["query"].as_str().unwrap(),
+                        MAX_RESULT_LIMIT,
+                        false,
+                        &Arc::new(AtomicBool::new(false)),
+                        force_scan,
+                        scope.as_ref(),
+                    )
+                    .unwrap();
+                assert_eq!(result.scope_not_indexed, case["missing"].as_bool().unwrap());
+                assert_eq!(result.results.iter().map(|row| row.path.as_str()).collect::<HashSet<_>>(), expected);
+                assert_eq!(result.total_matches as usize, expected.len());
+            }
+        }
+    }
 
     #[test]
     fn shared_fixtures_match_scan_and_trigram() {

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "limits": {
+    "query_utf8_bytes": 1024,
+    "zip_central_directory_bytes": 16384,
+    "pending_directory_bytes": 1048576,
+    "pending_directory_entry_bytes": 256,
+    "result_batch_items": 64,
+    "stream_record_bytes": 8388608,
+    "queued_batches": 4,
+    "skip_reason_types": 8
+  },
+  "policy_defaults": {
+    "concurrent_searches": 1,
+    "max_seconds": 30,
+    "max_results": 500
+  },
+  "policy_bounds": {
+    "concurrent_searches": {"min": 1, "max": 2},
+    "max_seconds": {"min": 1, "max": 60},
+    "max_results": {"min": 1, "max": 1000}
+  },
+  "directory_search_measurement": {
+    "directory_entries": 8000,
+    "matching_files": 1000,
+    "smb_fake_seconds": 2.124,
+    "smb_fake_python_peak_bytes": 11151225,
+    "note": "The fake SMB server retains request records during the measurement. This is not a production memory or latency guarantee."
+  },
+  "zip_projection_measurement": {
+    "central_directory_bytes": 16047,
+    "inferred_directories": 8000,
+    "approximate_python_peak_bytes": 65100000,
+    "companion_process_peak_kib": 116492,
+    "note": "A single deeply nested member can expand quadratically when the existing browse projection creates parent paths. The cap bounds this expansion; it is not an archive file-size limit."
+  }
+}

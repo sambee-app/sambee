@@ -299,6 +299,17 @@ export interface DirectoryIndexSettings {
 }
 export type DirectoryIndexSettingUpdate = { field: DirectoryIndexPolicyField; value: number };
 
+export const FILESYSTEM_SEARCH_POLICY_FIELDS = ["concurrent_searches", "max_seconds", "max_results"] as const;
+export type FilesystemSearchPolicyField = (typeof FILESYSTEM_SEARCH_POLICY_FIELDS)[number];
+export interface FilesystemSearchSettings {
+  policy: Record<FilesystemSearchPolicyField, number>;
+  fields: Record<
+    FilesystemSearchPolicyField,
+    { value: number; default_value: number; min_value: number; max_value: number; source: "default" | "database" }
+  >;
+}
+export type FilesystemSearchSettingUpdate = { field: FilesystemSearchPolicyField; value: number };
+
 export interface DirectoryPolicyGrantBinding {
   companion_id: string;
   challenge: string;
@@ -470,6 +481,9 @@ export enum FileType {
 }
 
 export interface FileInfo {
+  /** Browser-only identity and display path for a result from a live search. */
+  browser_identity?: string;
+  search_display_path?: string;
   name: string;
   path: string;
   type: FileType;
@@ -656,6 +670,7 @@ export interface DirectorySearchResult extends DirectorySearchStatus {
   results: string[];
   match_ranks?: Record<string, number>;
   total_matches: number;
+  scope_not_indexed?: boolean;
   matched_term_counts?: Record<string, number>;
   issue_details?: DirectoryIssueDetail[] | null;
   issue_details_incomplete?: boolean;

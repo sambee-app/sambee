@@ -3,108 +3,131 @@ import { describe, expect, it, vi } from "vitest";
 import "../../../../i18n";
 import api from "../../../../services/api";
 import { SambeeThemeProvider } from "../../../../theme/ThemeContext";
-import { type FileEntry, FileType } from "../../../../types";
+import { FileType } from "../../../../types";
 import { rankHistorySearchResults } from "../recentHistory";
 import { useFileSearchProvider } from "../useFileSearchProvider";
 
 vi.mock("../../../../services/api");
-
-const files = [
-  { name: "annual-report.txt", type: FileType.FILE },
-  { name: "report.txt", type: FileType.FILE },
-  { name: "summary.txt", type: FileType.FILE },
-] as FileEntry[];
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return <SambeeThemeProvider>{children}</SambeeThemeProvider>;
 }
 
 describe("useFileSearchProvider", () => {
-  it("publishes selectable loaded files before history and keeps them if history fails", async () => {
-    let rejectHistory!: (error: Error) => void;
-    vi.mocked(api.searchRecentFiles).mockImplementationOnce(
-      () =>
-        new Promise((_resolve, reject) => {
-          rejectHistory = reject;
-        })
+  it("finds and opens a file from the current folder without a history entry", async () => {
+    vi.mocked(api.searchRecentFiles).mockResolvedValueOnce({ result_limit: 10, results: [] });
+    const file = { name: "image.png", path: "Pictures/image.png", type: FileType.FILE, is_readable: true, is_hidden: false };
+    const onOpenFile = vi.fn();
+    const onOpenRecentFile = vi.fn();
+    const { result } = renderHook(() =>
+      useFileSearchProvider({
+        connectionId: "connection-1",
+        currentPath: "Pictures",
+        connectionName: "Pictures server",
+        resultLimit: 10,
+        getConnectionName: () => "Pictures server",
+        onOpenRecentFile,
+        currentFolder: { files: [file], onOpenFile },
+      })
     );
-    const onOpenCurrentFile = vi.fn();
+    await act(async () => {
+      const rows = await result.current.fetchResults("image", new AbortController().signal);
+      expect(rows).toMatchObject([{ kind: "result", icon: "file", primaryText: "image.png" }]);
+      const [match] = rows;
+      if (!match) throw new Error("Expected an image.png match");
+      result.current.onSelect(match.value, "force-viewer-picker");
+      expect(await result.current.onRemoveSelected?.(match.value)).toBe(false);
+    });
+    expect(onOpenFile).toHaveBeenCalledWith(file, "force-viewer-picker");
+    expect(onOpenRecentFile).not.toHaveBeenCalled();
+  });
+
+  it("shows a recent file only once and excludes direct files from Subfolders only", async () => {
+    const file = { name: "image.png", path: "Pictures/image.png", type: FileType.FILE, is_readable: true, is_hidden: false };
+    vi.mocked(api.searchRecentFiles).mockResolvedValueOnce({
+      result_limit: 10,
+      results: [
+        { id: "image", path: file.path, file_name: file.name, connection_id: "connection-1", last_opened_at: "2026-01-01T00:00:00Z" },
+      ],
+    });
+    const { result, rerender } = renderHook(
+      ({ descendantsOnly }) =>
+        useFileSearchProvider({
+          connectionId: "connection-1",
+          currentPath: "Pictures",
+          connectionName: "Pictures server",
+          resultLimit: 10,
+          getConnectionName: () => "Pictures server",
+          onOpenRecentFile: vi.fn(),
+          currentFolder: { files: [file], onOpenFile: vi.fn() },
+          historyOptions: descendantsOnly ? { scope: { path: "Pictures", mode: "descendants_only" } } : undefined,
+        }),
+      { initialProps: { descendantsOnly: false } }
+    );
+    await act(async () => {
+      expect(await result.current.fetchResults("image", new AbortController().signal)).toMatchObject([
+        { kind: "result", icon: "recent-file", primaryText: "image.png" },
+      ]);
+    });
+    vi.mocked(api.searchRecentFiles).mockResolvedValue({ result_limit: 10, results: [] });
+    rerender({ descendantsOnly: true });
+    await act(async () => {
+      expect(await result.current.fetchResults("image", new AbortController().signal)).toEqual([]);
+    });
+    rerender({ descendantsOnly: false });
+    await act(async () => {
+      expect(await result.current.fetchResults("", new AbortController().signal)).toEqual([]);
+    });
+  });
+
+  it("requests scoped recent files without publishing folder matches", async () => {
+    vi.mocked(api.searchRecentFiles).mockResolvedValueOnce({ result_limit: 10, results: [] });
+    const scope = { path: "Reports", mode: "subtree" as const };
     const { result } = renderHook(
       () =>
         useFileSearchProvider({
           connectionId: "connection-1",
           currentPath: "Reports",
-          files,
           connectionName: "Reports server",
           resultLimit: 10,
           getConnectionName: () => "Reports server",
-          onOpenCurrentFile,
+          onOpenRecentFile: vi.fn(),
+          historyOptions: { connectionId: "connection-1", scope },
+        }),
+      { wrapper }
+    );
+    const signal = new AbortController().signal;
+    const onUpdate = vi.fn();
+    let rows: Awaited<ReturnType<typeof result.current.fetchResults>> = [];
+    await act(async () => {
+      rows = await result.current.fetchResults("report", signal, onUpdate);
+    });
+    expect(rows).toEqual([]);
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(api.searchRecentFiles).toHaveBeenLastCalledWith("report", 10, signal, { connectionId: "connection-1", scope });
+  });
+
+  it("reports history errors without presenting stale results", async () => {
+    vi.mocked(api.searchRecentFiles).mockRejectedValueOnce(new Error("offline"));
+    const { result } = renderHook(
+      () =>
+        useFileSearchProvider({
+          connectionId: "connection-1",
+          currentPath: "Reports",
+          connectionName: "Reports server",
+          resultLimit: 10,
+          getConnectionName: () => "Reports server",
           onOpenRecentFile: vi.fn(),
         }),
       { wrapper }
     );
-    const onUpdate = vi.fn();
-    let pending!: ReturnType<typeof result.current.fetchResults>;
-    act(() => {
-      pending = result.current.fetchResults("report", new AbortController().signal, onUpdate);
-    });
-    expect(onUpdate).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ value: "current:report.txt" })]));
-    result.current.onSelect("current:report.txt");
-    expect(onOpenCurrentFile).toHaveBeenCalledWith(expect.objectContaining({ name: "report.txt" }), "associated-viewer");
     await act(async () => {
-      rejectHistory(new Error("offline"));
-      await pending;
+      expect(await result.current.fetchResults("report", new AbortController().signal)).toEqual([]);
     });
-    expect(await pending).toEqual(onUpdate.mock.calls[0]?.[0]);
     expect(result.current.getStatusInfo()).toMatchObject({
       label: "Reports server: Recent files are unavailable. Check the backend connection and retry.",
       showSpinner: false,
       loadDetails: expect.any(Function),
-    });
-  });
-
-  it("does not publish an empty pre-history update when no loaded directory files match", async () => {
-    let finishHistory!: (response: Awaited<ReturnType<typeof api.searchRecentFiles>>) => void;
-    vi.mocked(api.searchRecentFiles).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishHistory = resolve;
-        })
-    );
-    const { result } = renderHook(
-      () =>
-        useFileSearchProvider({
-          connectionId: "connection-1",
-          currentPath: "Reports",
-          files,
-          connectionName: "Reports server",
-          resultLimit: 10,
-          getConnectionName: () => "Reports server",
-          onOpenCurrentFile: vi.fn(),
-          onOpenRecentFile: vi.fn(),
-        }),
-      { wrapper }
-    );
-    const onUpdate = vi.fn();
-    let pending!: ReturnType<typeof result.current.fetchResults>;
-    act(() => {
-      pending = result.current.fetchResults("archive", new AbortController().signal, onUpdate);
-    });
-    expect(onUpdate).not.toHaveBeenCalled();
-    await act(async () => {
-      finishHistory({
-        result_limit: 10,
-        results: [
-          {
-            id: "recent-archive",
-            connection_id: "connection-1",
-            path: "Archives/archive.zip",
-            file_name: "archive.zip",
-            last_opened_at: "2026-01-01T00:00:00Z",
-          },
-        ],
-      });
-      expect(await pending).toEqual([expect.objectContaining({ value: "recent:recent-archive" })]);
     });
   });
 
@@ -133,11 +156,9 @@ describe("useFileSearchProvider", () => {
         useFileSearchProvider({
           connectionId: "connection-1",
           currentPath: "Reports",
-          files,
           connectionName: "Reports server",
           resultLimit: 10,
           getConnectionName: () => "Reports server",
-          onOpenCurrentFile: vi.fn(),
           onOpenRecentFile,
         }),
       { wrapper }
@@ -158,31 +179,7 @@ describe("useFileSearchProvider", () => {
     expect(onOpenRecentFile).toHaveBeenCalledWith(expect.objectContaining({ id: "new" }), "associated-viewer");
   });
 
-  it("uses normalized Unicode code-point ties before limiting loaded files", async () => {
-    vi.mocked(api.searchRecentFiles).mockResolvedValue({ result_limit: 1, results: [] });
-    const candidates = [
-      { name: "report-\u{10000}.txt", type: FileType.FILE },
-      { name: "report-\uE000.txt", type: FileType.FILE },
-    ] as FileEntry[];
-    const { result } = renderHook(
-      () =>
-        useFileSearchProvider({
-          connectionId: "connection-1",
-          currentPath: "Reports",
-          files: candidates,
-          connectionName: "Reports server",
-          resultLimit: 1,
-          getConnectionName: () => "Reports server",
-          onOpenCurrentFile: vi.fn(),
-          onOpenRecentFile: vi.fn(),
-        }),
-      { wrapper }
-    );
-    const rows = await result.current.fetchResults("report", new AbortController().signal);
-    expect(rows.map((row) => row.value)).toEqual(["current:report-\uE000.txt"]);
-  });
-
-  it("ranks exact matches across sources before frequency and preserves empty-query groups", () => {
+  it("ranks exact matches before frequency and preserves empty-query groups", () => {
     const results = [
       { kind: "group-header" as const, id: "recent", value: "" as const, label: "Recent" },
       {
@@ -194,7 +191,7 @@ describe("useFileSearchProvider", () => {
         matchRank: 1,
         usageScore: 100,
       },
-      { kind: "result" as const, id: "exact", value: "current:report", icon: "file" as const, primaryText: "report", matchRank: 0 },
+      { kind: "result" as const, id: "exact", value: "recent:exact", icon: "recent-file" as const, primaryText: "report", matchRank: 0 },
       {
         kind: "result" as const,
         id: "occasional",
@@ -208,10 +205,10 @@ describe("useFileSearchProvider", () => {
     expect(rankHistorySearchResults(results, "report").map((result) => result.id)).toEqual(["exact", "frequent", "occasional"]);
     expect(rankHistorySearchResults(results, "")).toBe(results);
   });
-  it("keeps recent files first, omits duplicate current items, and preserves selection mode", async () => {
-    const onOpenCurrentFile = vi.fn();
+
+  it("opens and removes a recent file with the selected mode", async () => {
     const onOpenRecentFile = vi.fn();
-    vi.mocked(api.searchRecentFiles).mockResolvedValue({
+    vi.mocked(api.searchRecentFiles).mockResolvedValueOnce({
       result_limit: 1,
       results: [
         {
@@ -223,56 +220,33 @@ describe("useFileSearchProvider", () => {
         },
       ],
     });
-
     const { result } = renderHook(
       () =>
         useFileSearchProvider({
           connectionId: "connection-1",
           currentPath: "Reports",
-          files,
           connectionName: "Reports server",
           resultLimit: 10,
           getConnectionName: () => "Reports server",
-          onOpenCurrentFile,
           onOpenRecentFile,
         }),
       { wrapper }
     );
-
     const results = await result.current.fetchResults("report", new AbortController().signal);
-
-    expect(results.map((entry) => ({ kind: entry.kind, value: entry.value }))).toEqual([
-      { kind: "result", value: "recent:recent-report" },
-      { kind: "result", value: "current:annual-report.txt" },
-    ]);
-
     expect(results).toMatchObject([
       {
         kind: "result",
+        value: "recent:recent-report",
         icon: "recent-file",
         primaryText: "report.txt",
         primaryHighlight: { start: 0, end: 6 },
         secondaryText: "Reports server:/Reports",
       },
-      {
-        kind: "result",
-        icon: "file",
-        primaryText: "annual-report.txt",
-        primaryHighlight: { start: 7, end: 13 },
-        secondaryText: "Reports server:/Reports",
-      },
     ]);
-
     result.current.onSelect("recent:recent-report", "associated-native-app");
     expect(onOpenRecentFile).toHaveBeenCalledWith(expect.objectContaining({ id: "recent-report" }), "associated-native-app");
-
-    result.current.onSelect("current:annual-report.txt", "force-native-picker");
-    expect(onOpenCurrentFile).toHaveBeenCalledWith(expect.objectContaining({ name: "annual-report.txt" }), "force-native-picker");
-
     await expect(result.current.onRemoveSelected?.("recent:recent-report")).resolves.toBe(true);
     expect(api.removeRecentFile).toHaveBeenCalledWith("recent-report");
-    await expect(result.current.onRemoveSelected?.("current:annual-report.txt")).resolves.toBe(false);
-
     render(
       result.current.getFooterHint?.({
         kind: "result",
@@ -282,12 +256,6 @@ describe("useFileSearchProvider", () => {
         primaryText: "report.txt",
       })
     );
-
-    expect(screen.getByText("Enter")).toBeInTheDocument();
-    expect(screen.getByText("Shift+Enter")).toBeInTheDocument();
-    expect(screen.getByText("Ctrl+Enter")).toBeInTheDocument();
-    expect(screen.getByText("Ctrl+Alt+Enter")).toBeInTheDocument();
     expect(screen.getByText("Shift+Del")).toBeInTheDocument();
-    expect(screen.queryByText("Shift+Delete")).not.toBeInTheDocument();
   });
 });

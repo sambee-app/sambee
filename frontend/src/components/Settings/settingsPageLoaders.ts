@@ -14,6 +14,8 @@ export const SETTINGS_PAGE_LOADERS = {
   "admin-users": () => import("../../pages/UserManagementSettings").then((module) => ({ default: module.UserManagementSettings })),
   "admin-smb": () => import("../../pages/SmbSettings").then((module) => ({ default: module.SmbSettings })),
   "admin-file-search": () => import("../../pages/FileSearchSettings").then((module) => ({ default: module.FileSearchSettings })),
+  "admin-filesystem-search": () =>
+    import("../../pages/FilesystemSearchSettings").then((module) => ({ default: module.FilesystemSearchSettings })),
   "admin-directory-search": () =>
     import("../../pages/DirectorySearchSettings").then((module) => ({ default: module.DirectorySearchSettings })),
   "admin-health-monitoring": () =>

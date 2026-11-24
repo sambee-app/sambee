@@ -379,6 +379,7 @@ function serializePane(
 ): StoredPane | null {
   const stored: StoredTab[] = [];
   for (const tab of tabs) {
+    if (tab.searchTitle) continue;
     if (!tab.connectionId || !tab.id) continue;
     const archive = tab.archiveLocation;
     const target =

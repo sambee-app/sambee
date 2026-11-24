@@ -70,7 +70,7 @@ pub struct LinkTargetListing {
 
 /// Metadata for a single file or directory.
 /// Matches the backend `FileInfo` Pydantic model.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {
     pub name: String,
     pub path: String,
@@ -674,6 +674,7 @@ pub struct DirectorySearchResult {
     pub status: DirectorySearchStatus,
     pub results: Vec<String>,
     pub total_matches: usize,
+    pub scope_not_indexed: bool,
     pub match_ranks: std::collections::HashMap<String, i64>,
     pub matched_term_counts: std::collections::HashMap<String, usize>,
     pub issue_details: Option<Vec<DirectoryIssueDetail>>,

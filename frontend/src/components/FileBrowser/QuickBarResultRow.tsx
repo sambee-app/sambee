@@ -1,7 +1,7 @@
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import FolderIcon from "@mui/icons-material/Folder";
-import HistoryOutlinedIcon from "@mui/icons-material/HistoryOutlined";
 import KeyboardCommandKeyIcon from "@mui/icons-material/KeyboardCommandKey";
+import ScheduleIcon from "@mui/icons-material/Schedule";
 import { Box, Typography } from "@mui/material";
 import type React from "react";
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
@@ -15,16 +15,26 @@ export const QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT = 32;
 
 const QUICK_BAR_RESULT_ICON_COLUMN_WIDTH = 36;
 
+export const quickBarDropdownRowPadding = { px: 2, py: 0.75 } as const;
+export const quickBarDropdownActiveRow = { backgroundColor: "action.selected" } as const;
+
+export function getQuickBarDropdownLabelSx(useCompactLayout: boolean) {
+  return {
+    typography: "body2",
+    fontSize: useCompactLayout ? `${COMPACT_LAYOUT_SIZE.SEARCH_RESULT_PRIMARY_TEXT_PX}px` : undefined,
+    lineHeight: useCompactLayout ? 1.25 : undefined,
+  } as const;
+}
+
 function getResultIcon(icon: SearchResultIcon): React.ReactElement {
   switch (icon) {
     case "command":
       return <KeyboardCommandKeyIcon fontSize="small" />;
     case "directory":
-      return <FolderIcon fontSize="small" />;
     case "recent-directory":
-    case "recent-file":
-      return <HistoryOutlinedIcon fontSize="small" />;
+      return <FolderIcon fontSize="small" />;
     case "file":
+    case "recent-file":
       return <DescriptionOutlinedIcon fontSize="small" />;
   }
 }
@@ -60,7 +70,15 @@ export function getQuickBarResultRowHeight(result: SearchResult): number {
   return result.kind === "group-header" ? QUICK_BAR_RESULT_GROUP_HEADER_HEIGHT : QUICK_BAR_RESULT_ITEM_HEIGHT;
 }
 
-export function QuickBarResultRow({ result, useCompactLayout = false }: { result: SearchResultItem; useCompactLayout?: boolean }) {
+export function QuickBarResultRow({
+  result,
+  useCompactLayout = false,
+  showRecentBadge = true,
+}: {
+  result: SearchResultItem;
+  useCompactLayout?: boolean;
+  showRecentBadge?: boolean;
+}) {
   const isDirectory = result.icon === "directory" || result.icon === "recent-directory";
 
   return (
@@ -75,16 +93,21 @@ export function QuickBarResultRow({ result, useCompactLayout = false }: { result
           justifyContent: "center",
         }}
       >
-        {getResultIcon(result.icon)}
+        <Box component="span" sx={{ position: "relative", display: "inline-flex" }}>
+          {getResultIcon(result.icon)}
+          {showRecentBadge && result.icon.startsWith("recent-") && (
+            <ScheduleIcon
+              sx={{ position: "absolute", bottom: -3, insetInlineEnd: -4, fontSize: 12, bgcolor: "background.paper", borderRadius: "50%" }}
+            />
+          )}
+        </Box>
       </Box>
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Typography
           component="div"
-          variant="body2"
           sx={{
+            ...getQuickBarDropdownLabelSx(useCompactLayout),
             color: isDirectory ? "text.secondary" : undefined,
-            fontSize: useCompactLayout ? `${COMPACT_LAYOUT_SIZE.SEARCH_RESULT_PRIMARY_TEXT_PX}px` : undefined,
-            lineHeight: useCompactLayout ? 1.25 : undefined,
           }}
           noWrap
         >

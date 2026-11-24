@@ -4,9 +4,11 @@
 
 import { Box, Typography } from "@mui/material";
 import { useTranslation } from "react-i18next";
+import type { FilesystemSearchSession } from "../../pages/FileBrowser/filesystemSearchSessions";
 import { formatDate, formatFileSize } from "../../pages/FileBrowser/formatters";
 import type { FileEntry } from "../../types";
 import { isShortcutFile } from "../../utils/fileEntries";
+import { LiveSearchStatus } from "./LiveSearchStatus";
 import { STATUS_BAR_STRINGS } from "./statusBarStrings";
 
 /** Shared height constant so breadcrumb bar and status bar match exactly. */
@@ -17,13 +19,21 @@ interface StatusBarProps {
   focusedIndex: number;
   selectedCount?: number;
   canResolveShortcutTargets: boolean;
+  searchSession?: FilesystemSearchSession | null;
+  onOpenLocalDrivesSettings?: () => void;
 }
 
 /**
  * Status bar showing selected file info and total count
- * Desktop only component
  */
-export function StatusBar({ files, focusedIndex, selectedCount = 0, canResolveShortcutTargets }: StatusBarProps) {
+export function StatusBar({
+  files,
+  focusedIndex,
+  selectedCount = 0,
+  canResolveShortcutTargets,
+  searchSession,
+  onOpenLocalDrivesSettings,
+}: StatusBarProps) {
   const { t } = useTranslation();
   const selectedFile = files[focusedIndex];
   const linkTargetStatus = selectedFile?.link_target
@@ -49,49 +59,53 @@ export function StatusBar({ files, focusedIndex, selectedCount = 0, canResolveSh
     >
       {/* Left side - Selected file info */}
       <Box sx={{ display: "flex", gap: 1, alignItems: "center", minWidth: 0, flex: 1, overflow: "hidden" }}>
-        {(() => {
-          if (selectedCount > 0)
+        {searchSession ? (
+          <LiveSearchStatus session={searchSession} onOpenLocalDrivesSettings={onOpenLocalDrivesSettings} />
+        ) : (
+          (() => {
+            if (selectedCount > 0)
+              return (
+                <Typography variant="caption" noWrap>
+                  {t("fileBrowser.compactActions.selectedCount", { count: selectedCount })}
+                </Typography>
+              );
+            if (!selectedFile) return null;
+
+            const parts = [];
+            parts.push(selectedFile.name);
+
+            if (selectedFile.type === "file" && selectedFile.size !== undefined && selectedFile.size !== null) {
+              parts.push(formatFileSize(selectedFile.size));
+            }
+
+            if (selectedFile.modified_at) {
+              parts.push(formatDate(selectedFile.modified_at));
+            }
+
             return (
-              <Typography variant="caption" noWrap>
-                {t("fileBrowser.compactActions.selectedCount", { count: selectedCount })}
-              </Typography>
+              <Box sx={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, overflow: "hidden" }}>
+                <Typography data-testid="status-bar-focused-file-name" variant="caption" noWrap sx={{ minWidth: 0 }}>
+                  {selectedFile.name}
+                </Typography>
+                {selectedFile.type === "file" && selectedFile.size !== undefined && selectedFile.size !== null && (
+                  <Typography variant="caption" noWrap>
+                    {formatFileSize(selectedFile.size)}
+                  </Typography>
+                )}
+                {selectedFile.modified_at && (
+                  <Typography variant="caption" noWrap>
+                    {formatDate(selectedFile.modified_at)}
+                  </Typography>
+                )}
+                {linkTargetStatus && (
+                  <Typography variant="caption" noWrap sx={{ color: "error.main" }}>
+                    {linkTargetStatus}
+                  </Typography>
+                )}
+              </Box>
             );
-          if (!selectedFile) return null;
-
-          const parts = [];
-          parts.push(selectedFile.name);
-
-          if (selectedFile.type === "file" && selectedFile.size !== undefined && selectedFile.size !== null) {
-            parts.push(formatFileSize(selectedFile.size));
-          }
-
-          if (selectedFile.modified_at) {
-            parts.push(formatDate(selectedFile.modified_at));
-          }
-
-          return (
-            <Box sx={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0, overflow: "hidden" }}>
-              <Typography data-testid="status-bar-focused-file-name" variant="caption" noWrap sx={{ minWidth: 0 }}>
-                {selectedFile.name}
-              </Typography>
-              {selectedFile.type === "file" && selectedFile.size !== undefined && selectedFile.size !== null && (
-                <Typography variant="caption" noWrap>
-                  {formatFileSize(selectedFile.size)}
-                </Typography>
-              )}
-              {selectedFile.modified_at && (
-                <Typography variant="caption" noWrap>
-                  {formatDate(selectedFile.modified_at)}
-                </Typography>
-              )}
-              {linkTargetStatus && (
-                <Typography variant="caption" noWrap sx={{ color: "error.main" }}>
-                  {linkTargetStatus}
-                </Typography>
-              )}
-            </Box>
-          );
-        })()}
+          })()
+        )}
       </Box>
 
       <Box sx={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, flexShrink: 0 }}>

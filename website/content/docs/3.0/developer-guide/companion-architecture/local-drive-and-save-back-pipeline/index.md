@@ -112,6 +112,10 @@ Directory policy uses the shared settings protocol described in [Browser-to-Comp
 
 Updates serialize against source initialization. Unchanged revisions are no-ops within the same backend identity. Failed delivery or persistence preserves the last valid policy. Authority changes invalidate pending delivery. File APIs must protect policy and index storage from modification. Policy synchronization state is separate from index health.
 
+File-system search policy is a separate managed section with its own delivery status. Companion snapshots the last valid policy for each admitted search; browser requests cannot set limits. Older Companion versions that do not support the section keep their existing settings.
+
+The safe local directory reader is implemented for Linux and Windows. On macOS it fails closed, so local-drive live search is unavailable until an adapter can verify the same redirect and mount-boundary rules.
+
 ### Verification and Inactive Cleanup
 
 Change monitoring maintains active indexes. Full verification is a safety net: the defaults are 24 hours with healthy monitoring and 30 minutes with degraded monitoring. The policy helper caps the effective degraded interval at the healthy interval. Startup and monitoring recovery still require verification; observation barriers and pass-acceptance rules are unchanged.

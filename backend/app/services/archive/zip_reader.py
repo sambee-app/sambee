@@ -5,7 +5,7 @@ import bz2
 import json
 import struct
 import zlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
@@ -309,6 +309,46 @@ def _parent_paths(path: str) -> tuple[str, ...]:
     return tuple("/".join(parts[:index]) for index in range(1, len(parts)))
 
 
+def build_effective_projection(raw_entries: Sequence[ZipEntry]) -> EffectiveZipProjection:
+    """Select browse-visible entries from raw records.
+
+    This is pure CPU work without I/O, so callers that run off the event loop can build it in their own thread.
+    """
+
+    selected_by_path: dict[str, ZipEntry] = {}
+    explicit_directories_by_path: dict[str, ZipEntry] = {}
+    for entry in raw_entries:
+        if not entry.is_safe or not entry.has_supported_file_type:
+            continue
+        if entry.is_directory:
+            explicit_directories_by_path[entry.path] = entry
+        else:
+            selected_by_path[entry.path] = entry
+
+    regular_entries = tuple(entry for entry in raw_entries if selected_by_path.get(entry.path) is entry)
+    explicit_directories = tuple(
+        entry for entry in raw_entries if entry.path not in selected_by_path and explicit_directories_by_path.get(entry.path) is entry
+    )
+    entries = tuple(
+        entry
+        for entry in raw_entries
+        if selected_by_path.get(entry.path) is entry
+        or (entry.path not in selected_by_path and explicit_directories_by_path.get(entry.path) is entry)
+    )
+    directories = set(explicit_directories_by_path)
+    for entry in entries:
+        directories.update(_parent_paths(entry.path))
+    directories.difference_update(selected_by_path)
+    return EffectiveZipProjection(
+        entries=entries,
+        regular_entries=regular_entries,
+        explicit_directories=explicit_directories,
+        directories=frozenset(directories),
+        member_by_path=selected_by_path,
+        skipped_entries=len(raw_entries) - len(entries),
+    )
+
+
 class ZipReader:
     """Read ZIP metadata without staging archive contents or member bytes."""
 
@@ -319,7 +359,7 @@ class ZipReader:
         self._size = size
         self._entry_identity = object()
         self._validation_identity = object()
-        self._forward_directory: ZipDirectory | None = None
+        self._central_directory: ZipDirectory | None = None
         self._forward_position: int | None = None
         self._forward_remaining_entries: int | None = None
         self._forward_next_read_offset: int | None = None
@@ -347,6 +387,11 @@ class ZipReader:
         return data
 
     async def _directory(self) -> ZipDirectory:
+        if self._central_directory is None:
+            self._central_directory = await self._read_directory()
+        return self._central_directory
+
+    async def _read_directory(self) -> ZipDirectory:
         tail_length = min(self._size, _EOCD_SIZE + _MAX_COMMENT_BYTES)
         tail_offset = self._size - tail_length
         tail = await self._read_exact(tail_offset, tail_length)
@@ -374,16 +419,18 @@ class ZipReader:
             raise ArchiveFormatError("ZIP64 end-of-central-directory record is invalid")
         return ZipDirectory(_u64(header, 48), _u64(header, 40), _u64(header, 32))
 
+    async def central_directory_size(self) -> int:
+        """Return the size from the same directory descriptor used to read entries."""
+        return (await self._directory()).size
+
     async def _initialize_forward_reader(self) -> ZipDirectory:
-        if self._forward_directory is not None:
-            return self._forward_directory
         directory = await self._directory()
-        if directory.offset + directory.size > self._size:
-            raise ArchiveFormatError("ZIP central directory extends beyond archive bounds")
-        self._forward_directory = directory
-        self._forward_position = directory.offset
-        self._forward_remaining_entries = directory.entries
-        self._forward_next_read_offset = directory.offset
+        if self._forward_position is None:
+            if directory.offset + directory.size > self._size:
+                raise ArchiveFormatError("ZIP central directory extends beyond archive bounds")
+            self._forward_position = directory.offset
+            self._forward_remaining_entries = directory.entries
+            self._forward_next_read_offset = directory.offset
         return directory
 
     async def set_forward_cursor(self, cursor: str | None) -> None:
@@ -421,51 +468,26 @@ class ZipReader:
         assert self._forward_remaining_entries is not None
         return tuple(entries), _forward_cursor(self._forward_position, self._forward_remaining_entries)
 
-    async def _effective_projection(self) -> EffectiveZipProjection:
-        """Build the source-entry projection once without reading member payloads."""
+    async def raw_entries(self) -> tuple[ZipEntry, ...]:
+        """Read every central-directory record in order without building the projection."""
 
-        if self._projection is not None:
-            return self._projection
         if self._forward_position is not None:
             raise ArchiveFormatError("Archive projection cannot begin after traversal starts")
-
         raw_entries: list[ZipEntry] = []
         while (entry := await self.next_entry()) is not None:
             raw_entries.append(entry)
+        return tuple(raw_entries)
 
-        selected_by_path: dict[str, ZipEntry] = {}
-        explicit_directories_by_path: dict[str, ZipEntry] = {}
-        for entry in raw_entries:
-            if not entry.is_safe or not entry.has_supported_file_type:
-                continue
-            if entry.is_directory:
-                explicit_directories_by_path[entry.path] = entry
-            else:
-                selected_by_path[entry.path] = entry
+    async def _effective_projection(self) -> EffectiveZipProjection:
+        """Build the source-entry projection once without reading member payloads."""
 
-        regular_entries = tuple(entry for entry in raw_entries if selected_by_path.get(entry.path) is entry)
-        explicit_directories = tuple(
-            entry for entry in raw_entries if entry.path not in selected_by_path and explicit_directories_by_path.get(entry.path) is entry
-        )
-        entries = tuple(
-            entry
-            for entry in raw_entries
-            if selected_by_path.get(entry.path) is entry
-            or (entry.path not in selected_by_path and explicit_directories_by_path.get(entry.path) is entry)
-        )
-        directories = set(explicit_directories_by_path)
-        for entry in entries:
-            directories.update(_parent_paths(entry.path))
-        directories.difference_update(selected_by_path)
-        self._projection = EffectiveZipProjection(
-            entries=entries,
-            regular_entries=regular_entries,
-            explicit_directories=explicit_directories,
-            directories=frozenset(directories),
-            member_by_path=selected_by_path,
-            skipped_entries=len(raw_entries) - len(entries),
-        )
+        if self._projection is None:
+            self._projection = build_effective_projection(await self.raw_entries())
         return self._projection
+
+    async def effective_projection(self) -> EffectiveZipProjection:
+        """Return the same effective member projection used for archive browsing."""
+        return await self._effective_projection()
 
     async def extraction_entries(self) -> tuple[tuple[ZipEntry, ...], int]:
         """Return selected source entries and aggregate-only skipped record count."""

@@ -12,7 +12,13 @@ The quick bar has multiple modes:
 
 ## Jump to Any Directory with Smart Navigation
 
-Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to search directory paths across the current connection and your recent locations. For example, `annual reports` finds paths containing either term, with matches for both terms ranked first.
+Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to search indexed directory paths, recent files and folders, and files in the open folder. For example, `image` matches `image.png` in the open folder even if you have never opened the file.
+
+Use the scope control to search the current connection, the current folder and its subfolders, or subfolders only. Use the item-type control to show files, folders, or both. These controls also apply to recent history. Inside a ZIP, folder scope starts at the physical folder that contains the ZIP.
+
+Press <kbd>Escape</kbd> to clear the search term and return to the file list. If an options menu is open, the first press closes only the menu.
+
+**Subfolders only** excludes files directly in the open folder. To find other files outside the open folder or search inside ZIP files, use File Search (<kbd>/</kbd>).
 
 Results can be incomplete while Sambee scans folders. During a scan, the status shows directories found or directories checked. An interrupted scan keeps committed progress for its next attempt. If a folder is missing from search, browse to it directly.
 
@@ -24,11 +30,13 @@ If directory search is temporarily unavailable, the quick bar keeps recent histo
 
 Directory search can stay up to date while the quick bar is closed. After a restart or a break in monitoring, results can remain unverified while background checks run. Missing removable media keeps its saved index; insert or mount the volume again to resume search. SMB search includes ordinary folders inside the configured share and folder, including server-mounted storage. Local search does not cross into other mounts. Redirects and reparse points are excluded.
 
-### Recent Directory History
+### Recent Files and Folders
 
-With an empty search box, Recent directories shows your saved locations across connections. These remain available while directory search loads.
+With an empty search box, Quick navigation shows recent files and folders together, newest first, in the current connection and scope. These remain available while directory search loads.
 
-To remove only the selected item from Recent directories, press <kbd>Shift</kbd> + <kbd>Delete</kbd>. This removes history metadata; it never deletes the underlying directory or its contents.
+To remove the selected item from history, press <kbd>Shift</kbd> + <kbd>Delete</kbd>. This does not delete the file or folder.
+
+Use <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to open a selected file in its associated native application, <kbd>Shift</kbd> + <kbd>Enter</kbd> to choose a browser viewer, or <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Enter</kbd> to choose a native application. The same modifiers work with a click.
 
 History is private to your account. See [File Browser Preferences](../../account-and-preferences/file-browser-preferences/#clear-personal-history) to clear it.
 
@@ -42,17 +50,19 @@ Confirmed missing folders are removed from recent history. Temporary connection 
 
 ## Find Files with File Search
 
-Press <kbd>/</kbd> when the file browser has keyboard focus to search loaded filenames in the active directory and your recent-file history. It does not search all files or file contents. Files matching more search terms rank first.
+Press <kbd>/</kbd> when the file browser has keyboard focus. Enter a name and press <kbd>Enter</kbd> to start a live search in a new results tab. The search reads the current folder and its subfolders by default. It searches names, not file contents, and does not depend on the directory index.
 
-Use modifiers with <kbd>Enter</kbd> or a result click to choose how to open the selected file:
+Plain text matches part of a name. Use `*` for any number of characters or `?` for one character to match a whole name. A backslash escapes `*`, `?`, or another backslash. Search ignores case by default.
 
-- <kbd>Ctrl</kbd> opens it in the associated native application.
-- <kbd>Shift</kbd> opens the browser viewer picker.
-- <kbd>Ctrl</kbd> + <kbd>Alt</kbd> opens the native application picker.
+Search options appear below the quick bar when the search box has focus. Use <kbd>↑</kbd> and <kbd>↓</kbd> to move through the options and <kbd>Space</kbd> to change one. Press <kbd>Escape</kbd> to go back without clearing the search term. To reopen the options, press an up or down arrow key in the search box or click the box.
 
-To remove only a selected item from Recent files, press <kbd>Shift</kbd> + <kbd>Delete</kbd>. This removes history metadata; it never deletes the underlying file.
+ZIP search is off by default because reading each ZIP adds work and can add network requests. Turn it on to search members of ZIPs found in the selected folder scope. Very large ZIPs are skipped. A search started inside an open ZIP searches from the current ZIP folder, even when ZIP discovery is off. Nested ZIPs are not opened. Encrypted members and members with unsupported compression can appear in results, but cannot be opened.
 
-Confirmed missing files are removed from recent history. Temporary access problems keep the entry for another attempt. If a native application does not open the file, check Companion or the application for an error.
+Results appear as the scan progresses. Press <kbd>Enter</kbd> to open the focused result without waiting for the scan to finish. The search term stays above the list so you can identify the search after switching tabs. Folders open in a normal tab. Quick navigation from a results tab also opens the target folder in a new tab, so the results stay available. You can download a supported selection, but other changes are disabled in results tabs. Results tabs close when you reload or close the page. Close the results tab to stop its scan.
+
+A scan can stop at an administrator-defined time or result limit, or report folders and ZIPs it could not read. A notice reports these conditions, and the activity bar keeps the scan status and result count. Existing results remain available, but they might not be complete. Narrow the scope or query and search again.
+
+Local-drive live search is not available on macOS. Browse the local folder directly instead.
 
 ## Locate and Run Any Command
 

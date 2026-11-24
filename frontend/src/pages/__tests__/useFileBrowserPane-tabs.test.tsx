@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
+import type { FilesystemSearchRecord } from "../../services/filesystemSearchContract";
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, createStorageBackedTestContentProviderRegistry, setupSuccessfulApiMocks } from "../../test/helpers";
@@ -46,6 +47,189 @@ describe("useFileBrowserPane — Multi-Tab Sessions", () => {
     setupSuccessfulApiMocks(api as unknown as ApiMock);
     vi.mocked(getPreferredViewerId).mockResolvedValue(null);
     vi.mocked(setPreferredViewerId).mockResolvedValue();
+  });
+
+  it("keeps duplicate archive member identities across batches, tabs, and close", async () => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    let signal: AbortSignal | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, requestSignal, onRecord) => {
+      signal = requestSignal;
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+    vi.mocked(getPreferredViewerId).mockResolvedValue("text");
+    const onOpenViewer = vi.fn();
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, onOpenViewer }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+    const browseId = result.current.selectedTabId;
+    act(() =>
+      result.current.startFilesystemSearch?.("same", {
+        case_sensitive: false,
+        folder_depth: "recursive",
+        item_type: "all",
+        search_archives: true,
+      })
+    );
+    const searchId = result.current.selectedTabId;
+    await waitFor(() => expect(publish).toBeDefined());
+    const member = (archive: string) => ({
+      entry: { name: "same.txt", path: "dir/same.txt", type: FileType.FILE, is_readable: true, is_hidden: false },
+      target: { kind: "archive" as const, archive_path: archive, member_path: "dir/same.txt" },
+      archive_state: "readable" as const,
+    });
+    await act(async () => {
+      await publish?.({ type: "batch", results: [member("a.zip"), member("b.zip")] });
+    });
+    expect(result.current.sortedFiles).toHaveLength(2);
+    act(() => {
+      result.current.selectItem(requireTestValue(result.current.sortedFiles[1]), 1);
+    });
+    const selection = [...result.current.selectedFiles];
+    expect(selection[0]).toContain("b.zip");
+    act(() => result.current.selectTab(browseId));
+    await act(async () => {
+      await publish?.({ type: "batch", results: [member("c.zip")] });
+    });
+    expect(result.current.sortedFiles).toHaveLength(3);
+    act(() => result.current.selectTab(searchId));
+    expect(result.current.sortedFiles).toHaveLength(3);
+    expect([...result.current.selectedFiles]).toEqual(selection);
+    act(() => result.current.handleOpenFileForFile(requireTestValue(result.current.sortedFiles[1]), 1));
+    await waitFor(() =>
+      expect(onOpenViewer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "dir/same.txt",
+          virtualSource: expect.objectContaining({
+            location: expect.objectContaining({ source: expect.objectContaining({ path: "b.zip" }) }),
+          }),
+        })
+      )
+    );
+    act(() => result.current.closeTab(searchId));
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      await publish?.({ type: "batch", results: [member("late.zip")] });
+    });
+    expect(result.current.isSearchTab).toBe(false);
+    expect(result.current.sortedFiles.some((file) => file.name === "same.txt")).toBe(false);
+  });
+
+  it("opens a result folder in a separate browse tab without rerunning the scan", async () => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, _signal, onRecord) => {
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+    act(() =>
+      result.current.startFilesystemSearch?.("docs", {
+        case_sensitive: false,
+        folder_depth: "recursive",
+        item_type: "all",
+        search_archives: false,
+      })
+    );
+    const searchId = result.current.selectedTabId;
+    await waitFor(() => expect(publish).toBeDefined());
+    await act(async () => {
+      await publish?.({
+        type: "batch",
+        results: [
+          {
+            entry: { name: "Documents", path: "Documents", type: FileType.DIRECTORY, is_readable: true, is_hidden: false },
+            target: { kind: "physical", path: "Documents" },
+          },
+        ],
+      });
+    });
+    act(() => result.current.handleFileClick(requireTestValue(result.current.sortedFiles[0]), 0));
+    await waitFor(() => expect(result.current.currentPath).toBe("Documents"));
+    expect(result.current.isSearchTab).toBe(false);
+    expect(result.current.selectedTabId).not.toBe(searchId);
+    act(() => result.current.selectTab(searchId));
+    expect(result.current.sortedFiles[0]?.name).toBe("Documents");
+    expect(api.startFilesystemSearch).toHaveBeenCalledOnce();
+  });
+
+  it("starts independent runs for the same query and aborts both when the pane unmounts", async () => {
+    const signals: AbortSignal[] = [];
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+    const { result, unmount } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+    const options = { case_sensitive: false, folder_depth: "recursive" as const, item_type: "all" as const, search_archives: false };
+    act(() => result.current.startFilesystemSearch?.("report", options));
+    const first = result.current.selectedTabId;
+    act(() => result.current.startFilesystemSearch?.("report", options));
+    expect(result.current.selectedTabId).not.toBe(first);
+    await waitFor(() => expect(signals).toHaveLength(2));
+    expect(api.startFilesystemSearch).toHaveBeenCalledTimes(2);
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+    unmount();
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+
+  it.each([
+    ["sign-out", () => authSession.clear()],
+    ["a new sign-in", () => authSession.notifyNewLogin()],
+  ])("closes active and background searches on %s and keeps the last folder tab", async (_event, clearAuth) => {
+    const signals: AbortSignal[] = [];
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    });
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+    const folderId = result.current.selectedTabId;
+    const options = { case_sensitive: false, folder_depth: "recursive" as const, item_type: "all" as const, search_archives: false };
+    await act(async () => {
+      result.current.startFilesystemSearch?.("report", options);
+      result.current.startFilesystemSearch?.("notes", options);
+    });
+    await waitFor(() => expect(signals).toHaveLength(2));
+    act(() => {
+      expect(result.current.closeTab(folderId).closed).toBe(false);
+    });
+    expect(result.current.tabs).toHaveLength(3);
+
+    await act(async () => clearAuth());
+
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(result.current.tabs.map((tab) => tab.id)).toEqual([folderId]);
+    expect(result.current.selectedTabId).toBe(folderId);
+    expect(result.current.isSearchTab).toBe(false);
+    expect(result.current.sortedFiles).toHaveLength(3);
+  });
+
+  it("uses the current ZIP as the root of a search", async () => {
+    vi.mocked(api.startFilesystemSearch).mockImplementation(() => new Promise(() => {}));
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.sortedFiles).toHaveLength(3));
+    act(() => result.current.openArchive("bundle.zip"));
+    await waitFor(() => expect(result.current.archiveLocation?.archivePath).toBe("bundle.zip"));
+    act(() =>
+      result.current.startFilesystemSearch?.("file", {
+        case_sensitive: false,
+        folder_depth: "recursive",
+        item_type: "all",
+        search_archives: false,
+      })
+    );
+    await waitFor(() =>
+      expect(api.startFilesystemSearch).toHaveBeenCalledWith(
+        expect.objectContaining({ root: { kind: "archive", path: "bundle.zip", member_path: "" } }),
+        expect.any(AbortSignal),
+        expect.any(Function)
+      )
+    );
   });
 
   it("preserves independent selection, focus, scroll, sort, and history across duplicate locations without refetching fresh data", async () => {

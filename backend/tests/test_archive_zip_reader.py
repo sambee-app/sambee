@@ -10,7 +10,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.services.archive.zip_reader import ArchiveFormatError, ZipReader, _dos_datetime
+from app.core.filesystem_search_contract import LIMITS
+from app.services.archive.zip_reader import ArchiveFormatError, ZipReader, _dos_datetime, build_effective_projection
+from app.services.filesystem_search_archive import ArchiveSearchTooLarge, iter_archive_matches, read_search_entries
+from app.services.filesystem_search_matching import NameMatcher
 
 
 class MemoryRandomAccessReader:
@@ -82,6 +85,81 @@ def _duplicate_name_zip_bytes() -> bytes:
 
 
 @pytest.mark.asyncio
+async def test_search_projection_respects_archive_root_depth_and_item_type() -> None:
+    data = _zip_bytes()
+    reader = ZipReader(MemoryRandomAccessReader(data), len(data))
+    projection = build_effective_projection(await read_search_entries(reader, lambda: None))
+    matcher = NameMatcher("*", case_sensitive=False)
+
+    def paths(root, depth, item_type):
+        return {
+            (match.path, match.is_directory) for match in iter_archive_matches(projection, root, depth, item_type, matcher, lambda: None)
+        }
+
+    assert paths("", "current", "all") == {("root.txt", False), ("folder", True)}
+    assert paths("folder", "current", "all") == {("folder/nested.txt", False), ("folder/deeper", True)}
+    assert paths("folder", "recursive", "files") == {("folder/nested.txt", False), ("folder/deeper/item.txt", False)}
+    assert paths("", "recursive", "directories") == {("folder", True), ("folder/deeper", True)}
+    with pytest.raises(ArchiveFormatError, match="search folder"):
+        paths("folder/missing", "recursive", "all")
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_large_metadata_before_projection(monkeypatch) -> None:
+    data = _large_directory_zip_bytes()
+    reader = ZipReader(MemoryRandomAccessReader(data), len(data))
+
+    async def unexpected_entries():
+        raise AssertionError("Oversized metadata must not be read.")
+
+    monkeypatch.setattr(reader, "raw_entries", unexpected_entries)
+    with pytest.raises(ArchiveSearchTooLarge, match="too much metadata"):
+        await read_search_entries(reader, lambda: None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("over_limit", [False, True])
+async def test_search_projection_exact_central_directory_limit(over_limit: bool) -> None:
+    central_header_bytes = 46
+    member_name = "a" * (LIMITS["zip_central_directory_bytes"] - central_header_bytes + int(over_limit))
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as archive:
+        archive.writestr(member_name, b"")
+    archive_bytes = data.getvalue()
+    source = CountingRandomAccessReader(archive_bytes)
+    reader = ZipReader(source, len(archive_bytes))
+    tail_read = (0, len(archive_bytes))
+    if over_limit:
+        with pytest.raises(ArchiveSearchTooLarge):
+            await read_search_entries(reader, lambda: None)
+        assert source.reads == [tail_read]
+    else:
+        projection = build_effective_projection(await read_search_entries(reader, lambda: None))
+        assert [entry.path for entry in projection.regular_entries] == [member_name]
+        eocd = archive_bytes.rfind(b"PK\x05\x06")
+        directory_offset = struct.unpack_from("<I", archive_bytes, eocd + 16)[0]
+        assert source.reads == [tail_read, (directory_offset, LIMITS["zip_central_directory_bytes"])]
+
+
+@pytest.mark.asyncio
+async def test_search_projection_uses_selected_duplicate_and_checks_cancellation() -> None:
+    data = _duplicate_name_zip_bytes()
+    reader = ZipReader(MemoryRandomAccessReader(data), len(data))
+    projection = await reader.effective_projection()
+    matcher = NameMatcher("duplicate", case_sensitive=False)
+    matches = list(iter_archive_matches(projection, "", "recursive", "files", matcher, lambda: None))
+    assert len(matches) == 1
+    assert matches[0].entry is not None
+    assert matches[0].entry.uncompressed_size == len(b"second entry")
+
+    def cancelled() -> None:
+        raise InterruptedError("Search cancelled")
+
+    with pytest.raises(InterruptedError, match="cancelled"):
+        list(iter_archive_matches(projection, "", "recursive", "files", matcher, cancelled))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("month", [1, 7])
 async def test_dos_member_timestamps_use_utc(month):
     expected = datetime(2026, month, 15, 11, 52, 2, tzinfo=timezone.utc)
@@ -111,6 +189,22 @@ async def test_reads_central_directory_records_forward_in_archive_order() -> Non
 
     assert entries == ["root.txt", "folder/nested.txt", "folder/deeper/item.txt"]
     assert await reader.next_entry() is None
+
+
+@pytest.mark.asyncio
+async def test_search_accessors_do_not_advance_the_archive_reader() -> None:
+    data = _zip_bytes()
+    source = CountingRandomAccessReader(data)
+    reader = ZipReader(source, len(data))
+    eocd = data.rfind(b"PK\x05\x06")
+    expected_size = struct.unpack_from("<I", data, eocd + 12)[0]
+
+    assert await reader.central_directory_size() == expected_size
+    assert source.read_count == 1
+    projection = await reader.effective_projection()
+    assert [entry.path for entry in projection.entries] == ["root.txt", "folder/nested.txt", "folder/deeper/item.txt"]
+    assert projection.directories == frozenset({"folder", "folder/deeper"})
+    assert await reader.effective_projection() is projection
 
 
 @pytest.mark.asyncio

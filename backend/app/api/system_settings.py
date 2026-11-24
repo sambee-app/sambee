@@ -17,6 +17,9 @@ from app.core.system_setting_definitions import DirectoryIndexPolicyScope
 from app.db.database import get_immediate_session, get_session
 from app.models.companion_settings import (
     RegionalLocaleTag,
+    SearchSettingsGrantRead,
+    SearchSettingsMetadata,
+    SearchSettingsReceipt,
     SettingsGrantBinding,
     SettingsGrantRead,
     SettingsGrantRedeem,
@@ -41,6 +44,8 @@ from app.models.system_settings import (
     FileSearchSettingsRead,
     FileSearchSettingsUpdate,
     FileSearchSettingsUpdateResult,
+    FilesystemSearchSettingsRead,
+    FilesystemSearchSettingUpdate,
     ImageConversionPreferenceUpdate,
     NetworkSettingsRead,
     NetworkSettingsUpdate,
@@ -53,10 +58,12 @@ from app.models.system_settings import (
 from app.models.user import User
 from app.models.user_settings import CatalogLanguage
 from app.services.system_settings import (
+    FilesystemSearchPolicyError,
     build_about_settings_read,
     build_advanced_system_settings_read,
     build_directory_index_settings_read,
     build_file_search_settings_read,
+    build_filesystem_search_settings_read,
     build_network_settings_read,
     build_public_support_report_read,
     build_smb_settings_read,
@@ -66,6 +73,7 @@ from app.services.system_settings import (
     update_advanced_system_settings,
     update_directory_index_settings,
     update_file_search_settings,
+    update_filesystem_search_settings,
     update_network_settings,
     update_smb_settings,
 )
@@ -82,19 +90,24 @@ def _require_browser_regional_locale(browser_regional_locale: RegionalLocaleTag 
     return browser_regional_locale
 
 
-@router.get("/settings/companion", response_model=SettingsMetadata)
+@router.get("/settings/companion", response_model=SearchSettingsMetadata | SettingsMetadata)
 def get_companion_settings(
     current_user: User = Depends(get_current_user_with_auth_check),
     browser_regional_locale: str = Depends(_require_browser_regional_locale),
     session: Session = Depends(get_session),
     browser_language: CatalogLanguage = "en",
-) -> SettingsMetadata:
-    from app.services.companion_settings import build_settings_metadata
+    include_filesystem_search: bool = False,
+) -> SearchSettingsMetadata | SettingsMetadata:
+    from app.services.companion_settings import build_search_settings_metadata, build_settings_metadata
 
-    return build_settings_metadata(current_user, session, browser_language, browser_regional_locale)
+    builder = build_search_settings_metadata if include_filesystem_search else build_settings_metadata
+    try:
+        return builder(current_user, session, browser_language, browser_regional_locale)
+    except FilesystemSearchPolicyError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
 
-@router.post("/settings/companion/grants", response_model=SettingsGrantRead)
+@router.post("/settings/companion/grants", response_model=SearchSettingsGrantRead | SettingsGrantRead)
 def post_companion_settings_grant(
     payload: SettingsGrantBinding,
     request: Request,
@@ -107,23 +120,29 @@ def post_companion_settings_grant(
 
     if request.headers.get("origin") != payload.origin:
         raise HTTPException(status_code=403, detail="Settings origin does not match the browser. Retry from the paired server.")
-    result = issue_directory_policy_grant(
-        payload,
-        authentication.user,
-        session,
-        browser_session_id=authentication.oidc_browser_session_id,
-        browser_language=browser_language,
-        browser_regional_locale=browser_regional_locale,
-    )
+    try:
+        result = issue_directory_policy_grant(
+            payload,
+            authentication.user,
+            session,
+            browser_session_id=authentication.oidc_browser_session_id,
+            browser_language=browser_language,
+            browser_regional_locale=browser_regional_locale,
+        )
+    except FilesystemSearchPolicyError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     assert isinstance(result, SettingsGrantRead)
     return result
 
 
-@router.post("/settings/companion/grants/redeem", response_model=SettingsReceipt)
+@router.post("/settings/companion/grants/redeem", response_model=SearchSettingsReceipt | SettingsReceipt)
 def post_companion_settings_redemption(payload: SettingsGrantRedeem, session: Session = Depends(get_immediate_session)) -> SettingsReceipt:
     from app.services.directory_policy_grants import redeem_directory_policy_grant
 
-    result = redeem_directory_policy_grant(payload, session)
+    try:
+        result = redeem_directory_policy_grant(payload, session)
+    except FilesystemSearchPolicyError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     assert isinstance(result, SettingsReceipt)
     return result
 
@@ -177,6 +196,31 @@ async def put_directory_index_settings(
         policy = build_directory_index_settings_read(scope, session).policy
         await asyncio.to_thread(get_directory_cache_manager().apply_policy, policy)
     return updated
+
+
+@router.get("/settings/filesystem-search", response_model=FilesystemSearchSettingsRead)
+async def get_filesystem_search_settings(
+    current_user: User = Depends(require_capability(Capability.ACCESS_ADMIN_SETTINGS)),
+    session: Session = Depends(get_session),
+) -> FilesystemSearchSettingsRead:
+    set_user(current_user.username)
+    try:
+        return build_filesystem_search_settings_read(session)
+    except FilesystemSearchPolicyError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+
+
+@router.put("/settings/filesystem-search", response_model=FilesystemSearchSettingUpdate)
+async def put_filesystem_search_settings(
+    payload: FilesystemSearchSettingUpdate,
+    session: Session = Depends(get_immediate_session),
+    current_user: User = Depends(require_capability(Capability.ACCESS_ADMIN_SETTINGS)),
+) -> FilesystemSearchSettingUpdate:
+    set_user(current_user.username)
+    try:
+        return update_filesystem_search_settings(payload, updated_by_user_id=current_user.id, session=session)
+    except FilesystemSearchPolicyError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
 
 @router.get("/settings/file-search", response_model=FileSearchSettingsRead)

@@ -1,5 +1,5 @@
 export const COMPANION_SETTINGS_VERSION = 1;
-export const COMPANION_SETTINGS_SECTIONS = ["theme", "localization", "directory_index"] as const;
+export const COMPANION_SETTINGS_SECTIONS = ["theme", "localization", "directory_index", "filesystem_search"] as const;
 export type CompanionSettingsSection = (typeof COMPANION_SETTINGS_SECTIONS)[number];
 
 export interface CompanionSectionMarker {
@@ -14,6 +14,7 @@ export interface CompanionSettingsMetadata {
   theme: CompanionSectionMarker;
   localization: CompanionSectionMarker;
   directory_index: CompanionSectionMarker;
+  filesystem_search?: CompanionSectionMarker;
 }
 
 export interface CompanionSettingsGrantBinding {

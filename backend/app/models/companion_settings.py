@@ -6,11 +6,17 @@ from pydantic import AfterValidator, StringConstraints
 from sqlmodel import Field
 
 from app.core.regional_locale import MAX_REGIONAL_LOCALE_LENGTH, require_regional_locale
-from app.models.system_settings import DirectoryIndexPolicy, DirectoryPolicyGrantBinding, DirectoryPolicyGrantRedeem, StrictSettingUpdate
+from app.models.system_settings import (
+    DirectoryIndexPolicy,
+    DirectoryPolicyGrantBinding,
+    DirectoryPolicyGrantRedeem,
+    FilesystemSearchPolicy,
+    StrictSettingUpdate,
+)
 from app.models.user_settings import CatalogLanguage
 
 SETTINGS_VERSION: Final[Literal[1]] = 1
-SectionName = Literal["theme", "localization", "directory_index"]
+SectionName = Literal["theme", "localization", "directory_index", "filesystem_search"]
 RegionalLocaleTag = Annotated[str, StringConstraints(max_length=MAX_REGIONAL_LOCALE_LENGTH), AfterValidator(require_regional_locale)]
 
 
@@ -47,6 +53,10 @@ class DirectoryIndexSection(SectionMarker):
     payload: DirectoryIndexPolicy
 
 
+class FilesystemSearchSection(SectionMarker):
+    payload: FilesystemSearchPolicy
+
+
 class SettingsMetadata(StrictSettingUpdate):
     version: Literal[1] = SETTINGS_VERSION
     backend_identity: str
@@ -55,15 +65,23 @@ class SettingsMetadata(StrictSettingUpdate):
     directory_index: SectionMarker
 
 
+class SearchSettingsMetadata(SettingsMetadata):
+    filesystem_search: SectionMarker
+
+
 class SettingsGrantBinding(DirectoryPolicyGrantBinding):
     version: Literal[1] = SETTINGS_VERSION
-    sections: list[SectionName] = Field(default_factory=lambda: ["theme", "localization", "directory_index"], min_length=1, max_length=3)
+    sections: list[SectionName] = Field(default_factory=lambda: ["theme", "localization", "directory_index"], min_length=1, max_length=4)
     switch_user: bool = False
 
 
 class SettingsGrantRead(SettingsMetadata):
     grant: str
     expires_in_seconds: int
+
+
+class SearchSettingsGrantRead(SettingsGrantRead):
+    filesystem_search: SectionMarker
 
 
 class SettingsGrantRedeem(DirectoryPolicyGrantRedeem):
@@ -77,3 +95,7 @@ class SettingsReceipt(DirectoryPolicyGrantBinding):
     theme: ThemeSection | None = None
     localization: LocalizationSection | None = None
     directory_index: DirectoryIndexSection | None = None
+
+
+class SearchSettingsReceipt(SettingsReceipt):
+    filesystem_search: FilesystemSearchSection

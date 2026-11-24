@@ -78,6 +78,8 @@ pub struct PairingState {
 
     pairing_window_cooldown: Duration,
     max_pending_pairings: usize,
+    #[cfg(test)]
+    test_secrets: Option<Mutex<HashMap<String, String>>>,
 }
 
 /// A pairing attempt in progress.
@@ -105,6 +107,12 @@ impl PairingState {
 
     fn set_settings_authority(&self, origin: Option<&str>) -> Result<(), String> {
         let mut authority = self.settings_authority()?;
+        #[cfg(test)]
+        if self.test_secrets.is_some() {
+            authority.origin = origin.map(str::to_owned);
+            authority.generation = authority.generation.wrapping_add(1);
+            return Ok(());
+        }
         let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_SETTINGS_AUTHORITY_ACCOUNT)
             .map_err(|error| format!("Settings authority storage is unavailable. Check the keychain: {error}"))?;
         let serialized = serde_json::to_string(&origin).map_err(|error| format!("Settings authority cannot be encoded: {error}"))?;
@@ -156,7 +164,16 @@ impl PairingState {
             download_intents: Mutex::new(HashMap::new()),
             pairing_window_cooldown: PAIRING_WINDOW_COOLDOWN,
             max_pending_pairings: MAX_PENDING_PAIRINGS,
+            #[cfg(test)]
+            test_secrets: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_memory_keychain() -> Self {
+        let mut state = Self::new();
+        state.test_secrets = Some(Mutex::new(HashMap::new()));
+        state
     }
 
     #[cfg(test)]
@@ -183,6 +200,7 @@ impl PairingState {
             download_intents: Mutex::new(HashMap::new()),
             pairing_window_cooldown,
             max_pending_pairings,
+            test_secrets: None,
         }
     }
 
@@ -217,7 +235,7 @@ impl PairingState {
     }
 
     fn record_verified_origin_locked(&self, origin: &str, reason: VerifiedOriginRecordReason) {
-        if matches!(reason, VerifiedOriginRecordReason::RecoveredFromAuthenticatedRequest) && get_secret_from_keychain(origin).is_err() {
+        if matches!(reason, VerifiedOriginRecordReason::RecoveredFromAuthenticatedRequest) && self.get_secret_for_origin(origin).is_none() {
             warn!("Skipped recovery of paired origin {origin}: its pairing secret is no longer available");
             return;
         }
@@ -227,7 +245,7 @@ impl PairingState {
             if matches!(reason, VerifiedOriginRecordReason::PairingCompleted) {
                 origins.remove(index);
                 origins.push(origin.to_string());
-                if let Err(e) = store_paired_origins_in_keychain(&origins) {
+                if let Err(e) = self.store_origins(&origins) {
                     warn!("Failed to persist paired origins list after auth for {origin}: {e}");
                 }
             }
@@ -235,7 +253,7 @@ impl PairingState {
         }
 
         origins.push(origin.to_string());
-        if let Err(e) = store_paired_origins_in_keychain(&origins) {
+        if let Err(e) = self.store_origins(&origins) {
             warn!("Failed to persist paired origins list after auth for {origin}: {e}");
         }
 
@@ -396,7 +414,7 @@ impl PairingState {
         let secret_hex = hex::encode(&secret_bytes);
 
         // Store in OS keychain
-        if let Err(e) = store_secret_in_keychain(&pairing.origin, &secret_hex) {
+        if let Err(e) = self.store_secret(&pairing.origin, &secret_hex) {
             warn!("Failed to store secret in keychain: {e}");
             return Err(format!("Failed to store pairing secret: {e}"));
         }
@@ -442,7 +460,31 @@ impl PairingState {
 
     /// Retrieve the stored secret for an origin from the keychain.
     pub fn get_secret_for_origin(&self, origin: &str) -> Option<String> {
+        #[cfg(test)]
+        if let Some(secrets) = &self.test_secrets {
+            return secrets.lock().ok()?.get(origin).cloned();
+        }
         get_secret_from_keychain(origin).ok()
+    }
+
+    fn store_secret(&self, origin: &str, secret: &str) -> Result<(), String> {
+        #[cfg(test)]
+        if let Some(secrets) = &self.test_secrets {
+            secrets
+                .lock()
+                .map_err(|_| "Test keychain is unavailable".to_owned())?
+                .insert(origin.to_owned(), secret.to_owned());
+            return Ok(());
+        }
+        store_secret_in_keychain(origin, secret)
+    }
+
+    fn store_origins(&self, origins: &[String]) -> Result<(), String> {
+        #[cfg(test)]
+        if self.test_secrets.is_some() {
+            return Ok(());
+        }
+        store_paired_origins_in_keychain(origins)
     }
 
     /// Get a pending pairing by ID (for the companion UI to display the code).

@@ -17,7 +17,7 @@ Use these shortcuts when the main file list or browser shell has focus.
 | <kbd>Backspace</kbd> | Go up to the parent directory |
 | <kbd>Left</kbd> / <kbd>Right</kbd> | Select the previous or next folder tab in the active pane when the file list itself has focus |
 | <kbd>Alt</kbd> + <kbd>Plus</kbd> (Windows/Linux), <kbd>Control</kbd> + <kbd>Plus</kbd> (macOS) | Open a new folder tab at the current location when the file list itself has focus |
-| <kbd>Alt</kbd> + <kbd>Minus</kbd> (Windows/Linux), <kbd>Control</kbd> + <kbd>Minus</kbd> (macOS) | Close the selected folder tab when the file list itself has focus (each pane keeps at least one tab) |
+| <kbd>Alt</kbd> + <kbd>Minus</kbd> (Windows/Linux), <kbd>Control</kbd> + <kbd>Minus</kbd> (macOS) | Close the selected tab when the file list itself has focus (each pane keeps at least one folder tab) |
 | <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd> (Windows/Linux), <kbd>Control</kbd> + <kbd>Option</kbd> + <kbd>T</kbd> (macOS) | Open the active pane's current location in a new browser tab |
 | <kbd>Ctrl</kbd> + <kbd>Down</kbd> | Open the connection selector |
 | <kbd>Ctrl</kbd> + <kbd>K</kbd> | Open smart navigation |

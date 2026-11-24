@@ -14,6 +14,8 @@ export interface BrowserCommandContext {
   hasFocusedFile: boolean;
   connectionSelected: boolean;
   connectionWritable: boolean;
+  canRefresh?: boolean;
+  canNavigateUp?: boolean;
   canCreateArchive: boolean;
   canExtractArchive: boolean;
   canOpenFocusedFileInApp: boolean;
@@ -145,7 +147,7 @@ const BROWSER_COMMANDS = [
     keywords: ["parent", "up", "backspace"],
     defaultShortcutIds: ["navigate-up"],
     shortcutLabel: "Backspace",
-    isEnabled: (context) => context.connectionSelected,
+    isEnabled: (context) => context.connectionSelected && context.canNavigateUp !== false,
     run: (context) => context.navigateUp(),
   }),
   createCommand({
@@ -185,7 +187,7 @@ const BROWSER_COMMANDS = [
     keywords: ["reload", "refresh"],
     defaultShortcutIds: ["refresh"],
     shortcutLabel: "Ctrl+R",
-    isEnabled: (context) => context.connectionSelected,
+    isEnabled: (context) => context.connectionSelected && context.canRefresh !== false,
     run: (context) => context.refresh(),
   }),
   createCommand({

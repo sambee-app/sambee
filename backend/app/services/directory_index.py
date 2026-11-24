@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Literal, Sequence
 
 from app.core.directory_index_contract import DIRECTORY_INDEX_CONTRACT, MAX_SQL_INTEGER
+from app.core.search_scope import SearchScope, SearchScopeMode
+from app.core.search_scope import validate_directory_path as validate_directory_path
 
 APPLICATION_ID = 1396853073
 SCHEMA_VERSION = DIRECTORY_INDEX_CONTRACT.limits["schema_version"]
@@ -258,12 +260,6 @@ def single_term_rank(basename_key: str, term: str) -> int:
     return 3
 
 
-def validate_directory_path(path: str) -> None:
-    path.encode("utf-8", errors="strict")
-    if "\x00" in path or any(component in {"", ".", ".."} for component in path.split("/")):
-        raise ValueError("Directory path must be relative and must not contain empty, dot, parent, or NUL components.")
-
-
 def epoch_milliseconds() -> int:
     value = time.time_ns() // 1_000_000
     if not 0 <= value <= MAX_SIGNED_INTEGER:
@@ -295,6 +291,7 @@ class DirectoryIndexSearch:
     query_plan: Literal["empty", "trigram", "scan"]
     issue_count: int = 0
     resumable_scan: bool = False
+    scope_not_indexed: bool = False
 
 
 class DirectoryIndex:
@@ -1755,6 +1752,7 @@ class DirectoryIndex:
         include_dot_directories: bool = False,
         cancelled: threading.Event | None = None,
         force_scan: bool = False,
+        scope: SearchScope | None = None,
     ) -> DirectoryIndexSearch:
         if not self._query_slots.acquire(timeout=SQL_BUSY_TIMEOUT_MS / 1000):
             raise TimeoutError("Directory query workers are busy. Wait briefly and retry the search.")
@@ -1765,7 +1763,7 @@ class DirectoryIndex:
                 self._active_queries += 1
                 admitted = True
             return self._search(
-                query, limit=limit, include_dot_directories=include_dot_directories, cancelled=cancelled, force_scan=force_scan
+                query, limit=limit, include_dot_directories=include_dot_directories, cancelled=cancelled, force_scan=force_scan, scope=scope
             )
         except sqlite3.OperationalError as exc:
             if exc.sqlite_errorcode == sqlite3.SQLITE_INTERRUPT:
@@ -1807,6 +1805,7 @@ class DirectoryIndex:
         include_dot_directories: bool = False,
         cancelled: threading.Event | None = None,
         force_scan: bool = False,
+        scope: SearchScope | None = None,
     ) -> DirectoryIndexSearch:
         terms = search_terms(query)
         if not 1 <= limit <= MAX_RESULT_LIMIT:
@@ -1833,6 +1832,16 @@ class DirectoryIndex:
                 )
                 plan: Literal["empty", "trigram", "scan"] = "empty"
                 count = 0
+                if (
+                    scope is not None
+                    and scope.path
+                    and not connection.execute(
+                        "SELECT 1 FROM directories WHERE generation_id = ? AND path = ?", (generation_id, scope.path)
+                    ).fetchone()
+                ):
+                    return DirectoryIndexSearch(
+                        (), count, directory_count, revision, coverage, verified, plan, issue_count, scope_not_indexed=True
+                    )
                 if not terms:
                     return DirectoryIndexSearch((), count, directory_count, revision, coverage, verified, plan, issue_count)
                 plan = "trigram" if fts_ready and not force_scan and all(len(term) >= 3 for term in terms) else "scan"
@@ -1845,9 +1854,18 @@ class DirectoryIndex:
                 parameters: list[str | int] = [generation_id]
                 if not include_dot_directories:
                     sql += " AND directories.has_dot_directory = 0"
+                if scope is not None:
+                    if scope.path:
+                        sql += " AND directories.path > ? AND directories.path < ?"
+                        parameters.extend((scope.path + "/", scope.path + "0"))
+                    if scope.mode is SearchScopeMode.DESCENDANTS_ONLY:
+                        sql += " AND directories.depth > ?"
+                        parameters.append(scope.path.count("/") + 1 if scope.path else 0)
                 if plan == "trigram":
                     sql += " AND directory_fts MATCH ?"
                     parameters.append(" OR ".join('"' + term.replace('"', '""') + '"' for term in terms))
+
+                scope_key_length = len(normalize_search_text(scope.path)) + 1 if scope is not None and scope.path else 0
 
                 def matches() -> Iterable[DirectoryIndexMatch]:
                     nonlocal count
@@ -1855,11 +1873,12 @@ class DirectoryIndex:
                         for path, path_key, basename_key, depth in cursor:
                             if interrupted():
                                 raise InterruptedError("Directory search was cancelled or timed out. Retry the search.")
-                            matched = tuple(term for term in terms if term in path_key)
+                            match_key = path_key[scope_key_length:]
+                            matched = tuple(term for term in terms if term in match_key)
                             if matched:
                                 count += 1
                                 yield DirectoryIndexMatch(
-                                    path, len(matched), min(single_term_rank(basename_key, term) for term in matched), depth, path_key
+                                    path, len(matched), min(single_term_rank(basename_key, term) for term in matched), depth, match_key
                                 )
 
                 rows = tuple(heapq.nsmallest(limit, matches(), key=lambda result: result.sort_key))

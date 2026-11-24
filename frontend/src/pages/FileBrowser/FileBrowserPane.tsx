@@ -16,6 +16,7 @@
 
 import BlockOutlinedIcon from "@mui/icons-material/BlockOutlined";
 import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
+import SearchIcon from "@mui/icons-material/Search";
 import { alpha, Box, Button, CircularProgress, LinearProgress, Typography, useTheme } from "@mui/material";
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -44,6 +45,7 @@ import { DRAFT_RECOVERY_CHANGED_EVENT, getUnsavedDraftsForConnection } from "../
 import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
 import type { Connection, FileEntry } from "../../types";
 import { FileType } from "../../types";
+import { getFileRowIdentity } from "../../utils/fileEntries";
 import { isConnectionReadOnly } from "./access";
 import type { BrowserItem } from "./contentProviders";
 import type { FileOperationAction, FileOperationPolicyContext } from "./fileOperationActions";
@@ -324,7 +326,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   );
   const getCompactItemActionsForFile = React.useCallback(
     (file: FileEntry) => {
-      const item = getItemsByPaths([file.path])[0];
+      const item = getItemsByPaths([getFileRowIdentity(file)])[0];
       return item ? (getCompactItemActions?.(getCompactActionsContext([item], item)) ?? []) : [];
     },
     [getCompactActionsContext, getCompactItemActions, getItemsByPaths]
@@ -683,6 +685,24 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
         ]}
         onDismiss={pane.dismissNotification}
       />
+      <OperationNotifications
+        notices={(pane.searchNotifications ?? []).map((notice) => ({
+          ...notice,
+          action:
+            notice.requiresCompanionUpdate && onOpenLocalDrivesSettings ? (
+              <Button color="inherit" onClick={onOpenLocalDrivesSettings}>
+                {t("fileBrowser.search.live.companionUpdateAction")}
+              </Button>
+            ) : undefined,
+        }))}
+      />
+      <Box
+        aria-live="polite"
+        aria-atomic="true"
+        sx={{ position: "absolute", width: "1px", height: "1px", overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}
+      >
+        {pane.searchAnnouncement}
+      </Box>
       <Box
         aria-live="polite"
         aria-atomic="true"
@@ -717,23 +737,34 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
 
       {/* Breadcrumbs row (available in all layouts below the tab bar) */}
       <Box
+        data-testid="pane-context-row"
         sx={{
           mb: useCompactLayout ? 0.5 : 1.5,
           mt: 0.5,
           px: 2,
-          minHeight: useCompactLayout ? 28 : STATUS_BAR_HEIGHT,
+          height: useCompactLayout ? 28 : STATUS_BAR_HEIGHT,
+          flexShrink: 0,
           boxSizing: "border-box",
           display: "flex",
           alignItems: "center",
         }}
       >
-        <BreadcrumbsNavigation
-          currentPath={breadcrumbPath}
-          connectionName={connectionName}
-          onNavigate={handleBreadcrumbNavigate}
-          onRestoreListFocus={() => pane.requestListFocus()}
-          showActiveIndicator={isDualMode && isActive}
-        />
+        {pane.isSearchTab ? (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, color: "text.secondary" }}>
+            <SearchIcon fontSize="small" aria-hidden="true" />
+            <Typography variant="body2" noWrap title={pane.searchSession?.request.query} dir="auto">
+              {t("fileBrowser.search.live.queryContext", { query: pane.searchSession?.request.query ?? "" })}
+            </Typography>
+          </Box>
+        ) : (
+          <BreadcrumbsNavigation
+            currentPath={breadcrumbPath}
+            connectionName={connectionName}
+            onNavigate={handleBreadcrumbNavigate}
+            onRestoreListFocus={() => pane.requestListFocus()}
+            showActiveIndicator={isDualMode && isActive}
+          />
+        )}
         {!useCompactLayout && connectionIsReadOnly && (
           <Chip
             size="small"
@@ -744,8 +775,8 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
             sx={{ ml: 1, flexShrink: 0 }}
           />
         )}
-        {!useCompactLayout && pane.directoryMonitorError && (
-          <Button size="small" onClick={pane.handleRefresh} sx={{ ml: "auto" }}>
+        {pane.directoryMonitorError && !pane.isSearchTab && (
+          <Button size="small" onClick={pane.handleRefresh} sx={{ ml: "auto", flexShrink: 0, whiteSpace: "nowrap" }}>
             {t("common.actions.monitoringStopped")}
           </Button>
         )}
@@ -764,13 +795,6 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
       )}
 
       {/* File list or loading indicator */}
-      {useCompactLayout && pane.directoryMonitorError && (
-        <Box sx={{ px: 2 }}>
-          <Button size="small" onClick={pane.handleRefresh}>
-            {t("common.actions.monitoringStopped")}
-          </Button>
-        </Box>
-      )}
       {loading ? (
         <Box
           ref={listContainerRef}
@@ -908,7 +932,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
           )}
           <FileList
             files={sortedFiles}
-            showEmptyState={error === null}
+            showEmptyState={!pane.isSearchTab && error === null}
             useCompactLayout={useCompactLayout}
             useTouchSelectionControls={useTouchSelectionControls}
             compactOverlay={compactOverlay}
@@ -930,6 +954,18 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
             ariaDescribedBy={listInstructionsId}
             onKeyDown={handleListSurfaceKeyDown}
           />
+          {pane.isSearchTab &&
+            pane.searchSession?.status === "finished" &&
+            pane.searchSession.terminal?.reason === "complete" &&
+            pane.searchSession.terminal.counts.skipped === 0 &&
+            pane.searchSession.terminal.skips.length === 0 &&
+            pane.searchSession.rows.length === 0 && (
+              <Typography
+                sx={{ position: "absolute", inset: 0, pt: 4, textAlign: "center", pointerEvents: "none", color: "text.secondary" }}
+              >
+                {t("fileBrowser.search.live.noMatches")}
+              </Typography>
+            )}
         </Box>
       )}
 

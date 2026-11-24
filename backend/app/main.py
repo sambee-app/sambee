@@ -28,6 +28,7 @@ from app.api import (
     browser,
     companion,
     connections,
+    filesystem_search,
     health_monitoring,
     logs,
     system_settings,
@@ -528,6 +529,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(admin_auth.router, prefix="/api/admin", tags=["admin-auth"])
 app.include_router(system_settings.router, prefix="/api/admin", tags=["admin-settings"])
 app.include_router(browser.router, prefix="/api/browse", tags=["browse"])
+app.include_router(filesystem_search.router, prefix="/api/browse", tags=["browse"])
 app.include_router(viewer.router, prefix="/api/viewer", tags=["viewer"])
 app.include_router(archive_operations.v2_router, prefix="/api/archive", tags=["archive"])
 app.include_router(companion.router, prefix="/api/companion", tags=["companion"])

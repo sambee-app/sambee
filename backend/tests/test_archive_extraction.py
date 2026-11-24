@@ -798,9 +798,9 @@ async def test_skips_an_unavailable_member_without_preflighting_its_blocked_pare
 
 
 @pytest.mark.asyncio
-async def test_direct_extraction_parses_the_central_directory_once() -> None:
+async def test_direct_extraction_reads_the_central_directory_descriptor_once() -> None:
     backend = MemoryExtractionBackend(_archive_bytes())
-    original_directory = ZipReader._directory
+    original_directory = ZipReader._read_directory
     directory_calls = 0
 
     async def count_directory(reader: ZipReader):
@@ -808,7 +808,7 @@ async def test_direct_extraction_parses_the_central_directory_once() -> None:
         directory_calls += 1
         return await original_directory(reader)
 
-    with patch.object(ZipReader, "_directory", count_directory):
+    with patch.object(ZipReader, "_read_directory", count_directory):
         await extract_archive_to_new_paths(backend, archive_path="input.zip", destination_root="output")
 
     assert directory_calls == 1

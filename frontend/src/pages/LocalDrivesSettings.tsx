@@ -134,6 +134,7 @@ export function LocalDrivesSettings({ isAdmin = false, onConnectionsChanged, sec
   const companionUnsupportedOnCurrentDevice = useMemo(() => isUnsupportedMobileCompanionPlatform(), []);
   const companionSigningAvailable = canSignCompanionRequests();
   const [testing, setTesting] = useState(false);
+  const [showPairedDownloads, setShowPairedDownloads] = useState(false);
   const [pairingTestResult, setPairingTestResult] = useState<PairingTestResult | null>(null);
   const [pairingDialogOpen, setPairingDialogOpen] = useState(false);
   const [unpairing, setUnpairing] = useState(false);
@@ -439,7 +440,9 @@ export function LocalDrivesSettings({ isAdmin = false, onConnectionsChanged, sec
               : alpha(theme.palette.warning.main, theme.palette.mode === "dark" ? 0.16 : 0.08),
         };
   const shouldShowInstallSection =
-    showStatusContent && !loading && ["secure_context_required", "unavailable", "update_required"].includes(viewState);
+    showStatusContent &&
+    !loading &&
+    (["secure_context_required", "unavailable", "update_required"].includes(viewState) || (viewState === "paired" && showPairedDownloads));
   const shouldShowPairingSection =
     showStatusContent && !loading && ["unpaired", "pending_local_approval", "needs_repair"].includes(viewState);
   const shouldShowVerificationSection =
@@ -517,6 +520,16 @@ export function LocalDrivesSettings({ isAdmin = false, onConnectionsChanged, sec
                       sx={settingsFormSurfaceUtilityButtonSx}
                     >
                       {LOCAL_DRIVES_PAGE_COPY.reloadButton}
+                    </Button>
+                  )}
+                  {viewState === "paired" && !showPairedDownloads && (
+                    <Button
+                      variant="outlined"
+                      startIcon={<DownloadIcon />}
+                      onClick={() => setShowPairedDownloads(true)}
+                      sx={settingsFormSurfaceUtilityButtonSx}
+                    >
+                      {LOCAL_DRIVES_PAGE_COPY.downloadSectionTitle}
                     </Button>
                   )}
                 </Stack>

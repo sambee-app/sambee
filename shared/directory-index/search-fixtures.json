@@ -1,5 +1,21 @@
 {
   "version": 1,
+  "scope_paths": [
+    "Projects",
+    "Projects/direct",
+    "Projects/deep",
+    "Projects/deep/item",
+    "ProjectsExtra/item",
+    "projects/item",
+    "root-item"
+  ],
+  "scope_searches": [
+    {"scope_path": "Projects", "scope_mode": "subtree", "query": "item", "expected": ["Projects/deep/item"], "missing": false},
+    {"scope_path": "Projects", "scope_mode": "subtree", "query": "projects", "expected": [], "missing": false},
+    {"scope_path": "Projects", "scope_mode": "descendants_only", "query": "direct item", "expected": ["Projects/deep/item"], "missing": false},
+    {"scope_path": "", "scope_mode": "descendants_only", "query": "item", "expected": ["projects/item", "Projects/deep/item", "ProjectsExtra/item"], "missing": false},
+    {"scope_path": "Missing", "scope_mode": "subtree", "query": "item", "expected": [], "missing": true}
+  ],
   "scan_trees": [
     {
       "name": "shallow",

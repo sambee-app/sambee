@@ -45,10 +45,6 @@
 - Additional formats
    - DCM (medical image format)
 
-## Directory search & navigation
-
-- Add an option to search only below the current directory in the active pane
-
 ## Storage
 
 - Plugin system to support additional backends like S3 or SFTP

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from time import monotonic
-from typing import Literal, NoReturn, Optional
+from typing import Annotated, Literal, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -28,6 +28,7 @@ from app.api.companion import (
 )
 from app.core.directory_index_contract import CONTRACT_VERSION
 from app.core.logging import get_logger, set_user
+from app.core.search_scope import parse_search_scope
 from app.core.security import (
     decrypt_password,
     get_current_user_for_token,
@@ -461,12 +462,23 @@ async def create_recent_directory(
 async def get_recent_directories(
     q: str = Query("", max_length=1024),
     limit: int = Query(10, ge=1, le=MAX_RECENT_DIRECTORY_RESULTS),
+    connection_id: Annotated[str | None, Query(min_length=1, max_length=256)] = None,
+    scope_path: Annotated[str | None, Query(max_length=4096)] = None,
+    scope_mode: str | None = None,
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
 ) -> RecentDirectorySearchRead:
     set_user(current_user.username)
     try:
-        results = search_recent_directories(query=q, limit=limit, current_user=current_user, session=session)
+        results = search_recent_directories(
+            query=q,
+            limit=limit,
+            current_user=current_user,
+            session=session,
+            connection_id=connection_id,
+            scope_path=scope_path,
+            scope_mode=scope_mode,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return RecentDirectorySearchRead(
@@ -555,13 +567,24 @@ async def create_recent_file(
 async def get_recent_files(
     q: str = Query("", max_length=1024),
     limit: int = Query(10, ge=1, le=50),
+    connection_id: Annotated[str | None, Query(min_length=1, max_length=256)] = None,
+    scope_path: Annotated[str | None, Query(max_length=4096)] = None,
+    scope_mode: str | None = None,
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
 ) -> RecentFileSearchRead:
     set_user(current_user.username)
     result_limit = get_recent_file_result_limit(limit=limit, session=session)
     try:
-        results = search_recent_files(query=q, limit=result_limit, current_user=current_user, session=session)
+        results = search_recent_files(
+            query=q,
+            limit=result_limit,
+            current_user=current_user,
+            session=session,
+            connection_id=connection_id,
+            scope_path=scope_path,
+            scope_mode=scope_mode,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return RecentFileSearchRead(
@@ -1118,6 +1141,8 @@ async def search_directories(
     q: str = Query("", max_length=MAX_QUERY_BYTES, description="Directory search text; shared UTF-8 byte and term limits apply"),
     include_dot_directories: bool = Query(False, description="Whether to include directories whose path contains dot-prefixed segments"),
     include_issue_details: bool = Query(False, description="Include bounded directory issue details for the status dialog"),
+    scope_path: Annotated[str | None, Query(max_length=4096)] = None,
+    scope_mode: str | None = None,
     current_user: User = Depends(get_current_user_with_auth_check),
     session: Session = Depends(get_session),
 ) -> DirectorySearchResult:
@@ -1135,6 +1160,7 @@ async def search_directories(
 
     try:
         search_terms(q.replace("\\", "/"))
+        scope = parse_search_scope(scope_path, scope_mode)
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
@@ -1154,9 +1180,14 @@ async def search_directories(
         if isinstance(cache, SQLiteConnectionDirectoryCache):
             cancelled = threading.Event()
             try:
-                response = await asyncio.to_thread(
-                    cache.search_index, q, include_dot_directories=include_dot_directories, cancelled=cancelled
-                )
+                if scope is None:
+                    response = await asyncio.to_thread(
+                        cache.search_index, q, include_dot_directories=include_dot_directories, cancelled=cancelled
+                    )
+                else:
+                    response = await asyncio.to_thread(
+                        cache.search_index, q, include_dot_directories=include_dot_directories, cancelled=cancelled, scope=scope
+                    )
             except asyncio.CancelledError:
                 cancelled.set()
                 raise
@@ -1168,12 +1199,18 @@ async def search_directories(
                 match_ranks={row.path: row.match_rank for row in response.results},
                 matched_term_counts={row.path: row.matched_term_count for row in response.results},
                 total_matches=response.total_matches,
+                scope_not_indexed=response.scope_not_indexed,
                 **_directory_search_status(cache, response, has_details=bool(details)).model_dump(),
                 issue_details=[DirectoryIssueDetail.model_validate(detail) for detail in details] if include_issue_details else None,
                 issue_details_incomplete=incomplete,
                 last_verified_at_ms=response.last_verified_at_ms,
             )
 
+        if scope is not None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Folder-scoped directory search is unavailable. Retry after directory indexing is available.",
+            )
         results, total_matches = await asyncio.to_thread(cache.search, q, include_dot_directories=include_dot_directories) if q else ([], 0)
         normalized_query = normalize_history_search_text(q.replace("\\", "/").strip())
 

@@ -31,6 +31,18 @@ async def _read_entries(reader: ZipReader) -> list[ZipEntry]:
     return entries
 
 
+@pytest.mark.asyncio
+async def test_zip64_directory_size_accessor() -> None:
+    fixture_path = CORPUS_ROOT / "zip64-v2.zip"
+    data = fixture_path.read_bytes()
+    zip64_eocd = data.index(b"PK\x06\x06")
+    expected_size = int.from_bytes(data[zip64_eocd + 40 : zip64_eocd + 48], "little")
+    reader = ZipReader(FileRandomAccessReader(fixture_path), len(data))
+
+    assert await reader.central_directory_size() == expected_size
+    assert [entry.path for entry in (await reader.effective_projection()).entries] == ["zip64.txt"]
+
+
 def _inspection_member(entry: ZipEntry) -> ArchiveInspectionManifestMember:
     return ArchiveInspectionManifestMember(
         path=entry.path,

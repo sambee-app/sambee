@@ -609,6 +609,40 @@ describe("Browse API Contract Tests", () => {
   // ==========================================================================
 
   describe("Contract Tests - GET /browse/{connection_id}/directories", () => {
+    it("sends an empty root scope and preserves a missing-scope status", async () => {
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: { results: [], total_matches: 0, cache_state: "ready", directory_count: 0, scope_not_indexed: true },
+      } as AxiosResponse);
+      const result = await apiService.searchDirectories(testConnectionId, "doc", {
+        scope: { path: "", mode: "descendants_only" },
+      });
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(
+        `/browse/${testConnectionId}/directories`,
+        expect.objectContaining({
+          params: { q: "doc", include_dot_directories: false, scope_path: "", scope_mode: "descendants_only" },
+        })
+      );
+      expect(result.scope_not_indexed).toBe(true);
+    });
+
+    it.each(["files", "directories"] as const)("sends connection and scope for recent %s", async (kind) => {
+      mockAxiosInstance.get.mockResolvedValueOnce({ data: { results: [], result_limit: 10 } } as AxiosResponse);
+      const signal = new AbortController().signal;
+      const options = { connectionId: "local-drive:c", scope: { path: "Docs", mode: "subtree" as const } };
+      if (kind === "files") {
+        await apiService.searchRecentFiles("", 10, signal, options);
+      } else {
+        await apiService.searchRecentDirectories("", 10, signal, options);
+      }
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(
+        `/browse/recent-${kind}`,
+        expect.objectContaining({
+          params: { q: "", limit: 10, connection_id: "local-drive:c", scope_path: "Docs", scope_mode: "subtree" },
+          signal,
+        })
+      );
+    });
+
     it.each([undefined, null, SEARCH_CONTRACT_VERSION])("preserves directory search contract version %s", async (searchContractVersion) => {
       const backendResponse: DirectorySearchResult = {
         results: ["documents", "documents/work", "documents/personal"],

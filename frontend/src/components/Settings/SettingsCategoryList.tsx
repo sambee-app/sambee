@@ -136,6 +136,7 @@ function renderCategoryIcon(item: SettingsNavItem, iconGlyphSx?: SxProps<Theme>)
     case "admin-smb":
       return <DnsIcon sx={iconGlyphSx} />;
     case "admin-file-search":
+    case "admin-filesystem-search":
       return <ManageSearchIcon sx={iconGlyphSx} />;
     case "admin-directory-search":
       return <FolderIcon sx={iconGlyphSx} />;

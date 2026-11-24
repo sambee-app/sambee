@@ -47,8 +47,9 @@ export function changedSettingsSections(
 ): CompanionSettingsSection[] {
   return COMPANION_SETTINGS_SECTIONS.filter((name) => {
     const desired = metadata[name];
+    if (!desired || (name === "filesystem_search" && !supportsFilesystemSearch(metadata, status))) return false;
     const current = status.sections[name];
-    if (name !== "directory_index" && !switchUser) {
+    if ((name === "theme" || name === "localization") && !switchUser) {
       const applied = [status.sections.theme, status.sections.localization].find(
         (section) => section?.origin === window.location.origin && section.backend_identity === metadata.backend_identity
       );
@@ -63,6 +64,21 @@ export function changedSettingsSections(
       current.user_scope !== desired.user_scope
     );
   });
+}
+
+function supportsFilesystemSearch(metadata: CompanionSettingsMetadata, status: CompanionSettingsStatus): boolean {
+  return Boolean(metadata.filesystem_search && status.results && Object.hasOwn(status.results, "filesystem_search"));
+}
+
+function statusSections(status: CompanionSettingsStatus, searchSupported: boolean): SettingsSyncSnapshot["sections"] {
+  return Object.fromEntries(
+    COMPANION_SETTINGS_SECTIONS.map((name) => [
+      name,
+      name === "filesystem_search" && !searchSupported
+        ? "update_required"
+        : (status.results?.[name] ?? status.sections[name]?.result ?? "defaults_active"),
+    ])
+  ) as SettingsSyncSnapshot["sections"];
 }
 
 class CompanionSettingsSynchronizer {
@@ -156,20 +172,20 @@ class CompanionSettingsSynchronizer {
     this.retries = 0;
   }
 
-  private publishStatus(status: CompanionSettingsStatus): void {
-    const sections = Object.fromEntries(
-      COMPANION_SETTINGS_SECTIONS.map((name) => [name, status.results?.[name] ?? status.sections[name]?.result ?? "defaults_active"])
-    ) as SettingsSyncSnapshot["sections"];
+  private publishStatus(status: CompanionSettingsStatus, searchSupported: boolean): void {
+    const sections = statusSections(status, searchSupported);
     const results = Object.values(sections);
     this.publish({
       phase:
         status.status === "delivery_failed" || results.includes("delivery_failed")
           ? "delivery_failed"
-          : results.every((result) => result === "defaults_active")
-            ? "defaults_active"
-            : "synchronized",
+          : results.includes("update_required")
+            ? "update_required"
+            : results.every((result) => result === "defaults_active")
+              ? "defaults_active"
+              : "synchronized",
       status,
-      message: status.message,
+      message: status.message ?? (!searchSupported ? translate("settings.companionSync.searchUpdateRequired") : null),
       sections,
     });
   }
@@ -211,7 +227,11 @@ class CompanionSettingsSynchronizer {
         const companionOptions = { signal: controller.signal };
         const backendOptions = {
           ...companionOptions,
-          params: { browser_language: getBrowserLanguage(), browser_regional_locale: getBrowserRegionalLocale() },
+          params: {
+            browser_language: getBrowserLanguage(),
+            browser_regional_locale: getBrowserRegionalLocale(),
+            include_filesystem_search: true,
+          },
         };
         const [metadata, status] = await Promise.all([
           api.getCompanionSettingsMetadata(backendOptions),
@@ -221,7 +241,11 @@ class CompanionSettingsSynchronizer {
         if (
           metadata.version !== COMPANION_SETTINGS_VERSION ||
           status.version !== COMPANION_SETTINGS_VERSION ||
-          COMPANION_SETTINGS_SECTIONS.some((name) => metadata[name].version !== COMPANION_SETTINGS_VERSION)
+          COMPANION_SETTINGS_SECTIONS.some(
+            (name) =>
+              (name !== "filesystem_search" && !metadata[name]) ||
+              (metadata[name] !== undefined && metadata[name]?.version !== COMPANION_SETTINGS_VERSION)
+          )
         ) {
           this.blocked = true;
           this.publish({ phase: "update_required", status, message: null, sections: {} });
@@ -231,18 +255,22 @@ class CompanionSettingsSynchronizer {
           this.publish({ phase: "authority_conflict", status, message: null, sections: {} });
           return;
         }
+        const searchSupported = supportsFilesystemSearch(metadata, status);
         const sections = changedSettingsSections(metadata, status, switchUser);
         if (!sections.length) {
           this.retries = 0;
           this.switchUser = false;
-          this.publishStatus(status);
+          this.publishStatus(status, searchSupported);
           return;
         }
         this.publish({
           phase: "synchronizing",
           status,
           message: null,
-          sections: Object.fromEntries(sections.map((name) => [name, "synchronizing"])),
+          sections: {
+            ...statusSections(status, searchSupported),
+            ...Object.fromEntries(sections.map((name) => [name, "synchronizing"])),
+          },
         });
         const challenge = await companionService.requestSettingsChallenge(companionOptions);
         if (!check()) return;
@@ -267,10 +295,12 @@ class CompanionSettingsSynchronizer {
           applied.authority_generation !== challenge.authority_generation ||
           sections.some((name) => {
             const result = applied.sections[name];
+            const desired = grant[name];
             return (
+              !desired ||
               result?.result !== "synchronized" ||
-              result.marker !== grant[name].marker ||
-              result.user_scope !== grant[name].user_scope ||
+              result.marker !== desired.marker ||
+              result.user_scope !== desired.user_scope ||
               result.backend_identity !== grant.backend_identity
             );
           })
@@ -278,7 +308,7 @@ class CompanionSettingsSynchronizer {
           throw new Error("Settings delivery was not confirmed. Refresh settings status and retry.");
         this.retries = 0;
         this.switchUser = false;
-        this.publishStatus(applied);
+        this.publishStatus(applied, searchSupported);
       };
       if (navigator.locks) {
         await navigator.locks.request(SETTINGS_LOCK, { signal: controller.signal }, synchronize);
@@ -317,7 +347,9 @@ class CompanionSettingsSynchronizer {
               : LEGACY_DIRECTORY_POLICY_ERRORS.has(errorMessage)
                 ? translate("settings.companionSync.directoryPolicyUpdateRequired")
                 : errorMessage,
-        sections: Object.fromEntries(Object.keys(this.snapshot.sections).map((name) => [name, phase])),
+        sections: Object.fromEntries(
+          Object.entries(this.snapshot.sections).map(([name, value]) => [name, value === "synchronizing" ? phase : value])
+        ),
       });
       delay = phase === "authority_conflict" ? CHECK_INTERVAL_MS : (RETRY_DELAYS_MS[this.retries++] ?? CHECK_INTERVAL_MS);
     } finally {

@@ -5,8 +5,10 @@
 import type { Virtualizer } from "@tanstack/react-virtual";
 import type React from "react";
 import type { SearchProvider } from "../../components/FileBrowser/search/types";
+import type { NavigationScope } from "../../components/FileBrowser/search/useNavigationSearchProvider";
 import type { BrowserHistoryService } from "../../services/browserHistoryService";
 import type { BrowserLinkTargetService } from "../../services/browserLinkTargetService";
+import type { FilesystemSearchRequest } from "../../services/filesystemSearchContract";
 import type { CompanionPairingErrorKind } from "../../services/localDrivePairing";
 import type { StorageBackendRegistry } from "../../services/storageContracts";
 import type { Connection, FileEntry, FileType } from "../../types";
@@ -19,6 +21,7 @@ import type {
   VirtualContentProviderId,
   VirtualItemHandle,
 } from "./contentProviders";
+import type { FilesystemSearchSession } from "./filesystemSearchSessions";
 import type { PaneTabCollection, PaneTabSummary, TabSessionState } from "./tabSessions";
 
 export type SortField = "name" | "size" | "modified" | "type";
@@ -157,6 +160,7 @@ export interface UseFileBrowserPaneConfig {
   /** Recent-history and directory-navigation service composed at the page boundary. */
   history?: BrowserHistoryService;
   sourceRevision?: number;
+  quickNavigationScope?: NavigationScope;
 
   /** Link-target metadata service composed at the page boundary. */
   linkTargets?: BrowserLinkTargetService;
@@ -226,6 +230,12 @@ export interface UseFileBrowserPaneReturn {
   restoreClosedTab: (session: TabSessionState, insertionIndex: number, options?: { focusList?: boolean; notifyRoute?: boolean }) => string;
   hydrateTabs: (collection: PaneTabCollection, options?: { focusList?: boolean }) => void;
   requestListFocus: () => void;
+  isSearchTab?: boolean;
+  searchSession?: FilesystemSearchSession | null;
+  startFilesystemSearch?: (
+    query: string,
+    options: Pick<FilesystemSearchRequest, "case_sensitive" | "folder_depth" | "item_type" | "search_archives">
+  ) => void;
 
   // ── Core State ──────────────────────────────────────────────────────────
   connectionId: string;
@@ -243,6 +253,8 @@ export interface UseFileBrowserPaneReturn {
   error: string | null;
   errorOccurrence?: number;
   notification?: import("../../components/OperationNotifications").OperationNotice | null;
+  searchNotifications?: (import("../../components/OperationNotifications").OperationNotice & { requiresCompanionUpdate?: boolean })[];
+  searchAnnouncement?: string;
   dismissNotification?: () => void;
   monitoredLocation?: { connectionId: string; path: string } | null;
   handleDirectorySubscribed?: (change: { connectionId: string; path: string }) => void;

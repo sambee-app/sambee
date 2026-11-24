@@ -88,6 +88,90 @@ def test_directory_parser_skips_files_and_dot_entries():
     assert list(files_only) == []
 
 
+def test_directory_parser_reports_files_only_when_requested():
+    from datetime import UTC, datetime
+
+    from smbprotocol.file_info import FileIdFullDirectoryInformation
+
+    from app.services.directory_traversal import parse_directory_records
+
+    record = FileIdFullDirectoryInformation()
+    record["file_name"] = "report.txt".encode("utf-16-le")
+    record["file_id"] = 42
+    record["end_of_file"] = 1234
+    record["last_write_time"] = datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC)
+    wire = record.pack()
+
+    assert list(parse_directory_records(wire)) == []
+    (entry,) = parse_directory_records(wire, include_files=True)
+    assert (entry.name, entry.file_id, entry.size, entry.modified_at) == (
+        "report.txt",
+        (42).to_bytes(8, "little"),
+        1234,
+        datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC),
+    )
+
+
+def test_directory_parser_excludes_file_reparse_points():
+    from app.services.directory_traversal import parse_directory_records
+
+    wire = _directory_wire_records([("link".encode("utf-16-le"), 1024, 1)])
+    assert list(parse_directory_records(wire, include_files=True)) == []
+
+
+def test_smb_no_follow_connection_accepts_read_response_options():
+    from smbprotocol.open import Open, SMB2ReadResponse
+
+    from app.services.directory_traversal import DirectoryTraversalError, _NoFollowConnection
+
+    connection = Mock()
+    request = object()
+    wrapped = _NoFollowConnection(connection)
+    response = SMB2ReadResponse()
+    response["buffer"] = b"ZIP data"
+    connection.receive.return_value = {"data": SimpleNamespace(get_value=lambda: response.pack())}
+    descriptor = SimpleNamespace(
+        connection=wrapped,
+        tree_connect=SimpleNamespace(session=SimpleNamespace(username="fixture"), share_name="fixture"),
+    )
+    assert Open._read_response(descriptor, request) == b"ZIP data"
+    connection.receive.assert_called_once_with(request, resolve_symlinks=False)
+    connection.reset_mock()
+    wrapped.receive(request, wait=False, timeout=3)
+    connection.receive.assert_called_once_with(request, resolve_symlinks=False, wait=False, timeout=3)
+    with pytest.raises(DirectoryTraversalError):
+        wrapped.receive(request, resolve_symlinks=True)
+
+
+@pytest.mark.parametrize("include_files", [False, True])
+def test_smb_directory_read_selects_file_reporting(include_files):
+    from app.services.directory_traversal import SmbDirectoryRead
+
+    handle = Mock()
+    handle.records.return_value = iter(())
+    check = Mock()
+    reader = SmbDirectoryRead([handle], [], check, include_files=include_files)
+    if include_files:
+        handle.records.assert_called_once_with(check, include_files=True)
+    else:
+        handle.records.assert_called_once_with(check)
+    assert list(reader) == []
+
+
+@pytest.mark.parametrize("offset,value,field", [(40, -1, "size"), (24, 0xFFFFFFFFFFFFFFFF, "modified_at")])
+def test_directory_parser_reports_invalid_file_metadata_as_unknown(offset, value, field):
+    from struct import pack_into
+
+    from app.services.directory_traversal import parse_directory_records
+
+    wire = bytearray(_directory_wire_records([("file".encode("utf-16-le"), 0, 1), ("other".encode("utf-16-le"), 0, 2)]))
+    pack_into("<q" if value < 0 else "<Q", wire, offset, value)
+    assert list(parse_directory_records(bytes(wire))) == []
+    entries = list(parse_directory_records(bytes(wire), include_files=True))
+    assert [entry.name for entry in entries] == ["file", "other"]
+    assert getattr(entries[0], field) is None
+
+
 @pytest.mark.parametrize("file_id", [0, 0xFFFFFFFFFFFFFFFF])
 def test_directory_parser_unavailable_file_id(file_id):
     from app.services.directory_traversal import parse_directory_records
@@ -3459,6 +3543,439 @@ def test_smb_io_counter_counts_compounds_not_messages(smb_directory_server, cred
         assert source_io.round_trips == len(server.compounds) == (1 if credits else 0)
     finally:
         reader.close()
+
+
+@pytest.mark.parametrize("include_files", [False, True])
+def test_smb_compound_file_reporting_is_opt_in(smb_directory_server, include_files):
+    from app.services.directory_traversal import SmbCompoundDirectoryReader
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.identifiers["base\\parent"] = 42
+    server.directories["base\\parent"] = [("folder", 16), ("file.txt", 0)]
+    reader = SmbCompoundDirectoryReader(server.tree, "base\\parent", (42).to_bytes(8, "little"), lambda: None, include_files=include_files)
+    try:
+        assert reader.complete
+        entries = list(reader)
+        assert [entry.name for entry in entries] == (["folder", "file.txt"] if include_files else ["folder"])
+        if include_files:
+            assert entries[1].size == 0
+            assert entries[1].modified_at is not None
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("credits", [0, 128])
+def test_smb_observed_file_reporting_survives_compound_fallback(smb_directory_server, credits):
+    from app.services.directory_traversal import SmbDirectoryRoot
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = credits
+    server.identifiers["base\\parent"] = 42
+    server.directories["base\\parent"] = [("folder", 16), ("file.txt", 0)]
+    root = SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        root.read("", lambda: None).close()
+        reader = root.read_observed("parent", (42).to_bytes(8, "little"), lambda: None, include_files=True)
+        try:
+            assert [entry.name for entry in reader] == ["folder", "file.txt"]
+            assert len(server.compounds) == (1 if credits else 0)
+        finally:
+            reader.close()
+    finally:
+        root.close()
+
+
+def test_smb_live_search_traverses_breadth_first_and_discovers_unmatched_archives(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+    from app.services.filesystem_search_matching import NameMatcher
+    from app.services.filesystem_search_physical import PhysicalSearchOptions, search_physical
+
+    server = smb_directory_server
+    server.record_ids = True
+    server.directories["base"] = [("folder", 16), ("top.txt", 0), ("other.ZIP", 0), ("link", 16 | 1024)]
+    server.directories["base\\folder"] = [("deeper", 16), ("nested.txt", 0)]
+    server.directories["base\\folder\\deeper"] = [("end.txt", 0)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+    events = []
+    try:
+        summary = search_physical(
+            source,
+            PhysicalSearchOptions("", "recursive", "files", True, NameMatcher("*.txt", case_sensitive=False)),
+            {},
+            lambda: None,
+            events.append,
+        )
+    finally:
+        source.close()
+    assert [event.path for event in events if event.kind == "file"] == ["top.txt", "folder/nested.txt", "folder/deeper/end.txt"]
+    assert [event.path for event in events if event.kind == "archive"] == ["other.ZIP"]
+    assert summary.scanned_directories == 3
+    assert summary.skipped == 0
+
+
+@pytest.mark.parametrize("credits", [0, 128])
+def test_smb_live_search_uses_compound_or_safe_fallback(smb_directory_server, credits):
+    from app.services.directory_traversal import SmbDirectoryRoot
+    from app.services.filesystem_search_matching import NameMatcher
+    from app.services.filesystem_search_physical import PhysicalSearchOptions, search_physical
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = credits
+    server.directories["base"] = [("folder", 16), ("file.txt", 0)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+    events = []
+    try:
+        summary = search_physical(
+            source,
+            PhysicalSearchOptions("", "current", "all", False, NameMatcher("*", case_sensitive=False)),
+            {},
+            lambda: None,
+            events.append,
+        )
+    finally:
+        source.close()
+    assert {event.path for event in events} == {"folder", "file.txt"}
+    assert summary.scanned_directories == 1
+    assert len(server.compounds) == (1 if credits else 0)
+
+
+def test_smb_live_search_falls_back_when_compound_listing_is_incomplete(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+    from app.services.filesystem_search_matching import NameMatcher
+    from app.services.filesystem_search_physical import PhysicalSearchOptions, search_physical
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.directories["base"] = [(f"{number}.txt", 0) for number in range(5)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+    events = []
+    try:
+        summary = search_physical(
+            source,
+            PhysicalSearchOptions("", "current", "files", False, NameMatcher("*", case_sensitive=False)),
+            {},
+            lambda: None,
+            events.append,
+        )
+    finally:
+        source.close()
+    assert [event.path for event in events] == [f"{number}.txt" for number in range(5)]
+    assert summary.scanned_directories == 1
+    assert len(server.compounds) == 1
+
+
+def test_smb_live_search_keeps_parent_pinned_and_releases_it_on_cancellation(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+    from app.services.filesystem_search_matching import NameMatcher
+    from app.services.filesystem_search_physical import PhysicalSearchOptions, search_physical
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.directories["base"] = [("file.txt", 0)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+
+    def cancel(event):
+        assert event.path == "file.txt"
+        assert any(handle.connected and handle.path == "base" for handle in server.handles)
+        raise RuntimeError("Search cancelled")
+
+    try:
+        with pytest.raises(RuntimeError, match="Search cancelled"):
+            search_physical(
+                source,
+                PhysicalSearchOptions("", "current", "files", False, NameMatcher("*", case_sensitive=False)),
+                {},
+                lambda: None,
+                cancel,
+            )
+    finally:
+        source.close()
+
+
+def test_smb_live_search_does_not_follow_replaced_descendant(smb_directory_server):
+    from app.services.directory_traversal import SmbDirectoryRoot
+    from app.services.filesystem_search_matching import NameMatcher
+    from app.services.filesystem_search_physical import PhysicalSearchOptions, search_physical
+
+    server = smb_directory_server
+    server.connection.sequence_window["high"] = 128
+    server.record_ids = True
+    server.directories["base"] = [("folder", 16)]
+    server.directories["base\\folder"] = [("secret.txt", 0)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+    events = []
+
+    def replace_folder(event):
+        events.append(event)
+        if event.kind == "directory":
+            server.identifiers["base\\folder"] += 1
+
+    try:
+        summary = search_physical(
+            source,
+            PhysicalSearchOptions("", "recursive", "all", False, NameMatcher("*", case_sensitive=False)),
+            {},
+            lambda: None,
+            replace_folder,
+        )
+    finally:
+        source.close()
+    assert [event.kind for event in events] == ["directory", "issue"]
+    assert events[-1].issue == "unreadable_directory"
+    assert summary.skipped == 1
+
+
+@pytest.mark.asyncio
+async def test_smb_search_worker_reads_source_without_a_directory_index(smb_directory_server):
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    from app.core.filesystem_search_contract import SearchRequest
+    from app.services.filesystem_search_admission import SearchAdmission
+    from app.services.filesystem_search_worker import SearchPolicy, SmbSearchWorker
+    from app.storage.smb import SMBBackend
+
+    server = smb_directory_server
+    server.directories["base"] = [("folder", 16), ("top.txt", 0)]
+    server.directories["base\\folder"] = [("nested.txt", 0)]
+    backend = Mock(spec=SMBBackend)
+    backend.directory_search_context.return_value = nullcontext((r"\\host\share\base", {}))
+    admission = SearchAdmission()
+    request = SearchRequest.model_validate(
+        {
+            "version": 1,
+            "source": {"kind": "smb", "id": "test"},
+            "root": {"kind": "directory", "path": ""},
+            "query": "*.txt",
+            "case_sensitive": False,
+            "folder_depth": "recursive",
+            "item_type": "files",
+            "search_archives": False,
+        }
+    )
+
+    async def authorize():
+        return True
+
+    worker = SmbSearchWorker(request, SearchPolicy(1, 5, 10), admission.admit("user", "test", 1), backend, authorize)
+    worker.start()
+    records = [json.loads(chunk) async for chunk in worker.stream()]
+    assert [record["results"][0]["target"]["path"] for record in records if record["type"] == "batch"] == [
+        "top.txt",
+        "folder/nested.txt",
+    ]
+    assert records[-1]["reason"] == "complete"
+    assert worker._task is not None
+    await worker._task
+
+
+@pytest.mark.asyncio
+async def test_smb_live_search_and_index_scan_remain_independent(smb_pipeline_cache, monkeypatch):
+    import asyncio
+    import threading
+    from contextlib import nullcontext
+    from unittest.mock import Mock
+
+    from app.core.filesystem_search_contract import SearchRequest
+    from app.services.filesystem_search_admission import SearchAdmission
+    from app.services.filesystem_search_worker import SearchPolicy, SmbSearchWorker
+    from app.storage.smb import SMBBackend
+
+    cache, server, parents = smb_pipeline_cache
+    server.directories["base"].append(("new.txt", 0))
+    entered = threading.Event()
+    release = threading.Event()
+    open_source_read = cache._open_source_read
+
+    def blocked_read(*args, **kwargs):
+        entered.set()
+        if not release.wait(5):
+            raise TimeoutError("Index scan did not resume.")
+        return open_source_read(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "_open_source_read", blocked_read)
+    scan = asyncio.create_task(asyncio.to_thread(cache._scan_disk_queue))
+    backend = Mock(spec=SMBBackend)
+    backend.directory_search_context.return_value = nullcontext((r"\\host\share\base", {}))
+    request = SearchRequest.model_validate(
+        {
+            "version": 1,
+            "source": {"kind": "smb", "id": "test"},
+            "root": {"kind": "directory", "path": ""},
+            "query": "new.txt",
+            "case_sensitive": False,
+            "folder_depth": "current",
+            "item_type": "files",
+            "search_archives": False,
+        }
+    )
+
+    async def authorize():
+        return True
+
+    worker = SmbSearchWorker(request, SearchPolicy(1, 5, 10), SearchAdmission().admit("user", "test", 1), backend, authorize)
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        worker.start()
+        records = [json.loads(chunk) async for chunk in worker.stream()]
+        assert [record["results"][0]["target"]["path"] for record in records if record["type"] == "batch"] == ["new.txt"]
+        assert records[-1]["reason"] == "complete"
+        assert not scan.done()
+        assert worker._task is not None
+        await worker._task
+    finally:
+        release.set()
+        await asyncio.wait_for(scan, 10)
+    assert cache.index.status().coverage == "complete"
+    assert cache.index.search(parents[0]).total_matches == 1
+
+
+@pytest.mark.parametrize("outcome", ["regular", "reparse", "replaced"])
+def test_smb_search_file_open_refuses_redirects_and_replacements(smb_directory_server, monkeypatch, outcome):
+    from smbprotocol.file_info import FileInternalInformation
+    from smbprotocol.open import CreateOptions
+
+    import app.services.directory_traversal as traversal
+
+    server = smb_directory_server
+    server.directories["base\\archive.zip"] = []
+    server.identifiers["base\\archive.zip"] = 42
+    previous_query_info = traversal.query_info
+    create_options = []
+
+    class SearchFile:
+        def __init__(self, path, *, mode, share_access, **session):
+            assert mode == "rb" and share_access == "rw"
+            tree, native = traversal._directory_tree(path, **session)
+            self.fd = traversal.Open(tree, native)
+            self.fd.file_attributes = 1024 if outcome == "reparse" else 0
+            create = self.fd.create
+
+            def open_file(*args, **kwargs):
+                create_options.append(args[-1])
+                return create(*args, **kwargs)
+
+            self.fd.create = open_file
+
+        def close(self):
+            self.fd.close()
+
+    def query(transaction, kind, **kwargs):
+        if kind is not FileInternalInformation:
+            return previous_query_info(transaction, kind, **kwargs)
+        info = kind()
+        info["index_number"] = server.identifiers["base\\archive.zip"]
+        transaction.results += (info,)
+
+    monkeypatch.setattr(traversal, "SMBFileIO", SearchFile)
+    monkeypatch.setattr(traversal, "query_info", query)
+    source = traversal.SmbDirectoryRoot(r"\\host\share\base")
+    try:
+        parent = source.read("", lambda: None, include_files=True)
+        try:
+            expected = (41 if outcome == "replaced" else 42).to_bytes(8, "little")
+            if outcome == "regular":
+                file = parent.open_search_file("archive.zip", expected, timeout=5)
+                assert file.fd.connected
+                file.close()
+            else:
+                with pytest.raises(traversal.DirectoryTraversalError):
+                    parent.open_search_file("archive.zip", expected, timeout=5)
+        finally:
+            parent.close()
+    finally:
+        source.close()
+    assert create_options[0] & CreateOptions.FILE_OPEN_REPARSE_POINT
+    assert create_options[0] & CreateOptions.FILE_NON_DIRECTORY_FILE
+
+
+@pytest.mark.skipif(
+    os.environ.get("FILESYSTEM_SEARCH_MEASUREMENT") != "1",
+    reason="Explicit live-search resource measurement; not part of routine tests.",
+)
+def test_smb_live_search_large_directory_measurement(smb_directory_server):
+    import time
+    import tracemalloc
+
+    from app.services.directory_traversal import SmbDirectoryRoot
+    from app.services.filesystem_search_matching import NameMatcher
+    from app.services.filesystem_search_physical import PhysicalSearchOptions, search_physical
+
+    server = smb_directory_server
+    server.directories["base"] = [(f"entry-{number:05d}.{'txt' if number % 8 == 0 else 'bin'}", 0) for number in range(8000)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+    count = 0
+
+    def receive(_event):
+        nonlocal count
+        count += 1
+
+    tracemalloc.start()
+    start = time.monotonic()
+    try:
+        summary = search_physical(
+            source,
+            PhysicalSearchOptions("", "current", "files", False, NameMatcher("*.txt", case_sensitive=False)),
+            {},
+            lambda: None,
+            receive,
+        )
+        elapsed = time.monotonic() - start
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+        source.close()
+    assert count == 1000 and summary.scanned_directories == 1
+    print(f"FILESYSTEM_SEARCH_MEASUREMENT entries=8000 matches={count} seconds={elapsed:.3f} python_peak_bytes={peak}")
+
+
+@pytest.mark.parametrize("depth", ["current", "recursive"])
+def test_smb_live_search_reports_removed_descendant_and_propagates_callback_errors(smb_directory_server, depth):
+    from app.services.directory_traversal import SmbDirectoryRoot
+    from app.services.filesystem_search_matching import NameMatcher
+    from app.services.filesystem_search_physical import PhysicalSearchOptions, search_physical
+
+    server = smb_directory_server
+    server.record_ids = True
+    server.directories["base"] = [("folder", 16)]
+    server.directories["base\\folder"] = [("nested.txt", 0)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+    events = []
+
+    def remove_folder(event):
+        events.append(event)
+        if event.kind == "directory":
+            del server.directories["base\\folder"]
+
+    try:
+        summary = search_physical(
+            source, PhysicalSearchOptions("", depth, "all", False, NameMatcher("*", case_sensitive=False)), {}, lambda: None, remove_folder
+        )
+    finally:
+        source.close()
+    assert [event.kind for event in events] == (["directory", "issue"] if depth == "recursive" else ["directory"])
+    assert summary.skipped == (1 if depth == "recursive" else 0)
+
+    server.directories["base\\folder"] = [("nested.txt", 0)]
+    source = SmbDirectoryRoot(r"\\host\share\base")
+
+    def fail_callback(event):
+        if event.kind == "file":
+            raise FileNotFoundError("Callback failure")
+
+    try:
+        if depth == "recursive":
+            with pytest.raises(FileNotFoundError, match="Callback failure"):
+                search_physical(
+                    source,
+                    PhysicalSearchOptions("", depth, "all", False, NameMatcher("*", case_sensitive=False)),
+                    {},
+                    lambda: None,
+                    fail_callback,
+                )
+    finally:
+        source.close()
 
 
 def test_smb_pipeline_uses_loop_when_server_does_not_grant_credits(smb_pipeline_cache):
@@ -8777,6 +9294,20 @@ def test_shared_search_scan_and_fts_parity(index):
         assert response.total_matches == ROW_BATCH_SIZE + 1
         assert [row.path for row in response.results] == ["last/needleone-needletwo"]
         assert response.results[0].matched_term_count == 2
+
+
+def test_shared_scoped_search_scan_and_fts_parity(index):
+    from app.core.search_scope import parse_search_scope
+
+    fixtures = json.loads((CONTRACT_ROOT / "search-fixtures.json").read_text())
+    index.write_paths(fixtures["scope_paths"])
+    for case in fixtures["scope_searches"]:
+        scope = parse_search_scope(case["scope_path"], case["scope_mode"])
+        for force_scan in (False, True):
+            response = index.search(case["query"], force_scan=force_scan, scope=scope)
+            assert response.scope_not_indexed == case["missing"]
+            assert {row.path for row in response.results} == set(case["expected"])
+            assert response.total_matches == len(case["expected"])
 
 
 def test_pending_scan_reads_do_not_walk_processed_prefix_or_sort_pending_jobs(index):

@@ -7,6 +7,7 @@ import type { UseCompanionResult } from "../../hooks/useCompanion";
 import api from "../../services/api";
 import * as authConfigModule from "../../services/authConfig";
 import { authSession } from "../../services/authSession";
+import type { FilesystemSearchRecord } from "../../services/filesystemSearchContract";
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
@@ -92,6 +93,317 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     setApplePlatformForTesting(null);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("starts a live search with slash, streams results, and retains the browse tab", async () => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    let signal: AbortSignal | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, requestSignal, onRecord) => {
+      signal = requestSignal;
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+
+    const user = userEvent.setup();
+    const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
+    const list = await screen.findByTestId("file-list-container");
+    act(() => list.focus());
+    await user.keyboard("/");
+    const input = await screen.findByPlaceholderText("Search files and folders");
+    await user.keyboard("{ArrowDown} ");
+    expect(screen.getByRole("menuitemradio", { name: "Current folder and subfolders" })).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(screen.getByRole("menuitemradio", { name: "Current folder only" })).toHaveFocus();
+    await user.keyboard(" {Escape}");
+    expect(input).toHaveFocus();
+    expect(api.startFilesystemSearch).not.toHaveBeenCalled();
+    await user.type(input, "report{Enter}");
+    await waitFor(() => expect(api.startFilesystemSearch).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.startFilesystemSearch).mock.calls[0]?.[0].folder_depth).toBe("current");
+    expect(container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(2);
+    expect(screen.getAllByText("Search results 1").length).toBeGreaterThan(0);
+    expect(screen.getByRole("status")).toHaveTextContent("Searching");
+    await act(async () => {
+      await publish?.({
+        type: "batch",
+        results: [
+          {
+            entry: { name: "report.txt", path: "docs/report.txt", type: FileType.FILE, is_readable: true, is_hidden: false },
+            target: { kind: "physical", path: "docs/report.txt" },
+          },
+        ],
+      });
+    });
+    expect((await screen.findAllByText("report.txt")).length).toBeGreaterThan(0);
+    expect(screen.getByText("docs/report.txt")).toBeInTheDocument();
+    await act(async () => {
+      await publish?.({
+        type: "terminal",
+        reason: "complete",
+        counts: { matches: 1, scanned_directories: 1, skipped: 0 },
+        skips: [],
+      });
+    });
+    const row = screen.getByRole("button", { name: "File: report.txt, docs/report.txt" });
+    act(() => row.focus());
+    await user.keyboard("/");
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(api.startFilesystemSearch).toHaveBeenCalledOnce();
+    const refresh = screen.getByRole("button", { name: /refresh/i });
+    expect(refresh).toBeDisabled();
+    const searchList = screen.getByTestId("file-list-container");
+    act(() => searchList.focus());
+    await act(async () => {
+      fireEvent.keyDown(searchList, { key: "-", altKey: true });
+      await Promise.resolve();
+    });
+    expect(signal?.aborted).toBe(true);
+    expect(container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(1);
+    expect(screen.queryByText("report.txt")).not.toBeInTheDocument();
+  });
+
+  it("keeps live search status visible in compact layout", async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: /max-width/.test(query),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, _signal, onRecord) => {
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+
+    try {
+      const user = userEvent.setup();
+      await renderBrowserAndFlush("/browse/smb/test-server-1");
+      const list = await screen.findByTestId("file-list-container");
+      act(() => list.focus());
+      await user.keyboard("/");
+      await user.type(await screen.findByPlaceholderText("Search files and folders"), "report{Enter}");
+      await waitFor(() => expect(publish).toBeDefined());
+      expect(screen.getByRole("status")).toHaveTextContent("Searching");
+      expect(screen.queryByTestId("status-bar-focused-file-name")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await publish?.({
+          type: "batch",
+          results: [
+            {
+              entry: { name: "report.txt", path: "report.txt", type: FileType.FILE, is_readable: true, is_hidden: false },
+              target: { kind: "physical", path: "report.txt" },
+            },
+          ],
+        });
+      });
+      expect(screen.getByText("1 item")).toBeInTheDocument();
+
+      await act(async () => {
+        await publish?.({
+          type: "terminal",
+          reason: "partial_coverage",
+          counts: { matches: 1, scanned_directories: 1, skipped: 1 },
+          skips: [{ reason: "unreadable_directory", count: 1 }],
+        });
+      });
+      expect(screen.getByTitle("Search ended with incomplete coverage. Check the skipped items and try again.")).toHaveAttribute(
+        "role",
+        "status"
+      );
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it.each(["running", "complete"] as const)("opens the first live search result with Enter when the search is %s", async (status) => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, _signal, onRecord) => {
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+    vi.mocked(api.getFileContent).mockResolvedValue("Search result content");
+    const user = userEvent.setup();
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    await waitFor(() => expect(screen.getByTestId("file-list-container")).toHaveFocus());
+    await user.keyboard("/");
+    await user.type(await screen.findByPlaceholderText("Search files and folders"), "note{Enter}");
+    await waitFor(() => expect(publish).toBeDefined());
+
+    await user.keyboard("{Enter}");
+    expect(api.startFilesystemSearch).toHaveBeenCalledOnce();
+    expect(api.getFileContent).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await publish?.({
+        type: "batch",
+        results: ["note.txt", "notes.txt"].map((name) => ({
+          entry: { name, path: `docs/${name}`, type: FileType.FILE, is_readable: true, is_hidden: false, mime_type: "text/plain" },
+          target: { kind: "physical", path: `docs/${name}` },
+        })),
+      });
+    });
+    if (status === "complete") {
+      await act(async () => {
+        await publish?.({
+          type: "terminal",
+          reason: "complete",
+          counts: { matches: 2, scanned_directories: 1, skipped: 0 },
+          skips: [],
+        });
+      });
+    }
+
+    expect(screen.getByRole("status")).toHaveTextContent(status === "complete" ? "Search complete." : "Searching");
+    expect(screen.getByRole("button", { name: "File: note.txt, docs/note.txt" })).toBeVisible();
+    expect(screen.getByTestId("file-list-container")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await act(() => vi.dynamicImportSettled());
+    expect(await screen.findByText("Search result content")).toBeVisible();
+    expect(vi.mocked(api.getFileContent).mock.calls[0]?.[1]).toBe("docs/note.txt");
+  });
+
+  it.each([
+    ["partial_coverage", "incomplete coverage"],
+    ["time_limit", "Time limit reached"],
+    ["source_failure", "source failed"],
+  ] as const)("notifies once when a background search ends with %s and keeps its rows", async (reason, message) => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, _signal, onRecord) => {
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+    const user = userEvent.setup();
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    act(() => screen.getByTestId("file-list-container").focus());
+    await user.keyboard("/");
+    await user.type(await screen.findByPlaceholderText("Search files and folders"), "report{Enter}");
+    await waitFor(() => expect(publish).toBeDefined());
+    await act(async () => {
+      await publish?.({
+        type: "batch",
+        results: [
+          {
+            entry: { name: "report.txt", path: "docs/report.txt", type: FileType.FILE, is_readable: true, is_hidden: false },
+            target: { kind: "physical", path: "docs/report.txt" },
+          },
+        ],
+      });
+    });
+    await user.click(within(screen.getByTestId("pane-tab-item-left-0")).getByRole("button", { name: /^Test Server 1 —/ }));
+    await act(async () => {
+      await publish?.({
+        type: "terminal",
+        reason,
+        counts: { matches: 1, scanned_directories: 1, skipped: 1 },
+        skips: [{ reason: "unreadable_directory", count: 1 }],
+      });
+    });
+    const notice = await screen.findByRole(reason === "source_failure" ? "alert" : "status");
+    expect(notice).toHaveTextContent(message);
+    await user.click(within(notice).getByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: /^Search results 1$/ }));
+    expect(screen.getByRole("status")).toHaveTextContent(message);
+    expect(screen.getByText("docs/report.txt")).toBeInTheDocument();
+    expect(document.querySelector(".MuiSnackbar-root")).not.toBeInTheDocument();
+    await user.click(within(screen.getByTestId("pane-tab-item-left-0")).getByRole("button", { name: /^Test Server 1 —/ }));
+    await user.click(screen.getByRole("button", { name: /^Search results 1$/ }));
+    expect(document.querySelector(".MuiSnackbar-root")).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])("reports an unexpected interruption without discarding rows (terminal received: %s)", async (terminalReceived) => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    let reject: ((reason: Error) => void) | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, _signal, onRecord) => {
+      publish = onRecord;
+      return new Promise((_resolve, rejectRun) => {
+        reject = rejectRun;
+      });
+    });
+    const user = userEvent.setup();
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    act(() => screen.getByTestId("file-list-container").focus());
+    await user.keyboard("/");
+    await user.type(await screen.findByPlaceholderText("Search files and folders"), "report{Enter}");
+    await waitFor(() => expect(publish).toBeDefined());
+    await act(async () => {
+      await publish?.({
+        type: "batch",
+        results: [
+          {
+            entry: { name: "report.txt", path: "docs/report.txt", type: FileType.FILE, is_readable: true, is_hidden: false },
+            target: { kind: "physical", path: "docs/report.txt" },
+          },
+        ],
+      });
+      if (terminalReceived) {
+        await publish?.({
+          type: "terminal",
+          reason: "complete",
+          counts: { matches: 1, scanned_directories: 1, skipped: 0 },
+          skips: [],
+        });
+      }
+      reject?.(new Error("Connection lost."));
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Search was interrupted. Start a new search to try again.");
+    expect(screen.getByText("1 item")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-context-row")).toHaveTextContent("Search: “report”");
+    expect(screen.getByText("docs/report.txt")).toBeInTheDocument();
+    expect(screen.queryByText("No matches.")).not.toBeInTheDocument();
+  });
+
+  it("opens quick-navigation targets from a search-results tab in a new folder tab", async () => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, _signal, onRecord) => {
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+    vi.mocked(api.searchDirectories).mockResolvedValue({
+      results: ["Documents"],
+      total_matches: 1,
+      cache_state: "ready",
+      directory_count: 1,
+    });
+    vi.mocked(api.listDirectory).mockImplementation(async (_conn, path = "") =>
+      path === "Documents" ? mockNestedDirectory : mockDirectoryListing
+    );
+    const user = userEvent.setup();
+    const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
+    act(() => screen.getByTestId("file-list-container").focus());
+    await user.keyboard("/");
+    await user.type(await screen.findByPlaceholderText("Search files and folders"), "report{Enter}");
+    await waitFor(() => expect(publish).toBeDefined());
+    await act(async () => {
+      await publish?.({
+        type: "batch",
+        results: [
+          {
+            entry: { name: "report.txt", path: "docs/report.txt", type: FileType.FILE, is_readable: true, is_hidden: false },
+            target: { kind: "physical", path: "docs/report.txt" },
+          },
+        ],
+      });
+    });
+    expect(await screen.findByText("docs/report.txt")).toBeInTheDocument();
+
+    act(() => screen.getByTestId("file-list-container").focus());
+    await user.keyboard("{Control>}k{/Control}");
+    await user.type(screen.getByPlaceholderText("Quick navigation"), "Doc");
+    expect(await screen.findByRole("option", { name: /^Documents\b/ })).toBeVisible();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(3));
+    await waitFor(() => expect(vi.mocked(api.listDirectory)).toHaveBeenCalledWith("conn-1", "Documents", expect.anything()));
+    expect(screen.queryByText("docs/report.txt")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Search results 1$/ }));
+    expect(await screen.findByText("docs/report.txt")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-context-row")).toHaveTextContent("Search: “report”");
   });
 
   it("keeps tab and breadcrumb controls non-focusable and restores file-list focus even when breadcrumb navigation fails", async () => {
@@ -200,7 +512,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     expect(container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(1);
 
     // Focus in quick bar input must NOT trigger tab switching or creation
-    const quickInput = screen.getByPlaceholderText("Navigate to any directory");
+    const quickInput = screen.getByPlaceholderText("Quick navigation");
     await user.click(quickInput);
     fireEvent.keyDown(quickInput, { key: "ArrowLeft" });
     fireEvent.keyDown(quickInput, { key: "+", altKey: true });

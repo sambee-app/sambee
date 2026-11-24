@@ -8,6 +8,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Final, Literal, Mapping, get_args
 
+from app.core.search_scope import SearchScopeMode
+
 CONTRACT_VERSION: Final[Literal[1]] = 1
 MAX_SQL_INTEGER: Final = (1 << 63) - 1
 MAX_WIRE_INTEGER: Final = (1 << 53) - 1
@@ -114,6 +116,12 @@ def load_directory_index_contract(path: Path = CONTRACT_PATH) -> DirectoryIndexC
     document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict) or document.get("version") != CONTRACT_VERSION or type(document.get("version")) is not int:
         raise ValueError("Directory-index contract version is unsupported. Restore the shared contract file.")
+    if document.get("quick_navigation_scope") != {
+        "path_parameter": "scope_path",
+        "mode_parameter": "scope_mode",
+        "modes": [mode.value for mode in SearchScopeMode],
+    }:
+        raise ValueError("Directory-index scope contract is invalid. Restore the shared contract file.")
     limits = document.get("limits")
     policy = document.get("policy")
     if document.get("scan_progress") != {

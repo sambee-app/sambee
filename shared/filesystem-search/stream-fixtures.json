@@ -1,0 +1,67 @@
+{
+  "requests": [
+    {
+      "version": 1,
+      "source": { "kind": "smb", "id": "server-1" },
+      "root": { "kind": "directory", "path": "Documents" },
+      "query": "*.pdf",
+      "case_sensitive": false,
+      "folder_depth": "recursive",
+      "item_type": "all",
+      "search_archives": true
+    },
+    {
+      "version": 1,
+      "source": { "kind": "local", "id": "local-drive:c" },
+      "root": { "kind": "archive", "path": "docs.zip", "member_path": "reports" },
+      "query": "annual report",
+      "case_sensitive": true,
+      "folder_depth": "current",
+      "item_type": "files",
+      "search_archives": false
+    }
+  ],
+  "stream": [
+    {
+      "type": "start",
+      "version": 1,
+      "request_id": "f1b3d56d-6d3e-454d-9456-8c2683e51b69",
+      "limits": { "max_seconds": 30, "max_results": 500 }
+    },
+    {
+      "type": "batch",
+      "results": [
+        {
+          "entry": {
+            "name": "report.pdf",
+            "path": "Documents/report.pdf",
+            "type": "file",
+            "size": 123,
+            "modified_at": "2026-01-02T03:04:05Z",
+            "is_readable": true,
+            "is_hidden": false
+          },
+          "target": { "kind": "physical", "path": "Documents/report.pdf" }
+        },
+        {
+          "entry": {
+            "name": "report.pdf",
+            "path": "reports/report.pdf",
+            "type": "file",
+            "size": 456,
+            "is_readable": false,
+            "is_hidden": false
+          },
+          "target": { "kind": "archive", "archive_path": "Documents/docs.zip", "member_path": "reports/report.pdf" },
+          "archive_state": "blocked"
+        }
+      ]
+    },
+    {
+      "type": "terminal",
+      "reason": "partial_coverage",
+      "counts": { "matches": 2, "scanned_directories": 3, "skipped": 1 },
+      "skips": [{ "reason": "archive_too_large", "count": 1 }]
+    }
+  ]
+}

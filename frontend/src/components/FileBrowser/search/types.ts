@@ -86,6 +86,7 @@ export interface SearchStatusInfo {
   label: string;
   /** Whether an activity spinner should be shown */
   showSpinner: boolean;
+  suppressEmpty?: boolean;
   loadDetails?: (signal: AbortSignal) => Promise<SearchStatusDetails>;
 }
 

@@ -12,7 +12,7 @@ import {
   withShortcut,
 } from "../../hooks/useKeyboardShortcuts";
 import { getConnectionById } from "../../pages/FileBrowser/access";
-import { getPaneTabFullLocation, getPaneTabLabel, type PaneTabSummary } from "../../pages/FileBrowser/tabSessions";
+import { getLastFolderTabId, getPaneTabFullLocation, getPaneTabLabel, type PaneTabSummary } from "../../pages/FileBrowser/tabSessions";
 import type { PaneId, PaneMode } from "../../pages/FileBrowser/types";
 import { secondaryToolbarMenuPaperSx } from "../../theme/commonStyles";
 import { PANE_TAB_BAR } from "../../theme/constants";
@@ -203,6 +203,7 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
     const [focusedMenuIndex, setFocusedMenuIndex] = useState<number>(0);
 
     const isClosable = tabs.length > 1;
+    const lastFolderTabId = getLastFolderTabId(tabs);
     const showMenuButton = tabs.length > 0;
     const isMenuOpen = Boolean(menuAnchorEl) && showMenuButton && !disabled;
     const previousTabCountRef = useRef<number>(tabs.length);
@@ -263,10 +264,12 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
           const rawLabel = getPaneTabLabel(tab, connectionName);
           const displayLabel = truncateTextByGrapheme(rawLabel, PANE_TAB_BAR.MAX_LABEL_GRAPHEMES);
           const fullLocation = getPaneTabFullLocation(tab, connectionName);
-          const selectAriaLabel = t("fileBrowser.tabs.selectTabAriaLabel", {
-            name: rawLabel,
-            location: fullLocation,
-          });
+          const selectAriaLabel =
+            tab.searchTitle ??
+            t("fileBrowser.tabs.selectTabAriaLabel", {
+              name: rawLabel,
+              location: fullLocation,
+            });
           const closeAriaLabel = t("fileBrowser.tabs.closeTabAriaLabel", {
             name: rawLabel,
             location: fullLocation,
@@ -422,13 +425,13 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
 
     const handleMiddleClickClose = useCallback(
       (event: React.MouseEvent<HTMLElement>, tabId: string) => {
-        if (event.button === 1 && isClosable && !disabled) {
+        if (event.button === 1 && isClosable && tabId !== lastFolderTabId && !disabled) {
           event.preventDefault();
           event.stopPropagation();
           onCloseTab(tabId);
         }
       },
-      [disabled, isClosable, onCloseTab]
+      [disabled, isClosable, lastFolderTabId, onCloseTab]
     );
 
     const handleMenuKeyDown = useCallback(
@@ -499,13 +502,13 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
 
         if (event.key === CLOSE_MENU_TAB_KEY && isClosable && !disabled && currentIdx >= 0) {
           const targetTab = tabs[currentIdx];
-          if (targetTab) {
+          if (targetTab && targetTab.id !== lastFolderTabId) {
             event.preventDefault();
             onCloseTab(targetTab.id);
           }
         }
       },
-      [closeMenu, disabled, isClosable, onCloseTab, revealMenuButton, safeFocusedMenuIndex, tabs]
+      [closeMenu, disabled, isClosable, lastFolderTabId, onCloseTab, revealMenuButton, safeFocusedMenuIndex, tabs]
     );
 
     const groupAriaLabel =
@@ -688,7 +691,8 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
               const showTrailingSeparator =
                 !isSelected && !isNextSelected && !isHovered && !isNextHovered && visibleIndex < visibleTabs.length - 1;
               const tabCurrentBg = isSelected ? colors.selectedBg : isHovered ? colors.unselectedHoverBg : colors.unselectedBg;
-              const showCloseOverlay = isClosable && !disabled && (useTouchControls || isHovered);
+              const canClose = isClosable && tab.id !== lastFolderTabId;
+              const showCloseOverlay = canClose && !disabled && (useTouchControls || isHovered);
 
               return (
                 <Box
@@ -812,7 +816,7 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
                     </Box>
                   </Tooltip>
 
-                  {isClosable && (
+                  {canClose && (
                     <Box
                       data-testid={`pane-tab-close-overlay-${paneId}-${tabIndex}`}
                       data-visible={showCloseOverlay ? "true" : "false"}
@@ -1090,7 +1094,7 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
                       margin: 0,
                       paddingBlock: 0.75,
                       paddingInlineStart: 2,
-                      paddingInlineEnd: isClosable ? 0.5 : 2,
+                      paddingInlineEnd: isClosable && tab.id !== lastFolderTabId ? 0.5 : 2,
                       flex: "1 1 auto",
                       minWidth: 0,
                       display: "flex",
@@ -1143,7 +1147,7 @@ export const PaneTabBar: React.FC<PaneTabBarProps> = React.memo(
                     </Box>
                   </Box>
 
-                  {isClosable && (
+                  {isClosable && tab.id !== lastFolderTabId && (
                     <Tooltip
                       title={closeMenuTabTooltip}
                       describeChild

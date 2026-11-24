@@ -33,6 +33,8 @@ import type { CompanionLifecycleStatus } from "../components/FileBrowser/FileBro
 import { FileBrowserAlerts, FileBrowserStatus } from "../components/FileBrowser/FileBrowserAlerts";
 import { FileOperationsToolbar } from "../components/FileBrowser/FileOperationsToolbar";
 import { formatConnectionPath } from "../components/FileBrowser/formatConnectionPath";
+import { DEFAULT_LIVE_SEARCH_OPTIONS } from "../components/FileBrowser/LiveSearchOptions";
+import { LiveSearchStatus } from "../components/FileBrowser/LiveSearchStatus";
 import { MobileToolbar } from "../components/FileBrowser/MobileToolbar";
 import NameInputDialog from "../components/FileBrowser/NameInputDialog";
 import {
@@ -44,6 +46,12 @@ import { SecondaryActionStrip } from "../components/FileBrowser/SecondaryActionS
 import { StatusBar } from "../components/FileBrowser/StatusBar";
 import { useBrowserCommandsProvider } from "../components/FileBrowser/search";
 import { useFileSearchProvider } from "../components/FileBrowser/search/useFileSearchProvider";
+import {
+  type NavigationItemType,
+  type NavigationScope,
+  useNavigationSearchProvider,
+} from "../components/FileBrowser/search/useNavigationSearchProvider";
+import { STATUS_BAR_STRINGS } from "../components/FileBrowser/statusBarStrings";
 import { SystemHealthDialog } from "../components/HealthMonitoring/SystemHealthDialog";
 import { KeyboardShortcutsHelp } from "../components/KeyboardShortcutsHelp";
 import HamburgerMenu from "../components/Mobile/HamburgerMenu";
@@ -85,6 +93,7 @@ import type { ConflictInfo, Connection, FileEntry } from "../types";
 import { FileType, isApiError } from "../types";
 import { getApiErrorMessage, getStorageErrorCode } from "../utils/apiErrors";
 import { openExternalUrl } from "../utils/externalLinks";
+import { getFileRowIdentity } from "../utils/fileEntries";
 import { compareLocalizedStrings } from "../utils/localeFormatting";
 import { createShareFile, supportsNativeShare } from "../utils/nativeShare";
 import { randomUuid } from "../utils/randomUuid";
@@ -154,7 +163,7 @@ import {
   serializeBrowseRoute,
   VIEWER_QUERY_KEYS,
 } from "./FileBrowser/routing";
-import type { ClosedPaneTabRecord } from "./FileBrowser/tabSessions";
+import { type ClosedPaneTabRecord, getLastFolderTabId } from "./FileBrowser/tabSessions";
 import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, ViewInfo, VirtualRouteLocation } from "./FileBrowser/types";
 import { ACTIVE_PANE_QUERY_KEY, ACTIVE_PANE_STORAGE_KEY, RIGHT_PANE_QUERY_KEY } from "./FileBrowser/types";
 import { useBrowserDownload } from "./FileBrowser/useBrowserDownload";
@@ -513,6 +522,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const mobileSettingsInitialView = currentRoute.settings ?? "main";
   const [showHelp, setShowHelp] = useState(false);
   const [quickBarMode, setQuickBarMode] = useState<"navigate" | "commands" | "file-search">("navigate");
+  const [liveSearchOptions, setLiveSearchOptions] = useState(DEFAULT_LIVE_SEARCH_OPTIONS);
   const [quickBarActivationToken, setQuickBarActivationToken] = useState(0);
   const [quickBarRefreshToken, setQuickBarRefreshToken] = useState(0);
   const [quickBarPaneId, setQuickBarPaneId] = useState<PaneId>("left");
@@ -762,11 +772,14 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   // ──────────────────────────────────────────────────────────────────────────
 
   // Left pane — always present, synced with URL
+  const [navigationScope, setNavigationScope] = useState<NavigationScope>("connection");
+  const [navigationItemType, setNavigationItemType] = useState<NavigationItemType>("all");
   const leftPane = useFileBrowserPane({
     connections: allConnections,
     contentProviders: browserContentServices.providers,
     storageRegistry: browserContentServices.registry,
     history: browserContentServices.history,
+    quickNavigationScope: navigationScope,
     sourceRevision: storageSnapshot.capabilityRevision,
     linkTargets: browserContentServices.linkTargets,
     rowHeight,
@@ -795,6 +808,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     contentProviders: browserContentServices.providers,
     storageRegistry: browserContentServices.registry,
     history: browserContentServices.history,
+    quickNavigationScope: navigationScope,
     sourceRevision: storageSnapshot.capabilityRevision,
     linkTargets: browserContentServices.linkTargets,
     rowHeight,
@@ -886,7 +900,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     (paneId: PaneId = effectiveActivePaneIdRef.current): FileOperationPolicyContext => {
       const pane = getPaneForId(paneId);
       const focusedFile = pane.sortedFiles[pane.focusedIndex];
-      const focusedItem = focusedFile ? pane.getItemsByPaths([focusedFile.path])[0] : undefined;
+      const focusedItem = focusedFile ? pane.getItemsByPaths([getFileRowIdentity(focusedFile)])[0] : undefined;
       return { paneId, items: pane.getEffectiveSelection(), focusedItem };
     },
     [getPaneForId]
@@ -998,8 +1012,10 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     return browserContentServices.providers.getCapabilities(source).extract ? source : null;
   }, [activePane.contentCapabilities.extract, activePane.currentLocation, activePaneFocusedFile, browserContentServices.providers]);
   const quickBarPaneWritable = quickBarPane.contentCapabilities.mutate && isConnectionWritable(quickBarPaneConnection);
-  const activePaneFocusedItem = activePaneFocusedFile ? activePane.getItemsByPaths([activePaneFocusedFile.path])[0] : undefined;
-  const quickBarFocusedItem = quickBarFocusedFile ? quickBarPane.getItemsByPaths([quickBarFocusedFile.path])[0] : undefined;
+  const activePaneFocusedItem = activePaneFocusedFile
+    ? activePane.getItemsByPaths([getFileRowIdentity(activePaneFocusedFile)])[0]
+    : undefined;
+  const quickBarFocusedItem = quickBarFocusedFile ? quickBarPane.getItemsByPaths([getFileRowIdentity(quickBarFocusedFile)])[0] : undefined;
   const activePaneCanOpenInApp = getItemActionAvailability({
     item: activePaneFocusedItem,
     nativeAppCapability: activePane.contentCapabilities.openInNativeApp,
@@ -1015,6 +1031,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const quickBarSelection = quickBarPane.getEffectiveSelection();
   const quickBarCanCopyToOtherPane =
     isDualMode &&
+    !quickBarPane.isSearchTab &&
+    !quickBarOtherPane.isSearchTab &&
     quickBarSelection.length > 0 &&
     quickBarSelection.every(
       (item) =>
@@ -1025,6 +1043,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     );
   const quickBarCanMoveToOtherPane =
     isDualMode &&
+    !quickBarPane.isSearchTab &&
+    !quickBarOtherPane.isSearchTab &&
     quickBarSelection.length > 0 &&
     quickBarSelection.every(
       (item) =>
@@ -1036,10 +1056,12 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const createContainerDestination = isDualMode
     ? (effectiveActivePaneId === "left" ? rightPane : leftPane).currentLocation
     : activePane.currentLocation;
-  const activePaneCanCreateArchive = getCreateContainerAvailability(
-    { sources: activePane.getEffectiveSelection().map((item) => item.handle), destination: createContainerDestination },
-    contentOperationEnvironment
-  ).available;
+  const activePaneCanCreateArchive =
+    !activePane.isSearchTab &&
+    getCreateContainerAvailability(
+      { sources: activePane.getEffectiveSelection().map((item) => item.handle), destination: createContainerDestination },
+      contentOperationEnvironment
+    ).available;
   const getArchiveExtractionShortcutAvailability = useCallback(
     (source: VirtualLocation, destination: ContentLocation): FileListShortcutAvailability => {
       if (destination.kind !== "physical") {
@@ -1074,6 +1096,26 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   );
   const getFileListShortcutAvailability = useCallback(
     (action: FileListShortcutAction, context: FileOperationPolicyContext = getOperationPolicyContext()): FileListShortcutAvailability => {
+      const sourcePane = getPaneForId(context.paneId);
+      if (sourcePane.isSearchTab) {
+        if (action !== "download") return unavailableFileListShortcut("interaction-blocked");
+        const selected = context.items.length ? context.items : context.focusedItem ? [context.focusedItem] : [];
+        return selected.length === 1 &&
+          selected[0]?.entry.type === FileType.FILE &&
+          selected[0].entry.is_readable &&
+          !isDownloading &&
+          (!isLocalDrive(selected[0].handle.location.connectionId) || contentOperationEnvironment.isCompanionPaired) &&
+          browserContentServices.providers.getCapabilities(selected[0].handle.location).download
+          ? AVAILABLE_FILE_LIST_SHORTCUT
+          : unavailableFileListShortcut("unsupported-source");
+      }
+      if (
+        (action === "copy" || action === "move" || action === "create-archive") &&
+        getPaneForId(context.paneId === "left" ? "right" : "left").isSearchTab &&
+        isDualMode
+      ) {
+        return unavailableFileListShortcut("unsupported-destination");
+      }
       if ((action === "copy" || action === "move") && uploadSessionActive) {
         return unavailableFileListShortcut("interaction-blocked");
       }
@@ -1081,7 +1123,6 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         return isBrowserBrowsing ? AVAILABLE_FILE_LIST_SHORTCUT : unavailableFileListShortcut("interaction-blocked");
       }
 
-      const sourcePane = getPaneForId(context.paneId);
       const sourceLocation = sourcePane.currentLocation;
       const sourceIsArchive = sourceLocation.kind === "virtual";
       const sourcePaneReadOnly =
@@ -1205,6 +1246,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     },
     [
       allConnections,
+      browserContentServices.providers,
       contentOperationEnvironment,
       conflictDialogOpen,
       copyMoveDialogOpen,
@@ -2757,6 +2799,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         setActivePaneId(paneId);
       }
       targetPane.selectTab(tabId, { focusList: true, notifyRoute: false });
+      if (targetPane.tabs.find((tab) => tab.id === tabId)?.searchTitle) return;
 
       const leftTarget = getCurrentLeftTarget();
       const rightTarget = paneMode === "dual" ? getCurrentRightTarget() : null;
@@ -2817,7 +2860,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     (paneId: PaneId, tabId: string, options?: { fromKeyboard?: boolean }) => {
       if (browserOverlayOpen) return;
       const targetPane = paneId === "right" ? rightPane : leftPane;
-      if (targetPane.tabs.length <= 1) {
+      if (targetPane.tabs.length <= 1 || getLastFolderTabId(targetPane.tabs) === tabId) {
         if (options?.fromKeyboard) {
           setUnavailableShortcutNotice((current) => ({
             id: (current?.id ?? 0) + 1,
@@ -2836,12 +2879,14 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         return;
       }
 
-      setClosedTabRecord((previous) => ({
-        paneId,
-        insertionIndex: result.closedIndex!,
-        session: result.closedSession!,
-        occurrence: (previous?.occurrence ?? 0) + 1,
-      }));
+      if (!result.closedSession.searchSessionId) {
+        setClosedTabRecord((previous) => ({
+          paneId,
+          insertionIndex: result.closedIndex!,
+          session: result.closedSession!,
+          occurrence: (previous?.occurrence ?? 0) + 1,
+        }));
+      }
 
       if (!closingSelected) {
         // Closing a background tab must not make an inactive pane active or steal focus from the active pane.
@@ -3339,25 +3384,23 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   const openQuickBarMode = useCallback(
     (mode: "navigate" | "commands" | "file-search") => {
       const sourcePaneId = effectiveActivePaneIdRef.current;
-      if (mode === "file-search") (sourcePaneId === "right" ? rightPane : leftPane).handleClearSelection();
       setQuickBarPaneId(sourcePaneId);
       setQuickBarMode(mode);
       setQuickBarActivationToken((current) => current + 1);
       focusQuickBarInput(sourcePaneId);
     },
-    [focusQuickBarInput, leftPane, rightPane]
+    [focusQuickBarInput]
   );
 
   const switchQuickBarMode = useCallback(
     (mode: "navigate" | "commands" | "file-search") => {
       const sourcePaneId = quickBarPaneId === "right" && isDualMode ? "right" : "left";
-      if (mode === "file-search") (sourcePaneId === "right" ? rightPane : leftPane).handleClearSelection();
       setQuickBarPaneId(sourcePaneId);
       setQuickBarMode(mode);
       setQuickBarActivationToken((current) => current + 1);
       focusQuickBarInput(sourcePaneId);
     },
-    [focusQuickBarInput, isDualMode, quickBarPaneId, leftPane, rightPane]
+    [focusQuickBarInput, isDualMode, quickBarPaneId]
   );
 
   const handleCreateArchiveRequest = useCallback(
@@ -3866,7 +3909,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         const sourcePane = getPaneForId(invocation.paneId);
         const item = invocation.focusedItem;
         if (!item) return;
-        const index = sourcePane.files.findIndex((file) => file.path === item.entry.path);
+        const index = sourcePane.files.findIndex((file) => getFileRowIdentity(file) === getFileRowIdentity(item.entry));
         if (index < 0) return;
         activateOperationPane(invocation.paneId);
         handler(item.entry, index);
@@ -4012,7 +4055,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       if (!item) return [];
 
       const sourcePane = getPaneForId(context.paneId);
-      const index = sourcePane.files.findIndex((file) => file.path === item.entry.path);
+      const index = sourcePane.files.findIndex((file) => getFileRowIdentity(file) === getFileRowIdentity(item.entry));
       if (index < 0) return [];
 
       const availability = getItemActionAvailability({
@@ -4021,7 +4064,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         isCompanionPaired: companion.status === "paired",
         environment: contentOperationEnvironment,
       });
-      const isSelected = sourcePane.selectedFiles.has(item.entry.path);
+      const isSelected = sourcePane.selectedFiles.has(getFileRowIdentity(item.entry));
       const actions: CompactItemAction[] = [
         {
           id: isSelected ? "deselect" : "select",
@@ -4091,16 +4134,20 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       hasFocusedFile: quickBarPane.focusedIndex >= 0 && quickBarPane.filesRef.current[quickBarPane.focusedIndex] !== undefined,
       connectionSelected: quickBarPane.connectionId !== "",
       connectionWritable: quickBarPaneWritable,
+      canRefresh: !quickBarPane.isSearchTab,
+      canNavigateUp: !quickBarPane.isSearchTab,
       canCreateArchive: activePaneCanCreateArchive,
-      canExtractArchive: !activePaneIsVirtualArchive && archiveExtractionSource !== null && archiveExtractionContext === null,
+      canExtractArchive:
+        !quickBarPane.isSearchTab && !activePaneIsVirtualArchive && archiveExtractionSource !== null && archiveExtractionContext === null,
       canOpenFocusedFileInApp: quickBarCanOpenInApp,
       canCopyToOtherPane: quickBarCanCopyToOtherPane,
       canMoveToOtherPane: quickBarCanMoveToOtherPane,
-      canOpenLocationInNewTab: canOpenQuickBarLocationInNewTab,
-      canMatchPaneLocations,
+      canOpenLocationInNewTab: !quickBarPane.isSearchTab && canOpenQuickBarLocationInNewTab,
+      canMatchPaneLocations: !leftPane.isSearchTab && !rightPane.isSearchTab && canMatchPaneLocations,
       canOpenSystemHealth: systemHealth.visible && !browserOverlayOpen,
       canCreateTab: !browserOverlayOpen && quickBarPane.connectionId !== "",
-      canCloseTab: !browserOverlayOpen && quickBarPane.tabs.length > 1,
+      canCloseTab:
+        !browserOverlayOpen && quickBarPane.tabs.length > 1 && getLastFolderTabId(quickBarPane.tabs) !== quickBarPane.selectedTabId,
       canUndoCloseTab: !browserOverlayOpen && closedTabRecord !== null,
       canSwitchTab: !browserOverlayOpen && quickBarPane.tabs.length > 1,
       openLocationInNewTab: () => handleOpenLocationInNewTab(quickBarPaneId === "right" && isDualMode ? "right" : "left"),
@@ -4174,11 +4221,13 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       systemHealth.visible,
       activePaneCanCreateArchive,
       archiveExtractionContext,
+      leftPane.isSearchTab,
       quickBarCanMoveToOtherPane,
       quickBarCanOpenInApp,
       quickBarMode,
       quickBarPane,
       quickBarPaneWritable,
+      rightPane.isSearchTab,
       settingsOpen,
       showHelp,
       useCompactLayout,
@@ -4190,22 +4239,32 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     onSelect: (command) => command.run(browserCommandContext),
   });
 
-  const fileSearchProvider = useFileSearchProvider({
+  const navigationScopePath = quickBarPane.archiveLocation
+    ? quickBarPane.archiveLocation.archivePath.split("/").slice(0, -1).join("/")
+    : quickBarPane.currentPath;
+  const fileNavigationProvider = useFileSearchProvider({
     connectionId: quickBarPane.connectionId,
     currentPath: quickBarPane.currentPath,
-    files: quickBarPane.files,
     connectionName: getConnectionById(allConnections, quickBarPane.connectionId)?.name ?? quickBarPane.connectionId,
     resultLimit: 50,
     getConnectionName: (connectionId) => getConnectionById(allConnections, connectionId)?.name ?? connectionId,
-    onOpenCurrentFile: (file, mode) => {
-      const index = quickBarPane.files.findIndex((entry) => entry.name === file.name);
-      quickBarPane.handleOpenFileForFile(file, index, mode);
-    },
     onOpenRecentFile: (file, mode) => {
       void quickBarPane.handleOpenFileAtPath(file.connection_id, file.path, mode, file.id);
     },
+    currentFolder:
+      quickBarPane.isSearchTab || quickBarPane.archiveLocation || quickBarPane.directoryUnavailable
+        ? undefined
+        : {
+            files: quickBarPane.sortedFiles,
+            onOpenFile: (file, mode) => quickBarPane.handleOpenFileForFile(file, quickBarPane.sortedFiles.indexOf(file), mode),
+          },
     history: browserContentServices.history,
+    historyOptions: {
+      connectionId: quickBarPane.connectionId,
+      ...(navigationScope === "connection" ? {} : { scope: { path: navigationScopePath, mode: navigationScope } }),
+    },
   });
+  const navigationProvider = useNavigationSearchProvider(quickBarPane.directorySearchProvider, fileNavigationProvider, navigationItemType);
 
   const suppressQuickBarDropdown =
     showHelp ||
@@ -4229,11 +4288,17 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     }
 
     if (quickBarMode === "file-search") {
-      return fileSearchProvider;
+      return {
+        ...fileNavigationProvider,
+        id: "live-search",
+        modeLabel: t("fileBrowser.search.live.mode"),
+        placeholder: t("fileBrowser.search.live.placeholder"),
+        getStatusInfo: () => null,
+      };
     }
 
-    return quickBarPane.directorySearchProvider;
-  }, [browserCommandsProvider, fileSearchProvider, quickBarMode, quickBarPane.directorySearchProvider]);
+    return navigationProvider;
+  }, [browserCommandsProvider, fileNavigationProvider, quickBarMode, navigationProvider, t]);
 
   const quickBarModeOptions = useMemo(
     () => [
@@ -4244,7 +4309,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       },
       {
         id: "file-search",
-        label: t("fileBrowser.search.modes.fileSearch"),
+        label: t("fileBrowser.search.live.mode"),
         onSelect: () => switchQuickBarMode("file-search"),
       },
       {
@@ -4257,9 +4322,6 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   );
 
   const quickBarQueryValue = undefined;
-  const handleQuickBarQueryValueChange = () => {
-    if (quickBarMode === "file-search") quickBarPane.handleClearSelection();
-  };
   const connectionSelectorButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const handleQuickBarArrowDownToFileList = useCallback(() => {
     if (quickBarPane.filesRef.current.length === 0) {
@@ -4295,8 +4357,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     // Common condition building blocks to avoid repetition
     const noSettings = !settingsOpen && !mobileSettingsOpen;
     const browsing = isBrowserBrowsing;
-    const hasFiles = activePane.filesRef.current.length > 0;
-    const hasFocusedFile = activePane.focusedIndex >= 0 && activePane.filesRef.current[activePane.focusedIndex] !== undefined;
+    const hasFiles = activePane.sortedFiles.length > 0;
+    const hasFocusedFile = activePaneFocusedFile !== undefined;
     const noDialogOpen = !activePane.deleteDialogOpen && !activePane.renameDialogOpen && !activePane.createDialogOpen;
     const noDialogOrCopyMove = noDialogOpen && !copyMoveDialogOpen;
     const deleteAvailability = getFileListShortcutAvailability("delete");
@@ -4375,7 +4437,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
       {
         ...BROWSER_SHORTCUTS.NAVIGATE_UP,
         handler: activePane.handleNavigateUpDirectory,
-        enabled: browsing && (activePaneIsArchive || activePane.currentPathRef.current !== ""),
+        enabled: browsing && !activePane.isSearchTab && (activePaneIsArchive || activePane.currentPathRef.current !== ""),
       },
       // Clear selection and search (close action in browser context)
       {
@@ -4576,6 +4638,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     handleMatchPaneLocation,
     handleUnavailableLocationShortcut,
     activePane,
+    activePaneFocusedFile,
     activePaneCanOpenInApp,
     activePaneIsArchive,
     browserOverlayOpen,
@@ -4848,13 +4911,28 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                 showSearch: activePane.connectionId !== "",
                 onBlurToFileList: () => quickBarPane.listContainerEl?.focus(),
                 searchQueryValue: quickBarQueryValue,
-                onSearchQueryValueChange: handleQuickBarQueryValueChange,
                 disableSearchDropdown: false,
                 suppressSearchDropdown: suppressQuickBarDropdown,
                 onSearchArrowDownToFileList: handleQuickBarArrowDownToFileList,
                 disableTabFocus: isDualMode,
                 modeOptions: quickBarModeOptions,
                 showKeyboardHints: showQuickBarKeyboardHints,
+                navigationControls: {
+                  scope: navigationScope,
+                  itemType: navigationItemType,
+                  onScopeChange: setNavigationScope,
+                  onItemTypeChange: setNavigationItemType,
+                },
+                liveSearchControls:
+                  quickBarMode === "file-search"
+                    ? {
+                        options: liveSearchOptions,
+                        onOptionsChange: setLiveSearchOptions,
+                        onSubmit: (query, options) => {
+                          quickBarPane.startFilesystemSearch?.(query, options);
+                        },
+                      }
+                    : undefined,
               };
               const hasStatusControl = backendAvailability.status !== "available" || Boolean(companionLifecycleStatus);
               const statusControl = hasStatusControl ? (
@@ -5076,14 +5154,24 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                   onUploadTriggerChange={handleUploadAnchorChange}
                 />
               )}
+              {useCompactLayout && leftPane.searchSession && (
+                <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, px: 2, minWidth: 0 }}>
+                  <LiveSearchStatus session={leftPane.searchSession} onOpenLocalDrivesSettings={openLocalDrivesSettings} />
+                  <Typography variant="caption" sx={{ whiteSpace: "nowrap" }}>
+                    {STATUS_BAR_STRINGS.itemCount(leftPane.sortedFiles.length)}
+                  </Typography>
+                </Box>
+              )}
               {!useCompactLayout && (
-                <Box sx={{ display: "flex", minHeight: 0 }}>
+                <Box sx={{ display: "flex", minHeight: 0, flexShrink: 0 }}>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
                     <StatusBar
                       files={leftPane.sortedFiles}
                       focusedIndex={leftPane.focusedIndex}
                       selectedCount={leftPane.selectedFiles.size}
                       canResolveShortcutTargets={leftPane.contentCapabilities.mutate && isLocalDrive(leftPane.connectionId)}
+                      searchSession={leftPane.searchSession}
+                      onOpenLocalDrivesSettings={openLocalDrivesSettings}
                     />
                   </Box>
                   {isDualMode && rightPane.connectionId && (
@@ -5095,6 +5183,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
                           focusedIndex={rightPane.focusedIndex}
                           selectedCount={rightPane.selectedFiles.size}
                           canResolveShortcutTargets={rightPane.contentCapabilities.mutate && isLocalDrive(rightPane.connectionId)}
+                          searchSession={rightPane.searchSession}
+                          onOpenLocalDrivesSettings={openLocalDrivesSettings}
                         />
                       </Box>
                     </>

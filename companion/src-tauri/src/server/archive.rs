@@ -553,6 +553,12 @@ pub(crate) struct EffectiveLocalArchiveProjection {
     pub skipped_entries: usize,
 }
 
+impl EffectiveLocalArchiveProjection {
+    pub(crate) fn directories(&self) -> &HashSet<String> {
+        &self.directories
+    }
+}
+
 /// A source item mapped to one portable archive entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalArchiveEntry {
@@ -1107,6 +1113,7 @@ pub struct LocalArchiveReader {
     archive_size: u64,
     #[cfg(unix)]
     archive_metadata: PinnedArchiveMetadata,
+    directory_size: u64,
     directory_end: u64,
     position: u64,
     remaining_entries: u64,
@@ -1144,7 +1151,11 @@ impl PinnedArchiveMetadata {
 impl LocalArchiveReader {
     /// Open a local ZIP once and retain its descriptor until the source session ends.
     pub fn open_pinned(archive_path: &Path) -> Result<Self, LocalArchiveReadError> {
-        let mut file = open_pinned_archive_file(archive_path)?;
+        Self::from_pinned_file(open_pinned_archive_file(archive_path)?)
+    }
+
+    /// Read an already pinned file supplied by the safe traversal reader.
+    pub(crate) fn from_pinned_file(mut file: FsFile) -> Result<Self, LocalArchiveReadError> {
         let metadata = file.metadata()?;
         let archive_size = metadata.len();
         #[cfg(unix)]
@@ -1192,10 +1203,16 @@ impl LocalArchiveReader {
             archive_size,
             #[cfg(unix)]
             archive_metadata,
+            directory_size,
             directory_end,
             position,
             remaining_entries,
         })
+    }
+
+    /// Return the declared central-directory size without reading its entries.
+    pub fn central_directory_size(&self) -> u64 {
+        self.directory_size
     }
 
     pub(crate) fn effective_projection(&mut self) -> Result<EffectiveLocalArchiveProjection, LocalArchiveReadError> {
@@ -1540,7 +1557,7 @@ fn is_safe_virtual_path(path: &str, normalized_path: &str) -> bool {
         && normalized_path == trimmed
 }
 
-fn local_directory_entry(entry: &LocalArchiveReadEntry) -> LocalArchiveDirectoryEntry {
+pub(crate) fn local_directory_entry(entry: &LocalArchiveReadEntry) -> LocalArchiveDirectoryEntry {
     LocalArchiveDirectoryEntry {
         name: entry.path.rsplit('/').next().unwrap_or_default().to_string(),
         path: entry.path.clone(),
@@ -3525,6 +3542,74 @@ mod tests {
         assert_eq!(contents, b"first");
         assert_eq!(second.path, "second.txt");
         assert!(reader.next_entry().unwrap().is_none());
+    }
+
+    #[test]
+    fn central_directory_size_does_not_advance_the_reader() {
+        let directory = tempdir().unwrap();
+        let archive_path = directory.path().join("size.zip");
+        let mut archive = ZipWriter::new(FsFile::create(&archive_path).unwrap());
+        archive.start_file("folder/file.txt", SimpleFileOptions::default()).unwrap();
+        archive.write_all(b"content").unwrap();
+        archive.finish().unwrap();
+        let data = fs::read(&archive_path).unwrap();
+        let eocd = data
+            .windows(EOCD_SIGNATURE.len())
+            .rposition(|window| window == EOCD_SIGNATURE)
+            .unwrap();
+        let expected = u64::from(u32_le(&data, eocd + 12));
+        let mut reader = LocalArchiveReader::open_pinned(&archive_path).unwrap();
+
+        assert_eq!(reader.central_directory_size(), expected);
+        let projection = reader.effective_projection().unwrap();
+        assert_eq!(projection.entries[0].path, "folder/file.txt");
+        assert!(projection.directories.contains("folder"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "Development measurement for the search ZIP metadata limit"]
+    fn measure_deep_archive_projection() {
+        fn peak_kib() -> i64 {
+            let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+            assert_eq!(unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) }, 0);
+            unsafe { usage.assume_init() }.ru_maxrss
+        }
+
+        let directory = tempdir().unwrap();
+        let archive_path = directory.path().join("deep.zip");
+        let mut archive = ZipWriter::new(FsFile::create(&archive_path).unwrap());
+        archive
+            .start_file(format!("{}f", "a/".repeat(8000)), SimpleFileOptions::default())
+            .unwrap();
+        archive.finish().unwrap();
+        let mut reader = LocalArchiveReader::open_pinned(&archive_path).unwrap();
+        let central_size = reader.central_directory_size();
+        let before = peak_kib();
+        let started = std::time::Instant::now();
+        let projection = reader.effective_projection().unwrap();
+        println!(
+            "central_bytes={central_size} directories={} elapsed_ms={} baseline_peak_kib={} peak_kib={}",
+            projection.directories.len(),
+            started.elapsed().as_millis(),
+            before,
+            peak_kib()
+        );
+        assert_eq!(projection.directories.len(), 8000);
+    }
+
+    #[test]
+    fn zip64_central_directory_size_accessor() {
+        let archive_path = conformance_corpus_root().join("zip64-v2.zip");
+        let data = fs::read(&archive_path).unwrap();
+        let eocd = data
+            .windows(ZIP64_EOCD_SIGNATURE.len())
+            .position(|window| window == ZIP64_EOCD_SIGNATURE)
+            .unwrap();
+        let mut reader = LocalArchiveReader::open_pinned(&archive_path).unwrap();
+
+        assert_eq!(reader.central_directory_size(), u64_le(&data, eocd + 40));
+        assert_eq!(reader.effective_projection().unwrap().entries[0].path, "zip64.txt");
     }
 
     #[cfg(unix)]

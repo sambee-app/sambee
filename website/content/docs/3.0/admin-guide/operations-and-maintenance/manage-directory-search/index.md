@@ -2,7 +2,21 @@
 title = "Manage Directory Search"
 +++
 
-Use **Admin > Directory Search** to set resource limits for backend and Companion directory indexes. Backend changes take effect on live sources. Paired browsers deliver saved Companion policy automatically while an authenticated session is active.
+Use **Admin > Directory Indexing** to set resource limits for backend and Companion directory indexes. Backend changes take effect on live sources. Paired browsers deliver saved Companion policy automatically while an authenticated session is active.
+
+## File System Search
+
+Live file-system search reads names directly from the selected source. It does not use or change the directory index. Use **Admin > File System Search** to set the limits for new searches:
+
+| Setting | Default | Range |
+|---|---:|---:|
+| Concurrent search limit | 1 | 1–2 |
+| Maximum scan time | 30 seconds | 1–60 seconds |
+| Maximum results | 500 | 1–1,000 |
+
+SMB limits apply per account and connection. Companion limits apply per paired site and local drive; windows from the same site share the limit. The backend can also reject a search when its process-wide worker capacity is full. Stop another search or retry shortly.
+
+The time limit includes ZIP inspection. A blocked read can take longer to finish and holds its slot until cleanup completes. Search results already delivered remain available. ZIP discovery is off by default. When enabled, search skips ZIPs whose central directory exceeds 16 KiB. A search started inside such a ZIP reports an error instead. These limits apply to both SMB and local drives.
 
 ## Resource Controls
 
@@ -34,15 +48,15 @@ Pairing authorizes settings delivery. The most recently paired server manages Co
 
 All active, authenticated users can deliver the saved canonical policy. Only administrators can edit it. There is no separate policy approval or Apply action.
 
-**Settings > Local Drives** shows the settings authority and separate synchronization states for directory policy, theme, and localization. Checks run after pairing, login, reconnect, persisted changes, and periodically while a tab is visible. A theme or localization change does not revise or reapply unchanged directory policy.
+**Settings > Local Drives** shows the settings authority and separate synchronization states for directory policy, file-system search policy, theme, and localization. Checks run after pairing, login, reconnect, persisted changes, and periodically while a tab is visible. A theme or localization change does not revise or reapply unchanged search policies.
 
 The device must reach the Sambee backend directly over HTTPS with a valid certificate. Redirects are not supported. HTTP is allowed only for loopback development origins.
 
 ## Troubleshooting
 
-If delivery fails, Companion keeps the last valid value for each section, or built-in defaults before the first delivery. Directory search remains available. Follow the displayed recovery action and use **Retry**. Update both applications when status reports an incompatible settings protocol.
+If delivery fails, Companion keeps the last valid value for each section, or built-in defaults before the first delivery. Search remains available. Follow the displayed recovery action and use **Retry**. Update both applications when status reports an incompatible settings protocol.
 
-To change authority, pair the intended server again. Unpairing the authoritative origin clears authority and keeps the last valid settings; Companion does not select another paired server automatically. For older installations with several pairings and no usable policy binding, pair the intended server again to establish authority.
+To change authority, pair the intended server again. When the authoritative origin is unpaired, Companion selects the most recently paired remaining origin. If none remains, it keeps the last valid settings until a server is paired.
 
 If index growth pauses, restore free disk space or increase the relevant disk budget.
 
