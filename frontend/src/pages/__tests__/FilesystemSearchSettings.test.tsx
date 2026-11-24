@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import contract from "../../../../shared/filesystem-search/contract.json";
 import { clearCachedAsyncData } from "../../hooks/useCachedAsyncData";
+import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
 import type { FilesystemSearchSettingUpdate, FilesystemSearchSettings as SettingsData } from "../../types";
 import { FilesystemSearchSettings } from "../FilesystemSearchSettings";
 
@@ -31,12 +32,23 @@ function settings(): SettingsData {
   return { policy: { ...contract.policy_defaults }, fields };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("FilesystemSearchSettings", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     clearCachedAsyncData();
-    vi.mocked(api.getFilesystemSearchSettings).mockResolvedValue(settings());
-    vi.mocked(api.updateFilesystemSearchSettings).mockImplementation(async (update) => update);
+    vi.mocked(api.getFilesystemSearchSettings).mockReset().mockResolvedValue(settings());
+    vi.mocked(api.updateFilesystemSearchSettings)
+      .mockReset()
+      .mockImplementation(async (update) => update);
   });
 
   it("shows server bounds and saves only a valid committed field", async () => {
@@ -62,29 +74,62 @@ describe("FilesystemSearchSettings", () => {
     expect(screen.getByRole("textbox", { name: "Maximum scan time" })).toHaveValue("30");
   });
 
-  it("retains field errors until edited and permits retry", async () => {
+  it.each([
+    { scenario: "without editing", retryValue: 40 },
+    { scenario: "after editing", retryValue: 41 },
+  ])("retains the save error until edited and permits retry $scenario", async ({ retryValue }) => {
     const user = userEvent.setup();
-    vi.mocked(api.updateFilesystemSearchSettings)
-      .mockRejectedValueOnce({ response: { data: { detail: "Policy was not saved. Retry." } } })
-      .mockImplementation(async (update) => update);
+    const message = "Policy was not saved. Retry.";
+    const firstSave = deferred<FilesystemSearchSettingUpdate>();
+    const retry = deferred<FilesystemSearchSettingUpdate>();
+    const firstUpdate = { field: "max_seconds", value: 40 } satisfies FilesystemSearchSettingUpdate;
+    const retryUpdate = { ...firstUpdate, value: retryValue };
+    const options = expect.objectContaining({ signal: expect.anything() });
+    const update = vi.mocked(api.updateFilesystemSearchSettings);
+    update.mockReturnValueOnce(firstSave.promise).mockReturnValueOnce(retry.promise);
+
     render(<FilesystemSearchSettings />);
     const field = await screen.findByRole("textbox", { name: "Maximum scan time" });
+    const description = field.getAttribute("aria-describedby");
+    expect(description).toBeTruthy();
     await user.clear(field);
-    await user.type(field, "40{Enter}");
-    await waitFor(() => expect(field).toHaveAccessibleDescription("Policy was not saved. Retry."));
-    await user.type(field, "{Enter}");
-    await waitFor(() => expect(api.updateFilesystemSearchSettings).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(field).toHaveAttribute("aria-invalid", "false"));
+    await user.type(field, "40");
+    await user.keyboard("{Enter}");
+    expect(update).toHaveBeenCalledExactlyOnceWith(firstUpdate, options);
+    expect(field).toBeDisabled();
+
+    await act(async () => firstSave.reject({ response: { data: { detail: message } } }));
+    expect(field).toBeEnabled();
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue("40");
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    await user.keyboard("{ArrowLeft}");
+    expect(field).toHaveAccessibleDescription(message);
+    expect(field).toHaveAttribute("aria-describedby", description);
+    expect(update).toHaveBeenCalledTimes(1);
+
+    if (retryValue !== firstUpdate.value) {
+      await user.clear(field);
+      await user.type(field, String(retryValue));
+      expect(field).toHaveAccessibleDescription(/Range: 1–60/);
+      expect(field).toHaveAttribute("aria-invalid", "false");
+      expect(update).toHaveBeenCalledTimes(1);
+    }
+    await user.keyboard("{Enter}");
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenNthCalledWith(2, retryUpdate, options);
+    expect(field).toBeDisabled();
+
+    await act(async () => retry.resolve(retryUpdate));
+    expect(field).toBeEnabled();
+    expect(field).toHaveValue(String(retryValue));
+    expect(field).toHaveAttribute("aria-invalid", "false");
+    expect(field).toHaveAccessibleDescription(/Range: 1–60/);
   });
 
   it("disables only the field that is saving", async () => {
-    let finish!: (value: FilesystemSearchSettingUpdate) => void;
-    vi.mocked(api.updateFilesystemSearchSettings).mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        })
-    );
+    const save = deferred<FilesystemSearchSettingUpdate>();
+    vi.mocked(api.updateFilesystemSearchSettings).mockReturnValueOnce(save.promise);
     render(<FilesystemSearchSettings />);
     const field = await screen.findByRole("textbox", { name: "Maximum results" });
     act(() => field.focus());
@@ -93,7 +138,7 @@ describe("FilesystemSearchSettings", () => {
     expect(field).toBeDisabled();
     expect(screen.getByRole("textbox", { name: "Maximum scan time" })).toBeEnabled();
     act(() => field.blur());
-    await act(async () => finish({ field: "max_results", value: 700 }));
+    await act(async () => save.resolve({ field: "max_results", value: 700 }));
     await waitFor(() => expect(field).toBeEnabled());
     await waitFor(() => expect(field).toHaveFocus());
   });
