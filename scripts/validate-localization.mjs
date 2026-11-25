@@ -155,7 +155,7 @@ function main() {
     return 0;
   }
   const release = process.argv.includes("--release");
-  const details = process.argv.includes("--details");
+  const details = release || process.argv.includes("--details");
   const locales = Object.keys(LANGUAGE_NAMES).filter((locale) => locale !== "en");
   let failed = false;
   for (const [app, english] of Object.entries({ frontend, companion })) {

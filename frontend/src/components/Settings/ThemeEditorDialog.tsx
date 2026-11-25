@@ -162,15 +162,15 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
                 disabled={pending}
                 sx={[settingsUtilityButtonSx, adminDialogActionButtonSx]}
               >
-                Import
+                {t("common.uiText.import")}
               </Button>
               <Button variant="outlined" onClick={exportDraft} disabled={pending} sx={[settingsUtilityButtonSx, adminDialogActionButtonSx]}>
-                Export
+                {t("common.uiText.export")}
               </Button>
             </Box>
             <Box sx={adminDialogActionGroupSx}>
               <Button variant="outlined" onClick={close} disabled={pending} sx={[settingsUtilityButtonSx, adminDialogActionButtonSx]}>
-                Cancel
+                {t("common.actions.cancel")}
               </Button>
               <Button
                 variant="outlined"
@@ -181,7 +181,7 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
                 aria-expanded={Boolean(copyMenuAnchor)}
                 sx={[settingsUtilityButtonSx, adminDialogActionButtonSx]}
               >
-                Save copy
+                {t("common.uiText.saveCopy")}
               </Button>
               <Button
                 variant="contained"
@@ -189,7 +189,7 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
                 disabled={!writable || pending}
                 sx={[settingsPrimaryButtonSx, adminDialogActionButtonSx]}
               >
-                Save
+                {t("common.actions.save")}
               </Button>
               <Menu
                 id="theme-save-copy-menu"
@@ -236,20 +236,20 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
           <FormRow>
             <Box sx={{ display: { xs: "none", md: "block" } }}>
               <FormFieldLabel
-                label="Name"
-                description="Name shown in the theme picker"
+                label={t("themeSelector.editor.name")}
+                description={t("themeSelector.editor.nameHelp")}
                 descriptionId="theme-name-help"
                 htmlFor="theme-name"
               />
             </Box>
             <TextField
               id="theme-name"
-              label={usesDesktopFormLayout ? undefined : "Name"}
+              label={usesDesktopFormLayout ? undefined : t("themeSelector.editor.name")}
               size={usesDesktopFormLayout ? "small" : "medium"}
-              slotProps={{ htmlInput: { "aria-label": "Name" } }}
+              slotProps={{ htmlInput: { "aria-label": t("themeSelector.editor.name") } }}
               value={draft.name}
               onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              helperText={usesDesktopFormLayout ? undefined : "Name shown in the theme picker"}
+              helperText={usesDesktopFormLayout ? undefined : t("themeSelector.editor.nameHelp")}
               fullWidth
               sx={formOutlinedControlSx}
             />
@@ -257,20 +257,20 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
           <FormRow>
             <Box sx={{ display: { xs: "none", md: "block" } }}>
               <FormFieldLabel
-                label="Description"
-                description="Optional text below the theme name"
+                label={t("themeSelector.editor.description")}
+                description={t("themeSelector.editor.descriptionHelp")}
                 descriptionId="theme-description-help"
                 htmlFor="theme-description"
               />
             </Box>
             <TextField
               id="theme-description"
-              label={usesDesktopFormLayout ? undefined : "Description"}
+              label={usesDesktopFormLayout ? undefined : t("themeSelector.editor.description")}
               size={usesDesktopFormLayout ? "small" : "medium"}
-              slotProps={{ htmlInput: { "aria-label": "Description" } }}
+              slotProps={{ htmlInput: { "aria-label": t("themeSelector.editor.description") } }}
               value={draft.description ?? ""}
               onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-              helperText={usesDesktopFormLayout ? undefined : "Optional text below the theme name"}
+              helperText={usesDesktopFormLayout ? undefined : t("themeSelector.editor.descriptionHelp")}
               fullWidth
               sx={formOutlinedControlSx}
             />
@@ -278,8 +278,8 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
           <FormRow>
             <Box sx={{ display: { xs: "none", md: "block" } }}>
               <FormFieldLabel
-                label="Mode"
-                description="Is this a light or dark theme?"
+                label={t("themeSelector.editor.mode")}
+                description={t("themeSelector.editor.modeHelp")}
                 descriptionId="theme-mode-help"
                 htmlFor="theme-mode"
               />
@@ -287,17 +287,17 @@ export function ThemeEditorDialog({ theme, stored, storedThemes, isAdmin, onClos
             <TextField
               select
               id="theme-mode"
-              label={usesDesktopFormLayout ? undefined : "Mode"}
+              label={usesDesktopFormLayout ? undefined : t("themeSelector.editor.mode")}
               size={usesDesktopFormLayout ? "small" : "medium"}
-              slotProps={{ select: { inputProps: { "aria-label": "Mode" } } }}
+              slotProps={{ select: { inputProps: { "aria-label": t("themeSelector.editor.mode") } } }}
               value={draft.mode}
               onChange={(event) => setDraft({ ...draft, mode: event.target.value as ThemeConfig["mode"] })}
-              helperText={usesDesktopFormLayout ? undefined : "Is this a light or dark theme?"}
+              helperText={usesDesktopFormLayout ? undefined : t("themeSelector.editor.modeHelp")}
               fullWidth
               sx={formOutlinedControlSx}
             >
-              <MenuItem value="light">Light</MenuItem>
-              <MenuItem value="dark">Dark</MenuItem>
+              <MenuItem value="light">{t("themeSelector.modes.light")}</MenuItem>
+              <MenuItem value="dark">{t("themeSelector.modes.dark")}</MenuItem>
             </TextField>
           </FormRow>
         </FormGroup>

@@ -19,6 +19,7 @@ import {
   useTheme,
 } from "@mui/material";
 import { type ReactNode, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { adminDialogActionButtonSx, adminDialogEndActionRowSx } from "../components/Admin/dialogActionStyles";
 import { DialogNotice } from "../components/Dialog/DialogNotice";
@@ -294,6 +295,7 @@ const mappingReviewFor = (identity: OidcTestedIdentity) =>
   );
 
 export function AuthenticationSettings() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const removeLocationFragment = useEffectEvent(useRemoveLocationFragment());
   const theme = useTheme();
@@ -905,7 +907,7 @@ export function AuthenticationSettings() {
       <Box sx={{ maxWidth: 820 }}>
         {busy && !configuration ? (
           <Box sx={{ display: "flex", justifyContent: "center", pt: 5 }}>
-            <CircularProgress aria-label="Loading authentication settings" />
+            <CircularProgress aria-label={t("settings.authenticationPage.loading")} />
           </Box>
         ) : null}
         {!(busy && !configuration) && (
@@ -922,7 +924,7 @@ export function AuthenticationSettings() {
             )}
             {configuration?.auth_enforcement_disabled && (
               <Alert severity="warning" sx={{ mb: 3 }}>
-                Authentication is disabled in the configuration file.
+                {t("settings.authenticationPage.disabled")}
               </Alert>
             )}
             <Stack spacing={2.5}>
@@ -1000,7 +1002,7 @@ export function AuthenticationSettings() {
               </FormSurface>
 
               {(isOidcMode || isActiveOidcMode) && (
-                <SettingsGroup title="OpenID Connect">
+                <SettingsGroup title={t("settings.authenticationPage.providerLabel")}>
                   <FormSurface testId="authentication-oidc-status-surface">
                     <Stack spacing={2}>
                       <Box
@@ -1026,7 +1028,7 @@ export function AuthenticationSettings() {
                           disabled={busy || finalizationUnresolved}
                           onClick={openOidcDialog}
                         >
-                          {oidcModeActivationPending ? "Review and activate OIDC mode" : "Configure OIDC"}
+                          {oidcModeActivationPending ? "Review and activate OIDC mode" : t("settings.authenticationPage.configureOidc")}
                         </Button>
                       </Box>
                     </Stack>
@@ -1038,7 +1040,7 @@ export function AuthenticationSettings() {
                 open={oidcDialogOpen && !oidcReviewOpen}
                 onClose={closeOidcDialog}
                 disableClose={busy || finalizationUnresolved}
-                title="Configure OIDC"
+                title={t("settings.authenticationPage.configureOidc")}
                 maxWidth="md"
                 contextualNotice={
                   <DialogNotice
@@ -1066,7 +1068,7 @@ export function AuthenticationSettings() {
                         message={
                           testError ? (
                             <>
-                              <AlertTitle>Connection test failed</AlertTitle>
+                              <AlertTitle>{t("settings.connectionDialog.results.errorDialogTitle")}</AlertTitle>
                               {testError}
                             </>
                           ) : null
@@ -1093,7 +1095,7 @@ export function AuthenticationSettings() {
                       variant="outlined"
                       sx={[settingsUtilityButtonSx, adminDialogActionButtonSx]}
                     >
-                      Cancel
+                      {t("common.actions.cancel")}
                     </Button>
                     <Button
                       onClick={() => (testedIdentity ? setOidcReviewOpen(true) : void startTest(effectiveCandidate))}
@@ -1134,9 +1136,9 @@ export function AuthenticationSettings() {
                                 endAdornment:
                                   typeof navigator.clipboard?.writeText === "function" ? (
                                     <InputAdornment position="end">
-                                      <Tooltip title="Copy redirect URI">
+                                      <Tooltip title={t("settings.authenticationPage.copyRedirectUri")}>
                                         <IconButton
-                                          aria-label="Copy redirect URI"
+                                          aria-label={t("settings.authenticationPage.copyRedirectUri")}
                                           edge="end"
                                           onClick={() => {
                                             void navigator.clipboard
@@ -1341,18 +1343,20 @@ export function AuthenticationSettings() {
                         />
                       )}
                       {renderFormRow(
-                        "Automatically link OIDC identities to local accounts by username",
+                        t("settings.authenticationPage.autoLink"),
                         "When an admitted identity-provider user has the same username as a local account, link the identity to that account.",
                         "auto-link-by-username-description",
                         "auto-link-by-username",
                         <Box sx={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 1 }}>
                           {!usesDesktopFormLayout && (
                             <Typography variant="body2" sx={{ mr: "auto" }}>
-                              Automatically link OIDC identities to local accounts by username
+                              {t("settings.authenticationPage.autoLink")}
                             </Typography>
                           )}
                           <Typography component="span" variant="body2" aria-live="polite">
-                            {candidate.auto_link_by_username ? "On" : "Off"}
+                            {candidate.auto_link_by_username
+                              ? t("settings.userManagement.editor.switchOn")
+                              : t("settings.userManagement.editor.switchOff")}
                           </Typography>
                           <Switch
                             checked={candidate.auto_link_by_username}
@@ -1361,8 +1365,10 @@ export function AuthenticationSettings() {
                             slotProps={{
                               input: {
                                 id: "auto-link-by-username",
-                                "aria-label": `Automatically link OIDC identities to local accounts by username: ${
-                                  candidate.auto_link_by_username ? "On" : "Off"
+                                "aria-label": `${t("settings.authenticationPage.autoLink")}: ${
+                                  candidate.auto_link_by_username
+                                    ? t("settings.userManagement.editor.switchOn")
+                                    : t("settings.userManagement.editor.switchOff")
                                 }`,
                                 "aria-describedby": usesDesktopFormLayout ? "auto-link-by-username-description" : undefined,
                               },
@@ -1371,7 +1377,7 @@ export function AuthenticationSettings() {
                         </Box>
                       )}
                     </FormGroup>
-                    <SettingsFormSection title="Access" />
+                    <SettingsFormSection title={t("settings.userManagement.editor.sections.access")} />
                     <FormGroup testId="authentication-access-form-group">
                       {renderFormRow(
                         "Admission",
@@ -1394,8 +1400,8 @@ export function AuthenticationSettings() {
                             htmlInput: { "aria-describedby": usesDesktopFormLayout ? "admission-description" : undefined },
                           }}
                         >
-                          <MenuItem value="all_idp_users">All authenticated users</MenuItem>
-                          <MenuItem value="selected_groups">Only selected groups</MenuItem>
+                          <MenuItem value="all_idp_users">{t("settings.authenticationPage.allUsers")}</MenuItem>
+                          <MenuItem value="selected_groups">{t("settings.authenticationPage.selectedGroups")}</MenuItem>
                         </TextField>
                       )}
                       {candidate.admission_mode === "selected_groups" &&
@@ -1427,10 +1433,10 @@ export function AuthenticationSettings() {
                           Boolean(admissionGroupError)
                         )}
                     </FormGroup>
-                    <SettingsFormSection title="Role assignment" />
+                    <SettingsFormSection title={t("settings.authenticationPage.roleAssignment")} />
                     <FormGroup testId="authentication-role-form-group">
                       {renderFormRow(
-                        "Role assignment",
+                        t("settings.authenticationPage.roleAssignment"),
                         "Set one role for all users or map roles from provider groups",
                         "role-assignment-description",
                         "role-assignment-mode",
@@ -1439,7 +1445,7 @@ export function AuthenticationSettings() {
                           select
                           fullWidth={!usesDesktopFormLayout}
                           size={formFieldSize}
-                          label={usesDesktopFormLayout ? undefined : "Role assignment"}
+                          label={usesDesktopFormLayout ? undefined : t("settings.authenticationPage.roleAssignment")}
                           value={candidate.role_assignment_mode}
                           onChange={(event) =>
                             update("role_assignment_mode", event.target.value as OidcConfigurationCandidate["role_assignment_mode"])
@@ -1452,8 +1458,8 @@ export function AuthenticationSettings() {
                             htmlInput: { "aria-describedby": usesDesktopFormLayout ? "role-assignment-description" : undefined },
                           }}
                         >
-                          <MenuItem value="uniform">All users are assigned to the same role</MenuItem>
-                          <MenuItem value="group_based">Group-based</MenuItem>
+                          <MenuItem value="uniform">{t("settings.authenticationPage.uniformRole")}</MenuItem>
+                          <MenuItem value="group_based">{t("settings.authenticationPage.groupBased")}</MenuItem>
                         </TextField>
                       )}
                       {candidate.role_assignment_mode === "uniform" ? (
@@ -1478,9 +1484,9 @@ export function AuthenticationSettings() {
                               htmlInput: { "aria-describedby": usesDesktopFormLayout ? "assigned-role-description" : undefined },
                             }}
                           >
-                            <MenuItem value="admin">Administrator</MenuItem>
-                            <MenuItem value="editor">Editor</MenuItem>
-                            <MenuItem value="viewer">Viewer</MenuItem>
+                            <MenuItem value="admin">{t("settings.authenticationPage.administrator")}</MenuItem>
+                            <MenuItem value="editor">{t("settings.userManagement.editorRole")}</MenuItem>
+                            <MenuItem value="viewer">{t("settings.userManagement.viewerRole")}</MenuItem>
                           </TextField>
                         )
                       ) : (
@@ -1571,12 +1577,9 @@ export function AuthenticationSettings() {
                         </>
                       )}
                     </FormGroup>
-                    <Alert severity="info">
-                      The administrator connecting this provider keeps an individual Administrator assignment. Individual assignments always
-                      override this configured role policy.
-                    </Alert>
-                    <SettingsFormSection title="Advanced claims" />
-                    <Typography sx={{ color: "text.secondary" }}>The default claim names work with most providers</Typography>
+                    <Alert severity="info">{t("settings.authenticationPage.adminOverride")}</Alert>
+                    <SettingsFormSection title={t("settings.authenticationPage.advancedClaims")} />
+                    <Typography sx={{ color: "text.secondary" }}>{t("settings.authenticationPage.defaultClaims")}</Typography>
                     <FormGroup edge="end" testId="authentication-claims-form-group">
                       {renderFormRow(
                         "Username claim",
@@ -1670,7 +1673,7 @@ export function AuthenticationSettings() {
                   open={oidcReviewOpen}
                   onClose={returnToOidcConfiguration}
                   disableClose={busy || finalizationUnresolved}
-                  title="Review OIDC connection"
+                  title={t("settings.authenticationPage.reviewOidc")}
                   description="Review the tested identity and account impact before activating this configuration."
                   maxWidth="md"
                   contextualNotice={
@@ -1687,13 +1690,9 @@ export function AuthenticationSettings() {
                         />
                         <DialogNotice
                           message={
-                            omittedPasswordlessMappings.length > 0 ? (
-                              <>
-                                {omittedPasswordlessMappings.length} active passwordless account
-                                {omittedPasswordlessMappings.length === 1 ? " is" : "s are"} omitted. These users cannot sign in until
-                                mapped. An unmapped OIDC login may collide with an existing username or create a separate account.
-                              </>
-                            ) : null
+                            omittedPasswordlessMappings.length > 0
+                              ? t("settings.authenticationPage.omittedAccounts", { count: omittedPasswordlessMappings.length })
+                              : null
                           }
                           severity="warning"
                           testId="oidc-review-omitted-accounts-warning"
@@ -1710,7 +1709,7 @@ export function AuthenticationSettings() {
                         variant="outlined"
                         sx={[settingsUtilityButtonSx, adminDialogActionButtonSx]}
                       >
-                        Back
+                        {t("fileBrowser.archive.historyBack")}
                       </Button>
                       <Button
                         onClick={() => void cancelTestFlow()}
@@ -1718,7 +1717,7 @@ export function AuthenticationSettings() {
                         variant="outlined"
                         sx={[settingsUtilityButtonSx, adminDialogActionButtonSx]}
                       >
-                        Cancel
+                        {t("common.actions.cancel")}
                       </Button>
                       <Button
                         onClick={() => void activate()}
@@ -1726,7 +1725,7 @@ export function AuthenticationSettings() {
                         variant="contained"
                         sx={[settingsPrimaryButtonSx, adminDialogActionButtonSx]}
                       >
-                        Activate configuration
+                        {t("settings.authenticationPage.activate")}
                       </Button>
                     </Box>
                   }
@@ -1734,29 +1733,46 @@ export function AuthenticationSettings() {
                   <Stack spacing={2}>
                     <FormSurface sx={{ gap: 2 }}>
                       <Typography variant="subtitle1" sx={{ fontWeight: "medium" }}>
-                        Test results
+                        {t("settings.authenticationPage.testResults")}
                       </Typography>
                       <Box sx={{ borderLeft: 3, borderColor: "success.main", pl: 2, py: 1 }}>
                         <Typography variant="subtitle1" sx={{ fontWeight: "medium" }}>
-                          Tested identity
+                          {t("settings.authenticationPage.testedIdentity")}
                         </Typography>
-                        <Typography>Username: {testedIdentity.username}</Typography>
-                        {testedIdentity.email && <Typography>Email: {testedIdentity.email}</Typography>}
-                        <Typography>Groups: {testedIdentity.groups.join(", ") || "None"}</Typography>
-                        <Typography>Admission: {testedIdentity.admitted ? "Allowed" : "Denied"}</Typography>
                         <Typography>
-                          Session renewal:{" "}
+                          {t("auth.login.usernameLabel")}: {testedIdentity.username}
+                        </Typography>
+                        {testedIdentity.email && (
+                          <Typography>
+                            {t("settings.userManagement.editor.emailLabel")}: {testedIdentity.email}
+                          </Typography>
+                        )}
+                        <Typography>
+                          {t("settings.authenticationPage.groups", {
+                            groups: testedIdentity.groups.join(", ") || t("settings.authenticationPage.none"),
+                          })}
+                        </Typography>
+                        <Typography>
+                          {t(
+                            testedIdentity.admitted
+                              ? "settings.authenticationPage.admissionAllowed"
+                              : "settings.authenticationPage.admissionDenied"
+                          )}
+                        </Typography>
+                        <Typography>
                           {testedIdentity.refresh_token_returned
-                            ? "Refresh token returned in this test"
-                            : "No refresh token returned in this test; users will need to sign in again after the configured session limit."}
+                            ? t("settings.authenticationPage.sessionRefresh")
+                            : t("settings.authenticationPage.sessionNoRefresh")}
                         </Typography>
                         {testedIdentity.matching_admission_group && (
-                          <Typography>Matching admission group: {testedIdentity.matching_admission_group}</Typography>
+                          <Typography>
+                            {t("settings.authenticationPage.matchingGroup", { group: testedIdentity.matching_admission_group })}
+                          </Typography>
                         )}
-                        <Typography sx={{ color: "text.secondary" }}>Account mapping does not override the admission policy.</Typography>
+                        <Typography sx={{ color: "text.secondary" }}>{t("settings.authenticationPage.admissionPolicy")}</Typography>
                         {testedIdentity.replacement_mappings.length > 0 && (
                           <Stack spacing={2} sx={{ mt: 2 }}>
-                            <Typography variant="subtitle1">Review existing accounts</Typography>
+                            <Typography variant="subtitle1">{t("settings.authenticationPage.reviewAccounts")}</Typography>
                             {testedIdentity.replacement_mappings
                               .filter((mapping) => mapping.selectable)
                               .map((mapping) => {
@@ -1868,12 +1884,18 @@ export function AuthenticationSettings() {
                               })}
                             {testedIdentity.replacement_mappings.some((mapping) => !mapping.selectable) && (
                               <Box>
-                                <Typography variant="subtitle2">Inactive or expired accounts</Typography>
+                                <Typography variant="subtitle2">{t("settings.authenticationPage.inactiveAccounts")}</Typography>
                                 {testedIdentity.replacement_mappings
                                   .filter((mapping) => !mapping.selectable)
                                   .map((mapping) => (
                                     <Typography key={mapping.target_user_id} sx={{ color: "text.secondary" }}>
-                                      {mapping.local_username} ({mapping.target_state}) must be reactivated before mapping.
+                                      {t("settings.authenticationPage.reactivate", {
+                                        username: mapping.local_username,
+                                        state:
+                                          mapping.target_state === "active"
+                                            ? t("settings.userManagement.activeStatus")
+                                            : t(`settings.authenticationPage.${mapping.target_state}`),
+                                      })}
                                     </Typography>
                                   ))}
                               </Box>

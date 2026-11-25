@@ -240,6 +240,53 @@
     }
   },
   "settings": {
+    "authenticationPage": {
+      "providerLabel": "OpenID Connect",
+      "adminOverride": "Administratören som ansluter leverantören behåller en individuell administratörstilldelning. Individuella tilldelningar har alltid företräde framför denna rollpolicy.",
+      "groups": "Grupper: {{groups}}",
+      "none": "Ingen",
+      "admissionAllowed": "Åtkomst: Tillåten",
+      "admissionDenied": "Åtkomst: Nekad",
+      "sessionRefresh": "Sessionsförnyelse: En förnyelsetoken returnerades i testet",
+      "sessionNoRefresh": "Sessionsförnyelse: Ingen förnyelsetoken returnerades i testet; användarna måste logga in igen efter den konfigurerade sessionsgränsen.",
+      "matchingGroup": "Matchande åtkomstgrupp: {{group}}",
+      "reactivate": "{{username}} ({{state}}) måste återaktiveras före kopplingen.",
+      "inactive": "inaktiv",
+      "expired": "utgången",
+      "omittedAccounts_one": "{{count}} aktivt konto utan lösenord utelämnas. Dessa användare kan inte logga in förrän de har kopplats. En okopplad OIDC-inloggning kan krocka med ett befintligt användarnamn eller skapa ett separat konto.",
+      "omittedAccounts_other": "{{count}} aktiva konton utan lösenord utelämnas. Dessa användare kan inte logga in förrän de har kopplats. En okopplad OIDC-inloggning kan krocka med ett befintligt användarnamn eller skapa ett separat konto.",
+      "loading": "Läser in autentiseringsinställningar",
+      "disabled": "Autentisering är inaktiverad i konfigurationsfilen.",
+      "configureOidc": "Konfigurera OIDC",
+      "copyRedirectUri": "Kopiera omdirigerings-URI",
+      "autoLink": "Koppla OIDC-identiteter automatiskt till lokala konton efter användarnamn",
+      "allUsers": "Alla autentiserade användare",
+      "selectedGroups": "Endast valda grupper",
+      "roleAssignment": "Rolltilldelning",
+      "uniformRole": "Alla användare tilldelas samma roll",
+      "groupBased": "Gruppbaserad",
+      "administrator": "Administratör",
+      "advancedClaims": "Avancerade anspråk",
+      "defaultClaims": "Standardnamnen för anspråk fungerar med de flesta leverantörer",
+      "reviewOidc": "Granska OIDC-anslutning",
+      "activate": "Aktivera konfiguration",
+      "testResults": "Testresultat",
+      "testedIdentity": "Testad identitet",
+      "admissionPolicy": "Kontokopplingen åsidosätter inte åtkomstpolicyn.",
+      "reviewAccounts": "Granska befintliga konton",
+      "inactiveAccounts": "Inaktiva eller utgångna konton"
+    },
+    "accountPage": {
+      "loading": "Läser in konto",
+      "passwordRequired": "Administratören kräver att du ändrar ditt lokala lösenord.",
+      "identity": "Din identitet",
+      "sessions": "Sessioner",
+      "sessionsUnavailable": "Sessionsinformation är inte tillgänglig eftersom autentisering inte krävs.",
+      "thisBrowser": "Den här webbläsaren",
+      "otherSessions": "Andra sessioner",
+      "otherSessionsFailed": "Det gick inte att läsa in andra sessioner.",
+      "identitySource": "Identitetskälla"
+    },
     "appearancePage": {
       "localizationTitle": "Språk och region",
       "localizationDescription": "Välj språk för gränssnittet och format för datum och tal.",
@@ -372,12 +419,12 @@
         "description": "Ställ in säkerhetspolicy och driftgränser för SMB-servrar."
       },
       "adminFileSearch": {
-        "label": "Filsökning",
-        "description": "Ställ in historik, resultatgränser och undantag för filsökning."
+        "label": "Senaste filer",
+        "description": "Konfigurera historik för senaste filer, gränser för snabbnavigering och undantag."
       },
       "adminDirectorySearch": {
-        "label": "Mappsökning",
-        "description": "Ställ in resurser för och verifiering av mappindex på servern och alla Companion-enheter."
+        "label": "Mappindexering",
+        "description": "Konfigurera mappindexet som används för snabbnavigering på SMB och Companion."
       },
       "adminHealthMonitoring": {
         "label": "Statusövervakning",
@@ -386,6 +433,10 @@
       "adminAbout": {
         "label": "Om",
         "description": "Visa information om Sambees bygge, programvara och maskinvara."
+      },
+      "adminFilesystemSearch": {
+        "label": "Filsystemssökning",
+        "description": "Ange gränser för direktsökningar på SMB-anslutningar och lokala enheter."
       }
     },
     "imageViewerPage": {
@@ -493,8 +544,10 @@
       "sections": {
         "theme": "Tema",
         "localization": "Språk och region",
-        "directory_index": "Policy för mappsökning"
-      }
+        "directory_index": "Policy för mappindexering",
+        "filesystem_search": "Policy för filsystemssökning"
+      },
+      "searchUpdateRequired": "Uppdatera Sambee och Companion för att överföra gränser för filsystemssökning. Den senast giltiga policyn förblir aktiv."
     },
     "aboutPage": {
       "applicationTitle": "Program",
@@ -761,6 +814,46 @@
       }
     },
     "userManagement": {
+      "directory": {
+        "status": "Status",
+        "lastOidcSignIn": "Senaste OIDC-inloggning",
+        "created": "Skapad",
+        "updated": "Senast uppdaterad",
+        "oidcState": "OIDC-status",
+        "roleSource": "Rollkälla",
+        "oidcProvider": "OIDC-leverantör",
+        "userActionsFor": "Användaråtgärder för {{username}}",
+        "mapOidc": "Koppla OIDC-konto",
+        "cancelMapping": "Avbryt väntande OIDC-koppling",
+        "viewIdentity": "Visa information om OIDC-identitet",
+        "changeOidc": "Ändra OIDC-konto",
+        "moveIdentity": "Flytta identitet till en annan lokal användare",
+        "detachIdentity": "Koppla bort OIDC-identitet",
+        "overview": "Katalogöversikt",
+        "columns": "Kolumner",
+        "directoryColumns": "Katalogkolumner",
+        "updating": "Uppdaterar användarkatalogen",
+        "filters": "Filter",
+        "expiration": "Förfall",
+        "anyExpiration": "Alla förfall",
+        "hasExpiration": "Har förfallodatum",
+        "noExpiration": "Inget förfallodatum",
+        "signIn": "Inloggning",
+        "activeFilters": "Aktiva filter",
+        "users": "Användare",
+        "manageColumns": "Hantera synliga kolumner",
+        "userActions": "Användaråtgärder",
+        "never": "Aldrig",
+        "confirm": "Bekräfta",
+        "perPage": "{{count}} per sida",
+        "expectedProviderUsername": "Förväntat användarnamn hos leverantören",
+        "expectedProviderUsernameHelp": "Den första godkända, ännu inte mappade OIDC-identiteten med exakt det här användarnamnet kopplas till kontot.",
+        "moveIdentityHelp": "Sök efter berättigade aktiva, olänkade lokala konton med användarnamn, namn eller e-postadress",
+        "moveIdentityTo": "Flytta identitet till",
+        "searchUsers": "Sök efter användare",
+        "signInMethod": "Inloggningsmetod",
+        "user": "Användare"
+      },
       "addUserButton": "Lägg till användare",
       "addUserFabAriaLabel": "Lägg till användare",
       "totalUsers_one": "Användare: {{count}}",
@@ -951,18 +1044,18 @@
       }
     },
     "fileSearch": {
-      "title": "Filsökning",
+      "title": "Senaste filer",
       "saveChanges": "Spara ändringar",
       "resetToDefault": "Återställ till standardvärde",
-      "loadFailed": "Det gick inte att läsa in inställningarna för filsökning.",
-      "saveFailed": "Det gick inte att spara inställningarna för filsökning.",
-      "resetFailed": "Det gick inte att återställa inställningarna för filsökning.",
+      "loadFailed": "Det gick inte att läsa in inställningarna för senaste filer. Kontrollera anslutningen och försök igen.",
+      "saveFailed": "Det gick inte att spara inställningarna för senaste filer. Kontrollera värdet och försök igen.",
+      "resetFailed": "Det gick inte att återställa inställningarna för senaste filer. Kontrollera anslutningen och försök igen.",
       "retentionLimit": "Antal senaste filer och mappar att behålla",
       "retentionLimitError": "Ange ett heltal mellan 0 och 500.",
       "resultLimit": "Resultat per grupp",
       "resultLimitError": "Ange ett heltal mellan 1 och 50.",
       "excludedCategories": "Undanta filkategorier",
-      "excludedCategoriesHelp": "Undantagna filer visas inte i filsökningens resultat eller historik.",
+      "excludedCategoriesHelp": "Undantagna filer visas inte i historiken för senaste filer eller i snabbnavigeringen.",
       "excludeImages": "Undanta bilder",
       "excludeTemporaryBackup": "Undanta tillfälliga filer och säkerhetskopior",
       "excludedExtensions": "Undantagna filändelser",
@@ -973,6 +1066,27 @@
       "excludedExtensionsHelp": "Ange en filändelse. Jokertecken och sökvägar stöds inte.",
       "excludedExtensionsNormalization": "Sparas som {{extension}}.",
       "excludedExtensionsRemove": "Ta bort {{extension}}"
+    },
+    "filesystemSearch": {
+      "group": "Gränser för direktsökning",
+      "loadFailed": "Det gick inte att läsa in inställningarna för filsystemssökning. Kontrollera anslutningen till serverdelen och försök igen.",
+      "updateRequired": "Uppdatera Sambee för att konfigurera gränser för filsystemssökning.",
+      "saveFailed": "Det gick inte att spara sökgränsen. Kontrollera värdet och anslutningen och försök igen.",
+      "changeNote": "Ändringarna gäller nya sökningar. Companion använder den senast giltiga policyn om överföringen misslyckas.",
+      "validation": "Ange ett heltal från {{min}} till {{max}}.",
+      "bounds": "{{description}} Standardvärde: {{defaultValue}}. Intervall: {{min}}–{{max}}.",
+      "concurrent_searches": {
+        "label": "Gräns för samtidiga sökningar",
+        "description": "Maximalt antal sökningar per konto och SMB-anslutning eller per parkopplad webbplats och lokal enhet."
+      },
+      "max_seconds": {
+        "label": "Maximal söktid",
+        "description": "Tid i sekunder tills sökningen slutar returnera resultat. Pågående läsningar kan ta längre tid innan sökplatsen frigörs."
+      },
+      "max_results": {
+        "label": "Maximalt antal resultat",
+        "description": "Maximalt antal olika resultat från filsystem och arkiv per sökning."
+      }
     }
   },
   "fileBrowser": {
@@ -1143,7 +1257,10 @@
         "legacyDirectorySearch": "Mappsökning med flera sökord har inte bekräftats för den här källan. Sök med ett ord eller kontrollera stödet på servern och i Companion.",
         "historyUnavailable": "Senaste mappar är inte tillgängliga. Kontrollera serveranslutningen och försök igen.",
         "fileHistoryUnavailable": "Senaste filer är inte tillgängliga. Kontrollera serveranslutningen och försök igen.",
-        "indexUnavailable": "Mappsökning är inte tillgänglig. Kontrollera anslutningen till källan och försök igen."
+        "indexUnavailable": "Mappsökning är inte tillgänglig. Kontrollera anslutningen till källan och försök igen.",
+        "scopeNotIndexed": "Den här mappen är inte indexerad ännu. Resultaten visas när indexeringen är klar.",
+        "scopeUnsupportedCompanion": "Den här källan stöder inte mappavgränsning. Uppdatera Companion och försök igen.",
+        "scopeUnsupportedServer": "Den här källan stöder inte mappavgränsning. Uppdatera servern och försök igen."
       },
       "statusDetails": {
         "title": "Status för mappsökning",
@@ -1174,9 +1291,77 @@
         "recentFiles": "Senaste filer",
         "recentDirectories": "Senaste mappar",
         "directories": "Mappar",
-        "currentDirectory": "Aktuell mapp"
+        "currentDirectory": "Aktuell mapp",
+        "recentItems": "Senaste filer och mappar",
+        "matches": "Träffar"
       },
-      "belowMinimum": "Skriv minst {{count}} tecken för att söka"
+      "belowMinimum": "Skriv minst {{count}} tecken för att söka",
+      "navigation": {
+        "scopeLabel": "Sökningens omfattning",
+        "itemTypeLabel": "Objekttyp",
+        "scope": {
+          "connection": "Aktuell anslutning",
+          "subtree": "Aktuell mapp och undermappar",
+          "descendants_only": "Endast undermappar"
+        },
+        "itemType": {
+          "all": "Filer och mappar",
+          "directories": "Mappar",
+          "files": "Filer"
+        }
+      },
+      "live": {
+        "mode": "Direktsökning",
+        "placeholder": "Sök filer och mappar",
+        "title": "Sökresultat {{number}}",
+        "options": "Sökalternativ",
+        "optionsKeyboardHint": "↑ ↓ Flytta · Mellanslag Ändra · Esc Tillbaka",
+        "queryContext": "Sökning: ”{{query}}”",
+        "archives": "Sök i ZIP-filer",
+        "folderDepth": "Mappdjup",
+        "caseSensitive": "Skilj på stora och små bokstäver",
+        "depth": {
+          "current": "Endast aktuell mapp",
+          "recursive": "Aktuell mapp och undermappar"
+        },
+        "emptyQuery": "Ange ett namn eller mönster att söka efter.",
+        "queryTooLong": "Sökordet är för långt. Använd högst {{max}} UTF-8-byte och försök igen.",
+        "unreadableItem": "Det här objektet kan inte läsas. Kontrollera åtkomsten och försök igen.",
+        "nestedArchive": "Nästlade ZIP-filer kan inte öppnas här. Ladda ner filen för att öppna den.",
+        "running": "Söker...",
+        "interrupted": "Sökningen avbröts. Starta en ny sökning för att försöka igen.",
+        "interruptedDetail": "Det gick inte att starta sökningen. {{error}}",
+        "errors": {
+          "invalid_data": "Sökningen returnerade ogiltiga data. Kontrollera anslutningen till källan och starta en ny sökning.",
+          "response_too_large": "Ett söksvar var för stort. Kontrollera källan och starta en ny sökning.",
+          "incomplete": "Sökningen avbröts innan den var klar. Kontrollera anslutningen till källan och starta en ny sökning.",
+          "start_failed": "Det gick inte att starta sökningen. Kontrollera anslutningen till källan och försök igen."
+        },
+        "companionUpdateRequired": "Den här versionen av Companion stöder inte direktsökning. Uppdatera Companion och starta en ny sökning.",
+        "companionUpdateAction": "Uppdatera Companion",
+        "noMatches": "Inga träffar.",
+        "terminal": {
+          "archive_too_large": "ZIP-filen är för stor för att söka i. Öppna en mindre ZIP-fil och försök igen.",
+          "archive_unreadable": "Det gick inte att läsa ZIP-filen. Kontrollera åtkomsten till ZIP-filen och försök igen.",
+          "complete": "Sökningen är klar.",
+          "partial_coverage": "Sökningen avslutades utan att omfatta allt. Kontrollera de överhoppade objekten och försök igen.",
+          "time_limit": "Tidsgränsen har nåtts. Starta en mer avgränsad sökning för att fortsätta.",
+          "result_limit": "Resultatgränsen har nåtts. Starta en mer avgränsad sökning för att fortsätta.",
+          "source_failure": "Sökningen stoppades eftersom källan misslyckades. Kontrollera anslutningen och försök igen."
+        },
+        "skips": {
+          "unreadable_directory_one": "{{count}} mapp kunde inte läsas.",
+          "unreadable_directory_other": "{{count}} mappar kunde inte läsas.",
+          "unsafe_name_one": "{{count}} objekt hade ett osäkert namn.",
+          "unsafe_name_other": "{{count}} objekt hade osäkra namn.",
+          "archive_too_large_one": "{{count}} ZIP-fil var för stor för att söka i.",
+          "archive_too_large_other": "{{count}} ZIP-filer var för stora för att söka i.",
+          "archive_unreadable_one": "{{count}} ZIP-fil kunde inte läsas.",
+          "archive_unreadable_other": "{{count}} ZIP-filer kunde inte läsas.",
+          "queue_limit_one": "Sökningen stoppades eftersom mappkön var full.",
+          "queue_limit_other": "Sökningen stoppades eftersom mappkön var full."
+        }
+      }
     },
     "commands": {
       "categories": {
@@ -1672,6 +1857,16 @@
     }
   },
   "common": {
+    "uiText": {
+      "import": "Importera",
+      "export": "Exportera",
+      "saveCopy": "Spara kopia",
+      "compatibilityMode": "Prova kompatibilitetsläge",
+      "passwordChanged": "Lösenordet har ändrats. Logga in med ditt nya lösenord.",
+      "or": "eller",
+      "clearFilters": "Rensa filter",
+      "serverIllustration": "Serverillustration"
+    },
     "actions": {
       "cancel": "Avbryt",
       "close": "Stäng",
@@ -1729,6 +1924,14 @@
         "name": "Sambee mörkt",
         "description": "Appens mörka standardtema"
       }
+    },
+    "editor": {
+      "description": "Beskrivning",
+      "descriptionHelp": "Valfri text under temanamnet",
+      "mode": "Läge",
+      "modeHelp": "Är det här ett ljust eller mörkt tema?",
+      "name": "Namn",
+      "nameHelp": "Namn som visas i temaväljaren"
     }
   },
   "keyboardShortcutsHelp": {

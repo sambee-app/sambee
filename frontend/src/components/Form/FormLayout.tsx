@@ -1,5 +1,6 @@
 import { alpha, Box, FormLabel, type SxProps, type Theme, Typography } from "@mui/material";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { FORM_SURFACE_CSS_VARIABLE, getModeAdjustedSurfaceColor, OVERLAY_SURFACE_CSS_VARIABLE } from "../../theme/palette";
 
 interface FormContainerProps {
@@ -154,6 +155,7 @@ export function FormRow({ children, sx }: Omit<FormContainerProps, "testId">) {
 }
 
 export function FormFieldLabel({ label, description, descriptionId, htmlFor, required = false, id, feedback = null }: FormFieldLabelProps) {
+  const { t } = useTranslation();
   const message = feedback?.message ?? description;
 
   return (
@@ -175,7 +177,13 @@ export function FormFieldLabel({ label, description, descriptionId, htmlFor, req
                 : theme.palette.text.secondary,
         }}
       >
-        {feedback?.severity === "warning" ? <>Warning: {message}</> : message}
+        {feedback?.severity === "warning" ? (
+          <>
+            {t("systemHealth.statuses.warning")}: {message}
+          </>
+        ) : (
+          message
+        )}
       </Typography>
     </Box>
   );

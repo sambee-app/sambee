@@ -64,10 +64,13 @@ echo -e "${BLUE}======================================${NC}"
 echo -e "${BLUE}  Sambee - Test & Analysis Suite${NC}"
 echo -e "${BLUE}======================================${NC}\n"
 
-run_check "Localization catalogs validated" "Localization catalog validation failed" node "$SCRIPT_DIR/validate-localization.mjs"
+run_check "Localization catalogs validated" "Localization catalog validation failed" node "$SCRIPT_DIR/validate-localization.mjs" --release
 run_check "Localization validator tests passed" "Localization validator tests failed" node --test "$SCRIPT_DIR/validate-localization.test.mjs"
+run_check "Native UI literals checked" "Native UI literal check failed" node "$SCRIPT_DIR/check-native-ui-literals.mjs"
+run_check "Native UI literal check tests passed" "Native UI literal check tests failed" node --test "$SCRIPT_DIR/check-native-ui-literals.test.mjs"
 require_backend_venv
 run_check "Frontend dependencies are up to date" "Frontend dependency check failed" node "$REPO_ROOT/frontend/scripts/dependency-state.mjs" --check
+run_check "UI text lint rule tests passed" "UI text lint rule tests failed" node --test "$SCRIPT_DIR/check-ui-text-rule.test.mjs"
 
 # ============================================
 # SETUP: Generate Test Images

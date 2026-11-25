@@ -42,6 +42,7 @@ jobs:
         output_path = os.environ["GITHUB_OUTPUT"]
         frontend_extras = {
           "VERSION",
+          "biome.json",
           "scripts/sync-version",
         }
         backend_extras = {
@@ -54,7 +55,11 @@ jobs:
         }
         companion_extras = {
           "VERSION",
+          "biome.json",
           "scripts/sync-version",
+          "frontend/biome.json",
+          "frontend/biome-base.json",
+          "frontend/no-hardcoded-ui-text.grit",
         }
 
         def write_output(name: str, value: bool) -> None:

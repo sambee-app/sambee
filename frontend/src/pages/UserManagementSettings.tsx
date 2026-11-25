@@ -402,7 +402,8 @@ function getCompactRoleSource(source: AdminUserDirectoryRoleSource): string {
 }
 
 function DirectoryTimestamp({ value }: { value: string | null | undefined }) {
-  if (!value) return <>Never</>;
+  const { t } = useTranslation();
+  if (!value) return <>{t("settings.userManagement.directory.never")}</>;
   return (
     <Tooltip title={formatLocalTimestamp(value)}>
       <Box component="time" dateTime={value} sx={{ display: "inline-block", verticalAlign: "top" }}>
@@ -1268,7 +1269,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
         variant="outlined"
         sx={combineSx(settingsUtilityButtonSx, adminDialogActionButtonSx)}
       >
-        Cancel
+        {t("common.actions.cancel")}
       </Button>
       <Button
         onClick={() => void handleMappingSubmit()}
@@ -1277,7 +1278,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
         startIcon={mappingSubmitting ? <CircularProgress size={18} color="inherit" /> : undefined}
         sx={combineSx(settingsPrimaryButtonSx, adminDialogActionButtonSx)}
       >
-        Confirm
+        {t("settings.userManagement.directory.confirm")}
       </Button>
     </Box>
   );
@@ -1847,7 +1848,13 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
             </Box>
           </SettingsInlineAlert>
         )}
-        <Stack aria-label="Directory overview" direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+        <Stack
+          aria-label={t("settings.userManagement.directory.overview")}
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ flexWrap: "wrap" }}
+        >
           <Chip
             label={t("settings.userManagement.totalUsers", { count: directorySummary.total })}
             size="small"
@@ -1876,7 +1883,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
           }}
         >
           <TextField
-            label="Search users"
+            label={t("settings.userManagement.directory.searchUsers")}
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
             size="small"
@@ -1913,7 +1920,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   visibility: activeDirectoryFilterCount > 0 ? "visible" : "hidden",
                 }}
               >
-                Clear filters
+                {t("common.uiText.clearFilters")}
               </Button>
             </Stack>
             <Button
@@ -1921,7 +1928,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               aria-expanded={columnsMenuOpen}
               aria-haspopup="menu"
               aria-controls={columnsMenuOpen ? columnsMenuId : undefined}
-              aria-label="Columns"
+              aria-label={t("settings.userManagement.directory.columns")}
               variant="text"
               startIcon={<ViewWeekIcon />}
               onClick={() => setColumnsMenuOpen(true)}
@@ -1934,14 +1941,14 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                 [DIRECTORY_WIDE_QUERY]: { display: !loading && users.length > 0 ? "none" : "inline-flex" },
               }}
             >
-              Columns
+              {t("settings.userManagement.directory.columns")}
             </Button>
           </Stack>
         </Box>
         <Menu
           action={columnsMenuActionsRef}
           anchorEl={getColumnsAnchor}
-          aria-label="Directory columns"
+          aria-label={t("settings.userManagement.directory.directoryColumns")}
           disableRestoreFocus
           onClose={() => setColumnsMenuOpen(false)}
           open={columnsMenuOpen}
@@ -1971,7 +1978,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
           </MenuItem>
         </Menu>
         <Box aria-live="polite" sx={{ height: 3 }}>
-          {directoryRefreshing && <LinearProgress aria-label="Updating user directory" sx={{ height: 3 }} />}
+          {directoryRefreshing && <LinearProgress aria-label={t("settings.userManagement.directory.updating")} sx={{ height: 3 }} />}
         </Box>
         <Popover
           open={Boolean(filterAnchor)}
@@ -1982,14 +1989,14 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
           slotProps={{ paper: { sx: { width: "min(480px, calc(100vw - 32px))", p: 2 } } }}
         >
           <Stack spacing={2}>
-            <Typography variant="subtitle2">Filters</Typography>
+            <Typography variant="subtitle2">{t("settings.userManagement.directory.filters")}</Typography>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
               <Stack spacing={1}>
                 <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600 }}>
-                  Account
+                  {t("settings.categories.account.label")}
                 </Typography>
                 <DirectoryFilterSelect
-                  label="Role"
+                  label={t("settings.userManagement.editor.roleLabel")}
                   options={[
                     { value: "admin", label: t("settings.userManagement.adminRole") },
                     { value: "editor", label: t("settings.userManagement.editorRole") },
@@ -1999,7 +2006,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   onChange={(roles) => updateDirectoryQuery({ roles })}
                 />
                 <DirectoryFilterSelect
-                  label="Status"
+                  label={t("settings.userManagement.directory.status")}
                   options={[
                     { value: "active", label: t("settings.userManagement.activeStatus") },
                     { value: "disabled", label: t("settings.userManagement.disabledStatus") },
@@ -2010,30 +2017,30 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   onChange={(states) => updateDirectoryQuery({ states })}
                 />
                 <FormControl size="small" fullWidth sx={DIRECTORY_SECONDARY_CONTROL_SX}>
-                  <InputLabel>Expiration</InputLabel>
+                  <InputLabel>{t("settings.userManagement.directory.expiration")}</InputLabel>
                   <Select
                     value={directoryQuery.expiration}
-                    label="Expiration"
+                    label={t("settings.userManagement.directory.expiration")}
                     onChange={(event) => updateDirectoryQuery({ expiration: event.target.value as DirectoryQueryState["expiration"] })}
                   >
                     <MenuItem value="" sx={{ fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE }}>
-                      Any expiration
+                      {t("settings.userManagement.directory.anyExpiration")}
                     </MenuItem>
                     <MenuItem value="has_expiration" sx={{ fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE }}>
-                      Has expiration
+                      {t("settings.userManagement.directory.hasExpiration")}
                     </MenuItem>
                     <MenuItem value="no_expiration" sx={{ fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE }}>
-                      No expiration
+                      {t("settings.userManagement.directory.noExpiration")}
                     </MenuItem>
                   </Select>
                 </FormControl>
               </Stack>
               <Stack spacing={1}>
                 <Typography variant="caption" sx={{ color: "text.secondary", fontWeight: 600 }}>
-                  Sign-in
+                  {t("settings.userManagement.directory.signIn")}
                 </Typography>
                 <DirectoryFilterSelect
-                  label="Sign-in method"
+                  label={t("settings.userManagement.directory.signInMethod")}
                   options={
                     oidcAuthenticationEnabled
                       ? [
@@ -2053,7 +2060,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                 {oidcAuthenticationEnabled && (
                   <>
                     <DirectoryFilterSelect
-                      label="OIDC state"
+                      label={t("settings.userManagement.directory.oidcState")}
                       options={[
                         { value: "linked", label: "Linked" },
                         { value: "pending", label: "Setup pending" },
@@ -2063,7 +2070,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                       onChange={(oidcStates) => updateDirectoryQuery({ oidcStates })}
                     />
                     <DirectoryFilterSelect
-                      label="Role source"
+                      label={t("settings.userManagement.directory.roleSource")}
                       options={[
                         { value: "local_assignment", label: "Local assignment" },
                         { value: "individual_override", label: "Individual override" },
@@ -2081,7 +2088,13 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
           </Stack>
         </Popover>
         {activeDirectoryFilterCount > 0 && (
-          <Stack aria-label="Active filters" direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <Stack
+            aria-label={t("settings.userManagement.directory.activeFilters")}
+            direction="row"
+            spacing={1}
+            useFlexGap
+            sx={{ flexWrap: "wrap" }}
+          >
             {directoryQuery.roles.map((role) => (
               <Chip
                 key={role}
@@ -2165,7 +2178,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
         ) : (
           <Box
             role="table"
-            aria-label="Users"
+            aria-label={t("settings.userManagement.directory.users")}
             sx={{
               minWidth: 0,
               px: 0.75,
@@ -2200,7 +2213,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               }}
             >
               <DirectoryColumnHeader
-                label="User"
+                label={t("settings.userManagement.directory.user")}
                 sort="username"
                 activeSort={directoryQuery.sort}
                 direction={directoryQuery.direction}
@@ -2208,7 +2221,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               />
               {visibleDirectoryColumns.includes("role") && (
                 <DirectoryColumnHeader
-                  label="Role"
+                  label={t("settings.userManagement.editor.roleLabel")}
                   sort="role"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2217,7 +2230,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("status") && (
                 <DirectoryColumnHeader
-                  label="Status"
+                  label={t("settings.userManagement.directory.status")}
                   sort="status"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2226,7 +2239,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("signIn") && (
                 <DirectoryColumnHeader
-                  label="Sign-in"
+                  label={t("settings.userManagement.directory.signIn")}
                   sort="sign_in"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2235,7 +2248,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("lastSignIn") && (
                 <DirectoryColumnHeader
-                  label="Last OIDC sign-in"
+                  label={t("settings.userManagement.directory.lastOidcSignIn")}
                   sort="last_sign_in"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2244,7 +2257,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("expiration") && (
                 <DirectoryColumnHeader
-                  label="Expiration"
+                  label={t("settings.userManagement.directory.expiration")}
                   sort="expiration"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2253,7 +2266,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("email") && (
                 <DirectoryColumnHeader
-                  label="Email"
+                  label={t("settings.userManagement.editor.emailLabel")}
                   sort="email"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2262,7 +2275,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("createdAt") && (
                 <DirectoryColumnHeader
-                  label="Created"
+                  label={t("settings.userManagement.directory.created")}
                   sort="created_at"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2271,7 +2284,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("updatedAt") && (
                 <DirectoryColumnHeader
-                  label="Last updated"
+                  label={t("settings.userManagement.directory.updated")}
                   sort="updated_at"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2280,7 +2293,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("oidcState") && (
                 <DirectoryColumnHeader
-                  label="OIDC state"
+                  label={t("settings.userManagement.directory.oidcState")}
                   sort="oidc_state"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2289,7 +2302,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("roleSource") && (
                 <DirectoryColumnHeader
-                  label="Role source"
+                  label={t("settings.userManagement.directory.roleSource")}
                   sort="role_source"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2298,7 +2311,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               )}
               {visibleDirectoryColumns.includes("oidcProvider") && (
                 <DirectoryColumnHeader
-                  label="OIDC provider"
+                  label={t("settings.userManagement.directory.oidcProvider")}
                   sort="oidc_provider"
                   activeSort={directoryQuery.sort}
                   direction={directoryQuery.direction}
@@ -2306,13 +2319,13 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                 />
               )}
               <Box role="columnheader" sx={{ display: "flex", justifyContent: "flex-end" }}>
-                <Tooltip title="Manage visible columns">
+                <Tooltip title={t("settings.userManagement.directory.manageColumns")}>
                   <IconButton
                     ref={headerColumnsRef}
                     aria-expanded={columnsMenuOpen}
                     aria-haspopup="menu"
                     aria-controls={columnsMenuOpen ? columnsMenuId : undefined}
-                    aria-label="Manage visible columns"
+                    aria-label={t("settings.userManagement.directory.manageColumns")}
                     onClick={() => setColumnsMenuOpen(true)}
                     sx={{ color: "text.secondary", width: 28, height: 28, p: 0 }}
                   >
@@ -2365,7 +2378,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                               variant="caption"
                               sx={{ display: { xs: "inline", md: "none" }, color: "text.secondary" }}
                             >
-                              Role
+                              {t("settings.userManagement.editor.roleLabel")}
                             </Typography>
                             <Typography data-testid="user-row-role" variant="body2" sx={{ color: "text.secondary" }}>
                               {roleLabel(user.role)}
@@ -2386,7 +2399,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                               variant="caption"
                               sx={{ display: { xs: "inline", md: "none" }, color: "text.secondary" }}
                             >
-                              Status
+                              {t("settings.userManagement.directory.status")}
                             </Typography>
                             <Stack
                               data-testid="user-metadata"
@@ -2412,7 +2425,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="signIn">
                           <Typography data-testid="user-row-sign-in" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              Sign-in:
+                              {t("settings.userManagement.directory.signIn")}:
                             </Box>{" "}
                             {authentication}
                           </Typography>
@@ -2427,7 +2440,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                               sx={{ color: "text.secondary", minWidth: 0 }}
                             >
                               <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                                Last OIDC sign-in:
+                                {t("settings.userManagement.directory.lastOidcSignIn")}:
                               </Box>{" "}
                               <DirectoryTimestamp value={user.oidc?.last_login_at} />
                             </Typography>
@@ -2438,7 +2451,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="expiration">
                           <Typography data-testid="user-row-expiration" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              Expiration:
+                              {t("settings.userManagement.directory.expiration")}:
                             </Box>{" "}
                             <DirectoryTimestamp value={user.expires_at} />
                           </Typography>
@@ -2448,7 +2461,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="email">
                           <Typography data-testid="user-row-email" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              Email:
+                              {t("settings.userManagement.editor.emailLabel")}:
                             </Box>{" "}
                             {user.email ?? "Not set"}
                           </Typography>
@@ -2458,7 +2471,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="createdAt">
                           <Typography data-testid="user-row-created" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              Created:
+                              {t("settings.userManagement.directory.created")}:
                             </Box>{" "}
                             <DirectoryTimestamp value={user.created_at} />
                           </Typography>
@@ -2468,7 +2481,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="updatedAt">
                           <Typography data-testid="user-row-updated" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              Last updated:
+                              {t("settings.userManagement.directory.updated")}:
                             </Box>{" "}
                             <DirectoryTimestamp value={user.updated_at} />
                           </Typography>
@@ -2478,7 +2491,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="oidcState">
                           <Typography data-testid="user-row-oidc-state" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              OIDC state:
+                              {t("settings.userManagement.directory.oidcState")}:
                             </Box>{" "}
                             {getDirectoryOidcState(user)}
                           </Typography>
@@ -2488,7 +2501,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="roleSource">
                           <Typography data-testid="user-row-role-source" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              Role source:
+                              {t("settings.userManagement.directory.roleSource")}:
                             </Box>{" "}
                             {getDirectoryRoleSource(user, oidcConfiguration?.role_assignment_mode)}
                           </Typography>
@@ -2498,7 +2511,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                         <DirectoryRowCell area="oidcProvider">
                           <Typography data-testid="user-row-oidc-provider" variant="body2" sx={{ color: "text.secondary", minWidth: 0 }}>
                             <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>
-                              OIDC provider:
+                              {t("settings.userManagement.directory.oidcProvider")}:
                             </Box>{" "}
                             {user.oidc?.provider_display_name ?? "Not linked"}
                           </Typography>
@@ -2515,9 +2528,9 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                               <EditIcon />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="User actions">
+                          <Tooltip title={t("settings.userManagement.directory.userActions")}>
                             <IconButton
-                              aria-label={`User actions for ${user.username}`}
+                              aria-label={t("settings.userManagement.directory.userActionsFor", { username: user.username })}
                               onClick={(event) => setUserActionsMenu({ anchor: event.currentTarget, user })}
                               sx={settingsUtilityIconButtonSx}
                             >
@@ -2547,7 +2560,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                 >
                   {DIRECTORY_PAGE_SIZE_OPTIONS.map((pageSize) => (
                     <MenuItem key={pageSize} value={String(pageSize)} sx={{ fontSize: DIRECTORY_SECONDARY_CONTROL_FONT_SIZE }}>
-                      {pageSize} per page
+                      {t("settings.userManagement.directory.perPage", { count: pageSize })}
                     </MenuItem>
                   ))}
                 </Select>
@@ -2577,7 +2590,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                 }}
               >
                 <LinkIcon fontSize="small" sx={{ mr: 1.5 }} />
-                Map OIDC account
+                {t("settings.userManagement.directory.mapOidc")}
               </MenuItem>
             )}
             {oidcAuthenticationEnabled && oidcConfiguration && userActionsMenu.user.pending_oidc && (
@@ -2589,7 +2602,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                 }}
               >
                 <LinkOffIcon fontSize="small" sx={{ mr: 1.5 }} />
-                Cancel pending OIDC mapping
+                {t("settings.userManagement.directory.cancelMapping")}
               </MenuItem>
             )}
             {oidcAuthenticationEnabled && oidcConfiguration && userActionsMenu.user.oidc && (
@@ -2602,7 +2615,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   }}
                 >
                   <LinkIcon fontSize="small" sx={{ mr: 1.5 }} />
-                  View OIDC identity details
+                  {t("settings.userManagement.directory.viewIdentity")}
                 </MenuItem>
                 <MenuItem
                   disabled={!pendingOidcMappingsAllowed}
@@ -2613,7 +2626,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   }}
                 >
                   <LinkIcon fontSize="small" sx={{ mr: 1.5 }} />
-                  Change OIDC account
+                  {t("settings.userManagement.directory.changeOidc")}
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -2623,7 +2636,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   }}
                 >
                   <MoreVertIcon fontSize="small" sx={{ mr: 1.5 }} />
-                  Move identity to another local user
+                  {t("settings.userManagement.directory.moveIdentity")}
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
@@ -2633,7 +2646,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   }}
                 >
                   <LinkOffIcon fontSize="small" sx={{ mr: 1.5 }} />
-                  Detach OIDC identity
+                  {t("settings.userManagement.directory.detachIdentity")}
                 </MenuItem>
               </>
             )}
@@ -2691,7 +2704,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               onClick={() => setOidcConfirmation(null)}
               onKeyDownCapture={dialogEnterKeyHandler()}
             >
-              Cancel
+              {t("common.actions.cancel")}
             </Button>
             <Button variant="contained" color="error" disabled={oidcConfirmationSubmitting} onClick={() => void handleOidcConfirmation()}>
               {oidcConfirmation?.action === "detach" ? "Detach OIDC identity" : "Cancel pending OIDC mapping"}
@@ -2714,7 +2727,7 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
               variant="contained"
               sx={combineSx(settingsPrimaryButtonSx, adminDialogActionButtonSx)}
             >
-              Close
+              {t("common.actions.close")}
             </Button>
           </Box>
         }
@@ -2831,11 +2844,9 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                       <TextField
                         {...params}
                         autoFocus
-                        label="Move identity to"
+                        label={t("settings.userManagement.directory.moveIdentityTo")}
                         error={Boolean(mappingFieldErrors.targetUser)}
-                        helperText={
-                          mappingFieldErrors.targetUser ?? "Search eligible active, unlinked local accounts by username, name, or email"
-                        }
+                        helperText={mappingFieldErrors.targetUser ?? t("settings.userManagement.directory.moveIdentityHelp")}
                         sx={formOutlinedControlSx}
                       />
                     )}
@@ -2844,17 +2855,14 @@ export function UserManagementSettings({ dialogSafeHeader = false }: UserManagem
                   <TextField
                     autoFocus
                     fullWidth
-                    label="Expected provider username"
+                    label={t("settings.userManagement.directory.expectedProviderUsername")}
                     value={mappingEditor.expectedUsername}
                     onChange={(event) => {
                       setMappingEditor((current) => ({ ...current, expectedUsername: event.target.value }));
                       setMappingFieldErrors((current) => ({ ...current, expectedUsername: undefined }));
                     }}
                     error={Boolean(mappingFieldErrors.expectedUsername)}
-                    helperText={
-                      mappingFieldErrors.expectedUsername ??
-                      "The first admitted, unmapped OIDC identity with this exact username will claim the account."
-                    }
+                    helperText={mappingFieldErrors.expectedUsername ?? t("settings.userManagement.directory.expectedProviderUsernameHelp")}
                     sx={formOutlinedControlSx}
                   />
                 )}

@@ -330,6 +330,14 @@
         "name": "Sambee Dunkel",
         "description": "Dunkles Standarddesign der Anwendung"
       }
+    },
+    "editor": {
+      "description": "Beschreibung",
+      "descriptionHelp": "Optionaler Text unter dem Themennamen",
+      "mode": "Modus",
+      "modeHelp": "Ist dies ein helles oder dunkles Thema?",
+      "name": "Name",
+      "nameHelp": "Name in der Themenauswahl"
     }
   },
   "keyboardShortcutsHelp": {
@@ -394,7 +402,94 @@
     }
   },
   "settings": {
+    "authenticationPage": {
+      "providerLabel": "OpenID Connect",
+      "adminOverride": "Der Administrator, der diesen Anbieter verbindet, behält eine individuelle Administratorzuweisung. Individuelle Zuweisungen haben stets Vorrang vor dieser Rollenrichtlinie.",
+      "groups": "Gruppen: {{groups}}",
+      "none": "Keine",
+      "admissionAllowed": "Zugang: Erlaubt",
+      "admissionDenied": "Zugang: Verweigert",
+      "sessionRefresh": "Sitzungsverlängerung: Der Test hat ein Aktualisierungstoken zurückgegeben",
+      "sessionNoRefresh": "Sitzungsverlängerung: Der Test hat kein Aktualisierungstoken zurückgegeben. Benutzer müssen sich nach dem konfigurierten Sitzungslimit erneut anmelden.",
+      "matchingGroup": "Passende Zugangsgruppe: {{group}}",
+      "reactivate": "{{username}} ({{state}}) muss vor der Zuordnung reaktiviert werden.",
+      "inactive": "inaktiv",
+      "expired": "abgelaufen",
+      "omittedAccounts_one": "{{count}} aktives Konto ohne Passwort ist nicht zugeordnet. Diese Benutzer können sich erst nach der Zuordnung anmelden. Eine nicht zugeordnete OIDC-Anmeldung kann mit einem vorhandenen Benutzernamen kollidieren oder ein separates Konto erstellen.",
+      "omittedAccounts_other": "{{count}} aktive Konten ohne Passwort sind nicht zugeordnet. Diese Benutzer können sich erst nach der Zuordnung anmelden. Eine nicht zugeordnete OIDC-Anmeldung kann mit einem vorhandenen Benutzernamen kollidieren oder ein separates Konto erstellen.",
+      "loading": "Authentifizierungseinstellungen werden geladen",
+      "disabled": "Die Authentifizierung ist in der Konfigurationsdatei deaktiviert.",
+      "configureOidc": "OIDC konfigurieren",
+      "copyRedirectUri": "Umleitungs-URI kopieren",
+      "autoLink": "OIDC-Identitäten anhand des Benutzernamens automatisch mit lokalen Konten verknüpfen",
+      "allUsers": "Alle authentifizierten Benutzer",
+      "selectedGroups": "Nur ausgewählte Gruppen",
+      "roleAssignment": "Rollenzuweisung",
+      "uniformRole": "Allen Benutzern wird dieselbe Rolle zugewiesen",
+      "groupBased": "Gruppenbasiert",
+      "administrator": "Administrator",
+      "advancedClaims": "Erweiterte Claims",
+      "defaultClaims": "Die Standardnamen der Claims funktionieren mit den meisten Anbietern",
+      "reviewOidc": "OIDC-Verbindung überprüfen",
+      "activate": "Konfiguration aktivieren",
+      "testResults": "Testergebnisse",
+      "testedIdentity": "Getestete Identität",
+      "admissionPolicy": "Die Kontozuordnung setzt die Zugangsrichtlinie nicht außer Kraft.",
+      "reviewAccounts": "Vorhandene Konten überprüfen",
+      "inactiveAccounts": "Inaktive oder abgelaufene Konten"
+    },
+    "accountPage": {
+      "loading": "Konto wird geladen",
+      "passwordRequired": "Ihr Administrator verlangt, dass Sie Ihr lokales Passwort ändern.",
+      "identity": "Ihre Identität",
+      "sessions": "Sitzungen",
+      "sessionsUnavailable": "Sitzungsinformationen sind nicht verfügbar, da keine Anmeldung erzwungen wird.",
+      "thisBrowser": "Dieser Browser",
+      "otherSessions": "Andere Sitzungen",
+      "otherSessionsFailed": "Andere Sitzungen konnten nicht geladen werden.",
+      "identitySource": "Identitätsquelle"
+    },
     "userManagement": {
+      "directory": {
+        "status": "Status",
+        "lastOidcSignIn": "Letzte OIDC-Anmeldung",
+        "created": "Erstellt",
+        "updated": "Zuletzt aktualisiert",
+        "oidcState": "OIDC-Status",
+        "roleSource": "Rollenquelle",
+        "oidcProvider": "OIDC-Anbieter",
+        "userActionsFor": "Benutzeraktionen für {{username}}",
+        "mapOidc": "OIDC-Konto zuordnen",
+        "cancelMapping": "Ausstehende OIDC-Zuordnung abbrechen",
+        "viewIdentity": "OIDC-Identitätsdetails anzeigen",
+        "changeOidc": "OIDC-Konto ändern",
+        "moveIdentity": "Identität zu einem anderen lokalen Benutzer verschieben",
+        "detachIdentity": "OIDC-Identität trennen",
+        "overview": "Verzeichnisübersicht",
+        "columns": "Spalten",
+        "directoryColumns": "Verzeichnisspalten",
+        "updating": "Benutzerverzeichnis wird aktualisiert",
+        "filters": "Filter",
+        "expiration": "Ablauf",
+        "anyExpiration": "Beliebiger Ablauf",
+        "hasExpiration": "Mit Ablauf",
+        "noExpiration": "Ohne Ablauf",
+        "signIn": "Anmeldung",
+        "activeFilters": "Aktive Filter",
+        "users": "Benutzer",
+        "manageColumns": "Sichtbare Spalten verwalten",
+        "userActions": "Benutzeraktionen",
+        "never": "Nie",
+        "confirm": "Bestätigen",
+        "perPage": "{{count}} pro Seite",
+        "expectedProviderUsername": "Erwarteter Benutzername beim Anbieter",
+        "expectedProviderUsernameHelp": "Die erste zugelassene, nicht zugeordnete OIDC-Identität mit genau diesem Benutzernamen übernimmt das Konto.",
+        "moveIdentityHelp": "Suchen Sie geeignete aktive, nicht verknüpfte lokale Konten nach Benutzername, Name oder E-Mail-Adresse",
+        "moveIdentityTo": "Identität verschieben zu",
+        "searchUsers": "Benutzer suchen",
+        "signInMethod": "Anmeldemethode",
+        "user": "Benutzer"
+      },
       "addUserButton": "Benutzer hinzufügen",
       "addUserFabAriaLabel": "Benutzer hinzufügen",
       "totalUsers_one": "Benutzer: {{count}}",
@@ -884,18 +979,18 @@
       "maxFileSizeDescription": "Dateien oberhalb dieses Grenzwerts werden nicht im vollständigen CodeMirror-Texteditor geöffnet. So vermeiden Sie lange Ladezeiten oder hohen Speicherbedarf beim Bearbeiten sehr großer Dateien."
     },
     "fileSearch": {
-      "title": "Dateisuche",
+      "title": "Zuletzt verwendete Dateien",
       "saveChanges": "Änderungen speichern",
       "resetToDefault": "Auf Standardwerte zurücksetzen",
-      "loadFailed": "Die Einstellungen für die Dateisuche konnten nicht geladen werden.",
-      "saveFailed": "Die Einstellungen für die Dateisuche konnten nicht gespeichert werden.",
-      "resetFailed": "Die Einstellungen für die Dateisuche konnten nicht zurückgesetzt werden.",
+      "loadFailed": "Die Einstellungen für zuletzt verwendete Dateien konnten nicht geladen werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
+      "saveFailed": "Die Einstellungen für zuletzt verwendete Dateien konnten nicht gespeichert werden. Prüfen Sie den Wert und versuchen Sie es erneut.",
+      "resetFailed": "Die Einstellungen für zuletzt verwendete Dateien konnten nicht zurückgesetzt werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
       "retentionLimit": "Anzahl zuletzt verwendeter Dateien und Ordner im Verlauf",
       "retentionLimitError": "Geben Sie eine ganze Zahl zwischen 0 und 500 ein.",
       "resultLimit": "Ergebnisse pro Gruppe",
       "resultLimitError": "Geben Sie eine ganze Zahl zwischen 1 und 50 ein.",
       "excludedCategories": "Dateikategorien ausschließen",
-      "excludedCategoriesHelp": "Ausgeschlossene Dateien erscheinen weder in den Ergebnissen noch im Verlauf der Dateisuche.",
+      "excludedCategoriesHelp": "Ausgeschlossene Dateien erscheinen weder im Verlauf zuletzt verwendeter Dateien noch in der Schnellnavigation.",
       "excludeImages": "Bilder ausschließen",
       "excludeTemporaryBackup": "Temporäre Dateien und Sicherungsdateien ausschließen",
       "excludedExtensions": "Ausgeschlossene Dateiendungen",
@@ -938,8 +1033,10 @@
       "sections": {
         "theme": "Design",
         "localization": "Sprache und Region",
-        "directory_index": "Regeln für die Ordnersuche"
-      }
+        "directory_index": "Richtlinie für die Ordnerindizierung",
+        "filesystem_search": "Richtlinie für die Dateisystemsuche"
+      },
+      "searchUpdateRequired": "Aktualisieren Sie Sambee und Companion, um die Grenzwerte für die Dateisystemsuche zu übermitteln. Die letzte gültige Richtlinie bleibt aktiv."
     },
     "connectionsSubgroups": {
       "smb": {
@@ -1011,12 +1108,12 @@
         "description": "Konfigurieren Sie die Sicherheitsrichtlinie und die Betriebsgrenzen für SMB-Backends."
       },
       "adminFileSearch": {
-        "label": "Dateisuche",
-        "description": "Legen Sie den Suchverlauf, die maximale Anzahl der Ergebnisse und die Ausschlüsse für die Dateisuche fest."
+        "label": "Zuletzt verwendete Dateien",
+        "description": "Konfigurieren Sie den Verlauf zuletzt verwendeter Dateien, die Grenzwerte für die Schnellnavigation und die Ausschlüsse."
       },
       "adminDirectorySearch": {
-        "label": "Ordnersuche",
-        "description": "Konfigurieren Sie die Ressourcen und die Überprüfung der Ordnerindizes für das Backend und alle Geräte mit Companion."
+        "label": "Ordnerindizierung",
+        "description": "Konfigurieren Sie den Ordnerindex für die Schnellnavigation über SMB und Companion."
       },
       "adminHealthMonitoring": {
         "label": "Systemüberwachung",
@@ -1025,6 +1122,10 @@
       "adminAbout": {
         "label": "Über Sambee",
         "description": "Zeigen Sie Informationen zum Sambee-Build, zur Software und zur Hardware an."
+      },
+      "adminFilesystemSearch": {
+        "label": "Dateisystemsuche",
+        "description": "Legen Sie Grenzwerte für Live-Suchen auf SMB-Verbindungen und lokalen Laufwerken fest."
       }
     },
     "aboutPage": {
@@ -1127,6 +1228,27 @@
         "svSE": "Schwedisch (Schweden)"
       },
       "regionalSettingsPreviewTitle": "Vorschau"
+    },
+    "filesystemSearch": {
+      "group": "Grenzwerte für die Live-Suche",
+      "loadFailed": "Die Einstellungen für die Dateisystemsuche konnten nicht geladen werden. Prüfen Sie die Verbindung zum Backend und versuchen Sie es erneut.",
+      "updateRequired": "Aktualisieren Sie Sambee, um die Grenzwerte für die Dateisystemsuche zu konfigurieren.",
+      "saveFailed": "Dieser Suchgrenzwert konnte nicht gespeichert werden. Prüfen Sie den Wert und die Verbindung und versuchen Sie es erneut.",
+      "changeNote": "Änderungen gelten für neue Suchvorgänge. Wenn die Übermittlung fehlschlägt, verwendet Companion die letzte gültige Richtlinie.",
+      "validation": "Geben Sie eine ganze Zahl von {{min}} bis {{max}} ein.",
+      "bounds": "{{description}} Standard: {{defaultValue}}. Bereich: {{min}}–{{max}}.",
+      "concurrent_searches": {
+        "label": "Maximale Anzahl gleichzeitiger Suchvorgänge",
+        "description": "Maximale Anzahl von Suchvorgängen pro Konto und SMB-Verbindung oder pro gekoppelter Website und lokalem Laufwerk."
+      },
+      "max_seconds": {
+        "label": "Maximale Suchdauer",
+        "description": "Zeit in Sekunden, nach der die Suche keine Ergebnisse mehr liefert. Aktive Lesevorgänge können den Suchplatz länger belegen."
+      },
+      "max_results": {
+        "label": "Maximale Anzahl von Ergebnissen",
+        "description": "Maximale Anzahl unterschiedlicher Ergebnisse aus dem Dateisystem und aus Archiven pro Suche."
+      }
     }
   },
   "fileBrowser": {
@@ -1479,7 +1601,10 @@
         "legacyDirectorySearch": "Für diese Quelle ist die Ordnersuche mit mehreren Begriffen nicht bestätigt. Suchen Sie nach einem Begriff oder prüfen Sie, ob das Backend und Companion diese Suche unterstützen.",
         "historyUnavailable": "Der Verlauf der zuletzt geöffneten Ordner ist nicht verfügbar. Prüfen Sie die Verbindung zum Backend und versuchen Sie es erneut.",
         "fileHistoryUnavailable": "Der Verlauf der zuletzt verwendeten Dateien ist nicht verfügbar. Prüfen Sie die Verbindung zum Backend und versuchen Sie es erneut.",
-        "indexUnavailable": "Die Ordnersuche ist nicht verfügbar. Prüfen Sie die Verbindung zur Quelle und versuchen Sie es erneut."
+        "indexUnavailable": "Die Ordnersuche ist nicht verfügbar. Prüfen Sie die Verbindung zur Quelle und versuchen Sie es erneut.",
+        "scopeNotIndexed": "Dieser Ordner ist noch nicht indiziert. Ergebnisse erscheinen nach Abschluss der Indizierung.",
+        "scopeUnsupportedCompanion": "Diese Quelle unterstützt keinen Ordnerbereich. Aktualisieren Sie Companion und versuchen Sie es erneut.",
+        "scopeUnsupportedServer": "Diese Quelle unterstützt keinen Ordnerbereich. Aktualisieren Sie den Server und versuchen Sie es erneut."
       },
       "statusDetails": {
         "title": "Status der Ordnersuche",
@@ -1510,9 +1635,77 @@
         "recentFiles": "Zuletzt verwendete Dateien",
         "recentDirectories": "Zuletzt geöffnete Ordner",
         "directories": "Ordner",
-        "currentDirectory": "Aktueller Ordner"
+        "currentDirectory": "Aktueller Ordner",
+        "recentItems": "Zuletzt verwendete Dateien und Ordner",
+        "matches": "Treffer"
       },
-      "belowMinimum": "Geben Sie mindestens {{count}} Zeichen ein, um zu suchen"
+      "belowMinimum": "Geben Sie mindestens {{count}} Zeichen ein, um zu suchen",
+      "navigation": {
+        "scopeLabel": "Suchbereich",
+        "itemTypeLabel": "Elementtyp",
+        "scope": {
+          "connection": "Aktuelle Verbindung",
+          "subtree": "Aktueller Ordner und Unterordner",
+          "descendants_only": "Nur Unterordner"
+        },
+        "itemType": {
+          "all": "Dateien und Ordner",
+          "directories": "Ordner",
+          "files": "Dateien"
+        }
+      },
+      "live": {
+        "mode": "Live-Suche",
+        "placeholder": "Dateien und Ordner suchen",
+        "title": "Suchergebnisse {{number}}",
+        "options": "Suchoptionen",
+        "optionsKeyboardHint": "↑ ↓ Bewegen · Leertaste Ändern · Esc Zurück",
+        "queryContext": "Suche: „{{query}}“",
+        "archives": "In ZIP-Dateien suchen",
+        "folderDepth": "Ordnertiefe",
+        "caseSensitive": "Groß- und Kleinschreibung beachten",
+        "depth": {
+          "current": "Nur aktueller Ordner",
+          "recursive": "Aktueller Ordner und Unterordner"
+        },
+        "emptyQuery": "Geben Sie einen Namen oder ein Muster für die Suche ein.",
+        "queryTooLong": "Der Suchbegriff ist zu lang. Verwenden Sie höchstens {{max}} UTF-8-Bytes und versuchen Sie es erneut.",
+        "unreadableItem": "Dieses Element kann nicht gelesen werden. Prüfen Sie den Zugriff und versuchen Sie es erneut.",
+        "nestedArchive": "Verschachtelte ZIP-Dateien können hier nicht geöffnet werden. Laden Sie die Datei herunter, um sie zu öffnen.",
+        "running": "Suche läuft...",
+        "interrupted": "Die Suche wurde unterbrochen. Starten Sie eine neue Suche, um es erneut zu versuchen.",
+        "interruptedDetail": "Die Suche konnte nicht gestartet werden. {{error}}",
+        "errors": {
+          "invalid_data": "Die Suche hat ungültige Daten zurückgegeben. Prüfen Sie die Verbindung zur Quelle und starten Sie eine neue Suche.",
+          "response_too_large": "Eine Antwort auf die Suche war zu groß. Prüfen Sie die Quelle und starten Sie eine neue Suche.",
+          "incomplete": "Die Suche wurde vor ihrem Abschluss unterbrochen. Prüfen Sie die Verbindung zur Quelle und starten Sie eine neue Suche.",
+          "start_failed": "Die Suche konnte nicht gestartet werden. Prüfen Sie die Verbindung zur Quelle und versuchen Sie es erneut."
+        },
+        "companionUpdateRequired": "Diese Companion-Version unterstützt die Live-Suche nicht. Aktualisieren Sie Companion und starten Sie dann eine neue Suche.",
+        "companionUpdateAction": "Companion aktualisieren",
+        "noMatches": "Keine Treffer.",
+        "terminal": {
+          "archive_too_large": "Die ZIP-Datei ist für die Suche zu groß. Öffnen Sie eine kleinere ZIP-Datei und versuchen Sie es erneut.",
+          "archive_unreadable": "Die ZIP-Datei konnte nicht gelesen werden. Prüfen Sie den Zugriff auf die ZIP-Datei und versuchen Sie es erneut.",
+          "complete": "Suche abgeschlossen.",
+          "partial_coverage": "Die Suche wurde mit unvollständiger Abdeckung beendet. Prüfen Sie die übersprungenen Elemente und versuchen Sie es erneut.",
+          "time_limit": "Zeitlimit erreicht. Starten Sie eine stärker eingegrenzte Suche, um fortzufahren.",
+          "result_limit": "Ergebnislimit erreicht. Starten Sie eine stärker eingegrenzte Suche, um fortzufahren.",
+          "source_failure": "Die Suche wurde aufgrund eines Quellenfehlers beendet. Prüfen Sie die Verbindung und versuchen Sie es erneut."
+        },
+        "skips": {
+          "unreadable_directory_one": "{{count}} Ordner konnte nicht gelesen werden.",
+          "unreadable_directory_other": "{{count}} Ordner konnten nicht gelesen werden.",
+          "unsafe_name_one": "{{count}} Element hatte einen unsicheren Namen.",
+          "unsafe_name_other": "{{count}} Elemente hatten unsichere Namen.",
+          "archive_too_large_one": "{{count}} ZIP-Datei war für die Suche zu groß.",
+          "archive_too_large_other": "{{count}} ZIP-Dateien waren für die Suche zu groß.",
+          "archive_unreadable_one": "{{count}} ZIP-Datei konnte nicht gelesen werden.",
+          "archive_unreadable_other": "{{count}} ZIP-Dateien konnten nicht gelesen werden.",
+          "queue_limit_one": "Die Suche wurde beendet, weil die Ordnerwarteschlange voll war.",
+          "queue_limit_other": "Die Suche wurde beendet, weil die Ordnerwarteschlange voll war."
+        }
+      }
     },
     "commands": {
       "categories": {
@@ -1757,6 +1950,16 @@
     }
   },
   "common": {
+    "uiText": {
+      "import": "Importieren",
+      "export": "Exportieren",
+      "saveCopy": "Kopie speichern",
+      "compatibilityMode": "Kompatibilitätsmodus versuchen",
+      "passwordChanged": "Passwort geändert. Melden Sie sich mit Ihrem neuen Passwort an.",
+      "or": "oder",
+      "clearFilters": "Filter zurücksetzen",
+      "serverIllustration": "Serverillustration"
+    },
     "labels": {
       "connection": "Verbindung",
       "itemToDelete": "Zu löschendes Element",

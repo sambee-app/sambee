@@ -55,6 +55,36 @@ def test_non_topology_component_changes_remain_selective() -> None:
     }
 
 
+@pytest.mark.parametrize("path", ["biome.json", "frontend/biome.json", "frontend/biome-base.json", "frontend/no-hardcoded-ui-text.grit"])
+def test_shared_biome_changes_schedule_both_apps(path: str) -> None:
+    selections = classify_paths([path])
+    assert selections["frontend"]
+    assert selections["companion"]
+
+
+@pytest.mark.parametrize("path", ["biome.json", "frontend/biome.json", "frontend/biome-base.json", "frontend/no-hardcoded-ui-text.grit"])
+def test_shared_biome_changes_schedule_both_lint_jobs(path: str) -> None:
+    workflow_path = Path(__file__).resolve().parents[2] / ".github/workflows/lint.yml"
+    workflow = yaml.safe_load(workflow_path.read_text())
+    detector = ast.parse(workflow["jobs"]["changes"]["steps"][0]["run"].split("\n", 1)[1].rsplit("\nPY", 1)[0])
+    selection = ast.Module(
+        body=[
+            statement
+            for statement in detector.body
+            if isinstance(statement, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id in {"frontend_extras", "companion_extras", "frontend", "companion"}
+                for target in statement.targets
+            )
+        ],
+        type_ignores=[],
+    )
+    namespace: dict[str, Any] = {"filenames": [path]}
+    exec(compile(selection, str(workflow_path), "exec"), namespace)
+    assert namespace["frontend"]
+    assert namespace["companion"]
+
+
 @pytest.mark.parametrize("path", sorted(ci_change_detector.FRONTEND_EXTRAS))
 def test_frontend_ci_infrastructure_runs_frontend_checks(path: str) -> None:
     assert classify_paths([path])["frontend"]
@@ -68,6 +98,10 @@ def test_shard_matrix_inputs_run_both_backend_and_frontend_checks(path: str) -> 
         "companion": False,
         "website": False,
     }
+
+
+def test_ui_lint_fixture_changes_schedule_frontend_checks() -> None:
+    assert classify_paths(["scripts/check-ui-text-rule.test.mjs"])["frontend"]
 
 
 def test_workflows_use_latest_x64_and_supported_arm_ubuntu_labels() -> None:

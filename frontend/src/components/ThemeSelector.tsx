@@ -13,6 +13,7 @@ import {
   useTheme,
 } from "@mui/material";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRestoreFocusAfterPending } from "../hooks/useRestoreFocusAfterPending";
 import { useCurrentUserSetting } from "../services/userSettingsStore";
 import { useSambeeTheme } from "../theme";
@@ -63,6 +64,7 @@ interface ThemeSelectorDialogProps {
  * Dialog that displays all available themes for selection
  */
 export function ThemeSelectorDialog({ open, onClose }: ThemeSelectorDialogProps) {
+  const { t } = useTranslation();
   const { currentTheme, availableThemes } = useSambeeTheme();
   const themeSetting = useCurrentUserSetting("appearance.theme_id");
   const [pendingThemeId, setPendingThemeId] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export function ThemeSelectorDialog({ open, onClose }: ThemeSelectorDialogProps)
       actionNotice={<DialogNotice message={themeSetting.error} />}
       actions={
         <Button onClick={onClose} variant="contained">
-          Close
+          {t("common.actions.close")}
         </Button>
       }
     >

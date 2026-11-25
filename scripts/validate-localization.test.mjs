@@ -1,10 +1,54 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { getTranslationInput, validateCatalog, validateTerminology } from "./validate-localization.mjs";
 
 const english = { item_one: "{{count}} item", item_other: "{{count}} items", open: "Open {{name}}" };
 const hash = (forms) => createHash("sha256").update(JSON.stringify(forms)).digest("hex");
+
+test("strict CLI reports missing and stale frontend, companion and native keys", () => {
+  const root = mkdtempSync(join(tmpdir(), "sambee-localization-test-"));
+  const write = (path, value) => {
+    const target = join(root, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, value);
+  };
+  const json = (path, value) => write(path, JSON.stringify(value));
+  try {
+    mkdirSync(join(root, "scripts"));
+    cpSync(new URL("./validate-localization.mjs", import.meta.url), join(root, "scripts/validate-localization.mjs"));
+    write("frontend/src/i18n/languages.ts", 'export const LANGUAGE_NAMES = { en: "English", fr: "French" }; export const SHIPPING_LANGUAGES = ["en", "fr"];');
+    write("frontend/src/i18n/resources.ts", 'export const EN_TRANSLATIONS = { button: "Open" };');
+    write("companion/src/i18n/resources.ts", 'export const EN_TRANSLATIONS = { button: "Open", native: { trayQuit: "Quit" } };');
+    json("localization/glossary.json", { locales: {} });
+    json("frontend/src/i18n/catalogs/fr.json", { button: "Ouvrir" });
+    json("frontend/src/i18n/fingerprints/fr.json", { button: hash(["Open"]) });
+    json("companion/src/i18n/catalogs/fr.json", { button: "Ouvrir", native: { trayQuit: "Quitter" } });
+    json("companion/src/i18n/fingerprints/fr.json", { button: hash(["Open"]), "native.trayQuit": hash(["Quit"]) });
+    const run = () => spawnSync(process.execPath, [join(root, "scripts/validate-localization.mjs"), "--release"], { encoding: "utf8" });
+    const complete = run();
+    assert.equal(complete.status, 0, complete.stderr);
+
+    json("frontend/src/i18n/fingerprints/fr.json", { button: hash(["Changed"]) });
+    const stale = run();
+    assert.equal(stale.status, 1, stale.stderr);
+    assert.match(stale.stdout, /frontend\/fr\/button: stale or without a source fingerprint/);
+
+    json("frontend/src/i18n/catalogs/fr.json", {});
+    json("companion/src/i18n/catalogs/fr.json", { native: {} });
+    const incomplete = run();
+    assert.equal(incomplete.status, 1, incomplete.stderr);
+    assert.match(incomplete.stdout, /frontend\/fr\/button: missing/);
+    assert.match(incomplete.stdout, /companion\/fr\/button: missing/);
+    assert.match(incomplete.stdout, /companion\/fr\/native\.trayQuit: missing/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("validates Japanese plurals and exact interpolation names", () => {
   const { errors, missing } = validateCatalog(english, "ja", {

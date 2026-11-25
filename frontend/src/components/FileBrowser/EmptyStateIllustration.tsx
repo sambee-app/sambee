@@ -3,6 +3,7 @@
 //
 
 import { Box, type SxProps, type Theme } from "@mui/material";
+import { useTranslation } from "react-i18next";
 
 interface EmptyStateIllustrationProps {
   /** Width of the illustration (default: 200) */
@@ -16,6 +17,7 @@ interface EmptyStateIllustrationProps {
  * Displays a stylized server/network icon with a subtle animation.
  */
 export function EmptyStateIllustration({ width = 200, sx }: EmptyStateIllustrationProps) {
+  const { t } = useTranslation();
   const height = width * 0.8;
 
   return (
@@ -28,7 +30,7 @@ export function EmptyStateIllustration({ width = 200, sx }: EmptyStateIllustrati
       }}
     >
       <svg width={width} height={height} viewBox="0 0 200 160" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <title>Server illustration</title>
+        <title>{t("common.uiText.serverIllustration")}</title>
         {/* Background circle */}
         <circle cx="100" cy="80" r="70" fill="currentColor" opacity="0.05" />
 

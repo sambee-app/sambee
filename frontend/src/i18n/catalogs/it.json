@@ -240,6 +240,54 @@
     }
   },
   "settings": {
+    "authenticationPage": {
+      "providerLabel": "OpenID Connect",
+      "adminOverride": "L'amministratore che collega questo provider mantiene un'assegnazione individuale di amministratore. Le assegnazioni individuali hanno sempre la precedenza su questa politica dei ruoli.",
+      "groups": "Gruppi: {{groups}}",
+      "none": "Nessuno",
+      "admissionAllowed": "Ammissione: Consentita",
+      "admissionDenied": "Ammissione: Negata",
+      "sessionRefresh": "Rinnovo sessione: Il test ha restituito un token di aggiornamento",
+      "sessionNoRefresh": "Rinnovo sessione: Il test non ha restituito un token di aggiornamento; gli utenti dovranno accedere di nuovo dopo il limite di sessione configurato.",
+      "matchingGroup": "Gruppo di ammissione corrispondente: {{group}}",
+      "reactivate": "{{username}} ({{state}}) deve essere riattivato prima dell'associazione.",
+      "inactive": "inattivo",
+      "expired": "scaduto",
+      "omittedAccounts_one": "{{count}} account attivo senza password è omesso. Questi utenti non possono accedere fino all'associazione. Un accesso OIDC non associato può entrare in conflitto con un nome utente esistente o creare un account separato.",
+      "omittedAccounts_many": "{{count}} account attivi senza password sono omessi. Questi utenti non possono accedere fino all'associazione. Un accesso OIDC non associato può entrare in conflitto con un nome utente esistente o creare un account separato.",
+      "omittedAccounts_other": "{{count}} account attivi senza password sono omessi. Questi utenti non possono accedere fino all'associazione. Un accesso OIDC non associato può entrare in conflitto con un nome utente esistente o creare un account separato.",
+      "loading": "Caricamento delle impostazioni di autenticazione",
+      "disabled": "L'autenticazione è disabilitata nel file di configurazione.",
+      "configureOidc": "Configura OIDC",
+      "copyRedirectUri": "Copia URI di reindirizzamento",
+      "autoLink": "Collega automaticamente le identità OIDC agli account locali tramite nome utente",
+      "allUsers": "Tutti gli utenti autenticati",
+      "selectedGroups": "Solo gruppi selezionati",
+      "roleAssignment": "Assegnazione dei ruoli",
+      "uniformRole": "A tutti gli utenti viene assegnato lo stesso ruolo",
+      "groupBased": "Basata sui gruppi",
+      "administrator": "Amministratore",
+      "advancedClaims": "Claim avanzati",
+      "defaultClaims": "I nomi dei claim predefiniti funzionano con la maggior parte dei provider",
+      "reviewOidc": "Verifica connessione OIDC",
+      "activate": "Attiva configurazione",
+      "testResults": "Risultati del test",
+      "testedIdentity": "Identità verificata",
+      "admissionPolicy": "L'associazione degli account non sostituisce la politica di ammissione.",
+      "reviewAccounts": "Verifica account esistenti",
+      "inactiveAccounts": "Account inattivi o scaduti"
+    },
+    "accountPage": {
+      "loading": "Caricamento account",
+      "passwordRequired": "L'amministratore richiede di cambiare la password locale.",
+      "identity": "La tua identità",
+      "sessions": "Sessioni",
+      "sessionsUnavailable": "Le informazioni sulla sessione non sono disponibili perché l'autenticazione non è obbligatoria.",
+      "thisBrowser": "Questo browser",
+      "otherSessions": "Altre sessioni",
+      "otherSessionsFailed": "Impossibile caricare le altre sessioni.",
+      "identitySource": "Origine dell’identità"
+    },
     "appearancePage": {
       "localizationTitle": "Lingua e area geografica",
       "localizationDescription": "Scegli la lingua dell’interfaccia e il formato di date e numeri.",
@@ -372,12 +420,12 @@
         "description": "Configura i criteri di sicurezza e i limiti operativi dei backend SMB."
       },
       "adminFileSearch": {
-        "label": "Ricerca file",
-        "description": "Configura la cronologia, i limiti dei risultati e le esclusioni della ricerca file."
+        "label": "File recenti",
+        "description": "Configura la cronologia dei file recenti, i limiti di navigazione rapida e le esclusioni."
       },
       "adminDirectorySearch": {
-        "label": "Ricerca cartelle",
-        "description": "Configura le risorse e i controlli degli indici delle cartelle per il backend e tutti i dispositivi Companion."
+        "label": "Indicizzazione delle cartelle",
+        "description": "Configura l'indice delle cartelle usato dalla navigazione rapida su SMB e Companion."
       },
       "adminHealthMonitoring": {
         "label": "Monitoraggio del sistema",
@@ -386,6 +434,10 @@
       "adminAbout": {
         "label": "Informazioni",
         "description": "Consulta le informazioni su build, software e hardware di Sambee."
+      },
+      "adminFilesystemSearch": {
+        "label": "Ricerca nel file system",
+        "description": "Imposta i limiti per le ricerche in tempo reale su connessioni SMB e unità locali."
       }
     },
     "imageViewerPage": {
@@ -493,8 +545,10 @@
       "sections": {
         "theme": "Tema",
         "localization": "Lingua e formati",
-        "directory_index": "Criteri di ricerca delle cartelle"
-      }
+        "directory_index": "Policy di indicizzazione delle cartelle",
+        "filesystem_search": "Policy di ricerca nel file system"
+      },
+      "searchUpdateRequired": "Aggiorna Sambee e Companion per trasmettere i limiti di ricerca nel file system. L'ultima policy valida rimane attiva."
     },
     "aboutPage": {
       "applicationTitle": "Applicazione",
@@ -761,6 +815,46 @@
       }
     },
     "userManagement": {
+      "directory": {
+        "status": "Stato",
+        "lastOidcSignIn": "Ultimo accesso OIDC",
+        "created": "Creato",
+        "updated": "Ultimo aggiornamento",
+        "oidcState": "Stato OIDC",
+        "roleSource": "Origine del ruolo",
+        "oidcProvider": "Provider OIDC",
+        "userActionsFor": "Azioni utente per {{username}}",
+        "mapOidc": "Associa account OIDC",
+        "cancelMapping": "Annulla associazione OIDC in sospeso",
+        "viewIdentity": "Visualizza dettagli identità OIDC",
+        "changeOidc": "Cambia account OIDC",
+        "moveIdentity": "Sposta identità a un altro utente locale",
+        "detachIdentity": "Scollega identità OIDC",
+        "overview": "Panoramica della directory",
+        "columns": "Colonne",
+        "directoryColumns": "Colonne della directory",
+        "updating": "Aggiornamento della directory utenti",
+        "filters": "Filtri",
+        "expiration": "Scadenza",
+        "anyExpiration": "Qualsiasi scadenza",
+        "hasExpiration": "Con scadenza",
+        "noExpiration": "Senza scadenza",
+        "signIn": "Accesso",
+        "activeFilters": "Filtri attivi",
+        "users": "Utenti",
+        "manageColumns": "Gestisci colonne visibili",
+        "userActions": "Azioni utente",
+        "never": "Mai",
+        "confirm": "Conferma",
+        "perPage": "{{count}} per pagina",
+        "expectedProviderUsername": "Nome utente previsto del provider",
+        "expectedProviderUsernameHelp": "La prima identità OIDC autorizzata e non associata con questo esatto nome utente verrà associata all’account.",
+        "moveIdentityHelp": "Cerca gli account locali idonei, attivi e non collegati per nome utente, nome o indirizzo email",
+        "moveIdentityTo": "Sposta identità in",
+        "searchUsers": "Cerca utenti",
+        "signInMethod": "Metodo di accesso",
+        "user": "Utente"
+      },
       "addUserButton": "Aggiungi utente",
       "addUserFabAriaLabel": "Aggiungi utente",
       "totalUsers_one": "Utenti: {{count}}",
@@ -953,18 +1047,18 @@
       }
     },
     "fileSearch": {
-      "title": "Ricerca file",
+      "title": "File recenti",
       "saveChanges": "Salva modifiche",
       "resetToDefault": "Ripristina impostazioni predefinite",
-      "loadFailed": "Impossibile caricare le impostazioni della ricerca file.",
-      "saveFailed": "Impossibile salvare le impostazioni della ricerca file.",
-      "resetFailed": "Impossibile ripristinare le impostazioni della ricerca file.",
+      "loadFailed": "Impossibile caricare le impostazioni dei file recenti. Controlla la connessione e riprova.",
+      "saveFailed": "Impossibile salvare le impostazioni dei file recenti. Controlla il valore e riprova.",
+      "resetFailed": "Impossibile ripristinare le impostazioni dei file recenti. Controlla la connessione e riprova.",
       "retentionLimit": "Numero di file e cartelle recenti da conservare",
       "retentionLimitError": "Inserisci un numero intero da 0 a 500.",
       "resultLimit": "Risultati per gruppo",
       "resultLimitError": "Inserisci un numero intero da 1 a 50.",
       "excludedCategories": "Escludi categorie di file",
-      "excludedCategoriesHelp": "I file esclusi non compaiono nei risultati né nella cronologia della ricerca file.",
+      "excludedCategoriesHelp": "I file esclusi non compaiono nella cronologia dei file recenti né nella navigazione rapida.",
       "excludeImages": "Escludi immagini",
       "excludeTemporaryBackup": "Escludi file temporanei e di backup",
       "excludedExtensions": "Estensioni escluse",
@@ -975,6 +1069,27 @@
       "excludedExtensionsHelp": "Inserisci una sola estensione letterale. I caratteri jolly e i percorsi non sono supportati.",
       "excludedExtensionsNormalization": "Verrà salvata come {{extension}}.",
       "excludedExtensionsRemove": "Rimuovi {{extension}}"
+    },
+    "filesystemSearch": {
+      "group": "Limiti della ricerca in tempo reale",
+      "loadFailed": "Impossibile caricare le impostazioni di ricerca nel file system. Controlla la connessione al server e riprova.",
+      "updateRequired": "Aggiorna Sambee per configurare i limiti di ricerca nel file system.",
+      "saveFailed": "Impossibile salvare questo limite di ricerca. Controlla il valore e la connessione, quindi riprova.",
+      "changeNote": "Le modifiche si applicano alle nuove ricerche. Se la trasmissione non riesce, Companion usa l'ultima policy valida.",
+      "validation": "Inserisci un numero intero da {{min}} a {{max}}.",
+      "bounds": "{{description}} Valore predefinito: {{defaultValue}}. Intervallo: {{min}}–{{max}}.",
+      "concurrent_searches": {
+        "label": "Limite di ricerche simultanee",
+        "description": "Numero massimo di ricerche per account e connessione SMB oppure per sito associato e unità locale."
+      },
+      "max_seconds": {
+        "label": "Durata massima della ricerca",
+        "description": "Tempo in secondi dopo il quale la ricerca smette di restituire risultati. Le letture attive possono richiedere più tempo per liberare lo slot."
+      },
+      "max_results": {
+        "label": "Numero massimo di risultati",
+        "description": "Numero massimo di risultati distinti del file system e degli archivi per ricerca."
+      }
     }
   },
   "fileBrowser": {
@@ -1149,7 +1264,10 @@
         "legacyDirectorySearch": "La ricerca di cartelle con più termini non è confermata per questa origine. Cerca un solo termine o controlla il supporto nel backend e in Companion.",
         "historyUnavailable": "Cartelle recenti non disponibili. Controlla la connessione al backend e riprova.",
         "fileHistoryUnavailable": "File recenti non disponibili. Controlla la connessione al backend e riprova.",
-        "indexUnavailable": "Ricerca cartelle non disponibile. Controlla la connessione all’origine e riprova."
+        "indexUnavailable": "Ricerca cartelle non disponibile. Controlla la connessione all’origine e riprova.",
+        "scopeNotIndexed": "Questa cartella non è ancora indicizzata. I risultati appariranno al termine dell'indicizzazione.",
+        "scopeUnsupportedCompanion": "Questa origine non supporta la ricerca per cartella. Aggiorna Companion e riprova.",
+        "scopeUnsupportedServer": "Questa origine non supporta la ricerca per cartella. Aggiorna il server e riprova."
       },
       "statusDetails": {
         "title": "Stato della ricerca cartelle",
@@ -1180,9 +1298,82 @@
         "recentFiles": "File recenti",
         "recentDirectories": "Cartelle recenti",
         "directories": "Cartelle",
-        "currentDirectory": "Cartella attuale"
+        "currentDirectory": "Cartella attuale",
+        "recentItems": "File e cartelle recenti",
+        "matches": "Corrispondenze"
       },
-      "belowMinimum": "Digita almeno {{count}} caratteri per cercare"
+      "belowMinimum": "Digita almeno {{count}} caratteri per cercare",
+      "navigation": {
+        "scopeLabel": "Ambito della ricerca",
+        "itemTypeLabel": "Tipo di elemento",
+        "scope": {
+          "connection": "Connessione corrente",
+          "subtree": "Cartella corrente e sottocartelle",
+          "descendants_only": "Solo sottocartelle"
+        },
+        "itemType": {
+          "all": "File e cartelle",
+          "directories": "Cartelle",
+          "files": "File"
+        }
+      },
+      "live": {
+        "mode": "Ricerca in tempo reale",
+        "placeholder": "Cerca file e cartelle",
+        "title": "Risultati della ricerca {{number}}",
+        "options": "Opzioni di ricerca",
+        "optionsKeyboardHint": "↑ ↓ Sposta · Spazio Cambia · Esc Indietro",
+        "queryContext": "Ricerca: «{{query}}»",
+        "archives": "Cerca nei file ZIP",
+        "folderDepth": "Profondità delle cartelle",
+        "caseSensitive": "Distingui maiuscole e minuscole",
+        "depth": {
+          "current": "Solo cartella corrente",
+          "recursive": "Cartella corrente e sottocartelle"
+        },
+        "emptyQuery": "Inserisci un nome o un modello da cercare.",
+        "queryTooLong": "Il termine di ricerca è troppo lungo. Usa al massimo {{max}} byte UTF-8 e riprova.",
+        "unreadableItem": "Impossibile leggere questo elemento. Controlla l'accesso e riprova.",
+        "nestedArchive": "I file ZIP annidati non possono essere aperti qui. Scarica il file per aprirlo.",
+        "running": "Ricerca in corso...",
+        "interrupted": "La ricerca è stata interrotta. Avvia una nuova ricerca per riprovare.",
+        "interruptedDetail": "Impossibile avviare la ricerca. {{error}}",
+        "errors": {
+          "invalid_data": "La ricerca ha restituito dati non validi. Controlla la connessione all'origine e avvia una nuova ricerca.",
+          "response_too_large": "Una risposta della ricerca era troppo grande. Controlla l'origine e avvia una nuova ricerca.",
+          "incomplete": "La ricerca è stata interrotta prima del completamento. Controlla la connessione all'origine e avvia una nuova ricerca.",
+          "start_failed": "Impossibile avviare la ricerca. Controlla la connessione all'origine e riprova."
+        },
+        "companionUpdateRequired": "Questa versione di Companion non supporta la ricerca in tempo reale. Aggiorna Companion e avvia una nuova ricerca.",
+        "companionUpdateAction": "Aggiorna Companion",
+        "noMatches": "Nessuna corrispondenza.",
+        "terminal": {
+          "archive_too_large": "Il file ZIP è troppo grande per la ricerca. Apri un file ZIP più piccolo e riprova.",
+          "archive_unreadable": "Impossibile leggere il file ZIP. Controlla l'accesso al file ZIP e riprova.",
+          "complete": "Ricerca completata.",
+          "partial_coverage": "La ricerca è terminata con copertura incompleta. Controlla gli elementi ignorati e riprova.",
+          "time_limit": "Limite di tempo raggiunto. Avvia una ricerca più specifica per continuare.",
+          "result_limit": "Limite di risultati raggiunto. Avvia una ricerca più specifica per continuare.",
+          "source_failure": "La ricerca si è interrotta a causa di un errore dell'origine. Controlla la connessione e riprova."
+        },
+        "skips": {
+          "unreadable_directory_one": "Impossibile leggere {{count}} cartella.",
+          "unreadable_directory_many": "Impossibile leggere {{count}} cartelle.",
+          "unreadable_directory_other": "Impossibile leggere {{count}} cartelle.",
+          "unsafe_name_one": "{{count}} elemento aveva un nome non sicuro.",
+          "unsafe_name_many": "{{count}} elementi avevano nomi non sicuri.",
+          "unsafe_name_other": "{{count}} elementi avevano nomi non sicuri.",
+          "archive_too_large_one": "{{count}} file ZIP era troppo grande per la ricerca.",
+          "archive_too_large_many": "{{count}} file ZIP erano troppo grandi per la ricerca.",
+          "archive_too_large_other": "{{count}} file ZIP erano troppo grandi per la ricerca.",
+          "archive_unreadable_one": "Impossibile leggere {{count}} file ZIP.",
+          "archive_unreadable_many": "Impossibile leggere {{count}} file ZIP.",
+          "archive_unreadable_other": "Impossibile leggere {{count}} file ZIP.",
+          "queue_limit_one": "La ricerca si è interrotta perché la coda delle cartelle era piena.",
+          "queue_limit_many": "La ricerca si è interrotta perché la coda delle cartelle era piena.",
+          "queue_limit_other": "La ricerca si è interrotta perché la coda delle cartelle era piena."
+        }
+      }
     },
     "commands": {
       "categories": {
@@ -1697,6 +1888,16 @@
     }
   },
   "common": {
+    "uiText": {
+      "import": "Importa",
+      "export": "Esporta",
+      "saveCopy": "Salva copia",
+      "compatibilityMode": "Prova la modalità compatibilità",
+      "passwordChanged": "Password modificata. Accedi con la nuova password.",
+      "or": "o",
+      "clearFilters": "Cancella filtri",
+      "serverIllustration": "Illustrazione del server"
+    },
     "actions": {
       "cancel": "Annulla",
       "close": "Chiudi",
@@ -1754,6 +1955,14 @@
         "name": "Sambee scuro",
         "description": "Tema scuro predefinito dell’applicazione"
       }
+    },
+    "editor": {
+      "description": "Descrizione",
+      "descriptionHelp": "Testo facoltativo sotto il nome del tema",
+      "mode": "Modalità",
+      "modeHelp": "È un tema chiaro o scuro?",
+      "name": "Nome",
+      "nameHelp": "Nome visualizzato nel selettore dei temi"
     }
   },
   "keyboardShortcutsHelp": {

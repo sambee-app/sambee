@@ -154,6 +154,33 @@ If you change the browser-side locale model, you must check the companion sync p
 
 ## Validation Expectations
 
+The local test script and CI require complete, current catalogs in both apps.
+Run the same check with:
+
+```bash
+node scripts/validate-localization.mjs --release
+```
+
+The check reports each missing or stale key. Use
+`--translation-input <frontend|companion> <locale>` to get
+the English source and fingerprint for each key that needs work. Runtime
+fallback does not change when validation fails.
+
+Biome lint checks JSX text and common display props, including `label` and
+`helperText`, for literal UI text in both apps. Use translation keys for
+app-owned text. The check excludes test fixtures
+and browser-only Companion previews. For a non-translatable literal, add a
+specific `biome-ignore lint/plugin` comment with the reason. The rule catches
+common literals, not every way to construct UI text. Catalog validation checks
+coverage and freshness, not translation quality.
+
+The local test script and CI also run `node scripts/check-native-ui-literals.mjs`.
+This check flags direct string literals in common native title, message, tray
+tooltip, and menu-item calls. It also checks window title and tray tooltip
+setters. It does not detect every way to construct UI
+text. For a non-translatable literal, put a
+`// localization-lint-ignore: <reason>` comment immediately before the call.
+
 For routine localization changes, usually run:
 
 ```bash

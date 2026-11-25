@@ -14,6 +14,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { adminDialogActionButtonSx, adminDialogEndActionRowSx } from "../components/Admin/dialogActionStyles";
 import { DialogNotice } from "../components/Dialog/DialogNotice";
@@ -169,6 +170,7 @@ function AccountIdentityRow({ label, value, isLast = false }: AccountIdentityRow
 }
 
 export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [account, setAccount] = useState<CurrentAccount | null>(null);
   const [sessions, setSessions] = useState<OidcBrowserSession[] | null>(null);
@@ -316,33 +318,36 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
         )}
         {loading ? (
           <Box sx={{ display: "flex", justifyContent: "center", py: 4 }}>
-            <CircularProgress aria-label="Loading account" size={28} />
+            <CircularProgress aria-label={t("settings.accountPage.loading")} size={28} />
           </Box>
         ) : account === null ? (
           <Box>
             <Button variant="outlined" sx={settingsUtilityButtonSx} startIcon={<RefreshIcon />} onClick={() => void loadAccount()}>
-              Try again
+              {t("auth.passwordChange.retry")}
             </Button>
           </Box>
         ) : (
           <SettingsSectionList>
             {account.must_change_password && account.password_change_available && (
-              <Alert severity="warning">Your administrator requires you to change your local password.</Alert>
+              <Alert severity="warning">{t("settings.accountPage.passwordRequired")}</Alert>
             )}
-            <SettingsGroup title="Your identity" contentSpacing="compact">
-              <Table aria-label="Your identity" size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
+            <SettingsGroup title={t("settings.accountPage.identity")} contentSpacing="compact">
+              <Table aria-label={t("settings.accountPage.identity")} size="small" sx={{ tableLayout: "fixed", width: "100%" }}>
                 <TableBody>
-                  <AccountIdentityRow label="Username" value={account.username} />
-                  {account.name && <AccountIdentityRow label="Name" value={account.name} />}
-                  {account.email && <AccountIdentityRow label="Email" value={account.email} />}
-                  <AccountIdentityRow label="Identity source" value={formatIdentitySource(account.identity_source)} />
-                  <AccountIdentityRow label="Role" value={account.role} isLast />
+                  <AccountIdentityRow label={t("auth.login.usernameLabel")} value={account.username} />
+                  {account.name && <AccountIdentityRow label={t("settings.userManagement.editor.nameLabel")} value={account.name} />}
+                  {account.email && <AccountIdentityRow label={t("settings.userManagement.editor.emailLabel")} value={account.email} />}
+                  <AccountIdentityRow
+                    label={t("settings.accountPage.identitySource")}
+                    value={formatIdentitySource(account.identity_source)}
+                  />
+                  <AccountIdentityRow label={t("settings.userManagement.editor.roleLabel")} value={account.role} isLast />
                 </TableBody>
               </Table>
             </SettingsGroup>
 
             {account.password_change_available && (
-              <SettingsGroup title="Password">
+              <SettingsGroup title={t("auth.login.passwordLabel")}>
                 <Button
                   variant="outlined"
                   startIcon={<LockResetIcon />}
@@ -350,19 +355,17 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
                   disabled={passwordSubmitting}
                   sx={[settingsUtilityButtonSx, { alignSelf: "flex-start" }]}
                 >
-                  Change password
+                  {t("auth.passwordChange.title")}
                 </Button>
               </SettingsGroup>
             )}
 
-            <SettingsGroup title="Sessions">
+            <SettingsGroup title={t("settings.accountPage.sessions")}>
               {currentBrowserSession === null ? (
-                <Typography sx={{ color: "text.secondary" }}>
-                  Session information is not available because authentication is not enforced.
-                </Typography>
+                <Typography sx={{ color: "text.secondary" }}>{t("settings.accountPage.sessionsUnavailable")}</Typography>
               ) : (
                 <SettingsSectionList level="subsection">
-                  <SettingsGroup title="This browser" level="subsection">
+                  <SettingsGroup title={t("settings.accountPage.thisBrowser")} level="subsection">
                     <BrowserSessionList
                       browserSessions={[currentBrowserSession]}
                       revoking={revoking}
@@ -371,8 +374,8 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
                     />
                   </SettingsGroup>
                   {sessions === null && account.browser_session_management_available ? (
-                    <SettingsGroup title="Other sessions" level="subsection">
-                      <Typography sx={{ color: "text.secondary" }}>Other sessions could not be loaded.</Typography>
+                    <SettingsGroup title={t("settings.accountPage.otherSessions")} level="subsection">
+                      <Typography sx={{ color: "text.secondary" }}>{t("settings.accountPage.otherSessionsFailed")}</Typography>
                       <Button
                         sx={[settingsUtilityButtonSx, { mt: 2 }]}
                         variant="outlined"
@@ -380,11 +383,11 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
                         onClick={() => void loadAccount()}
                         disabled={revoking !== null || signingOut}
                       >
-                        Try again
+                        {t("auth.passwordChange.retry")}
                       </Button>
                     </SettingsGroup>
                   ) : otherBrowserSessions.length > 0 ? (
-                    <SettingsGroup title="Other sessions" level="subsection">
+                    <SettingsGroup title={t("settings.accountPage.otherSessions")} level="subsection">
                       <BrowserSessionList
                         browserSessions={otherBrowserSessions}
                         revoking={revoking}
@@ -404,7 +407,7 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
         open={passwordDialogOpen}
         onClose={closePasswordDialog}
         disableClose={passwordSubmitting}
-        title="Change password"
+        title={t("auth.passwordChange.title")}
         description="Enter your current password and choose a new one. You will be signed out after the change."
         actionNotice={<DialogNotice message={passwordError} testId="change-password-error" />}
         actions={
@@ -415,7 +418,7 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
               variant="outlined"
               sx={{ ...settingsUtilityButtonSx, ...adminDialogActionButtonSx }}
             >
-              Cancel
+              {t("common.actions.cancel")}
             </Button>
             <Button
               onClick={() => void submitPasswordChange()}
@@ -444,7 +447,7 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
                 <TextField
                   autoFocus
                   inputRef={currentPasswordInputRef}
-                  label="Current password"
+                  label={t("auth.passwordChange.current")}
                   type={passwordVisibility.current ? "text" : "password"}
                   autoComplete="current-password"
                   value={passwordForm.currentPassword}
@@ -472,7 +475,7 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
               <FormRow sx={{ gridTemplateColumns: { md: "minmax(0, 1fr)" } }}>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
                   <TextField
-                    label="New password"
+                    label={t("auth.passwordChange.new")}
                     type={passwordVisibility.new ? "text" : "password"}
                     autoComplete="new-password"
                     value={passwordForm.newPassword}
@@ -495,7 +498,7 @@ export function AccountSettings({ dialogSafe = false }: { dialogSafe?: boolean }
                   />
                   <TextField
                     inputRef={confirmationInputRef}
-                    label="Confirm new password"
+                    label={t("auth.passwordChange.confirmation")}
                     type={passwordVisibility.confirmation ? "text" : "password"}
                     autoComplete="new-password"
                     value={passwordForm.confirmation}
