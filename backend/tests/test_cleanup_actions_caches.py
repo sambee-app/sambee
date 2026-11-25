@@ -2,8 +2,11 @@
 
 import json
 import sys
+from io import BytesIO
 from pathlib import Path
-from urllib.error import HTTPError
+from unittest.mock import Mock
+from urllib.error import HTTPError, URLError
+from urllib.request import Request
 
 import pytest
 
@@ -19,6 +22,12 @@ def cache(cache_id: int, ref: str, key: str, created_at: str = "2026-10-03T00:00
 RUST_OLD = "v0-rust-companion-Linux-x64-c7b3ef7d-fa4e0e5f"
 RUST_NEW = "v0-rust-companion-Linux-x64-c7b3ef7d-cd520792"
 LINT = "v0-rust-lint-companion-Linux-x64-c7b3ef7d-cd520792"
+
+
+class ApiResponse(BytesIO):
+    def __init__(self, payload: object, status: int = 200) -> None:
+        super().__init__(json.dumps(payload).encode())
+        self.status = status
 
 
 def test_rust_toolchain_changes_supersede_old_main_cache() -> None:
@@ -189,19 +198,92 @@ def test_cache_deletion_errors_other_than_not_found_still_fail(monkeypatch: pyte
     assert raised.value is error
 
 
-def test_api_reads_do_not_ignore_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    error = HTTPError("https://api.github.com/repos/example/project/pulls/43", 404, "Not Found", None, None)
-
-    def open_url(_request: object) -> object:
-        raise error
-
+@pytest.mark.parametrize(
+    ("method", "path", "status"),
+    [
+        ("GET", "/repos/example/project/pulls/43", 404),
+        ("DELETE", "/repos/example/project/actions/caches/1", 500),
+    ],
+)
+def test_api_does_not_retry_permanent_reads_or_deletions(
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str, status: int
+) -> None:
+    error = HTTPError(f"https://api.github.com{path}", status, "Failure", None, BytesIO())
+    open_url = Mock(side_effect=error)
     monkeypatch.setattr(cleanup.urllib.request, "urlopen", open_url)
+    sleep = Mock()
+    monkeypatch.setattr("time.sleep", sleep)
     try:
         with pytest.raises(HTTPError) as raised:
-            cleanup.api_request("/repos/example/project/pulls/43", "test-token")
+            cleanup.api_request(path, "test-token", method=method)
         assert raised.value is error
+        assert raised.value.__notes__ == [f"GitHub API {method} {path} failed (HTTP {status})."]
+        open_url.assert_called_once()
+        sleep.assert_not_called()
     finally:
         error.close()
+
+
+@pytest.mark.parametrize("failures", [1, 3])
+def test_apply_retries_active_run_lookup_before_deleting(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], failures: int
+) -> None:
+    base = "/repos/example/project/actions"
+    active_url = f"https://api.github.com{base}/runs?status=in_progress&per_page=100&page=1"
+    entries = [
+        cache(1, cleanup.MAIN_REF, RUST_OLD),
+        cache(2, cleanup.MAIN_REF, RUST_NEW),
+    ]
+    attempts = []
+    delays = []
+    deletes = []
+
+    def open_url(request: Request, *, timeout: float | None = None) -> ApiResponse:
+        url = request.full_url
+        if request.get_method() == "DELETE":
+            deletes.append(url)
+            return ApiResponse(None, status=204)
+        if "/caches?" in url:
+            return ApiResponse({"actions_caches": entries})
+        if url == active_url:
+            attempts.append(timeout)
+            if len(attempts) <= failures:
+                raise HTTPError(url, 500, "Internal Server Error", None, BytesIO())
+        return ApiResponse({"workflow_runs": []})
+
+    monkeypatch.setattr(cleanup.urllib.request, "urlopen", open_url)
+    monkeypatch.setattr("time.sleep", delays.append)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "example/project")
+    monkeypatch.setenv("GITHUB_RUN_ID", "123")
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(sys, "argv", ["cleanup_actions_caches.py", "--apply"])
+
+    if failures == 1:
+        assert cleanup.main() == 0
+        assert deletes == [f"https://api.github.com{base}/caches/1"]
+        assert delays == [1]
+        assert len(attempts) == 2
+    else:
+        with pytest.raises(HTTPError, match="HTTP Error 500"):
+            cleanup.main()
+        assert not deletes
+        assert delays == [1, 2]
+        assert len(attempts) == 3
+    assert all(timeout and timeout > 0 for timeout in attempts)
+    log = capsys.readouterr().err
+    assert "status=in_progress" in log
+    assert "HTTP 500" in log
+    assert "test-token" not in log
+
+
+def test_api_read_retries_network_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    urlopen = Mock(side_effect=[URLError(TimeoutError("timed out")), ApiResponse({"state": "open"})])
+    monkeypatch.setattr(cleanup.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr("time.sleep", Mock())
+
+    assert cleanup.api_request("/repos/example/project/pulls/43", "test-token") == {"state": "open"}
+    assert urlopen.call_count == 2
 
 
 @pytest.mark.parametrize(

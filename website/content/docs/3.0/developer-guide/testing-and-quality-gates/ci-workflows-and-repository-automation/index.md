@@ -111,6 +111,8 @@ When dependency manifests or lockfiles change, commit the corresponding lockfile
 
 The policy keeps the newest known cache family on `main` and each open pull request. It removes superseded Rust and website cache keys, and deletes all caches for a closed pull request after its builds finish. It skips refs with active builds and leaves unrecognized keys, including individual BuildKit blobs on active refs, alone. GitHub's normal expiration still applies to those unclassified entries. The job deletes caches by ID so a pull request's copy cannot inadvertently delete an identically keyed cache on `main`.
 
+Cleanup retries temporary GitHub API read failures up to twice. If a required read still fails, the job stops before it deletes any caches. Check the failed request in the job log and run cleanup again when the API is available.
+
 Review the dry-run report before changing cache-family rules. If active caches alone approach the repository storage limit, raise the limit or accept more cache misses: deleting their newest copies would make CI slower. Cleanup happens after cache uploads, so it cannot prevent a full repository from evicting caches during an upload.
 
 ### Local Parity
