@@ -153,6 +153,8 @@ COPY --chown=vscode:vscode shared/ ./shared/
 COPY --chown=vscode:vscode VERSION ./VERSION
 COPY --chown=vscode:vscode .github/ ./.github/
 COPY --chown=vscode:vscode scripts/ ./scripts/
+# Release CI reuse tests read the committed shard matrix at its repository path.
+COPY --chown=vscode:vscode frontend/ci-shards.json ./frontend/ci-shards.json
 COPY --chown=vscode:vscode Dockerfile ./Dockerfile
 COPY --chown=vscode:vscode .dockerignore ./.dockerignore
 USER vscode

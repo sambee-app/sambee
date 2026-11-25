@@ -2,7 +2,7 @@
 
 - Use defensive programming.
 - Follow the DRY principle.
-- Favor simple, robust, elegant solutions.
+- Favor simple, robust, elegant solutions. Avoid overengineering.
 - Don't use hacks. Find the root cause and fix problems properly.
 
 ### Error handling and logging
@@ -15,6 +15,10 @@
 - Use ASD-STE100 (simplified technical English) for all your chat communications and in all documents you create or contribute to.
 - When asked to analyze or research, present your findings. Then ask if/how to implement them.
 - Whenever changing code, verify if the related documentation needs to be updated, too.
+
+## Planning
+
+- When planning changes, make the user aware of parts of a plan that add complexity, that are risky or require a huge implementation effort.
 
 ## Correctness
 

@@ -173,8 +173,9 @@ async def test_real_http_delivers_a_result_before_the_scan_finishes(session, reg
             pass
 
     def search(_root, _options, _session, _check, receive, *, summary):
-        receive(PhysicalSearchEvent("file", "early.txt", SmbDirectoryEntry("early.txt", SmbDirectoryEntryInformation(0), size=1)))
+        # The client can read the batch before receive() returns in this thread.
         entered.set()
+        receive(PhysicalSearchEvent("file", "early.txt", SmbDirectoryEntry("early.txt", SmbDirectoryEntryInformation(0), size=1)))
         assert release.wait(5)
         summary.scanned_directories += 1
 

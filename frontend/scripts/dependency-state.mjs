@@ -6,7 +6,8 @@ const FRONTEND_ROOT = new URL("../", import.meta.url);
 const [mode, project = "frontend", ...extraArguments] = process.argv.slice(2);
 const PROJECT_ROOT = project === "companion" ? new URL("../../companion/", import.meta.url) : FRONTEND_ROOT;
 const STAMP_PATH = new URL("node_modules/.dependencies.sha256", FRONTEND_ROOT);
-const DEPENDENCY_INPUTS = ["package.json", "package-lock.json"];
+const LOCKFILE = "package-lock.json";
+const DEPENDENCY_INPUTS = ["package.json", LOCKFILE];
 const RECOVERY_MESSAGE = `Run cd ${project} && npm ci from the repository root to restore ${project} dependencies.`;
 const BIOME_PACKAGE = "@biomejs/biome";
 const BIOME_PACKAGE_PATH = `node_modules/${BIOME_PACKAGE}`;
@@ -18,13 +19,13 @@ async function readJson(filename) {
   try {
     return JSON.parse(await readFile(new URL(filename, PROJECT_ROOT), "utf8"));
   } catch (error) {
-    const recovery = filename.startsWith("node_modules/") ? RECOVERY_MESSAGE : "Restore a valid JSON file before running lint.";
+    const recovery = filename.startsWith("node_modules/") ? RECOVERY_MESSAGE : "Restore a valid JSON file before retrying.";
     throw new Error(`Cannot read ${filename}. ${recovery}`, { cause: error });
   }
 }
 
 async function checkBiome() {
-  const lockfile = await readJson("package-lock.json");
+  const lockfile = await readJson(LOCKFILE);
   const version = lockfile?.packages?.[BIOME_PACKAGE_PATH]?.version;
   if (typeof version !== "string" || !version) {
     throw new Error(`package-lock.json has no locked ${BIOME_PACKAGE} version. Restore the ${project} lockfile.`);
@@ -36,7 +37,7 @@ async function checkBiome() {
     );
   }
   const peerManifestPath = `../${PEER_PROJECT}/package.json`;
-  const peerLockfilePath = `../${PEER_PROJECT}/package-lock.json`;
+  const peerLockfilePath = `../${PEER_PROJECT}/${LOCKFILE}`;
   const peerManifest = await readJson(peerManifestPath);
   const peerLockfile = await readJson(peerLockfilePath);
   if (peerManifest?.devDependencies?.[BIOME_PACKAGE] !== version || peerLockfile?.packages?.[BIOME_PACKAGE_PATH]?.version !== version) {
@@ -65,8 +66,16 @@ async function checkBiome() {
 async function dependencyHash() {
   const hash = createHash("sha256");
   for (const filename of DEPENDENCY_INPUTS) {
-    hash.update(filename).update("\0");
-    hash.update(await readFile(new URL(filename, FRONTEND_ROOT))).update("\0");
+    const input = await readJson(filename);
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new Error(`${filename} must contain a JSON object. Restore the file before retrying.`);
+    }
+    // npm records the app's version at the top level and in the lockfile's root package.
+    delete input.version;
+    if (filename === LOCKFILE && input.packages?.[""]) {
+      delete input.packages[""].version;
+    }
+    hash.update(filename).update("\0").update(JSON.stringify(input)).update("\0");
   }
   return hash.digest("hex");
 }
@@ -108,7 +117,7 @@ async function main() {
   }
 
   if (recordedHash !== currentHash) {
-    throw new Error("Frontend dependencies are stale: package.json or package-lock.json changed, or the stamp is invalid.");
+    throw new Error("Frontend dependencies are stale: the dependency inputs changed or the install stamp is out of date.");
   }
 }
 

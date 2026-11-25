@@ -8,7 +8,13 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+
+from ci_frontend_shards import load_shard_matrix
 
 COMPONENTS = ("backend", "frontend")
 CI_WORKFLOW = "test.yml"
@@ -17,6 +23,29 @@ JOBS_PER_PAGE = 100
 FRONTEND_REQUIRED_STEPS = frozenset(
     {"Run browser correctness contracts", "Verify frontend type correctness"}
 )
+SHARD_JOB_PREFIX = "frontend-tests"
+SHARD_REQUIRED_STEPS = frozenset({"Run Vitest shard"})
+FRONTEND_CHECKS_JOB = "frontend-checks"
+
+
+def expected_shard_names() -> set[str]:
+    matrix = load_shard_matrix()
+    (total,) = matrix["total"]
+    return {f"{SHARD_JOB_PREFIX} (shard {index}/{total})" for index in matrix["index"]}
+
+
+def job_passed(job: dict[str, Any], required_steps: frozenset[str]) -> bool:
+    """Require the job and each named step to succeed exactly once."""
+    steps = job.get("steps")
+    if job.get("conclusion") != "success" or not isinstance(steps, list):
+        return False
+    for name in required_steps:
+        matching = [
+            step for step in steps if isinstance(step, dict) and step.get("name") == name
+        ]
+        if len(matching) != 1 or matching[0].get("conclusion") != "success":
+            return False
+    return True
 
 
 def github_get(url: str, token: str) -> dict[str, Any]:
@@ -63,6 +92,9 @@ def reusable_jobs(api_url: str, repository: str, sha: str, token: str) -> set[st
         raise ValueError("CI workflow run is missing a valid id")
 
     successful: set[str] = set()
+    shard_names: Counter[str] = Counter()
+    shards_passed = True
+    frontend_checks: list[dict[str, Any]] = []
     page = 1
     while True:
         jobs_url = f"{api_url}/repos/{repository}/actions/runs/{run_id}/jobs?filter=latest&per_page={JOBS_PER_PAGE}&page={page}"
@@ -72,24 +104,27 @@ def reusable_jobs(api_url: str, repository: str, sha: str, token: str) -> set[st
         for job in jobs:
             if not isinstance(job, dict):
                 raise ValueError("CI workflow job is not an object")
-            if job.get("name") in COMPONENTS and job.get("conclusion") == "success":
-                if job["name"] == "frontend":
-                    steps = job.get("steps", [])
-                    if not isinstance(steps, list):
-                        raise ValueError("Frontend CI job steps are not a list")
-                    successful_steps = {
-                        step.get("name")
-                        for step in steps
-                        if isinstance(step, dict)
-                        and step.get("conclusion") == "success"
-                        and isinstance(step.get("name"), str)
-                    }
-                    if not FRONTEND_REQUIRED_STEPS <= successful_steps:
-                        continue
-                successful.add(job["name"])
+            name = job.get("name")
+            if not isinstance(name, str):
+                raise ValueError("CI workflow job is missing a valid name")
+            if name == "backend" and job.get("conclusion") == "success":
+                successful.add("backend")
+            elif name == FRONTEND_CHECKS_JOB:
+                frontend_checks.append(job)
+            elif name.startswith(SHARD_JOB_PREFIX):
+                shard_names[name] += 1
+                shards_passed &= job_passed(job, SHARD_REQUIRED_STEPS)
         if len(jobs) < JOBS_PER_PAGE:
-            return successful
+            break
         page += 1
+    if (
+        shards_passed
+        and len(frontend_checks) == 1
+        and job_passed(frontend_checks[0], FRONTEND_REQUIRED_STEPS)
+        and shard_names == Counter(expected_shard_names())
+    ):
+        successful.add("frontend")
+    return successful
 
 
 def main() -> int:

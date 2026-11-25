@@ -60,6 +60,16 @@ def test_frontend_ci_infrastructure_runs_frontend_checks(path: str) -> None:
     assert classify_paths([path])["frontend"]
 
 
+@pytest.mark.parametrize("path", ["frontend/ci-shards.json", "scripts/ci_frontend_shards.py"])
+def test_shard_matrix_inputs_run_both_backend_and_frontend_checks(path: str) -> None:
+    assert classify_paths([path]) == {
+        "backend": True,
+        "frontend": True,
+        "companion": False,
+        "website": False,
+    }
+
+
 def test_workflows_use_latest_x64_and_supported_arm_ubuntu_labels() -> None:
     workflows = Path(__file__).resolve().parents[2] / ".github/workflows"
     allowed = {"ubuntu-latest", "ubuntu-26.04-arm"}
@@ -112,15 +122,32 @@ def test_executable_script_lint_is_required_in_ci_and_local_validation() -> None
     assert '"$BACKEND_PYTHON" -m ruff check --select EXE "$REPO_ROOT" "$REPO_ROOT/.github"' in local_runner
 
 
-def test_gate_requires_selected_components_and_allows_intentional_skips() -> None:
+def needs_with_result(result: str) -> dict[str, Any]:
     needs = {"changes": {"result": "success", "outputs": {component: "false" for component in COMPONENT_JOBS}}}
-    needs.update({job: {"result": "skipped"} for job in COMPONENT_JOBS.values()})
+    needs.update({job: {"result": result} for jobs in COMPONENT_JOBS.values() for job in jobs})
+    return needs
+
+
+def test_gate_allows_both_unselected_frontend_jobs_to_skip() -> None:
+    needs = needs_with_result("skipped")
     assert gate_errors(needs, "pull_request") == []
+
+
+@pytest.mark.parametrize("job", COMPONENT_JOBS["frontend"])
+@pytest.mark.parametrize("result", ["failure", "cancelled", "skipped"])
+def test_gate_requires_both_selected_frontend_jobs(job: str, result: str) -> None:
+    needs = needs_with_result("success")
     needs["changes"]["outputs"]["frontend"] = "true"
-    assert gate_errors(needs, "pull_request") == ["Required frontend job did not succeed: skipped"]
-    needs["frontend"]["result"] = "success"
     assert gate_errors(needs, "pull_request") == []
-    assert gate_errors(needs, "workflow_dispatch")
+    needs[job]["result"] = result
+    assert gate_errors(needs, "pull_request") == [f"Required {job} job did not succeed: {result}"]
+
+
+@pytest.mark.parametrize("job", COMPONENT_JOBS["frontend"])
+def test_gate_requires_both_frontend_jobs_on_manual_dispatch(job: str) -> None:
+    needs = needs_with_result("success")
+    needs[job]["result"] = "skipped"
+    assert gate_errors(needs, "workflow_dispatch") == [f"Required {job} job did not succeed: skipped"]
 
 
 @pytest.mark.parametrize("name", ["test.yml", "lint.yml"])
@@ -138,9 +165,8 @@ def test_gate_rejects_failed_change_detection(result: str | None) -> None:
 
 def test_gate_rejects_missing_outputs_and_unselected_failures() -> None:
     assert gate_errors({"changes": {"result": "success"}}, "push")
-    needs = {"changes": {"result": "success", "outputs": {component: "false" for component in COMPONENT_JOBS}}}
-    needs.update({job: {"result": "cancelled"} for job in COMPONENT_JOBS.values()})
-    assert len(gate_errors(needs, "push")) == len(COMPONENT_JOBS)
+    needs = needs_with_result("cancelled")
+    assert len(gate_errors(needs, "push")) == sum(map(len, COMPONENT_JOBS.values()))
 
 
 @pytest.mark.parametrize(

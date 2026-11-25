@@ -5,10 +5,10 @@ import os
 from collections.abc import Mapping
 
 COMPONENT_JOBS = {
-    "backend": "backend",
-    "frontend": "frontend",
-    "companion": "companion",
-    "website": "website-docs",
+    "backend": ("backend",),
+    "frontend": ("frontend-tests", "frontend-checks"),
+    "companion": ("companion",),
+    "website": ("website-docs",),
 }
 
 
@@ -19,18 +19,20 @@ def gate_errors(needs: Mapping[str, dict], event_name: str) -> list[str]:
         return [f"Change detection did not succeed: {changes.get('result')}"]
     outputs = changes.get("outputs", {})
     errors = []
-    for component, job in COMPONENT_JOBS.items():
+    for component, jobs in COMPONENT_JOBS.items():
         selection = outputs.get(component)
-        result = needs.get(job, {}).get("result")
         if selection not in {"true", "false"}:
             errors.append(
                 f"Missing or invalid component selection: {component}={selection}"
             )
-        elif event_name == "workflow_dispatch" or selection == "true":
-            if result != "success":
+            continue
+        required = event_name == "workflow_dispatch" or selection == "true"
+        for job in jobs:
+            result = needs.get(job, {}).get("result")
+            if required and result != "success":
                 errors.append(f"Required {job} job did not succeed: {result}")
-        elif result not in {"success", "skipped"}:
-            errors.append(f"Unselected {job} job failed or was cancelled: {result}")
+            elif not required and result not in {"success", "skipped"}:
+                errors.append(f"Unselected {job} job failed or was cancelled: {result}")
     return errors
 
 

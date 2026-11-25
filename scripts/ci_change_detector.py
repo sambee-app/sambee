@@ -21,7 +21,9 @@ BACKEND_EXTRAS = frozenset(
         "scripts/verify-python-runtime-image.py",
         ".github/actions/setup-runtime-python/action.yml",
         ".github/scripts/reuse_release_ci_tests.py",
+        "frontend/ci-shards.json",
         "scripts/check_ci_test_gate.py",
+        "scripts/ci_frontend_shards.py",
     }
 )
 FRONTEND_EXTRAS = frozenset(
@@ -29,6 +31,7 @@ FRONTEND_EXTRAS = frozenset(
         "VERSION",
         "scripts/sync-version",
         "scripts/ci_change_detector.py",
+        "scripts/ci_frontend_shards.py",
         "scripts/check_ci_test_gate.py",
         ".github/workflows/test.yml",
         ".github/workflows/lint.yml",

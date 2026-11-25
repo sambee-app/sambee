@@ -161,16 +161,28 @@ def test_docker_release_reuses_only_verified_source_ci_jobs() -> None:
             assert step["if"] == f"steps.source-ci.outputs.{component} != 'true'"
 
 
-def test_release_browser_checks_use_the_container_users_home() -> None:
+def test_release_validation_leaves_the_runner_home_unchanged() -> None:
     workflow = load_workflow("docker-image-preview-publish.yml")
     validation = workflow["jobs"]["validate-tests"]
 
     assert validation["container"]["image"] == "${{ needs.prepare.outputs.python_runtime_image }}"
     assert not validation["container"].get("options")
-    assert validation["env"]["HOME"] == "/root"
     assert "HOME" not in workflow.get("env", {})
+    assert "HOME" not in validation.get("env", {})
     for step in validation["steps"]:
         assert "HOME" not in step.get("env", {})
+
+
+def test_release_uploads_browser_reports_only_if_browser_checks_ran() -> None:
+    workflow = load_workflow("docker-image-preview-publish.yml")
+    steps = workflow["jobs"]["validate-tests"]["steps"]
+    browser = next(step for step in steps if step["name"] == "Run browser correctness contracts")
+    upload = next(step for step in steps if step["name"] == "Upload browser correctness reports")
+
+    assert steps.index(browser) < steps.index(upload)
+    outcome = f"steps.{browser['id']}.outcome"
+    assert upload["if"] == f"${{{{ !cancelled() && ({outcome} == 'success' || {outcome} == 'failure') }}}}"
+    assert upload["with"]["if-no-files-found"] == "warn"
 
 
 def test_pr_browser_checks_are_required_by_the_test_gate() -> None:
@@ -180,15 +192,23 @@ def test_pr_browser_checks_are_required_by_the_test_gate() -> None:
     assert "paths" not in trigger["pull_request"]
     assert "paths-ignore" not in trigger["pull_request"]
 
-    frontend = workflow["jobs"]["frontend"]
-    assert frontend["needs"] == "changes"
-    assert frontend["if"] == "needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'"
-    assert not frontend.get("continue-on-error")
     assert "HOME" not in workflow.get("env", {})
-    assert "HOME" not in frontend.get("env", {})
-
     gate = workflow["jobs"]["test-gate"]
-    assert "frontend" in gate["needs"]
+    for job in ("frontend-tests", "frontend-checks"):
+        frontend = workflow["jobs"][job]
+        assert frontend["needs"] == "changes"
+        assert frontend["if"] == "needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'"
+        assert not frontend.get("continue-on-error")
+        assert "HOME" not in frontend.get("env", {})
+        assert job in gate["needs"]
+
+    tests = workflow["jobs"]["frontend-tests"]
+    assert tests["strategy"]["fail-fast"] is False
+    assert tests["strategy"]["matrix"] == "${{ fromJSON(needs.changes.outputs.frontend_shards) }}"
+    run_shard = next(step for step in tests["steps"] if step["name"] == "Run Vitest shard")
+    assert "--shard=${{ matrix.index }}/${{ matrix.total }}" in run_shard["run"]
+    assert "if" not in run_shard
+    assert not run_shard.get("continue-on-error")
     assert gate["if"] == "always()"
     assert any(step.get("run", "").strip() == "python3 scripts/check_ci_test_gate.py" for step in gate["steps"])
 
@@ -339,13 +359,13 @@ def test_companion_recovery_verification_builds_before_smoke_and_keeps_evidence(
     assert "--features recovery-verification" in steps[build]["run"]
     assert "--target x86_64-pc-windows-msvc" in steps[build]["run"]
     native_run = steps[native]["run"]
-    # Both passes share the package's release profile and target so Cargo reuses its dependencies.
-    assert "@('--release', '--lib', '--target', 'x86_64-pc-windows-msvc')" in native_run
-    assert native_run.count("cargo test @buildArgs --features") == 2
-    assert "cargo test @buildArgs --features tauri/custom-protocol\n" in native_run
-    # Cargo succeeds when no test matches the filter, so the log must record the exact pass.
-    assert "$recoveryTest -- --exact" in native_run
+    assert native_run.count("cargo test ") == 1
+    assert (
+        "cargo test --release --lib --target x86_64-pc-windows-msvc "
+        "--features 'tauri/custom-protocol,recovery-verification' -- --format pretty 2>&1 |"
+    ) in native_run
     assert "Tee-Object -FilePath $nativeTestLog" in native_run
+    assert "if ($LASTEXITCODE -ne 0) { throw" in native_run
     assert "Select-String -LiteralPath $nativeTestLog -Pattern $passedTest -Quiet" in native_run
     assert "--source-sha '${{ github.sha }}' --run-id '${{ github.run_id }}'" in steps[smoke]["run"]
     assert steps[smoke]["timeout-minutes"] <= 5

@@ -25,8 +25,7 @@ describe("frontend dependency freshness", () => {
     script = join(root, "scripts/dependency-state.mjs");
     stamp = join(root, "node_modules/.dependencies.sha256");
     copyFileSync(HELPER_PATH, script);
-    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture" }));
-    writeFileSync(join(root, "package-lock.json"), JSON.stringify({ lockfileVersion: 3 }));
+    writeInputs("1.0.0");
   });
 
   afterEach(() => {
@@ -37,15 +36,40 @@ describe("frontend dependency freshness", () => {
     return spawnSync(process.execPath, [script, mode], { cwd: tmpdir(), encoding: "utf8" });
   }
 
+  function writeInputs(version: string, declaredVersion = "^1.0.0", lockedVersion = "1.0.0") {
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "fixture", version, dependencies: { example: declaredVersion } }));
+    writeFileSync(
+      join(root, "package-lock.json"),
+      JSON.stringify({
+        name: "fixture",
+        version,
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "fixture", version, dependencies: { example: "^1.0.0" } },
+          "node_modules/example": { version: lockedVersion },
+        },
+      })
+    );
+  }
+
   it("accepts a current installation regardless of the working directory", () => {
     expect(run("--write").status).toBe(0);
     expect(readFileSync(stamp, "utf8")).toMatch(/^[a-f0-9]{64}\n$/);
     expect(run("--check").status).toBe(0);
   });
 
-  it.each(["package.json", "package-lock.json"])("rejects a changed %s", (filename) => {
+  it("accepts an app release bump in the manifest and both lockfile root version fields", () => {
     expect(run("--write").status).toBe(0);
-    writeFileSync(join(root, filename), JSON.stringify({ changed: true }));
+    writeInputs("1.0.1");
+    expect(run("--check").status).toBe(0);
+  });
+
+  it.each([
+    ["manifest", "^2.0.0", "1.0.0"],
+    ["lockfile", "^1.0.0", "1.0.1"],
+  ])("rejects a changed dependency version in the %s", (_source, declaredVersion, lockedVersion) => {
+    expect(run("--write").status).toBe(0);
+    writeInputs("1.0.0", declaredVersion, lockedVersion);
     const result = run("--check");
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("dependencies are stale");
@@ -199,7 +223,7 @@ describe("frontend dependency freshness", () => {
     expect(scripts.postinstall).toMatch(/&& node scripts\/dependency-state.mjs --write$/);
     expect(scripts["check:dependencies"]).toBe("node scripts/dependency-state.mjs --check");
     expect(scripts["check:biome"]).toBe("node scripts/dependency-state.mjs --check-biome");
-    expect(scripts.prelint).toBe("npm run check:dependencies && npm run check:biome");
+    expect(scripts.prelint).toBe("npm run check:biome");
     const { scripts: companionScripts } = JSON.parse(readFileSync(join(FRONTEND_ROOT, "../companion/package.json"), "utf8"));
     expect(companionScripts["check:biome"]).toBe("node ../frontend/scripts/dependency-state.mjs --check-biome companion");
     expect(companionScripts.prelint).toBe("npm run check:biome");
