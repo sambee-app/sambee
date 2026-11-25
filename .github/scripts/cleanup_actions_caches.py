@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import re
+import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterable
@@ -16,6 +18,14 @@ PR_REF = re.compile(r"^refs/pull/(\d+)/merge$")
 RUST_KEY = re.compile(r"^(v\d+-rust-(?:lint-companion|companion|companion-windows-verification)-[^-]+-[^-]+)-[0-9a-f]{8}-[0-9a-f]{8}$")
 MAIN_REF = "refs/heads/main"
 API_URL = "https://api.github.com"
+API_TIMEOUT_SECONDS = 15
+API_READ_RETRY_DELAYS = (1, 2)
+RETRYABLE_HTTP_STATUSES = {
+    HTTPStatus.INTERNAL_SERVER_ERROR,
+    HTTPStatus.BAD_GATEWAY,
+    HTTPStatus.SERVICE_UNAVAILABLE,
+    HTTPStatus.GATEWAY_TIMEOUT,
+}
 ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
 CLEANUP_WORKFLOW = "Maintenance: Clean Up Actions Caches"
 WARN_BYTES = 8 * 1024**3
@@ -76,13 +86,38 @@ def classify_caches(
 
 
 def api_request(path: str, token: str, method: str = "GET") -> Any:
+    """Retry temporary read failures without repeating a cache deletion."""
     request = urllib.request.Request(f"{API_URL}{path}", method=method)
     request.add_header("Accept", "application/vnd.github+json")
     request.add_header("Authorization", f"Bearer {token}")
     request.add_header("User-Agent", "sambee-actions-cache-cleanup")
     request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    with urllib.request.urlopen(request) as response:
-        return json.load(response) if response.status != 204 else None
+    # A failed DELETE response does not tell us whether GitHub removed the cache.
+    retry_delays = iter(API_READ_RETRY_DELAYS if method == "GET" else ())
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=API_TIMEOUT_SECONDS) as response:
+                if response.status == HTTPStatus.NO_CONTENT:
+                    return None
+                return json.load(response)
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+                retryable = error.code in RETRYABLE_HTTP_STATUSES
+                failure = f"HTTP {error.code}"
+            else:
+                reason = error.reason if isinstance(error, urllib.error.URLError) else error
+                retryable = isinstance(reason, (TimeoutError, ConnectionError))
+                failure = type(reason).__name__
+            delay = next(retry_delays, None) if retryable else None
+            if delay is None:
+                error.add_note(f"GitHub API {method} {path} failed ({failure}).")
+                raise
+            print(
+                f"GitHub API {method} {path} failed ({failure}). Retrying in {delay} s.",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
 
 
 def list_pages(path: str, field: str, token: str) -> list[dict[str, Any]]:
