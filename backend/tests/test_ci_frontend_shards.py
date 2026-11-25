@@ -8,7 +8,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from ci_frontend_shards import load_shard_matrix
+from ci_frontend_shards import SHARD_FILE, load_shard_matrix
+
+
+def test_backend_image_copies_committed_shard_matrix() -> None:
+    workspace = Path(__file__).resolve().parents[2]
+    matrix_path = SHARD_FILE.relative_to(workspace).as_posix()
+    dockerfile = (workspace / "Dockerfile").read_text(encoding="utf-8")
+    backend_test = dockerfile.split("FROM runtime-base AS backend-test", 1)[1].split("FROM runtime-base AS production", 1)[0]
+    assert f"COPY --chown=vscode:vscode {matrix_path} ./{matrix_path}" in backend_test.splitlines()
 
 
 def test_valid_matrix_preserves_shard_order(tmp_path: Path) -> None:

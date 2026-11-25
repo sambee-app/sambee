@@ -60,6 +60,16 @@ def test_frontend_ci_infrastructure_runs_frontend_checks(path: str) -> None:
     assert classify_paths([path])["frontend"]
 
 
+@pytest.mark.parametrize("path", ["frontend/ci-shards.json", "scripts/ci_frontend_shards.py"])
+def test_shard_matrix_inputs_run_both_backend_and_frontend_checks(path: str) -> None:
+    assert classify_paths([path]) == {
+        "backend": True,
+        "frontend": True,
+        "companion": False,
+        "website": False,
+    }
+
+
 def test_workflows_use_latest_x64_and_supported_arm_ubuntu_labels() -> None:
     workflows = Path(__file__).resolve().parents[2] / ".github/workflows"
     allowed = {"ubuntu-latest", "ubuntu-26.04-arm"}
