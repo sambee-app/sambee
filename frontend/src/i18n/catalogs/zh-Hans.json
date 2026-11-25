@@ -330,6 +330,14 @@
         "name": "Sambee 深色",
         "description": "应用默认深色主题"
       }
+    },
+    "editor": {
+      "description": "说明",
+      "descriptionHelp": "主题名称下方的可选文字",
+      "mode": "模式",
+      "modeHelp": "这是浅色主题还是深色主题？",
+      "name": "名称",
+      "nameHelp": "在主题选择器中显示的名称"
     }
   },
   "keyboardShortcutsHelp": {
@@ -394,7 +402,93 @@
     }
   },
   "settings": {
+    "authenticationPage": {
+      "providerLabel": "OpenID Connect",
+      "adminOverride": "连接此提供商的管理员保留单独的管理员分配。单独分配始终优先于此角色策略。",
+      "groups": "组：{{groups}}",
+      "none": "无",
+      "admissionAllowed": "准入：允许",
+      "admissionDenied": "准入：拒绝",
+      "sessionRefresh": "会话续期：此测试返回了刷新令牌",
+      "sessionNoRefresh": "会话续期：此测试未返回刷新令牌；用户需要在配置的会话期限结束后重新登录。",
+      "matchingGroup": "匹配的准入组：{{group}}",
+      "reactivate": "{{username}}（{{state}}）必须在映射前重新启用。",
+      "inactive": "已停用",
+      "expired": "已过期",
+      "omittedAccounts_other": "已省略 {{count}} 个活跃的无密码账户。这些用户在映射之前无法登录。未映射的 OIDC 登录可能与现有用户名冲突或创建单独的账户。",
+      "loading": "正在加载身份验证设置",
+      "disabled": "配置文件中已禁用身份验证。",
+      "configureOidc": "配置 OIDC",
+      "copyRedirectUri": "复制重定向 URI",
+      "autoLink": "按用户名自动将 OIDC 身份关联到本地账户",
+      "allUsers": "所有已验证用户",
+      "selectedGroups": "仅选定的组",
+      "roleAssignment": "角色分配",
+      "uniformRole": "为所有用户分配相同角色",
+      "groupBased": "基于组",
+      "administrator": "管理员",
+      "advancedClaims": "高级声明",
+      "defaultClaims": "默认声明名称适用于大多数提供商",
+      "reviewOidc": "检查 OIDC 连接",
+      "activate": "启用配置",
+      "testResults": "测试结果",
+      "testedIdentity": "已测试的身份",
+      "admissionPolicy": "账户映射不会覆盖准入策略。",
+      "reviewAccounts": "检查现有账户",
+      "inactiveAccounts": "已停用或已过期的账户"
+    },
+    "accountPage": {
+      "loading": "正在加载账户",
+      "passwordRequired": "管理员要求您更改本地密码。",
+      "identity": "您的身份",
+      "sessions": "会话",
+      "sessionsUnavailable": "由于未强制身份验证，会话信息不可用。",
+      "thisBrowser": "此浏览器",
+      "otherSessions": "其他会话",
+      "otherSessionsFailed": "无法加载其他会话。",
+      "identitySource": "身份来源"
+    },
     "userManagement": {
+      "directory": {
+        "status": "状态",
+        "lastOidcSignIn": "上次 OIDC 登录",
+        "created": "创建时间",
+        "updated": "上次更新",
+        "oidcState": "OIDC 状态",
+        "roleSource": "角色来源",
+        "oidcProvider": "OIDC 提供商",
+        "userActionsFor": "{{username}} 的用户操作",
+        "mapOidc": "映射 OIDC 账户",
+        "cancelMapping": "取消待处理的 OIDC 映射",
+        "viewIdentity": "查看 OIDC 身份详情",
+        "changeOidc": "更改 OIDC 账户",
+        "moveIdentity": "将身份移至其他本地用户",
+        "detachIdentity": "解除 OIDC 身份关联",
+        "overview": "目录概览",
+        "columns": "列",
+        "directoryColumns": "目录列",
+        "updating": "正在更新用户目录",
+        "filters": "筛选",
+        "expiration": "到期时间",
+        "anyExpiration": "任意到期时间",
+        "hasExpiration": "有到期时间",
+        "noExpiration": "无到期时间",
+        "signIn": "登录",
+        "activeFilters": "已启用的筛选",
+        "users": "用户",
+        "manageColumns": "管理可见列",
+        "userActions": "用户操作",
+        "never": "从不",
+        "confirm": "确认",
+        "perPage": "每页 {{count}} 项",
+        "expectedProviderUsername": "预期的提供方用户名",
+        "expectedProviderUsernameHelp": "首个获准登录、尚未映射且用户名完全匹配的 OIDC 身份将与此账户关联。",
+        "moveIdentityHelp": "按用户名、姓名或电子邮箱搜索符合条件的、处于启用状态且尚未关联的本地账户",
+        "moveIdentityTo": "将身份移至",
+        "searchUsers": "搜索用户",
+        "signInMethod": "登录方式",
+        "user": "用户"
+      },
       "addUserButton": "添加用户",
       "addUserFabAriaLabel": "添加用户",
       "totalUsers_other": "用户：{{count}}",
@@ -882,18 +976,18 @@
       "maxFileSizeDescription": "超过此大小的文件不会在基于 CodeMirror 的完整文本编辑器中打开。可使用此限制避免在编辑特大文件时速度过慢或占用过多内存。"
     },
     "fileSearch": {
-      "title": "文件搜索",
+      "title": "最近使用的文件",
       "saveChanges": "保存更改",
       "resetToDefault": "恢复默认设置",
-      "loadFailed": "无法加载文件搜索设置。",
-      "saveFailed": "无法保存文件搜索设置。",
-      "resetFailed": "无法重置文件搜索设置。",
+      "loadFailed": "无法加载最近使用的文件设置。请检查连接并重试。",
+      "saveFailed": "无法保存最近使用的文件设置。请检查数值并重试。",
+      "resetFailed": "无法重置最近使用的文件设置。请检查连接并重试。",
       "retentionLimit": "保留的最近文件和文件夹数量",
       "retentionLimitError": "请输入 0 到 500 之间的整数。",
       "resultLimit": "每组的结果数",
       "resultLimitError": "请输入 1 到 50 之间的整数。",
       "excludedCategories": "排除文件类别",
-      "excludedCategoriesHelp": "排除的文件不会出现在文件搜索结果或历史记录中。",
+      "excludedCategoriesHelp": "排除的文件不会出现在最近使用的文件历史记录和快速导航中。",
       "excludeImages": "排除图片",
       "excludeTemporaryBackup": "排除临时文件和备份文件",
       "excludedExtensions": "排除的扩展名",
@@ -959,12 +1053,12 @@
         "description": "配置 SMB 后端的安全策略和运行限制。"
       },
       "adminFileSearch": {
-        "label": "文件搜索",
-        "description": "配置文件搜索历史记录、结果数量上限和排除项。"
+        "label": "最近使用的文件",
+        "description": "配置最近使用的文件历史记录、快速导航限制和排除项。"
       },
       "adminDirectorySearch": {
-        "label": "文件夹搜索",
-        "description": "配置后端和所有 Companion 设备的文件夹索引资源及验证设置。"
+        "label": "文件夹索引",
+        "description": "配置 SMB 和 Companion 上快速导航使用的文件夹索引。"
       },
       "adminHealthMonitoring": {
         "label": "健康监控",
@@ -973,6 +1067,10 @@
       "adminAbout": {
         "label": "关于",
         "description": "查看 Sambee 构建版本、软件和硬件信息。"
+      },
+      "adminFilesystemSearch": {
+        "label": "文件系统搜索",
+        "description": "设置 SMB 连接和本地驱动器实时搜索的限制。"
       }
     },
     "directorySearch": {
@@ -1006,8 +1104,10 @@
       "sections": {
         "theme": "主题",
         "localization": "语言和地区",
-        "directory_index": "文件夹搜索策略"
-      }
+        "directory_index": "文件夹索引策略",
+        "filesystem_search": "文件系统搜索策略"
+      },
+      "searchUpdateRequired": "更新 Sambee 和 Companion 以传送文件系统搜索限制。上次有效的策略仍然生效。"
     },
     "connectionsSubgroups": {
       "smb": {
@@ -1125,6 +1225,27 @@
         "svSE": "瑞典语（瑞典）"
       },
       "regionalSettingsPreviewTitle": "预览"
+    },
+    "filesystemSearch": {
+      "group": "实时搜索限制",
+      "loadFailed": "无法加载文件系统搜索设置。请检查后端连接，然后重试。",
+      "updateRequired": "更新 Sambee 以配置文件系统搜索限制。",
+      "saveFailed": "无法保存此搜索限制。请检查数值和连接，然后重试。",
+      "changeNote": "更改适用于新的搜索。如果传送失败，Companion 将使用上次有效的策略。",
+      "validation": "请输入 {{min}} 到 {{max}} 之间的整数。",
+      "bounds": "{{description}} 默认值：{{defaultValue}}。范围：{{min}}–{{max}}。",
+      "concurrent_searches": {
+        "label": "并发搜索限制",
+        "description": "每个账户和 SMB 连接，或每个已配对站点和本地驱动器的最大搜索数。"
+      },
+      "max_seconds": {
+        "label": "最长扫描时间",
+        "description": "搜索停止返回结果前的时间（秒）。正在进行的读取可能需要更长时间才能释放搜索名额。"
+      },
+      "max_results": {
+        "label": "最大结果数",
+        "description": "每次搜索中不同的物理文件和归档结果的最大数量。"
+      }
     }
   },
   "fileBrowser": {
@@ -1592,7 +1713,10 @@
         "legacyDirectorySearch": "尚未确认此来源支持多词文件夹搜索。请使用单个搜索词，或检查后端和 Companion 是否支持此功能。",
         "historyUnavailable": "最近访问的文件夹不可用。请检查后端连接后重试。",
         "fileHistoryUnavailable": "最近使用的文件不可用。请检查后端连接后重试。",
-        "indexUnavailable": "文件夹搜索不可用。请检查与来源的连接后重试。"
+        "indexUnavailable": "文件夹搜索不可用。请检查与来源的连接后重试。",
+        "scopeNotIndexed": "此文件夹尚未建立索引。索引完成后将显示结果。",
+        "scopeUnsupportedCompanion": "此源不支持文件夹范围。请更新 Companion 并重试。",
+        "scopeUnsupportedServer": "此源不支持文件夹范围。请更新服务器并重试。"
       },
       "statusDetails": {
         "title": "文件夹搜索状态",
@@ -1623,9 +1747,72 @@
         "recentFiles": "最近使用的文件",
         "recentDirectories": "最近访问的文件夹",
         "directories": "文件夹",
-        "currentDirectory": "当前文件夹"
+        "currentDirectory": "当前文件夹",
+        "recentItems": "最近使用的文件和文件夹",
+        "matches": "匹配项"
       },
-      "belowMinimum": "请输入至少 {{count}} 个字符进行搜索"
+      "belowMinimum": "请输入至少 {{count}} 个字符进行搜索",
+      "navigation": {
+        "scopeLabel": "搜索范围",
+        "itemTypeLabel": "项目类型",
+        "scope": {
+          "connection": "当前连接",
+          "subtree": "当前文件夹及其子文件夹",
+          "descendants_only": "仅子文件夹"
+        },
+        "itemType": {
+          "all": "文件和文件夹",
+          "directories": "文件夹",
+          "files": "文件"
+        }
+      },
+      "live": {
+        "mode": "实时搜索",
+        "placeholder": "搜索文件和文件夹",
+        "title": "搜索结果 {{number}}",
+        "options": "搜索选项",
+        "optionsKeyboardHint": "↑ ↓ 移动 · 空格 更改 · Esc 返回",
+        "queryContext": "搜索：“{{query}}”",
+        "archives": "搜索 ZIP 文件内容",
+        "folderDepth": "文件夹深度",
+        "caseSensitive": "区分大小写",
+        "depth": {
+          "current": "仅当前文件夹",
+          "recursive": "当前文件夹及其子文件夹"
+        },
+        "emptyQuery": "请输入名称或模式进行搜索。",
+        "queryTooLong": "搜索词过长。请使用不超过 {{max}} 个 UTF-8 字节，然后重试。",
+        "unreadableItem": "无法读取此项目。请检查访问权限并重试。",
+        "nestedArchive": "无法在此打开嵌套的 ZIP 文件。请下载文件后打开。",
+        "running": "正在搜索...",
+        "interrupted": "搜索已中断。请开始新的搜索以重试。",
+        "interruptedDetail": "无法开始搜索。{{error}}",
+        "errors": {
+          "invalid_data": "搜索返回了无效数据。请检查源连接并开始新的搜索。",
+          "response_too_large": "搜索响应过大。请检查源并开始新的搜索。",
+          "incomplete": "搜索在完成前中断。请检查源连接并开始新的搜索。",
+          "start_failed": "无法开始搜索。请检查源连接并重试。"
+        },
+        "companionUpdateRequired": "此 Companion 版本不支持实时搜索。请更新 Companion，然后开始新的搜索。",
+        "companionUpdateAction": "更新 Companion",
+        "noMatches": "没有匹配项。",
+        "terminal": {
+          "archive_too_large": "ZIP 文件过大，无法搜索。请打开较小的 ZIP 文件并重试。",
+          "archive_unreadable": "无法读取 ZIP 文件。请检查 ZIP 文件的访问权限并重试。",
+          "complete": "搜索完成。",
+          "partial_coverage": "搜索结束，但未覆盖所有内容。请检查跳过的项目并重试。",
+          "time_limit": "已达到时间限制。请缩小搜索范围后继续。",
+          "result_limit": "已达到结果数量限制。请缩小搜索范围后继续。",
+          "source_failure": "搜索因源故障而停止。请检查连接并重试。"
+        },
+        "skips": {
+          "unreadable_directory_other": "无法读取 {{count}} 个文件夹。",
+          "unsafe_name_other": "{{count}} 个项目的名称不安全。",
+          "archive_too_large_other": "{{count}} 个 ZIP 文件过大，无法搜索。",
+          "archive_unreadable_other": "无法读取 {{count}} 个 ZIP 文件。",
+          "queue_limit_other": "文件夹队列已满，搜索已停止。"
+        }
+      }
     },
     "transfers": {
       "downloadFailed": "下载失败。请重试。",
@@ -1732,6 +1919,16 @@
     }
   },
   "common": {
+    "uiText": {
+      "import": "导入",
+      "export": "导出",
+      "saveCopy": "保存副本",
+      "compatibilityMode": "尝试兼容模式",
+      "passwordChanged": "密码已更改。请使用新密码登录。",
+      "or": "或",
+      "clearFilters": "清除筛选",
+      "serverIllustration": "服务器插图"
+    },
     "labels": {
       "connection": "连接",
       "itemToDelete": "要删除的项目",

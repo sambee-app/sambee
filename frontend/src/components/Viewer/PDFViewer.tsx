@@ -1568,7 +1568,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                       <>
                         <Typography variant="body2">{t("viewer.slowPdf")}</Typography>
                         <Button color="inherit" size="small" onClick={handleCancelPdfLoad}>
-                          Cancel
+                          {t("common.actions.cancel")}
                         </Button>
                       </>
                     )}
@@ -1587,7 +1587,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
                   pdfSourceVariant === "original" ? (
                     documentFailure ? (
                       <Button color="inherit" size="small" onClick={handleCompatibilityRetry}>
-                        Try compatibility mode
+                        {t("common.uiText.compatibilityMode")}
                       </Button>
                     ) : (
                       <Button color="inherit" size="small" onClick={handleRetryLoad}>

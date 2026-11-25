@@ -390,6 +390,7 @@ export function CodeMirrorFindReplacePopover({
                     sx={{ color: caseSensitive ? "primary.main" : "inherit", height: 30, p: 0.25, width: 28 }}
                   >
                     <Typography component="span" sx={{ fontSize: "0.875rem", fontWeight: 600, lineHeight: 1 }}>
+                      {/* biome-ignore lint/plugin: Aa is the case-sensitivity icon, not interface copy. */}
                       Aa
                     </Typography>
                   </IconButton>
@@ -406,6 +407,7 @@ export function CodeMirrorFindReplacePopover({
                     sx={{ color: wholeWord ? "primary.main" : "inherit", height: 30, p: 0.25, width: 28 }}
                   >
                     <Typography component="span" sx={{ fontSize: "0.875rem", fontWeight: 600, lineHeight: 1 }}>
+                      {/* biome-ignore lint/plugin: ab is the whole-word icon, not interface copy. */}
                       ab
                     </Typography>
                   </IconButton>

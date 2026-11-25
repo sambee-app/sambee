@@ -240,6 +240,53 @@
     }
   },
   "settings": {
+    "authenticationPage": {
+      "providerLabel": "OpenID Connect",
+      "adminOverride": "De beheerder die deze provider verbindt, behoudt een individuele beheerderstoewijzing. Individuele toewijzingen hebben altijd voorrang op dit rolbeleid.",
+      "groups": "Groepen: {{groups}}",
+      "none": "Geen",
+      "admissionAllowed": "Toegang: Toegestaan",
+      "admissionDenied": "Toegang: Geweigerd",
+      "sessionRefresh": "Sessieverlenging: Bij deze test is een vernieuwingstoken ontvangen",
+      "sessionNoRefresh": "Sessieverlenging: Bij deze test is geen vernieuwingstoken ontvangen; gebruikers moeten zich na de ingestelde sessielimiet opnieuw aanmelden.",
+      "matchingGroup": "Overeenkomende toegangsgroep: {{group}}",
+      "reactivate": "{{username}} ({{state}}) moet vóór koppeling opnieuw worden geactiveerd.",
+      "inactive": "inactief",
+      "expired": "verlopen",
+      "omittedAccounts_one": "{{count}} actief account zonder wachtwoord is niet gekoppeld. Deze gebruikers kunnen zich pas aanmelden nadat ze zijn gekoppeld. Een niet-gekoppelde OIDC-aanmelding kan botsen met een bestaande gebruikersnaam of een apart account maken.",
+      "omittedAccounts_other": "{{count}} actieve accounts zonder wachtwoord zijn niet gekoppeld. Deze gebruikers kunnen zich pas aanmelden nadat ze zijn gekoppeld. Een niet-gekoppelde OIDC-aanmelding kan botsen met een bestaande gebruikersnaam of een apart account maken.",
+      "loading": "Authenticatie-instellingen laden",
+      "disabled": "Authenticatie is uitgeschakeld in het configuratiebestand.",
+      "configureOidc": "OIDC configureren",
+      "copyRedirectUri": "Omleidings-URI kopiëren",
+      "autoLink": "OIDC-identiteiten automatisch op gebruikersnaam aan lokale accounts koppelen",
+      "allUsers": "Alle geverifieerde gebruikers",
+      "selectedGroups": "Alleen geselecteerde groepen",
+      "roleAssignment": "Roltoewijzing",
+      "uniformRole": "Alle gebruikers krijgen dezelfde rol",
+      "groupBased": "Op basis van groepen",
+      "administrator": "Beheerder",
+      "advancedClaims": "Geavanceerde claims",
+      "defaultClaims": "De standaardclaimnamen werken met de meeste providers",
+      "reviewOidc": "OIDC-verbinding controleren",
+      "activate": "Configuratie activeren",
+      "testResults": "Testresultaten",
+      "testedIdentity": "Geteste identiteit",
+      "admissionPolicy": "Accountkoppeling gaat niet boven het toelatingsbeleid.",
+      "reviewAccounts": "Bestaande accounts controleren",
+      "inactiveAccounts": "Inactieve of verlopen accounts"
+    },
+    "accountPage": {
+      "loading": "Account laden",
+      "passwordRequired": "Uw beheerder vereist dat u uw lokale wachtwoord wijzigt.",
+      "identity": "Uw identiteit",
+      "sessions": "Sessies",
+      "sessionsUnavailable": "Sessiegegevens zijn niet beschikbaar omdat verificatie niet verplicht is.",
+      "thisBrowser": "Deze browser",
+      "otherSessions": "Andere sessies",
+      "otherSessionsFailed": "Andere sessies konden niet worden geladen.",
+      "identitySource": "Identiteitsbron"
+    },
     "appearancePage": {
       "localizationTitle": "Taal en regio",
       "localizationDescription": "Kies de taal van de interface en de notatie voor datums en getallen.",
@@ -463,12 +510,12 @@
         "description": "Stel het beveiligingsbeleid en de uitvoeringslimieten voor SMB-backends in."
       },
       "adminFileSearch": {
-        "label": "Bestanden zoeken",
-        "description": "Stel de zoekgeschiedenis, resultaatlimieten en uitsluitingen voor het zoeken naar bestanden in."
+        "label": "Recente bestanden",
+        "description": "Configureer de geschiedenis van recente bestanden, de limieten voor snelle navigatie en uitsluitingen."
       },
       "adminDirectorySearch": {
-        "label": "Mappen zoeken",
-        "description": "Stel middelen en controles voor de mapindex in voor de backend en alle Companion-apparaten."
+        "label": "Mappen indexeren",
+        "description": "Configureer de mappenindex die snelle navigatie op SMB en Companion gebruikt."
       },
       "adminHealthMonitoring": {
         "label": "Systeembewaking",
@@ -477,6 +524,10 @@
       "adminAbout": {
         "label": "Over Sambee",
         "description": "Bekijk informatie over de build, software en hardware van Sambee."
+      },
+      "adminFilesystemSearch": {
+        "label": "Bestandssysteem doorzoeken",
+        "description": "Stel limieten in voor live zoekopdrachten op SMB-verbindingen en lokale schijven."
       }
     },
     "fileBrowserPage": {
@@ -503,18 +554,18 @@
       "clearRecentDirectoriesFailed": "Recente mappen konden niet worden gewist. Probeer het opnieuw."
     },
     "fileSearch": {
-      "title": "Bestanden zoeken",
+      "title": "Recente bestanden",
       "saveChanges": "Wijzigingen opslaan",
       "resetToDefault": "Standaard herstellen",
-      "loadFailed": "De instellingen voor het zoeken naar bestanden konden niet worden geladen.",
-      "saveFailed": "De instellingen voor het zoeken naar bestanden konden niet worden opgeslagen.",
-      "resetFailed": "De instellingen voor het zoeken naar bestanden konden niet worden teruggezet.",
+      "loadFailed": "De instellingen voor recente bestanden konden niet worden geladen. Controleer de verbinding en probeer het opnieuw.",
+      "saveFailed": "De instellingen voor recente bestanden konden niet worden opgeslagen. Controleer de waarde en probeer het opnieuw.",
+      "resetFailed": "De instellingen voor recente bestanden konden niet worden hersteld. Controleer de verbinding en probeer het opnieuw.",
       "retentionLimit": "Aantal recente bestanden en mappen dat wordt bewaard",
       "retentionLimitError": "Voer een geheel getal van 0 tot 500 in.",
       "resultLimit": "Resultaten per groep",
       "resultLimitError": "Voer een geheel getal van 1 tot 50 in.",
       "excludedCategories": "Bestandscategorieën uitsluiten",
-      "excludedCategoriesHelp": "Uitgesloten bestanden verschijnen niet in de zoekresultaten of zoekgeschiedenis voor bestanden.",
+      "excludedCategoriesHelp": "Uitgesloten bestanden verschijnen niet in de geschiedenis van recente bestanden en niet in snelle navigatie.",
       "excludeImages": "Afbeeldingen uitsluiten",
       "excludeTemporaryBackup": "Tijdelijke bestanden en reservekopieën uitsluiten",
       "excludedExtensions": "Uitgesloten extensies",
@@ -541,6 +592,46 @@
       "refresh": "Status vernieuwen"
     },
     "userManagement": {
+      "directory": {
+        "status": "Status",
+        "lastOidcSignIn": "Laatste OIDC-aanmelding",
+        "created": "Aangemaakt",
+        "updated": "Laatst bijgewerkt",
+        "oidcState": "OIDC-status",
+        "roleSource": "Rolbron",
+        "oidcProvider": "OIDC-provider",
+        "userActionsFor": "Gebruikersacties voor {{username}}",
+        "mapOidc": "OIDC-account koppelen",
+        "cancelMapping": "Wachtende OIDC-koppeling annuleren",
+        "viewIdentity": "Details van OIDC-identiteit bekijken",
+        "changeOidc": "OIDC-account wijzigen",
+        "moveIdentity": "Identiteit naar een andere lokale gebruiker verplaatsen",
+        "detachIdentity": "OIDC-identiteit loskoppelen",
+        "overview": "Overzicht van de gebruikerslijst",
+        "columns": "Kolommen",
+        "directoryColumns": "Kolommen van de gebruikerslijst",
+        "updating": "Gebruikerslijst bijwerken",
+        "filters": "Filters",
+        "expiration": "Vervaldatum",
+        "anyExpiration": "Elke vervaldatum",
+        "hasExpiration": "Met vervaldatum",
+        "noExpiration": "Zonder vervaldatum",
+        "signIn": "Aanmelden",
+        "activeFilters": "Actieve filters",
+        "users": "Gebruikers",
+        "manageColumns": "Zichtbare kolommen beheren",
+        "userActions": "Gebruikersacties",
+        "never": "Nooit",
+        "confirm": "Bevestigen",
+        "perPage": "{{count}} per pagina",
+        "expectedProviderUsername": "Verwachte gebruikersnaam bij de provider",
+        "expectedProviderUsernameHelp": "De eerste toegelaten, nog niet toegewezen OIDC-identiteit met exact deze gebruikersnaam wordt aan het account gekoppeld.",
+        "moveIdentityHelp": "Zoek op gebruikersnaam, naam of e-mailadres naar geschikte actieve, niet-gekoppelde lokale accounts",
+        "moveIdentityTo": "Identiteit verplaatsen naar",
+        "searchUsers": "Gebruikers zoeken",
+        "signInMethod": "Aanmeldmethode",
+        "user": "Gebruiker"
+      },
       "editor": {
         "switchOn": "Aan",
         "switchOff": "Uit",
@@ -678,8 +769,10 @@
       "sections": {
         "theme": "Thema",
         "localization": "Taal en regio",
-        "directory_index": "Zoekbeleid voor mappen"
-      }
+        "directory_index": "Beleid voor mapindexering",
+        "filesystem_search": "Beleid voor zoeken in het bestandssysteem"
+      },
+      "searchUpdateRequired": "Werk Sambee en Companion bij om de limieten voor zoeken in het bestandssysteem te verzenden. Het laatst geldige beleid blijft actief."
     },
     "connectionsSubgroups": {
       "smb": {
@@ -973,6 +1066,27 @@
         "database": "Afwijkende systeeminstelling",
         "configFile": "Configuratiebestand"
       }
+    },
+    "filesystemSearch": {
+      "group": "Limieten voor live zoeken",
+      "loadFailed": "De instellingen voor zoeken in het bestandssysteem konden niet worden geladen. Controleer de verbinding met de backend en probeer het opnieuw.",
+      "updateRequired": "Werk Sambee bij om de limieten voor zoeken in het bestandssysteem te configureren.",
+      "saveFailed": "Deze zoeklimiet kon niet worden opgeslagen. Controleer de waarde en de verbinding en probeer het opnieuw.",
+      "changeNote": "Wijzigingen gelden voor nieuwe zoekopdrachten. Als de overdracht mislukt, gebruikt Companion het laatst geldige beleid.",
+      "validation": "Voer een geheel getal van {{min}} tot {{max}} in.",
+      "bounds": "{{description}} Standaard: {{defaultValue}}. Bereik: {{min}}–{{max}}.",
+      "concurrent_searches": {
+        "label": "Limiet voor gelijktijdige zoekopdrachten",
+        "description": "Maximumaantal zoekopdrachten per account en SMB-verbinding, of per gekoppelde site en lokale schijf."
+      },
+      "max_seconds": {
+        "label": "Maximale zoektijd",
+        "description": "Tijd in seconden waarna de zoekopdracht geen resultaten meer teruggeeft. Actieve leesbewerkingen kunnen langer duren voordat de zoekplek vrijkomt."
+      },
+      "max_results": {
+        "label": "Maximumaantal resultaten",
+        "description": "Maximumaantal verschillende resultaten uit het bestandssysteem en archieven per zoekopdracht."
+      }
     }
   },
   "fileBrowser": {
@@ -1236,7 +1350,7 @@
       "modes": {
         "fileSearch": "Bestanden zoeken",
         "navigate": "Navigeren",
-        "quickNav": "Snel navigeren",
+        "quickNav": "Snelle navigatie",
         "commands": "Opdrachten"
       },
       "statusDetails": {
@@ -1311,15 +1425,86 @@
         "legacyDirectorySearch": "Zoeken naar mappen met meerdere termen is voor deze bron niet bevestigd. Zoek met één term of controleer of de backend en Companion dit ondersteunen.",
         "historyUnavailable": "Recente mappen zijn niet beschikbaar. Controleer de verbinding met de backend en probeer het opnieuw.",
         "fileHistoryUnavailable": "Recente bestanden zijn niet beschikbaar. Controleer de verbinding met de backend en probeer het opnieuw.",
-        "indexUnavailable": "Zoeken naar mappen is niet beschikbaar. Controleer de verbinding met de bron en probeer het opnieuw."
+        "indexUnavailable": "Zoeken naar mappen is niet beschikbaar. Controleer de verbinding met de bron en probeer het opnieuw.",
+        "scopeNotIndexed": "Deze map is nog niet geïndexeerd. Resultaten verschijnen nadat de indexering is voltooid.",
+        "scopeUnsupportedCompanion": "Deze bron ondersteunt geen mapbereik. Werk Companion bij en probeer het opnieuw.",
+        "scopeUnsupportedServer": "Deze bron ondersteunt geen mapbereik. Werk de server bij en probeer het opnieuw."
       },
       "groups": {
         "recentFiles": "Recente bestanden",
         "recentDirectories": "Recente mappen",
         "directories": "Mappen",
-        "currentDirectory": "Huidige map"
+        "currentDirectory": "Huidige map",
+        "recentItems": "Recente bestanden en mappen",
+        "matches": "Resultaten"
       },
-      "belowMinimum": "Typ minstens {{count}} tekens om te zoeken"
+      "belowMinimum": "Typ minstens {{count}} tekens om te zoeken",
+      "navigation": {
+        "scopeLabel": "Zoekbereik",
+        "itemTypeLabel": "Itemtype",
+        "scope": {
+          "connection": "Huidige verbinding",
+          "subtree": "Huidige map en submappen",
+          "descendants_only": "Alleen submappen"
+        },
+        "itemType": {
+          "all": "Bestanden en mappen",
+          "directories": "Mappen",
+          "files": "Bestanden"
+        }
+      },
+      "live": {
+        "mode": "Live zoeken",
+        "placeholder": "Bestanden en mappen zoeken",
+        "title": "Zoekresultaten {{number}}",
+        "options": "Zoekopties",
+        "optionsKeyboardHint": "↑ ↓ Verplaatsen · Spatie Wijzigen · Esc Terug",
+        "queryContext": "Zoeken: ‘{{query}}’",
+        "archives": "In ZIP-bestanden zoeken",
+        "folderDepth": "Mapdiepte",
+        "caseSensitive": "Hoofdlettergevoelig",
+        "depth": {
+          "current": "Alleen huidige map",
+          "recursive": "Huidige map en submappen"
+        },
+        "emptyQuery": "Voer een naam of patroon in om te zoeken.",
+        "queryTooLong": "De zoekterm is te lang. Gebruik maximaal {{max}} UTF-8-bytes en probeer het opnieuw.",
+        "unreadableItem": "Dit item kan niet worden gelezen. Controleer de toegang en probeer het opnieuw.",
+        "nestedArchive": "Geneste ZIP-bestanden kunnen hier niet worden geopend. Download het bestand om het te openen.",
+        "running": "Zoeken...",
+        "interrupted": "De zoekopdracht is onderbroken. Start een nieuwe zoekopdracht om het opnieuw te proberen.",
+        "interruptedDetail": "De zoekopdracht kon niet worden gestart. {{error}}",
+        "errors": {
+          "invalid_data": "De zoekopdracht gaf ongeldige gegevens terug. Controleer de verbinding met de bron en start een nieuwe zoekopdracht.",
+          "response_too_large": "Een zoekantwoord was te groot. Controleer de bron en start een nieuwe zoekopdracht.",
+          "incomplete": "De zoekopdracht is onderbroken voordat deze was voltooid. Controleer de verbinding met de bron en start een nieuwe zoekopdracht.",
+          "start_failed": "De zoekopdracht kon niet worden gestart. Controleer de verbinding met de bron en probeer het opnieuw."
+        },
+        "companionUpdateRequired": "Deze versie van Companion ondersteunt live zoeken niet. Werk Companion bij en start een nieuwe zoekopdracht.",
+        "companionUpdateAction": "Companion bijwerken",
+        "noMatches": "Geen resultaten.",
+        "terminal": {
+          "archive_too_large": "Het ZIP-bestand is te groot om te doorzoeken. Open een kleiner ZIP-bestand en probeer het opnieuw.",
+          "archive_unreadable": "Het ZIP-bestand kon niet worden gelezen. Controleer de toegang tot het ZIP-bestand en probeer het opnieuw.",
+          "complete": "Zoekopdracht voltooid.",
+          "partial_coverage": "De zoekopdracht is beëindigd zonder alles te doorzoeken. Controleer de overgeslagen items en probeer het opnieuw.",
+          "time_limit": "Tijdslimiet bereikt. Start een gerichtere zoekopdracht om door te gaan.",
+          "result_limit": "Resultaatlimiet bereikt. Start een gerichtere zoekopdracht om door te gaan.",
+          "source_failure": "De zoekopdracht is gestopt doordat de bron is mislukt. Controleer de verbinding en probeer het opnieuw."
+        },
+        "skips": {
+          "unreadable_directory_one": "{{count}} map kon niet worden gelezen.",
+          "unreadable_directory_other": "{{count}} mappen konden niet worden gelezen.",
+          "unsafe_name_one": "{{count}} item had een onveilige naam.",
+          "unsafe_name_other": "{{count}} items hadden onveilige namen.",
+          "archive_too_large_one": "{{count}} ZIP-bestand was te groot om te doorzoeken.",
+          "archive_too_large_other": "{{count}} ZIP-bestanden waren te groot om te doorzoeken.",
+          "archive_unreadable_one": "{{count}} ZIP-bestand kon niet worden gelezen.",
+          "archive_unreadable_other": "{{count}} ZIP-bestanden konden niet worden gelezen.",
+          "queue_limit_one": "De zoekopdracht is gestopt omdat de wachtrij voor mappen vol was.",
+          "queue_limit_other": "De zoekopdracht is gestopt omdat de wachtrij voor mappen vol was."
+        }
+      }
     },
     "archive": {
       "entryUnavailable": "Niet beschikbaar",
@@ -1672,6 +1857,16 @@
     }
   },
   "common": {
+    "uiText": {
+      "import": "Importeren",
+      "export": "Exporteren",
+      "saveCopy": "Kopie opslaan",
+      "compatibilityMode": "Compatibiliteitsmodus proberen",
+      "passwordChanged": "Wachtwoord gewijzigd. Meld u aan met uw nieuwe wachtwoord.",
+      "or": "of",
+      "clearFilters": "Filters wissen",
+      "serverIllustration": "Serverillustratie"
+    },
     "actions": {
       "cancel": "Annuleren",
       "close": "Sluiten",
@@ -1756,6 +1951,14 @@
         "name": "Sambee donker",
         "description": "Standaard donker thema van de app"
       }
+    },
+    "editor": {
+      "description": "Beschrijving",
+      "descriptionHelp": "Optionele tekst onder de naam van het thema",
+      "mode": "Modus",
+      "modeHelp": "Is dit een licht of donker thema?",
+      "name": "Naam",
+      "nameHelp": "Naam die in de themakiezer wordt weergegeven"
     }
   },
   "systemHealth": {

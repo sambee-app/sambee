@@ -1,0 +1,34 @@
+engine biome(1.0)
+language js(typescript, jsx)
+
+or {
+  JsxText() as $text where {
+    $text <: r"(?s).*\pL.*",
+    not $text <: r"(?s)^(?:&(?:[A-Za-z]+|#[0-9]+|#x[0-9A-Fa-f]+);|[^\pL])+$",
+    // The product name is the same in every language.
+    not $text <: r"(?s)^\s*Sambee\s*$",
+    // Key names describe physical shortcuts, not translatable UI copy.
+    not $text <: and {
+      r"(?i)^(?:esc|enter|shift\+del|shift\+enter|ctrl\+enter|ctrl\+alt\+enter)$",
+      within `<kbd>$...</kbd>`
+    },
+    register_diagnostic(span = $text, message = "Use a translation for UI text.")
+  },
+  JsxAttribute(name = $name, initializer = JsxAttributeInitializerClause(value = $value)) where {
+    $name <: r"^(?:aria-label|aria-description|placeholder|title|alt|label|helperText)$",
+    $value <: or { JsxString(), JsxExpressionAttributeValue(expression = JsStringLiteralExpression()) },
+    $value <: r"(?s).*\pL.*",
+    // The logo's alternative text is the product name.
+    not and {
+      $name <: r"^alt$",
+      $value <: r"^['\"]Sambee['\"]$"
+    },
+    register_diagnostic(span = $value, message = "Use a translation for UI text.")
+  },
+  JsxExpressionChild(expression = JsStringLiteralExpression() as $text) where {
+    $text <: r"(?s).*\pL.*",
+    // This arrow is a decorative glyph in the file list.
+    not $text <: r"^['\"]\\u2192['\"]$",
+    register_diagnostic(span = $text, message = "Use a translation for UI text.")
+  }
+}

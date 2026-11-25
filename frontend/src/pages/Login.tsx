@@ -234,7 +234,7 @@ const Login: React.FC = () => {
       <Container maxWidth="sm" sx={{ py: 10 }}>
         <Alert severity="error">{error}</Alert>
         <Typography component="h1" variant="h5" sx={{ mt: 3 }}>
-          Sign in unavailable
+          {t("auth.oidcCallback.title")}
         </Typography>
         <Button
           variant="contained"
@@ -244,7 +244,7 @@ const Login: React.FC = () => {
             setConfigurationAttempt((attempt) => attempt + 1);
           }}
         >
-          Try again
+          {t("auth.oidcCallback.retry")}
         </Button>
       </Container>
     );
@@ -283,7 +283,7 @@ const Login: React.FC = () => {
           </Typography>
           {passwordChanged && (
             <Alert severity="success" sx={{ mb: 2 }}>
-              Password changed. Sign in with your new password.
+              {t("common.uiText.passwordChanged")}
             </Alert>
           )}
           {error && (
@@ -296,7 +296,7 @@ const Login: React.FC = () => {
               <Button fullWidth variant="contained" sx={{ mt: 2, mb: 3 }} onClick={startProviderLogin}>
                 {t("auth.login.submitWithOidc", { providerName: authConfig.oidc.display_name })}
               </Button>
-              <Divider>or</Divider>
+              <Divider>{t("common.uiText.or")}</Divider>
             </>
           )}
           <form onSubmit={handleSubmit}>

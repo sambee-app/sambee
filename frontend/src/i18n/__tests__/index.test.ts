@@ -121,6 +121,17 @@ describe("frontend i18n", () => {
     expect(translate("common.labels.connection")).toBe("Połączenie");
   });
 
+  it("uses localized plural forms for the omitted account warning", async () => {
+    await setLocale("pl");
+    const key = "settings.authenticationPage.omittedAccounts";
+    expect(translate(key, { count: 1 })).toMatch(/^Pominięto 1 aktywne konto bez hasła/);
+    expect(translate(key, { count: 2 })).toMatch(/^Pominięto 2 aktywne konta bez hasła/);
+    expect(translate(key, { count: 5 })).toMatch(/^Pominięto 5 aktywnych kont bez hasła/);
+
+    await setLocale("ja");
+    expect(translate(key, { count: 2 })).toContain("アカウント2件");
+  });
+
   it("tries browser locales in order and does not use Simplified Chinese for Traditional Chinese", () => {
     const supported = ["en", "zh-Hans", "pt", "de"] as const;
     expect(matchBrowserLanguage(["xx-XA", "not a tag", "de-AT", "pt-PT"], supported)).toBe("de");

@@ -650,6 +650,7 @@ fn setup_system_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>>
                 .cloned()
                 .unwrap_or_else(|| tauri::image::Image::new(&[], 0, 0)),
         )
+        // localization-lint-ignore: Sambee Companion is the product name.
         .tooltip("Sambee Companion")
         .menu(&menu)
         .on_menu_event(|app, event| {

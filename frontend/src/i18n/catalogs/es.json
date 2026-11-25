@@ -267,6 +267,54 @@
     }
   },
   "settings": {
+    "authenticationPage": {
+      "providerLabel": "OpenID Connect",
+      "adminOverride": "El administrador que conecta este proveedor conserva una asignación individual de administrador. Las asignaciones individuales siempre tienen prioridad sobre esta política de roles.",
+      "groups": "Grupos: {{groups}}",
+      "none": "Ninguno",
+      "admissionAllowed": "Admisión: Permitida",
+      "admissionDenied": "Admisión: Denegada",
+      "sessionRefresh": "Renovación de sesión: La prueba devolvió un token de actualización",
+      "sessionNoRefresh": "Renovación de sesión: La prueba no devolvió un token de actualización; los usuarios deberán iniciar sesión de nuevo después del límite de sesión configurado.",
+      "matchingGroup": "Grupo de admisión coincidente: {{group}}",
+      "reactivate": "{{username}} ({{state}}) debe reactivarse antes de la asignación.",
+      "inactive": "inactivo",
+      "expired": "caducado",
+      "omittedAccounts_one": "Se omite {{count}} cuenta activa sin contraseña. Estos usuarios no pueden iniciar sesión hasta que se asignen sus cuentas. Un inicio de sesión OIDC sin asignar puede coincidir con un nombre de usuario existente o crear otra cuenta.",
+      "omittedAccounts_many": "Se omiten {{count}} cuentas activas sin contraseña. Estos usuarios no pueden iniciar sesión hasta que se asignen sus cuentas. Un inicio de sesión OIDC sin asignar puede coincidir con un nombre de usuario existente o crear otra cuenta.",
+      "omittedAccounts_other": "Se omiten {{count}} cuentas activas sin contraseña. Estos usuarios no pueden iniciar sesión hasta que se asignen sus cuentas. Un inicio de sesión OIDC sin asignar puede coincidir con un nombre de usuario existente o crear otra cuenta.",
+      "loading": "Cargando configuración de autenticación",
+      "disabled": "La autenticación está desactivada en el archivo de configuración.",
+      "configureOidc": "Configurar OIDC",
+      "copyRedirectUri": "Copiar URI de redirección",
+      "autoLink": "Vincular automáticamente identidades OIDC a cuentas locales por nombre de usuario",
+      "allUsers": "Todos los usuarios autenticados",
+      "selectedGroups": "Solo grupos seleccionados",
+      "roleAssignment": "Asignación de roles",
+      "uniformRole": "Se asigna el mismo rol a todos los usuarios",
+      "groupBased": "Basada en grupos",
+      "administrator": "Administrador",
+      "advancedClaims": "Reclamaciones avanzadas",
+      "defaultClaims": "Los nombres de reclamación predeterminados funcionan con la mayoría de los proveedores",
+      "reviewOidc": "Revisar conexión OIDC",
+      "activate": "Activar configuración",
+      "testResults": "Resultados de la prueba",
+      "testedIdentity": "Identidad probada",
+      "admissionPolicy": "La asignación de cuentas no anula la política de admisión.",
+      "reviewAccounts": "Revisar cuentas existentes",
+      "inactiveAccounts": "Cuentas inactivas o caducadas"
+    },
+    "accountPage": {
+      "loading": "Cargando cuenta",
+      "passwordRequired": "Su administrador requiere que cambie su contraseña local.",
+      "identity": "Su identidad",
+      "sessions": "Sesiones",
+      "sessionsUnavailable": "La información de sesión no está disponible porque no se requiere autenticación.",
+      "thisBrowser": "Este navegador",
+      "otherSessions": "Otras sesiones",
+      "otherSessionsFailed": "No se pudieron cargar las otras sesiones.",
+      "identitySource": "Origen de la identidad"
+    },
     "categories": {
       "appearance": {
         "label": "Apariencia",
@@ -321,12 +369,12 @@
         "description": "Configura la política de seguridad y los límites operativos de los servidores SMB."
       },
       "adminFileSearch": {
-        "label": "Búsqueda de archivos",
-        "description": "Configura el historial, los límites de resultados y las exclusiones de la búsqueda de archivos."
+        "label": "Archivos recientes",
+        "description": "Configure el historial de archivos recientes, los límites de navegación rápida y las exclusiones."
       },
       "adminDirectorySearch": {
-        "label": "Búsqueda de carpetas",
-        "description": "Configura los recursos del índice de carpetas y su verificación para el servidor y todos los dispositivos con Companion."
+        "label": "Indexación de carpetas",
+        "description": "Configure el índice de carpetas que usa la navegación rápida en SMB y Companion."
       },
       "adminHealthMonitoring": {
         "label": "Supervisión del estado",
@@ -335,6 +383,10 @@
       "adminAbout": {
         "label": "Acerca de",
         "description": "Consulta la información sobre la compilación, el software y el hardware de Sambee."
+      },
+      "adminFilesystemSearch": {
+        "label": "Búsqueda en el sistema de archivos",
+        "description": "Establezca los límites de las búsquedas en directo en conexiones SMB y unidades locales."
       }
     },
     "appearancePage": {
@@ -520,8 +572,10 @@
       "sections": {
         "theme": "Tema",
         "localization": "Localización",
-        "directory_index": "Política de búsqueda de carpetas"
-      }
+        "directory_index": "Política de indexación de carpetas",
+        "filesystem_search": "Política de búsqueda en el sistema de archivos"
+      },
+      "searchUpdateRequired": "Actualice Sambee y Companion para enviar los límites de búsqueda en el sistema de archivos. La última política válida sigue activa."
     },
     "aboutPage": {
       "applicationTitle": "Aplicación",
@@ -788,6 +842,46 @@
       }
     },
     "userManagement": {
+      "directory": {
+        "status": "Estado",
+        "lastOidcSignIn": "Último inicio de sesión OIDC",
+        "created": "Creado",
+        "updated": "Última actualización",
+        "oidcState": "Estado OIDC",
+        "roleSource": "Origen del rol",
+        "oidcProvider": "Proveedor OIDC",
+        "userActionsFor": "Acciones de usuario para {{username}}",
+        "mapOidc": "Asignar cuenta OIDC",
+        "cancelMapping": "Cancelar asignación OIDC pendiente",
+        "viewIdentity": "Ver detalles de identidad OIDC",
+        "changeOidc": "Cambiar cuenta OIDC",
+        "moveIdentity": "Mover identidad a otro usuario local",
+        "detachIdentity": "Desvincular identidad OIDC",
+        "overview": "Resumen del directorio",
+        "columns": "Columnas",
+        "directoryColumns": "Columnas del directorio",
+        "updating": "Actualizando directorio de usuarios",
+        "filters": "Filtros",
+        "expiration": "Vencimiento",
+        "anyExpiration": "Cualquier vencimiento",
+        "hasExpiration": "Con vencimiento",
+        "noExpiration": "Sin vencimiento",
+        "signIn": "Inicio de sesión",
+        "activeFilters": "Filtros activos",
+        "users": "Usuarios",
+        "manageColumns": "Gestionar columnas visibles",
+        "userActions": "Acciones de usuario",
+        "never": "Nunca",
+        "confirm": "Confirmar",
+        "perPage": "{{count}} por página",
+        "expectedProviderUsername": "Nombre de usuario esperado del proveedor",
+        "expectedProviderUsernameHelp": "La primera identidad OIDC admitida y sin asignar que tenga exactamente este nombre de usuario se vinculará a la cuenta.",
+        "moveIdentityHelp": "Busca cuentas locales aptas, activas y no vinculadas por nombre de usuario, nombre o correo electrónico",
+        "moveIdentityTo": "Mover identidad a",
+        "searchUsers": "Buscar usuarios",
+        "signInMethod": "Método de inicio de sesión",
+        "user": "Usuario"
+      },
       "addUserButton": "Añadir usuario",
       "addUserFabAriaLabel": "Añadir usuario",
       "totalUsers_one": "Usuarios: {{count}}",
@@ -980,18 +1074,18 @@
       }
     },
     "fileSearch": {
-      "title": "Búsqueda de archivos",
+      "title": "Archivos recientes",
       "saveChanges": "Guardar cambios",
       "resetToDefault": "Restaurar valores predeterminados",
-      "loadFailed": "No se pudo cargar la configuración de búsqueda de archivos.",
-      "saveFailed": "No se pudo guardar la configuración de búsqueda de archivos.",
-      "resetFailed": "No se pudo restablecer la configuración de búsqueda de archivos.",
+      "loadFailed": "No se pudo cargar la configuración de archivos recientes. Compruebe la conexión e inténtelo de nuevo.",
+      "saveFailed": "No se pudo guardar la configuración de archivos recientes. Compruebe el valor e inténtelo de nuevo.",
+      "resetFailed": "No se pudo restablecer la configuración de archivos recientes. Compruebe la conexión e inténtelo de nuevo.",
       "retentionLimit": "Cantidad de archivos y carpetas recientes que se conservan",
       "retentionLimitError": "Introduce un número entero entre 0 y 500.",
       "resultLimit": "Resultados por grupo",
       "resultLimitError": "Introduce un número entero entre 1 y 50.",
       "excludedCategories": "Excluir categorías de archivos",
-      "excludedCategoriesHelp": "Los archivos excluidos no aparecen en los resultados ni en el historial de búsqueda de archivos.",
+      "excludedCategoriesHelp": "Los archivos excluidos no aparecen en el historial de archivos recientes ni en la navegación rápida.",
       "excludeImages": "Excluir imágenes",
       "excludeTemporaryBackup": "Excluir archivos temporales y copias de seguridad",
       "excludedExtensions": "Extensiones excluidas",
@@ -1002,6 +1096,27 @@
       "excludedExtensionsHelp": "Introduce una extensión literal. No se admiten patrones con comodines ni rutas.",
       "excludedExtensionsNormalization": "Se guardará como {{extension}}.",
       "excludedExtensionsRemove": "Quitar {{extension}}"
+    },
+    "filesystemSearch": {
+      "group": "Límites de búsqueda en directo",
+      "loadFailed": "No se pudo cargar la configuración de búsqueda en el sistema de archivos. Compruebe la conexión al servidor e inténtelo de nuevo.",
+      "updateRequired": "Actualice Sambee para configurar los límites de búsqueda en el sistema de archivos.",
+      "saveFailed": "No se pudo guardar este límite de búsqueda. Compruebe el valor y la conexión e inténtelo de nuevo.",
+      "changeNote": "Los cambios se aplican a las nuevas búsquedas. Si falla la entrega, Companion utiliza la última política válida.",
+      "validation": "Introduzca un número entero entre {{min}} y {{max}}.",
+      "bounds": "{{description}} Valor predeterminado: {{defaultValue}}. Intervalo: {{min}}–{{max}}.",
+      "concurrent_searches": {
+        "label": "Límite de búsquedas simultáneas",
+        "description": "Número máximo de búsquedas por cuenta y conexión SMB, o por sitio vinculado y unidad local."
+      },
+      "max_seconds": {
+        "label": "Tiempo máximo de búsqueda",
+        "description": "Tiempo en segundos hasta que la búsqueda deja de devolver resultados. Las lecturas activas pueden tardar más en liberar el espacio de búsqueda."
+      },
+      "max_results": {
+        "label": "Número máximo de resultados",
+        "description": "Número máximo de resultados distintos del sistema de archivos y de archivos comprimidos por búsqueda."
+      }
     }
   },
   "fileBrowser": {
@@ -1176,7 +1291,10 @@
         "legacyDirectorySearch": "No se ha confirmado que este origen admita búsquedas de carpetas con varios términos. Busca con un solo término o comprueba si el servidor y Companion admiten esta función.",
         "historyUnavailable": "Las carpetas recientes no están disponibles. Comprueba la conexión al servidor y vuelve a intentarlo.",
         "fileHistoryUnavailable": "Los archivos recientes no están disponibles. Comprueba la conexión al servidor y vuelve a intentarlo.",
-        "indexUnavailable": "La búsqueda de carpetas no está disponible. Comprueba la conexión al origen y vuelve a intentarlo."
+        "indexUnavailable": "La búsqueda de carpetas no está disponible. Comprueba la conexión al origen y vuelve a intentarlo.",
+        "scopeNotIndexed": "Esta carpeta aún no está indexada. Los resultados aparecerán cuando termine la indexación.",
+        "scopeUnsupportedCompanion": "Este origen no admite el alcance de carpeta. Actualice Companion e inténtelo de nuevo.",
+        "scopeUnsupportedServer": "Este origen no admite el alcance de carpeta. Actualice el servidor e inténtelo de nuevo."
       },
       "statusDetails": {
         "title": "Estado de la búsqueda de carpetas",
@@ -1207,9 +1325,82 @@
         "recentFiles": "Archivos recientes",
         "recentDirectories": "Carpetas recientes",
         "directories": "Carpetas",
-        "currentDirectory": "Carpeta actual"
+        "currentDirectory": "Carpeta actual",
+        "recentItems": "Archivos y carpetas recientes",
+        "matches": "Coincidencias"
       },
-      "belowMinimum": "Escribe al menos {{count}} caracteres para buscar"
+      "belowMinimum": "Escribe al menos {{count}} caracteres para buscar",
+      "navigation": {
+        "scopeLabel": "Alcance de búsqueda",
+        "itemTypeLabel": "Tipo de elemento",
+        "scope": {
+          "connection": "Conexión actual",
+          "subtree": "Carpeta actual y subcarpetas",
+          "descendants_only": "Solo subcarpetas"
+        },
+        "itemType": {
+          "all": "Archivos y carpetas",
+          "directories": "Carpetas",
+          "files": "Archivos"
+        }
+      },
+      "live": {
+        "mode": "Búsqueda en directo",
+        "placeholder": "Buscar archivos y carpetas",
+        "title": "Resultados de búsqueda {{number}}",
+        "options": "Opciones de búsqueda",
+        "optionsKeyboardHint": "↑ ↓ Mover · Espacio Cambiar · Esc Volver",
+        "queryContext": "Búsqueda: «{{query}}»",
+        "archives": "Buscar dentro de archivos ZIP",
+        "folderDepth": "Profundidad de carpetas",
+        "caseSensitive": "Distinguir mayúsculas y minúsculas",
+        "depth": {
+          "current": "Solo la carpeta actual",
+          "recursive": "Carpeta actual y subcarpetas"
+        },
+        "emptyQuery": "Introduzca un nombre o patrón para buscar.",
+        "queryTooLong": "El término de búsqueda es demasiado largo. Use como máximo {{max}} bytes UTF-8 e inténtelo de nuevo.",
+        "unreadableItem": "No se puede leer este elemento. Compruebe el acceso e inténtelo de nuevo.",
+        "nestedArchive": "No se pueden abrir archivos ZIP anidados aquí. Descargue el archivo para abrirlo.",
+        "running": "Buscando...",
+        "interrupted": "Se interrumpió la búsqueda. Inicie una nueva búsqueda para intentarlo de nuevo.",
+        "interruptedDetail": "No se pudo iniciar la búsqueda. {{error}}",
+        "errors": {
+          "invalid_data": "La búsqueda devolvió datos no válidos. Compruebe la conexión al origen e inicie una nueva búsqueda.",
+          "response_too_large": "Una respuesta de búsqueda era demasiado grande. Compruebe el origen e inicie una nueva búsqueda.",
+          "incomplete": "La búsqueda se interrumpió antes de finalizar. Compruebe la conexión al origen e inicie una nueva búsqueda.",
+          "start_failed": "No se pudo iniciar la búsqueda. Compruebe la conexión al origen e inténtelo de nuevo."
+        },
+        "companionUpdateRequired": "Esta versión de Companion no admite la búsqueda en directo. Actualice Companion e inicie una nueva búsqueda.",
+        "companionUpdateAction": "Actualizar Companion",
+        "noMatches": "No hay coincidencias.",
+        "terminal": {
+          "archive_too_large": "El archivo ZIP es demasiado grande para buscar en él. Abra un archivo ZIP más pequeño e inténtelo de nuevo.",
+          "archive_unreadable": "No se pudo leer el archivo ZIP. Compruebe el acceso al archivo e inténtelo de nuevo.",
+          "complete": "Búsqueda completada.",
+          "partial_coverage": "La búsqueda terminó con cobertura incompleta. Compruebe los elementos omitidos e inténtelo de nuevo.",
+          "time_limit": "Se alcanzó el límite de tiempo. Inicie una búsqueda más específica para continuar.",
+          "result_limit": "Se alcanzó el límite de resultados. Inicie una búsqueda más específica para continuar.",
+          "source_failure": "La búsqueda se detuvo porque falló el origen. Compruebe la conexión e inténtelo de nuevo."
+        },
+        "skips": {
+          "unreadable_directory_one": "No se pudo leer {{count}} carpeta.",
+          "unreadable_directory_many": "No se pudieron leer {{count}} carpetas.",
+          "unreadable_directory_other": "No se pudieron leer {{count}} carpetas.",
+          "unsafe_name_one": "{{count}} elemento tenía un nombre no seguro.",
+          "unsafe_name_many": "{{count}} elementos tenían nombres no seguros.",
+          "unsafe_name_other": "{{count}} elementos tenían nombres no seguros.",
+          "archive_too_large_one": "{{count}} archivo ZIP era demasiado grande para buscar en él.",
+          "archive_too_large_many": "{{count}} archivos ZIP eran demasiado grandes para buscar en ellos.",
+          "archive_too_large_other": "{{count}} archivos ZIP eran demasiado grandes para buscar en ellos.",
+          "archive_unreadable_one": "No se pudo leer {{count}} archivo ZIP.",
+          "archive_unreadable_many": "No se pudieron leer {{count}} archivos ZIP.",
+          "archive_unreadable_other": "No se pudieron leer {{count}} archivos ZIP.",
+          "queue_limit_one": "La búsqueda se detuvo porque la cola de carpetas estaba llena.",
+          "queue_limit_many": "La búsqueda se detuvo porque la cola de carpetas estaba llena.",
+          "queue_limit_other": "La búsqueda se detuvo porque la cola de carpetas estaba llena."
+        }
+      }
     },
     "commands": {
       "categories": {
@@ -1724,6 +1915,16 @@
     }
   },
   "common": {
+    "uiText": {
+      "import": "Importar",
+      "export": "Exportar",
+      "saveCopy": "Guardar copia",
+      "compatibilityMode": "Probar modo de compatibilidad",
+      "passwordChanged": "Contraseña cambiada. Inicie sesión con su nueva contraseña.",
+      "or": "o",
+      "clearFilters": "Borrar filtros",
+      "serverIllustration": "Ilustración del servidor"
+    },
     "labels": {
       "connection": "Conexión",
       "itemToDelete": "Elemento que se va a eliminar",
@@ -1781,6 +1982,14 @@
         "name": "Sambee oscuro",
         "description": "Tema oscuro predeterminado de la aplicación"
       }
+    },
+    "editor": {
+      "description": "Descripción",
+      "descriptionHelp": "Texto opcional debajo del nombre del tema",
+      "mode": "Modo",
+      "modeHelp": "¿Es un tema claro u oscuro?",
+      "name": "Nombre",
+      "nameHelp": "Nombre que se muestra en el selector de temas"
     }
   },
   "systemHealth": {

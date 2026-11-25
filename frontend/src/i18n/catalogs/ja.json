@@ -240,6 +240,52 @@
     }
   },
   "settings": {
+    "authenticationPage": {
+      "providerLabel": "OpenID Connect",
+      "adminOverride": "このプロバイダーを接続する管理者は、個別の管理者ロールを保持します。個別の割り当ては、このロールポリシーより常に優先されます。",
+      "groups": "グループ: {{groups}}",
+      "none": "なし",
+      "admissionAllowed": "アクセス: 許可",
+      "admissionDenied": "アクセス: 拒否",
+      "sessionRefresh": "セッション更新: このテストでリフレッシュトークンを受信しました",
+      "sessionNoRefresh": "セッション更新: このテストでリフレッシュトークンを受信しませんでした。設定されたセッション上限後にユーザーは再度サインインする必要があります。",
+      "matchingGroup": "一致したアクセスグループ: {{group}}",
+      "reactivate": "{{username}}（{{state}}）は関連付けの前に再有効化する必要があります。",
+      "inactive": "無効",
+      "expired": "期限切れ",
+      "omittedAccounts_other": "有効なパスワードなしアカウント{{count}}件が省略されています。これらのユーザーは関連付けるまでサインインできません。関連付けられていないOIDCサインインは、既存のユーザー名と競合するか、別のアカウントを作成する可能性があります。",
+      "loading": "認証設定を読み込み中",
+      "disabled": "設定ファイルで認証が無効になっています。",
+      "configureOidc": "OIDCを設定",
+      "copyRedirectUri": "リダイレクトURIをコピー",
+      "autoLink": "ユーザー名に基づいてOIDC IDをローカルアカウントに自動的に関連付ける",
+      "allUsers": "すべての認証済みユーザー",
+      "selectedGroups": "選択したグループのみ",
+      "roleAssignment": "ロールの割り当て",
+      "uniformRole": "すべてのユーザーに同じロールを割り当てる",
+      "groupBased": "グループに基づく",
+      "administrator": "管理者",
+      "advancedClaims": "詳細なクレーム",
+      "defaultClaims": "既定のクレーム名はほとんどのプロバイダーで使用できます",
+      "reviewOidc": "OIDC接続を確認",
+      "activate": "設定を有効化",
+      "testResults": "テスト結果",
+      "testedIdentity": "テストしたID",
+      "admissionPolicy": "アカウントの関連付けはアクセス許可ポリシーを上書きしません。",
+      "reviewAccounts": "既存のアカウントを確認",
+      "inactiveAccounts": "無効または期限切れのアカウント"
+    },
+    "accountPage": {
+      "loading": "アカウントを読み込み中",
+      "passwordRequired": "管理者により、ローカルパスワードの変更が求められています。",
+      "identity": "あなたのアカウント情報",
+      "sessions": "セッション",
+      "sessionsUnavailable": "認証が必須ではないため、セッション情報は利用できません。",
+      "thisBrowser": "このブラウザー",
+      "otherSessions": "その他のセッション",
+      "otherSessionsFailed": "その他のセッションを読み込めませんでした。",
+      "identitySource": "ID の取得元"
+    },
     "appearancePage": {
       "localizationTitle": "言語と地域",
       "localizationDescription": "表示言語と、日付や数値の表示形式を選択します。",
@@ -372,12 +418,12 @@
         "description": "SMB バックエンドのセキュリティポリシーと動作時の上限を設定します。"
       },
       "adminFileSearch": {
-        "label": "ファイル検索",
-        "description": "ファイル検索の履歴、結果件数の上限、除外条件を設定します。"
+        "label": "最近使用したファイル",
+        "description": "最近使用したファイルの履歴、クイックナビゲーションの制限、除外項目を設定します。"
       },
       "adminDirectorySearch": {
-        "label": "フォルダー検索",
-        "description": "バックエンドとすべての Companion デバイスで使用するフォルダーインデックスのリソースと検証を設定します。"
+        "label": "フォルダーのインデックス作成",
+        "description": "SMB と Companion のクイックナビゲーションで使用するフォルダーインデックスを設定します。"
       },
       "adminHealthMonitoring": {
         "label": "稼働状況の監視",
@@ -386,6 +432,10 @@
       "adminAbout": {
         "label": "製品情報",
         "description": "Sambee のビルド、ソフトウェア、ハードウェアの情報を確認します。"
+      },
+      "adminFilesystemSearch": {
+        "label": "ファイルシステム検索",
+        "description": "SMB 接続とローカルドライブのライブ検索の制限を設定します。"
       }
     },
     "imageViewerPage": {
@@ -493,8 +543,10 @@
       "sections": {
         "theme": "テーマ",
         "localization": "言語と地域",
-        "directory_index": "フォルダー検索ポリシー"
-      }
+        "directory_index": "フォルダーインデックスのポリシー",
+        "filesystem_search": "ファイルシステム検索のポリシー"
+      },
+      "searchUpdateRequired": "ファイルシステム検索の制限を配信するには、Sambee と Companion を更新してください。最後に有効だったポリシーは引き続き適用されます。"
     },
     "aboutPage": {
       "applicationTitle": "アプリケーション",
@@ -761,6 +813,46 @@
       }
     },
     "userManagement": {
+      "directory": {
+        "status": "状態",
+        "lastOidcSignIn": "最終OIDCサインイン",
+        "created": "作成日時",
+        "updated": "最終更新",
+        "oidcState": "OIDCの状態",
+        "roleSource": "ロールの割り当て元",
+        "oidcProvider": "OIDCプロバイダー",
+        "userActionsFor": "{{username}}のユーザー操作",
+        "mapOidc": "OIDCアカウントを関連付ける",
+        "cancelMapping": "保留中のOIDC関連付けを取り消す",
+        "viewIdentity": "OIDC IDの詳細を表示",
+        "changeOidc": "OIDCアカウントを変更",
+        "moveIdentity": "IDを別のローカルユーザーに移動",
+        "detachIdentity": "OIDC IDの関連付けを解除",
+        "overview": "ディレクトリの概要",
+        "columns": "列",
+        "directoryColumns": "ディレクトリの列",
+        "updating": "ユーザーディレクトリを更新中",
+        "filters": "フィルター",
+        "expiration": "有効期限",
+        "anyExpiration": "すべての有効期限",
+        "hasExpiration": "有効期限あり",
+        "noExpiration": "有効期限なし",
+        "signIn": "サインイン",
+        "activeFilters": "適用中のフィルター",
+        "users": "ユーザー",
+        "manageColumns": "表示する列を管理",
+        "userActions": "ユーザーの操作",
+        "never": "なし",
+        "confirm": "確認",
+        "perPage": "1ページあたり{{count}}件",
+        "expectedProviderUsername": "プロバイダー側で想定するユーザー名",
+        "expectedProviderUsernameHelp": "このユーザー名と完全に一致し、サインインが許可された未割り当ての最初の OIDC ID が、このアカウントに関連付けられます。",
+        "moveIdentityHelp": "ユーザー名、名前、またはメールアドレスで、対象となる有効な未連携のローカルアカウントを検索します",
+        "moveIdentityTo": "ID の移動先",
+        "searchUsers": "ユーザーを検索",
+        "signInMethod": "サインイン方法",
+        "user": "ユーザー"
+      },
       "addUserButton": "ユーザーを追加",
       "addUserFabAriaLabel": "ユーザーを追加",
       "totalUsers_other": "ユーザー：{{count}} 人",
@@ -949,18 +1041,18 @@
       }
     },
     "fileSearch": {
-      "title": "ファイル検索",
+      "title": "最近使用したファイル",
       "saveChanges": "変更を保存",
       "resetToDefault": "既定値に戻す",
-      "loadFailed": "ファイル検索の設定を読み込めませんでした。",
-      "saveFailed": "ファイル検索の設定を保存できませんでした。",
-      "resetFailed": "ファイル検索の設定を既定値に戻せませんでした。",
+      "loadFailed": "最近使用したファイルの設定を読み込めませんでした。接続を確認して、再試行してください。",
+      "saveFailed": "最近使用したファイルの設定を保存できませんでした。値を確認して、再試行してください。",
+      "resetFailed": "最近使用したファイルの設定をリセットできませんでした。接続を確認して、再試行してください。",
       "retentionLimit": "履歴に残す最近のファイルとフォルダーの件数",
       "retentionLimitError": "0～500 の整数を入力してください。",
       "resultLimit": "グループごとの結果件数",
       "resultLimitError": "1～50 の整数を入力してください。",
       "excludedCategories": "除外するファイルの種類",
-      "excludedCategoriesHelp": "除外したファイルは、ファイル検索の結果と履歴に表示されません。",
+      "excludedCategoriesHelp": "除外されたファイルは、最近使用したファイルの履歴とクイックナビゲーションに表示されません。",
       "excludeImages": "画像を除外",
       "excludeTemporaryBackup": "一時ファイルとバックアップファイルを除外",
       "excludedExtensions": "除外する拡張子",
@@ -971,6 +1063,27 @@
       "excludedExtensionsHelp": "拡張子を 1 つ、そのまま入力してください。グロブパターンやパスは使用できません。",
       "excludedExtensionsNormalization": "{{extension}} として保存されます。",
       "excludedExtensionsRemove": "{{extension}} を除外リストから削除"
+    },
+    "filesystemSearch": {
+      "group": "ライブ検索の制限",
+      "loadFailed": "ファイルシステム検索の設定を読み込めませんでした。バックエンドへの接続を確認して、再試行してください。",
+      "updateRequired": "ファイルシステム検索の制限を設定するには、Sambee を更新してください。",
+      "saveFailed": "この検索制限を保存できませんでした。値と接続を確認して、再試行してください。",
+      "changeNote": "変更は新しい検索に適用されます。配信に失敗した場合、Companion は最後に有効だったポリシーを使用します。",
+      "validation": "{{min}} から {{max}} までの整数を入力してください。",
+      "bounds": "{{description}} デフォルト: {{defaultValue}}。範囲: {{min}}–{{max}}。",
+      "concurrent_searches": {
+        "label": "同時検索の上限",
+        "description": "アカウントと SMB 接続ごと、またはペアリング済みサイトとローカルドライブごとの最大検索数。"
+      },
+      "max_seconds": {
+        "label": "最大スキャン時間",
+        "description": "検索が結果の返却を停止するまでの時間（秒）。実行中の読み取りが検索枠を解放するまでにさらに時間がかかる場合があります。"
+      },
+      "max_results": {
+        "label": "最大結果数",
+        "description": "検索ごとの物理ファイルとアーカイブの重複しない結果の最大数。"
+      }
     }
   },
   "fileBrowser": {
@@ -1090,7 +1203,7 @@
       "modeSelectorAriaLabel": "クイックバーのモードを切り替え",
       "modes": {
         "navigate": "移動",
-        "quickNav": "クイック移動",
+        "quickNav": "クイックナビゲーション",
         "commands": "コマンド",
         "fileSearch": "ファイル検索"
       },
@@ -1137,7 +1250,10 @@
         "legacyDirectorySearch": "この接続先では複数の語句によるフォルダー検索への対応が確認できていません。語句を 1 つだけ指定して検索するか、バックエンドと Companion の対応状況を確認してください。",
         "historyUnavailable": "最近のフォルダー履歴を利用できません。バックエンドへの接続を確認して再試行してください。",
         "fileHistoryUnavailable": "最近のファイル履歴を利用できません。バックエンドへの接続を確認して再試行してください。",
-        "indexUnavailable": "フォルダー検索を利用できません。検索対象への接続を確認して再試行してください。"
+        "indexUnavailable": "フォルダー検索を利用できません。検索対象への接続を確認して再試行してください。",
+        "scopeNotIndexed": "このフォルダーはまだインデックス化されていません。インデックス作成が完了すると結果が表示されます。",
+        "scopeUnsupportedCompanion": "この検索元はフォルダー範囲に対応していません。Companion を更新して、再試行してください。",
+        "scopeUnsupportedServer": "この検索元はフォルダー範囲に対応していません。サーバーを更新して、再試行してください。"
       },
       "statusDetails": {
         "title": "フォルダー検索の状態",
@@ -1168,9 +1284,72 @@
         "recentFiles": "最近のファイル",
         "recentDirectories": "最近のフォルダー",
         "directories": "フォルダー",
-        "currentDirectory": "現在のフォルダー"
+        "currentDirectory": "現在のフォルダー",
+        "recentItems": "最近使用したファイルとフォルダー",
+        "matches": "一致する項目"
       },
-      "belowMinimum": "検索するには {{count}} 文字以上入力してください"
+      "belowMinimum": "検索するには {{count}} 文字以上入力してください",
+      "navigation": {
+        "scopeLabel": "検索範囲",
+        "itemTypeLabel": "項目の種類",
+        "scope": {
+          "connection": "現在の接続",
+          "subtree": "現在のフォルダーとサブフォルダー",
+          "descendants_only": "サブフォルダーのみ"
+        },
+        "itemType": {
+          "all": "ファイルとフォルダー",
+          "directories": "フォルダー",
+          "files": "ファイル"
+        }
+      },
+      "live": {
+        "mode": "ライブ検索",
+        "placeholder": "ファイルとフォルダーを検索",
+        "title": "検索結果 {{number}}",
+        "options": "検索オプション",
+        "optionsKeyboardHint": "↑ ↓ 移動 · スペース 変更 · Esc 戻る",
+        "queryContext": "検索: 「{{query}}」",
+        "archives": "ZIP ファイル内を検索",
+        "folderDepth": "フォルダーの深さ",
+        "caseSensitive": "大文字と小文字を区別",
+        "depth": {
+          "current": "現在のフォルダーのみ",
+          "recursive": "現在のフォルダーとサブフォルダー"
+        },
+        "emptyQuery": "検索する名前またはパターンを入力してください。",
+        "queryTooLong": "検索語が長すぎます。{{max}} UTF-8 バイト以内で入力して、再試行してください。",
+        "unreadableItem": "この項目を読み取れません。アクセス権を確認して、再試行してください。",
+        "nestedArchive": "入れ子になった ZIP ファイルはここでは開けません。ファイルをダウンロードして開いてください。",
+        "running": "検索中...",
+        "interrupted": "検索が中断されました。新しい検索を開始して、再試行してください。",
+        "interruptedDetail": "検索を開始できませんでした。{{error}}",
+        "errors": {
+          "invalid_data": "検索が無効なデータを返しました。検索元への接続を確認し、新しい検索を開始してください。",
+          "response_too_large": "検索応答が大きすぎます。検索元を確認し、新しい検索を開始してください。",
+          "incomplete": "検索が完了前に中断されました。検索元への接続を確認し、新しい検索を開始してください。",
+          "start_failed": "検索を開始できませんでした。検索元への接続を確認して、再試行してください。"
+        },
+        "companionUpdateRequired": "このバージョンの Companion はライブ検索に対応していません。Companion を更新してから、新しい検索を開始してください。",
+        "companionUpdateAction": "Companion を更新",
+        "noMatches": "一致する項目はありません。",
+        "terminal": {
+          "archive_too_large": "ZIP ファイルが大きすぎるため検索できません。より小さい ZIP ファイルを開いて、再試行してください。",
+          "archive_unreadable": "ZIP ファイルを読み取れませんでした。ZIP ファイルへのアクセス権を確認して、再試行してください。",
+          "complete": "検索が完了しました。",
+          "partial_coverage": "検索対象の一部を処理できずに終了しました。スキップされた項目を確認して、再試行してください。",
+          "time_limit": "時間制限に達しました。検索範囲を絞って続行してください。",
+          "result_limit": "結果数の上限に達しました。検索範囲を絞って続行してください。",
+          "source_failure": "検索元の障害により検索が停止しました。接続を確認して、再試行してください。"
+        },
+        "skips": {
+          "unreadable_directory_other": "{{count}} 個のフォルダーを読み取れませんでした。",
+          "unsafe_name_other": "{{count}} 個の項目に安全でない名前がありました。",
+          "archive_too_large_other": "{{count}} 個の ZIP ファイルが大きすぎるため検索できませんでした。",
+          "archive_unreadable_other": "{{count}} 個の ZIP ファイルを読み取れませんでした。",
+          "queue_limit_other": "フォルダーのキューがいっぱいになったため、検索が停止しました。"
+        }
+      }
     },
     "commands": {
       "categories": {
@@ -1647,6 +1826,16 @@
     }
   },
   "common": {
+    "uiText": {
+      "import": "インポート",
+      "export": "エクスポート",
+      "saveCopy": "コピーを保存",
+      "compatibilityMode": "互換モードを試す",
+      "passwordChanged": "パスワードを変更しました。新しいパスワードでサインインしてください。",
+      "or": "または",
+      "clearFilters": "フィルターをクリア",
+      "serverIllustration": "サーバーのイラスト"
+    },
     "actions": {
       "cancel": "キャンセル",
       "close": "閉じる",
@@ -1704,6 +1893,14 @@
         "name": "Sambee ダーク",
         "description": "アプリの標準ダークテーマ"
       }
+    },
+    "editor": {
+      "description": "説明",
+      "descriptionHelp": "テーマ名の下に表示する任意のテキスト",
+      "mode": "モード",
+      "modeHelp": "ライトテーマとダークテーマのどちらですか？",
+      "name": "名前",
+      "nameHelp": "テーマ選択画面に表示する名前"
     }
   },
   "keyboardShortcutsHelp": {

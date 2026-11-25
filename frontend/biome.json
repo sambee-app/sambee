@@ -1,89 +1,32 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.4/schema.json",
   "root": false,
-  "vcs": {
-    "enabled": true,
-    "clientKind": "git",
-    "useIgnoreFile": false
-  },
-  "files": {
-    "ignoreUnknown": true
-  },
-  "formatter": {
-    "enabled": true,
-    "indentStyle": "space",
-    "indentWidth": 2,
-    "lineWidth": 140
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "preset": "recommended",
-      "complexity": {
-        "useLiteralKeys": "off"
-      },
-      "style": {
-        "noNonNullAssertion": "off",
-        "noRestrictedImports": {
-          "level": "error",
-          "options": {
-            "paths": {
-              "@mui/material": {
-                "importNames": [
-                  "Chip"
-                ],
-                "message": "Use CompactBadge to enforce the 18-character badge-label limit."
-              },
-              "@mui/material/Chip": "Use CompactBadge to enforce the 18-character badge-label limit."
-            }
-          }
-        }
-      },
-      "suspicious": {
-        "noExplicitAny": "warn"
-      }
-    }
-  },
+  "extends": ["./biome-base.json"],
   "overrides": [
     {
       "includes": [
-        "src/**/__tests__/**",
-        "src/test/**"
+        "src/**/*.tsx",
+        "src/**/*.jsx",
+        "!src/**/__tests__/**",
+        "!src/**/__fixtures__/**",
+        "!src/**/fixtures/**",
+        "!src/**/*.test.tsx",
+        "!src/**/*.test.jsx",
+        "!src/**/*.spec.tsx",
+        "!src/**/*.spec.jsx",
+        "!src/test/**",
+        "!src/components/AppPickerPreview.tsx",
+        "!src/components/ConflictDialogPreview.tsx",
+        "!src/components/DialogPreviewLayout.tsx",
+        "!src/components/DoneEditingWindowPreview.tsx",
+        "!src/components/LargeFileWarningPreview.tsx",
+        "!src/components/PreferencesPreview.tsx",
+        "!src/components/PreviewHome.tsx",
+        "!src/components/PreviewIndexLink.tsx",
+        "!src/components/PreviewLocalizationControls.tsx",
+        "!src/components/RecoveryDialogPreview.tsx"
       ],
-      "linter": {
-        "rules": {
-          "correctness": {
-            "noComponentHookFactories": "off",
-            "noPlaywrightMissingAwait": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": [
-        "src/components/CompactBadge.tsx"
-      ],
-      "linter": {
-        "rules": {
-          "style": {
-            "noRestrictedImports": "off"
-          }
-        }
-      }
+      "plugins": ["../frontend/no-hardcoded-ui-text.grit"]
     }
-  ],
-  "javascript": {
-    "formatter": {
-      "quoteStyle": "double",
-      "trailingCommas": "es5"
-    }
-  },
-  "assist": {
-    "enabled": true,
-    "actions": {
-      "source": {
-        "organizeImports": "on"
-      }
-    }
-  }
+  ]
 }

@@ -567,7 +567,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                     <>
                       <Typography variant="body2">{t("viewer.slowImage")}</Typography>
                       <Button color="inherit" size="small" onClick={cancelCurrentImageLoad}>
-                        Cancel
+                        {t("common.actions.cancel")}
                       </Button>
                     </>
                   )}

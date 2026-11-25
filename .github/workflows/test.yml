@@ -63,8 +63,13 @@ jobs:
 
     - name: Validate localization catalogs
       run: |
-        node scripts/validate-localization.mjs
+        node scripts/validate-localization.mjs --release
         node --test scripts/validate-localization.test.mjs
+
+    - name: Check native UI literals
+      run: |
+        node scripts/check-native-ui-literals.mjs
+        node --test scripts/check-native-ui-literals.test.mjs
 
   # ──────────────────────────────────────────────
   # Website docs: validator + standalone tests
@@ -248,6 +253,9 @@ jobs:
 
     - name: Install dependencies
       run: cd frontend && npm ci --prefer-offline
+
+    - name: Test UI text lint rule
+      run: node --test scripts/check-ui-text-rule.test.mjs
 
     - name: Verify frontend type correctness
       id: frontend-types

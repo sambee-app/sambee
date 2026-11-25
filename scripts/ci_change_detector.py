@@ -29,10 +29,12 @@ BACKEND_EXTRAS = frozenset(
 FRONTEND_EXTRAS = frozenset(
     {
         "VERSION",
+        "biome.json",
         "scripts/sync-version",
         "scripts/ci_change_detector.py",
         "scripts/ci_frontend_shards.py",
         "scripts/check_ci_test_gate.py",
+        "scripts/check-ui-text-rule.test.mjs",
         ".github/workflows/test.yml",
         ".github/workflows/lint.yml",
         ".github/workflows/docker-image-preview-publish.yml",
@@ -40,7 +42,16 @@ FRONTEND_EXTRAS = frozenset(
         ".github/actions/sync-version-check/action.yml",
     }
 )
-COMPANION_EXTRAS = frozenset({"VERSION", "scripts/sync-version"})
+COMPANION_EXTRAS = frozenset(
+    {
+        "VERSION",
+        "biome.json",
+        "scripts/sync-version",
+        "frontend/biome.json",
+        "frontend/biome-base.json",
+        "frontend/no-hardcoded-ui-text.grit",
+    }
+)
 WEBSITE_EXTRAS = frozenset({"VERSION"})
 FULL_TREE_DIFF_BASE = "__empty_tree__"
 ARCHIVE_TOPOLOGY_PREFIXES = (

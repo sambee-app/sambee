@@ -74,6 +74,14 @@ if [ -d "$REPO_ROOT/companion/src" ]; then
     echo -e "${YELLOW}=== Companion: Rust Format ===${NC}"
     cd "$REPO_ROOT/companion/src-tauri" || exit 1
 
+    echo "Checking native UI text..."
+    if node "$SCRIPT_DIR/check-native-ui-literals.mjs"; then
+        echo -e "${GREEN}✓ Native UI literal check passed${NC}\n"
+    else
+        echo -e "${RED}✗ Native UI literal check failed${NC}\n"
+        exit 1
+    fi
+
     echo "Checking companion Rust formatting..."
     if cargo fmt --check; then
         echo -e "${GREEN}✓ Companion Rust format check passed${NC}\n"
