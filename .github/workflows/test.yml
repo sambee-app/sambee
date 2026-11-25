@@ -26,6 +26,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      frontend_shards: ${{ steps.frontend-shards.outputs.frontend_shards }}
       companion: ${{ steps.filter.outputs.companion }}
       website: ${{ steps.filter.outputs.website }}
     steps:
@@ -37,6 +38,10 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
       run: python3 scripts/ci_change_detector.py
+
+    - name: Validate frontend shard matrix
+      id: frontend-shards
+      run: python3 scripts/ci_frontend_shards.py
 
     - name: Check changed whitespace
       env:
@@ -171,9 +176,47 @@ jobs:
       run: docker rm -f sambee-backend-test || true
 
   # ──────────────────────────────────────────────
-  # Frontend: Node.js + tsc + vitest
+  # Frontend: parallel Vitest shards and browser checks
   # ──────────────────────────────────────────────
-  frontend:
+  frontend-tests:
+    name: frontend-tests (shard ${{ matrix.index }}/${{ matrix.total }})
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.frontend_shards) }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+    - name: Set up Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '24'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci --prefer-offline
+
+    - name: Run Vitest shard
+      run: npm run test:ci -- --shard=${{ matrix.index }}/${{ matrix.total }} --reporter=default --reporter=json --outputFile.json=vitest-shard.json
+
+    - name: Upload Vitest shard report
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: frontend-vitest-shard-${{ matrix.index }}-attempt-${{ github.run_attempt }}
+        path: frontend/vitest-shard.json
+        retention-days: 7
+        if-no-files-found: error
+
+  frontend-checks:
     needs: changes
     if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -209,9 +252,6 @@ jobs:
     - name: Verify frontend type correctness
       id: frontend-types
       run: cd frontend && npm run typecheck
-
-    - name: Run tests
-      run: cd frontend && npm run test:ci
 
     - name: Build production frontend
       run: cd frontend && npm run build:assets
@@ -290,7 +330,7 @@ jobs:
   # ──────────────────────────────────────────────
   test-gate:
     if: always()
-    needs: [changes, backend, frontend, companion, website-docs]
+    needs: [changes, backend, frontend-tests, frontend-checks, companion, website-docs]
     runs-on: ubuntu-latest
     steps:
     - name: Checkout gate script

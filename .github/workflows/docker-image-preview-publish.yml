@@ -158,8 +158,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ${{ needs.prepare.outputs.python_runtime_image }}
-    env:
-      HOME: /root
     defaults:
       run:
         shell: bash
@@ -237,16 +235,18 @@ jobs:
       if: steps.source-ci.outputs.frontend != 'true'
       run: cd frontend && npm run build
 
+    # Firefox needs the container user's home, but the host Docker CLI must keep its own.
     - name: Install browser dependencies
       if: steps.source-ci.outputs.frontend != 'true'
-      run: cd frontend && npm run test:e2e:install -- --with-deps
+      run: cd frontend && HOME=/root npm run test:e2e:install -- --with-deps
 
     - name: Run browser correctness contracts
+      id: browser-correctness
       if: steps.source-ci.outputs.frontend != 'true'
-      run: cd frontend && npm run test:browser:ci
+      run: cd frontend && HOME=/root npm run test:browser:ci
 
     - name: Upload browser correctness reports
-      if: ${{ !cancelled() && steps.source-ci.outputs.frontend != 'true' }}
+      if: ${{ !cancelled() && (steps.browser-correctness.outcome == 'success' || steps.browser-correctness.outcome == 'failure') }}
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: release-browser-correctness

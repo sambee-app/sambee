@@ -59,13 +59,15 @@ It first detects which top-level product areas changed, then fans out only the r
 
 Manual dispatch runs all areas. Changes to shared frontend CI infrastructure also select frontend validation.
 
-The workflow ends with a single gate job so branch protection can depend on one stable required check instead of a changing set of per-area jobs. Require `CI: Test / test-gate` in the repository's branch protection or ruleset. A failed browser check fails the selected frontend job and therefore the gate; browser correctness doesn't wait for Docker image creation.
+The workflow ends with a single gate job so branch protection can depend on one stable required check instead of a changing set of per-area jobs. Require `CI: Test / test-gate` in the repository's branch protection or ruleset. Browser correctness doesn't wait for Docker image creation.
 
 In the backend job, regular tests run under `pytest-xdist` for throughput, while `@performance` tests run in a separate serial pass so wall-clock assertions are not distorted by parallel worker contention.
 
 Backend pytest runs treat unexpected warnings as errors, including resource-cleanup warnings. The shared policy in `backend/pyproject.toml` applies to both local and CI runs, and warning summaries aren't suppressed. Tests that deliberately trigger a warning must assert it with `pytest.warns(...)`, matching the warning category and message. Fix application warnings rather than ignoring them. Unavoidable dependency exceptions must be narrowly scoped and documented; the current exception covers Starlette's TestClient reference to AnyIO's deprecated `BlockingPortal` alias. Remove that exception when the dependency no longer needs it.
 
-The `frontend` job requires a clean TypeScript check, runs Vitest, builds production assets with `npm run build:assets`, then installs version-matched Playwright Chromium/Firefox binaries and their Linux dependencies and runs `npm run test:browser:ci`. The asset command does not repeat the TypeScript check. Both engines run on frontend pull requests, pushes, and manual dispatch. The same required checks run in release fallback when successful source CI cannot be reused.
+The `frontend-tests` matrix runs Vitest in parallel shards. The `changes` job reads `frontend/ci-shards.json`, checks that each index from 1 through the total occurs exactly once, and passes the matrix to GitHub Actions. With `fail-fast: false`, the other shards continue if one fails. Each shard logs its file count and duration and uploads a JSON report.
+
+The `frontend-checks` job runs in parallel with the shards. It checks version metadata and Tauri version alignment, checks TypeScript, and builds production assets with `npm run build:assets`. The asset command does not repeat the TypeScript check. The job then installs Playwright Chromium and Firefox with their Linux dependencies and runs `npm run test:browser:ci`. Both engines run on frontend pull requests, pushes, and manual dispatch.
 
 The browser command requires exactly 20 production cases. In each engine, four scenarios run at desktop and narrow widths, and two more check Markdown print-link formatting in light and dark modes. The width scenarios check real normalization and syntax workers, entity decoding, native selection, focus, heading links, search, regex replacement with undo and redo, exact saved content, and cleanup when a file closes and opens again. Two development cases per engine exercise Vite's dependency-resolution path. Browser APIs and workers are real; backend responses are mocked at `http://localhost:3000/browse/smb/demo`. This isn't full-stack SMB E2E or evidence of physical printing, browser-menu Find, hardware IME, or assistive-technology behavior.
 
@@ -75,7 +77,9 @@ The correctness reporter rejects missing, duplicate, skipped, failed, and retrie
 
 Type correctness is mandatory in routine CI, release fallback, ordinary `npm run build`, `./scripts/test`, and the VS Code frontend validation task. The old root `tsc --noEmit` command checked no input files and mustn't be used as a substitute. Regression tests protect required command wiring, strict options, separate environments, and complete source coverage. Unit and browser correctness remain independent required gates.
 
-The required gate rejects an unexpectedly skipped selected job. Only unrelated, unselected areas may be skipped. Superseded pull-request test/lint runs are cancelled; main-branch validation runs aren't cancelled by that policy. Release reuse requires the exact source commit's successful frontend job, its successful browser-correctness step, and the new required `Verify frontend type correctness` step. Missing, skipped, or failed steps and legacy advisory type-check runs don't qualify.
+When CI selects the frontend or runs on manual dispatch, `test-gate` requires success from both `frontend-checks` and the combined `frontend-tests` matrix result. A failed or cancelled shard prevents the matrix from passing. The frontend jobs can skip only when CI doesn't select the frontend. Superseded pull-request test and lint runs are cancelled; this policy doesn't cancel main-branch runs.
+
+Release reuse requires a completed, successful `main` push run for the exact source commit. The run must contain exactly the shard jobs in the committed matrix, with no missing, extra, or duplicate names. Each shard job and its `Run Vitest shard` step must succeed. The `frontend-checks` job and its `Verify frontend type correctness` and `Run browser correctness contracts` steps must also succeed. If the evidence is incomplete, including for older runs with a single `frontend` job, the release runs its own frontend checks.
 
 The current companion test job does not call `./scripts/test`.
 It runs explicit steps for Node install, companion TypeScript type checking, and the archive topology conformance script, including Rust tests, formatting, and Clippy.
@@ -144,7 +148,9 @@ The workflow also ends with one gate job so branch protection can depend on a st
 
 For pull requests that change packaging inputs, this workflow runs native Windows tests, builds an unsigned NSIS installer, and runs a recovery smoke test against the packaged executable. A new revision cancels earlier verification for the same pull request. Manual verification runs independently.
 
-The package build produces the frontend assets before the native tests run. The package and tests use the same Windows target, Tauri custom protocol, and release profile. Verification uses less Rust optimization, more parallel code generation, and panic unwinding so Cargo can reuse dependencies between the package and the test harnesses. Because the packaged executable also unwinds, the smoke test does not verify the `panic = "abort"` behavior of shipping builds. Tests that need debug assertions do not run on Windows. The full library suite runs without the recovery feature. A second pass runs only the recovery-specific test.
+The package build produces the frontend assets before the native tests run. The package and tests use the same Windows target, Tauri custom protocol, and release profile. Verification uses less Rust optimization, more parallel code generation, and panic unwinding so Cargo can reuse dependencies between the package and the test harnesses. Because the packaged executable also unwinds, the smoke test does not verify the `panic = "abort"` behavior of shipping builds. Tests that need debug assertions do not run on Windows.
+
+The Windows job runs the library tests once, with `recovery-verification` enabled. It saves the test log and requires the recovery test to pass. Windows CI does not run the library tests without this feature. The Linux `companion` job in `CI: Test` still runs them without it.
 
 The Windows Rust dependency cache is separate from Linux and release caches. These settings do not change signed release builds.
 
@@ -156,7 +162,7 @@ Host runner choice doesn't replace production-runtime validation. Debian-family 
 
 The backend job builds the `backend-test` Docker target, which inherits the same runtime base as production. It runs mypy and the backend test suites inside that target, including when a Python image or other runtime input changes. The release validation job uses the pinned Debian-based Python container because `scripts/install-system-deps` requires distro-provided ImageMagick 7, while the default Ubuntu GitHub-hosted runner image still resolves `imagemagick` to ImageMagick 6.
 
-The release `validate-tests` job runs as root and sets `HOME=/root` at job scope. GitHub Actions can otherwise supply a mounted home directory owned by another user, which Firefox refuses to use. The override keeps dependency installation, Playwright browser installation, and browser execution on the same owned home. Hosted frontend PR checks keep the runner's normal home; don't apply `/root` globally or change ownership of GitHub's mounted directories.
+The release `validate-tests` job sets `HOME=/root` only on the Playwright installation and browser test commands. This gives Firefox a home that the container user owns and leaves the host Docker client on the runner's home. The job uploads browser reports after the browser checks pass or fail, but not if those checks were skipped.
 
 ## Shared Runtime Targets
 

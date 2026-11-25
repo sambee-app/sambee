@@ -133,15 +133,11 @@ jobs:
         shell: pwsh
         run: |
           # Tauri has built the frontend assets required by custom-protocol.
-          $buildArgs = @('--release', '--lib', '--target', 'x86_64-pc-windows-msvc')
-          cargo test @buildArgs --features tauri/custom-protocol
-          if ($LASTEXITCODE -ne 0) { throw 'Native Rust tests failed.' }
-
           $recoveryTest = 'server::directory_manager::tests::verification_controls_reconcile_gap_and_release_resources'
           $nativeTestLog = '../recovery-report/native-tests.log'
-          cargo test @buildArgs --features 'tauri/custom-protocol,recovery-verification' $recoveryTest -- --exact --format pretty 2>&1 |
+          cargo test --release --lib --target x86_64-pc-windows-msvc --features 'tauri/custom-protocol,recovery-verification' -- --format pretty 2>&1 |
             Tee-Object -FilePath $nativeTestLog
-          if ($LASTEXITCODE -ne 0) { throw 'Native recovery test failed. Inspect recovery-report/native-tests.log.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows tests failed. Inspect recovery-report/native-tests.log.' }
 
           $passedTest = '^test ' + [regex]::Escape($recoveryTest) + ' \.\.\. ok$'
           if (-not (Select-String -LiteralPath $nativeTestLog -Pattern $passedTest -Quiet)) {

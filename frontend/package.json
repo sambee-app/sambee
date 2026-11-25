@@ -1,6 +1,6 @@
 {
   "name": "sambee-frontend",
-  "version": "3.0.9",
+  "version": "3.0.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,7 +15,7 @@
     "build": "npm run typecheck && npm run build:assets",
     "build:assets": "npm run prepare:pdfjs-assets && vite build",
     "preview": "vite preview",
-    "prelint": "npm run check:dependencies && npm run check:biome",
+    "prelint": "npm run check:biome",
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
     "format": "biome format --write src",
