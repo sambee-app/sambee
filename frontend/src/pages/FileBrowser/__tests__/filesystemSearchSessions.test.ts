@@ -9,7 +9,7 @@ import {
 } from "../../../services/filesystemSearchContract";
 import { SearchStreamError } from "../../../services/filesystemSearchStream";
 import { FileType } from "../../../types";
-import { FilesystemSearchSessions, searchResultDisplayPath, searchResultItem } from "../filesystemSearchSessions";
+import { FilesystemSearchSessions, searchResultItem, searchResultLocation } from "../filesystemSearchSessions";
 
 const request: FilesystemSearchRequest = {
   version: 1,
@@ -40,7 +40,7 @@ const flush = async () => {
 };
 
 describe("file-system search sessions", () => {
-  it("uses the real archive identity and a display-only relative path", () => {
+  it("uses the real archive identity and shows only the parent location", () => {
     const first = member("docs/a.zip");
     const second = member("docs/b.zip");
     expect(searchResultItem("demo", first).key).not.toBe(searchResultItem("demo", second).key);
@@ -49,10 +49,20 @@ describe("file-system search sessions", () => {
       path: "dir/same.txt",
       location: { source: { connectionId: "demo", path: "docs/a.zip" }, path: "dir" },
     });
-    expect(searchResultDisplayPath(request, first)).toBe("a.zip ▸ dir/same.txt");
-    expect(searchResultDisplayPath({ ...request, root: { kind: "archive", path: "docs/a.zip", member_path: "dir" } }, first)).toBe(
-      "same.txt"
-    );
+    expect(searchResultLocation(request, first)).toBe("a.zip/dir");
+    expect(searchResultLocation({ ...request, root: { kind: "archive", path: "docs/a.zip", member_path: "" } }, first)).toBe("dir");
+    expect(searchResultLocation({ ...request, root: { kind: "archive", path: "docs/a.zip", member_path: "dir" } }, first)).toBe("");
+  });
+
+  it.each([
+    ["docs/same.txt", ""],
+    ["docs/sub/deeper/same.txt", "sub/deeper"],
+  ])("shows the physical parent of %s relative to the search root", (path, expected) => {
+    const item: FilesystemSearchItem = {
+      entry: { name: "same.txt", path, type: FileType.FILE, is_readable: true, is_hidden: false },
+      target: { kind: "physical", path },
+    };
+    expect(searchResultLocation(request, item)).toBe(expected);
   });
 
   it("keeps independent runs, snapshots their requests, and ignores records after close", async () => {

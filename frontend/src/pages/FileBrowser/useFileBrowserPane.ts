@@ -63,7 +63,7 @@ import {
   virtualItem,
   virtualLocation,
 } from "./contentProviders";
-import { FilesystemSearchSessions } from "./filesystemSearchSessions";
+import { FilesystemSearchSessions, isSearchResultFromSource } from "./filesystemSearchSessions";
 import {
   useFileBrowserViewModePreference,
   useQuickNavIncludeDotDirectoriesPreference,
@@ -1719,7 +1719,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
   useEffect(() => {
     setViewInfo((previous) => {
-      if (!previous?.virtualSource || previous.viewerId !== "image") {
+      if (!previous?.virtualSource || previous.viewerId !== "image" || previous.searchSessionId) {
         return previous;
       }
 
@@ -2164,6 +2164,25 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
     if (!finalPath) return;
 
+    if (viewInfo?.searchSessionId) {
+      const search = searchSessionsRef.current?.get(viewInfo.searchSessionId);
+      const viewedItem = search?.rows.find(
+        ({ item }) =>
+          item.handle.path === finalPath &&
+          isSearchResultFromSource(item.handle, viewInfo.connectionId ?? connectionIdRef.current, viewInfo.virtualSource)
+      )?.item;
+      if (!viewedItem) return;
+
+      if (originTabId && originTabId !== activeTabIdRef.current) {
+        const originSession = tabCollectionRef.current.sessions.get(originTabId);
+        if (originSession) originSession.focusedItemIdentity = viewedItem.key;
+      } else {
+        const targetIndex = sortedFiles.findIndex((file) => getFileRowIdentity(file) === viewedItem.key);
+        if (targetIndex >= 0) updateFocus(targetIndex, { immediate: true });
+      }
+      return;
+    }
+
     if (originTabId && originTabId !== activeTabIdRef.current) {
       const originSession = tabCollectionRef.current.sessions.get(originTabId);
       if (originSession) {
@@ -2307,14 +2326,26 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       virtualSource?: VirtualItemHandle
     ) => {
       const viewerSessionId = createViewerSessionId();
-      const galleryImages = virtualSource
-        ? sortedItems
-            .filter(isVirtualItem)
-            .filter((item) => item.entry.type === "file" && isImageFile(item.entry.name))
-            .map((item) => item.handle.path)
-        : imageFiles;
+      const activeSearchId = tabCollectionRef.current.sessions.get(activeTabIdRef.current)?.searchSessionId;
+      const searchSessionId = file.browser_identity ? activeSearchId : undefined;
+      const galleryImages = searchSessionId
+        ? itemsRef.current
+            .filter(
+              ({ entry, handle }) =>
+                entry.type === FileType.FILE &&
+                entry.is_readable &&
+                isImageFile(entry.name) &&
+                isSearchResultFromSource(handle, targetConnectionId, virtualSource)
+            )
+            .map(({ handle }) => handle.path)
+        : virtualSource
+          ? sortedItems
+              .filter(isVirtualItem)
+              .filter((item) => item.entry.type === "file" && isImageFile(item.entry.name))
+              .map((item) => item.handle.path)
+          : imageFiles;
       const useImageGallery =
-        !tabCollectionRef.current.sessions.get(activeTabIdRef.current)?.searchSessionId &&
+        (!activeSearchId || searchSessionId !== undefined) &&
         viewerId === "image" &&
         isImageFile(file.name) &&
         targetConnectionId === connectionIdRef.current &&
@@ -2353,6 +2384,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
           currentIndex: effectiveIndex,
           sessionId: viewerSessionId,
           originTabId: activeTabIdRef.current,
+          searchSessionId,
         });
         return;
       }
@@ -2372,6 +2404,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         virtualSource,
         sessionId: viewerSessionId,
         originTabId: activeTabIdRef.current,
+        searchSessionId,
       });
     },
     [imageFiles, onOpenViewer, recordRecentFileAttempt, sortedItems]

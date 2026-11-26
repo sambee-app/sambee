@@ -51,6 +51,7 @@ export interface ViewInfo {
   currentIndex?: number;
   sessionId: string;
   originTabId?: string;
+  searchSessionId?: string;
 }
 
 export interface BrowserViewerPickerState {

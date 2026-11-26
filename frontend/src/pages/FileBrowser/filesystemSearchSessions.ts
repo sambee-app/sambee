@@ -9,7 +9,15 @@ import {
 import { FilesystemSearchStartError, startFilesystemSearch } from "../../services/filesystemSearchService";
 import { SearchStreamError } from "../../services/filesystemSearchStream";
 import { randomUuid } from "../../utils/randomUuid";
-import { type BrowserItem, physicalItem, physicalLocation, virtualItem, virtualLocation } from "./contentProviders";
+import {
+  type BrowserItem,
+  type ContentItemHandle,
+  physicalItem,
+  physicalLocation,
+  type VirtualItemHandle,
+  virtualItem,
+  virtualLocation,
+} from "./contentProviders";
 
 type Terminal = Extract<FilesystemSearchRecord, { type: "terminal" }>;
 
@@ -28,18 +36,21 @@ export interface FilesystemSearchSession {
 
 export interface FilesystemSearchRow {
   item: BrowserItem;
-  displayPath: string;
 }
 
 type SearchRunner = typeof startFilesystemSearch;
 
+function parentPath(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf("/")));
+}
+
 /** Result keys identify the source and real target, not a display path or file name. */
 export function searchResultItem(connectionId: string, result: FilesystemSearchItem): BrowserItem {
   if (result.target.kind === "physical") {
-    const parent = result.target.path.split("/").slice(0, -1).join("/");
+    const parent = parentPath(result.target.path);
     return physicalItem(physicalLocation(connectionId, parent), { ...result.entry, path: result.target.path });
   }
-  const parent = result.target.member_path.split("/").slice(0, -1).join("/");
+  const parent = parentPath(result.target.member_path);
   const source = physicalLocation(connectionId, result.target.archive_path);
   return virtualItem(virtualLocation("zip", connectionId, source, parent), {
     ...result.entry,
@@ -48,16 +59,29 @@ export function searchResultItem(connectionId: string, result: FilesystemSearchI
   });
 }
 
-/** A display-only path. It must not be used to resolve an item action. */
-export function searchResultDisplayPath(request: FilesystemSearchRequest, result: FilesystemSearchItem): string {
+/** The parent location relative to the search root, for display only. */
+export function searchResultLocation(request: FilesystemSearchRequest, result: FilesystemSearchItem): string {
   const relative = (path: string, root: string) => (root && path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path);
   if (result.target.kind === "physical") {
-    return relative(result.target.path, request.root.path);
+    return parentPath(relative(result.target.path, request.root.path));
   }
   if (request.root.kind === "archive" && result.target.archive_path === request.root.path) {
-    return relative(result.target.member_path, request.root.member_path);
+    return parentPath(relative(result.target.member_path, request.root.member_path));
   }
-  return `${relative(result.target.archive_path, request.root.path)} ▸ ${result.target.member_path}`;
+  const archive = relative(result.target.archive_path, request.root.path);
+  const memberParent = parentPath(result.target.member_path);
+  return memberParent ? `${archive}/${memberParent}` : archive;
+}
+
+/** A gallery has one connection and, for ZIP members, one archive. */
+export function isSearchResultFromSource(handle: ContentItemHandle, connectionId: string, virtualSource?: VirtualItemHandle): boolean {
+  if (handle.location.connectionId !== connectionId) return false;
+  if (handle.kind === "physical") return virtualSource === undefined;
+  return (
+    virtualSource !== undefined &&
+    handle.location.providerId === virtualSource.location.providerId &&
+    handle.location.source.path === virtualSource.location.source.path
+  );
 }
 
 /**
@@ -107,10 +131,9 @@ export class FilesystemSearchSessions {
           const item = searchResultItem(snapshot.source.id, result);
           if (!seen.has(item.key)) {
             seen.add(item.key);
-            const displayPath = searchResultDisplayPath(snapshot, result);
+            const location = searchResultLocation(snapshot, result);
             rows.push({
-              item: { ...item, entry: { ...item.entry, browser_identity: item.key, search_display_path: displayPath } },
-              displayPath,
+              item: { ...item, entry: { ...item.entry, browser_identity: item.key, search_location: location } },
             });
           }
         }

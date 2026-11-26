@@ -30,6 +30,7 @@ import type { Connection, FileEntry } from "../../types";
 import { FileType } from "../../types";
 import { physicalLocation } from "../FileBrowser/contentProviders";
 import { FileBrowserPane, type FileBrowserPaneProps } from "../FileBrowser/FileBrowserPane";
+import type { FilesystemSearchSession } from "../FileBrowser/filesystemSearchSessions";
 import type { UseFileBrowserPaneReturn } from "../FileBrowser/types";
 
 vi.mock("react-i18next", async (importOriginal) => ({
@@ -584,6 +585,51 @@ describe("FileBrowserPane", () => {
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
       act(() => vi.advanceTimersByTime(1));
       expect(screen.getByRole("progressbar", { name: "app.loading" })).toBeInTheDocument();
+    });
+
+    it("delays live search progress, keeps it during streaming, and hides it on tab switch or completion", () => {
+      const session: FilesystemSearchSession = {
+        id: "first-search",
+        request: {
+          version: 1,
+          source: { kind: "smb", id: "conn-1" },
+          root: { kind: "directory", path: "" },
+          query: "report",
+          case_sensitive: false,
+          folder_depth: "recursive",
+          item_type: "all",
+          search_archives: false,
+        },
+        requestId: null,
+        rows: [],
+        status: "running",
+        terminal: null,
+        error: null,
+      };
+      const pane = createMockPane();
+      const props = defaultProps({ pane });
+      const searchPane = { ...pane, isSearchTab: true, searchSession: session };
+      const { rerender } = render(<FileBrowserPane {...props} pane={searchPane} />);
+      act(() => vi.advanceTimersByTime(199));
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      rerender(<FileBrowserPane {...props} pane={{ ...searchPane, searchSession: { ...session, status: "finished" } }} />);
+      act(() => vi.advanceTimersByTime(1));
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+      rerender(<FileBrowserPane {...props} pane={searchPane} />);
+      act(() => vi.advanceTimersByTime(200));
+      const progress = screen.getByRole("progressbar", { name: "fileBrowser.search.live.running" });
+      expect(progress.parentElement).toBe(screen.getByTestId("file-list").parentElement);
+      rerender(<FileBrowserPane {...props} pane={{ ...searchPane, searchSession: { ...session, requestId: "stream-id" } }} />);
+      expect(screen.getByRole("progressbar")).toBe(progress);
+
+      const otherSearch = { ...session, id: "other-search" };
+      rerender(<FileBrowserPane {...props} pane={{ ...searchPane, searchSession: otherSearch }} />);
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(200));
+      expect(screen.getByRole("progressbar")).toBeInTheDocument();
+      rerender(<FileBrowserPane {...props} pane={{ ...searchPane, searchSession: { ...otherSearch, status: "interrupted" } }} />);
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     });
 
     it("clears the pending progress timer when the pane unmounts", () => {

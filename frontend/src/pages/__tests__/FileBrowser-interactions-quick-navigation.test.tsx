@@ -242,6 +242,46 @@ describe("Browser Component - Interactions", () => {
       });
     });
 
+    it.each(["Enter", "click"])("keeps Quick Navigation closed after opening a folder with %s", async (activation) => {
+      const user = userEvent.setup();
+      const history = vi.mocked(api.searchRecentDirectories);
+      history.mockResolvedValue({
+        result_limit: 10,
+        results: [
+          {
+            id: "recent-documents",
+            connection_id: "conn-1",
+            path: "Documents",
+            last_visited_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+      });
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");
+
+      await user.keyboard("{Control>}k{/Control}");
+      const input = screen.getByPlaceholderText("Quick navigation");
+      await user.type(input, "Documents");
+      const option = await screen.findByRole("option", { name: /^Documents\b/ });
+      const emptyQueryCount = () => history.mock.calls.filter(([query]) => query === "").length;
+      const beforeSelection = emptyQueryCount();
+
+      if (activation === "Enter") await user.keyboard("{Enter}");
+      else await user.click(option);
+
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe("/browse/smb/test-server-1/Documents");
+        expectDirectoryLoad("conn-1", "Documents");
+        expect(screen.getByTestId("file-list-container")).toHaveFocus();
+      });
+      await act(async () => window.dispatchEvent(new Event(RECENT_DIRECTORIES_CHANGED_EVENT)));
+      expect(input).toHaveValue("");
+      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+      expect(emptyQueryCount()).toBe(beforeSelection);
+
+      await user.keyboard("{Control>}k{/Control}");
+      expect(await screen.findByRole("listbox")).toBeVisible();
+    });
+
     it("does not reopen dismissed Directory Navigation after a history refresh", async () => {
       const user = userEvent.setup();
       vi.mocked(api.searchRecentDirectories).mockResolvedValue({

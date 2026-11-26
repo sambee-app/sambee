@@ -8,7 +8,7 @@ import EditNoteIcon from "@mui/icons-material/EditNote";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import ShortcutIcon from "@mui/icons-material/Shortcut";
 import { Box, IconButton, Tooltip, Typography } from "@mui/material";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDate, formatFileSize } from "../../pages/FileBrowser/formatters";
 import type { ViewMode } from "../../pages/FileBrowser/types";
@@ -17,11 +17,13 @@ import type { FileEntry } from "../../types";
 import { getArchiveMemberUnavailableMessageKey, isShortcutFile } from "../../utils/fileEntries";
 import { getFileIcon } from "../../utils/fileIcons";
 import { abbreviatePath } from "../../utils/pathDisplay";
+import { AbbreviatedPathLabel } from "./AbbreviatedPathLabel";
 import { FileRowButton } from "./FileRowButton";
 
 const LONG_PRESS_DURATION_MS = 450;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 const LONG_PRESS_SUPPRESSION_DURATION_MS = 1000;
+const NARROW_SEARCH_PANE = "@container search-results (width < 640px)";
 
 interface FileRowProps {
   file: FileEntry;
@@ -62,56 +64,13 @@ function getCompactFileMetadata(file: FileEntry): string | null {
   return metadata.length > 0 ? metadata.join(" \u00b7 ") : null;
 }
 
-function TargetPathLabel({ path, rowTextSx }: { path: string; rowTextSx?: Record<string, string> }) {
-  const labelRef = useRef<HTMLSpanElement>(null);
-  const measureRef = useRef<HTMLSpanElement>(null);
-  const [displayPath, setDisplayPath] = useState(path);
-
-  useEffect(() => {
-    const label = labelRef.current;
-    const measurement = measureRef.current;
-    if (!label || !measurement) return;
-
-    const updatePath = () => {
-      const availableWidth = label.clientWidth;
-      if (availableWidth <= 0) {
-        setDisplayPath(path);
-        return;
-      }
-      const measureText = (text: string) => {
-        measurement.textContent = text;
-        return measurement.getBoundingClientRect().width;
-      };
-      setDisplayPath(shortenTargetPath(path, availableWidth, measureText));
-    };
-
-    updatePath();
-    const observer = new ResizeObserver(updatePath);
-    observer.observe(label);
-    return () => observer.disconnect();
-  }, [path]);
-
+function ShortcutTargetLabel({ path, rowTextSx }: { path: string; rowTextSx?: Record<string, string> }) {
   return (
     <>
       <Typography variant="body2" component="span" noWrap sx={{ ...rowTextSx, color: "text.secondary", flex: "0 0 auto", mx: 1 }}>
         {"\u2192"}
       </Typography>
-      <Typography
-        ref={labelRef}
-        variant="body2"
-        component="span"
-        noWrap
-        title={path}
-        sx={{ ...rowTextSx, color: "text.secondary", flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
-      >
-        {displayPath}
-      </Typography>
-      <Typography
-        ref={measureRef}
-        aria-hidden
-        component="span"
-        sx={{ ...rowTextSx, left: -10000, position: "fixed", visibility: "hidden", whiteSpace: "nowrap" }}
-      />
+      <AbbreviatedPathLabel path={path} variant="body2" sx={{ ...rowTextSx, color: "text.secondary", flex: "1 1 auto", minWidth: 0 }} />
     </>
   );
 }
@@ -153,6 +112,7 @@ export const FileRow = React.memo(
       const suppressContextMenuRef = useRef(false);
       const suppressGestureRef = useRef(false);
       const isListMode = viewMode === "list";
+      const isSearchResult = file.search_location !== undefined;
       const linkTarget = file.link_target?.target;
       const isShortcut = isShortcutFile(file);
       const isUnavailableArchiveEntry = file.archive_entry_state !== undefined && !file.is_readable;
@@ -172,7 +132,7 @@ export const FileRow = React.memo(
           : isShortcut
             ? t("fileBrowser.row.shortcutSuffix")
             : ""
-      }${file.search_display_path ? `, ${file.search_display_path}` : ""}${hasUnsavedLocalDraft ? t("fileBrowser.row.unsavedLocalDraftSuffix") : ""}${isMultiSelected ? t("fileBrowser.row.selectedSuffix") : ""}`;
+      }${file.search_location ? `, ${t("fileBrowser.search.live.resultLocation", { path: file.search_location })}` : ""}${hasUnsavedLocalDraft ? t("fileBrowser.row.unsavedLocalDraftSuffix") : ""}${isMultiSelected ? t("fileBrowser.row.selectedSuffix") : ""}`;
 
       // Compute the correct row style based on focused + multi-selected state
       const rowStyle =
@@ -191,7 +151,7 @@ export const FileRow = React.memo(
             component="span"
             noWrap
             title={unavailableMessage ?? file.name}
-            sx={{ ...rowTextSx, color: "text.primary", flex: linkTargetPath || file.search_display_path ? "0 1 auto" : 1, minWidth: 0 }}
+            sx={{ ...rowTextSx, color: "text.primary", flex: linkTargetPath ? "0 1 auto" : 1, minWidth: 0 }}
           >
             {file.name}
           </Typography>
@@ -207,8 +167,7 @@ export const FileRow = React.memo(
               </Box>
             </Tooltip>
           ) : null}
-          {linkTargetPath ? <TargetPathLabel path={linkTargetPath} rowTextSx={rowTextSx} /> : null}
-          {file.search_display_path ? <TargetPathLabel path={file.search_display_path} rowTextSx={rowTextSx} /> : null}
+          {linkTargetPath ? <ShortcutTargetLabel path={linkTargetPath} rowTextSx={rowTextSx} /> : null}
         </Box>
       );
 
@@ -323,7 +282,11 @@ export const FileRow = React.memo(
               event.stopPropagation();
             }}
             disabled={isUnavailableArchiveEntry}
-            sx={[rowStyle, canOpenItemActions ? { pr: 7 } : {}, isUnavailableArchiveEntry ? { cursor: "not-allowed", opacity: 0.5 } : {}]}
+            sx={[
+              rowStyle,
+              isSearchResult ? { py: 0, ...(showCompactActions ? { paddingInlineEnd: 7 } : {}) } : canOpenItemActions ? { pr: 7 } : {},
+              isUnavailableArchiveEntry ? { cursor: "not-allowed", opacity: 0.5 } : {},
+            ]}
             dataSelected={isSelected ? "true" : undefined}
             ariaLabel={unavailableMessage ? `${ariaLabel}. ${unavailableMessage}` : ariaLabel}
             ariaPressed={useTouchSelectionControls && selectionMode ? isMultiSelected : undefined}
@@ -350,6 +313,58 @@ export const FileRow = React.memo(
                 });
               })();
 
+              if (isSearchResult) {
+                const showDetails = !useCompactLayout && !isListMode;
+                const stacked = {
+                  gridTemplateColumns: `${fileIconSize}px minmax(0, 1fr)`,
+                  gridTemplateAreas: file.search_location ? '"icon name" "icon location"' : '"icon name"',
+                  "& [data-search-metadata]": { display: "none" },
+                  "& [data-search-location]": { fontSize: `${COMPACT_LAYOUT_SIZE.FILE_ROW_METADATA_PX}px`, lineHeight: 1.2 },
+                };
+                return (
+                  <Box
+                    sx={{
+                      display: "grid",
+                      width: "100%",
+                      columnGap: 1.5,
+                      alignItems: "center",
+                      gridTemplateColumns: `${fileIconSize}px minmax(0, 3fr) minmax(0, 2fr)${showDetails ? " 5rem 11rem" : ""}`,
+                      gridTemplateAreas: showDetails ? '"icon name location size date"' : '"icon name location"',
+                      ...(useCompactLayout ? stacked : { [NARROW_SEARCH_PANE]: stacked }),
+                    }}
+                  >
+                    <Box sx={{ ...fileRowStyles.iconBox, gridArea: "icon", visibility: desktopSelection ? "hidden" : undefined }}>
+                      {icon}
+                    </Box>
+                    <Box sx={{ gridArea: "name", minWidth: 0 }}>{fileName}</Box>
+                    {file.search_location && (
+                      <Typography
+                        variant="body2"
+                        component="span"
+                        data-search-location
+                        sx={{ gridArea: "location", color: "text.secondary", minWidth: 0 }}
+                      >
+                        <AbbreviatedPathLabel path={file.search_location} />
+                      </Typography>
+                    )}
+                    {showDetails && (
+                      <>
+                        <Typography
+                          variant="body2"
+                          noWrap
+                          data-search-metadata
+                          sx={{ gridArea: "size", textAlign: "end", color: "text.secondary" }}
+                        >
+                          {file.type === "directory" ? "" : formatFileSize(file.size)}
+                        </Typography>
+                        <Typography variant="body2" noWrap data-search-metadata sx={{ gridArea: "date", color: "text.secondary" }}>
+                          {formatDate(file.modified_at)}
+                        </Typography>
+                      </>
+                    )}
+                  </Box>
+                );
+              }
               return useCompactLayout ? (
                 <>
                   <Box sx={{ ...fileRowStyles.iconBox, visibility: desktopSelection ? "hidden" : undefined }}>{icon}</Box>
@@ -484,7 +499,7 @@ export const FileRow = React.memo(
     prev.isSelected === next.isSelected &&
     prev.isMultiSelected === next.isMultiSelected &&
     prev.file.name === next.file.name &&
-    prev.file.search_display_path === next.file.search_display_path &&
+    prev.file.search_location === next.file.search_location &&
     prev.file.modified_at === next.file.modified_at &&
     prev.file.size === next.file.size &&
     prev.file.is_readable === next.file.is_readable &&

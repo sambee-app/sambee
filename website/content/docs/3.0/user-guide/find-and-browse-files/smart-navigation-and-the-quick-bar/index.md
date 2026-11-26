@@ -54,13 +54,17 @@ Press <kbd>/</kbd> when the file browser has keyboard focus. Enter a name and pr
 
 Plain text matches part of a name. Use `*` for any number of characters or `?` for one character to match a whole name. A backslash escapes `*`, `?`, or another backslash. Search ignores case by default.
 
-Search options appear below the quick bar when the search box has focus. Use <kbd>↑</kbd> and <kbd>↓</kbd> to move through the options and <kbd>Space</kbd> to change one. Press <kbd>Escape</kbd> to go back without clearing the search term. To reopen the options, press an up or down arrow key in the search box or click the box.
+Search options appear below the quick bar when the search box has focus. Use <kbd>↑</kbd> and <kbd>↓</kbd> to move through the options and <kbd>Space</kbd> to change one. Press <kbd>Escape</kbd> to close the options without clearing the search term. Press <kbd>Escape</kbd> again to clear the term and return to the file list. To reopen the options, press an up or down arrow key in the search box or click the box.
 
 ZIP search is off by default because reading each ZIP adds work and can add network requests. Turn it on to search members of ZIPs found in the selected folder scope. Very large ZIPs are skipped. A search started inside an open ZIP searches from the current ZIP folder, even when ZIP discovery is off. Nested ZIPs are not opened. Encrypted members and members with unsupported compression can appear in results, but cannot be opened.
 
-Results appear as the scan progresses. Press <kbd>Enter</kbd> to open the focused result without waiting for the scan to finish. The search term stays above the list so you can identify the search after switching tabs. Folders open in a normal tab. Quick navigation from a results tab also opens the target folder in a new tab, so the results stay available. You can download a supported selection, but other changes are disabled in results tabs. Results tabs close when you reload or close the page. Close the results tab to stop its scan.
+Results appear as the scan progresses. A yellow bar above the list shows activity during longer searches. The row above the list shows the search term and the path where you started the search, including the ZIP and its internal folder when applicable. To tell matches with the same name apart, check their parent paths. These paths are relative to the starting folder. A blank location means the match is directly in that folder.
 
-A scan can stop at an administrator-defined time or result limit, or report folders and ZIPs it could not read. A notice reports these conditions, and the activity bar keeps the scan status and result count. Existing results remain available, but they might not be complete. Narrow the scope or query and search again.
+Press <kbd>Enter</kbd> to open the focused result without waiting for the scan to finish. In the image viewer, use Left Arrow and Right Arrow to browse matching images on the same connection or within the same ZIP. The viewer uses the results available when it opens. To include newer matches, close the viewer and open an image again.
+
+Folders open in a normal tab. Quick navigation from a results tab also opens the target folder in a new tab, so the results stay available. You can download a supported selection, but other changes are disabled in results tabs. Results tabs close when you reload or close the page. Close the results tab to stop its scan.
+
+The default time limit is 60 seconds. A scan can stop at an administrator-defined time or result limit, or report folders and ZIPs it could not read. A notice reports these conditions, and the status area keeps the scan status and result count. Existing results remain available, but they might not be complete. Narrow the scope or query and search again.
 
 Local-drive live search is not available on macOS. Browse the local folder directly instead.
 

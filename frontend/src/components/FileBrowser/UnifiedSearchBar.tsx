@@ -819,39 +819,6 @@ export function UnifiedSearchBar({
     }
   }, [effectiveInputRef, executeSearch, query, results, selectedIndex]);
 
-  //
-  // handleSelect
-  //
-  const handleSelect = useCallback(
-    (value: string, action: SearchSelectionAction = "associated-viewer") => {
-      // Apply quick-bar teardown before command side effects open other overlays.
-      flushSync(() => {
-        setQuery("");
-        setResults([]);
-        setSettledEmptyFeedback(null);
-        setIsDropdownOpen(false);
-        setHasSearched(false);
-      });
-
-      const selectionBehavior: SearchSelectionBehavior | undefined = providerRef.current.onSelect(value, action);
-
-      const focusTarget = selectionBehavior?.focusTarget ?? "file-list";
-
-      if (focusTarget === "quick-bar") {
-        setTimeout(() => {
-          effectiveInputRef.current?.focus();
-          effectiveInputRef.current?.select();
-        }, 0);
-        return;
-      }
-
-      if (focusTarget === "file-list" && onBlurToFileList) {
-        onBlurToFileList();
-      }
-    },
-    [effectiveInputRef, onBlurToFileList, setQuery]
-  );
-
   const getSelectionAction = useCallback((event: { ctrlKey: boolean; altKey: boolean; shiftKey: boolean }): SearchSelectionAction => {
     if (event.ctrlKey && event.altKey) return "force-native-picker";
     if (event.ctrlKey) return "associated-native-app";
@@ -881,16 +848,42 @@ export function UnifiedSearchBar({
     providerRef.current.onDeactivate?.();
   }, [clearInterimTimer]);
 
-  const exitQuickNavigation = useCallback(() => {
+  const resetQuickBar = useCallback(() => {
     setQuery("");
     setResults([]);
     setSettledEmptyFeedback(null);
     setHasSearched(false);
     setSearchError(false);
     setRemoveError(false);
+    setLiveQueryError(null);
     dismissSearch();
+  }, [dismissSearch, setQuery]);
+
+  const exitQuickBar = useCallback(() => {
+    resetQuickBar();
     onBlurToFileList?.();
-  }, [dismissSearch, onBlurToFileList, setQuery]);
+  }, [onBlurToFileList, resetQuickBar]);
+
+  const handleSelect = useCallback(
+    (value: string, action: SearchSelectionAction = "associated-viewer") => {
+      const activeProvider = providerRef.current;
+      // End the search before selection can change the provider or open another overlay.
+      flushSync(resetQuickBar);
+
+      const selectionBehavior: SearchSelectionBehavior | undefined = activeProvider.onSelect(value, action);
+      const focusTarget = selectionBehavior?.focusTarget ?? "file-list";
+
+      if (focusTarget === "quick-bar") {
+        setTimeout(() => {
+          effectiveInputRef.current?.focus();
+          effectiveInputRef.current?.select();
+        }, 0);
+      } else if (focusTarget === "file-list") {
+        onBlurToFileList?.();
+      }
+    },
+    [effectiveInputRef, onBlurToFileList, resetQuickBar]
+  );
 
   const returnFromLiveOptions = useCallback(() => {
     suppressLiveOptionsOnFocusRef.current = true;
@@ -1006,19 +999,13 @@ export function UnifiedSearchBar({
 
         case "Escape":
           e.preventDefault();
-          if (liveSearchControls) {
+          if (liveSearchControls || showNavigationControls) {
             e.stopPropagation();
-            if (liveOptionsOpen) {
+            if (liveSearchControls && liveOptionsOpen) {
               setLiveOptionsOpen(false);
             } else {
-              dismissSearch();
-              onBlurToFileList?.();
+              exitQuickBar();
             }
-            break;
-          }
-          if (showNavigationControls) {
-            e.stopPropagation();
-            exitQuickNavigation();
             break;
           }
           if (disableDropdown) {
@@ -1068,7 +1055,7 @@ export function UnifiedSearchBar({
     [
       disableDropdown,
       dismissSearch,
-      exitQuickNavigation,
+      exitQuickBar,
       findSelectableResultIndex,
       getSelectionAction,
       handleSelect,
@@ -1412,7 +1399,7 @@ export function UnifiedSearchBar({
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      exitQuickNavigation();
+      exitQuickBar();
     } else if (event.key === "Tab") {
       event.preventDefault();
       const target =

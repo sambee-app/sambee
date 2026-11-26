@@ -399,6 +399,7 @@ describe("UnifiedSearchBar", () => {
     expect(input).toHaveFocus();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(onBlurToFileList).not.toHaveBeenCalled();
+    expect(input).toHaveValue("annual report");
     await user.keyboard("{ArrowUp}");
     expect(screen.getByRole("menuitemcheckbox", { name: "Search inside ZIP files" })).toHaveFocus();
     await user.tab();
@@ -407,7 +408,11 @@ describe("UnifiedSearchBar", () => {
     await user.tab();
     expect(screen.getByRole("button", { name: "After quick bar" })).toHaveFocus();
     await user.click(input);
-    await user.keyboard("{Escape}{Escape}");
+    await user.keyboard("{Escape}");
+    expect(input).toHaveValue("annual report");
+    expect(onBlurToFileList).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(input).toHaveValue("");
     expect(onBlurToFileList).toHaveBeenCalledOnce();
   });
 
