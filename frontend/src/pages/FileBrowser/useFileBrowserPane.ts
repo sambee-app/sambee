@@ -35,7 +35,6 @@ import { publishRecentDirectoriesChanged } from "../../services/recentDirectorie
 import { publishRecentFilesChanged } from "../../services/recentFilesSync";
 import type { StorageBackendRegistry } from "../../services/storageContracts";
 import { useSambeeTheme } from "../../theme";
-import { FILE_BROWSER_ROW_HEIGHT } from "../../theme/constants";
 import type { FileEntry, RecentFileValidationError } from "../../types";
 import { FileType, isApiError } from "../../types";
 import { classifyFileFailure, type FileFailureKind, getApiErrorMessage, getStorageErrorCode } from "../../utils/apiErrors";
@@ -328,7 +327,7 @@ function recordRecentHistoryEntry({
 
 export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBrowserPaneReturn {
   const {
-    rowHeight: baseRowHeight,
+    rowHeight,
     connections = [],
     contentProviders,
     storageRegistry,
@@ -468,10 +467,6 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   const [sortBy, setSortBy] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [viewMode, setViewMode] = useFileBrowserViewModePreference();
-  const rowHeight =
-    baseRowHeight === FILE_BROWSER_ROW_HEIGHT.DESKTOP_PX && viewMode === "details" && !activeSearchId
-      ? FILE_BROWSER_ROW_HEIGHT.DESKTOP_DETAILS_PX
-      : baseRowHeight;
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [includeDotDirectoriesInQuickNav] = useQuickNavIncludeDotDirectoriesPreference();
 

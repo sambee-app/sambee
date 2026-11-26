@@ -46,7 +46,7 @@ Visual state also matters:
 - the active pane gets the stronger emphasis treatment
 - the inactive pane is visually de-emphasized rather than treated as a separate route or different screen
 
-Desktop Details rows are 32 CSS pixels tall with no gap. The virtualizer and keyboard page navigation use the same height. List view and search results keep their existing row heights, as do compact layouts and touch selection controls.
+On desktop, folder listings and search results use 32 CSS pixel rows with no gap in List and Details views. The virtualizer and keyboard page navigation use the same height. Touch selection controls use 48 CSS pixel rows, and compact layouts use 72 CSS pixel rows.
 
 ## Real-Time Directory Refresh
 

@@ -106,6 +106,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
 
     const user = userEvent.setup();
     const { container } = await renderBrowserAndFlush("/browse/smb/test-server-1");
+    expect(screen.getByRole("button", { name: "Folder: Documents" }).closest("[data-file-row]")).toHaveStyle({ height: "32px" });
     const list = await screen.findByTestId("file-list-container");
     act(() => list.focus());
     await user.keyboard("/");
@@ -147,6 +148,12 @@ describe("FileBrowser — Pane Tabs Integration", () => {
       });
     });
     const row = screen.getByRole("button", { name: "File: report.txt, in docs" });
+    expect(row.closest("[data-file-row]")).toHaveStyle({ height: "32px" });
+    const viewMode = screen.getByRole("button", { name: "View mode options" });
+    await user.click(viewMode);
+    await user.click(screen.getByRole("menuitem", { name: "List" }));
+    await waitFor(() => expect(viewMode).toHaveTextContent("List"));
+    expect(row.closest("[data-file-row]")).toHaveStyle({ height: "32px" });
     act(() => row.focus());
     await user.keyboard("/");
     await waitFor(() => expect(input).toHaveFocus());
@@ -162,6 +169,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     expect(signal?.aborted).toBe(true);
     expect(container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(1);
     expect(screen.queryByText("report.txt")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Folder: Documents" }).closest("[data-file-row]")).toHaveStyle({ height: "32px" });
   });
 
   it("shows paths instead of file details and keeps search status visible in compact layout", async () => {
