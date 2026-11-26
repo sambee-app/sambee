@@ -41,8 +41,9 @@ export function WorkspaceViewer({ ref, connections, services, left, right, ready
   useImperativeHandle(ref, () => workspace, [workspace]);
   const pane = left.viewInfo ? left : right;
   const info = workspace.viewerSelection ?? pane.viewInfo;
+  const isArchiveListing = Boolean(info?.virtualSource && !info.searchSessionId);
   const viewerInfo =
-    info?.virtualSource && info.viewerId === "image"
+    info && isArchiveListing && info.viewerId === "image"
       ? { ...info, images: pane.imageFiles, currentIndex: Math.max(pane.imageFiles.indexOf(info.path), 0) }
       : info;
 
@@ -71,10 +72,10 @@ export function WorkspaceViewer({ ref, connections, services, left, right, ready
           }}
           onClose={workspace.closeViewer}
           onIndexChange={(index) => workspace.changeImage(left.viewInfo ? "left" : "right", index)}
-          hasMoreItems={info.virtualSource ? pane.archiveHasMore : false}
-          isLoadingMoreItems={info.virtualSource ? pane.archiveLoadingMore : false}
-          loadMoreError={info.virtualSource ? pane.error : null}
-          onLoadMoreItems={info.virtualSource ? pane.loadMoreArchive : undefined}
+          hasMoreItems={isArchiveListing ? pane.archiveHasMore : false}
+          isLoadingMoreItems={isArchiveListing ? pane.archiveLoadingMore : false}
+          loadMoreError={isArchiveListing ? pane.error : null}
+          onLoadMoreItems={isArchiveListing ? pane.loadMoreArchive : undefined}
           contentProviders={services.providers}
         />
       )}

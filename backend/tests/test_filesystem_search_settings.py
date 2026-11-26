@@ -35,12 +35,12 @@ def test_policy_bounds_are_loaded_from_shared_contract():
     [
         ("policy_bounds", "max_seconds", {"min": True, "max": 60}),
         ("policy_bounds", "max_seconds", {"min": 0, "max": 60}),
-        ("policy_bounds", "max_seconds", {"min": 31, "max": 60}),
-        ("policy_bounds", "max_seconds", {"min": 1, "max": 29}),
+        ("policy_bounds", "max_seconds", {"min": 61, "max": 60}),
+        ("policy_bounds", "max_seconds", {"min": 1, "max": 59}),
         ("policy_bounds", "max_seconds", {"min": 1, "max": 2**53}),
         ("policy_bounds", "max_seconds", {"min": 1, "max": 60, "extra": 1}),
         ("policy_bounds", "max_seconds", None),
-        ("policy_defaults", "max_seconds", 30.0),
+        ("policy_defaults", "max_seconds", 60.0),
         ("policy_defaults", "extra", 1),
     ],
 )
@@ -67,14 +67,15 @@ def test_settings_are_admin_only_persisted_and_used_by_runtime(client, session, 
     assert client.put(URL, headers=auth_headers_user, json={"field": "max_results", "value": 700}).status_code == 403
     initial = client.get(URL, headers=auth_headers_admin).json()
     assert initial["policy"] == {name: bound.default for name, bound in POLICY_BOUNDS.items()}
+    assert initial["policy"]["max_seconds"] == 60
     for name in POLICY_BOUNDS:
         assert initial["fields"][name]["min_value"] == CONTRACT["policy_bounds"][name]["min"]
         assert initial["fields"][name]["max_value"] == CONTRACT["policy_bounds"][name]["max"]
     snapshot = get_filesystem_search_policy(session)
-    for field, value in (("concurrent_searches", 2), ("max_seconds", 60), ("max_results", 1000)):
+    for field, value in (("concurrent_searches", 2), ("max_seconds", 30), ("max_results", 1000)):
         assert client.put(URL, headers=auth_headers_admin, json={"field": field, "value": value}).status_code == 200
     current = client.get(URL, headers=auth_headers_admin).json()
-    assert current["policy"] == {"concurrent_searches": 2, "max_seconds": 60, "max_results": 1000}
+    assert current["policy"] == {"concurrent_searches": 2, "max_seconds": 30, "max_results": 1000}
     assert all(field["source"] == "database" for field in current["fields"].values())
     assert get_filesystem_search_policy(session).model_dump() == current["policy"]
     assert snapshot.model_dump() == initial["policy"]

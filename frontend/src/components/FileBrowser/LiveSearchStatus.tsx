@@ -1,4 +1,4 @@
-import { Box, Button, CircularProgress, Typography } from "@mui/material";
+import { Box, Button, Typography } from "@mui/material";
 import { useTranslation } from "react-i18next";
 import { translate } from "../../i18n";
 import type { FilesystemSearchSession } from "../../pages/FileBrowser/filesystemSearchSessions";
@@ -38,7 +38,6 @@ export function LiveSearchStatus({
   const message = getLiveSearchMessage(session);
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
-      {session.status === "running" && <CircularProgress size={16} aria-hidden="true" sx={{ flexShrink: 0 }} />}
       <Typography variant="caption" role="status" aria-live="polite" noWrap title={message}>
         {message}
       </Typography>

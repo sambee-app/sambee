@@ -19,8 +19,9 @@ import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import { alpha, Box, Button, CircularProgress, LinearProgress, Typography, useTheme } from "@mui/material";
 import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { CompactBadge as Chip } from "../../components/CompactBadge";
+import { AbbreviatedPathLabel } from "../../components/FileBrowser/AbbreviatedPathLabel";
 import { BreadcrumbsNavigation } from "../../components/FileBrowser/BreadcrumbsNavigation";
 import { BrowserViewerPicker } from "../../components/FileBrowser/BrowserViewerPicker";
 import { CompactCreateMenu } from "../../components/FileBrowser/CompactCreateMenu";
@@ -30,6 +31,7 @@ import ConfirmDeleteDialog from "../../components/FileBrowser/ConfirmDeleteDialo
 import CreateItemDialog from "../../components/FileBrowser/CreateItemDialog";
 import { FileBrowserAlerts } from "../../components/FileBrowser/FileBrowserAlerts";
 import { FileList } from "../../components/FileBrowser/FileList";
+import { formatConnectionPath } from "../../components/FileBrowser/formatConnectionPath";
 import { PaneTabBar } from "../../components/FileBrowser/PaneTabBar";
 import RenameDialog from "../../components/FileBrowser/RenameDialog";
 import { STATUS_BAR_HEIGHT } from "../../components/FileBrowser/StatusBar";
@@ -52,7 +54,7 @@ import type { FileOperationAction, FileOperationPolicyContext } from "./fileOper
 import { getPaneTabLabel } from "./tabSessions";
 import type { PaneId, PaneMode, UseFileBrowserPaneReturn } from "./types";
 
-const NAVIGATION_PROGRESS_DELAY_MS = 200;
+const PANE_PROGRESS_DELAY_MS = 200;
 
 // ============================================================================
 // Props
@@ -231,17 +233,16 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
     closeBrowserViewerPicker,
     confirmBrowserViewerPicker,
   } = pane;
-  const [navigationProgressVisible, setNavigationProgressVisible] = useState(false);
+  const runningSearchId = pane.searchSession?.status === "running" ? pane.searchSession.id : undefined;
+  const pendingProgressKey = runningSearchId ? `search:${runningSearchId}` : navigationPending ? "navigation" : null;
+  const [visibleProgressKey, setVisibleProgressKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!navigationPending) {
-      setNavigationProgressVisible(false);
-      return;
-    }
-
-    const timer = window.setTimeout(() => setNavigationProgressVisible(true), NAVIGATION_PROGRESS_DELAY_MS);
+    setVisibleProgressKey(null);
+    if (!pendingProgressKey) return;
+    const timer = window.setTimeout(() => setVisibleProgressKey(pendingProgressKey), PANE_PROGRESS_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [navigationPending]);
+  }, [pendingProgressKey]);
 
   useEffect(() => {
     const location = `${connectionId}:${currentPath}`;
@@ -630,6 +631,15 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
   const breadcrumbPath = archiveLocation
     ? [archiveLocation.archivePath, archiveLocation.virtualPath].filter(Boolean).join("/")
     : currentPath;
+  const searchRequest = pane.searchSession?.request;
+  const searchStartPath = searchRequest
+    ? formatConnectionPath(
+        connections.find(({ id }) => id === searchRequest.source.id)?.name ?? searchRequest.source.id,
+        searchRequest.root.kind === "archive"
+          ? [searchRequest.root.path, searchRequest.root.member_path].filter(Boolean).join("/")
+          : searchRequest.root.path
+      )
+    : null;
 
   // ──────────────────────────────────────────────────────────────────────────
   // Render
@@ -750,12 +760,36 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
         }}
       >
         {pane.isSearchTab ? (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0, color: "text.secondary" }}>
-            <SearchIcon fontSize="small" aria-hidden="true" />
-            <Typography variant="body2" noWrap title={pane.searchSession?.request.query} dir="auto">
-              {t("fileBrowser.search.live.queryContext", { query: pane.searchSession?.request.query ?? "" })}
-            </Typography>
-          </Box>
+          searchRequest &&
+          searchStartPath && (
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, flex: 1, minWidth: 0, color: "text.secondary" }}>
+              <SearchIcon fontSize="small" aria-hidden="true" sx={{ flexShrink: 0 }} />
+              <Typography variant="body2" component="div" sx={{ display: "flex", alignItems: "baseline", gap: 0.5, flex: 1, minWidth: 0 }}>
+                <Trans
+                  i18nKey="fileBrowser.search.live.queryContext"
+                  components={{
+                    term: (
+                      <Box
+                        component="span"
+                        title={searchRequest.query}
+                        sx={{ maxWidth: "55%", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      />
+                    ),
+                    query: (
+                      <Box component="bdi" dir="auto" sx={{ color: "text.primary", fontWeight: 500 }}>
+                        {searchRequest.query}
+                      </Box>
+                    ),
+                    path: (
+                      <Box component="span" sx={{ flex: "1 1 0", minWidth: 0 }}>
+                        <AbbreviatedPathLabel path={searchStartPath} />
+                      </Box>
+                    ),
+                  }}
+                />
+              </Typography>
+            </Box>
+          )
         ) : (
           <BreadcrumbsNavigation
             currentPath={breadcrumbPath}
@@ -841,7 +875,7 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
         </Box>
       ) : (
         <Box
-          aria-busy={navigationPending}
+          aria-busy={pendingProgressKey !== null}
           onDragEnter={(event) => {
             if (!Array.from(event.dataTransfer.types).includes("Files")) return;
             event.preventDefault();
@@ -873,14 +907,15 @@ export const FileBrowserPane: React.FC<FileBrowserPaneProps> = ({
             minHeight: 0,
             mb: 0,
             flexDirection: "column",
+            ...(pane.isSearchTab ? { containerType: "inline-size", containerName: "search-results" } : {}),
             position: "relative",
             outline: fileDragActive && !dropUnavailableReason ? `2px solid ${theme.palette.primary.main}` : undefined,
             outlineOffset: -2,
           }}
         >
-          {navigationPending && navigationProgressVisible && (
+          {pendingProgressKey && visibleProgressKey === pendingProgressKey && (
             <LinearProgress
-              aria-label={t("app.loading")}
+              aria-label={runningSearchId ? t("fileBrowser.search.live.running") : t("app.loading")}
               sx={{ position: "absolute", top: 0, insetInline: 0, zIndex: 1, pointerEvents: "none" }}
             />
           )}

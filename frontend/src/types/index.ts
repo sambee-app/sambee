@@ -483,7 +483,7 @@ export enum FileType {
 export interface FileInfo {
   /** Browser-only identity and display path for a result from a live search. */
   browser_identity?: string;
-  search_display_path?: string;
+  search_location?: string;
   name: string;
   path: string;
   type: FileType;

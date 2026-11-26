@@ -135,7 +135,9 @@ describe("FileBrowser — Pane Tabs Integration", () => {
       });
     });
     expect((await screen.findAllByText("report.txt")).length).toBeGreaterThan(0);
-    expect(screen.getByText("docs/report.txt")).toBeInTheDocument();
+    expect(screen.getByText("docs", { selector: "bdi > span" })).toBeInTheDocument();
+    expect(screen.queryByText("in docs")).not.toBeInTheDocument();
+    expect(screen.queryByText("→")).not.toBeInTheDocument();
     await act(async () => {
       await publish?.({
         type: "terminal",
@@ -144,7 +146,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
         skips: [],
       });
     });
-    const row = screen.getByRole("button", { name: "File: report.txt, docs/report.txt" });
+    const row = screen.getByRole("button", { name: "File: report.txt, in docs" });
     act(() => row.focus());
     await user.keyboard("/");
     await waitFor(() => expect(input).toHaveFocus());
@@ -162,7 +164,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     expect(screen.queryByText("report.txt")).not.toBeInTheDocument();
   });
 
-  it("keeps live search status visible in compact layout", async () => {
+  it("shows paths instead of file details and keeps search status visible in compact layout", async () => {
     const originalMatchMedia = window.matchMedia;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: /max-width/.test(query),
@@ -196,19 +198,28 @@ describe("FileBrowser — Pane Tabs Integration", () => {
           type: "batch",
           results: [
             {
-              entry: { name: "report.txt", path: "report.txt", type: FileType.FILE, is_readable: true, is_hidden: false },
+              entry: { name: "report.txt", path: "report.txt", type: FileType.FILE, is_readable: true, is_hidden: false, size: 1024 },
               target: { kind: "physical", path: "report.txt" },
+            },
+            {
+              entry: { name: "report.txt", path: "docs/report.txt", type: FileType.FILE, is_readable: true, is_hidden: false, size: 1024 },
+              target: { kind: "physical", path: "docs/report.txt" },
             },
           ],
         });
       });
-      expect(screen.getByText("1 item")).toBeInTheDocument();
+      expect(screen.getByText("2 items")).toBeInTheDocument();
+      const rootMatch = screen.getByRole("button", { name: "File: report.txt" });
+      const nestedMatch = screen.getByRole("button", { name: "File: report.txt, in docs" });
+      expect(rootMatch).toHaveTextContent(/^report\.txt$/);
+      expect(within(nestedMatch).getByTitle("docs")).toHaveTextContent(/^docs$/);
+      expect(within(nestedMatch).queryByText(/1 KB/)).not.toBeInTheDocument();
 
       await act(async () => {
         await publish?.({
           type: "terminal",
           reason: "partial_coverage",
-          counts: { matches: 1, scanned_directories: 1, skipped: 1 },
+          counts: { matches: 2, scanned_directories: 1, skipped: 1 },
           skips: [{ reason: "unreadable_directory", count: 1 }],
         });
       });
@@ -260,12 +271,86 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     }
 
     expect(screen.getByRole("status")).toHaveTextContent(status === "complete" ? "Search complete." : "Searching");
-    expect(screen.getByRole("button", { name: "File: note.txt, docs/note.txt" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "File: note.txt, in docs" })).toBeVisible();
     expect(screen.getByTestId("file-list-container")).toHaveFocus();
     await user.keyboard("{Enter}");
     await act(() => vi.dynamicImportSettled());
     expect(await screen.findByText("Search result content")).toBeVisible();
     expect(vi.mocked(api.getFileContent).mock.calls[0]?.[1]).toBe("docs/note.txt");
+  });
+
+  it.each(["physical", "archive"] as const)("navigates a stable %s search gallery and returns to the last viewed row", async (kind) => {
+    let publish: ((record: FilesystemSearchRecord) => void | Promise<void>) | undefined;
+    vi.mocked(api.startFilesystemSearch).mockImplementation((_request, _signal, onRecord) => {
+      publish = onRecord;
+      return new Promise(() => {});
+    });
+    vi.mocked(api.getArchiveMember).mockResolvedValue(new Blob(["image"], { type: "image/png" }));
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = vi.fn(() => "blob:search-image");
+        static revokeObjectURL = vi.fn();
+      }
+    );
+    const physical = (path: string, readable = true) => ({
+      entry: { name: path.split("/").at(-1)!, path, type: FileType.FILE, is_readable: readable, is_hidden: false, mime_type: "image/png" },
+      target: { kind: "physical" as const, path },
+    });
+    const member = (path: string, archive = "one.zip") => ({
+      entry: physical(path).entry,
+      target: { kind: "archive" as const, archive_path: archive, member_path: path },
+      archive_state: "readable" as const,
+    });
+    const makeResult = kind === "physical" ? physical : member;
+    const user = userEvent.setup();
+    const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");
+    const viewerPath = () => {
+      const params = new URLSearchParams(router.state.location.search);
+      return kind === "archive" ? params.get("virtual") : params.get("file");
+    };
+    const expectedTarget = (path: string) => (kind === "archive" ? JSON.stringify(["zip", "one.zip", path]) : `smb/test-server-1/${path}`);
+    await waitFor(() => expect(screen.getByTestId("file-list-container")).toHaveFocus());
+    await user.keyboard("/");
+    await user.type(await screen.findByPlaceholderText("Search files and folders"), "photo{Enter}");
+    await waitFor(() => expect(publish).toBeDefined());
+
+    await act(async () => {
+      await publish?.({
+        type: "batch",
+        results: [
+          makeResult("a/photo.png"),
+          makeResult("b/photo.png"),
+          member("b/photo.png", "other.zip"),
+          kind === "archive" ? physical("b/photo.png") : physical("c/photo.png", false),
+        ],
+      });
+    });
+    await user.keyboard("{Enter}");
+    await act(() => vi.dynamicImportSettled());
+    const viewer = await screen.findByRole("dialog", { name: "" });
+    const expectViewerReady = () => expect(viewer.closest("[aria-busy]")).toHaveAttribute("aria-busy", "false");
+    await waitFor(expectViewerReady);
+    expect(viewerPath()).toBe(expectedTarget("a/photo.png"));
+
+    await act(async () => {
+      await publish?.({ type: "batch", results: [makeResult("later/z-photo.png")] });
+    });
+    fireEvent.keyDown(viewer, { key: "ArrowRight" });
+    await waitFor(() => expect(viewerPath()).toBe(expectedTarget("b/photo.png")));
+    await waitFor(expectViewerReady);
+    fireEvent.keyDown(viewer, { key: "ArrowRight" });
+    expect(viewerPath()).toBe(expectedTarget("b/photo.png"));
+    fireEvent.keyDown(viewer, { key: "ArrowLeft" });
+    await waitFor(() => expect(viewerPath()).toBe(expectedTarget("a/photo.png")));
+    await waitFor(expectViewerReady);
+    fireEvent.keyDown(viewer, { key: "ArrowRight" });
+    await waitFor(() => expect(viewerPath()).toBe(expectedTarget("b/photo.png")));
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("file-list-container")).toHaveFocus());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(viewerPath()).toBe(expectedTarget("b/photo.png")));
   });
 
   it.each([
@@ -309,7 +394,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     await user.click(within(notice).getByRole("button", { name: "Close" }));
     await user.click(screen.getByRole("button", { name: /^Search results 1$/ }));
     expect(screen.getByRole("status")).toHaveTextContent(message);
-    expect(screen.getByText("docs/report.txt")).toBeInTheDocument();
+    expect(screen.getByTitle("docs")).toBeInTheDocument();
     expect(document.querySelector(".MuiSnackbar-root")).not.toBeInTheDocument();
     await user.click(within(screen.getByTestId("pane-tab-item-left-0")).getByRole("button", { name: /^Test Server 1 —/ }));
     await user.click(screen.getByRole("button", { name: /^Search results 1$/ }));
@@ -353,8 +438,8 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     });
     expect(await screen.findByRole("alert")).toHaveTextContent("Search was interrupted. Start a new search to try again.");
     expect(screen.getByText("1 item")).toBeInTheDocument();
-    expect(screen.getByTestId("pane-context-row")).toHaveTextContent("Search: “report”");
-    expect(screen.getByText("docs/report.txt")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-context-row")).toHaveTextContent("Search: “report” in Test Server 1:/");
+    expect(screen.getByTitle("docs")).toBeInTheDocument();
     expect(screen.queryByText("No matches.")).not.toBeInTheDocument();
   });
 
@@ -390,7 +475,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
         ],
       });
     });
-    expect(await screen.findByText("docs/report.txt")).toBeInTheDocument();
+    expect(await screen.findByTitle("docs")).toBeInTheDocument();
 
     act(() => screen.getByTestId("file-list-container").focus());
     await user.keyboard("{Control>}k{/Control}");
@@ -400,10 +485,10 @@ describe("FileBrowser — Pane Tabs Integration", () => {
 
     await waitFor(() => expect(container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(3));
     await waitFor(() => expect(vi.mocked(api.listDirectory)).toHaveBeenCalledWith("conn-1", "Documents", expect.anything()));
-    expect(screen.queryByText("docs/report.txt")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("docs")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Search results 1$/ }));
-    expect(await screen.findByText("docs/report.txt")).toBeInTheDocument();
-    expect(screen.getByTestId("pane-context-row")).toHaveTextContent("Search: “report”");
+    expect(await screen.findByTitle("docs")).toBeInTheDocument();
+    expect(screen.getByTestId("pane-context-row")).toHaveTextContent("Search: “report” in Test Server 1:/");
   });
 
   it("keeps tab and breadcrumb controls non-focusable and restores file-list focus even when breadcrumb navigation fails", async () => {

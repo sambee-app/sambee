@@ -12,7 +12,7 @@
   },
   "policy_defaults": {
     "concurrent_searches": 1,
-    "max_seconds": 30,
+    "max_seconds": 60,
     "max_results": 500
   },
   "policy_bounds": {

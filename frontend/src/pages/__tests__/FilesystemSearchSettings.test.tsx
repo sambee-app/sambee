@@ -55,7 +55,10 @@ describe("FilesystemSearchSettings", () => {
     const user = userEvent.setup();
     render(<FilesystemSearchSettings />);
     const field = await screen.findByRole("textbox", { name: "Maximum results" });
-    expect(field).toHaveValue("500");
+    const scanTime = screen.getByRole("textbox", { name: "Maximum scan time" });
+    const expectedScanTime = String(contract.policy_defaults.max_seconds);
+    expect(scanTime).toHaveValue(expectedScanTime);
+    expect(field).toHaveValue(String(contract.policy_defaults.max_results));
     expect(field).toHaveAccessibleDescription(/Range: 1–1,?000/);
     await user.clear(field);
     await user.type(field, "1001{Enter}");
@@ -63,15 +66,17 @@ describe("FilesystemSearchSettings", () => {
     expect(field).toHaveAttribute("aria-invalid", "true");
     expect(field).toHaveAccessibleDescription(/whole number from 1 to 1000/);
     await user.clear(field);
-    await user.type(field, "800{Enter}");
-    await waitFor(() =>
-      expect(api.updateFilesystemSearchSettings).toHaveBeenCalledWith(
-        { field: "max_results", value: 800 },
-        expect.objectContaining({ signal: expect.anything() })
-      )
+    await user.type(field, "800");
+    expect(api.updateFilesystemSearchSettings).not.toHaveBeenCalled();
+    await user.keyboard("{Enter}");
+    expect(api.updateFilesystemSearchSettings).toHaveBeenCalledExactlyOnceWith(
+      { field: "max_results", value: 800 },
+      expect.objectContaining({ signal: expect.anything() })
     );
-    expect(await screen.findByDisplayValue("800")).toHaveAttribute("aria-invalid", "false");
-    expect(screen.getByRole("textbox", { name: "Maximum scan time" })).toHaveValue("30");
+    await waitFor(() => expect(field).toBeEnabled());
+    expect(field).toHaveValue("800");
+    expect(field).toHaveAttribute("aria-invalid", "false");
+    expect(scanTime).toHaveValue(expectedScanTime);
   });
 
   it.each([
