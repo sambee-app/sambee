@@ -12,7 +12,7 @@ import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDate, formatFileSize } from "../../pages/FileBrowser/formatters";
 import type { ViewMode } from "../../pages/FileBrowser/types";
-import { COMPACT_LAYOUT_SIZE } from "../../theme/constants";
+import { COMPACT_LAYOUT_SIZE, FILE_BROWSER_ROW_HEIGHT } from "../../theme/constants";
 import type { FileEntry } from "../../types";
 import { getArchiveMemberUnavailableMessageKey, isShortcutFile } from "../../utils/fileEntries";
 import { getFileIcon } from "../../utils/fileIcons";
@@ -284,7 +284,8 @@ export const FileRow = React.memo(
             disabled={isUnavailableArchiveEntry}
             sx={[
               rowStyle,
-              isSearchResult ? { py: 0, ...(showCompactActions ? { paddingInlineEnd: 7 } : {}) } : canOpenItemActions ? { pr: 7 } : {},
+              (isSearchResult || virtualSize === FILE_BROWSER_ROW_HEIGHT.DESKTOP_DETAILS_PX) && { py: 0 },
+              isSearchResult ? { ...(showCompactActions ? { paddingInlineEnd: 7 } : {}) } : canOpenItemActions ? { pr: 7 } : {},
               isUnavailableArchiveEntry ? { cursor: "not-allowed", opacity: 0.5 } : {},
             ]}
             dataSelected={isSelected ? "true" : undefined}
@@ -447,7 +448,8 @@ export const FileRow = React.memo(
                 top: "50%",
                 transform: "translateY(-50%)",
                 width: 40,
-                height: 40,
+                height: Math.min(virtualSize, FILE_BROWSER_ROW_HEIGHT.DESKTOP_PX),
+                paddingBlock: 0,
                 "& .selection-affordance": { display: "none" },
                 "&:hover .selection-affordance, &:focus-visible .selection-affordance": { display: "block" },
                 "&:hover .file-icon, &:focus-visible .file-icon": { display: "none" },
