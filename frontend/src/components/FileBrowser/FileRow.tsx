@@ -7,7 +7,7 @@ import CircleOutlinedIcon from "@mui/icons-material/CircleOutlined";
 import EditNoteIcon from "@mui/icons-material/EditNote";
 import MoreVertIcon from "@mui/icons-material/MoreVert";
 import ShortcutIcon from "@mui/icons-material/Shortcut";
-import { Box, IconButton, Tooltip, Typography } from "@mui/material";
+import { Box, IconButton, Tooltip, Typography, typographyClasses } from "@mui/material";
 import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { formatDate, formatFileSize } from "../../pages/FileBrowser/formatters";
@@ -113,6 +113,7 @@ export const FileRow = React.memo(
       const suppressGestureRef = useRef(false);
       const isListMode = viewMode === "list";
       const isSearchResult = file.search_location !== undefined;
+      const isDesktopDensity = virtualSize === FILE_BROWSER_ROW_HEIGHT.DESKTOP_PX;
       const linkTarget = file.link_target?.target;
       const isShortcut = isShortcutFile(file);
       const isUnavailableArchiveEntry = file.archive_entry_state !== undefined && !file.is_readable;
@@ -284,7 +285,7 @@ export const FileRow = React.memo(
             disabled={isUnavailableArchiveEntry}
             sx={[
               rowStyle,
-              (isSearchResult || virtualSize === FILE_BROWSER_ROW_HEIGHT.DESKTOP_DETAILS_PX) && { py: 0 },
+              (isSearchResult || isDesktopDensity) && { py: 0 },
               isSearchResult ? { ...(showCompactActions ? { paddingInlineEnd: 7 } : {}) } : canOpenItemActions ? { pr: 7 } : {},
               isUnavailableArchiveEntry ? { cursor: "not-allowed", opacity: 0.5 } : {},
             ]}
@@ -320,7 +321,13 @@ export const FileRow = React.memo(
                   gridTemplateColumns: `${fileIconSize}px minmax(0, 1fr)`,
                   gridTemplateAreas: file.search_location ? '"icon name" "icon location"' : '"icon name"',
                   "& [data-search-metadata]": { display: "none" },
-                  "& [data-search-location]": { fontSize: `${COMPACT_LAYOUT_SIZE.FILE_ROW_METADATA_PX}px`, lineHeight: 1.2 },
+                  ...(isDesktopDensity && {
+                    [`& [data-search-name] .${typographyClasses.root}`]: { lineHeight: 1.25 },
+                  }),
+                  "& [data-search-location]": {
+                    fontSize: `${COMPACT_LAYOUT_SIZE.FILE_ROW_METADATA_PX}px`,
+                    lineHeight: isDesktopDensity ? 1.125 : 1.2,
+                  },
                 };
                 return (
                   <Box
@@ -337,7 +344,9 @@ export const FileRow = React.memo(
                     <Box sx={{ ...fileRowStyles.iconBox, gridArea: "icon", visibility: desktopSelection ? "hidden" : undefined }}>
                       {icon}
                     </Box>
-                    <Box sx={{ gridArea: "name", minWidth: 0 }}>{fileName}</Box>
+                    <Box data-search-name sx={{ gridArea: "name", minWidth: 0 }}>
+                      {fileName}
+                    </Box>
                     {file.search_location && (
                       <Typography
                         variant="body2"
@@ -448,7 +457,7 @@ export const FileRow = React.memo(
                 top: "50%",
                 transform: "translateY(-50%)",
                 width: 40,
-                height: Math.min(virtualSize, FILE_BROWSER_ROW_HEIGHT.DESKTOP_PX),
+                height: virtualSize,
                 paddingBlock: 0,
                 "& .selection-affordance": { display: "none" },
                 "&:hover .selection-affordance, &:focus-visible .selection-affordance": { display: "block" },
