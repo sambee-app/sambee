@@ -2,6 +2,7 @@ import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-l
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setLocale, translate } from "../../../i18n";
 import { formatDate, formatFileSize } from "../../../pages/FileBrowser/formatters";
+import { renderWithStyles } from "../../../test/utils/renderWithStyles";
 import { FILE_BROWSER_ROW_HEIGHT } from "../../../theme/constants";
 import { type FileInfo, FileType } from "../../../types";
 import { FileRow, shortenTargetPath } from "../FileRow";
@@ -77,6 +78,13 @@ describe("FileRow", () => {
     fireEvent.contextMenu(rowButton);
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("keeps the desktop Details selection target within its row", () => {
+    const props = createDefaultFileRowProps();
+    renderWithStyles(<FileRow {...props} viewMode="details" virtualSize={32} onIconClick={vi.fn()} />);
+
+    expect(screen.getByRole("checkbox")).toHaveStyle({ height: "32px", width: "40px" });
   });
 
   it("invokes onClick when the row button is pressed", () => {

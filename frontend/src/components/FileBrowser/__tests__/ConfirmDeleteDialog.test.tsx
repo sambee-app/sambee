@@ -3,15 +3,16 @@
  *
  * Verifies:
  * - Renders with correct item name and type label
- * - Cancel button receives initial focus
+ * - Delete button receives initial focus
  * - onConfirm/onClose callbacks fire correctly
  * - Buttons are disabled during isDeleting
  * - Uses centralized string constants
  */
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { renderWithStyles as render } from "../../../test/utils/renderWithStyles";
 import { FileType } from "../../../types";
 import ConfirmDeleteDialog from "../ConfirmDeleteDialog";
 import { CONFIRM_DELETE_STRINGS } from "../confirmDeleteDialogStrings";
@@ -87,11 +88,15 @@ describe("ConfirmDeleteDialog", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it("disables buttons when isDeleting is true", () => {
-    render(<ConfirmDeleteDialog {...defaultProps} isDeleting={true} />);
+  it("cannot confirm again while deleting", async () => {
+    const onConfirm = vi.fn();
+    const user = userEvent.setup();
+    render(<ConfirmDeleteDialog {...defaultProps} isDeleting={true} onConfirm={onConfirm} />);
 
     expect(screen.getByRole("button", { name: /cancel/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /deleting/i })).toBeDisabled();
+    await user.keyboard("{Enter}");
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
   it("shows 'Deleting…' text when isDeleting", () => {
@@ -100,40 +105,32 @@ describe("ConfirmDeleteDialog", () => {
     expect(screen.getByText("Deleting…")).toBeInTheDocument();
   });
 
-  it("focuses Cancel button when dialog opens", async () => {
-    render(<ConfirmDeleteDialog {...defaultProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
-    });
-  });
-
-  it("calls onClose when Enter is pressed on focused Cancel button", async () => {
+  it("focuses Delete on opening and confirms with Enter", async () => {
+    const onConfirm = vi.fn();
     const onClose = vi.fn();
     const user = userEvent.setup();
-    render(<ConfirmDeleteDialog {...defaultProps} onClose={onClose} />);
+    render(<ConfirmDeleteDialog {...defaultProps} onConfirm={onConfirm} onClose={onClose} />);
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
-    });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toHaveFocus());
+
+    await user.keyboard("{Enter}");
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("still cancels with Enter after moving focus to Cancel", async () => {
+    const onConfirm = vi.fn();
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(<ConfirmDeleteDialog {...defaultProps} onConfirm={onConfirm} onClose={onClose} />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toHaveFocus());
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
 
     await user.keyboard("{Enter}");
     expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("calls onConfirm when Enter is pressed on focused Delete button", async () => {
-    const onConfirm = vi.fn();
-    const user = userEvent.setup();
-    render(<ConfirmDeleteDialog {...defaultProps} onConfirm={onConfirm} />);
-
-    // Wait for initial auto-focus on Cancel to settle before moving focus
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
-    });
-
-    act(() => screen.getByRole("button", { name: "Delete" }).focus());
-    await user.keyboard("{Enter}");
-    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
   it("does not render when open is false", () => {

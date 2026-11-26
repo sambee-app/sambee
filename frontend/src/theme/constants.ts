@@ -53,6 +53,7 @@ export const FILE_BROWSER_ROW_HEIGHT = {
   MOBILE_PX: 72,
   TOUCH_PX: 48,
   DESKTOP_PX: 40,
+  DESKTOP_DETAILS_PX: 32,
 } as const;
 
 /** Geometry, spacing, and interaction targets for per-pane folder tab bars. */

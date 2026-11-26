@@ -81,7 +81,7 @@ Choose each action's treatment by what it does, including in decisions embedded 
 
 An action's role can change with the selected option: a conflict dialog's Continue is destructive only when it will overwrite an existing item. When a decision offers both Save and Discard, distinguish the primary and destructive actions without changing what either one does. Do not restyle settings-page triggers when styling their confirmation dialogs.
 
-Visual priority does not determine Enter behavior. For safety-critical decisions, focus the least destructive action on opening; for input workflows, focus the first input. Never make a destructive action the default Enter action unless the user has already focused it. Keep cancellation available and focused during cancellable pending operations. Use `ResponsiveDialogShell` for application confirmations rather than native `window.confirm`, whose buttons cannot follow these styles.
+Visual priority does not determine Enter behavior. A confirmation can focus its approval button on opening, even if the action is destructive. For example, the File Browser delete dialog focuses **Delete**, so Enter confirms the deletion. Enter still activates **Cancel** when it has focus. For input workflows, focus the first input. Keep cancellation available and focused during cancellable pending operations. Use `ResponsiveDialogShell` for application confirmations rather than native `window.confirm`, whose buttons cannot follow these styles.
 
 ## Shared Building Blocks
 

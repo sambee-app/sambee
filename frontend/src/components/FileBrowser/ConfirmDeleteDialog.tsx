@@ -6,9 +6,7 @@
  * Confirm Delete Dialog
  * =====================
  *
- * Modal dialog asking the user to confirm deletion of a file or directory.
- * The Cancel button receives initial focus so that pressing Enter does NOT
- * accidentally trigger the destructive action.
+ * Modal dialog to confirm deletion of files or directories.
  */
 
 import { Box, Button, CircularProgress, Typography } from "@mui/material";
@@ -66,12 +64,12 @@ const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
   const isSingleItem = items.length === 1;
   const item = items[0];
   const isDirectory = item?.type === FileType.DIRECTORY;
-  const cancelRef = useRef<HTMLButtonElement>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Focus the Cancel button immediately when dialog opens (no transition delay)
+  // Set focus after the modal sets up its focus trap.
   useEffect(() => {
     if (open) {
-      const frame = requestAnimationFrame(() => cancelRef.current?.focus());
+      const frame = requestAnimationFrame(() => deleteButtonRef.current?.focus());
       return () => cancelAnimationFrame(frame);
     }
   }, [open]);
@@ -89,7 +87,6 @@ const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
   const visibleItems = items.slice(0, DELETE_LIST_MAX_VISIBLE_ROWS);
   const remainingItemCount = items.length - visibleItems.length;
 
-  /** ENTER activates the focused button; no default fallback (Cancel has focus). */
   const handleKeyDown = useMemo(() => dialogEnterKeyHandler(), []);
 
   return (
@@ -105,10 +102,11 @@ const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
       maxWidth="sm"
       actions={
         <>
-          <Button ref={cancelRef} onClick={onClose} disabled={isDeleting} variant="outlined" sx={settingsUtilityButtonSx}>
+          <Button onClick={onClose} disabled={isDeleting} variant="outlined" sx={settingsUtilityButtonSx}>
             {CONFIRM_DELETE_STRINGS.BUTTON_CANCEL}
           </Button>
           <Button
+            ref={deleteButtonRef}
             onClick={onConfirm}
             color="error"
             variant="contained"
