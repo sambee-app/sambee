@@ -1,4 +1,5 @@
 import { startTransition, useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
 import type { MobileSettingsView } from "../../components/Settings/settingsNavigation";
 import type { BrowserContentServices } from "../../services/browserContentServices";
@@ -10,7 +11,7 @@ import { getFileTypeByExtension } from "../../utils/FileTypeRegistry";
 import { randomUuid } from "../../utils/randomUuid";
 import { type BrowserItem, physicalLocation, virtualItemHandle, virtualLocation } from "./contentProviders";
 import { type BrowseRouteState, buildBrowseRouteTarget, resolveBrowseRouteTarget, serializeBrowseRoute } from "./routing";
-import type { PaneId, UseFileBrowserPaneReturn, ViewInfo } from "./types";
+import type { PaneId, UseFileBrowserPaneReturn, ViewerDeletionTarget, ViewInfo } from "./types";
 
 export function useWorkspaceNavigation({
   route,
@@ -266,10 +267,47 @@ export function useWorkspaceNavigation({
     return () => controller.abort();
   }, [viewerIdentity, location.key, viewerRequestRevision, ready, retry, connections, services]);
 
+  const closeViewer = (options?: { replace?: boolean }) =>
+    navigateRoute({ ...route, viewer: undefined }, { replace: options?.replace, flushSync: true });
+
   return {
     navigateRoute,
     openViewer,
-    closeViewer: () => navigateRoute({ ...route, viewer: undefined }, { flushSync: true }),
+    closeViewer,
+    applyViewerDeletion: (deletion: ViewerDeletionTarget, matchesSelection: boolean) => {
+      const { paneId, connectionId, path } = deletion;
+      const pane = panes.current[paneId];
+      if (!matchesSelection) {
+        if (viewer?.paneId !== paneId || gallerySelection?.sessionId !== deletion.sessionId) return;
+        // Keep the new history entry and its image, but remove the deleted slide from the shared gallery.
+        pane.pruneViewerImages(deletion, gallerySelection.path);
+        if (gallerySelection.path === path) {
+          // A different history entry for the deleted image must resolve it from storage.
+          setViewerRequestRevision((revision) => revision + 1);
+        }
+        return;
+      }
+      let closed = false;
+      flushSync(() => {
+        const next = viewer?.viewerId === "image" ? pane.pruneViewerImages(deletion) : null;
+        const target = next && buildBrowseRouteTarget(connectionId, next.path, connections, null);
+        if (target) {
+          navigateRoute({ ...route, viewer: { file: target, paneId, viewerId: "image", mode: "view" } }, { replace: true });
+        } else {
+          pane.handleViewClose(path);
+          closeViewer({ replace: true });
+          closed = true;
+        }
+      });
+      if (closed) {
+        const closedLocation = entries.current.current;
+        // The list cannot take focus while the closing modals still own it.
+        requestAnimationFrame(() => {
+          const currentPane = panes.current[paneId];
+          if (entries.current.current === closedLocation && !currentPane.viewInfo) currentPane.requestListFocus();
+        });
+      }
+    },
     changeImage: (paneId: PaneId, index: number) => {
       const info = panes.current[paneId].viewInfo;
       const path = info?.images?.[index];
@@ -294,7 +332,7 @@ export function useWorkspaceNavigation({
     changeMode: (mode: "view" | "edit", replace = false) => {
       if (!viewer || viewer.mode === mode) return;
       const next = { ...route, viewer: { ...viewer, mode } };
-      navigateRoute(next, { replace, flushSync: true });
+      navigateRoute(next, { replace, flushSync: !replace });
     },
     openSettings: (settings: MobileSettingsView) => navigateRoute({ ...route, settings }, { flushSync: true }),
     closeSettings: () => navigateRoute({ ...route, settings: undefined }),
@@ -304,7 +342,7 @@ export function useWorkspaceNavigation({
     },
     viewerError,
     viewerSelection: gallerySelection,
-    viewerSelectionKey: String(viewerSelectionRevision),
+    viewerSelectionKey: gallerySelection ? `${location.key}:${viewerRequestRevision}` : String(viewerSelectionRevision),
     viewerLoading: Boolean(viewer && !gallerySelection && (viewerLoading || resolvedViewerIdentity !== viewerIdentity)),
     retryViewer: () => setRetry((value) => value + 1),
   };

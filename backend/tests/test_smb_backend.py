@@ -29,10 +29,10 @@ import pytest
 import smbclient
 import smbclient.path
 from smbclient._os import FileAttributes
-from smbprotocol.exceptions import AccessDenied, SMBOSError
+from smbprotocol.exceptions import AccessDenied, DeletePending, SMBOSError
 from smbprotocol.file_info import FileDispositionInformation, InfoType
 from smbprotocol.header import NtStatus
-from smbprotocol.open import FileInformationClass, FilePipePrinterAccessMask, SMB2SetInfoResponse
+from smbprotocol.open import CreateOptions, FileInformationClass, FilePipePrinterAccessMask, SMB2SetInfoResponse
 from smbprotocol.structure import DateTimeField
 
 from app.models.file import DirectoryListing, FileInfo, FileType
@@ -130,6 +130,7 @@ async def test_write_recreates_missing_target_and_truncates_existing_content(tmp
         ("create_directory", ("parent/new",), ("parent/new",)),
         ("create_file", ("parent/new.txt",), ("parent/new.txt",)),
         ("delete_item", ("parent/old",), ("parent/old",)),
+        ("remove_file", ("parent/old.txt",), ("parent/old.txt",)),
         ("remove_empty_directory", ("parent/empty",), ("parent/empty",)),
         ("rename_item", ("parent/old", "new"), ("parent/old", "parent/new")),
         ("copy_item", ("source/tree", "destination/tree"), ("destination/tree",)),
@@ -2297,6 +2298,60 @@ class TestPathPrefixIntegration:
         assert mock_scandir.call_args_list[0].kwargs["connection_cache"] is not mock_scandir.call_args_list[1].kwargs["connection_cache"]
 
 
+class TestRemoveFile:
+    @pytest.mark.asyncio
+    async def test_opens_only_the_final_entry_as_a_file(self):
+        backend = SMBBackend(host="server", share_name="share", username="user", password="pass", path_prefix="/scoped")
+        with (
+            patch("smbclient._os.SMBFileIO") as open_file,
+            patch("smbclient._os.SMBFileTransaction"),
+            patch("smbclient._os.set_info") as set_info,
+        ):
+            open_file.FILE_TYPE = "file"
+            await backend.remove_file("/docs/link.txt")
+
+        assert open_file.call_args.args == (r"\\server\share\scoped\docs\link.txt",)
+        assert open_file.call_args.kwargs["create_options"] == (
+            CreateOptions.FILE_OPEN_REPARSE_POINT | CreateOptions.FILE_NON_DIRECTORY_FILE
+        )
+        disposition = set_info.call_args.args[1]
+        assert isinstance(disposition, FileDispositionInformation)
+        assert disposition["delete_pending"].get_value() is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status", "expected_error"),
+        [
+            (NtStatus.STATUS_FILE_IS_A_DIRECTORY, IsADirectoryError),
+            (NtStatus.STATUS_OBJECT_NAME_NOT_FOUND, FileNotFoundError),
+            (NtStatus.STATUS_ACCESS_DENIED, PermissionError),
+        ],
+    )
+    async def test_translates_smb_target_errors(self, status, expected_error):
+        backend = SMBBackend(host="server", share_name="share", username="user", password="pass")
+        with (
+            patch("app.storage.smb.smbclient.remove", side_effect=SMBOSError(status, "target")),
+            pytest.raises(expected_error),
+        ):
+            await backend.remove_file("/target")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("error", [SMBOSError(NtStatus.STATUS_DELETE_PENDING, "target"), DeletePending()])
+    async def test_accepts_delete_pending(self, error):
+        backend = SMBBackend(host="server", share_name="share", username="user", password="pass")
+        with patch("app.storage.smb.smbclient.remove", side_effect=error):
+            await backend.remove_file("/target")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["../outside.txt", r"\\other\share\file.txt"])
+    async def test_refuses_paths_outside_the_share(self, path):
+        backend = SMBBackend(host="server", share_name="share", username="user", password="pass", path_prefix="/scoped")
+        with patch("app.storage.smb.smbclient.remove") as remove, pytest.raises(ValueError):
+            await backend.remove_file(path)
+
+        remove.assert_not_called()
+
+
 class TestDeleteItem:
     """Test file and directory deletion."""
 
@@ -2394,7 +2449,8 @@ class TestDeleteItem:
         mock_rmdir.assert_called_once_with(r"\\server.local\share\folder", **SMB_AUTH_KWARGS)
 
     @pytest.mark.asyncio
-    async def test_delete_timeout_raises(self):
+    @pytest.mark.parametrize("method", ["delete_item", "remove_file"])
+    async def test_delete_timeout_raises(self, method):
         """A delete deadline leaves the dispatched change uncertain."""
         backend = SMBBackend(
             host="server.local",
@@ -2410,7 +2466,7 @@ class TestDeleteItem:
         ):
             mock_get_running_loop.return_value.run_in_executor.return_value = pending_operation
             with pytest.raises(SMBMutationUncertain, match="Check the source before retrying"):
-                await backend.delete_item("/big-file.zip")
+                await getattr(backend, method)("/big-file.zip")
 
         mock_get_running_loop.return_value.run_in_executor.assert_called_once()
 

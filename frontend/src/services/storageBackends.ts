@@ -172,6 +172,10 @@ abstract class ApiStorageBackend implements StorageBackend {
     await api.deleteItem(connectionId(item.target), item.path);
     return COMPLETED;
   }
+  async removeFile(item: ResolvedStorageItemLocation): Promise<void> {
+    assertOwned(this.kind, item.resolvedTarget);
+    await api.removeFile(connectionId(item.target), item.path);
+  }
   async removeEmptyDirectory(item: ResolvedStorageItemLocation): Promise<StorageEmptyDirectoryRemovalResult> {
     assertOwned(this.kind, item.resolvedTarget);
     try {

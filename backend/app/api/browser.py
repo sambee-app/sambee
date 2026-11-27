@@ -2181,7 +2181,7 @@ async def execute_transfer_operation(
 
 
 # ============================================================================
-# Delete file or empty directory
+# Delete files and directories
 # ============================================================================
 
 
@@ -2267,6 +2267,39 @@ async def delete_item(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete item: {str(e)}",
         )
+
+
+@router.delete("/{connection_id}/file", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_file(
+    connection_id: uuid.UUID,
+    path: str = Query(..., description="Path to the file to delete"),
+    current_user: User = Depends(get_current_user_with_auth_check),
+    session: Session = Depends(get_session),
+) -> None:
+    """Remove a file entry without deleting directories or following a final link."""
+
+    set_user(current_user.username)
+    if not path.strip("/\\"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete the share root")
+    connection = _get_connection_or_404(session, current_user, connection_id)
+    require_connection_write_access(current_user, connection, action="delete", path=path)
+
+    backend: SMBBackend | None = None
+    try:
+        backend = build_smb_backend(connection, backend_factory=SMBBackend)
+        await backend.connect()
+        await backend.remove_file(path)
+    except Exception as error:
+        raise file_target_http_error(error, requires_file=True) from error
+    finally:
+        if backend is not None:
+            await disconnect_backend_safely(
+                backend,
+                logger=logger,
+                context=f"remove file: connection_id={connection_id}, path='{path}'",
+            )
+
+    logger.info("Deleted file: connection_id=%s, path=%r, user=%s", connection_id, path, current_user.username)
 
 
 @router.delete("/{connection_id}/empty-directory", status_code=status.HTTP_204_NO_CONTENT)

@@ -16,6 +16,7 @@ import { createMockAuthToken } from "../../test/fixtures/users";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as companionHook from "../../hooks/useCompanion";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
@@ -41,7 +42,7 @@ vi.mock("../AccountSettings", () => ({ AccountSettings: () => <div>Account conte
 
 // Mock components using lazy mock factories
 vi.mock("../../components/Viewer/MarkdownViewer", () => ({
-  default: ({ onClose, navigation, path, isTransitioning }: ViewerComponentProps) => {
+  default: ({ onClose, navigation, path, isTransitioning, onDeleteRequest }: ViewerComponentProps) => {
     return (
       <div role="dialog" data-testid="markdown-viewer" data-mode={navigation?.mode} data-path={path} data-pending={isTransitioning}>
         Markdown Viewer
@@ -54,6 +55,11 @@ vi.mock("../../components/Viewer/MarkdownViewer", () => ({
         <button type="button" onClick={onClose}>
           Close Viewer
         </button>
+        {onDeleteRequest && (
+          <button type="button" onClick={onDeleteRequest}>
+            Delete viewed file
+          </button>
+        )}
       </div>
     );
   },
@@ -286,6 +292,7 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
 
   describe("viewer history", () => {
     beforeEach(() => {
+      vi.mocked(api.removeFile).mockReset().mockResolvedValue(undefined);
       vi.mocked(api.listDirectory).mockResolvedValue({
         ...mockDirectoryListing,
         items: [
@@ -302,6 +309,109 @@ describe("FileBrowser — URL Routing (Phase 3)", () => {
         ],
       });
       vi.mocked(api.getFileInfo).mockResolvedValue({ type: FileType.FILE, size: 20, mime_type: "text/markdown" } as never);
+    });
+
+    it("deletes only the confirmed file and replaces its history entry", async () => {
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");
+      vi.mocked(api.removeFile).mockResolvedValue(undefined);
+      fireEvent.click(await screen.findByRole("button", { name: /file: readme\.md/i }));
+      fireEvent.click(await screen.findByRole("button", { name: "Delete viewed file" }));
+      const dialog = await screen.findByRole("dialog", { name: "Delete file" });
+      expect(within(dialog).getByText("readme.md")).toBeVisible();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+      await waitFor(() => expect(screen.queryByTestId("markdown-viewer")).not.toBeInTheDocument());
+      expect(api.removeFile).toHaveBeenCalledExactlyOnceWith("conn-1", "readme.md");
+      expect(api.deleteItem).not.toHaveBeenCalled();
+      expect(router.state.historyAction).toBe("REPLACE");
+      await act(() => router.navigate(-1));
+      expect(router.state.location.search).toBe("");
+    });
+
+    it("dismisses a confirmation on Back without deleting and reopens the viewer on Forward", async () => {
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");
+      fireEvent.click(await screen.findByRole("button", { name: /file: readme\.md/i }));
+      fireEvent.click(await screen.findByRole("button", { name: "Delete viewed file" }));
+      const confirm = within(await screen.findByRole("dialog", { name: "Delete file" })).getByRole("button", { name: "Delete" });
+      await act(async () => {
+        const back = router.navigate(-1);
+        fireEvent.click(confirm);
+        await back;
+      });
+      expect(api.removeFile).not.toHaveBeenCalled();
+      expect(screen.queryByRole("dialog", { name: "Delete file" })).not.toBeInTheDocument();
+      await act(() => router.navigate(1));
+      expect(await screen.findByTestId("markdown-viewer")).toBeVisible();
+      expect(screen.queryByRole("dialog", { name: "Delete file" })).not.toBeInTheDocument();
+    });
+
+    it("submits a pending confirmation once and leaves a new viewer open when it finishes", async () => {
+      let finish: (() => void) | undefined;
+      vi.mocked(api.removeFile).mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      );
+      const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      fireEvent.click(await screen.findByRole("button", { name: "Delete viewed file" }));
+      const confirm = within(await screen.findByRole("dialog", { name: "Delete file" })).getByRole("button", { name: "Delete" });
+      act(() => {
+        fireEvent.click(confirm);
+        fireEvent.click(confirm);
+      });
+      expect(api.removeFile).toHaveBeenCalledTimes(1);
+      expect(confirm).toBeDisabled();
+      await act(() => router.navigate("?file=smb%2Ftest-server-1%2Fother.md&viewer=markdown"));
+      await waitFor(() => expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "other.md"));
+      await act(async () => finish?.());
+      expect(screen.getByTestId("markdown-viewer")).toHaveAttribute("data-path", "other.md");
+    });
+
+    it.each([404, 405])("does not fall back when an older Companion returns %s", async (status) => {
+      vi.spyOn(companionHook, "useCompanion").mockReturnValue({
+        status: "paired",
+        drives: [{ id: "c", name: "Test drive", drive_type: "fixed" }],
+        loading: false,
+        initiatePairing: vi.fn(),
+        confirmPairing: vi.fn(),
+        refresh: vi.fn(),
+      });
+      vi.mocked(api.removeFile).mockRejectedValueOnce({ response: { status, data: {} } });
+      await renderBrowserAndFlush("/browse/local/c/Users?file=local%2Fc%2FUsers%2Freadme.md&viewer=markdown");
+      fireEvent.click(await screen.findByRole("button", { name: "Delete viewed file" }));
+      const dialog = within(await screen.findByRole("dialog", { name: "Delete file" }));
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Delete" }));
+      });
+      expect(await dialog.findByRole("alert")).toHaveTextContent("Update Sambee Companion to delete files from the viewer.");
+      expect(api.removeFile).toHaveBeenCalledExactlyOnceWith("local-drive:c", "Users/readme.md");
+      expect(api.deleteItem).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["smb_mutation_uncertain", 409, "Sambee could not confirm the deletion.", false],
+      ["file_timeout", 504, "Sambee could not confirm the deletion.", false],
+      ["smb_recovery_busy", 409, "The SMB connection is recovering.", true],
+      ["not_a_file", 409, "This path is a folder, not a file.", true],
+      ["item_not_found", 404, "Sambee could not find this file.", true],
+      ["file_access_denied", 403, "You do not have permission to delete this file.", true],
+      [undefined, 404, "Sambee could not delete the file.", true],
+    ])("displays the error for %s and controls retries", async (code, status, message, retryable) => {
+      vi.mocked(api.removeFile).mockRejectedValue({ response: { status, data: { detail: { code } } } });
+      await renderBrowserAndFlush("/browse/smb/test-server-1?file=smb%2Ftest-server-1%2Freadme.md&viewer=markdown");
+      fireEvent.click(await screen.findByRole("button", { name: "Delete viewed file" }));
+      const dialog = within(await screen.findByRole("dialog", { name: "Delete file" }));
+      const confirm = dialog.getByRole("button", { name: "Delete" });
+      await act(async () => {
+        fireEvent.click(confirm);
+      });
+      expect(await dialog.findByRole("alert")).toHaveTextContent(message);
+      if (retryable) expect(confirm).toBeEnabled();
+      else expect(confirm).toBeDisabled();
+      await act(async () => {
+        fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+      });
+      expect(Boolean(screen.queryByRole("button", { name: "Delete viewed file" }))).toBe(retryable);
     });
     it("restores a file viewer without the secure-context UUID method", async () => {
       const getRandomValues = crypto.getRandomValues.bind(crypto);

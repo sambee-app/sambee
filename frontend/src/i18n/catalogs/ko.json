@@ -1,5 +1,14 @@
 {
   "viewer": {
+    "delete": {
+      "missing": "Sambee에서 이 파일을 찾을 수 없습니다. 뷰어를 닫고 폴더를 새로 고치세요.",
+      "notFile": "이 경로는 파일이 아닌 폴더를 가리킵니다. Sambee는 이 폴더를 삭제하지 않았습니다. 폴더를 새로 고치세요.",
+      "accessDenied": "이 파일을 삭제할 권한이 없습니다. 공유 리소스의 소유자에게 쓰기 권한을 요청하세요.",
+      "uncertain": "Sambee에서 삭제 여부를 확인할 수 없습니다. 파일이 이미 삭제되었을 수 있습니다. 뷰어를 닫고 폴더를 새로 고치세요.",
+      "recoveryBusy": "SMB 연결을 복구하는 중입니다. 잠시 기다렸다가 다시 시도하세요.",
+      "companionUpdate": "뷰어에서 파일을 삭제하려면 Sambee Companion을 업데이트하세요.",
+      "failed": "Sambee에서 파일을 삭제할 수 없습니다. 연결을 확인한 후 다시 시도하세요."
+    },
     "pdfPassword": {
       "title": "PDF 잠금 해제",
       "description": "이 PDF를 보려면 비밀번호를 입력하세요.",

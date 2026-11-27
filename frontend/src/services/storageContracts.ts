@@ -257,6 +257,7 @@ export interface StorageBackend {
   create(destination: ResolvedStorageDirectoryLocation, request: StorageCreateRequest): Promise<StorageOperationResult>;
   rename(item: ResolvedStorageItemLocation, name: string): Promise<StorageOperationResult>;
   remove(item: ResolvedStorageItemLocation): Promise<StorageOperationResult>;
+  removeFile(item: ResolvedStorageItemLocation): Promise<void>;
   removeEmptyDirectory(item: ResolvedStorageItemLocation): Promise<StorageEmptyDirectoryRemovalResult>;
   copyWithinBackend(request: SameBackendTransferRequest): Promise<ContentTransferResult>;
   moveWithinBackend(request: SameBackendTransferRequest): Promise<ContentTransferResult>;

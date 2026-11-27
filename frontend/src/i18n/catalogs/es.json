@@ -1,5 +1,14 @@
 {
   "viewer": {
+    "delete": {
+      "missing": "Sambee no pudo encontrar este archivo. Cierra el visor y actualiza la carpeta.",
+      "notFile": "Esta ruta corresponde a una carpeta, no a un archivo. Sambee no la eliminó. Actualiza la carpeta.",
+      "accessDenied": "No tienes permiso para eliminar este archivo. Pide permiso de escritura al propietario del recurso compartido.",
+      "uncertain": "Sambee no pudo confirmar la eliminación. Es posible que el archivo ya se haya eliminado. Cierra el visor y actualiza la carpeta.",
+      "recoveryBusy": "La conexión SMB se está restableciendo. Espera un momento y vuelve a intentarlo.",
+      "companionUpdate": "Actualiza Sambee Companion para eliminar archivos desde el visor.",
+      "failed": "Sambee no pudo eliminar el archivo. Comprueba la conexión y vuelve a intentarlo."
+    },
     "pdfPassword": {
       "title": "Desbloquear PDF",
       "description": "Introduce la contraseña para ver este PDF.",

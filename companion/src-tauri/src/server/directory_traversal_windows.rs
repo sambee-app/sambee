@@ -20,11 +20,12 @@ use windows::Win32::Foundation::{
     ERROR_NO_MORE_FILES, HANDLE, OBJ_CASE_INSENSITIVE, OBJ_DONT_REPARSE, UNICODE_STRING,
 };
 use windows::Win32::Storage::FileSystem::{
-    ExtendedFileIdType, FileAttributeTagInfo, FileIdExtdDirectoryInfo, FileIdExtdDirectoryRestartInfo, FileIdInfo, FileIdType,
-    GetFileInformationByHandleEx, GetFinalPathNameByHandleW, OpenFileById, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_128, FILE_ID_DESCRIPTOR,
-    FILE_ID_DESCRIPTOR_0, FILE_ID_EXTD_DIR_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE, FILE_SHARE_MODE, FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE, VOLUME_NAME_NT,
+    ExtendedFileIdType, FileAttributeTagInfo, FileDispositionInfo, FileIdExtdDirectoryInfo, FileIdExtdDirectoryRestartInfo, FileIdInfo,
+    FileIdType, GetFileInformationByHandleEx, GetFinalPathNameByHandleW, OpenFileById, SetFileInformationByHandle, DELETE,
+    FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DISPOSITION_INFO,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_128, FILE_ID_DESCRIPTOR, FILE_ID_DESCRIPTOR_0, FILE_ID_EXTD_DIR_INFO,
+    FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_MODE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, SYNCHRONIZE, VOLUME_NAME_NT,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -117,14 +118,17 @@ fn open_directory(path: &Path, io: &super::NativeIo, share_mode: FILE_SHARE_MODE
     io.record_open();
     #[cfg(test)]
     io.record_open_target(|| super::NativeOpenTarget::Path(path.to_owned()));
-    let file = OpenOptions::new()
-        .read(true)
-        .access_mode(FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0)
-        .share_mode(share_mode.0)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
-        .open(path)?;
+    let file = open_no_follow(path, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, share_mode)?;
     validate_directory(&file)?;
     Ok(file)
+}
+
+fn open_no_follow(path: &Path, access: FILE_ACCESS_RIGHTS, share_mode: FILE_SHARE_MODE) -> io::Result<File> {
+    OpenOptions::new()
+        .access_mode(access.0)
+        .share_mode(share_mode.0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(path)
 }
 
 fn validate_directory(file: &File) -> Result<(), IndexError> {
@@ -318,6 +322,10 @@ fn verify_native_parent(parent: &Path, child: &Path) -> Result<(), IndexError> {
 
 /// Root bindings block rename; scan chains permit it and validate the retained native path.
 fn open_chain(path: &Path, io: &super::NativeIo, share_mode: FILE_SHARE_MODE) -> Result<Vec<File>, IndexError> {
+    open_chain_with(path, |path| open_directory(path, io, share_mode))
+}
+
+fn open_chain_with(path: &Path, open: impl Fn(&Path) -> Result<File, IndexError>) -> Result<Vec<File>, IndexError> {
     let mut current = PathBuf::new();
     let mut files = Vec::new();
     let mut volume = None;
@@ -327,7 +335,7 @@ fn open_chain(path: &Path, io: &super::NativeIo, share_mode: FILE_SHARE_MODE) ->
         if matches!(component, Component::Prefix(_)) {
             continue;
         }
-        let file = open_directory(&current, io, share_mode)?;
+        let file = open(&current)?;
         let found = identity(&file)?;
         let native = native_path(&file)?;
         if let Some(parent) = binding.as_ref() {
@@ -346,6 +354,58 @@ fn open_chain(path: &Path, io: &super::NativeIo, share_mode: FILE_SHARE_MODE) ->
         return Err(IndexError::Invalid("Directory source root has no directory handle."));
     }
     Ok(files)
+}
+
+fn validate_deletion_directory(file: &File) -> Result<(), IndexError> {
+    let info = attributes(file)?;
+    let reparse = info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0;
+    if info.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0
+        || !matches!(
+            (reparse, windows_reparse_kind(info.ReparseTag)),
+            (false, WindowsReparseKind::Ordinary) | (true, WindowsReparseKind::CloudPlaceholder)
+        )
+    {
+        return Err(io::Error::from(io::ErrorKind::NotADirectory).into());
+    }
+    Ok(())
+}
+
+pub(in super::super) fn remove_empty_directory_no_follow(path: &Path) -> io::Result<()> {
+    remove_empty_directory(path).map_err(|error| match error {
+        IndexError::Io(error) => error,
+        IndexError::Invalid(message) => io::Error::new(io::ErrorKind::PermissionDenied, message),
+        error => io::Error::other(error),
+    })
+}
+
+fn remove_empty_directory(path: &Path) -> Result<(), IndexError> {
+    let parent = path.parent().ok_or(IndexError::Invalid("The folder has no parent."))?;
+    // Keep ancestor handles open without delete sharing until the final handle is closed.
+    let parents = open_chain_with(&root_path(parent)?, |path| {
+        let file = open_no_follow(path, FILE_READ_ATTRIBUTES, ROOT_SHARE_MODE)?;
+        validate_deletion_directory(&file)?;
+        Ok(file)
+    })?;
+    let parent = last(&parents)?;
+    let directory = open_no_follow(path, DELETE | FILE_READ_ATTRIBUTES, ROOT_SHARE_MODE)?;
+    validate_deletion_directory(&directory)?;
+    verify_native_parent(&native_path(parent)?, &native_path(&directory)?)?;
+    if identity(parent)?.device != identity(&directory)?.device {
+        return Err(IndexError::Invalid(
+            "The folder is on a different volume. Select it from its own drive.",
+        ));
+    }
+    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+    unsafe {
+        SetFileInformationByHandle(
+            HANDLE(directory.as_raw_handle()),
+            FileDispositionInfo,
+            std::ptr::from_ref(&disposition).cast(),
+            size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    }
+    .map_err(|error| io::Error::from_raw_os_error(error.code().0 & 0xffff))?;
+    Ok(())
 }
 
 fn last(files: &[File]) -> Result<&File, IndexError> {

@@ -1,5 +1,14 @@
 {
   "viewer": {
+    "delete": {
+      "missing": "Sambee non ha trovato questo file. Chiudi il visualizzatore e aggiorna la cartella.",
+      "notFile": "Questo percorso indica una cartella, non un file. Sambee non ha eliminato la cartella. Aggiorna la cartella.",
+      "accessDenied": "Non hai il permesso di eliminare questo file. Chiedi al proprietario della condivisione l’accesso in scrittura.",
+      "uncertain": "Sambee non ha potuto confermare l’eliminazione. Il file potrebbe essere già stato eliminato. Chiudi il visualizzatore e aggiorna la cartella.",
+      "recoveryBusy": "La connessione SMB è in fase di ripristino. Attendi un momento, poi riprova.",
+      "companionUpdate": "Aggiorna Sambee Companion per eliminare i file dal visualizzatore.",
+      "failed": "Sambee non ha potuto eliminare il file. Controlla la connessione, poi riprova."
+    },
     "pdfPassword": {
       "title": "Sblocca PDF",
       "description": "Inserisci la password per visualizzare questo PDF.",

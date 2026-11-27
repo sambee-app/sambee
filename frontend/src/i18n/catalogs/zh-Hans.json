@@ -18,6 +18,15 @@
     }
   },
   "viewer": {
+    "delete": {
+      "missing": "Sambee 找不到此文件。请关闭查看器并刷新文件夹。",
+      "notFile": "此路径指向文件夹，而不是文件。Sambee 未删除该文件夹。请刷新文件夹。",
+      "accessDenied": "你没有权限删除此文件。请向共享资源的所有者申请写入权限。",
+      "uncertain": "Sambee 无法确认删除结果。文件可能已删除。请关闭查看器并刷新文件夹。",
+      "recoveryBusy": "SMB 连接正在恢复。请稍候再试。",
+      "companionUpdate": "请更新 Sambee Companion，以便在查看器中删除文件。",
+      "failed": "Sambee 无法删除此文件。请检查连接后重试。"
+    },
     "pdfPassword": {
       "title": "解锁 PDF",
       "description": "输入密码以查看此 PDF。",

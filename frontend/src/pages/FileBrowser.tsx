@@ -5239,6 +5239,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
           ref={workspaceRef}
           connections={allConnections}
           services={browserContentServices}
+          contentOperations={contentOperationEnvironment}
           left={leftPane}
           right={rightPane}
           ready={

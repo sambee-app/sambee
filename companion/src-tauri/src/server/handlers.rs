@@ -1442,19 +1442,20 @@ pub async fn browse_delete(
 ) -> Result<StatusCode, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
 
-    let relative = normalize_drive_relative_path(&drive, query.path.as_deref().unwrap_or(""))?;
-    if relative.is_empty() {
-        return Err(ApiError::BadRequest("Cannot delete the drive root".to_string()));
-    }
+    let full_path = resolve_final_entry_path(&base_path, &drive, query.path.as_deref().unwrap_or(""), map_io_error)?;
 
-    let full_path = resolve_safe_path(&base_path, &drive, &relative)?;
-
-    super::directory_policy::ensure_mutation_allowed(&full_path)?;
+    super::directory_policy::ensure_entry_mutation_allowed(&full_path)?;
     let target = full_path.clone();
     tokio::task::spawn_blocking(move || {
         indexes.run_observed_subtree_operation(&drive, &base_path, &target, || {
             let metadata = std::fs::symlink_metadata(&target)?;
-            if metadata.is_dir() {
+            if is_filesystem_link(&metadata) {
+                #[cfg(windows)]
+                if is_directory_entry(&metadata) {
+                    return std::fs::remove_dir(&target);
+                }
+                std::fs::remove_file(&target)
+            } else if metadata.is_dir() {
                 std::fs::remove_dir_all(&target)
             } else {
                 std::fs::remove_file(&target)
@@ -1469,6 +1470,75 @@ pub async fn browse_delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `DELETE /api/browse/{drive}/file` — remove a file entry, never a directory tree.
+pub async fn browse_delete_file(
+    State(DirectoryMutationState(indexes)): State<DirectoryMutationState>,
+    Path(drive): Path<String>,
+    Query(query): Query<BrowseQuery>,
+) -> Result<StatusCode, ApiError> {
+    let base_path = drives::resolve_drive_path(&drive).ok_or_else(file_delete_location_unavailable)?;
+    let full_path = resolve_final_entry_path(
+        &base_path,
+        &drive,
+        query.path.as_deref().unwrap_or(""),
+        map_file_delete_location_io_error,
+    )
+    .map_err(|error| match error {
+        ApiError::NotFound(_) => file_delete_location_unavailable(),
+        ApiError::Forbidden(message) => ApiError::forbidden_code(message, FILE_ACCESS_DENIED_CODE),
+        error => error,
+    })?;
+    super::directory_policy::ensure_entry_mutation_allowed(&full_path).map_err(|error| match error {
+        ApiError::Io(error) => map_file_delete_location_io_error(error, &full_path),
+        error => error,
+    })?;
+
+    let target = full_path.clone();
+    tokio::task::spawn_blocking(move || {
+        indexes.run_observed_operation(&drive, &base_path, &target, || {
+            std::fs::remove_file(&target).map_err(|error| map_file_delete_io_error(error, &target))
+        })
+    })
+    .await
+    .map_err(|error| {
+        log::error!("File deletion task failed: {error}");
+        ApiError::internal_code(
+            "Could not confirm file deletion. Check the drive before retrying.",
+            FILE_UNAVAILABLE_CODE,
+        )
+    })??;
+
+    log::info!("Local file deletion completed");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn file_delete_location_unavailable() -> ApiError {
+    ApiError::not_found_code(
+        "The file location is unavailable. Check the drive and select the file again.",
+        FILE_UNAVAILABLE_CODE,
+    )
+}
+
+fn map_file_delete_location_io_error(error: std::io::Error, path: &FsPath) -> ApiError {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return file_delete_location_unavailable();
+    }
+    map_file_io_error(error, path)
+}
+
+fn map_file_delete_io_error(error: std::io::Error, path: &FsPath) -> ApiError {
+    use std::io::ErrorKind;
+
+    let error = normalize_path_io_error(error, path);
+    if error.kind() == ErrorKind::NotFound && !path.parent().is_some_and(FsPath::is_dir) {
+        return file_delete_location_unavailable();
+    }
+    if error.kind() == ErrorKind::PermissionDenied && std::fs::symlink_metadata(path).is_ok_and(|metadata| is_directory_entry(&metadata)) {
+        return map_file_io_error(ErrorKind::IsADirectory.into(), path);
+    }
+    map_file_io_error(error, path)
+}
+
 /// `DELETE /api/browse/{drive}/empty-directory` — remove one empty directory.
 pub async fn browse_delete_empty_directory(
     State(DirectoryMutationState(indexes)): State<DirectoryMutationState>,
@@ -1476,38 +1546,45 @@ pub async fn browse_delete_empty_directory(
     Query(query): Query<BrowseQuery>,
 ) -> Result<StatusCode, ApiError> {
     let base_path = drives::resolve_drive_path(&drive).ok_or_else(|| ApiError::NotFound(format!("Unknown drive: {drive}")))?;
-    let relative = normalize_drive_relative_path(&drive, query.path.as_deref().unwrap_or(""))?;
-    if relative.is_empty() {
-        return Err(ApiError::BadRequest("Cannot delete the drive root".to_string()));
-    }
-    let directory = resolve_safe_path(&base_path, &drive, &relative)?;
-    super::directory_policy::ensure_mutation_allowed(&directory)?;
-    let metadata = tokio::fs::symlink_metadata(&directory)
-        .await
-        .map_err(|error| map_io_error(error, &directory))?;
-    if !metadata.is_dir() {
-        return Err(ApiError::conflict_message(format!(
-            "Target is not a directory: {}",
-            directory.display()
-        )));
-    }
-    let target = directory.clone();
-    let outcome =
-        tokio::task::spawn_blocking(move || indexes.run_observed_operation(&drive, &base_path, &target, || std::fs::remove_dir(&target)))
-            .await
-            .map_err(|error| {
-                ApiError::Internal(format!(
-                    "Empty-directory deletion task failed: {error}. Check the target and retry."
-                ))
-            })?;
-    match outcome {
-        Ok(()) => Ok(StatusCode::NO_CONTENT),
+    let relative = query.path.unwrap_or_default();
+    tokio::task::spawn_blocking(move || {
+        let directory = resolve_final_entry_path(&base_path, &drive, &relative, map_io_error)?;
+        super::directory_policy::ensure_entry_mutation_allowed(&directory)?;
+        indexes.run_observed_operation(&drive, &base_path, &directory, || remove_empty_directory_entry(&directory))
+    })
+    .await
+    .map_err(|error| {
+        ApiError::Internal(format!(
+            "Empty-directory deletion task failed: {error}. Check the target and retry."
+        ))
+    })??;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn remove_empty_directory_entry(directory: &FsPath) -> Result<(), ApiError> {
+    let result = remove_empty_directory_no_follow(directory);
+    match result {
+        Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => Err(ApiError::conflict_message(format!(
             "Directory is not empty: {}",
             directory.display()
         ))),
-        Err(error) => Err(map_io_error(error, &directory)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotADirectory => Err(ApiError::conflict_message(
+            "Empty-directory deletion requires a directory that is not a link or redirect. Select a different folder.",
+        )),
+        Err(error) => Err(map_io_error(error, directory)),
     }
+}
+
+#[cfg(windows)]
+fn remove_empty_directory_no_follow(directory: &FsPath) -> std::io::Result<()> {
+    super::directory_traversal::remove_empty_directory_no_follow(directory)
+}
+
+#[cfg(not(windows))]
+fn remove_empty_directory_no_follow(directory: &FsPath) -> std::io::Result<()> {
+    // rmdir rejects a final symlink and checks emptiness as part of removal.
+    std::fs::remove_dir(directory)
 }
 
 #[derive(Deserialize)]
@@ -6129,6 +6206,50 @@ fn resolve_safe_path_and_root(
     Ok((canonical_base, canonical_full))
 }
 
+/// Resolve the parent under the drive root without following the entry to be changed.
+fn resolve_final_entry_path(
+    base: &FsPath,
+    drive: &str,
+    relative: &str,
+    map_parent_error: fn(std::io::Error, &FsPath) -> ApiError,
+) -> Result<PathBuf, ApiError> {
+    let relative = normalize_drive_relative_path(drive, relative)?;
+    if relative.is_empty() {
+        return Err(ApiError::BadRequest("Cannot delete the drive root".to_string()));
+    }
+
+    let (parent, name) = relative.rsplit_once('/').unwrap_or(("", &relative));
+    if matches!(name, "" | ".") {
+        return Err(ApiError::BadRequest("Select a path that ends with an item name".to_string()));
+    }
+    if relative.split('/').any(|component| component == "..") {
+        return Err(ApiError::BadRequest("Path traversal not allowed".to_string()));
+    }
+    #[cfg(windows)]
+    if name.contains(':') {
+        return Err(ApiError::BadRequest("Select an item, not a drive or file stream".to_string()));
+    }
+
+    let canonical_base = base
+        .canonicalize()
+        .map_err(|_| ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()))?;
+    if !canonical_base.is_dir() {
+        return Err(ApiError::NotFound(DRIVE_UNAVAILABLE_MESSAGE.to_string()));
+    }
+    let parent = canonical_base.join(parent);
+    let canonical_parent = if parent == canonical_base {
+        canonical_base.clone()
+    } else {
+        parent
+            .canonicalize()
+            .map_err(|error| map_parent_error(normalize_path_io_error(error, &parent), &parent))?
+    };
+    if !canonical_parent.starts_with(&canonical_base) {
+        return Err(ApiError::Forbidden("Path is outside the drive boundary".to_string()));
+    }
+    Ok(canonical_parent.join(name))
+}
+
 /// Distinguish missing paths from file parents when the OS reports both as missing.
 fn normalize_path_io_error(error: std::io::Error, path: &std::path::Path) -> std::io::Error {
     if error.kind() == std::io::ErrorKind::NotFound {
@@ -6177,24 +6298,45 @@ fn map_link_resolution_error(error: LinkResolutionError) -> ApiError {
     }
 }
 
-async fn source_link_kind(path: &std::path::Path) -> Result<Option<LinkKind>, std::io::Error> {
-    let metadata = tokio::fs::symlink_metadata(path).await?;
+fn is_filesystem_link(metadata: &std::fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
-        return Ok(Some(LinkKind::FilesystemLink));
+        return true;
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-
         use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
-        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
-            return Ok(Some(LinkKind::FilesystemLink));
-        }
-        if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("lnk")) {
-            return Ok(Some(LinkKind::WindowsShortcut));
-        }
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[cfg(windows)]
+fn is_directory_entry(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY;
+
+    metadata.file_attributes() & FILE_ATTRIBUTE_DIRECTORY.0 != 0
+}
+
+#[cfg(not(windows))]
+fn is_directory_entry(metadata: &std::fs::Metadata) -> bool {
+    metadata.is_dir()
+}
+
+async fn source_link_kind(path: &std::path::Path) -> Result<Option<LinkKind>, std::io::Error> {
+    let metadata = tokio::fs::symlink_metadata(path).await?;
+    if is_filesystem_link(&metadata) {
+        return Ok(Some(LinkKind::FilesystemLink));
+    }
+    #[cfg(windows)]
+    if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("lnk")) {
+        return Ok(Some(LinkKind::WindowsShortcut));
     }
 
     Ok(None)

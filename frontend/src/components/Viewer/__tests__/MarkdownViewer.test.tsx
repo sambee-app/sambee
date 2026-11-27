@@ -38,7 +38,7 @@ function render(ui: ReactNode) {
   return renderBase(ui, { wrapper: ContentProviderTestWrapper });
 }
 
-function RoutedMarkdownViewer() {
+function RoutedMarkdownViewer({ deletePending, onDeleteRequest }: { deletePending?: boolean; onDeleteRequest?: () => void } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const [guard, setGuard] = useState<ViewerLeaveGuard | null>(null);
@@ -48,6 +48,8 @@ function RoutedMarkdownViewer() {
       <MarkdownViewer
         connectionId="conn1"
         path="/docs/readme.md"
+        deletePending={deletePending}
+        onDeleteRequest={onDeleteRequest}
         onClose={() => void navigate("/browse")}
         navigation={{
           mode: new URLSearchParams(location.search).get("mode") === "edit" ? "edit" : "view",
@@ -1221,6 +1223,41 @@ describe("MarkdownViewer", () => {
     } finally {
       unsubscribe();
     }
+  });
+
+  it("replaces a pending delete's edit route without acquiring a lock and allows editing after failure", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValue("# Readme\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    const deleteRequest = vi.fn();
+    let finishDelete = () => {};
+    function PendingDeleteViewer() {
+      const [pending, setPending] = useState(true);
+      finishDelete = () => setPending(false);
+      return <RoutedMarkdownViewer deletePending={pending} onDeleteRequest={deleteRequest} />;
+    }
+    const router = createMemoryRouter([{ path: "/viewer", element: <PendingDeleteViewer /> }], {
+      initialEntries: ["/viewer?mode=edit", "/viewer"],
+    });
+    render(
+      <SambeeThemeProvider>
+        <RouterProvider router={router} />
+      </SambeeThemeProvider>
+    );
+    await screen.findByRole("heading", { name: "Readme" });
+    await act(() => router.navigate(-1));
+    expect(router.state.historyAction).toBe("REPLACE");
+    expect(router.state.location.search).not.toContain("mode=edit");
+    expect(apiService.acquireEditLock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Delete file" })).not.toBeInTheDocument();
+
+    act(finishDelete);
+    await screen.findByRole("button", { name: "Delete file" });
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    await waitFor(() => expect(apiService.acquireEditLock).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("button", { name: "Delete file" })).not.toBeInTheDocument();
+    fireEvent.keyDown(editor, { key: "Delete" });
+    expect(deleteRequest).not.toHaveBeenCalled();
   });
 
   it("opens an edit bookmark and guards dirty Back with Cancel and Discard", async () => {

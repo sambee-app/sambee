@@ -89,7 +89,11 @@ fn storage_path_starts_with(path: &Path, parent: &Path) -> Result<bool, ApiError
 fn ensure_outside_policy_storage(path: &Path, protected: &Path) -> Result<(), ApiError> {
     let resolved = canonical_storage_path(path)?;
     let protected = canonical_storage_path(protected)?;
-    if storage_path_starts_with(&resolved, &protected)? || storage_path_starts_with(&protected, &resolved)? {
+    ensure_outside_resolved_storage(&resolved, &protected)
+}
+
+fn ensure_outside_resolved_storage(path: &Path, protected: &Path) -> Result<(), ApiError> {
+    if storage_path_starts_with(path, protected)? || storage_path_starts_with(protected, path)? {
         return Err(ApiError::forbidden_code(
             "Companion internal storage can change only through native controls. Select a different file or directory.",
             "directory_policy_storage_protected",
@@ -105,6 +109,48 @@ pub(super) fn ensure_mutation_allowed(path: &Path) -> Result<(), ApiError> {
         }
     }
     Ok(())
+}
+
+/// Check a mutation of the entry itself. The caller has already resolved its parent.
+pub(super) fn ensure_entry_mutation_allowed(path: &Path) -> Result<(), ApiError> {
+    if let Some(roots) = PROTECTED_NATIVE_STORAGE.get() {
+        #[cfg(windows)]
+        let expanded = expand_windows_entry_name(path)?;
+        #[cfg(windows)]
+        let path = expanded.as_path();
+        for protected in roots {
+            ensure_outside_resolved_storage(path, protected)?;
+            ensure_outside_resolved_storage(path, &canonical_storage_path(protected)?)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn expand_windows_entry_name(path: &Path) -> std::io::Result<PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetLongPathNameW;
+
+    // Expand 8.3 names so a short alias cannot bypass protection. Unlike
+    // canonicalization, expanding the name does not open a link's target.
+    let input: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let mut buffer = vec![0; input.len()];
+    loop {
+        let length = unsafe { GetLongPathNameW(PCWSTR(input.as_ptr()), Some(&mut buffer)) } as usize;
+        if length == 0 {
+            let error = std::io::Error::last_os_error();
+            return if error.kind() == std::io::ErrorKind::NotFound {
+                Ok(path.to_path_buf())
+            } else {
+                Err(error)
+            };
+        }
+        if length < buffer.len() {
+            return Ok(std::ffi::OsString::from_wide(&buffer[..length]).into());
+        }
+        buffer.resize(length, 0);
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -924,6 +970,7 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let namespace = temporary.path().join("index-cache");
         let manager = LocalDirectoryManager::new(namespace.clone()).unwrap();
+        std::fs::create_dir_all(&namespace).unwrap();
         let configuration = temporary.path().join("configuration");
         let policy = DirectoryPolicyState::open(configuration.join("policy"), &manager).unwrap();
         policy.protect_storage(&namespace).unwrap();
@@ -934,8 +981,20 @@ mod tests {
             namespace.clone(),
         ] {
             assert!(ensure_mutation_allowed(&path).is_err());
+            assert!(
+                ensure_entry_mutation_allowed(&path.parent().unwrap().canonicalize().unwrap().join(path.file_name().unwrap())).is_err()
+            );
         }
         assert!(ensure_mutation_allowed(&temporary.path().join("ordinary.txt")).is_ok());
+        let parent = temporary.path().canonicalize().unwrap();
+        assert!(ensure_entry_mutation_allowed(&parent.join("ordinary.txt")).is_ok());
+        #[cfg(unix)]
+        {
+            let link = parent.join("link");
+            std::os::unix::fs::symlink(&namespace, &link).unwrap();
+            assert!(ensure_mutation_allowed(&link).is_err());
+            assert!(ensure_entry_mutation_allowed(&link).is_ok());
+        }
         #[cfg(windows)]
         assert!(ensure_mutation_allowed(&PathBuf::from(namespace.to_str().unwrap().to_ascii_uppercase())).is_err());
     }

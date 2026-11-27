@@ -1,5 +1,14 @@
 {
   "viewer": {
+    "delete": {
+      "missing": "Sambee nie mógł znaleźć tego pliku. Zamknij podgląd i odśwież folder.",
+      "notFile": "Ta ścieżka wskazuje folder, a nie plik. Sambee nie usunął folderu. Odśwież folder.",
+      "accessDenied": "Nie masz uprawnień do usunięcia tego pliku. Poproś właściciela udziału o uprawnienia do zapisu.",
+      "uncertain": "Sambee nie mógł potwierdzić usunięcia pliku. Plik mógł już zostać usunięty. Zamknij podgląd i odśwież folder.",
+      "recoveryBusy": "Trwa przywracanie połączenia SMB. Poczekaj chwilę i spróbuj ponownie.",
+      "companionUpdate": "Zaktualizuj Sambee Companion, aby usuwać pliki z poziomu podglądu.",
+      "failed": "Sambee nie mógł usunąć pliku. Sprawdź połączenie i spróbuj ponownie."
+    },
     "pdfPassword": {
       "title": "Odblokuj PDF",
       "description": "Wpisz hasło, aby wyświetlić ten plik PDF.",

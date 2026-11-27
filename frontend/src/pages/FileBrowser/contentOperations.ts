@@ -885,6 +885,14 @@ export async function deleteContentItems(items: readonly ContentItemHandle[], en
   }
 }
 
+export async function deleteContentFile(item: PhysicalItemHandle, environment: ContentOperationEnvironment): Promise<void> {
+  if (!canWriteItem(item, environment).available) {
+    throw new Error("File deletion is unavailable for this location");
+  }
+  const resolved = environment.storageRegistry.resolveItem({ connectionId: item.location.connectionId, path: item.path });
+  await environment.storageRegistry.getBackend(resolved.target).removeFile(resolved);
+}
+
 export async function renameContentItem(item: ContentItemHandle, name: string, environment: ContentOperationEnvironment): Promise<void> {
   if (!isPhysicalItem(item) || !canWriteItem(item, environment).available) {
     throw new Error("Content renaming is unavailable for this item");

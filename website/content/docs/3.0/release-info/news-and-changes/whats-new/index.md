@@ -38,6 +38,14 @@ Index-based directory navigation and recent file access have been combined into 
 - The quick bar's mode (navigate/search/command) is now visualized with a pill button.
 - Fixed result menu flickering while typing in directory navigation mode.
 
+## Delete from Viewers
+
+Files opened in the image, Markdown, or PDF viewer can now be deleted (<kbd>Del</kbd> or a toolbar icon).
+
+## Image Viewer
+
+- If an image can't be opened, the viewer no longer shows the previous image behind the error message.
+
 ## Markdown Viewer
 
 ### Improvements
@@ -61,3 +69,4 @@ Index-based directory navigation and recent file access have been combined into 
 ## Miscellaneous
 
 - Companion settings sync: Pairing a new browser now moves Companion settings authority to that browser. When a browser is unpaired, authority moves to the most recently paired browser that remains. Companion repairs a missing or stale authority after restart, and browser tabs resume settings delivery automatically when they become the authority again.
+- Companion: empty directory deletion doesn't follow symlinks or junctions to another directory anymore and rejects deletion instead. On Windows, cloud-managed directories are recognized and deleted through a Windows API.

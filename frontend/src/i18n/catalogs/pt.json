@@ -1,5 +1,14 @@
 {
   "viewer": {
+    "delete": {
+      "missing": "O Sambee não conseguiu encontrar este arquivo. Feche o visualizador e atualize a pasta.",
+      "notFile": "Este caminho aponta para uma pasta, não para um arquivo. O Sambee não excluiu a pasta. Atualize a pasta.",
+      "accessDenied": "Não tem permissão para excluir este arquivo. Solicite acesso de escrita ao responsável pelo compartilhamento.",
+      "uncertain": "O Sambee não conseguiu confirmar a exclusão. O arquivo pode já ter sido excluído. Feche o visualizador e atualize a pasta.",
+      "recoveryBusy": "A conexão SMB está sendo restabelecida. Aguarde um momento e tente novamente.",
+      "companionUpdate": "Atualize o Sambee Companion para excluir arquivos pelo visualizador.",
+      "failed": "O Sambee não conseguiu excluir o arquivo. Verifique a conexão e tente novamente."
+    },
     "pdfPassword": {
       "title": "Desbloquear PDF",
       "description": "Introduza a senha para ver este PDF.",

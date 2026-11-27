@@ -54,6 +54,13 @@ export interface ViewInfo {
   searchSessionId?: string;
 }
 
+export interface ViewerDeletionTarget {
+  connectionId: string;
+  path: string;
+  paneId: PaneId;
+  sessionId: string;
+}
+
 export interface BrowserViewerPickerState {
   connectionId?: string;
   fileName: string;
@@ -368,7 +375,8 @@ export interface UseFileBrowserPaneReturn {
 
   // ── Viewer Handlers ────────────────────────────────────────────────────
   handleViewIndexChange: (index: number, options?: { updatePresentation?: boolean }) => void;
-  handleViewClose: () => void;
+  pruneViewerImages: (target: ViewerDeletionTarget, retainedPath?: string) => ViewInfo | null;
+  handleViewClose: (deletedPath?: string) => void;
   closeBrowserViewerPicker: () => void;
   confirmBrowserViewerPicker: (selection: { viewerId: ViewerId | null; rememberSelection: boolean }) => Promise<void>;
 
@@ -398,7 +406,7 @@ export interface UseFileBrowserPaneReturn {
    * `directory_changed` event is received.  Invalidates the cache entry
    * and triggers a reload if this pane is viewing the affected directory.
    */
-  handleDirectoryChanged: (change: DirectoryChange, options?: { invalidateOnly?: boolean }) => void;
+  handleDirectoryChanged: (change: DirectoryChange, options?: { invalidateOnly?: boolean; confirmedAbsence?: boolean }) => void;
   handleDirectorySubscriptionError?: (change: DirectoryChange, code?: string) => void;
   directoryMonitorError?: string | null;
   directoryMonitorErrorSummary?: string;

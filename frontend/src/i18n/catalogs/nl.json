@@ -1,5 +1,14 @@
 {
   "viewer": {
+    "delete": {
+      "missing": "Sambee kon dit bestand niet vinden. Sluit de viewer en vernieuw de map.",
+      "notFile": "Dit pad verwijst naar een map, niet naar een bestand. Sambee heeft de map niet verwijderd. Vernieuw de map.",
+      "accessDenied": "Je hebt geen toestemming om dit bestand te verwijderen. Vraag de eigenaar van de share om schrijftoegang.",
+      "uncertain": "Sambee kon de verwijdering niet bevestigen. Het bestand is mogelijk al verwijderd. Sluit de viewer en vernieuw de map.",
+      "recoveryBusy": "De SMB-verbinding wordt hersteld. Wacht even en probeer het opnieuw.",
+      "companionUpdate": "Werk Sambee Companion bij om bestanden vanuit de viewer te verwijderen.",
+      "failed": "Sambee kon het bestand niet verwijderen. Controleer de verbinding en probeer het opnieuw."
+    },
     "pdfPassword": {
       "title": "Pdf ontgrendelen",
       "description": "Voer het wachtwoord in om deze pdf te bekijken.",

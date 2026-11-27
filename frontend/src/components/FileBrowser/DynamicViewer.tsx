@@ -33,6 +33,8 @@ interface DynamicViewerProps {
     sessionId: string;
   };
   onClose: () => void;
+  onDeleteRequest?: () => void;
+  deletePending?: boolean;
   onIndexChange?: (index: number) => void;
   hasMoreItems?: boolean;
   isLoadingMoreItems?: boolean;
@@ -253,6 +255,8 @@ export const DynamicViewer = memo(function DynamicViewer(props: DynamicViewerPro
         fileSize={displayedInfo.fileSize}
         fileModifiedAt={displayedInfo.fileModifiedAt}
         onClose={onClose}
+        onDeleteRequest={isTransitioning ? undefined : displayed.onDeleteRequest}
+        deletePending={props.deletePending}
         isReadOnly={isReadOnly}
         isTransitioning={isTransitioning}
         virtualSource={displayedInfo.virtualSource}

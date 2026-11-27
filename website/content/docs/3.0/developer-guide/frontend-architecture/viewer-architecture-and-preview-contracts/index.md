@@ -39,6 +39,16 @@ Explicit image, PDF, and Markdown viewers take precedence over extension-based t
 
 All file viewers and editors use `useViewerDocumentTitle` to set the browser tab title to the active filename, including its extension. Image navigation updates the title to the active image. Native print events temporarily remove the final extension so browsers can suggest a clean PDF filename. The Markdown Print action uses the hook's print callback to prepare the title before opening the dialog and restore it after a print failure. Successful calls retain the short title until `afterprint`; `window.print()` can return before the print dialog closes. Closing the workspace restores the previous title unless another owner has changed it.
 
+## Delete from a Viewer
+
+Image, PDF, and Markdown preview can delete a physical file on a writable connection. `WorkspaceViewer` captures the routed file, pane, and viewer selection when the confirmation opens. It checks the same selection before sending the request and before changing the view. Markdown cannot start editing the target while deletion is pending, even if browser history requests edit mode. Archive members and editors do not offer this action.
+
+Use the dedicated `DELETE /api/browse/{target}/file` route on SMB and Companion. It removes the final entry without following a link and cannot remove a directory. Do not fall back to the recursive `item` route if an older Companion does not support `file`. If the server cannot confirm deletion, refresh the parent listing and block another attempt for that target in the current viewer session.
+
+On success, invalidate the parent listing in both panes. Remove the deleted image from the gallery snapshot. If the confirmed image is still selected, show the next image or, if there is none, the previous image. If no images remain, close the viewer. Replace only the current history entry. If the user selected another image in the same gallery while deletion was pending, keep that image and its history entry. History entries that still refer to the deleted file use the normal missing-file check.
+
+The confirmation owns its errors and shortcut scope. In fullscreen, its portal mounts inside the fullscreen element without locking that element's scroll. It stays there if the browser exits fullscreen while the confirmation is open.
+
 ## Unified Text Editor
 
 `TextEditor.tsx` owns the text destination and reuses `TextCodeEditor` for writable and read-only content. There isn't a separate text-viewer component or an Edit action. The public `viewer=text` identifier, viewer preferences, settings, and recovery-draft keys remain compatible. Text routes accept absent, `view`, and `edit` modes as the same destination; canonical URLs omit `mode` without adding a history entry or dropping fragments. Markdown still uses its existing preview/edit route modes.

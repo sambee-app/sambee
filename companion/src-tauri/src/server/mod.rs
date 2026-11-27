@@ -211,11 +211,7 @@ fn build_router(state: Arc<AppState>) -> Router {
             "/api/browse/{drive}/resolve-activation",
             axum::routing::get(handlers::browse_resolve_activation),
         )
-        .route("/api/browse/{drive}/item", axum::routing::delete(handlers::browse_delete))
-        .route(
-            "/api/browse/{drive}/empty-directory",
-            axum::routing::delete(handlers::browse_delete_empty_directory),
-        )
+        .merge(delete_routes())
         .route("/api/browse/{drive}/rename", axum::routing::post(handlers::browse_rename))
         .route("/api/browse/{drive}/create", axum::routing::post(handlers::browse_create))
         .merge(transfer_routes())
@@ -339,12 +335,287 @@ where
         )
 }
 
+fn delete_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+    handlers::DirectoryMutationState: axum::extract::FromRef<S>,
+{
+    Router::new()
+        .route("/api/browse/{drive}/item", axum::routing::delete(handlers::browse_delete))
+        .route("/api/browse/{drive}/file", axum::routing::delete(handlers::browse_delete_file))
+        .route(
+            "/api/browse/{drive}/empty-directory",
+            axum::routing::delete(handlers::browse_delete_empty_directory),
+        )
+}
+
 #[cfg(test)]
 mod tests {
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::{to_bytes, Body},
+        http::{Request, StatusCode},
+        response::Response,
+        Router,
+    };
     use tower::ServiceExt;
 
-    use super::transfer_routes;
+    use super::{delete_routes, errors, transfer_routes};
+
+    fn deletion_fixture() -> (tempfile::TempDir, String, Router) {
+        let temporary = tempfile::tempdir_in(std::env::current_dir().unwrap()).unwrap();
+        let root = temporary.path().join("drive");
+        std::fs::create_dir(&root).unwrap();
+        let drive = format!("delete-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(drive.clone(), root);
+        let indexes = super::directory_manager::LocalDirectoryManager::new(temporary.path().join("private")).unwrap();
+        let router = delete_routes().with_state(super::handlers::DirectoryMutationState(indexes));
+        (temporary, drive, router)
+    }
+
+    async fn delete(router: &Router, drive: &str, route: &str, path: &str) -> Response {
+        router
+            .clone()
+            .oneshot(
+                Request::delete(format!("/api/browse/{drive}/{route}?path={path}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn assert_delete_error(response: Response, status: StatusCode, code: &str) {
+        assert_eq!(response.status(), status);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["code"], code);
+    }
+
+    #[cfg(windows)]
+    fn windows_test_symlink_created(result: std::io::Result<()>) -> bool {
+        use windows::Win32::Foundation::ERROR_PRIVILEGE_NOT_HELD;
+
+        if result
+            .as_ref()
+            .is_err_and(|error| error.raw_os_error() == Some(ERROR_PRIVILEGE_NOT_HELD.0 as i32))
+        {
+            eprintln!("Windows does not permit symbolic link creation. Enable Developer Mode to run this test.");
+            return false;
+        }
+        result.unwrap();
+        true
+    }
+
+    #[tokio::test]
+    async fn delete_routes_remove_files_but_only_item_removes_directories() {
+        let (temporary, drive, router) = deletion_fixture();
+        let root = temporary.path().join("drive");
+        std::fs::create_dir(root.join("tree")).unwrap();
+        std::fs::write(root.join("tree/child"), b"keep").unwrap();
+
+        assert_delete_error(
+            delete(&router, &drive, "file", "tree").await,
+            StatusCode::CONFLICT,
+            errors::NOT_A_FILE_CODE,
+        )
+        .await;
+        assert_eq!(std::fs::read(root.join("tree/child")).unwrap(), b"keep");
+        for route in ["file", "item"] {
+            std::fs::write(root.join("ordinary"), b"remove").unwrap();
+            assert_eq!(delete(&router, &drive, route, "ordinary").await.status(), StatusCode::NO_CONTENT);
+            assert!(!root.join("ordinary").exists());
+            for path in ["", ".", "..", "tree/.", "tree/", "tree/../ordinary"] {
+                assert_eq!(
+                    delete(&router, &drive, route, path).await.status(),
+                    StatusCode::BAD_REQUEST,
+                    "{route}: {path}"
+                );
+            }
+        }
+        assert_eq!(delete(&router, &drive, "item", "tree").await.status(), StatusCode::NO_CONTENT);
+        assert!(!root.join("tree").exists());
+    }
+
+    #[tokio::test]
+    async fn delete_file_distinguishes_a_missing_entry_from_an_unavailable_location() {
+        let (temporary, drive, router) = deletion_fixture();
+        let unavailable = format!("unavailable-{}", uuid::Uuid::new_v4());
+        super::drives::register_test_drive_path(unavailable.clone(), temporary.path().join("unavailable"));
+        let unknown = format!("unknown-{}", uuid::Uuid::new_v4());
+        for (drive, path, code) in [
+            (&drive, "missing", errors::ITEM_NOT_FOUND_CODE),
+            (&drive, "missing/child", errors::FILE_UNAVAILABLE_CODE),
+            (&unavailable, "child", errors::FILE_UNAVAILABLE_CODE),
+            (&unknown, "child", errors::FILE_UNAVAILABLE_CODE),
+        ] {
+            assert_delete_error(delete(&router, drive, "file", path).await, StatusCode::NOT_FOUND, code).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn empty_directory_delete_does_not_remove_contents() {
+        let (temporary, drive, router) = deletion_fixture();
+        let root = temporary.path().join("drive");
+        let directory = root.join("directory");
+        std::fs::create_dir(&directory).unwrap();
+        let child = directory.join("child");
+        std::fs::write(&child, b"keep").unwrap();
+
+        let response = delete(&router, &drive, "empty-directory", "directory").await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(body["detail"].as_str().unwrap().starts_with("Directory is not empty:"));
+        assert_eq!(std::fs::read(&child).unwrap(), b"keep");
+        assert_eq!(
+            delete(&router, &drive, "empty-directory", "directory/child").await.status(),
+            StatusCode::CONFLICT
+        );
+        std::fs::remove_file(child).unwrap();
+        assert_eq!(
+            delete(&router, &drive, "empty-directory", "directory").await.status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(!directory.exists());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[tokio::test]
+    async fn empty_directory_delete_does_not_follow_links_or_junctions() {
+        let (temporary, drive, router) = deletion_fixture();
+        let root = temporary.path().join("drive");
+        let inside = root.join("inside");
+        let outside = temporary.path().join("outside");
+        std::fs::create_dir(&inside).unwrap();
+        std::fs::create_dir_all(outside.join("empty")).unwrap();
+
+        for (name, target) in [("inside-link", &inside), ("outside-link", &outside)] {
+            let link = root.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, &link).unwrap();
+            #[cfg(windows)]
+            {
+                let result = std::process::Command::new("cmd")
+                    .args(["/d", "/c", "mklink", "/J"])
+                    .arg(&link)
+                    .arg(target)
+                    .output()
+                    .unwrap();
+                assert!(result.status.success(), "Junction creation failed: {result:?}");
+            }
+            assert_eq!(
+                delete(&router, &drive, "empty-directory", name).await.status(),
+                StatusCode::CONFLICT
+            );
+            assert!(std::fs::symlink_metadata(link).is_ok());
+        }
+        assert!(inside.is_dir());
+        assert_eq!(
+            delete(&router, &drive, "empty-directory", "outside-link/empty").await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(outside.join("empty").is_dir());
+    }
+
+    #[cfg(any(unix, windows))]
+    #[tokio::test]
+    async fn delete_routes_unlink_file_links_without_removing_the_target() {
+        let (temporary, drive, router) = deletion_fixture();
+        let root = temporary.path().join("drive");
+        let target = root.join("original");
+        let link = root.join("link");
+        std::fs::write(&target, b"keep").unwrap();
+
+        #[cfg(unix)]
+        use std::os::unix::fs::symlink as symlink_file;
+        #[cfg(windows)]
+        use std::os::windows::fs::symlink_file;
+
+        for route in ["item", "file"] {
+            for source in [&target, &root.join("missing")] {
+                #[cfg(unix)]
+                symlink_file(source, &link).unwrap();
+                #[cfg(windows)]
+                if !windows_test_symlink_created(symlink_file(source, &link)) {
+                    return;
+                }
+                assert_eq!(delete(&router, &drive, route, "link").await.status(), StatusCode::NO_CONTENT);
+                assert_eq!(std::fs::symlink_metadata(&link).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+                assert_eq!(std::fs::read(&target).unwrap(), b"keep");
+            }
+        }
+    }
+
+    #[cfg(any(unix, windows))]
+    #[tokio::test]
+    async fn delete_routes_do_not_follow_directory_links_or_junctions() {
+        let (temporary, drive, router) = deletion_fixture();
+        let root = temporary.path().join("drive");
+        let outside = temporary.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("child"), b"keep").unwrap();
+        let inside = root.join("inside");
+        std::fs::create_dir(&inside).unwrap();
+        std::fs::write(inside.join("child"), b"keep").unwrap();
+        let link = root.join("link");
+
+        #[cfg(unix)]
+        let cases = [(&inside, "item"), (&outside, "item"), (&outside, "file")];
+        #[cfg(windows)]
+        let cases = [(&inside, "item"), (&outside, "item")];
+
+        for (target, route) in cases {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(target, &link).unwrap();
+            #[cfg(windows)]
+            {
+                let result = std::process::Command::new("cmd")
+                    .args(["/d", "/c", "mklink", "/J"])
+                    .arg(&link)
+                    .arg(target)
+                    .output()
+                    .unwrap();
+                assert!(result.status.success(), "Junction creation failed: {result:?}");
+            }
+
+            if target == &outside {
+                assert_delete_error(
+                    delete(&router, &drive, "file", "link/child").await,
+                    StatusCode::FORBIDDEN,
+                    errors::FILE_ACCESS_DENIED_CODE,
+                )
+                .await;
+                assert_eq!(delete(&router, &drive, "item", "link/child").await.status(), StatusCode::FORBIDDEN);
+            }
+
+            #[cfg(windows)]
+            {
+                assert_delete_error(
+                    delete(&router, &drive, "file", "link").await,
+                    StatusCode::CONFLICT,
+                    errors::NOT_A_FILE_CODE,
+                )
+                .await;
+                assert!(std::fs::symlink_metadata(&link).is_ok());
+            }
+            assert_eq!(delete(&router, &drive, route, "link").await.status(), StatusCode::NO_CONTENT);
+            assert_eq!(std::fs::symlink_metadata(&link).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+            assert_eq!(std::fs::read(target.join("child")).unwrap(), b"keep");
+        }
+
+        #[cfg(windows)]
+        if windows_test_symlink_created(std::os::windows::fs::symlink_dir(&inside, &link)) {
+            assert_delete_error(
+                delete(&router, &drive, "file", "link").await,
+                StatusCode::CONFLICT,
+                errors::NOT_A_FILE_CODE,
+            )
+            .await;
+            assert_eq!(delete(&router, &drive, "item", "link").await.status(), StatusCode::NO_CONTENT);
+            assert_eq!(std::fs::symlink_metadata(&link).unwrap_err().kind(), std::io::ErrorKind::NotFound);
+            assert_eq!(std::fs::read(inside.join("child")).unwrap(), b"keep");
+        }
+    }
 
     #[tokio::test]
     async fn transfer_stream_route_is_registered() {

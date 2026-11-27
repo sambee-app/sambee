@@ -1741,6 +1741,12 @@ class ApiService {
     });
   }
 
+  async removeFile(connectionId: string, path: string): Promise<void> {
+    const segment = getBrowseSegment(connectionId);
+    const { client, extraConfig } = await this.getClientConfig(connectionId);
+    await client.delete(`/browse/${segment}/file`, { ...extraConfig, params: { path } });
+  }
+
   /** Remove a directory only when it contains no entries. */
   async removeEmptyDirectory(connectionId: string, path: string): Promise<void> {
     const segment = getBrowseSegment(connectionId);

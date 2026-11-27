@@ -1831,6 +1831,15 @@ export const EN_TRANSLATIONS = {
     },
   },
   viewer: {
+    delete: {
+      missing: "Sambee could not find this file. Close the viewer and refresh the folder.",
+      notFile: "This path is a folder, not a file. Sambee did not delete it. Refresh the folder.",
+      accessDenied: "You do not have permission to delete this file. Ask the share owner for write access.",
+      uncertain: "Sambee could not confirm the deletion. The file may already be deleted. Close the viewer and refresh the folder.",
+      recoveryBusy: "The SMB connection is recovering. Wait a moment, then try again.",
+      companionUpdate: "Update Sambee Companion to delete files from the viewer.",
+      failed: "Sambee could not delete the file. Check the connection, then try again.",
+    },
     slowImage: "This image is taking longer than usual.",
     slowPdf: "This PDF is taking longer than usual.",
     pdfLoadFailed: "Failed to load PDF document",

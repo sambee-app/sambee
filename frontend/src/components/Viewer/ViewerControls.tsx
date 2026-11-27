@@ -35,6 +35,8 @@ export interface ViewerControlsConfig {
  */
 export interface NavigationState {
   currentIndex: number;
+  /** Position to show while the selected item is still loading. */
+  displayedIndex?: number;
   totalItems: number;
   onNext?: () => void;
   onPrevious?: () => void;
@@ -442,7 +444,7 @@ export const ViewerControls: React.FC<ViewerControlsProps> = ({
                 flexShrink: 0,
               }}
             >
-              {navigation.currentIndex + 1} / {navigation.totalItems}
+              {(navigation.displayedIndex ?? navigation.currentIndex) + 1} / {navigation.totalItems}
             </Typography>
           )}
         </Box>

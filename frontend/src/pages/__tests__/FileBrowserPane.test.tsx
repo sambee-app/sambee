@@ -285,6 +285,7 @@ function createMockPane(overrides: Partial<UseFileBrowserPaneReturn> = {}): UseF
 
     // Viewer handlers
     handleViewIndexChange: vi.fn(),
+    pruneViewerImages: vi.fn(),
     handleViewClose: vi.fn(),
     closeBrowserViewerPicker: vi.fn(),
     confirmBrowserViewerPicker: vi.fn(),
