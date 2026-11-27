@@ -6298,22 +6298,17 @@ fn map_link_resolution_error(error: LinkResolutionError) -> ApiError {
     }
 }
 
+#[cfg(windows)]
 fn is_filesystem_link(metadata: &std::fs::Metadata) -> bool {
-    if metadata.file_type().is_symlink() {
-        return true;
-    }
+    use std::os::windows::fs::MetadataExt;
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+    metadata.file_type().is_symlink() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+}
 
-        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
-    }
-    #[cfg(not(windows))]
-    {
-        false
-    }
+#[cfg(not(windows))]
+fn is_filesystem_link(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }
 
 #[cfg(windows)]
