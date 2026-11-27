@@ -1,9 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import type { NavigateFunction } from "react-router-dom";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UseCompanionResult } from "../../hooks/useCompanion";
-import { LocalePreferencesProvider } from "../../i18n/LocalePreferencesProvider";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
 import { getBackendAvailabilitySnapshot, resetBackendAvailabilityForTests } from "../../services/backendAvailability";
@@ -11,9 +8,7 @@ import { logger } from "../../services/logger";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
 import { requireTestValue } from "../../test/helpers/assertions";
-import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
-import { SambeeThemeProvider } from "../../theme/ThemeContext";
-import FileBrowser from "../FileBrowser";
+import { renderBrowserAndFlush } from "./FileBrowser.test.utils";
 
 const mockUseCompanion = vi.fn<() => UseCompanionResult>();
 const mockBuildCompanionWsUrl = vi.fn<() => Promise<string | null>>();
@@ -97,44 +92,6 @@ async function acknowledgeSubscriptions(socket: InspectableWebSocket | undefined
   });
 }
 
-function renderBrowserWithNavigator(initialPath: string) {
-  let navigateFn: NavigateFunction | null = null;
-
-  const NavigationCapture = () => {
-    navigateFn = useNavigate();
-    return null;
-  };
-
-  const renderResult = render(
-    <LocalePreferencesProvider>
-      <SambeeThemeProvider>
-        <MemoryRouter initialEntries={[initialPath]}>
-          <NavigationCapture />
-          <Routes>
-            <Route path="/browse/:targetType/:targetId/*" element={<FileBrowser />} />
-            <Route path="/browse" element={<FileBrowser />} />
-            <Route path="/login" element={<div>Login Page</div>} />
-          </Routes>
-        </MemoryRouter>
-      </SambeeThemeProvider>
-    </LocalePreferencesProvider>
-  );
-
-  return {
-    ...renderResult,
-    navigate: (path: string) => {
-      if (!navigateFn) {
-        throw new Error("navigate function was not initialized");
-      }
-
-      const navigate = navigateFn;
-      act(() => {
-        navigate(path);
-      });
-    },
-  };
-}
-
 const buildDefaultCompanionResult = (): UseCompanionResult => ({
   status: "unavailable",
   drives: [],
@@ -167,8 +124,6 @@ describe("FileBrowser WebSocket behavior", () => {
   it("subscribes to directory changes without the secure-context UUID method", async () => {
     const getRandomValues = crypto.getRandomValues.bind(crypto);
     vi.stubGlobal("crypto", { getRandomValues });
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/smb/test-server-1");
     await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
     const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
@@ -189,8 +144,6 @@ describe("FileBrowser WebSocket behavior", () => {
 
   it("redacts the server WebSocket token from connection logs", async () => {
     const infoSpy = vi.spyOn(logger, "info");
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
@@ -210,8 +163,6 @@ describe("FileBrowser WebSocket behavior", () => {
       status: "paired",
     });
     const infoSpy = vi.spyOn(logger, "info");
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/local/c/Users");
 
     await waitFor(() => {
@@ -222,8 +173,6 @@ describe("FileBrowser WebSocket behavior", () => {
   });
 
   it("does not mark the backend as reconnecting when the realtime socket closes", async () => {
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
@@ -242,8 +191,6 @@ describe("FileBrowser WebSocket behavior", () => {
 
   it("ignores malformed WebSocket frames and continues handling later directory changes", async () => {
     const warnSpy = vi.spyOn(logger, "warn");
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
@@ -283,7 +230,6 @@ describe("FileBrowser WebSocket behavior", () => {
   });
 
   it("refreshes a missing subscription target only for its matching request", async () => {
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
     await renderBrowserAndFlush("/browse/smb/test-server-1");
     await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
     const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
@@ -299,13 +245,13 @@ describe("FileBrowser WebSocket behavior", () => {
   });
 
   it("ignores subscription errors after navigation unsubscribes the old location", async () => {
-    const browser = renderBrowserWithNavigator("/browse/smb/test-server-1");
+    const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1");
     await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
     const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
     act(() => socket.open());
     await waitFor(() => expect(socket.sentMessages.length).toBeGreaterThan(0));
     const request = JSON.parse(requireTestValue(socket.sentMessages[0]));
-    browser.navigate("/browse/smb/test-server-1/Documents");
+    await act(() => router.navigate("/browse/smb/test-server-1/Documents"));
     await waitFor(() => expect(parseSentMessages(socket).some((message) => message.action === "unsubscribe")).toBe(true));
     const calls = vi.mocked(api.listDirectory).mock.calls.length;
     act(() =>
@@ -320,7 +266,6 @@ describe("FileBrowser WebSocket behavior", () => {
       status: "paired",
       drives: [{ id: "local-drive:c", name: "Drive C", drive_type: "fixed" }],
     });
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
     await renderBrowserAndFlush(transport === "server" ? "/browse/smb/test-server-1" : "/browse/local/c/Users");
     const matches = transport === "server" ? isServerSocket : isCompanionSocket;
     await waitFor(() => expect(InspectableWebSocket.instances.some(matches)).toBe(true));
@@ -369,7 +314,6 @@ describe("FileBrowser WebSocket behavior", () => {
 
   it("keeps timeout recovery visible and ignores a late acknowledgement", async () => {
     const timer = vi.spyOn(window, "setTimeout");
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
     await renderBrowserAndFlush("/browse/smb/test-server-1");
     await waitFor(() => expect(InspectableWebSocket.instances.some(isServerSocket)).toBe(true));
     const socket = requireTestValue(InspectableWebSocket.instances.find(isServerSocket));
@@ -405,7 +349,6 @@ describe("FileBrowser WebSocket behavior", () => {
       this.dispatchEvent(new Event("change", { bubbles: true }));
     });
     try {
-      const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
       await renderBrowserAndFlush("/browse/smb/test-server-1");
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
@@ -458,7 +401,6 @@ describe("FileBrowser WebSocket behavior", () => {
       this.dispatchEvent(new Event("change", { bubbles: true }));
     });
     try {
-      const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
       await renderBrowserAndFlush("/browse/smb/test-server-1");
       await waitFor(() => expect(api.listDirectory).toHaveBeenCalledTimes(1));
       const backendSocket = InspectableWebSocket.instances.find(isServerSocket);
@@ -485,8 +427,6 @@ describe("FileBrowser WebSocket behavior", () => {
 
   it("ignores acknowledged WebSocket control frames without malformed-message warnings", async () => {
     const warnSpy = vi.spyOn(logger, "warn");
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
@@ -516,8 +456,6 @@ describe("FileBrowser WebSocket behavior", () => {
       status: "paired",
     });
 
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/smb/test-server-1");
 
     await waitFor(() => {
@@ -533,8 +471,6 @@ describe("FileBrowser WebSocket behavior", () => {
       ...buildDefaultCompanionResult(),
       status: "paired",
     });
-
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
     await renderBrowserAndFlush("/browse/local/c/Users");
 
@@ -557,8 +493,6 @@ describe("FileBrowser WebSocket behavior", () => {
         },
       ],
     });
-
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
 
     await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=local/c/Users");
 
@@ -624,8 +558,6 @@ describe("FileBrowser WebSocket behavior", () => {
   });
 
   it("deduplicates same-directory subscriptions across dual SMB panes", async () => {
-    const { renderBrowserAndFlush } = await import("./FileBrowser.test.utils");
-
     await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=smb/test-server-1/Documents");
 
     await waitFor(() => {
@@ -652,7 +584,7 @@ describe("FileBrowser WebSocket behavior", () => {
   });
 
   it("does not churn the unchanged SMB sibling path when one dual-pane path changes", async () => {
-    const { navigate } = renderBrowserWithNavigator("/browse/smb/test-server-1/Documents?p2=smb/test-server-1/Pictures");
+    const { router } = await renderBrowserAndFlush("/browse/smb/test-server-1/Documents?p2=smb/test-server-1/Pictures");
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.length).toBeGreaterThan(0);
@@ -680,7 +612,7 @@ describe("FileBrowser WebSocket behavior", () => {
 
     const previousMessageCount = backendSocket?.sentMessages.length ?? 0;
 
-    navigate("/browse/smb/test-server-1?p2=smb/test-server-1/Pictures");
+    await act(() => router.navigate("/browse/smb/test-server-1?p2=smb/test-server-1/Pictures"));
 
     await waitFor(() => {
       const delta = parseSentMessages(backendSocket).slice(previousMessageCount);
@@ -712,7 +644,7 @@ describe("FileBrowser WebSocket behavior", () => {
       ],
     });
 
-    const { navigate } = renderBrowserWithNavigator("/browse/local/c/Users?p2=local/c/Documents");
+    const { router } = await renderBrowserAndFlush("/browse/local/c/Users?p2=local/c/Documents");
 
     await waitFor(() => {
       expect(InspectableWebSocket.instances.some(isCompanionSocket)).toBe(true);
@@ -740,7 +672,7 @@ describe("FileBrowser WebSocket behavior", () => {
 
     const previousMessageCount = companionSocket?.sentMessages.length ?? 0;
 
-    navigate("/browse/local/c?p2=local/c/Documents");
+    await act(() => router.navigate("/browse/local/c?p2=local/c/Documents"));
 
     await waitFor(() => {
       const delta = parseSentMessages(companionSocket).slice(previousMessageCount);

@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import type { ReactElement } from "react";
 import { Suspense } from "react";
-import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, Navigate, RouterProvider } from "react-router-dom";
 import { expect } from "vitest";
 import FileBrowser from "../pages/FileBrowser";
 import Login from "../pages/Login";
@@ -32,22 +32,24 @@ const theme = createTheme({
 });
 
 /**
- * Render the full App with MemoryRouter for integration testing
+ * Render the integration routes with a data router, as in production.
  */
 export function renderApp(initialRoute = "/") {
+  const router = createMemoryRouter(
+    [
+      { path: "/login", element: <Login /> },
+      { path: "/browse/:targetType/:targetId/*", element: <FileBrowser /> },
+      { path: "/browse", element: <FileBrowser /> },
+      { path: "/", element: <Navigate to="/browse" replace /> },
+    ],
+    { initialEntries: [initialRoute] }
+  );
   return render(
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <MemoryRouter initialEntries={[initialRoute]}>
-        <Suspense fallback={<div>Loading...</div>}>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/browse/:targetType/:targetId/*" element={<FileBrowser />} />
-            <Route path="/browse" element={<FileBrowser />} />
-            <Route path="/" element={<Navigate to="/browse" replace />} />
-          </Routes>
-        </Suspense>
-      </MemoryRouter>
+      <Suspense fallback={<div>Loading...</div>}>
+        <RouterProvider router={router} />
+      </Suspense>
     </ThemeProvider>
   );
 }

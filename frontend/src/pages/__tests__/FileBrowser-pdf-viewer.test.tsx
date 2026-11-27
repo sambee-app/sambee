@@ -6,17 +6,14 @@ import { requireTestValue } from "../../test/helpers/assertions";
  * Tests for PDF file viewing workflows
  */
 
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { useEffect, useRef } from "react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { MockedObject } from "vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import apiService from "../../services/api";
 import { authSession } from "../../services/authSession";
-import { renderWithStyles as render } from "../../test/utils/renderWithStyles";
-import { SambeeThemeProvider } from "../../theme/ThemeContext";
 import { FileType } from "../../types";
-import FileBrowser from "../FileBrowser";
+import { renderBrowserAndFlush } from "./FileBrowser.test.utils";
 
 const FILE_LIST_READY_TIMEOUT_MS = 5000;
 
@@ -144,23 +141,7 @@ global.URL.createObjectURL = vi.fn(() => "blob:mock-pdf-url");
 global.URL.revokeObjectURL = vi.fn();
 
 describe("Browser - PDF Viewer Integration", () => {
-  const renderBrowser = async (initialPath = "/browse/smb/test-server-1") => {
-    let result: ReturnType<typeof render> | undefined;
-    await act(async () => {
-      result = render(
-        <SambeeThemeProvider>
-          <MemoryRouter initialEntries={[initialPath]}>
-            <Routes>
-              <Route path="/browse/:targetType/:targetId/*" element={<FileBrowser />} />
-              <Route path="/browse" element={<FileBrowser />} />
-              <Route path="/login" element={<div>Login Page</div>} />
-            </Routes>
-          </MemoryRouter>
-        </SambeeThemeProvider>
-      );
-    });
-    return requireTestValue(result);
-  };
+  const renderBrowser = () => renderBrowserAndFlush("/browse/smb/test-server-1");
 
   const waitForPageNavigationReady = async () => {
     await waitFor(() => {
