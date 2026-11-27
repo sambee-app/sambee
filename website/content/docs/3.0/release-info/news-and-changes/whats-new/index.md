@@ -12,9 +12,11 @@ Open multiple tabs for the locations you need most often and switch between them
 
 ## UI Translations
 
-Sambee's UI (frontend and Companion) is now available in the following languages: English, Chinese (Simplified), Dutch, French, German, Italian, Korean, Japanese, Polish, Portuguese, Spanish, Swedish.
+Sambee's UI (frontend and Companion) is now available in the following languages: English, Chinese (Simplified), Dutch, French, German, Italian, Korean, Japanese, Polish, Portuguese, Spanish, Swedish. To change the interface language, use **Settings** > **Appearance** > **Localization** > **Language**.
 
-The localization preview now shows the resolved language and regional locale, including browser defaults. Language and regional settings changes now synchronize correctly to Companion.
+The localization preview in settings shows the resolved language and regional locale, including browser defaults. Language and regional settings changes now synchronize correctly to Companion.
+
+Sambee opts out of automatic page translation in Chrome (translation may cause UI errors).
 
 ## System Health Monitoring
 
@@ -48,5 +50,6 @@ Index-based directory navigation and recent file access have been combined into 
 
 ## Miscellaneous
 
-- Sambee now opts out of automatic page translation in Chrome because translation may cause UI errors. To change the interface language, use **Settings** > **Appearance** > **Localization** > **Language**.
+- File list: The row height has been reduced on non-touch devices to increase information density.
+- File list: Fixed keyboard focus issues. When you create a folder, focus moves to the new folder. When you open a folder, focus moves to its first item. When you go up one level, focus returns to the folder you just left.
 - Companion settings sync: Pairing a new browser now moves Companion settings authority to that browser. When a browser is unpaired, authority moves to the most recently paired browser that remains. Companion repairs a missing or stale authority after restart, and browser tabs resume settings delivery automatically when they become the authority again.
