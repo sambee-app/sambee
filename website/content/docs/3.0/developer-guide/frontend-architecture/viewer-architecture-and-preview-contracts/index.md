@@ -43,6 +43,8 @@ All file viewers and editors use `useViewerDocumentTitle` to set the browser tab
 
 `TextEditor.tsx` owns the text destination and reuses `TextCodeEditor` for writable and read-only content. There isn't a separate text-viewer component or an Edit action. The public `viewer=text` identifier, viewer preferences, settings, and recovery-draft keys remain compatible. Text routes accept absent, `view`, and `edit` modes as the same destination; canonical URLs omit `mode` without adding a history entry or dropping fragments. Markdown still uses its existing preview/edit route modes.
 
+The shared Text and Markdown editor host can shrink to the available dialog width. CodeMirror's `.cm-scroller` scrolls long source lines horizontally, not the dialog. Markdown table widgets keep their own horizontal scrolling.
+
 Opening an eligible text file automatically calls `beginViewerTextEdit`. The editor stays read-only until acquisition succeeds and a fresh content read establishes the baseline. Archive members, read-only connections, and oversized files don't acquire sessions. Storage boundaries distinguish contention, denied permissions, unsupported editing, and temporary unavailability. SMB's acquisition request opts into a non-mutating per-file write probe; Companion also checks an existing file with read/write open and no creation or truncation.
 
 Acquisition feedback appears after 200 ms as a small spinner beside the filename, in a fixed-size toolbar slot. Fast acquisitions show no progress message, and slower ones don't move the document. Completion, navigation, and unmount cancel pending feedback without delaying readiness. Access failures remain immediate; related error details and the read-only reason share one notice with Retry where supported.

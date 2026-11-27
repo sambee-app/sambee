@@ -344,7 +344,7 @@ export const SourceTextEditor = forwardRef<SourceTextEditorHandle, SourceTextEdi
       [value]
     );
 
-    return <div ref={containerRef} className={className} style={getSyntaxVariables(muiTheme)} />;
+    return <div ref={containerRef} className={className} style={{ ...getSyntaxVariables(muiTheme), minWidth: 0 }} />;
   }
 );
 
