@@ -5,11 +5,16 @@ export const CI_BROWSER_ENGINES = ["chromium", "firefox"];
 export const CI_BROWSER_WIDTHS = [1543, 390];
 export const CI_PRODUCTION_SCENARIOS = ["real workers", "native contracts", "edit and save", "cancel and reopen"];
 export const CI_MARKDOWN_PRINT_MODES = ["light", "dark"];
+export const CI_SOURCE_EDITORS = ["Text", "Markdown"];
 export const CI_DEVELOPMENT_SCENARIO = "normalizes and renders entity text without DOM globals in the worker";
 const CI_DEVELOPMENT_SCENARIOS = ["renders small notes without starting a normalization worker", CI_DEVELOPMENT_SCENARIO];
 
 export function markdownPrintCaseTitle(mode) {
   return `Markdown print links in ${mode} mode`;
+}
+
+export function sourceEditorScrollCaseTitle(editor, width) {
+  return `${editor} editor follows the caret horizontally at ${width}px`;
 }
 
 export function ciWorkerCount(cpuCount, memoryBytes) {
@@ -27,6 +32,7 @@ export function expectedBrowserCases(mode) {
       ? [
           ...CI_MARKDOWN_PRINT_MODES.map(markdownPrintCaseTitle),
           ...CI_PRODUCTION_SCENARIOS.flatMap((scenario) => CI_BROWSER_WIDTHS.map((width) => `CI ${scenario} at ${width}px`)),
+          ...CI_SOURCE_EDITORS.flatMap((editor) => CI_BROWSER_WIDTHS.map((width) => sourceEditorScrollCaseTitle(editor, width))),
         ]
       : CI_DEVELOPMENT_SCENARIOS;
   return CI_BROWSER_ENGINES.flatMap((engine) => titles.map((title) => `${engine}: ${title}`));

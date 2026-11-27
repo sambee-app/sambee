@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CI_MARKDOWN_PRINT_MODES, markdownPrintCaseTitle } from "../scripts/ci-test-policy.mjs";
+import { CI_BROWSER_WIDTHS, CI_MARKDOWN_PRINT_MODES, CI_SOURCE_EDITORS, markdownPrintCaseTitle, sourceEditorScrollCaseTitle } from "../scripts/ci-test-policy.mjs";
 import type { StoredTheme } from "../src/services/api";
 import type { HealthMonitoringClientPolicy } from "../src/types/healthMonitoring";
 import { editableDefinition } from "../src/theme/themeDefinition";
@@ -113,6 +113,7 @@ async function mockMarkdownViewerApi(page: Page, options: MockMarkdownViewerApiO
 
 function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH, additionalFilePaths = [], themeId = () => "sambee-light", wordWrapEnabled, userRole = "admin", accessMode = "read_write", includeDirectory, includeZip, existingFilePaths, onUploadBody }: MockMarkdownViewerApiOptions): (route: ViewerApiRoute) => Promise<void> {
   let currentMarkdown = initialMarkdown;
+  let currentWordWrap = wordWrapEnabled ?? null;
 
   return async (route) => {
     const request = route.request();
@@ -188,12 +189,33 @@ function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH,
           selected_connection_id: null,
           viewer_associations: {},
         },
-        text_editor: { max_file_size_bytes: 52428800, word_wrap_enabled: wordWrapEnabled ?? null },
+        text_editor: { max_file_size_bytes: 52428800, word_wrap_enabled: currentWordWrap },
       });
       return;
     }
 
     if (pathname.endsWith("/auth/me/settings") && request.method() === "PUT") {
+      let update: unknown;
+      try {
+        update = JSON.parse(request.postDataBuffer()?.toString("utf8") ?? "");
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        await fulfillJson(route, { detail: "Send a valid JSON settings update." }, 400);
+        return;
+      }
+      if (!update || typeof update !== "object" || !("field" in update) || typeof update.field !== "string" || !("value" in update)) {
+        await fulfillJson(route, { detail: "A settings update requires a field name and a value." }, 400);
+        return;
+      }
+      if (update.field === "text_editor.word_wrap_enabled") {
+        if (typeof update.value !== "boolean" && update.value !== null) {
+          await fulfillJson(route, { detail: "Set word wrap to true, false, or null." }, 400);
+          return;
+        }
+        currentWordWrap = update.value;
+        await fulfillJson(route, { field: update.field, value: currentWordWrap });
+        return;
+      }
       await fulfillJson(route, {
         appearance: { theme_id: themeId(), custom_themes: [] },
         localization: { language: "browser", regional_locale: "browser" },
@@ -205,7 +227,7 @@ function createMarkdownViewerApiHandler({ initialMarkdown, filePath = DEMO_PATH,
           selected_connection_id: null,
           viewer_associations: {},
         },
-        text_editor: { max_file_size_bytes: 52428800, word_wrap_enabled: wordWrapEnabled ?? null },
+        text_editor: { max_file_size_bytes: 52428800, word_wrap_enabled: currentWordWrap },
       });
       return;
     }
@@ -466,6 +488,29 @@ async function captureViewerScheduling(page: Page, testInfo: TestInfo, action: (
     }
   }
 }
+
+test("saves word wrap settings through the viewer HTTP proxy", async ({ request }) => {
+  const proxy = await createCacheableViewerProxy({ initialMarkdown: "# Demo", wordWrapEnabled: true });
+  try {
+    const url = `${proxy.url}/api/auth/me/settings`;
+    const update = { field: "text_editor.word_wrap_enabled", value: false };
+    const saved = await request.put(url, { data: update });
+    await expect(saved).toBeOK();
+    expect(await saved.json()).toEqual(update);
+
+    const malformed = await request.put(url, {
+      headers: { "Content-Type": "application/json" },
+      data: "{",
+    });
+    expect(malformed.status()).toBe(400);
+
+    const settings = await request.get(url);
+    await expect(settings).toBeOK();
+    expect(await settings.json()).toMatchObject({ text_editor: { word_wrap_enabled: false } });
+  } finally {
+    await proxy.close();
+  }
+});
 
 test.describe("development settings focus", () => {
   test.skip(process.env.SAMBEE_E2E_DEVELOPMENT !== "1", "Requires the development server and approved demo route");
@@ -1381,6 +1426,63 @@ const readCiProbe = (page: Page) => page.evaluate(() => {
 test.describe("production CI correctness", () => {
   test.skip(process.env.SAMBEE_E2E_PRODUCTION !== "1", "Requires a normal production build");
   const markdown = "# CI preview\n\n[CI tail](#ci-tail)\n\nA &amp; B and &#x1F680;\n\n```javascript\nconst alpha = 1;\n```\n\n## CI tail\n\nLast paragraph.\n" + " ".repeat(INLINE_MARKDOWN_NORMALIZATION_MAX_UNITS);
+
+  for (const kind of CI_SOURCE_EDITORS) {
+    for (const width of CI_BROWSER_WIDTHS) {
+      test(sourceEditorScrollCaseTitle(kind, width), async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        const filePath = kind === "Text" ? "notes.txt" : DEMO_PATH;
+        const line = LONG_UNWRAPPED_LINE.trimEnd();
+        await serveProductionAssets(page);
+        await mockMarkdownViewerApi(page, { initialMarkdown: line, filePath, wordWrapEnabled: false });
+        await page.goto("/browse/smb/demo");
+        await page.getByRole("button", { name: "Later", exact: true }).click();
+        await page.getByRole("button", { name: `File: ${filePath}`, exact: true }).click();
+        if (kind === "Markdown") await enterMarkdownEditMode(page);
+
+        const editor = page.getByRole("textbox", { name: `${kind} editor`, exact: true });
+        await expect(editor).toHaveAttribute("contenteditable", "true");
+        await expect(editor).not.toHaveClass(/cm-lineWrapping/);
+        await editor.focus();
+        await page.keyboard.press("Home");
+        await expect.poll(async () => (await readSourceEditorScroll(editor)).head).toBe(0);
+        const start = await readSourceEditorScroll(editor);
+        expect(start.scrollRange, "The source scroller must have horizontal overflow").toBeGreaterThan(0);
+
+        const arrowCount = 12;
+        await page.mouse.click(start.visibleRight - 56, start.caretY);
+        const beforeArrows = await readSourceEditorScroll(editor);
+        expect(beforeArrows.head).toBeGreaterThan(0);
+        expect(beforeArrows.scrollLeft).toBe(start.scrollLeft);
+        for (let step = 0; step < arrowCount; step++) await page.keyboard.press("ArrowRight");
+
+        const expectCaretAt = async (head: number, didScroll: (left: number) => boolean) => {
+          await expect.poll(async () => {
+            const state = await readSourceEditorScroll(editor);
+            return {
+              head: state.head,
+              caretVisible: state.caretVisible,
+              ancestorScroll: state.ancestorScroll,
+              didScroll: didScroll(state.scrollLeft),
+            };
+          }).toEqual({ head, caretVisible: true, ancestorScroll: start.ancestorScroll, didScroll: true });
+        };
+        await expectCaretAt(beforeArrows.head + arrowCount, (left) => left > start.scrollLeft);
+
+        await page.keyboard.press("End");
+        await expectCaretAt(line.length, (left) => left > start.scrollLeft);
+        await page.keyboard.press("Home");
+        await expectCaretAt(0, (left) => left === start.scrollLeft);
+
+        await page.keyboard.press("End");
+        await expectCaretAt(line.length, (left) => left > start.scrollLeft);
+        const beforeTyping = await readSourceEditorScroll(editor);
+        const suffix = " appended";
+        await page.keyboard.insertText(suffix);
+        await expectCaretAt(line.length + suffix.length, (left) => left > beforeTyping.scrollLeft);
+      });
+    }
+  }
 
   for (const mode of CI_MARKDOWN_PRINT_MODES) {
     test(markdownPrintCaseTitle(mode), async ({ page }, testInfo) => {
@@ -4032,6 +4134,46 @@ async function activateCellEditor(cellLocator: Locator): Promise<Locator> {
   return nestedEditor;
 }
 
+async function readSourceEditorScroll(editor: Locator) {
+  return editor.evaluate((content, tolerance) => {
+    const root = content.closest(".cm-editor");
+    const scroller = root?.querySelector(":scope > .cm-scroller");
+    const caret = scroller?.querySelector(":scope > .cm-cursorLayer .cm-cursor-primary");
+    const dialog = content.closest('[role="dialog"]');
+    const view = (content as HTMLElement & { cmTile?: { view: EditorView } }).cmTile?.view;
+    if (!(scroller instanceof HTMLElement) || !(caret instanceof HTMLElement) || !dialog || !view) {
+      throw new Error("Expected a focused source editor with a caret and scroll container inside the dialog");
+    }
+
+    const rect = scroller.getBoundingClientRect();
+    let visibleLeft = rect.left + scroller.clientLeft;
+    let visibleRight = visibleLeft + scroller.clientWidth;
+    const ancestorScroll: number[] = [];
+    for (let ancestor = scroller.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      ancestorScroll.push(ancestor.scrollLeft);
+      if (ancestor === dialog || getComputedStyle(ancestor).overflowX !== "visible") {
+        const left = ancestor.getBoundingClientRect().left + ancestor.clientLeft;
+        visibleLeft = Math.max(visibleLeft, left);
+        visibleRight = Math.min(visibleRight, left + ancestor.clientWidth);
+      }
+      if (ancestor === dialog) break;
+    }
+
+    const cursor = caret.getBoundingClientRect();
+    const inset = Number.parseFloat(getComputedStyle(content).getPropertyValue("--sambee-codemirror-editor-horizontal-inset"));
+    return {
+      head: view.state.selection.main.head,
+      visibleRight,
+      caretY: (cursor.top + cursor.bottom) / 2,
+      caretVisible: cursor.left >= visibleLeft - tolerance && cursor.right <= visibleRight + tolerance,
+      rightInsetVisible: cursor.right <= visibleRight - inset + tolerance,
+      scrollLeft: scroller.scrollLeft,
+      scrollRange: scroller.scrollWidth - scroller.clientWidth,
+      ancestorScroll,
+    };
+  }, CURSOR_EDGE_TOLERANCE_PX);
+}
+
 async function getActiveCursorViewportPosition(editorRoot: Locator): Promise<{ position: "bottom" | "other" | "top" } | null> {
   return editorRoot.evaluate((root, edgeTolerance) => {
     const activeLine = root.querySelector(".cm-activeLine");
@@ -4176,21 +4318,64 @@ test.describe("markdown viewer table editing", () => {
 
 test.describe("markdown editor selection", () => {
   test("toggles word wrapping with Alt+Z", async ({ page }) => {
-    await mockMarkdownViewerApi(page, { initialMarkdown: WRAPPED_SELECTION_MARKDOWN });
+    await page.setViewportSize({ width: 390, height: 900 });
+    await mockMarkdownViewerApi(page, { initialMarkdown: WRAPPED_SELECTION_MARKDOWN.repeat(3) });
 
     await openMarkdownViewer(page);
     await enterMarkdownEditMode(page);
 
     const editor = page.getByRole("textbox", { name: "Markdown editor" });
+    const line = editor.locator(".cm-line");
     await expect(editor).toHaveClass(/cm-lineWrapping/);
+    const wrapped = await line.boundingBox();
+    if (!wrapped) throw new Error("Expected the wrapped Markdown line to be visible");
 
     await editor.click();
+    const unwrap = page.waitForResponse((response) =>
+      response.url().endsWith("/auth/me/settings") && response.request().method() === "PUT" && response.ok()
+    );
     await page.keyboard.press("Alt+Z");
+    await unwrap;
     await expect(editor).not.toHaveClass(/cm-lineWrapping/);
+    await expect.poll(async () => (await line.boundingBox())?.height).toBeLessThan(wrapped.height);
 
     await page.keyboard.press("Alt+Z");
     await expect(editor).toHaveClass(/cm-lineWrapping/);
+    await expect.poll(async () => (await line.boundingBox())?.height).toBe(wrapped.height);
   });
+
+  for (const wordWrapEnabled of [true, false]) {
+    test(`keeps the rightmost Markdown table cell editable with wrapping ${wordWrapEnabled ? "on" : "off"}`, async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 900 });
+      const columns = Array.from({ length: 12 }, (_, index) => `Column ${index + 1}`);
+      const table = [
+        columns,
+        columns.map(() => "---"),
+        columns.map((column) => `Value for ${column}`),
+      ].map((row) => `| ${row.join(" | ")} |`).join("\n");
+      await mockMarkdownViewerApi(page, { initialMarkdown: table, wordWrapEnabled });
+      await openMarkdownViewer(page);
+      await enterMarkdownEditModeWithTable(page);
+
+      const widget = page.locator(".tbl-table-widget");
+      const header = widget.getByRole("columnheader").last();
+      const cell = widget.getByRole("gridcell").last();
+      const cellView = cell.locator(".tbl-cell-view");
+      const scroller = page.locator(".sambee-markdown-editor > .cm-editor > .cm-scroller");
+      const scrollRange = (element: Element) => element.scrollWidth - element.clientWidth;
+      const tableScroller = (await widget.evaluate(scrollRange)) > 0 ? widget : scroller;
+      await expect.poll(() => tableScroller.evaluate(scrollRange)).toBeGreaterThan(0);
+      await tableScroller.evaluate((element) => { element.scrollLeft = element.scrollWidth; });
+      await expect(cellView).toBeInViewport();
+      await expect(header.locator(".tbl-handle").first()).toBeInViewport();
+
+      const nested = await activateCellEditor(cellView);
+      await expect(nested).toBeFocused();
+      const edit = "edited";
+      await page.keyboard.insertText(edit);
+      await expect(cell).toContainText(edit);
+    });
+  }
 
   test("keeps the caret at the document end after toggling word wrap", async ({ page }) => {
     await mockMarkdownViewerApi(page, { initialMarkdown: WRAPPED_SELECTION_MARKDOWN });
@@ -4242,32 +4427,20 @@ test.describe("markdown editor selection", () => {
   });
 
   test("keeps the right gutter visible at the end of an unwrapped long line", async ({ page }) => {
-    await mockMarkdownViewerApi(page, { initialMarkdown: LONG_UNWRAPPED_LINE });
+    await mockMarkdownViewerApi(page, { initialMarkdown: LONG_UNWRAPPED_LINE, wordWrapEnabled: false });
 
     await openMarkdownViewer(page);
     await enterMarkdownEditMode(page);
 
     const editor = page.getByRole("textbox", { name: "Markdown editor" });
-    await editor.click();
-    await page.keyboard.press("Alt+Z");
+    await expect(editor).not.toHaveClass(/cm-lineWrapping/);
+    await editor.focus();
     await page.keyboard.press("Control+End");
 
-    await expect.poll(() =>
-      editor.evaluate((content) => {
-        const editorRoot = content.closest(".cm-editor");
-        const scroller = editorRoot?.querySelector(".cm-scroller");
-        const cursor = editorRoot?.querySelector(".cm-cursor");
-
-        if (!(scroller instanceof HTMLElement) || !(cursor instanceof HTMLElement)) {
-          return null;
-        }
-
-        const inset = Number.parseFloat(getComputedStyle(content).getPropertyValue("--sambee-codemirror-editor-horizontal-inset"));
-        const scrollerRect = scroller.getBoundingClientRect();
-        const cursorRect = cursor.getBoundingClientRect();
-        return cursorRect.right <= scrollerRect.right - inset + 1;
-      })
-    ).toBe(true);
+    await expect.poll(async () => {
+      const { head, caretVisible, rightInsetVisible } = await readSourceEditorScroll(editor);
+      return { head, caretVisible, rightInsetVisible };
+    }).toEqual({ head: LONG_UNWRAPPED_LINE.length, caretVisible: true, rightInsetVisible: true });
   });
 
   test("does not add artificial vertical space after a short document", async ({ page }) => {

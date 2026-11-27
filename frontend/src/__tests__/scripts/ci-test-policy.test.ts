@@ -51,7 +51,7 @@ describe("CI resource and browser policy", () => {
         return { engine, title, status: "passed", attempts: 1 };
       });
     it(`requires the complete ${mode} browser matrix`, () => {
-      expect(passing()).toHaveLength(mode === "production" ? 20 : 4);
+      expect(passing()).toHaveLength(mode === "production" ? 28 : 4);
       expect(validateBrowserCases(mode, passing())).toEqual([]);
       expect(validateBrowserCases(mode, passing().slice(1))).not.toEqual([]);
       expect(validateBrowserCases(mode, [...passing(), passing()[0]!])).not.toEqual([]);
