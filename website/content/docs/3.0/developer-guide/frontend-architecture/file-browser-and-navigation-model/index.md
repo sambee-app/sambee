@@ -98,6 +98,10 @@ Notifications don't cancel an active listing request. Instead, the pane remember
 
 A listing with unprocessed change notifications can remain visible, but it isn't cached as fresh. Deferred link-target metadata only updates cache entries that are still valid, so cancelling a follow-up refresh can't make an outdated snapshot reusable on return.
 
+The pane resolves the active row separately from browser keyboard focus. A folder entry, parent return, or successful create or rename takes priority over background refresh. A cached parent list can show a temporary active row until the fresh list can match the return target. If the user chooses a row before the refresh finishes, the refresh keeps that item instead. A successful refresh matches the current item by identity when possible, or uses the nearest valid row if the item is gone. A canceled refresh cannot change the active row.
+
+Create and rename invalidate the affected directory and its retained tab listings, even if the user changes tabs during the operation. If that directory is still visible, the pane refreshes it without moving focus to the changed item after a tab or location change. A failed refresh clears the pending request to focus the changed item.
+
 SMB file-list subscriptions watch immediate children rather than the whole subtree. The separate backend directory-search cache retains recursive directory-name monitoring. See [SMB Change Notification and Directory Freshness](../../backend-architecture/smb-change-notification-and-directory-freshness/) for watcher ownership and lifecycle.
 
 ## Progressive Quick-Bar Results

@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import api from "../../services/api";
 import { authSession } from "../../services/authSession";
+import { CompanionLocalBackend, SambeeSmbBackend } from "../../services/storageBackends";
+import { BrowserStorageBackendRegistry } from "../../services/storageRegistry";
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
 import { createMockAuthToken } from "../../test/fixtures/users";
 import {
@@ -33,6 +35,13 @@ vi.mock("../FileBrowser/viewerPreferences", () => ({
 }));
 
 const paneContentProviders = createStorageBackedTestContentProviderRegistry(mockConnections);
+
+function createSmbStorageRegistry() {
+  return new BrowserStorageBackendRegistry(
+    { capabilityRevision: 1, connections: mockConnections, companion: { status: "unavailable", revision: 1, drives: [], error: null } },
+    { smb: new SambeeSmbBackend(), local: new CompanionLocalBackend() }
+  );
+}
 
 function useFileBrowserPane(config: Omit<UseFileBrowserPaneConfig, "contentProviders"> & { contentProviders?: ContentProviderRegistry }) {
   const { contentProviders = paneContentProviders, ...rest } = config;
@@ -1502,6 +1511,52 @@ describe("useFileBrowserPane", () => {
     }
   );
 
+  it("keeps the scroll offset and active row when a background refresh moves the row", async () => {
+    const rowHeight = 40;
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+
+    const list = document.createElement("div");
+    list.tabIndex = 0;
+    document.body.appendChild(list);
+    const scrollToIndex = vi.spyOn(result.current.rowVirtualizer, "scrollToIndex").mockImplementation((index) => {
+      list.scrollTop = index * rowHeight;
+    });
+    try {
+      act(() => {
+        result.current.listContainerRef(list);
+        result.current.parentRef.current = list;
+      });
+      list.focus();
+      const originalIndex = result.current.sortedFiles.length - 1;
+      const activeItem = requireTestValue(result.current.sortedFiles[originalIndex]);
+      act(() => result.current.selectItemFromIcon(activeItem, originalIndex, false, false));
+      const scrollOffset = 10;
+      list.scrollTop = scrollOffset;
+      scrollToIndex.mockClear();
+
+      const inserted = { ...activeItem, type: FileType.DIRECTORY, name: "A", path: "A" };
+      vi.mocked(api.listDirectory).mockResolvedValueOnce({
+        ...mockDirectoryListing,
+        items: [inserted, ...mockDirectoryListing.items],
+        total: mockDirectoryListing.total + 1,
+      });
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+      await waitFor(() => expect(result.current.focusedIndex).toBe(originalIndex + 1));
+      expect(result.current.sortedFiles[result.current.focusedIndex]?.path).toBe(activeItem.path);
+      expect(list.scrollTop).toBe(scrollOffset);
+      expect(scrollToIndex).not.toHaveBeenCalled();
+
+      act(() => result.current.handleArrowUp());
+      await waitFor(() => expect(result.current.focusedIndex).toBe(originalIndex));
+      expect(scrollToIndex).toHaveBeenCalledWith(originalIndex, expect.anything());
+    } finally {
+      scrollToIndex.mockRestore();
+      list.remove();
+    }
+  });
+
   it("reloads an open archive when its physical parent directory changes", async () => {
     const archive = { name: "backup.zip", path: "backup.zip", type: FileType.FILE, is_readable: true, is_hidden: false };
     vi.mocked(api.listArchiveDirectory)
@@ -2492,6 +2547,252 @@ describe("useFileBrowserPane", () => {
     });
 
     expect(api.recordRecentDirectory).not.toHaveBeenCalled();
+  });
+
+  it.each(["enter", "up", "breadcrumb"] as const)("sets the destination row on %s during a background refresh", async (direction) => {
+    const directory = (name: string, path = name) => ({
+      ...requireTestValue(mockDirectoryListing.items[0]),
+      name,
+      path,
+      type: FileType.DIRECTORY,
+    });
+    const root = { ...mockDirectoryListing, items: [directory("A"), directory("Documents")], total: 2 };
+    const child = {
+      ...mockNestedDirectory,
+      path: "Documents",
+      items: [directory("One", "Documents/One"), directory("Two", "Documents/Two")],
+      total: 2,
+    };
+    const entering = direction === "enter";
+    const origin = entering ? root : child;
+    const destination = entering ? child : root;
+    vi.mocked(api.listDirectory).mockResolvedValueOnce(origin);
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", origin.path));
+    await waitFor(() => expect(result.current.files).toEqual(origin.items));
+    act(() => result.current.seedDirectorySnapshot("conn-1", destination.path, destination.items));
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + DIRECTORY_CACHE_TTL_MS);
+    try {
+      const originRefresh = deferred<typeof root>();
+      const destinationRefresh = deferred<typeof root>();
+      vi.mocked(api.listDirectory).mockReturnValueOnce(originRefresh.promise).mockReturnValueOnce(destinationRefresh.promise);
+      act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: origin.path }));
+      const originSignal = vi.mocked(api.listDirectory).mock.lastCall?.[2]?.signal;
+      act(() => {
+        if (entering) result.current.handleFileClick(requireTestValue(root.items[1]), 1);
+        else if (direction === "breadcrumb") result.current.navigateToPath("");
+        else result.current.handleNavigateUpDirectory();
+      });
+      expect(originSignal?.aborted).toBe(true);
+      expect(result.current.currentPath).toBe(destination.path);
+      const focusedName = () => result.current.sortedFiles[result.current.focusedIndex]?.name;
+      expect(focusedName()).toBe(entering ? "One" : "Documents");
+      await act(async () => destinationRefresh.resolve(destination));
+      expect(focusedName()).toBe(entering ? "One" : "Documents");
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("focuses the created folder when its reload replaces a background refresh", async () => {
+    const storageRegistry = createSmbStorageRegistry();
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, storageRegistry }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    const created = { ...requireTestValue(mockDirectoryListing.items[0]), type: FileType.DIRECTORY, name: "ZZZ", path: "ZZZ" };
+    const background = deferred<typeof mockDirectoryListing>();
+    const afterCreate = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockReturnValueOnce(background.promise).mockReturnValueOnce(afterCreate.promise);
+    vi.mocked(api.createItem).mockResolvedValueOnce(created);
+    act(() => result.current.handleDirectoryChanged({ connectionId: "conn-1", path: "" }));
+    act(() => result.current.handleNewDirectoryRequest());
+    await act(async () => result.current.handleCreateConfirm(created.name));
+    expect(api.createItem).toHaveBeenCalledWith("conn-1", "", created.name, "directory");
+    await act(async () => afterCreate.resolve({ ...mockDirectoryListing, items: [...mockDirectoryListing.items, created], total: 4 }));
+    expect(result.current.sortedFiles[result.current.focusedIndex]?.name).toBe(created.name);
+  });
+
+  it.each([
+    ["create", "another directory"],
+    ["rename", "another directory"],
+    ["rename", "the same directory"],
+  ] as const)("refreshes the changed listing after %s completes in a tab at %s", async (mutation, tabLocation) => {
+    const storageRegistry = createSmbStorageRegistry();
+    const { result } = renderHook(
+      () =>
+        useFileBrowserPane({
+          rowHeight: 40,
+          connections: mockConnections,
+          storageRegistry,
+          isLocationMonitoredElsewhere: () => true,
+        }),
+      { wrapper }
+    );
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    const sourceTab = result.current.selectedTabId;
+    const original = requireTestValue(result.current.sortedFiles[0]);
+    const changed = { ...original, name: "AAA changed", path: "AAA changed" };
+    const listing = {
+      ...mockDirectoryListing,
+      items:
+        mutation === "create"
+          ? [...mockDirectoryListing.items, changed]
+          : mockDirectoryListing.items.map((entry) => (entry === original ? changed : entry)),
+    };
+    const pendingMutation = deferred<typeof changed>();
+    if (mutation === "create") {
+      vi.mocked(api.createItem).mockReturnValueOnce(pendingMutation.promise);
+      act(() => result.current.handleNewDirectoryRequest());
+    } else {
+      vi.mocked(api.renameItem).mockReturnValueOnce(pendingMutation.promise);
+      act(() => result.current.handleRenameForFile(original, 0));
+    }
+    let completion: Promise<void> | undefined;
+    act(() => {
+      completion =
+        mutation === "create" ? result.current.handleCreateConfirm(changed.name) : result.current.handleRenameConfirm(changed.name);
+    });
+    expect(mutation === "create" ? api.createItem : api.renameItem).toHaveBeenCalledOnce();
+
+    act(() => {
+      result.current.createTab({ focusList: false });
+    });
+    const sameDirectory = tabLocation === "the same directory";
+    if (!sameDirectory) {
+      act(() => result.current.applyLocation("conn-1", "Documents"));
+      await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+    }
+    const currentTab = result.current.selectedTabId;
+    const currentRowIndex = result.current.sortedFiles.length - 1;
+    const currentRow = requireTestValue(result.current.sortedFiles[currentRowIndex]);
+    act(() => result.current.selectItem(currentRow, currentRowIndex));
+
+    vi.mocked(api.listDirectory).mockClear().mockResolvedValueOnce(listing);
+    await act(async () => {
+      pendingMutation.resolve(changed);
+      await completion;
+    });
+    expect(result.current.selectedTabId).toBe(currentTab);
+    expect(result.current.sortedFiles[result.current.focusedIndex]?.path).toBe(currentRow.path);
+    expect(result.current.selectedFiles).toEqual(new Set([currentRow.path]));
+    if (!sameDirectory) {
+      expect(api.listDirectory).not.toHaveBeenCalled();
+      act(() => {
+        result.current.selectTab(sourceTab, { focusList: false });
+      });
+    }
+    await waitFor(() => expect(result.current.files).toEqual(listing.items));
+    expect(api.listDirectory).toHaveBeenCalledExactlyOnceWith("conn-1", "", expect.anything());
+  });
+
+  it("does not publish a return listing requested before a create completed", async () => {
+    const storageRegistry = createSmbStorageRegistry();
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, storageRegistry }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+
+    const original = requireTestValue(result.current.sortedFiles[0]);
+    const created = { ...original, type: FileType.DIRECTORY, name: "Created", path: "Created" };
+    const create = deferred<typeof created>();
+    vi.mocked(api.createItem).mockReturnValueOnce(create.promise);
+    act(() => result.current.handleNewDirectoryRequest());
+    act(() => {
+      void result.current.handleCreateConfirm(created.name);
+    });
+    expect(api.createItem).toHaveBeenCalledOnce();
+    act(() => {
+      result.current.applyLocation("conn-1", "Documents");
+      result.current.clearCaches();
+    });
+    await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+
+    const oldListing = deferred<typeof mockDirectoryListing>();
+    const freshListing = deferred<typeof mockDirectoryListing>();
+    vi.mocked(api.listDirectory).mockClear().mockReturnValueOnce(oldListing.promise).mockReturnValueOnce(freshListing.promise);
+    act(() => result.current.navigateToPath(""));
+    expect(api.listDirectory).toHaveBeenCalledOnce();
+    await act(async () => create.resolve(created));
+    await act(async () => oldListing.resolve(mockDirectoryListing));
+    expect(result.current.currentPath).toBe("Documents");
+    expect(api.listDirectory).toHaveBeenCalledTimes(2);
+
+    const listing = { ...mockDirectoryListing, items: [...mockDirectoryListing.items, created] };
+    await act(async () => freshListing.resolve(listing));
+    expect(result.current.currentPath).toBe("");
+    expect(result.current.files).toEqual(listing.items);
+  });
+
+  it.each(["row choice", "failed reload"] as const)("does not apply create focus after a %s", async (condition) => {
+    const storageRegistry = createSmbStorageRegistry();
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections, storageRegistry }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", ""));
+    await waitFor(() => expect(result.current.files).toEqual(mockDirectoryListing.items));
+    const chosenIndex = condition === "row choice" ? result.current.sortedFiles.length - 1 : result.current.focusedIndex;
+    const chosen = requireTestValue(result.current.sortedFiles[chosenIndex]);
+    const created = { ...chosen, type: FileType.DIRECTORY, name: "AAA created", path: "AAA created" };
+    const listing = { ...mockDirectoryListing, items: [...mockDirectoryListing.items, created] };
+    const reload = deferred<typeof listing>();
+    vi.mocked(api.createItem).mockResolvedValueOnce(created);
+    if (condition === "row choice") {
+      vi.mocked(api.listDirectory).mockReturnValueOnce(reload.promise);
+    } else {
+      vi.mocked(api.listDirectory).mockRejectedValueOnce(new Error("Directory unavailable"));
+    }
+    act(() => result.current.handleNewDirectoryRequest());
+    await act(async () => result.current.handleCreateConfirm(created.name));
+    if (condition === "row choice") {
+      act(() => result.current.selectItem(chosen, chosenIndex));
+      await act(async () => reload.resolve(listing));
+    } else {
+      await waitFor(() => expect(result.current.error).not.toBeNull());
+      vi.mocked(api.listDirectory).mockResolvedValueOnce(listing);
+      await act(async () => result.current.reloadCurrentLocation({ forceRefresh: true, preserveVisibleContent: true }));
+    }
+    expect(result.current.files).toEqual(listing.items);
+    expect(result.current.sortedFiles[result.current.focusedIndex]?.path).toBe(chosen.path);
+  });
+
+  it.each([
+    ["no input", "Documents"],
+    ["pointer selection", "A"],
+    ["keyboard movement", "Z"],
+  ] as const)("resolves parent focus after a stale cache with %s", async (input, expectedName) => {
+    const child = requireTestValue(mockDirectoryListing.items.find((item) => item.name === "Documents"));
+    const first = { ...child, name: "A", path: "A" };
+    const last = { ...child, name: "Z", path: "Z" };
+    const cached = [first, last];
+    const root = { ...mockDirectoryListing, items: [first, child, last], total: 3 };
+    const { result } = renderHook(() => useFileBrowserPane({ rowHeight: 40, connections: mockConnections }), { wrapper });
+    act(() => result.current.applyLocation("conn-1", "Documents"));
+    await waitFor(() => expect(result.current.files).toEqual(mockNestedDirectory.items));
+    const list = document.createElement("div");
+    list.tabIndex = 0;
+    document.body.appendChild(list);
+    act(() => result.current.listContainerRef(list));
+    list.focus();
+    act(() => result.current.seedDirectorySnapshot("conn-1", "", cached));
+    const refresh = deferred<typeof root>();
+    vi.mocked(api.listDirectory).mockReturnValueOnce(refresh.promise);
+    vi.useFakeTimers();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + DIRECTORY_CACHE_TTL_MS);
+    try {
+      act(() => result.current.handleNavigateUpDirectory());
+      expect(result.current.files).toEqual(cached);
+      expect(result.current.focusedIndex).toBe(0);
+      if (input === "pointer selection") {
+        act(() => result.current.selectItemFromIcon(first, 0, false, false));
+      } else if (input === "keyboard movement") {
+        act(() => result.current.handleNavigateDown());
+        expect(result.current.focusedIndex).toBe(0);
+      }
+      await act(async () => refresh.resolve(root));
+      expect(result.current.sortedFiles[result.current.focusedIndex]?.name).toBe(expectedName);
+    } finally {
+      clock.mockRestore();
+      vi.useRealTimers();
+      list.remove();
+    }
   });
 
   it("commits a fresh cached parent immediately without a listing request", async () => {
