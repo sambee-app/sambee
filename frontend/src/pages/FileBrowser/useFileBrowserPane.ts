@@ -64,16 +64,13 @@ import {
   virtualLocation,
 } from "./contentProviders";
 import { FilesystemSearchSessions, isSearchResultFromSource } from "./filesystemSearchSessions";
-import {
-  useFileBrowserViewModePreference,
-  useQuickNavIncludeDotDirectoriesPreference,
-  writeSelectedConnectionIdPreference,
-} from "./preferences";
+import { useQuickNavIncludeDotDirectoriesPreference, writeSelectedConnectionIdPreference } from "./preferences";
 import { getBrowseParentPath } from "./routing";
 import {
   closeTabInCollection,
   createInitialTabCollection,
   createTabAfterSelected,
+  DEFAULT_TAB_VIEW_MODE,
   evictOverflowTabListings,
   getAdjacentTabId,
   getLastFolderTabId,
@@ -92,6 +89,7 @@ import type {
   SortField,
   UseFileBrowserPaneConfig,
   UseFileBrowserPaneReturn,
+  ViewMode,
 } from "./types";
 import { getPreferredViewerId, setPreferredViewerId } from "./viewerPreferences";
 
@@ -334,6 +332,7 @@ function recordRecentHistoryEntry({
 export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBrowserPaneReturn {
   const {
     rowHeight,
+    initialTabViewMode,
     connections = [],
     contentProviders,
     storageRegistry,
@@ -368,6 +367,26 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
   const activeTabIdRef = React.useRef<string>(tabCollectionRef.current.selectedTabId);
   const [selectedTabId, setSelectedTabId] = useState<string>(tabCollectionRef.current.selectedTabId);
   const [tabs, setTabs] = useState<PaneTabSummary[]>(() => toPaneTabSummaries(tabCollectionRef.current));
+  const viewMode = tabs.find((tab) => tab.id === selectedTabId)?.viewMode ?? DEFAULT_TAB_VIEW_MODE;
+  const setViewMode = useCallback((mode: ViewMode) => {
+    const collection = tabCollectionRef.current;
+    const session = collection.sessions.get(activeTabIdRef.current);
+    if (!session || session.viewMode === mode) return;
+    session.viewMode = mode;
+    setTabs(toPaneTabSummaries(collection));
+  }, []);
+
+  useEffect(() => {
+    if (initialTabViewMode === undefined || !tabs.some((tab) => tab.viewMode === undefined)) return;
+    const collection = tabCollectionRef.current;
+    let initialized = false;
+    for (const session of collection.sessions.values()) {
+      if (session.viewMode !== undefined) continue;
+      session.viewMode = initialTabViewMode;
+      initialized = true;
+    }
+    if (initialized) setTabs(toPaneTabSummaries(collection));
+  }, [initialTabViewMode, tabs]);
   const [tabRevealToken, setTabRevealToken] = useState<number>(0);
   const searchSessionsRef = React.useRef<FilesystemSearchSessions | null>(null);
   const [, setSearchRevision] = useState(0);
@@ -476,7 +495,6 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
   const [sortBy, setSortBy] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const [viewMode, setViewMode] = useFileBrowserViewModePreference();
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [includeDotDirectoriesInQuickNav] = useQuickNavIncludeDotDirectoriesPreference();
 
@@ -1633,7 +1651,8 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
             prevTab.currentPath === next[idx]?.currentPath &&
             archiveLocationsMatch(prevTab.archiveLocation, next[idx]?.archiveLocation ?? null) &&
             prevTab.sortBy === next[idx]?.sortBy &&
-            prevTab.sortDirection === next[idx]?.sortDirection
+            prevTab.sortDirection === next[idx]?.sortDirection &&
+            prevTab.viewMode === next[idx]?.viewMode
         )
       ) {
         return previous;
@@ -3944,7 +3963,6 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       items: [...files],
       sortBy,
       sortDirection,
-      viewMode,
       focusedIndex,
       focusedFileName,
       selectedFileNames: Array.from(selectedFiles),
@@ -3956,7 +3974,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
         : null,
       scrollOffset: currentScrollOffset,
     };
-  }, [files, focusedIndex, selectedFiles, sortBy, sortDirection, viewInfo, viewMode]);
+  }, [files, focusedIndex, selectedFiles, sortBy, sortDirection, viewInfo]);
 
   const restoreRecoverySnapshot = useCallback(
     (snapshot: FileBrowserPaneRecoverySnapshot | null) => {
@@ -4042,7 +4060,6 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
       setSortBy(snapshot.sortBy);
       setSortDirection(snapshot.sortDirection);
-      setViewMode(snapshot.viewMode);
       setFocusedIndex(nextFocusedIndex);
       setSelectedFiles(nextSelectedFiles);
       setViewInfo(
@@ -4066,7 +4083,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
       setLoading(false);
       setError(null);
     },
-    [clearIncrementalSearch, resetListingFocus, setViewMode, transitionListingLocation, setError]
+    [clearIncrementalSearch, resetListingFocus, transitionListingLocation, setError]
   );
 
   const applyResolvedLocation = useCallback(

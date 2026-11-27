@@ -580,6 +580,24 @@ export const BROWSER_SHORTCUTS = {
     helpGroup: "general",
     ctrl: true,
   },
+  SHOW_LIST_VIEW: {
+    id: "show-list-view",
+    keys: "F1",
+    get description() {
+      return translate("fileBrowser.chrome.viewMode.options.list");
+    },
+    helpGroup: "view",
+    ctrl: true,
+  },
+  SHOW_DETAILS_VIEW: {
+    id: "show-details-view",
+    keys: "F2",
+    get description() {
+      return translate("fileBrowser.chrome.viewMode.options.details");
+    },
+    helpGroup: "view",
+    ctrl: true,
+  },
   UPLOAD: {
     id: "upload-files",
     keys: "u",

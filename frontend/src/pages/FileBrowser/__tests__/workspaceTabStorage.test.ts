@@ -32,13 +32,14 @@ const state: WorkspaceTabState = {
   activePaneId: "right",
   connections,
   leftTabs: [
-    tab("folder"),
+    { ...tab("folder"), viewMode: "list" },
     tab("drive", "local-drive:d"),
     {
       ...tab("zip", "local-drive:d", "Downloads"),
       archiveLocation: { providerId: "zip", archivePath: "Downloads/data.zip", virtualPath: "docs" },
       sortBy: "size",
       sortDirection: "desc",
+      viewMode: "details",
     },
     tab("missing", "missing-smb:unavailable"),
   ],
@@ -95,7 +96,7 @@ describe("workspace tab storage", () => {
     expect(Object.keys(sessionStorage)).toEqual([WORKSPACE_PAGE_ID_KEY]);
     expect(history.state).toEqual({ usr: { caller: true }, key: "router", idx: 4, [WORKSPACE_PAGE_HISTORY_KEY]: [claim.pageId] });
     expect(claim.record?.left.tabs).toEqual([
-      { id: "folder", kind: "smb", targetId: "demo", path: "folder" },
+      { id: "folder", kind: "smb", targetId: "demo", path: "folder", viewMode: "list" },
       { id: "drive", kind: "local", targetId: "d", path: "drive" },
       {
         id: "zip",
@@ -104,6 +105,7 @@ describe("workspace tab storage", () => {
         archive: { sourcePath: "Downloads/data.zip", virtualPath: "docs" },
         sortBy: "size",
         sortDirection: "desc",
+        viewMode: "details",
       },
       { id: "missing", kind: "smb", targetId: "unavailable", path: "missing" },
     ]);

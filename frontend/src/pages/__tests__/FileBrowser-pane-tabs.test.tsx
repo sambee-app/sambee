@@ -7,10 +7,11 @@ import type { UseCompanionResult } from "../../hooks/useCompanion";
 import api from "../../services/api";
 import * as authConfigModule from "../../services/authConfig";
 import { authSession } from "../../services/authSession";
+import { saveBrowserRecoverySnapshot } from "../../services/browserRecoverySnapshot";
 import type { FilesystemSearchRecord } from "../../services/filesystemSearchContract";
 import { resetCurrentUserSettingsStoreForTests } from "../../services/userSettingsStore";
 import { createMockAuthToken } from "../../test/fixtures/users";
-import { type ApiMock, setupSuccessfulApiMocks } from "../../test/helpers";
+import { type ApiMock, createMockCurrentUserSettings, setupSuccessfulApiMocks } from "../../test/helpers";
 import { requireTestValue } from "../../test/helpers/assertions";
 import { mockWebLocks } from "../../test/mocks/webLocks";
 import { renderWithStyles } from "../../test/utils/renderWithStyles";
@@ -24,6 +25,7 @@ import {
   WORKSPACE_TAB_RECORD_PREFIX,
 } from "../FileBrowser/workspaceTabStorage";
 import {
+  mockConnections,
   mockDirectoryListing,
   mockEmptyDirectory,
   mockNestedDirectory,
@@ -151,8 +153,8 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     expect(row.closest("[data-file-row]")).toHaveStyle({ height: "32px" });
     const viewMode = screen.getByRole("button", { name: "View mode options" });
     await user.click(viewMode);
-    await user.click(screen.getByRole("menuitem", { name: "List" }));
-    await waitFor(() => expect(viewMode).toHaveTextContent("List"));
+    await user.click(screen.getByRole("menuitem", { name: "Details Ctrl+F2" }));
+    expect(viewMode).toHaveTextContent("Details");
     expect(row.closest("[data-file-row]")).toHaveStyle({ height: "32px" });
     act(() => row.focus());
     await user.keyboard("/");
@@ -169,6 +171,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     expect(signal?.aborted).toBe(true);
     expect(container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(1);
     expect(screen.queryByText("report.txt")).not.toBeInTheDocument();
+    expect(viewMode).toHaveTextContent("List");
     expect(screen.getByRole("button", { name: "Folder: Documents" }).closest("[data-file-row]")).toHaveStyle({ height: "32px" });
   });
 
@@ -640,17 +643,22 @@ describe("FileBrowser — Pane Tabs Integration", () => {
 
     const rightList = container.querySelector<HTMLElement>('[data-pane-id="right"] [data-testid="file-list-container"]')!;
     rightList.focus();
+    fireEvent.keyDown(rightList, { key: "F2", ctrlKey: true });
+    expect(screen.getByRole("button", { name: "View mode options" })).toHaveTextContent("Details");
     fireEvent.keyDown(rightList, { key: "-", altKey: true });
     expect(container.querySelectorAll('[data-testid^="pane-tab-item-right-"]')).toHaveLength(1);
     expect(await screen.findByText("Tab closed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View mode options" })).toHaveTextContent("List");
 
     // Hide the right pane by toggling to single-pane mode, then click Undo -> reveals right pane and restores 2nd tab!
     fireEvent.click(screen.getByRole("button", { name: "Toggle dual-pane view" }));
     await waitFor(() => expect(container.querySelector('[data-pane-id="right"]')).toBeNull());
+    expect(screen.getByRole("button", { name: "View mode options" })).toHaveTextContent("List");
 
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     await waitFor(() => expect(container.querySelector('[data-pane-id="right"]')).toBeTruthy());
     expect(container.querySelectorAll('[data-testid^="pane-tab-item-right-"]')).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "View mode options" })).toHaveTextContent("Details");
 
     // Close again and verify record expires after NOTICE_DURATION_MS.information
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -727,6 +735,61 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     expect(screen.getByRole("button", { name: "Test Server 1 — Test Server 1:/" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Test Server 2 — Test Server 2:/" })).toHaveAttribute("aria-pressed", "true");
     void firstMount;
+  });
+
+  it("restores distinct modes and uses the old account preference only for tabs without a saved mode", async () => {
+    const settings = createMockCurrentUserSettings();
+    vi.mocked(api.getCurrentUserSettings).mockResolvedValue({
+      ...settings,
+      browser: { ...settings.browser, file_browser_view_mode: "details" },
+    });
+    const user = userEvent.setup();
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    const viewMode = () => screen.getByRole("button", { name: "View mode options" });
+    expect(viewMode()).toHaveTextContent("Details");
+
+    fireEvent.click(screen.getByTestId("pane-tab-add-left"));
+    expect(viewMode()).toHaveTextContent("Details");
+    await user.click(viewMode());
+    await user.click(screen.getByRole("menuitem", { name: "List Ctrl+F1" }));
+    expect(viewMode()).toHaveTextContent("List");
+    const [pageId] = readWorkspacePageIds();
+    const storageKey = WORKSPACE_TAB_RECORD_PREFIX + pageId;
+    const record: PersistedWorkspaceTabsRecord = JSON.parse(requireTestValue(localStorage.getItem(storageKey)));
+    expect(record.left.tabs.map((tab) => tab.viewMode)).toEqual(["details", "list"]);
+    cleanup();
+
+    // Simulate an older tab record and a stale listing snapshot for the explicit List tab.
+    const olderTab = requireTestValue(record.left.tabs[0]);
+    delete olderTab.viewMode;
+    localStorage.setItem(storageKey, JSON.stringify(record));
+    const legacyRecoveryFields = { viewMode: "details" };
+    saveBrowserRecoverySnapshot({
+      savedAt: Date.now(),
+      routeUrl: "/browse/smb/test-server-1",
+      activePaneId: "left",
+      paneMode: "single",
+      connections: mockConnections,
+      left: {
+        ...legacyRecoveryFields,
+        tabId: record.left.selectedTabId,
+        connectionId: "conn-1",
+        path: "",
+        items: mockDirectoryListing.items,
+        sortBy: "name",
+        sortDirection: "asc",
+        focusedIndex: 0,
+        focusedFileName: null,
+        selectedFileNames: [],
+        viewInfo: null,
+        scrollOffset: 0,
+      },
+      right: null,
+    });
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    expect(viewMode()).toHaveTextContent("List");
+    await user.click(within(screen.getByTestId("pane-tab-item-left-0")).getByRole("button", { name: "Test Server 1 — Test Server 1:/" }));
+    expect(viewMode()).toHaveTextContent("Details");
   });
 
   it("warns when workspace storage is full and keeps the new tab open", async () => {
@@ -1223,10 +1286,15 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     await act(() => router.navigate("/browse/local/c/c:%5CUsers"));
     await waitFor(() => expect(screen.getAllByText("alice.txt").length).toBeGreaterThan(0));
     await user.click(screen.getByRole("checkbox", { name: /select: alice\.txt/i }));
+    const usersList = screen.getByTestId("file-list-container");
+    act(() => usersList.focus());
+    fireEvent.keyDown(usersList, { key: "F2", ctrlKey: true });
+    expect(screen.getByRole("button", { name: "View mode options" })).toHaveTextContent("Details");
 
     // Switch back to Drive C root tab, then back to Users tab -> selection and local-drive URL preserved
     fireEvent.click(screen.getByRole("button", { name: "Drive C — Drive C:/" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/browse/local/c"));
+    expect(screen.getByRole("button", { name: "View mode options" })).toHaveTextContent("List");
     fireEvent.click(screen.getByRole("button", { name: "Users — Drive C:/Users" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/browse/local/c/Users"));
     expect(screen.getByRole("checkbox", { name: /select: alice\.txt/i })).toBeChecked();
@@ -1246,6 +1314,7 @@ describe("FileBrowser — Pane Tabs Integration", () => {
     await waitFor(() => expect(reloaded.container.querySelectorAll('[data-testid^="pane-tab-item-left-"]')).toHaveLength(2));
     expect(screen.getByRole("button", { name: "Drive C — Drive C:/" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Users — Drive C:/Users" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "View mode options" })).toHaveTextContent("Details");
   });
 
   it("keeps in-flight upload operations bound to the captured destination tab even if tabs switch or close mid-upload", async () => {

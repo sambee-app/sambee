@@ -38,7 +38,6 @@ function isRecoveryPaneSnapshot(value: unknown): value is FileBrowserPaneRecover
     Array.isArray(snapshot.items) &&
     (snapshot.sortBy === "name" || snapshot.sortBy === "size" || snapshot.sortBy === "modified" || snapshot.sortBy === "type") &&
     (snapshot.sortDirection === "asc" || snapshot.sortDirection === "desc") &&
-    (snapshot.viewMode === "list" || snapshot.viewMode === "details") &&
     typeof snapshot.focusedIndex === "number" &&
     (typeof snapshot.focusedFileName === "string" || snapshot.focusedFileName === null) &&
     Array.isArray(snapshot.selectedFileNames) &&

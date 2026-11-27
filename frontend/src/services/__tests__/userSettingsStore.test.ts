@@ -38,6 +38,7 @@ vi.mock("../api", () => ({
     getCurrentUser: () => Promise.resolve({ role: "editor" }),
   },
 }));
+vi.mock("../authConfig", () => ({ isAuthRequired: () => Promise.resolve(true) }));
 
 import { SambeeThemeProvider, useSambeeTheme } from "../../theme/ThemeContext";
 import { authSession } from "../authSession";
@@ -76,9 +77,10 @@ function themeProviderWrapper({ children }: { children: ReactNode }) {
 }
 
 describe("userSettingsStore", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     authSession.clear();
+    await refreshCurrentUserSettings();
     userSettingsStore.resetForTests();
   });
 
@@ -255,26 +257,43 @@ describe("userSettingsStore", () => {
     await vi.waitFor(() => expect(getCurrentUserSettingsMock).toHaveBeenCalledTimes(2));
   });
 
-  it("does not let a stale refresh overwrite a successful field update", async () => {
+  it("waits for the replacement snapshot when a write supersedes the refresh", async () => {
     await authenticateAndLoad();
     getCurrentUserSettingsMock.mockClear();
-    let resolveStaleRefresh: ((value: typeof settings) => void) | undefined;
-    getCurrentUserSettingsMock.mockImplementationOnce(
-      () =>
-        new Promise<typeof settings>((resolve) => {
-          resolveStaleRefresh = resolve;
-        })
-    );
-    getCurrentUserSettingsMock.mockResolvedValueOnce({ ...settings, appearance: { ...settings.appearance, theme_id: "sambee-dark" } });
+    let finishStaleRefresh: () => void = () => {};
+    let finishReplacementRefresh: () => void = () => {};
+    getCurrentUserSettingsMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishStaleRefresh = () => resolve(settings);
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishReplacementRefresh = () =>
+              resolve({
+                ...settings,
+                appearance: { ...settings.appearance, theme_id: "sambee-dark" },
+                browser: { ...settings.browser, file_browser_view_mode: "details" },
+              });
+          })
+      );
     updateCurrentUserSettingsMock.mockResolvedValue({ field: "appearance.theme_id", value: "sambee-dark" });
 
-    const staleRefresh = refreshCurrentUserSettings();
+    const viewModeAfterRefresh = refreshCurrentUserSettings().then(
+      () => userSettingsStore.getValue("browser.file_browser_view_mode").confirmedValue
+    );
     await vi.waitFor(() => expect(getCurrentUserSettingsMock).toHaveBeenCalledTimes(1));
     await userSettingsStore.getValue("appearance.theme_id").commit("sambee-dark");
-    resolveStaleRefresh?.(settings);
-    await staleRefresh;
+    finishStaleRefresh();
+    await vi.waitFor(() => expect(getCurrentUserSettingsMock).toHaveBeenCalledTimes(2));
+    const themeBeforeReplacement = userSettingsStore.getValue("appearance.theme_id").confirmedValue;
+    finishReplacementRefresh();
 
-    await vi.waitFor(() => expect(userSettingsStore.getValue("appearance.theme_id").confirmedValue).toBe("sambee-dark"));
+    expect(themeBeforeReplacement).toBe("sambee-dark");
+    await expect(viewModeAfterRefresh).resolves.toBe("details");
   });
 
   it("applies a successful field update after a refresh completes during its write", async () => {

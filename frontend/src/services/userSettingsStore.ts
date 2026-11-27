@@ -202,10 +202,10 @@ class UserSettingsStore {
       })
       .finally(() => {
         this.refreshPromise = null;
-        if (this.queuedRefresh) {
-          this.queuedRefresh = false;
-          void this.refresh().catch(() => undefined);
-        }
+        if (!this.queuedRefresh) return;
+        this.queuedRefresh = false;
+        // A superseded response may not have supplied a confirmed snapshot.
+        return this.refresh();
       });
     return this.refreshPromise;
   }
