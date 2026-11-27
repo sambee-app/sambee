@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { commitCurrentUserSetting, getConfirmedCurrentUserSetting, useCurrentUserSetting } from "../../services/userSettingsStore";
-import type { PaneMode, ViewMode } from "./types";
+import type { PaneMode } from "./types";
 
 export const QUICK_NAV_INCLUDE_DOT_DIRECTORIES_STORAGE_KEY = "quick-nav-include-dot-directories";
 export const QUICK_BAR_SHORTCUT_HINT_VISIBILITY_STORAGE_KEY = "quick-bar-shortcut-hint-visibility";
@@ -152,11 +152,6 @@ export function writeSelectedConnectionIdPreference(connectionId: string | null)
 export function useQuickNavIncludeDotDirectoriesPreference(): [boolean, (enabled: boolean) => void] {
   const setting = useCurrentUserSetting("browser.quick_nav_include_dot_directories");
   return [setting.confirmedValue ?? false, (enabled) => void setting.commit(enabled).catch(() => undefined)];
-}
-
-export function useFileBrowserViewModePreference(): [ViewMode, (viewMode: ViewMode) => void] {
-  const setting = useCurrentUserSetting("browser.file_browser_view_mode");
-  return [setting.confirmedValue ?? "list", (viewMode) => void setting.commit(viewMode).catch(() => undefined)];
 }
 
 export function useTextEditorMaxFileSizeBytesPreference(): [number, (maxFileSizeBytes: number) => void] {

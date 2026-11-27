@@ -101,7 +101,6 @@ export interface FileBrowserPaneRecoverySnapshot {
   items: FileEntry[];
   sortBy: SortField;
   sortDirection: "asc" | "desc";
-  viewMode: ViewMode;
   focusedIndex: number;
   focusedFileName: string | null;
   selectedFileNames: string[];
@@ -148,6 +147,7 @@ export interface VirtualRouteLocation {
 export interface UseFileBrowserPaneConfig {
   /** Row height in pixels for the virtualizer (touch: 56, mouse: 40). */
   rowHeight: number;
+  initialTabViewMode?: ViewMode;
 
   /** Available connections so the hook can derive capability state for the selected connection. */
   connections?: Connection[];

@@ -1,6 +1,8 @@
 import ViewList from "@mui/icons-material/ViewList";
 import ViewModule from "@mui/icons-material/ViewModule";
 import { Box, Button, Divider, Menu, MenuItem, Typography } from "@mui/material";
+import { BROWSER_SHORTCUTS } from "../../config/keyboardShortcuts";
+import { formatShortcut } from "../../hooks/useKeyboardShortcuts";
 import { usePillButtonMenu } from "../../hooks/usePillButtonMenu";
 import type { ViewMode } from "../../pages/FileBrowser/types";
 import {
@@ -28,14 +30,22 @@ export function ViewModeSelector({ viewMode, onViewModeChange, onAfterChange, di
   const { anchorEl, open, handleClick, handleKeyDown, handleKeyUp, handleClose } = usePillButtonMenu(onAfterChange);
 
   const handleModeChange = (mode: ViewMode) => {
-    if (mode !== viewMode) {
-      onViewModeChange(mode);
-    }
+    onViewModeChange(mode);
     handleClose();
   };
 
   const currentLabel = VIEW_MODE_SELECTOR_STRINGS.optionLabel(viewMode);
   const icon = viewMode === "list" ? <ViewList sx={secondaryStripButtonIconSx} /> : <ViewModule sx={secondaryStripButtonIconSx} />;
+
+  const renderOption = (mode: ViewMode, Icon: typeof ViewList, shortcut: Parameters<typeof formatShortcut>[0]) => (
+    <MenuItem onClick={() => handleModeChange(mode)} selected={viewMode === mode} sx={{ display: "flex", gap: 1 }}>
+      <Icon fontSize="small" sx={{ display: "flex" }} />
+      {VIEW_MODE_SELECTOR_STRINGS.optionLabel(mode)}
+      <Typography component="kbd" variant="caption" sx={{ marginInlineStart: "auto", color: "text.secondary", whiteSpace: "nowrap" }}>
+        {formatShortcut(shortcut)}
+      </Typography>
+    </MenuItem>
+  );
 
   return (
     <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
@@ -83,15 +93,9 @@ export function ViewModeSelector({ viewMode, onViewModeChange, onAfterChange, di
           },
         }}
       >
-        <MenuItem onClick={() => handleModeChange("list")} selected={viewMode === "list"} sx={{ display: "flex", gap: 1 }}>
-          <ViewList fontSize="small" sx={{ display: "flex" }} />
-          {VIEW_MODE_SELECTOR_STRINGS.optionLabel("list")}
-        </MenuItem>
+        {renderOption("list", ViewList, BROWSER_SHORTCUTS.SHOW_LIST_VIEW)}
         <Divider />
-        <MenuItem onClick={() => handleModeChange("details")} selected={viewMode === "details"} sx={{ display: "flex", gap: 1 }}>
-          <ViewModule fontSize="small" sx={{ display: "flex" }} />
-          {VIEW_MODE_SELECTOR_STRINGS.optionLabel("details")}
-        </MenuItem>
+        {renderOption("details", ViewModule, BROWSER_SHORTCUTS.SHOW_DETAILS_VIEW)}
       </Menu>
     </Box>
   );

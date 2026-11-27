@@ -78,6 +78,7 @@ describe("ViewModeSelector", () => {
       expect(screen.getByRole("menu")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("Details")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "List Ctrl+F1" })).toHaveClass("Mui-selected");
+    expect(screen.getByRole("menuitem", { name: "Details Ctrl+F2" })).not.toHaveClass("Mui-selected");
   });
 });

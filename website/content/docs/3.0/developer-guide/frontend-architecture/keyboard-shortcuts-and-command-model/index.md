@@ -167,6 +167,7 @@ Current browser-level shortcuts include:
 - `Ctrl+Alt+T` (`Ctrl+Option+T` on macOS): open the active pane's location in a new browser tab
 - `Ctrl+Left` / `Ctrl+Right`: match left or right pane location
 - `Ctrl+R`: refresh file list
+- `Ctrl+F1` / `Ctrl+F2`: switch to List or Details view
 - `F2`: rename focused item
 - `Delete`: delete focused item
 - `Ctrl+D` / `Ctrl+U`: download selected items or upload files

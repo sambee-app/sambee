@@ -163,8 +163,8 @@ import {
   serializeBrowseRoute,
   VIEWER_QUERY_KEYS,
 } from "./FileBrowser/routing";
-import { type ClosedPaneTabRecord, getLastFolderTabId } from "./FileBrowser/tabSessions";
-import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, ViewInfo, VirtualRouteLocation } from "./FileBrowser/types";
+import { type ClosedPaneTabRecord, DEFAULT_TAB_VIEW_MODE, getLastFolderTabId } from "./FileBrowser/tabSessions";
+import type { ArchiveLocation, DirectoryChange, PaneId, PaneMode, ViewInfo, ViewMode, VirtualRouteLocation } from "./FileBrowser/types";
 import { ACTIVE_PANE_QUERY_KEY, ACTIVE_PANE_STORAGE_KEY, RIGHT_PANE_QUERY_KEY } from "./FileBrowser/types";
 import { useBrowserDownload } from "./FileBrowser/useBrowserDownload";
 import { useBrowserUpload } from "./FileBrowser/useBrowserUpload";
@@ -774,6 +774,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
   // Left pane — always present, synced with URL
   const [navigationScope, setNavigationScope] = useState<NavigationScope>("connection");
   const [navigationItemType, setNavigationItemType] = useState<NavigationItemType>("all");
+  const [initialTabViewMode, setInitialTabViewMode] = useState<ViewMode>();
   const leftPane = useFileBrowserPane({
     connections: allConnections,
     contentProviders: browserContentServices.providers,
@@ -783,6 +784,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     sourceRevision: storageSnapshot.capabilityRevision,
     linkTargets: browserContentServices.linkTargets,
     rowHeight,
+    initialTabViewMode,
     disabled: settingsOpen || mobileSettingsOpen,
     isActive: activePaneId === "left",
     onCompanionHint: () => setCompanionHintOpen(true),
@@ -812,6 +814,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     sourceRevision: storageSnapshot.capabilityRevision,
     linkTargets: browserContentServices.linkTargets,
     rowHeight,
+    initialTabViewMode,
     disabled: settingsOpen || mobileSettingsOpen || paneMode === "single",
     isActive: activePaneId === "right" && paneMode === "dual",
     onCompanionHint: () => setCompanionHintOpen(true),
@@ -1989,6 +1992,8 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
 
         await refreshCurrentUserSettings();
         const persistedSelectedConnectionId = getConfirmedCurrentUserSetting("browser.selected_connection_id") ?? null;
+        const legacyViewMode = getConfirmedCurrentUserSetting("browser.file_browser_view_mode") ?? DEFAULT_TAB_VIEW_MODE;
+        setInitialTabViewMode((current) => current ?? legacyViewMode);
 
         const data = await browserContentServices.connections.getConnections();
         setConnections(data);
@@ -4372,6 +4377,7 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
     const uploadAvailability = getFileListShortcutAvailability("upload");
     const downloadAvailability = getFileListShortcutAvailability("download");
     const refreshAvailability = getFileListShortcutAvailability("refresh");
+    const canChangeViewMode = browsing && !browserOverlayOpen && activePane.connectionId !== "";
 
     return [
       // Navigation - Arrow keys (focus checked inside handlers)
@@ -4450,6 +4456,16 @@ const BrowserWorkspace = React.memo(function BrowserWorkspace({ params, location
         ...BROWSER_SHORTCUTS.REFRESH,
         handler: activePane.handleRefresh,
         enabled: refreshAvailability.available,
+      },
+      {
+        ...BROWSER_SHORTCUTS.SHOW_LIST_VIEW,
+        handler: () => activePane.setViewMode("list"),
+        enabled: canChangeViewMode,
+      },
+      {
+        ...BROWSER_SHORTCUTS.SHOW_DETAILS_VIEW,
+        handler: () => activePane.setViewMode("details"),
+        enabled: canChangeViewMode,
       },
       {
         ...BROWSER_SHORTCUTS.UPLOAD,

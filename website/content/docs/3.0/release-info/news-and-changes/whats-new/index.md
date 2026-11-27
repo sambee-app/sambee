@@ -44,6 +44,16 @@ Index-based directory navigation and recent file access have been combined into 
 
 - Links in printed documents are now underlined and use the theme's link color instead of black.
 
+## File Browser
+
+- The row height has been reduced on non-touch devices to increase information density.
+- Fixed keyboard focus issues. When you create a folder, focus moves to the new folder. When you open a folder, focus moves to its first item. When you go up one level, focus returns to the folder you just left.
+
+### New Keyboard Shortcuts
+
+- <kbd>Ctrl+F1</kbd> switches to list view
+- <kbd>Ctrl+F2</kbd> switches to details view
+
 ## Security
 
 - Updated all dependencies with known issues or vulnerabilities to fixed versions.

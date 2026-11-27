@@ -18,6 +18,7 @@ import {
   hydrateTabCollection,
   type PaneTabCollection,
   type PaneTabSummary,
+  type TabDisplayOptions,
 } from "./tabSessions";
 import type { PaneId, PaneMode, SortField } from "./types";
 
@@ -35,14 +36,12 @@ type UserScope = string | null;
 type WorkspaceRoute = Pick<BrowseRouteState, "left" | "right" | "activePaneId">;
 type Connections = readonly Pick<Connection, "id" | "slug">[];
 
-interface StoredTab {
+interface StoredTab extends Partial<TabDisplayOptions> {
   id: string;
   kind: BrowseRouteTarget["kind"];
   targetId: string;
   path?: string;
   archive?: { sourcePath: string; virtualPath: string };
-  sortBy?: SortField;
-  sortDirection?: "asc" | "desc";
 }
 
 interface StoredPane {
@@ -91,14 +90,15 @@ function isKind(value: unknown): value is StoredTab["kind"] {
 
 function isStoredTab(value: unknown): value is StoredTab {
   if (!isObject(value)) return false;
-  const { id, kind, targetId, archive, path, sortBy, sortDirection } = value;
+  const { id, kind, targetId, archive, path, sortBy, sortDirection, viewMode } = value;
   return (
     nonempty(id) &&
     isKind(kind) &&
     nonempty(targetId) &&
     (archive === undefined ? typeof path === "string" : isArchive(archive) && path === undefined) &&
     (sortBy === undefined || isSortField(sortBy)) &&
-    (sortDirection === undefined || isSortDirection(sortDirection))
+    (sortDirection === undefined || isSortDirection(sortDirection)) &&
+    (viewMode === undefined || viewMode === "list" || viewMode === "details")
   );
 }
 
@@ -240,7 +240,11 @@ function rankClosedWorkspaceCandidates(scope: UserScope, route: WorkspaceRoute, 
   );
 }
 
-function compactTab(id: string, target: BrowseRouteTarget, sortBy?: SortField, sortDirection?: "asc" | "desc"): StoredTab {
+function compactTab(
+  id: string,
+  target: BrowseRouteTarget,
+  { sortBy, sortDirection, viewMode }: Partial<TabDisplayOptions> = {}
+): StoredTab {
   const virtual = target.virtualLocation;
   return {
     id,
@@ -249,6 +253,8 @@ function compactTab(id: string, target: BrowseRouteTarget, sortBy?: SortField, s
     ...(virtual ? { archive: { sourcePath: virtual.sourcePath, virtualPath: virtual.virtualPath } } : { path: target.path }),
     ...(sortBy && sortBy !== DEFAULT_TAB_SORT_FIELD ? { sortBy } : {}),
     ...(sortDirection && sortDirection !== DEFAULT_TAB_SORT_DIRECTION ? { sortDirection } : {}),
+    // An explicit List must remain distinct from a tab that has not received its initial mode.
+    ...(viewMode === undefined ? {} : { viewMode }),
   };
 }
 
@@ -285,8 +291,7 @@ function migrateLegacyPane(value: unknown): StoredPane | null {
             ? { virtualLocation: { providerId: "zip", sourcePath: virtualLocation.sourcePath, virtualPath: virtualLocation.virtualPath } }
             : {}),
         },
-        sortBy,
-        sortDirection
+        { sortBy, sortDirection }
       )
     );
   }
@@ -393,7 +398,7 @@ function serializePane(
           virtualPath: archive.virtualPath,
         }
       ) ?? fallbackTargets.get(tab.id);
-    if (target) stored.push(compactTab(tab.id, target, tab.sortBy, tab.sortDirection));
+    if (target) stored.push(compactTab(tab.id, target, tab));
   }
   const first = stored[0];
   return first ? { tabs: stored, selectedTabId: stored.some((tab) => tab.id === selectedTabId) ? selectedTabId : first.id } : null;
@@ -757,6 +762,7 @@ function restoreTab(entry: StoredTab, connections: Connections, unresolvedTarget
     archiveLocation: archive ? { providerId: archive.providerId, archivePath: archive.sourcePath, virtualPath: archive.virtualPath } : null,
     sortBy: entry.sortBy ?? DEFAULT_TAB_SORT_FIELD,
     sortDirection: entry.sortDirection ?? DEFAULT_TAB_SORT_DIRECTION,
+    viewMode: entry.viewMode,
     unmonitoredWhileHidden: true,
   });
 }
@@ -771,7 +777,7 @@ function applyIncomingTarget(pane: StoredPane | null, incoming: BrowseRouteTarge
     if (existing) return { tabs: entries, selectedTabId: existing.id };
   }
   const selected = fromClosed ? undefined : entries.find((tab) => tab.id === pane?.selectedTabId);
-  const replacement = compactTab(selected?.id ?? randomUuid(), incoming, selected?.sortBy, selected?.sortDirection);
+  const replacement = compactTab(selected?.id ?? randomUuid(), incoming, selected);
   return {
     tabs: selected ? entries.map((tab) => (tab === selected ? replacement : tab)) : [...entries, replacement],
     selectedTabId: replacement.id,

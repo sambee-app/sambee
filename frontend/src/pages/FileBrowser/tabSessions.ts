@@ -2,26 +2,32 @@ import { formatConnectionPath } from "../../components/FileBrowser/formatConnect
 import type { CompanionPairingErrorKind } from "../../services/localDrivePairing";
 import { randomUuid } from "../../utils/randomUuid";
 import type { BrowserItem } from "./contentProviders";
-import type { ArchiveLocation, NavigationHistoryEntry, PaneId, SortField } from "./types";
+import type { ArchiveLocation, NavigationHistoryEntry, PaneId, SortField, ViewMode } from "./types";
 
 /** Default cap on inactive tab sessions retaining full item listings per pane. */
 export const DEFAULT_MAX_INACTIVE_RETAINED_TAB_LISTINGS = 32;
 export const DEFAULT_TAB_SORT_FIELD = "name";
 export const DEFAULT_TAB_SORT_DIRECTION = "asc";
+export const DEFAULT_TAB_VIEW_MODE: ViewMode = "list";
+
+export interface TabDisplayOptions {
+  sortBy: SortField;
+  sortDirection: "asc" | "desc";
+  /** Unset until a new or older tab receives its initial view mode. */
+  viewMode?: ViewMode;
+}
 
 /** Lightweight public summary of a tab in a pane's ordered collection. */
-export interface PaneTabSummary {
+export interface PaneTabSummary extends TabDisplayOptions {
   id: string;
   connectionId: string;
   currentPath: string;
   archiveLocation: ArchiveLocation | null;
-  sortBy: SortField;
-  sortDirection: "asc" | "desc";
   searchTitle?: string;
 }
 
 /** Complete browsing state owned by an individual tab session. */
-export interface TabSessionState {
+export interface TabSessionState extends TabDisplayOptions {
   id: string;
   connectionId: string;
   currentPath: string;
@@ -40,8 +46,6 @@ export interface TabSessionState {
   focusedIndex: number;
   focusedItemIdentity: string | null;
   scrollOffset: number;
-  sortBy: SortField;
-  sortDirection: "asc" | "desc";
   navigationHistory: Map<string, NavigationHistoryEntry>;
   archiveNavigationHistory: Map<string, NavigationHistoryEntry>;
   error: string | null;
@@ -54,6 +58,10 @@ export interface TabSessionState {
   directoryMonitorErrorOccurrence: number;
   searchSessionId?: string;
   searchTitle?: string;
+}
+
+function tabDisplayOptions({ sortBy, sortDirection, viewMode }: TabDisplayOptions): TabDisplayOptions {
+  return { sortBy, sortDirection, ...(viewMode === undefined ? {} : { viewMode }) };
 }
 
 /** Ordered tab collection and per-tab session map for one pane. */
@@ -214,7 +222,7 @@ export function createInitialTabCollection(initialTabId: string = randomUuid()):
 
 /**
  * Inserts a new tab immediately after the currently selected tab, copying its committed
- * location and sort settings while starting at the top with no selected items.
+ * location and display options while starting at the top with no selected items.
  */
 export function createTabAfterSelected(
   collection: PaneTabCollection,
@@ -243,8 +251,7 @@ export function createTabAfterSelected(
     connectionId: selectedSession.connectionId,
     currentPath: selectedSession.currentPath,
     archiveLocation: selectedSession.archiveLocation ? { ...selectedSession.archiveLocation } : null,
-    sortBy: selectedSession.sortBy,
-    sortDirection: selectedSession.sortDirection,
+    ...tabDisplayOptions(selectedSession),
     items: seed ? [...seed.items] : [],
     hasPhysicalListing: seed?.hasPhysicalListing ?? false,
     hasArchiveListing: seed?.hasArchiveListing ?? false,
@@ -467,8 +474,7 @@ export function toPaneTabSummaries(collection: PaneTabCollection): PaneTabSummar
         connectionId: session.connectionId,
         currentPath: session.currentPath,
         archiveLocation: session.archiveLocation ? { ...session.archiveLocation } : null,
-        sortBy: session.sortBy,
-        sortDirection: session.sortDirection,
+        ...tabDisplayOptions(session),
         searchTitle: session.searchTitle,
       },
     ];

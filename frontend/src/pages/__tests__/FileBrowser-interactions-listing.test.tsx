@@ -17,6 +17,12 @@ import { FileType } from "../../types";
 import { mockDirectoryListing, renderBrowserAndFlush } from "./FileBrowser.test.utils";
 import { expectDirectoryLoad, setupFileBrowserInteractions } from "./FileBrowser-interactions.setup";
 
+const getViewModeUpdates = () =>
+  vi
+    .mocked(api.updateCurrentUserSettings)
+    .mock.calls.map(([update]) => update)
+    .filter((update) => update.field === "browser.file_browser_view_mode");
+
 describe("Browser Component - Interactions", () => {
   setupFileBrowserInteractions();
 
@@ -55,6 +61,53 @@ describe("Browser Component - Interactions", () => {
     expect(currentRow.closest('[aria-busy="true"]')).not.toBeNull();
     await act(async () => requireTestValue(finishListing)(mockDirectoryListing));
     await waitFor(() => expect(screen.queryByRole("progressbar")).not.toBeInTheDocument());
+  });
+
+  it("switches the tab view without writing account settings or changing plain F1 and F2", async () => {
+    const user = userEvent.setup();
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+
+    const viewModeButton = screen.getByRole("button", { name: "View mode options" });
+    await user.click(screen.getByTestId("virtual-list"));
+    expect(viewModeButton).toHaveTextContent("List");
+
+    await user.keyboard("{Control>}{F2}{/Control}");
+    await waitFor(() => expect(viewModeButton).toHaveTextContent("Details"));
+    expect(screen.queryByLabelText(/new name/i)).not.toBeInTheDocument();
+
+    await user.keyboard("{Control>}{F2}{F1}{/Control}");
+    await waitFor(() => expect(viewModeButton).toHaveTextContent("List"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    expect(getViewModeUpdates()).toEqual([]);
+
+    await user.keyboard("{F1}");
+    await screen.findByRole("dialog", { name: "File browser shortcuts" });
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    await user.click(screen.getByTestId("virtual-list"));
+    await user.keyboard("{F2}");
+    expect(await screen.findByLabelText(/new name/i)).toBeInTheDocument();
+  });
+
+  it("does not switch the view while the quick bar or rename dialog has focus", async () => {
+    const user = userEvent.setup();
+    await renderBrowserAndFlush("/browse/smb/test-server-1");
+    const viewModeButton = screen.getByRole("button", { name: "View mode options" });
+    expect(viewModeButton).toHaveTextContent("List");
+
+    await user.keyboard("{Control>}k{/Control}");
+    expect(await screen.findByPlaceholderText("Quick navigation")).toHaveFocus();
+    await user.keyboard("{Control>}{F2}{/Control}");
+    expect(viewModeButton).toHaveTextContent("List");
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByTestId("virtual-list"));
+    await user.keyboard("{F2}");
+    expect(await screen.findByLabelText(/new name/i)).toHaveFocus();
+    await user.keyboard("{Control>}{F2}{/Control}");
+    expect(viewModeButton).toHaveTextContent("List");
   });
 
   describe("Settings", () => {

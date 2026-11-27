@@ -26,6 +26,8 @@ Use these shortcuts when the main file list or browser shell has focus.
 | <kbd>Ctrl</kbd> + <kbd>,</kbd> | Open settings |
 | <kbd>?</kbd> / <kbd>F1</kbd> | Show keyboard shortcuts help |
 | <kbd>Ctrl</kbd> + <kbd>R</kbd> | Refresh the current file list |
+| <kbd>Ctrl</kbd> + <kbd>F1</kbd> | Switch the current tab to List view |
+| <kbd>Ctrl</kbd> + <kbd>F2</kbd> | Switch the current tab to Details view |
 | <kbd>F2</kbd> | Rename the focused item |
 | <kbd>Del</kbd> | Delete the focused item |
 | <kbd>Ctrl</kbd> + <kbd>D</kbd> | Download the selected items, or the focused item if nothing is selected |
@@ -33,6 +35,8 @@ Use these shortcuts when the main file list or browser shell has focus.
 | <kbd>F7</kbd> | Create a new directory |
 | <kbd>Shift</kbd> + <kbd>F7</kbd> | Create a new file |
 | <kbd>Ctrl</kbd> + <kbd>Enter</kbd> | Open the focused file in the companion app |
+
+If your operating system or browser uses the List or Details shortcut, use the view mode menu instead.
 
 When the focused item is a local shortcut or filesystem link, Sambee resolves its target before activating it. A directory target opens in its drive and directory, including a different local drive. A file target follows the same behavior as opening that file directly: <kbd>Enter</kbd> uses the selected viewer, while <kbd>Ctrl</kbd> + <kbd>Enter</kbd> opens it in the companion app. If the target is missing or inaccessible, Sambee shows an error instead of opening the link itself.
 
