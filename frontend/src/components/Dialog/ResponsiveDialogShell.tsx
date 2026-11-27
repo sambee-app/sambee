@@ -16,7 +16,7 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { type ReactNode, type Ref, useEffect, useId, useRef } from "react";
+import { type ReactNode, type Ref, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE,
@@ -55,6 +55,7 @@ interface ResponsiveDialogShellProps {
   paperOverlay?: ReactNode;
   fullWidth?: boolean;
   dialogZIndexOffset?: number;
+  container?: DialogProps["container"];
   mobileActionLabel?: string;
   disableAutoFocus?: boolean;
   disableEnforceFocus?: boolean;
@@ -90,6 +91,7 @@ export function ResponsiveDialogShell({
   paperOverlay,
   fullWidth = true,
   dialogZIndexOffset = 1,
+  container,
   mobileActionLabel,
   disableAutoFocus = false,
   disableEnforceFocus = false,
@@ -104,6 +106,24 @@ export function ResponsiveDialogShell({
   const titleId = useId();
   const descriptionId = useId();
   const shortcutScopeId = useKeyboardShortcutScope(open);
+  const resolvedContainerRef = useRef<Element | null>(null);
+  const [openContainer, setOpenContainer] = useState<Element | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !container) {
+      resolvedContainerRef.current = null;
+      setOpenContainer(null);
+      return;
+    }
+    if (!resolvedContainerRef.current) {
+      const element = (typeof container === "function" ? container() : container) ?? document.body;
+      resolvedContainerRef.current = element;
+      setOpenContainer(element);
+    }
+  }, [container, open]);
+  // Wait for the target before mounting the portal so it never moves out of fullscreen while open.
+  const modalOpen = open && (!container || Boolean(openContainer));
+  const modalContainer = openContainer ?? undefined;
+  const disableScrollLock = Boolean(modalContainer && modalContainer !== document.body);
   const triggerElementRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(open);
   const renderedDescription = description ? (
@@ -181,7 +201,8 @@ export function ResponsiveDialogShell({
         <Drawer
           {...{ [KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE]: shortcutScopeId }}
           anchor="right"
-          open={open}
+          open={modalOpen}
+          ModalProps={{ container: modalContainer, disableScrollLock }}
           onClose={handleShellClose}
           onKeyDown={handleShellKeyDown}
           disableAutoFocus={disableAutoFocus}
@@ -288,7 +309,9 @@ export function ResponsiveDialogShell({
     <KeyboardShortcutScopeContext value={shortcutScopeId}>
       <Dialog
         {...{ [KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE]: shortcutScopeId }}
-        open={open}
+        open={modalOpen}
+        container={modalContainer}
+        disableScrollLock={disableScrollLock}
         onClose={handleShellClose}
         onKeyDown={handleShellKeyDown}
         aria-labelledby={titleId}

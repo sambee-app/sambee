@@ -2215,63 +2215,99 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
     [recordRecentFileAttempt]
   );
 
-  const handleViewClose = useCallback(() => {
-    const images = currentViewImagesRef.current ?? viewInfo?.images;
-    const indexFromRef = currentViewIndexRef.current ?? viewInfo?.currentIndex ?? null;
+  const pruneViewerImages = useCallback<UseFileBrowserPaneReturn["pruneViewerImages"]>((target, retainedPath) => {
+    const current = viewInfoRef.current;
+    if (
+      current?.viewerId !== "image" ||
+      current.virtualSource ||
+      current.sessionId !== target.sessionId ||
+      (current.connectionId ?? connectionIdRef.current) !== target.connectionId ||
+      !current.images
+    )
+      return null;
 
-    let finalPath: string | undefined;
-    if (images && images.length > 0) {
-      const clampedIndex = indexFromRef !== null ? Math.min(Math.max(indexFromRef, 0), images.length - 1) : 0;
-      finalPath = images[clampedIndex];
-    } else if (viewInfo?.path) {
-      finalPath = viewInfo.path;
-    }
+    const index = current.images.indexOf(target.path);
+    if (index < 0) return null;
+    const images = current.images.filter((path) => path !== target.path);
+    currentViewImagesRef.current = images;
+    const retainedIndex = retainedPath === undefined ? -1 : images.indexOf(retainedPath);
+    const currentIndex = retainedIndex >= 0 ? retainedIndex : Math.min(index, images.length - 1);
+    currentViewIndexRef.current = currentIndex >= 0 ? currentIndex : null;
+    const path = images[currentIndex];
+    const next = path
+      ? {
+          ...current,
+          path,
+          images,
+          currentIndex,
+          fileSize: path === current.path ? current.fileSize : undefined,
+          fileModifiedAt: path === current.path ? current.fileModifiedAt : undefined,
+        }
+      : null;
+    setViewInfo(next);
+    return next;
+  }, []);
 
-    const originTabId = viewInfo?.originTabId;
-    setViewInfo(null);
-    currentViewIndexRef.current = null;
-    currentViewImagesRef.current = undefined;
-    lastDisplayedImagePathRef.current = null;
+  const handleViewClose = useCallback(
+    (deletedPath?: string) => {
+      const images = currentViewImagesRef.current ?? viewInfo?.images;
+      const indexFromRef = currentViewIndexRef.current ?? viewInfo?.currentIndex ?? null;
 
-    if (!finalPath) return;
+      let finalPath: string | undefined;
+      if (images && images.length > 0) {
+        const clampedIndex = indexFromRef !== null ? Math.min(Math.max(indexFromRef, 0), images.length - 1) : 0;
+        finalPath = images[clampedIndex];
+      } else if (viewInfo?.path) {
+        finalPath = viewInfo.path;
+      }
 
-    if (viewInfo?.searchSessionId) {
-      const search = searchSessionsRef.current?.get(viewInfo.searchSessionId);
-      const viewedItem = search?.rows.find(
-        ({ item }) =>
-          item.handle.path === finalPath &&
-          isSearchResultFromSource(item.handle, viewInfo.connectionId ?? connectionIdRef.current, viewInfo.virtualSource)
-      )?.item;
-      if (!viewedItem) return;
+      const originTabId = viewInfo?.originTabId;
+      setViewInfo(null);
+      currentViewIndexRef.current = null;
+      currentViewImagesRef.current = undefined;
+      lastDisplayedImagePathRef.current = null;
+
+      if (!finalPath || finalPath === deletedPath) return;
+
+      if (viewInfo?.searchSessionId) {
+        const search = searchSessionsRef.current?.get(viewInfo.searchSessionId);
+        const viewedItem = search?.rows.find(
+          ({ item }) =>
+            item.handle.path === finalPath &&
+            isSearchResultFromSource(item.handle, viewInfo.connectionId ?? connectionIdRef.current, viewInfo.virtualSource)
+        )?.item;
+        if (!viewedItem) return;
+
+        if (originTabId && originTabId !== activeTabIdRef.current) {
+          const originSession = tabCollectionRef.current.sessions.get(originTabId);
+          if (originSession) originSession.focusedItemIdentity = viewedItem.key;
+        } else {
+          const targetIndex = sortedFiles.findIndex((file) => getFileRowIdentity(file) === viewedItem.key);
+          if (targetIndex >= 0) updateFocus(targetIndex, { immediate: true });
+        }
+        return;
+      }
 
       if (originTabId && originTabId !== activeTabIdRef.current) {
         const originSession = tabCollectionRef.current.sessions.get(originTabId);
-        if (originSession) originSession.focusedItemIdentity = viewedItem.key;
-      } else {
-        const targetIndex = sortedFiles.findIndex((file) => getFileRowIdentity(file) === viewedItem.key);
-        if (targetIndex >= 0) updateFocus(targetIndex, { immediate: true });
+        if (originSession) {
+          originSession.focusedItemIdentity = finalPath;
+        }
+        return;
       }
-      return;
-    }
 
-    if (originTabId && originTabId !== activeTabIdRef.current) {
-      const originSession = tabCollectionRef.current.sessions.get(originTabId);
-      if (originSession) {
-        originSession.focusedItemIdentity = finalPath;
+      const targetIndex = sortedFiles.findIndex((file: FileEntry) => {
+        if (file.type !== "file") return false;
+        const fullPath = viewInfo?.virtualSource ? file.path : currentPath ? `${currentPath}/${file.name}` : file.name;
+        return fullPath === finalPath;
+      });
+
+      if (targetIndex >= 0) {
+        updateFocus(targetIndex, { immediate: true });
       }
-      return;
-    }
-
-    const targetIndex = sortedFiles.findIndex((file: FileEntry) => {
-      if (file.type !== "file") return false;
-      const fullPath = viewInfo?.virtualSource ? file.path : currentPath ? `${currentPath}/${file.name}` : file.name;
-      return fullPath === finalPath;
-    });
-
-    if (targetIndex >= 0) {
-      updateFocus(targetIndex, { immediate: true });
-    }
-  }, [currentPath, viewInfo, sortedFiles, updateFocus]);
+    },
+    [currentPath, viewInfo, sortedFiles, updateFocus]
+  );
 
   // ──────────────────────────────────────────────────────────────────────────
   // Keyboard Navigation Handlers
@@ -5321,6 +5357,7 @@ export function useFileBrowserPane(config: UseFileBrowserPaneConfig): UseFileBro
 
     // Viewer
     handleViewIndexChange,
+    pruneViewerImages,
     handleViewClose,
     closeBrowserViewerPicker,
     confirmBrowserViewerPicker,

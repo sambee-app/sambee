@@ -1375,6 +1375,8 @@ pub use platform::{NativeParent, NativeRoot};
 #[path = "directory_traversal_windows.rs"]
 mod windows_platform;
 
+#[cfg(windows)]
+pub(super) use windows_platform::remove_empty_directory_no_follow;
 #[cfg(all(test, windows))]
 pub(super) use windows_platform::test_file_id;
 #[cfg(windows)]

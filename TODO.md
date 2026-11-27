@@ -1,14 +1,5 @@
 # TODO
 
-## Viewers
-
-- Delete: add a delete function to all viewers.
-   - Toolbar button and keyboard shortcut (Del)
-   - When clicked/pressed, ask for confirmation
-   - If the user confirms, delete the file and then:
-      - Close the viewer (Markdown, PDF)
-      - Advance to the next image (image). If there is no next image, close the viewer.
-
 ## Auditing
 
 - Add an auditing feature for changes (but not for read access), comprised of:

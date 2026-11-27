@@ -57,6 +57,7 @@ import { ResponsiveDialogShell } from "../Dialog/ResponsiveDialogShell";
 import { DialogOperationContext } from "../FileBrowser/DialogOperationContext";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
 import { settingsUtilityButtonSx } from "../Settings/settingsButtonStyles";
+import { useViewerDeleteAction } from "./useViewerDeleteAction";
 import { ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
 import { downloadViewerBlob } from "./viewerContent";
 
@@ -157,6 +158,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
   connectionId,
   path,
   onClose,
+  onDeleteRequest,
   isReadOnly: connectionIsReadOnly = false,
   virtualSource,
 }) => {
@@ -1254,8 +1256,12 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
     setShowHelp(true);
   }, []);
 
+  const deleteAction = useViewerDeleteAction(
+    !isTransitioning && !isReadOnly && !isPdfLoading && !error && !pdfPasswordCallback ? onDeleteRequest : undefined
+  );
   const pdfShortcuts = useMemo(
     () => [
+      ...(deleteAction ? [deleteAction.shortcut] : []),
       // Download
       {
         ...COMMON_SHORTCUTS.DOWNLOAD,
@@ -1354,6 +1360,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
       },
     ],
     [
+      deleteAction,
       handleDownload,
       handleOpenSearch,
       handleSearchNext,
@@ -1439,6 +1446,7 @@ const PDFViewer: React.FC<ViewerComponentProps> = ({
           }}
         >
           <ViewerControls
+            actions={deleteAction ? [deleteAction.action] : undefined}
             filename={filename}
             filenameAdornment={readOnlyIndicator}
             toolbarBackground={toolbarBg}

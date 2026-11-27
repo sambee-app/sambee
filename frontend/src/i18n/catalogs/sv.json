@@ -1,5 +1,14 @@
 {
   "viewer": {
+    "delete": {
+      "missing": "Sambee kunde inte hitta den här filen. Stäng visaren och uppdatera mappen.",
+      "notFile": "Den här sökvägen pekar på en mapp, inte en fil. Sambee tog inte bort mappen. Uppdatera mappen.",
+      "accessDenied": "Du har inte behörighet att ta bort den här filen. Be nätverksresursens ägare om skrivbehörighet.",
+      "uncertain": "Sambee kunde inte bekräfta borttagningen. Filen kan redan ha tagits bort. Stäng visaren och uppdatera mappen.",
+      "recoveryBusy": "SMB-anslutningen håller på att återställas. Vänta en stund och försök sedan igen.",
+      "companionUpdate": "Uppdatera Sambee Companion för att ta bort filer från visaren.",
+      "failed": "Sambee kunde inte ta bort filen. Kontrollera anslutningen och försök sedan igen."
+    },
     "pdfPassword": {
       "title": "Lås upp PDF",
       "description": "Ange lösenordet för att visa den här PDF-filen.",

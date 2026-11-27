@@ -96,6 +96,7 @@ import { normalizeMarkdownTableCellLineBreaks, remarkRenderMarkdownTableCellLine
 import { PROGRESSIVE_MARKDOWN_MIN_UNITS, ProgressiveMarkdown } from "./ProgressiveMarkdown";
 import { RecoveredDraftDialog } from "./RecoveredDraftDialog";
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
+import { useViewerDeleteAction } from "./useViewerDeleteAction";
 import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge, type ViewerToolbarAction } from "./ViewerControls";
 import {
   useViewerLockNotice,
@@ -306,6 +307,8 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   isReadOnly: connectionIsReadOnly = false,
   virtualSource,
   navigation,
+  onDeleteRequest,
+  deletePending = false,
   isTransitioning = false,
 }) => {
   const isReadOnly = connectionIsReadOnly || virtualSource !== undefined;
@@ -1095,7 +1098,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const handleEnterEditMode = useCallback(
     async (initialDraft?: string): Promise<boolean> => {
       if (editSessionRef.current || acquisitionPending.current) return Boolean(editSessionRef.current);
-      if (isReadOnly || loading || (!isEditing && !previewReady) || error || isTransitioning) {
+      if (deletePending || isReadOnly || loading || (!isEditing && !previewReady) || error || isTransitioning) {
         return false;
       }
 
@@ -1201,6 +1204,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       connectionId,
       contentProviders,
       content,
+      deletePending,
       draftContent,
       isEditing,
       isTransitioning,
@@ -1242,7 +1246,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     isEditing,
     isSaving,
     isAcquiring,
-    loading: loading || (!isEditing && !previewReady),
+    loading: loading || deletePending || (!isEditing && !previewReady),
     dirty: hasUnsavedChanges,
     enterEdit: handleEnterEditMode,
     exitEdit: exitEditMode,
@@ -1255,6 +1259,10 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       setPendingUnsavedChangesAction("navigate");
     },
   });
+
+  useEffect(() => {
+    if (deletePending && navigation?.mode === "edit") navigation.onModeChange("view", true);
+  }, [deletePending, navigation]);
 
   const handleDiscardRecoveryDraft = useCallback(() => {
     clearDraft(connectionId, path, "markdown");
@@ -1828,8 +1836,23 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     openExternalUrl("https://sambee.net/docs/");
   }, []);
 
+  const deleteAction = useViewerDeleteAction(
+    !deletePending &&
+      !isEditing &&
+      !isAcquiring &&
+      !routedEditing.isExiting &&
+      !isTransitioning &&
+      !isReadOnly &&
+      !loading &&
+      previewReady &&
+      !error &&
+      navigation?.mode !== "edit"
+      ? onDeleteRequest
+      : undefined
+  );
   const markdownViewerShortcuts = useMemo(
     () => [
+      ...(deleteAction ? [deleteAction.shortcut] : []),
       {
         ...COMMON_SHORTCUTS.DOWNLOAD,
         handler: handleDownload,
@@ -1855,7 +1878,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         handler: () => {
           void handleEnterEditMode();
         },
-        enabled: !isEditing && !isReadOnly,
+        enabled: !isEditing && !isReadOnly && !deletePending,
       },
       {
         ...VIEWER_SHORTCUTS.FULLSCREEN,
@@ -1880,6 +1903,8 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       },
     ],
     [
+      deleteAction,
+      deletePending,
       handleDownload,
       handleEnterEditMode,
       handleEscape,
@@ -2126,7 +2151,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
     ]
   );
 
-  const actions = [...toolbarActions];
+  const actions = deleteAction ? [...toolbarActions, deleteAction.action] : [...toolbarActions];
   if (readOnlyReason === "locked" || readOnlyReason === "unavailable" || readOnlyReason === "lost") {
     actions.push({
       id: "retry-editing",

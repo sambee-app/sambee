@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import type { MockedObject } from "vitest";
@@ -57,6 +57,7 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
             currentIndex: initialIndex = 0,
             onCurrentIndexChange,
             onClose,
+            onDeleteRequest,
             connectionId,
             navigation,
             isTransitioning,
@@ -92,6 +93,11 @@ vi.mock("../../utils/FileTypeRegistry", async () => {
                 <button type="button" onClick={onClose}>
                   Close image
                 </button>
+                {onDeleteRequest && (
+                  <button type="button" onClick={onDeleteRequest}>
+                    Delete viewed image
+                  </button>
+                )}
               </div>
             );
           },
@@ -220,6 +226,157 @@ describe("Browser - Image View Integration", () => {
     await act(() => router.navigate(2));
     await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
   });
+
+  it("prunes the snapshot and replaces the route with next, previous, or no image", async () => {
+    let names = ["a.jpg", "b.jpg", "c.jpg"];
+    mockedApi.listDirectory.mockImplementation(async () => ({
+      path: "/",
+      total: names.length,
+      items: names.map((name) => ({
+        name,
+        path: name,
+        type: FileType.FILE,
+        mime_type: "image/jpeg",
+        is_readable: true,
+        is_hidden: false,
+      })),
+    }));
+    mockedApi.removeFile.mockImplementation(async (_, path) => {
+      names = names.filter((name) => name !== path);
+    });
+    const { router } = await renderBrowser();
+    fireEvent.click(await screen.findByRole("button", { name: /: b\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
+    expect(await screen.findByTestId("image-view")).toHaveAttribute("data-filename", "b.jpg");
+    const remove = async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Delete viewed image" }));
+      const dialog = within(await screen.findByRole("dialog", { name: "Delete file" }));
+      fireEvent.click(dialog.getByRole("button", { name: "Delete" }));
+    };
+    mockedApi.getFileInfo.mockClear();
+    recordFilename.mockClear();
+    await remove();
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "c.jpg"));
+    expect(recordFilename.mock.calls.flat()).not.toContain("b.jpg");
+    expect(router.state.historyAction).toBe("REPLACE");
+    await remove();
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "a.jpg"));
+    expect(router.state.historyAction).toBe("REPLACE");
+    await remove();
+    await waitFor(() => expect(screen.queryByTestId("image-view")).not.toBeInTheDocument());
+    expect(router.state.historyAction).toBe("REPLACE");
+    expect(mockedApi.removeFile.mock.calls).toEqual([
+      ["conn-1", "b.jpg"],
+      ["conn-1", "c.jpg"],
+      ["conn-1", "a.jpg"],
+    ]);
+    expect(mockedApi.getFileInfo).not.toHaveBeenCalled();
+    await act(() => router.navigate(-1));
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("keeps older history entries and reports a deleted image as missing on Back", async () => {
+    mockedApi.listDirectory.mockResolvedValue({
+      path: "/",
+      total: 2,
+      items: ["b.jpg", "c.jpg"].map((name) => ({
+        name,
+        path: name,
+        type: FileType.FILE,
+        mime_type: "image/jpeg",
+        is_readable: true,
+        is_hidden: false,
+      })),
+    });
+    mockedApi.removeFile.mockResolvedValue(undefined);
+    const { router } = await renderBrowser();
+    fireEvent.click(await screen.findByRole("button", { name: /: b\.jpg$/ }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
+    await screen.findByTestId("image-view");
+    fireEvent.click(screen.getByRole("button", { name: "Next image" }));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "c.jpg"));
+    fireEvent.click(screen.getByRole("button", { name: "Previous image" }));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "b.jpg"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete viewed image" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Delete file" }));
+    mockedApi.getFileInfo.mockClear();
+    fireEvent.click(dialog.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "c.jpg"));
+    expect(mockedApi.getFileInfo).not.toHaveBeenCalled();
+
+    await act(() => router.navigate(-1));
+    expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "c.jpg");
+    mockedApi.getFileInfo.mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "item_not_found" } } } });
+    await act(() => router.navigate(-1));
+    expect(new URLSearchParams(router.state.location.search).get("file")).toBe("smb/test-server-1/b.jpg");
+    expect(await screen.findByText('File "b.jpg" was not found. It may have been moved or deleted.')).toBeVisible();
+  });
+
+  it.each([
+    { survivor: "a.jpg", revisitDeletedImage: false },
+    { survivor: "c.jpg", revisitDeletedImage: false },
+    { survivor: "a.jpg", revisitDeletedImage: true },
+  ])(
+    "prunes a pending delete after Back ($survivor, new entry for the deleted image: $revisitDeletedImage)",
+    async ({ survivor, revisitDeletedImage }) => {
+      let names = ["a.jpg", "b.jpg", "c.jpg"];
+      mockedApi.listDirectory.mockImplementation(async () => ({
+        path: "/",
+        total: names.length,
+        items: names.map((name) => ({
+          name,
+          path: name,
+          type: FileType.FILE,
+          mime_type: "image/jpeg",
+          size: 10,
+          is_readable: true,
+          is_hidden: false,
+        })),
+      }));
+      let finishDeletion: (() => void) | undefined;
+      mockedApi.removeFile.mockImplementationOnce(async (_, path) => {
+        await new Promise<void>((resolve) => {
+          finishDeletion = resolve;
+        });
+        names = names.filter((name) => name !== path);
+      });
+
+      const { router } = await renderBrowser();
+      fireEvent.click(await screen.findByRole("button", { name: `File: ${survivor}` }, { timeout: FILE_LIST_READY_TIMEOUT_MS }));
+      await screen.findByTestId("image-view");
+      const towardDeleted = survivor === "a.jpg" ? "Next image" : "Previous image";
+      fireEvent.click(screen.getByRole("button", { name: towardDeleted }));
+      await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", "b.jpg"));
+      fireEvent.click(screen.getByRole("button", { name: "Delete viewed image" }));
+      const dialog = within(await screen.findByRole("dialog", { name: "Delete file" }));
+      fireEvent.click(dialog.getByRole("button", { name: "Delete" }));
+      expect(mockedApi.removeFile).toHaveBeenCalledExactlyOnceWith("conn-1", "b.jpg");
+
+      await act(() => router.navigate(-1));
+      await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", survivor));
+      if (revisitDeletedImage) {
+        fireEvent.click(screen.getByRole("button", { name: towardDeleted }));
+        await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-path", "b.jpg"));
+      }
+      const activeEntry = router.state.location;
+      mockedApi.getFileInfo.mockClear();
+      mockedApi.getFileInfo.mockRejectedValueOnce({ response: { status: 404, data: { detail: { code: "item_not_found" } } } });
+      await act(async () => requireTestValue(finishDeletion)());
+      expect(router.state.location).toBe(activeEntry);
+
+      if (!revisitDeletedImage) {
+        expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", survivor);
+        expect(mockedApi.getFileInfo).not.toHaveBeenCalled();
+        await act(() => router.navigate(1));
+      }
+      expect(await screen.findByText('File "b.jpg" was not found. It may have been moved or deleted.')).toBeVisible();
+      await act(() => router.navigate(-1));
+      await waitFor(() => expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", survivor));
+      fireEvent.click(screen.getByRole("button", { name: towardDeleted }));
+      await waitFor(() =>
+        expect(screen.getByTestId("image-view")).toHaveAttribute("data-filename", survivor === "a.jpg" ? "c.jpg" : "a.jpg")
+      );
+      expect(mockedApi.getFileInfo).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it.each(["separate events", "batched events", "batched reversal"])(
     "keeps distinct history entries for rapid gallery moves in %s",

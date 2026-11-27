@@ -203,6 +203,15 @@ export const COMMON_SHORTCUTS = {
  * Common viewer shortcuts shared across viewers
  */
 export const VIEWER_SHORTCUTS = {
+  DELETE_FILE: {
+    id: "delete-viewed-file",
+    keys: ["Delete"],
+    get description() {
+      return translate("fileBrowser.confirmDelete.titleFile");
+    },
+    label: "Del",
+    helpGroup: "fileActions",
+  },
   //
   // Zoom
   //

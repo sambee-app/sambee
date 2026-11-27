@@ -1,5 +1,5 @@
 import { Box, Button, CircularProgress, Dialog, Typography, useMediaQuery, useTheme } from "@mui/material";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Lightbox, { type Slide } from "yet-another-react-lightbox";
 import Fullscreen from "yet-another-react-lightbox/plugins/fullscreen";
@@ -9,7 +9,12 @@ import "./ImageViewer.css";
 
 import { BROWSER_SHORTCUTS, COMMON_SHORTCUTS, VIEWER_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { useCachedImageGallery } from "../../hooks/useCachedImageGallery";
-import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import {
+  isEventInKeyboardShortcutScope,
+  KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE,
+  KeyboardShortcutScopeContext,
+  useKeyboardShortcuts,
+} from "../../hooks/useKeyboardShortcuts";
 import { useViewerDocumentTitle } from "../../hooks/useViewerDocumentTitle";
 import { useViewerSharing } from "../../hooks/useViewerSharing";
 import {
@@ -26,6 +31,7 @@ import type { ViewerComponentProps } from "../../utils/FileTypeRegistry";
 import { blurActiveToolbarControl } from "../../utils/keyboardUtils";
 import { createDisplayedShareFile, supportsNativeShare } from "../../utils/nativeShare";
 import { KeyboardShortcutsHelp } from "../KeyboardShortcutsHelp";
+import { useViewerDeleteAction } from "./useViewerDeleteAction";
 import { ViewerControls, ViewerFilenameBadge } from "./ViewerControls";
 import { downloadViewerBlob } from "./viewerContent";
 
@@ -69,7 +75,6 @@ const IMAGE_SWIPE_DURATION_MS = 400;
 interface PresentedImage {
   identity: string;
   index: number;
-  path: string;
   source: string;
   blob: Blob;
   release: () => void;
@@ -83,6 +88,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   connectionId,
   path,
   onClose,
+  onDeleteRequest,
   isReadOnly = false,
   isTransitioning = false,
   navigation,
@@ -97,6 +103,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   sessionId,
 }) => {
   const contentProviders = useContentProviderRegistry();
+  const shortcutScope = useContext(KeyboardShortcutScopeContext);
   const { t } = useTranslation();
   const [rotate, setRotate] = useState(0);
   const [hideControls, setHideControls] = useState(false);
@@ -105,7 +112,17 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const fullscreenRef = useRef<FullscreenRef | null>(null);
   const controllerRef = useRef<import("yet-another-react-lightbox").ControllerRef | null>(null);
   const transitionSetting = useCurrentUserSetting("image_viewer.transition");
-  const [lightboxIndex, setLightboxIndex] = useState(initialIndex);
+  const galleryIdentity = `${connectionId}:${virtualSource ? `${virtualSource.location.providerId}:${virtualSource.location.source.path}` : images.join("\u0000")}`;
+  const [lightbox, setLightbox] = useState({ identity: galleryIdentity, index: initialIndex });
+  const lightboxIndex = lightbox.identity === galleryIdentity ? lightbox.index : initialIndex;
+  const setLightboxIndex = useCallback(
+    (index: number) => {
+      setLightbox((previous) =>
+        previous.identity === galleryIdentity && previous.index === index ? previous : { identity: galleryIdentity, index }
+      );
+    },
+    [galleryIdentity]
+  );
   const [presentedImage, setPresentedImage] = useState<PresentedImage | null>(null);
   const presentedImageRef = useRef<PresentedImage | null>(null);
   const discreteNavigationRef = useRef(false);
@@ -114,7 +131,6 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const [endIntent, setEndIntent] = useState(false);
   const endRequestRef = useRef<{ length: number; loadingSeen: boolean } | null>(null);
   const [endError, setEndError] = useState<string | null>(null);
-  const galleryIdentity = `${connectionId}:${virtualSource ? `${virtualSource.location.providerId}:${virtualSource.location.source.path}` : images.join("\u0000")}`;
 
   // Callback-ref + state ensures the Lightbox only renders once the portal
   // container is mounted.  Without this, portalRef.current is null on the
@@ -183,8 +199,15 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     preloadRange: PRELOAD_COUNT,
     cacheRange: CACHE_COUNT,
   });
-  const retainingImage = discreteNavigationRef.current && presentedImage?.identity === galleryIdentity && lightboxIndex !== currentIndex;
-  const displayedFilename = retainingImage ? (presentedImage.path.split("/").pop() ?? filename) : filename;
+  const isCurrentImageUnavailable = currentImageLoadPhase === "error" || currentImageLoadPhase === "canceled";
+  const unavailableImageIndex = isCurrentImageUnavailable ? currentIndex : null;
+  const retainingImage =
+    discreteNavigationRef.current &&
+    !isCurrentImageUnavailable &&
+    presentedImage?.identity === galleryIdentity &&
+    lightboxIndex !== currentIndex;
+  const displayedIndex = retainingImage ? lightboxIndex : currentIndex;
+  const displayedFilename = retainingImage ? (images[displayedIndex]?.split("/").pop() ?? filename) : filename;
   useViewerDocumentTitle(displayedFilename);
   const viewerSessionMetaRef = useRef({
     filename,
@@ -193,6 +216,17 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   const [imageLoadingFeedbackStage, setImageLoadingFeedbackStage] = useState<ImageLoadingFeedbackStage>("spinner");
   const isCurrentImageLoading = currentImageLoadPhase === "fetching" || currentImageLoadPhase === "decoding";
   const isCurrentImageReady = currentImageLoadPhase === "ready" && Boolean(getCachedImageSrc(currentIndex));
+  const deleteAction = useViewerDeleteAction(
+    !isTransitioning &&
+      !isReadOnly &&
+      !virtualSource &&
+      isCurrentImageReady &&
+      lightboxIndex === currentIndex &&
+      currentIndex === initialIndex &&
+      currentPath === path
+      ? onDeleteRequest
+      : undefined
+  );
   const targetSource = getCachedImageSrc(currentIndex);
   // biome-ignore lint/correctness/useExhaustiveDependencies: route index changes do not replace the gallery session.
   useLayoutEffect(() => {
@@ -206,6 +240,14 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
   }, [galleryIdentity]);
 
   useLayoutEffect(() => {
+    if (isCurrentImageUnavailable) {
+      if (presentedImageRef.current) {
+        presentedImageRef.current.release();
+        presentedImageRef.current = null;
+        setPresentedImage(null);
+      }
+      return;
+    }
     if (!isCurrentImageReady || !targetSource) return;
     const blob = getCachedImageBlob(currentIndex);
     if (!blob) return;
@@ -214,7 +256,6 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     const next = {
       identity: galleryIdentity,
       index: currentIndex,
-      path: currentPath,
       source: targetSource,
       blob,
       release: pinCachedImage(currentIndex),
@@ -222,7 +263,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     presentedImageRef.current = next;
     setPresentedImage(next);
     previous?.release();
-  }, [currentIndex, currentPath, galleryIdentity, getCachedImageBlob, isCurrentImageReady, targetSource, pinCachedImage]);
+  }, [currentIndex, galleryIdentity, getCachedImageBlob, isCurrentImageReady, isCurrentImageUnavailable, targetSource, pinCachedImage]);
 
   useEffect(
     () => () => {
@@ -233,9 +274,13 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     []
   );
 
-  useEffect(() => {
-    if (discreteNavigationRef.current && !isCurrentImageReady) return;
+  useLayoutEffect(() => {
     if (currentIndex === lightboxIndex) return;
+    if (isCurrentImageUnavailable) {
+      setLightboxIndex(currentIndex);
+      return;
+    }
+    if (discreteNavigationRef.current && !isCurrentImageReady) return;
     const distance = currentIndex - lightboxIndex;
     if (discreteNavigationRef.current && Math.abs(distance) === 1 && navigationDuration > 0 && controllerRef.current) {
       if (distance > 0) controllerRef.current.next();
@@ -243,7 +288,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     } else {
       setLightboxIndex(currentIndex);
     }
-  }, [currentIndex, isCurrentImageReady, lightboxIndex, navigationDuration]);
+  }, [currentIndex, isCurrentImageReady, isCurrentImageUnavailable, lightboxIndex, navigationDuration, setLightboxIndex]);
   const currentImageError = errorStates.get(currentIndex) ?? null;
   const imageDecodeChecksRef = useRef({ connectionId, path: currentPath, contentProviders, requests: new Map<string, AbortController>() });
   useEffect(() => {
@@ -274,7 +319,8 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     };
   }, [filename, images.length]);
 
-  useEffect(() => {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A new gallery resets the view even when its index is unchanged.
+  useLayoutEffect(() => {
     if (currentIndex < 0) {
       return;
     }
@@ -282,7 +328,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
     setRotate(0);
     setHideControls(false);
     zoomRef.current?.changeZoom(1, true);
-  }, [currentIndex]);
+  }, [currentIndex, galleryIdentity]);
 
   // The active image index deliberately restarts the staged feedback timer.
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentIndex is an intentional timer reset trigger.
@@ -335,14 +381,16 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       images.map((imagePath, index) => ({
         type: "image",
         src:
-          (presentedImage?.identity === galleryIdentity && presentedImage.index === index
-            ? presentedImage.source
-            : getCachedImageSrc(index)) ?? TRANSPARENT_PIXEL,
+          (index === unavailableImageIndex
+            ? undefined
+            : presentedImage?.identity === galleryIdentity && presentedImage.index === index
+              ? presentedImage.source
+              : getCachedImageSrc(index)) ?? TRANSPARENT_PIXEL,
         alt: imagePath.split("/").pop() ?? imagePath,
         imageIndex: index,
         originalPath: imagePath,
       })),
-    [images, imageSourceRevision, presentedImage, galleryIdentity, getCachedImageSrc]
+    [images, imageSourceRevision, presentedImage, galleryIdentity, getCachedImageSrc, unavailableImageIndex]
   );
 
   const handleClose = useCallback(() => {
@@ -364,12 +412,12 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
    */
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.key !== "Escape" || !isEventInKeyboardShortcutScope(event.nativeEvent, shortcutScope)) return;
       event.preventDefault();
       if (blurActiveToolbarControl()) return;
       onClose();
     },
-    [onClose]
+    [onClose, shortcutScope]
   );
 
   const handleViewChange = useCallback(
@@ -379,7 +427,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
         setCurrentIndex(index);
       }
     },
-    [currentIndex, setCurrentIndex]
+    [currentIndex, setCurrentIndex, setLightboxIndex]
   );
 
   const handleZoomChange = useCallback(({ zoom }: { zoom: number }) => {
@@ -576,7 +624,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
             </Box>
           )}
 
-          {isCurrentSlide && currentImageError && (
+          {isCurrentSlide && imageIndex === currentIndex && currentImageError && (
             <Box
               sx={{
                 position: "absolute",
@@ -613,6 +661,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       canRetryCurrentImage,
       currentImageError,
       currentImageLoadPhase,
+      currentIndex,
       lightboxIndex,
       filename,
       imageLoadingFeedbackStage,
@@ -667,6 +716,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
 
   const imageShortcuts = useMemo(
     () => [
+      ...(deleteAction ? [deleteAction.shortcut] : []),
       { ...COMMON_SHORTCUTS.FIRST_IMAGE, handler: () => requestImage(0) },
       { ...COMMON_SHORTCUTS.LAST_IMAGE, handler: handleLastImage },
       {
@@ -718,6 +768,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
       },
     ],
     [
+      deleteAction,
       handleDownload,
       requestImage,
       handleLastImage,
@@ -772,7 +823,16 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
             onKeyDown: handlePaperKeyDown,
             onKeyDownCapture: (event: React.KeyboardEvent) => {
               toolbarTouchRef.current = false;
-              if (showHelp || isTransitioning || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+              if (
+                !isEventInKeyboardShortcutScope(event.nativeEvent, shortcutScope) ||
+                showHelp ||
+                isTransitioning ||
+                event.altKey ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.shiftKey
+              )
+                return;
               if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
                 if ((zoomRef.current?.zoom ?? 1) > 1) return;
                 event.preventDefault();
@@ -822,10 +882,12 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
                 share: shareEnabled,
               }}
               onClose={handleClose}
+              actions={deleteAction ? [deleteAction.action] : undefined}
               navigation={
                 images.length > 1
                   ? {
                       currentIndex,
+                      displayedIndex,
                       totalItems: images.length,
                       onNext: handleNavigateNext,
                       onPrevious: handleNavigatePrevious,
@@ -862,7 +924,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
           ref={portalRef}
           className={currentImageError ? "image-viewer-load-error" : undefined}
           onPointerDownCapture={(event) => {
-            if (event.target instanceof Element && event.target.closest("button")) return;
+            if (event.target instanceof Element && event.target.closest(`button, [${KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE}]`)) return;
             setEndIntent(false);
             endRequestRef.current = null;
             if (discreteNavigationRef.current) {
@@ -873,6 +935,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
             }
           }}
           onWheelCapture={(event) => {
+            if (event.target instanceof Element && event.target.closest(`[${KEYBOARD_SHORTCUT_SCOPE_ATTRIBUTE}]`)) return;
             if (event.deltaX && discreteNavigationRef.current) {
               discreteNavigationRef.current = false;
               setEndIntent(false);
@@ -881,6 +944,7 @@ const ImageViewer: React.FC<ViewerComponentProps> = ({
             }
           }}
           onKeyDownCapture={(event) => {
+            if (!isEventInKeyboardShortcutScope(event.nativeEvent, shortcutScope)) return;
             if (
               (isTransitioning && event.key !== "Escape") ||
               (event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight"))

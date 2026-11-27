@@ -68,6 +68,8 @@ Additional rules that matter in practice:
 
 That direct local-open path is intentionally different from SMB-backed native-app editing.
 
+Empty-directory cleanup after a move removes only the selected directory, and only if it is empty. It does not follow a symbolic link or junction in the final path component. On Windows, Companion accepts known cloud placeholder directory tags and asks Windows to remove the directory through the same handle it inspected. If Windows or the sync provider refuses the operation, Companion reports the error and does not retry through the target path.
+
 ## Drive Enumeration Model
 
 The companion discovers drives and mounted volumes automatically.

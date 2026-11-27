@@ -25,6 +25,8 @@ export interface ViewerComponentProps {
   fileSize?: number;
   fileModifiedAt?: string;
   onClose: () => void;
+  onDeleteRequest?: () => void;
+  deletePending?: boolean;
   isReadOnly?: boolean;
   isTransitioning?: boolean;
   virtualSource?: VirtualItemHandle;

@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import logging
 import stat
 import uuid
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, BinaryIO, TypeVar, cast
 import smbclient
 from smbclient._io import SMBFileIO, SMBFileTransaction, query_info
 from smbclient._os import FileAttributes
-from smbprotocol.exceptions import SMBResponseException
+from smbprotocol.exceptions import SMBOSError, SMBResponseException
 from smbprotocol.file_info import (
     FileBasicInformation,
     FileDispositionInformation,
@@ -21,6 +22,7 @@ from smbprotocol.file_info import (
     FileStandardInformation,
     InfoType,
 )
+from smbprotocol.header import NtStatus
 from smbprotocol.open import FileInformationClass, FilePipePrinterAccessMask, SMB2SetInfoRequest, SMB2SetInfoResponse
 from smbprotocol.structure import DateTimeField
 
@@ -1501,6 +1503,37 @@ class SMBBackend(StorageBackend):
                 exc_info=True,
             )
             raise
+
+    async def remove_file(self, path: str) -> None:
+        """Remove a file or its link entry without following the final link."""
+
+        smb_path = self._build_smb_path(path)
+        pool = await get_connection_pool()
+        async with pool.get_connection(
+            host=self.host,
+            port=self.port,
+            username=self.username,
+            password=self.password,
+            share_name=self.share_name,
+            connection_cache=self._connection_cache,
+        ):
+            try:
+                # The SMB open rejects directories and opens the final reparse point itself.
+                await self._run_blocking_smb_call(
+                    "remove file",
+                    lambda: smbclient.remove(smb_path, **self._smb_auth_kwargs()),
+                    SMB_DELETE_TIMEOUT_SECONDS,
+                    smb_path=smb_path,
+                    mutation_paths=(smb_path,),
+                )
+            except (SMBOSError, SMBResponseException) as error:
+                # Keep these delete-specific outcomes local to this operation.
+                error_status = error.ntstatus if isinstance(error, SMBOSError) else error.status
+                if error_status == NtStatus.STATUS_DELETE_PENDING:
+                    return
+                if error_status == NtStatus.STATUS_FILE_IS_A_DIRECTORY:
+                    raise IsADirectoryError(errno.EISDIR, "The item is a directory", smb_path) from error
+                raise
 
     async def remove_empty_directory(self, path: str) -> None:
         """Remove one empty directory without recursively deleting its contents."""

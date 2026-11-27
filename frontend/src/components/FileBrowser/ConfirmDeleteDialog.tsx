@@ -9,7 +9,7 @@
  * Modal dialog to confirm deletion of files or directories.
  */
 
-import { Box, Button, CircularProgress, Typography } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, Typography } from "@mui/material";
 import type React from "react";
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,11 +29,15 @@ interface ConfirmDeleteDialogProps {
   /** Whether the dialog is open */
   open: boolean;
   /** Files and directories to delete */
-  items: FileEntry[];
+  items: readonly Pick<FileEntry, "name" | "path" | "type">[];
   /** Whether a delete operation is in progress */
   isDeleting: boolean;
+  error?: string | null;
+  disableConfirm?: boolean;
+  container?: React.ComponentProps<typeof ResponsiveDialogShell>["container"];
   /** Called when the user cancels */
   onClose: () => void;
+  onEscape?: () => void;
   /** Called when the user confirms deletion */
   onConfirm: () => void;
   /** Prevent the dialog from returning focus to its trigger. */
@@ -55,7 +59,11 @@ const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
   open,
   items,
   isDeleting,
+  error,
+  disableConfirm,
+  container,
   onClose,
+  onEscape,
   onConfirm,
   disableRestoreFocus,
   onTransitionExited,
@@ -93,7 +101,9 @@ const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
     <ResponsiveDialogShell
       open={open}
       onClose={onClose}
+      onEscape={onEscape}
       disableClose={isDeleting}
+      container={container}
       disableRestoreFocus={disableRestoreFocus}
       onTransitionExited={onTransitionExited}
       onKeyDown={handleKeyDown}
@@ -110,7 +120,7 @@ const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
             onClick={onConfirm}
             color="error"
             variant="contained"
-            disabled={isDeleting}
+            disabled={isDeleting || disableConfirm}
             startIcon={isDeleting ? <CircularProgress size={16} /> : undefined}
           >
             {isDeleting ? CONFIRM_DELETE_STRINGS.BUTTON_DELETING : CONFIRM_DELETE_STRINGS.BUTTON_DELETE}
@@ -137,6 +147,11 @@ const ConfirmDeleteDialog: React.FC<ConfirmDeleteDialogProps> = ({
           ) : null}
         </Box>
       )}
+      {error ? (
+        <Alert sx={{ mt: 2 }} severity="error">
+          {error}
+        </Alert>
+      ) : null}
     </ResponsiveDialogShell>
   );
 };

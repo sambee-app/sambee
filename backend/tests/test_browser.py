@@ -39,12 +39,15 @@ PUBLISH_CONTRACT = json.loads(
 )["staged_publish"]
 
 
-@pytest.mark.parametrize("operation", ["delete", "rename"])
+@pytest.mark.parametrize("operation", ["delete", "remove_file", "rename"])
 def test_uncertain_smb_mutation_returns_non_replayable_conflict(client, auth_headers_user, test_connection, mock_smb_backend, operation):
     _backend_class, backend = mock_smb_backend
     if operation == "delete":
         backend.delete_item.side_effect = SMBMutationUncertain()
         response = client.delete(f"/api/browse/{test_connection.id}/item", headers=auth_headers_user, params={"path": "/document.txt"})
+    elif operation == "remove_file":
+        backend.remove_file.side_effect = SMBMutationUncertain()
+        response = client.delete(f"/api/browse/{test_connection.id}/file", headers=auth_headers_user, params={"path": "/document.txt"})
     else:
         backend.rename_item.side_effect = SMBMutationUncertain()
         response = client.post(
@@ -2411,6 +2414,70 @@ class TestFileInfoModel:
         assert data["name"] == "test.txt"
         assert data["type"] == "file"
         assert data["size"] == 100
+
+
+@pytest.mark.integration
+class TestRemoveFile:
+    def test_removes_only_the_requested_file(self, client, auth_headers_user, test_connection, mock_smb_backend):
+        _, backend = mock_smb_backend
+        response = client.delete(f"/api/browse/{test_connection.id}/file", headers=auth_headers_user, params={"path": "/document.txt"})
+
+        assert response.status_code == 204
+        backend.connect.assert_awaited_once()
+        backend.remove_file.assert_awaited_once_with("/document.txt")
+        backend.get_file_info.assert_not_called()
+        backend.delete_item.assert_not_called()
+        backend.disconnect.assert_awaited_once()
+
+    @pytest.mark.parametrize(
+        ("error", "status_code", "code"),
+        [
+            (IsADirectoryError(), 409, "not_a_file"),
+            (FileNotFoundError(), 404, "item_not_found"),
+            (PermissionError(), 403, "file_access_denied"),
+            (TimeoutError(), 504, "file_timeout"),
+            (OSError(), 503, "file_unavailable"),
+        ],
+    )
+    def test_reports_storage_failures_without_subtree_cleanup(
+        self, client, auth_headers_user, test_connection, mock_smb_backend, error, status_code, code
+    ):
+        _, backend = mock_smb_backend
+        backend.remove_file.side_effect = error
+        with (
+            patch.object(browser_api, "_stop_monitors_for_path") as stop_monitors,
+            patch.object(browser_api, "_remove_from_directory_cache") as remove_from_cache,
+        ):
+            response = client.delete(f"/api/browse/{test_connection.id}/file", headers=auth_headers_user, params={"path": "/target"})
+
+        assert response.status_code == status_code
+        assert response.json()["detail"]["code"] == code
+        stop_monitors.assert_not_called()
+        remove_from_cache.assert_not_called()
+        backend.disconnect.assert_awaited_once()
+
+    @pytest.mark.parametrize("path", ["", "/", "\\"])
+    def test_rejects_share_root(self, client, auth_headers_user, test_connection, mock_smb_backend, path):
+        backend_class, _ = mock_smb_backend
+        response = client.delete(f"/api/browse/{test_connection.id}/file", headers=auth_headers_user, params={"path": path})
+
+        assert response.status_code == 400
+        backend_class.assert_not_called()
+
+    def test_rejects_read_only_connection(self, client, auth_headers_user, read_only_connection, mock_smb_backend):
+        backend_class, _ = mock_smb_backend
+        response = client.delete(f"/api/browse/{read_only_connection.id}/file", headers=auth_headers_user, params={"path": "/file.txt"})
+
+        assert response.status_code == 403
+        backend_class.assert_not_called()
+
+    def test_keeps_unknown_connection_distinct_from_missing_file(self, client, auth_headers_user, mock_smb_backend):
+        backend_class, _ = mock_smb_backend
+        response = client.delete(f"/api/browse/{uuid.uuid4()}/file", headers=auth_headers_user, params={"path": "/file.txt"})
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Connection not found"
+        backend_class.assert_not_called()
 
 
 @pytest.mark.integration

@@ -18,6 +18,15 @@
     }
   },
   "viewer": {
+    "delete": {
+      "missing": "Sambee konnte diese Datei nicht finden. Schließen Sie die Dateiansicht und aktualisieren Sie den Ordner.",
+      "notFile": "Dieser Pfad verweist auf einen Ordner, nicht auf eine Datei. Sambee hat den Ordner nicht gelöscht. Aktualisieren Sie den Ordner.",
+      "accessDenied": "Sie haben keine Berechtigung, diese Datei zu löschen. Bitten Sie den Besitzer der Freigabe um Schreibzugriff.",
+      "uncertain": "Sambee konnte den Löschvorgang nicht bestätigen. Die Datei wurde möglicherweise bereits gelöscht. Schließen Sie die Dateiansicht und aktualisieren Sie den Ordner.",
+      "recoveryBusy": "Die SMB-Verbindung wird wiederhergestellt. Warten Sie kurz und versuchen Sie es dann erneut.",
+      "companionUpdate": "Aktualisieren Sie Sambee Companion, um Dateien aus der Dateiansicht zu löschen.",
+      "failed": "Sambee konnte die Datei nicht löschen. Prüfen Sie die Verbindung und versuchen Sie es dann erneut."
+    },
     "pdfPassword": {
       "title": "PDF entsperren",
       "description": "Geben Sie das Passwort ein, um dieses PDF anzuzeigen.",

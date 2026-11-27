@@ -69,6 +69,7 @@ Viewers share a common keyboard model for closing, searching, paging, and visual
 | --- | --- |
 | <kbd>Esc</kbd> | Close the viewer |
 | <kbd>D</kbd> | Download the current file |
+| <kbd>Del</kbd> | Open the delete confirmation for the current image, PDF, or Markdown preview |
 | <kbd>Ctrl</kbd> + <kbd>F</kbd> | Search inside supported viewers |
 | <kbd>F3</kbd> / <kbd>Shift</kbd> + <kbd>F3</kbd> | Jump to the next or previous search result |
 | <kbd>Home</kbd> / <kbd>End</kbd> | Jump to the first or last page or item |
@@ -81,6 +82,8 @@ Viewers share a common keyboard model for closing, searching, paging, and visual
 | <kbd>?</kbd> / <kbd>F1</kbd> | Show keyboard shortcuts help |
 
 Some viewer shortcuts depend on the file type. For example, search applies to searchable viewers, and page navigation applies to paged or gallery-style viewers.
+
+Delete is available only for files on writable connections. It is not available for archive members or in an editor. In an image gallery, Sambee shows the next image after deletion, or the previous image if there is no next image. If Sambee cannot confirm a deletion, close the viewer and refresh the folder before trying again.
 
 ## Markdown Editor
 

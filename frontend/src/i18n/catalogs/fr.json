@@ -18,6 +18,15 @@
     }
   },
   "viewer": {
+    "delete": {
+      "missing": "Sambee n’a pas trouvé ce fichier. Fermez la visionneuse et actualisez le dossier.",
+      "notFile": "Ce chemin désigne un dossier, pas un fichier. Sambee n’a pas supprimé le dossier. Actualisez le dossier.",
+      "accessDenied": "Vous n’avez pas l’autorisation de supprimer ce fichier. Demandez un accès en écriture au propriétaire du partage.",
+      "uncertain": "Sambee n’a pas pu confirmer la suppression. Le fichier a peut-être déjà été supprimé. Fermez la visionneuse et actualisez le dossier.",
+      "recoveryBusy": "La connexion SMB est en cours de rétablissement. Patientez un instant, puis réessayez.",
+      "companionUpdate": "Mettez à jour Sambee Companion pour supprimer des fichiers depuis la visionneuse.",
+      "failed": "Sambee n’a pas pu supprimer le fichier. Vérifiez la connexion, puis réessayez."
+    },
     "pdfPassword": {
       "title": "Déverrouiller le PDF",
       "description": "Saisissez le mot de passe pour afficher ce PDF.",

@@ -1,11 +1,12 @@
-import { act, createEvent, fireEvent, render as renderBase, screen, waitFor } from "@testing-library/react";
+import { act, createEvent, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { type ReactNode, useLayoutEffect } from "react";
+import { type ReactElement, type ReactNode, useLayoutEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ImageLoadPhase } from "../../../hooks/useCachedImageGallery";
 import { ContentProviderRegistryContext } from "../../../pages/FileBrowser/contentProviders";
 import apiService from "../../../services/api";
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
+import { renderWithStyles } from "../../../test/utils/renderWithStyles";
 import { SambeeThemeProvider } from "../../../theme";
 import ImageViewer from "../ImageViewer";
 import { downloadViewerBlob } from "../viewerContent";
@@ -22,8 +23,8 @@ function ContentProviderTestWrapper({ children }: { children: ReactNode }) {
   return <ContentProviderRegistryContext.Provider value={contentProviders}>{children}</ContentProviderRegistryContext.Provider>;
 }
 
-async function render(ui: ReactNode) {
-  return act(async () => renderBase(ui, { wrapper: ContentProviderTestWrapper }));
+async function render(ui: ReactElement) {
+  return act(async () => renderWithStyles(ui, { wrapper: ContentProviderTestWrapper }));
 }
 
 vi.mock("yet-another-react-lightbox", () => ({
@@ -156,13 +157,62 @@ describe("ImageViewer", () => {
     expect(gallery.setCurrentIndex).not.toHaveBeenCalled();
   });
 
+  it("releases the deleted image and resets zoom while its same-index replacement loads", async () => {
+    let images = ["/a.jpg", "/b.jpg", "/c.jpg"];
+    let source: string | undefined = "blob:deleted";
+    const release = vi.fn();
+    const requestDelete = vi.fn();
+    const gallery = {
+      ...createGalleryMock(),
+      currentIndex: 1,
+      currentPath: "/b.jpg",
+      filename: "b.jpg",
+      getCachedImageSrc: (index: number) => (index === 1 ? source : undefined),
+      getCachedImageBlob: () => new Blob(["image"], { type: "image/jpeg" }),
+      pinCachedImage: vi.fn(() => release),
+    };
+    mockUseCachedImageGallery.mockReturnValue(gallery);
+    const viewer = () => (
+      <SambeeThemeProvider>
+        <ImageViewer
+          connectionId="conn-1"
+          path={gallery.currentPath}
+          images={images}
+          currentIndex={1}
+          onClose={() => {}}
+          onDeleteRequest={requestDelete}
+        />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer());
+    expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:deleted");
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "Delete" });
+    expect(requestDelete).toHaveBeenCalledOnce();
+    lightboxZoom.changeZoom.mockClear();
+
+    images = ["/a.jpg", "/c.jpg"];
+    gallery.currentPath = "/c.jpg";
+    gallery.filename = "c.jpg";
+    gallery.currentImageLoadPhase = "fetching";
+    source = undefined;
+    rerender(viewer());
+    expect(lightboxZoom.changeZoom).toHaveBeenCalledWith(1, true);
+    expect(release).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("lightbox-image")).not.toHaveAttribute("src", "blob:deleted");
+    expect(screen.queryByRole("button", { name: "Delete file" })).not.toBeInTheDocument();
+    fireEvent.keyDown(screen.getByTestId("image-lightbox"), { key: "Delete" });
+    expect(requestDelete).toHaveBeenCalledOnce();
+    expect(gallery.setCurrentIndex).not.toHaveBeenCalled();
+  });
+
   it.each(["Retry", "Cancel"] as const)("keeps the requested target selected during pointer activation of %s", async (action) => {
     if (action === "Cancel") vi.useFakeTimers();
     const images = ["/images/photo.jpg", "/images/next.jpg"];
     const blob = new Blob(["image"], { type: "image/jpeg" });
+    let targetSource: string | undefined;
     const gallery = {
       ...createGalleryMock(),
-      getCachedImageSrc: (index: number) => (index === 0 ? "blob:first" : undefined),
+      getCachedImageSrc: (index: number) => (index === 0 ? "blob:first" : targetSource),
       getCachedImageBlob: () => blob,
     };
     mockUseCachedImageGallery.mockImplementation(() => gallery);
@@ -193,7 +243,87 @@ describe("ImageViewer", () => {
     fireEvent.pointerUp(button);
     fireEvent.click(button);
     expect(action === "Retry" ? gallery.retryCurrentImage : gallery.cancelCurrentImageLoad).toHaveBeenCalledOnce();
+    if (action === "Cancel") {
+      expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:first");
+      gallery.currentImageLoadPhase = "canceled";
+      gallery.errorStates = new Map([[1, "Image load canceled"]]);
+      rerender(viewer());
+      expect(screen.getByText("Image load canceled")).toBeInTheDocument();
+      expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", expect.stringMatching(/^data:image\//));
+    } else {
+      expect(screen.getByText("Failed to load image")).toBeInTheDocument();
+      expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", expect.stringMatching(/^data:image\//));
+      gallery.currentImageLoadPhase = "fetching";
+      gallery.errorStates = new Map();
+      rerender(viewer());
+      expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", expect.stringMatching(/^data:image\//));
+      targetSource = "blob:retried";
+      gallery.imageSourceRevision++;
+      gallery.currentImageLoadPhase = "ready";
+      rerender(viewer());
+      expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:retried");
+    }
+    expect(screen.getByText("next.jpg")).toBeInTheDocument();
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+  });
+
+  it.each(["fetching", "decoding"] as const)("commits the failed slide after %s without showing stale pixels", async (phase) => {
+    const images = ["/photo.png", "/broken.psd"];
+    const targetSource = phase === "decoding" ? "blob:broken" : undefined;
+    const blob = new Blob(["image"], { type: "image/png" });
+    const release = vi.fn();
+    const gallery = {
+      ...createGalleryMock(),
+      currentPath: "/photo.png",
+      filename: "photo.png",
+      getCachedImageSrc: (index: number) => (index === 0 ? "blob:first" : targetSource),
+      getCachedImageBlob: () => blob,
+      pinCachedImage: vi.fn(() => release),
+    };
+    mockUseCachedImageGallery.mockReturnValue(gallery);
+    const viewer = () => (
+      <SambeeThemeProvider>
+        <ImageViewer connectionId="conn-1" path="/photo.png" images={images} onClose={() => {}} />
+      </SambeeThemeProvider>
+    );
+    const { rerender } = await render(viewer());
+    const next = screen.getByRole("button", { name: "Next" });
+    fireEvent.click(next);
+    expect(gallery.setCurrentIndex).toHaveBeenLastCalledWith(1);
+    gallery.currentIndex = 1;
+    gallery.currentPath = "/broken.psd";
+    gallery.filename = "broken.psd";
+    gallery.currentImageLoadPhase = phase;
+    rerender(viewer());
+
+    expect(screen.getByText("photo.png")).toBeInTheDocument();
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(next).toBeDisabled();
     expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:first");
+    if (phase === "decoding") {
+      fireEvent.error(screen.getByTestId("pending-image-decode"));
+      expect(gallery.markImageDecodeFailed).toHaveBeenCalledWith(1, targetSource);
+    }
+
+    gallery.currentImageLoadPhase = "error";
+    gallery.errorStates = new Map([[1, "Failed to load image"]]);
+    rerender(viewer());
+    expect(screen.getByText("broken.psd")).toBeInTheDocument();
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(document.title).toBe("broken.psd");
+    expect(screen.getByText("Failed to load image")).toBeInTheDocument();
+    expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", expect.stringMatching(/^data:image\//));
+    expect(screen.queryByTestId("pending-image-decode")).not.toBeInTheDocument();
+    expect(release).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+    expect(gallery.setCurrentIndex).toHaveBeenLastCalledWith(0);
+    gallery.currentIndex = 0;
+    gallery.currentPath = "/photo.png";
+    gallery.filename = "photo.png";
+    gallery.currentImageLoadPhase = "ready";
+    rerender(viewer());
+    expect(screen.getByTestId("lightbox-image")).toHaveAttribute("src", "blob:first");
+    expect(screen.queryByText("Failed to load image")).not.toBeInTheDocument();
   });
 
   it("ignores an older decode completion while the latest target is still decoding", async () => {
