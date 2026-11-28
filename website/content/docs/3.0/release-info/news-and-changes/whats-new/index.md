@@ -52,6 +52,10 @@ Files opened in the image, Markdown, or PDF viewer can now be deleted (<kbd>Del<
 
 - Links in printed documents are now underlined and use the theme's link color instead of black.
 
+## Text and Markdown Editors
+
+- Find and replace now save recent search and replacement terms consistently.
+
 ## File Browser
 
 - The row height has been reduced on non-touch devices to increase information density.

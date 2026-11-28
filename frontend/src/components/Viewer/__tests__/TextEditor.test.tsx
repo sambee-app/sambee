@@ -13,6 +13,7 @@ import { loadDraft, snapshotRegisteredDrafts } from "../../../services/draftReco
 import { createStorageBackedTestContentProviderRegistry, readBlobAsText } from "../../../test/helpers";
 import { SambeeThemeProvider } from "../../../theme";
 import { CODEMIRROR_FIND_HISTORY_STORAGE_KEY, CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY } from "../codeMirrorFindReplaceConstants";
+import { readCodeMirrorFindReplaceHistory } from "../codeMirrorFindReplaceHistory";
 
 const contentProviders = createStorageBackedTestContentProviderRegistry();
 
@@ -1413,8 +1414,14 @@ describe("TextEditor", () => {
     fireEvent.keyDown(findInput, { altKey: true, key: "c" });
     fireEvent.keyDown(findInput, { altKey: true, key: "w" });
     fireEvent.keyDown(findInput, { altKey: true, key: "r" });
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["recent find"]);
     fireEvent.keyDown(findInput, { key: "F3" });
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["hello", "recent find"]);
+
+    fireEvent.change(findInput, { target: { value: "bye" } });
     fireEvent.keyDown(findInput, { key: "F3", shiftKey: true });
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["bye", "hello", "recent find"]);
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toEqual(["recent replace"]);
 
     expect(screen.getByRole("button", { name: "Match case" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Match whole word" })).toHaveAttribute("aria-pressed", "true");
@@ -1440,10 +1447,43 @@ describe("TextEditor", () => {
     await act(async () => replaceInput.focus());
     fireEvent.keyDown(replaceInput, { key: "Enter" });
     expect(replaceInput).toHaveFocus();
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toEqual(["goodbye", "recent replace"]);
+
+    fireEvent.change(replaceInput, { target: { value: "done" } });
     fireEvent.keyDown(replaceInput, { altKey: true, ctrlKey: true, key: "Enter" });
     expect(replaceInput).toHaveFocus();
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toEqual(["done", "goodbye", "recent replace"]);
+
+    fireEvent.change(replaceInput, { target: { value: "temporary draft" } });
+    fireEvent.keyDown(replaceInput, { key: "ArrowUp" });
+    expect(replaceInput).toHaveValue("done");
 
     expect(mockTextEditorCommands.replaceCurrentSearchResult).toHaveBeenCalledTimes(1);
     expect(mockTextEditorCommands.replaceAllSearchResults).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not save drafts on close or run replacement shortcuts without an active query", async () => {
+    localStorage.removeItem(CODEMIRROR_FIND_HISTORY_STORAGE_KEY);
+    localStorage.removeItem(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY);
+    renderViewer();
+
+    const editor = await enterEditMode();
+    fireEvent.keyDown(editor, { ctrlKey: true, key: "h" });
+    const findInput = await screen.findByRole("textbox", { name: "Find" });
+    const replaceInput = screen.getByRole("textbox", { name: "Replace" });
+    fireEvent.change(replaceInput, { target: { value: "replacement draft" } });
+    await act(async () => replaceInput.focus());
+
+    expect(screen.getByRole("button", { name: "Replace all" })).toBeDisabled();
+    fireEvent.keyDown(replaceInput, { key: "Enter" });
+    fireEvent.keyDown(replaceInput, { key: "Enter", ctrlKey: true, altKey: true });
+    expect(mockTextEditorCommands.replaceCurrentSearchResult).not.toHaveBeenCalled();
+    expect(mockTextEditorCommands.replaceAllSearchResults).not.toHaveBeenCalled();
+    expect(localStorage.getItem(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toBeNull();
+
+    fireEvent.change(findInput, { target: { value: "search draft" } });
+    fireEvent.click(within(screen.getByTestId("code-mirror-find-replace-popover")).getByRole("button", { name: "Close" }));
+    expect(localStorage.getItem(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toBeNull();
   });
 });

@@ -112,7 +112,7 @@ Markdown files build on the shared viewer shortcuts and add editor-specific form
 | <kbd>F1</kbd> | Show Markdown editor shortcuts |
 | <kbd>Esc</kbd> | Close the Markdown viewer |
 
-Find and replace opens as a compact panel in the upper-right of the viewer, with a small margin below the toolbar. It shows the current match and total result count. Use the visible previous, next, replace, and replace-all controls after entering a search. The fields display `Search (⇅ for history)` and `Replace (⇅ for history)` until you type; each keeps up to ten recent values locally, available with <kbd>Up</kbd> and <kbd>Down</kbd>. Invalid regular expressions are reported without changing the document.
+The Find and Replace panel shows the current match and the total number of matches. Use a button or shortcut to move between matches or replace them. The editor saves up to ten search terms and ten replacement values in this browser. In either field, press <kbd>Up</kbd> or <kbd>Down</kbd> to recall a value. Typing or closing the panel does not save a value. The panel reports invalid regular expressions without changing the document.
 
 ## Text Editor
 

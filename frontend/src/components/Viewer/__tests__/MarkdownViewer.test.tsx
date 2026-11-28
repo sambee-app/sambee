@@ -22,6 +22,8 @@ import * as markdownDocumentPreview from "../../../utils/markdownDocumentPreview
 import * as markdownSyntaxPublication from "../../../utils/markdownSyntaxPublication";
 import * as markdownSyntaxWorker from "../../../utils/markdownSyntaxWorker";
 import type { PreparedCodeBlock } from "../../../utils/syntaxHighlighting";
+import { CODEMIRROR_FIND_HISTORY_STORAGE_KEY, CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY } from "../codeMirrorFindReplaceConstants";
+import { readCodeMirrorFindReplaceHistory } from "../codeMirrorFindReplaceHistory";
 import MarkdownViewer from "../MarkdownViewer";
 import { MARKDOWN_VIEWER_CONTENT_AUTOFOCUS_DELAY_MS } from "../markdownEditorConstants";
 import { normalizeMarkdownTableCellLineBreaks } from "../markdownTableCellLineBreaks";
@@ -3845,16 +3847,32 @@ describe("MarkdownViewer", () => {
     await waitFor(() => {
       expect(screen.getByText("2 / 2")).toBeInTheDocument();
     });
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["alpha"]);
 
     fireEvent.keyDown(document, { key: "F3", shiftKey: true });
 
     await waitFor(() => {
       expect(screen.getByText("1 / 2")).toBeInTheDocument();
     });
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["alpha"]);
 
+    fireEvent.change(findInput, { target: { value: "beta" } });
+    fireEvent.keyDown(findInput, { key: "Enter" });
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["beta", "alpha"]);
+
+    fireEvent.change(findInput, { target: { value: "Alpha" } });
+    fireEvent.click(screen.getByRole("button", { name: "Previous match" }));
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["Alpha", "beta", "alpha"]);
+
+    fireEvent.change(findInput, { target: { value: "alpha" } });
     fireEvent.change(replaceInput, { target: { value: "done" } });
     fireEvent.click(screen.getByRole("button", { name: "Replace current match" }));
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["alpha", "Alpha", "beta"]);
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toEqual(["done"]);
+
+    fireEvent.change(replaceInput, { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Replace all" }));
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toEqual(["done"]);
 
     expect(mockMarkdownEditorCommands.replaceCurrentSearchResult).toHaveBeenCalledTimes(1);
     expect(mockMarkdownEditorCommands.replaceAllSearchResults).toHaveBeenCalledTimes(1);
