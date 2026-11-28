@@ -45,6 +45,7 @@ import { scheduleRetriableFocusRestore } from "./focusRestoration";
 import MarkdownEditorErrorBoundary from "./MarkdownEditorErrorBoundary";
 import { RecoveredDraftDialog } from "./RecoveredDraftDialog";
 import { TextCodeEditor, type TextCodeEditorHandle, type TextCodeEditorSearchState } from "./TextCodeEditor";
+import { useCodeMirrorFindReplaceCommands } from "./useCodeMirrorFindReplaceCommands";
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
 import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge, type ViewerToolbarAction } from "./ViewerControls";
 import {
@@ -867,41 +868,50 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
     [closeSearchPanel]
   );
 
-  const handleSearchNext = useCallback(() => {
-    if (searchMatches === 0 && !editorSearchState.pending && !editorSearchState.error) {
-      return;
-    }
+  const { canNavigate, canReplace, findHistory, replaceHistory, runFind, runReplace } = useCodeMirrorFindReplaceCommands({
+    available: searchPanelOpen && !loading && !error && !exceedsEditorLimit && !isSaving,
+    replaceMode: searchMode === "replace" && !editorShouldBeReadOnly && !routedEditing.isExiting && !isTransitioning,
+    regexp: searchRegexp,
+    replacement: searchReplaceText,
+    searchState: editorSearchState,
+    searchText,
+  });
 
-    editorRef.current?.focusCurrentSearchResult();
-    editorRef.current?.nextSearchResult();
-  }, [searchMatches, editorSearchState.pending, editorSearchState.error]);
+  const handleSearchNext = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    runFind(() => {
+      editor.focusCurrentSearchResult();
+      editor.nextSearchResult();
+    });
+  }, [runFind]);
 
   const handleSearchPrevious = useCallback(() => {
-    if (searchMatches === 0 && !editorSearchState.pending && !editorSearchState.error) {
-      return;
-    }
-
-    editorRef.current?.focusCurrentSearchResult();
-    editorRef.current?.previousSearchResult();
-  }, [searchMatches, editorSearchState.pending, editorSearchState.error]);
+    const editor = editorRef.current;
+    if (!editor) return;
+    runFind(() => {
+      editor.focusCurrentSearchResult();
+      editor.previousSearchResult();
+    });
+  }, [runFind]);
 
   const handleReplaceCurrent = useCallback(() => {
-    if (editorShouldBeReadOnly || isSaving) {
-      return;
-    }
-
-    setSearchAutoNavigate(false);
-    editorRef.current?.replaceCurrentSearchResult();
-  }, [editorShouldBeReadOnly, isSaving]);
+    const editor = editorRef.current;
+    if (!editor) return;
+    runReplace(() => {
+      setSearchAutoNavigate(false);
+      editor.replaceCurrentSearchResult();
+    });
+  }, [runReplace]);
 
   const handleReplaceAll = useCallback(() => {
-    if (editorShouldBeReadOnly || isSaving) {
-      return;
-    }
-
-    setSearchAutoNavigate(false);
-    editorRef.current?.replaceAllSearchResults();
-  }, [editorShouldBeReadOnly, isSaving]);
+    const editor = editorRef.current;
+    if (!editor) return;
+    runReplace(() => {
+      setSearchAutoNavigate(false);
+      editor.replaceAllSearchResults();
+    });
+  }, [runReplace]);
 
   const handlePaperKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -969,12 +979,12 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.REPLACE_CURRENT,
         handler: handleReplaceCurrent,
-        enabled: !editorShouldBeReadOnly && !isSaving && !exceedsEditorLimit && searchMode === "replace" && searchPanelOpen,
+        enabled: canReplace,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.REPLACE_ALL,
         handler: handleReplaceAll,
-        enabled: !editorShouldBeReadOnly && !isSaving && !exceedsEditorLimit && searchMode === "replace" && searchPanelOpen,
+        enabled: canReplace,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_CASE_SENSITIVE,
@@ -999,12 +1009,12 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       {
         ...COMMON_SHORTCUTS.NEXT_MATCH,
         handler: handleSearchNext,
-        enabled: searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error),
+        enabled: canNavigate,
       },
       {
         ...COMMON_SHORTCUTS.PREVIOUS_MATCH,
         handler: handleSearchPrevious,
-        enabled: searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error),
+        enabled: canNavigate,
       },
       {
         ...COMMON_SHORTCUTS.SAVE,
@@ -1016,9 +1026,9 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       { ...BROWSER_SHORTCUTS.SHOW_HELP_ALTERNATE, handler: () => setShowEditorHelp(true) },
     ],
     [
+      canNavigate,
+      canReplace,
       editorSearchState.isSearchable,
-      editorSearchState.pending,
-      editorSearchState.error,
       error,
       exceedsEditorLimit,
       handleDownload,
@@ -1038,8 +1048,6 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
       isTransitioning,
       readOnlyReason,
       loading,
-      searchMatches,
-      searchMode,
       searchPanelOpen,
       setWordWrapEnabled,
       unsavedChangesDialogOpen,
@@ -1250,9 +1258,12 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
           </Box>
 
           <CodeMirrorFindReplacePopover
+            canNavigate={canNavigate}
+            canReplace={canReplace}
             caseSensitive={searchCaseSensitive}
             currentMatch={currentSearchMatch}
             disabled={isSaving}
+            findHistory={findHistory}
             focusTarget={searchFocusTarget}
             isReplaceMode={searchMode === "replace" && !editorShouldBeReadOnly}
             isSearchValid={editorSearchState.isValid}
@@ -1271,6 +1282,7 @@ export const TextEditor: React.FC<ViewerComponentProps> = ({
             onWholeWordChange={setSearchWholeWord}
             open={searchPanelOpen}
             regex={searchRegexp}
+            replaceHistory={replaceHistory}
             replaceText={searchReplaceText}
             searchMatches={searchMatches}
             searchText={searchText}

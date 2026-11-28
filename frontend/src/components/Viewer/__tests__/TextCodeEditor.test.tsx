@@ -618,6 +618,47 @@ describe("TextCodeEditor", () => {
     }
   });
 
+  it.each(["replace-one", "replace-all"] as const)(
+    "keeps regex match results ready for %s when only replacement text changes",
+    (operation) => {
+      const mock = mockSearchWorkers();
+      const view = new EditorView({
+        state: EditorState.create({ doc: "aa aa", extensions: [search(), buildPassiveSearchHighlightExtension()] }),
+      });
+      const setReplacement = (replace: string) => {
+        view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "a+", regexp: true, replace })) });
+      };
+      try {
+        setReplacement("");
+        const count = requireTestValue(mock.workers[0]);
+        setReplacement("draft");
+        expect(mock.workers).toHaveLength(1);
+        expect(count.terminate).not.toHaveBeenCalled();
+        count.emit({
+          type: "ranges",
+          ranges: [
+            { from: 0, to: 2 },
+            { from: 3, to: 5 },
+          ],
+        });
+        count.emit({ type: "complete", announcements: [] });
+
+        setReplacement("final");
+        expect(getCodeMirrorFindReplaceMetrics(view)).toMatchObject({ matches: 2, pending: false });
+        expect(mock.workers).toHaveLength(1);
+        runSourceRegexSearchCommand(view, operation);
+        const replace = requireTestValue(mock.workers[1]);
+        replace.emit({ type: "ready" });
+        expect(replace.postMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "start", operation, query: expect.objectContaining({ replace: "final" }) })
+        );
+      } finally {
+        view.destroy();
+        mock.restore();
+      }
+    }
+  );
+
   it.each(["complete", "failure", "cancel", "destroy"])("releases regex worker callbacks after %s", async (reason) => {
     const mock = mockSearchWorkers();
     const view = new EditorView({
@@ -794,7 +835,7 @@ describe("TextCodeEditor", () => {
     }
   });
 
-  it("discards buffered replacements after a document or query revision changes", async () => {
+  it.each(["search", "replacement"])("discards buffered replacements after a document or %s revision changes", async (changed) => {
     const mock = mockSearchWorkers();
     const view = new EditorView({
       state: EditorState.create({ doc: "aa aa", extensions: [search(), buildPassiveSearchHighlightExtension()] }),
@@ -810,7 +851,15 @@ describe("TextCodeEditor", () => {
       runSourceRegexSearchCommand(view, "replace-all");
       const staleQuery = mock.workers.at(-1)!;
       staleQuery.emit({ type: "change", from: 4, to: 6, insert: "wrong", continued: false });
-      view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: "new", regexp: true })) });
+      view.dispatch({
+        effects: setSearchQuery.of(
+          new SearchQuery({
+            search: changed === "search" ? "new" : "a+",
+            replace: changed === "replacement" ? "updated" : "",
+            regexp: true,
+          })
+        ),
+      });
       staleQuery.emit({ type: "complete", announcements: [] });
       await Promise.resolve();
       expect(view.state.doc.toString()).toBe("new aa aa");

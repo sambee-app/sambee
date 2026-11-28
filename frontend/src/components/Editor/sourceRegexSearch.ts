@@ -19,6 +19,7 @@ type NavigationOperation = "next" | "previous";
 interface RegexSearchSession {
   document: Text;
   query: SearchQuery;
+  replacement?: string;
   ranges: SourceSearchRange[];
   pending: boolean;
   error?: string;
@@ -28,13 +29,28 @@ interface RegexSearchSession {
 
 const sessions = new WeakMap<EditorView, RegexSearchSession>();
 
+function matchesSearchQuery(previous: SearchQuery, next: SearchQuery, replacement?: string): boolean {
+  // Counts and navigation do not depend on the replacement text.
+  return (
+    previous.search === next.search &&
+    previous.regexp === next.regexp &&
+    previous.caseSensitive === next.caseSensitive &&
+    previous.wholeWord === next.wholeWord &&
+    previous.literal === next.literal &&
+    previous.test === next.test &&
+    (replacement === undefined || replacement === next.replace)
+  );
+}
+
 export const sourceRegexSearchLifecycle = ViewPlugin.fromClass(
   class {
     constructor(private view: EditorView) {}
 
     update(update: ViewUpdate) {
       const session = sessions.get(this.view);
-      if (session && (update.docChanged || !session.query.eq(getSearchQuery(update.state)))) disposeSourceRegexSearch(this.view);
+      if (session && (update.docChanged || !matchesSearchQuery(session.query, getSearchQuery(update.state), session.replacement))) {
+        disposeSourceRegexSearch(this.view);
+      }
     }
 
     destroy() {
@@ -51,7 +67,7 @@ export function disposeSourceRegexSearch(view: EditorView): void {
 export function getSourceRegexSearch(view: EditorView): RegexSearchSession {
   const query = getSearchQuery(view.state);
   const existing = sessions.get(view);
-  if (existing?.document === view.state.doc && existing.query.eq(query)) return existing;
+  if (existing?.document === view.state.doc && matchesSearchQuery(existing.query, query, existing.replacement)) return existing;
   existing?.cancel();
   const session: RegexSearchSession = { document: view.state.doc, query, ranges: [], pending: true, cancel: () => {} };
   sessions.set(view, session);
@@ -73,7 +89,10 @@ export function runSourceRegexSearchCommand(view: EditorView, operation: Exclude
 }
 
 function run(view: EditorView, session: RegexSearchSession, operation: SourceSearchOperation): void {
-  const { document, query } = session;
+  const { document } = session;
+  const query = getSearchQuery(view.state);
+  const replacement = operation === "replace-one" || operation === "replace-all" ? query.replace : undefined;
+  session.replacement = replacement;
   let selection = view.state.selection;
   const isNavigation = operation === "next" || operation === "previous";
   const navigationQueue = new Map<number, NavigationOperation>();
@@ -87,7 +106,8 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
   const announcements: string[][] = [];
   session.pending = true;
   session.error = undefined;
-  const current = () => sessions.get(view) === session && view.state.doc === document && query.eq(getSearchQuery(view.state));
+  const current = () =>
+    sessions.get(view) === session && view.state.doc === document && matchesSearchQuery(query, getSearchQuery(view.state), replacement);
   const releaseReplacementBuffers = () => {
     changes.length = 0;
     announcements.length = 0;
@@ -265,7 +285,10 @@ function run(view: EditorView, session: RegexSearchSession, operation: SourceSea
                 });
               } else {
                 stopTransport();
-                if (current() && session.ranges.length === 0) run(view, session, "count");
+                if (current()) {
+                  session.replacement = undefined;
+                  if (session.ranges.length === 0) run(view, session, "count");
+                }
               }
             };
             if (feedback) {

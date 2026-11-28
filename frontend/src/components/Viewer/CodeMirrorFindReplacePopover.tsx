@@ -1,28 +1,27 @@
 import { Close, FindReplace, KeyboardArrowDown, KeyboardArrowUp, PlaylistAddCheck } from "@mui/icons-material";
 import { Box, Button, IconButton, InputAdornment, Portal, TextField, Tooltip, Typography, useTheme } from "@mui/material";
-import { type MutableRefObject, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type MutableRefObject, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { CODEMIRROR_EDITOR_SHORTCUTS, COMMON_SHORTCUTS } from "../../config/keyboardShortcuts";
 import { withShortcut } from "../../hooks/useKeyboardShortcuts";
 import { SCROLLBAR, TOOLBAR_HEIGHT } from "../../theme/constants";
 import { getOverlaySurfaceTokens } from "../../theme/palette";
-import {
-  CODEMIRROR_FIND_HISTORY_STORAGE_KEY,
-  CODEMIRROR_FIND_REPLACE_REPLACE_INPUT_ATTRIBUTE,
-  CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY,
-} from "./codeMirrorFindReplaceConstants";
-import {
-  addCodeMirrorFindReplaceHistoryEntry,
-  readCodeMirrorFindReplaceHistory,
-  writeCodeMirrorFindReplaceHistory,
-} from "./codeMirrorFindReplaceHistory";
+import { CODEMIRROR_FIND_REPLACE_REPLACE_INPUT_ATTRIBUTE } from "./codeMirrorFindReplaceConstants";
 
 const FOCUSABLE_ELEMENT_SELECTOR = 'button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
+interface HistoryPosition {
+  history: string[];
+  index: number;
+}
+
 export interface CodeMirrorFindReplacePopoverProps {
+  canNavigate: boolean;
+  canReplace: boolean;
   caseSensitive: boolean;
   currentMatch: number;
   disabled?: boolean;
+  findHistory: string[];
   focusTarget: "find" | "replace" | null;
   isReplaceMode: boolean;
   isSearchValid: boolean;
@@ -39,6 +38,7 @@ export interface CodeMirrorFindReplacePopoverProps {
   onWholeWordChange: (enabled: boolean) => void;
   open: boolean;
   regex: boolean;
+  replaceHistory: string[];
   replaceText: string;
   searchMatches: number;
   searchPending?: boolean;
@@ -50,7 +50,7 @@ export interface CodeMirrorFindReplacePopoverProps {
 function navigateHistory(
   event: ReactKeyboardEvent<HTMLElement>,
   history: string[],
-  historyIndexRef: MutableRefObject<number | null>,
+  historyPositionRef: MutableRefObject<HistoryPosition | null>,
   historyDraftRef: MutableRefObject<string>,
   value: string,
   onValueChange: (value: string) => void
@@ -66,7 +66,8 @@ function navigateHistory(
     return;
   }
 
-  const historyIndex = historyIndexRef.current;
+  const position = historyPositionRef.current;
+  const historyIndex = position?.history === history ? position.index : null;
   if (event.key === "ArrowDown" && historyIndex === null) {
     return;
   }
@@ -79,7 +80,7 @@ function navigateHistory(
     const nextHistoryIndex = historyIndex === null ? 0 : Math.min(historyIndex + 1, history.length - 1);
     const entry = history[nextHistoryIndex];
     if (entry === undefined) return;
-    historyIndexRef.current = nextHistoryIndex;
+    historyPositionRef.current = { history, index: nextHistoryIndex };
     onValueChange(entry);
     return;
   }
@@ -87,21 +88,24 @@ function navigateHistory(
   if (historyIndex === null) return;
   const nextHistoryIndex = historyIndex - 1;
   if (nextHistoryIndex < 0) {
-    historyIndexRef.current = null;
+    historyPositionRef.current = null;
     onValueChange(historyDraftRef.current);
     return;
   }
 
   const entry = history[nextHistoryIndex];
   if (entry === undefined) return;
-  historyIndexRef.current = nextHistoryIndex;
+  historyPositionRef.current = { history, index: nextHistoryIndex };
   onValueChange(entry);
 }
 
 export function CodeMirrorFindReplacePopover({
+  canNavigate,
+  canReplace,
   caseSensitive,
   currentMatch,
   disabled = false,
+  findHistory,
   focusTarget,
   isReplaceMode,
   isSearchValid,
@@ -118,6 +122,7 @@ export function CodeMirrorFindReplacePopover({
   onWholeWordChange,
   open,
   regex,
+  replaceHistory,
   replaceText,
   searchMatches,
   searchPending = false,
@@ -127,16 +132,12 @@ export function CodeMirrorFindReplacePopover({
 }: CodeMirrorFindReplacePopoverProps) {
   const { t } = useTranslation();
   const theme = useTheme();
-  const findHistoryIndexRef = useRef<number | null>(null);
-  const replaceHistoryIndexRef = useRef<number | null>(null);
+  const findHistoryPositionRef = useRef<HistoryPosition | null>(null);
+  const replaceHistoryPositionRef = useRef<HistoryPosition | null>(null);
   const findHistoryDraftRef = useRef("");
   const replaceHistoryDraftRef = useRef("");
   const popoverRef = useRef<HTMLElement | null>(null);
-  const [findHistory, setFindHistory] = useState(() => readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY));
-  const [replaceHistory, setReplaceHistory] = useState(() => readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY));
   const hasMatches = isSearchValid && searchMatches > 0;
-  const canNavigate = hasMatches || (isSearchValid && regex && Boolean(searchText) && (searchPending || Boolean(searchError)));
-  const replaceDisabled = disabled || searchPending || Boolean(searchError) || !hasMatches;
   const dialogSurfaces = getOverlaySurfaceTokens(theme.palette.background.default, theme.palette.mode);
 
   useEffect(() => {
@@ -144,8 +145,8 @@ export function CodeMirrorFindReplacePopover({
       return;
     }
 
-    findHistoryIndexRef.current = null;
-    replaceHistoryIndexRef.current = null;
+    findHistoryPositionRef.current = null;
+    replaceHistoryPositionRef.current = null;
     findHistoryDraftRef.current = "";
     replaceHistoryDraftRef.current = "";
   }, [open]);
@@ -170,55 +171,11 @@ export function CodeMirrorFindReplacePopover({
     [focusTarget, onFocusHandled]
   );
 
-  const recordFindHistory = () => {
-    setFindHistory((previousHistory) => {
-      const nextHistory = addCodeMirrorFindReplaceHistoryEntry(previousHistory, searchText);
-      writeCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY, nextHistory);
-      return nextHistory;
-    });
-  };
-
-  const recordReplaceHistory = () => {
-    setReplaceHistory((previousHistory) => {
-      const nextHistory = addCodeMirrorFindReplaceHistoryEntry(previousHistory, replaceText);
-      writeCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY, nextHistory);
-      return nextHistory;
-    });
-  };
-
-  const handleClose = () => {
-    recordFindHistory();
-    recordReplaceHistory();
-    onClose();
-  };
-
-  const handleFindPrevious = () => {
-    recordFindHistory();
-    onFindPrevious();
-  };
-
-  const handleFindNext = () => {
-    recordFindHistory();
-    onFindNext();
-  };
-
-  const handleReplaceCurrent = () => {
-    recordFindHistory();
-    recordReplaceHistory();
-    onReplaceCurrent();
-  };
-
-  const handleReplaceAll = () => {
-    recordFindHistory();
-    recordReplaceHistory();
-    onReplaceAll();
-  };
-
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      handleClose();
+      onClose();
       return;
     }
 
@@ -296,22 +253,22 @@ export function CodeMirrorFindReplacePopover({
             disabled={disabled}
             inputRef={setFindInputRef}
             onChange={(event) => {
-              findHistoryIndexRef.current = null;
+              findHistoryPositionRef.current = null;
               findHistoryDraftRef.current = event.target.value;
               onSearchChange(event.target.value);
             }}
             onKeyDown={(event) => {
-              if (event.key === "Enter") {
+              if (event.key === "Enter" && !event.defaultPrevented && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 if (event.shiftKey) {
-                  handleFindPrevious();
+                  onFindPrevious();
                 } else {
-                  handleFindNext();
+                  onFindNext();
                 }
                 return;
               }
 
-              navigateHistory(event, findHistory, findHistoryIndexRef, findHistoryDraftRef, searchText, onSearchChange);
+              navigateHistory(event, findHistory, findHistoryPositionRef, findHistoryDraftRef, searchText, onSearchChange);
             }}
             placeholder={t("viewer.edit.findWithHistory")}
             size="small"
@@ -352,12 +309,12 @@ export function CodeMirrorFindReplacePopover({
               disabled={disabled}
               inputRef={setReplaceInputRef}
               onChange={(event) => {
-                replaceHistoryIndexRef.current = null;
+                replaceHistoryPositionRef.current = null;
                 replaceHistoryDraftRef.current = event.target.value;
                 onReplaceChange(event.target.value);
               }}
               onKeyDown={(event) =>
-                navigateHistory(event, replaceHistory, replaceHistoryIndexRef, replaceHistoryDraftRef, replaceText, onReplaceChange)
+                navigateHistory(event, replaceHistory, replaceHistoryPositionRef, replaceHistoryDraftRef, replaceText, onReplaceChange)
               }
               placeholder={t("viewer.edit.replaceWithHistory")}
               size="small"
@@ -435,8 +392,8 @@ export function CodeMirrorFindReplacePopover({
                 <span>
                   <IconButton
                     aria-label={t("viewer.edit.previousMatch")}
-                    disabled={disabled || !canNavigate}
-                    onClick={handleFindPrevious}
+                    disabled={!canNavigate}
+                    onClick={onFindPrevious}
                     size="small"
                     sx={{ height: 30, p: 0.25, width: 26 }}
                   >
@@ -448,8 +405,8 @@ export function CodeMirrorFindReplacePopover({
                 <span>
                   <IconButton
                     aria-label={t("viewer.edit.nextMatch")}
-                    disabled={disabled || !canNavigate}
-                    onClick={handleFindNext}
+                    disabled={!canNavigate}
+                    onClick={onFindNext}
                     size="small"
                     sx={{ height: 30, p: 0.25, width: 26 }}
                   >
@@ -461,7 +418,7 @@ export function CodeMirrorFindReplacePopover({
             <Tooltip describeChild title={withShortcut(COMMON_SHORTCUTS.CLOSE)}>
               <IconButton
                 aria-label={t("common.actions.close")}
-                onClick={handleClose}
+                onClick={onClose}
                 size="small"
                 sx={{ height: 30, ml: 0.25, p: 0.25, width: 30 }}
               >
@@ -475,8 +432,8 @@ export function CodeMirrorFindReplacePopover({
                 <span>
                   <Button
                     aria-label={t("viewer.edit.replaceCurrent")}
-                    disabled={replaceDisabled}
-                    onClick={handleReplaceCurrent}
+                    disabled={!canReplace}
+                    onClick={onReplaceCurrent}
                     size="small"
                     startIcon={<FindReplace sx={{ fontSize: "1rem" }} />}
                     sx={{ fontSize: "0.875rem", minHeight: 34, px: 0.75 }}
@@ -490,8 +447,8 @@ export function CodeMirrorFindReplacePopover({
                 <span>
                   <Button
                     aria-label={t("viewer.edit.replaceAll")}
-                    disabled={replaceDisabled}
-                    onClick={handleReplaceAll}
+                    disabled={!canReplace}
+                    onClick={onReplaceAll}
                     size="small"
                     startIcon={<PlaylistAddCheck sx={{ fontSize: "1rem" }} />}
                     sx={{ fontSize: "0.875rem", minHeight: 34, px: 0.75 }}

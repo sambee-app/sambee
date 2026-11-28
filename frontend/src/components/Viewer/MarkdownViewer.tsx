@@ -95,6 +95,7 @@ import { areMarkdownSearchStatesEqual } from "./markdownSearchState";
 import { normalizeMarkdownTableCellLineBreaks, remarkRenderMarkdownTableCellLineBreaks } from "./markdownTableCellLineBreaks";
 import { PROGRESSIVE_MARKDOWN_MIN_UNITS, ProgressiveMarkdown } from "./ProgressiveMarkdown";
 import { RecoveredDraftDialog } from "./RecoveredDraftDialog";
+import { useCodeMirrorFindReplaceCommands } from "./useCodeMirrorFindReplaceCommands";
 import { useMarkdownEditSession } from "./useMarkdownEditSession";
 import { useViewerDeleteAction } from "./useViewerDeleteAction";
 import { VIEWER_SEARCH_INPUT_ATTRIBUTE, ViewerControls, ViewerFilenameBadge, type ViewerToolbarAction } from "./ViewerControls";
@@ -1626,6 +1627,17 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   const activeEditorSearchText = isEditing && searchPanelOpen ? editorSearchText : "";
   const editorShouldBeReadOnly = readOnlyReason !== null || isAcquiring || Boolean(isSaving && pendingUnsavedChangesAction);
+  const editorCommandsAvailable =
+    isEditing && !editorShouldBeReadOnly && !editorFailed && editorLoadState === "loaded" && !editorLoadError && Boolean(EditorComponent);
+  const searchControlsDisabled = isSaving || editorLoadState !== "loaded" || Boolean(editorLoadError) || editorFailed;
+  const { canNavigate, canReplace, findHistory, replaceHistory, runFind, runReplace } = useCodeMirrorFindReplaceCommands({
+    available: searchPanelOpen && editorCommandsAvailable && !isSaving,
+    replaceMode: editorSearchMode === "replace" && !routedEditing.isExiting,
+    regexp: editorSearchRegexp,
+    replacement: editorSearchReplaceText,
+    searchState: editorSearchState,
+    searchText: editorSearchText,
+  });
 
   const handleSearchPanelToggle = useCallback(
     (open: boolean) => {
@@ -1654,7 +1666,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
   const runEditorCommand = useCallback(
     (commandLabel: string, command: () => void) => {
-      if (!isEditing || editorShouldBeReadOnly || editorFailed || editorLoadState !== "loaded" || editorLoadError || !EditorComponent) {
+      if (!editorCommandsAvailable) {
         return;
       }
 
@@ -1668,33 +1680,30 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
         logError("Markdown editor command failed", { error: err, path, connectionId, command: commandLabel });
       }
     },
-    [
-      EditorComponent,
-      connectionId,
-      editorFailed,
-      editorLoadError,
-      editorLoadState,
-      editorShouldBeReadOnly,
-      isEditing,
-      path,
-      t,
-      setEditError,
-    ]
+    [connectionId, editorCommandsAvailable, path, t, setEditError]
   );
 
   const handleReplaceCurrent = useCallback(() => {
-    setEditorSearchAutoNavigate(false);
+    const editor = editorRef.current;
+    if (!editor) return;
     runEditorCommand(t("viewer.edit.replace"), () => {
-      editorRef.current?.replaceCurrentSearchResult();
+      runReplace(() => {
+        setEditorSearchAutoNavigate(false);
+        editor.replaceCurrentSearchResult();
+      });
     });
-  }, [runEditorCommand, t]);
+  }, [runEditorCommand, runReplace, t]);
 
   const handleReplaceAll = useCallback(() => {
-    setEditorSearchAutoNavigate(false);
+    const editor = editorRef.current;
+    if (!editor) return;
     runEditorCommand(t("viewer.edit.replaceAll"), () => {
-      editorRef.current?.replaceAllSearchResults();
+      runReplace(() => {
+        setEditorSearchAutoNavigate(false);
+        editor.replaceAllSearchResults();
+      });
     });
-  }, [runEditorCommand, t]);
+  }, [runEditorCommand, runReplace, t]);
 
   const handleEditorCrashed = useCallback(
     (error: Error, errorInfo: ErrorInfo) => {
@@ -1764,9 +1773,13 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
   const handleSearchNext = useCallback(
     (_event?: KeyboardEvent) => {
       if (isEditing) {
+        const editor = editorRef.current;
+        if (!canNavigate || !editor) return;
         runEditorCommand(t("common.search.nextMatch"), () => {
-          editorRef.current?.focusCurrentSearchResult();
-          editorRef.current?.nextSearchResult();
+          runFind(() => {
+            editor.focusCurrentSearchResult();
+            editor.nextSearchResult();
+          });
         });
         return;
       }
@@ -1777,15 +1790,19 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
       setCurrentSearchMatch((previousMatch) => (previousMatch >= searchMatches ? 1 : previousMatch + 1));
     },
-    [isEditing, runEditorCommand, searchMatches, t]
+    [canNavigate, isEditing, runEditorCommand, runFind, searchMatches, t]
   );
 
   const handleSearchPrevious = useCallback(
     (_event?: KeyboardEvent) => {
       if (isEditing) {
+        const editor = editorRef.current;
+        if (!canNavigate || !editor) return;
         runEditorCommand(t("common.search.previousMatch"), () => {
-          editorRef.current?.focusCurrentSearchResult();
-          editorRef.current?.previousSearchResult();
+          runFind(() => {
+            editor.focusCurrentSearchResult();
+            editor.previousSearchResult();
+          });
         });
         return;
       }
@@ -1796,7 +1813,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
       setCurrentSearchMatch((previousMatch) => (previousMatch <= 1 ? searchMatches : previousMatch - 1));
     },
-    [isEditing, runEditorCommand, searchMatches, t]
+    [canNavigate, isEditing, runEditorCommand, runFind, searchMatches, t]
   );
 
   /**
@@ -1937,12 +1954,12 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       {
         ...COMMON_SHORTCUTS.NEXT_MATCH,
         handler: handleSearchNext,
-        enabled: isEditing && (searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error)),
+        enabled: canNavigate,
       },
       {
         ...COMMON_SHORTCUTS.PREVIOUS_MATCH,
         handler: handleSearchPrevious,
-        enabled: isEditing && (searchMatches > 0 || Boolean(editorSearchState.pending || editorSearchState.error)),
+        enabled: canNavigate,
       },
       {
         ...COMMON_SHORTCUTS.SAVE,
@@ -1964,12 +1981,12 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.REPLACE_CURRENT,
         handler: handleReplaceCurrent,
-        enabled: isEditing && !isSaving && editorSearchMode === "replace" && searchPanelOpen,
+        enabled: canReplace,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.REPLACE_ALL,
         handler: handleReplaceAll,
-        enabled: isEditing && !isSaving && editorSearchMode === "replace" && searchPanelOpen,
+        enabled: canReplace,
       },
       {
         ...CODEMIRROR_EDITOR_SHORTCUTS.TOGGLE_CASE_SENSITIVE,
@@ -2034,6 +2051,8 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       },
     ],
     [
+      canNavigate,
+      canReplace,
       editorSearchState.isSearchable,
       error,
       handleCreateLink,
@@ -2056,11 +2075,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
       isEditing,
       isSaving,
       loading,
-      editorSearchMode,
-      editorSearchState.pending,
-      editorSearchState.error,
       searchPanelOpen,
-      searchMatches,
       setWordWrapEnabled,
       unsavedChangesDialogOpen,
       wordWrapEnabled,
@@ -2314,9 +2329,12 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
 
           {isEditing && (
             <CodeMirrorFindReplacePopover
+              canNavigate={canNavigate}
+              canReplace={canReplace}
               caseSensitive={editorSearchCaseSensitive}
               currentMatch={currentSearchMatch}
-              disabled={isSaving || editorLoadState !== "loaded" || Boolean(editorLoadError) || editorFailed}
+              disabled={searchControlsDisabled}
+              findHistory={findHistory}
               focusTarget={editorSearchFocusTarget}
               isReplaceMode={editorSearchMode === "replace" && !editorShouldBeReadOnly}
               isSearchValid={editorSearchState.isValid}
@@ -2335,6 +2353,7 @@ export const MarkdownViewer: React.FC<ViewerComponentProps> = ({
               onWholeWordChange={setEditorSearchWholeWord}
               open={searchPanelOpen}
               regex={editorSearchRegexp}
+              replaceHistory={replaceHistory}
               replaceText={editorSearchReplaceText}
               searchMatches={searchMatches}
               searchText={editorSearchText}
