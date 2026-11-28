@@ -3878,6 +3878,48 @@ describe("MarkdownViewer", () => {
     expect(mockMarkdownEditorCommands.replaceAllSearchResults).toHaveBeenCalledTimes(1);
   });
 
+  it("recalls history from another tab and keeps entries written just before a command", async () => {
+    vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Alpha\n\nAlpha beta alpha\n");
+    vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);
+    renderViewer();
+
+    await screen.findByText("Alpha");
+    const publishHistory = (key: string, value: string) => {
+      const newValue = JSON.stringify([value]);
+      localStorage.setItem(key, newValue);
+      const event = new StorageEvent("storage", { key, newValue });
+      Object.defineProperty(event, "storageArea", { value: localStorage });
+      fireEvent(window, event);
+    };
+    publishHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY, "beta");
+    publishHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY, "first replacement");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const editor = await screen.findByRole("textbox", { name: "Markdown editor" });
+    fireEvent.keyDown(editor, { key: "h", ctrlKey: true });
+
+    const findInput = await screen.findByRole("textbox", { name: "Find" });
+    const replaceInput = screen.getByRole("textbox", { name: "Replace" });
+    fireEvent.keyDown(findInput, { key: "ArrowUp" });
+    fireEvent.keyDown(replaceInput, { key: "ArrowUp" });
+    expect(findInput).toHaveValue("beta");
+    expect(replaceInput).toHaveValue("first replacement");
+
+    // The localStorage write is visible before the browser delivers its event.
+    localStorage.setItem(CODEMIRROR_FIND_HISTORY_STORAGE_KEY, JSON.stringify(["Alpha", "beta"]));
+    localStorage.setItem(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY, JSON.stringify(["other replacement", "first replacement"]));
+    fireEvent.change(findInput, { target: { value: "alpha" } });
+    fireEvent.change(replaceInput, { target: { value: "done" } });
+    fireEvent.click(screen.getByRole("button", { name: "Replace all" }));
+
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_FIND_HISTORY_STORAGE_KEY)).toEqual(["alpha", "Alpha", "beta"]);
+    expect(readCodeMirrorFindReplaceHistory(CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY)).toEqual([
+      "done",
+      "other replacement",
+      "first replacement",
+    ]);
+  });
+
   it("does not restore preview highlights after exiting edit mode when edit search was already closed", async () => {
     vi.spyOn(apiService, "getFileContent").mockResolvedValueOnce("# Alpha\n\nAlpha beta alpha\n");
     vi.spyOn(apiService, "supportsEditLocks").mockReturnValue(true);

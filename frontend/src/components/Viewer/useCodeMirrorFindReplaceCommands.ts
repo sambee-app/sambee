@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CODEMIRROR_FIND_HISTORY_STORAGE_KEY, CODEMIRROR_REPLACE_HISTORY_STORAGE_KEY } from "./codeMirrorFindReplaceConstants";
 import {
   addCodeMirrorFindReplaceHistoryEntry,
@@ -8,17 +8,40 @@ import {
 
 function useFieldHistory(storageKey: string) {
   const [history, setHistory] = useState(() => readCodeMirrorFindReplaceHistory(storageKey));
+  const unsavedEntries = useRef<string[]>([]);
+  const readLatest = useCallback(
+    () => unsavedEntries.current.reduceRight(addCodeMirrorFindReplaceHistoryEntry, readCodeMirrorFindReplaceHistory(storageKey)),
+    [storageKey]
+  );
+  const updateHistory = useCallback((nextHistory: string[]) => {
+    setHistory((previous) =>
+      previous.length === nextHistory.length && previous.every((entry, index) => entry === nextHistory[index]) ? previous : nextHistory
+    );
+  }, []);
+
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      if ((event.key === storageKey || event.key === null) && event.storageArea === window.localStorage) updateHistory(readLatest());
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [readLatest, storageKey, updateHistory]);
+
   const record = useCallback(
     (value: string) => {
-      if (value === history[0]) return;
+      if (value.trim().length === 0) return;
 
-      const nextHistory = addCodeMirrorFindReplaceHistoryEntry(history, value);
-      if (nextHistory === history) return;
-
-      setHistory(nextHistory);
-      writeCodeMirrorFindReplaceHistory(storageKey, nextHistory);
+      // Another tab can write before its storage event reaches this editor.
+      const latest = readLatest();
+      const nextHistory = value === latest[0] ? latest : addCodeMirrorFindReplaceHistoryEntry(latest, value);
+      if (nextHistory !== latest || unsavedEntries.current.length > 0) {
+        unsavedEntries.current = writeCodeMirrorFindReplaceHistory(storageKey, nextHistory)
+          ? []
+          : addCodeMirrorFindReplaceHistoryEntry(unsavedEntries.current, value);
+      }
+      updateHistory(nextHistory);
     },
-    [history, storageKey]
+    [readLatest, storageKey, updateHistory]
   );
   return [history, record] as const;
 }

@@ -1,3 +1,4 @@
+import { logger } from "../../services/logger";
 import { CODEMIRROR_FIND_REPLACE_HISTORY_LIMIT } from "./codeMirrorFindReplaceConstants";
 
 function isHistory(value: unknown): value is string[] {
@@ -25,10 +26,12 @@ export function addCodeMirrorFindReplaceHistoryEntry(history: string[], value: s
   return [value, ...history.filter((entry) => entry !== value)].slice(0, CODEMIRROR_FIND_REPLACE_HISTORY_LIMIT);
 }
 
-export function writeCodeMirrorFindReplaceHistory(storageKey: string, history: string[]): void {
+export function writeCodeMirrorFindReplaceHistory(storageKey: string, history: string[]): boolean {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(history));
+    return true;
   } catch {
-    // Find and replace remains functional when browser storage is unavailable.
+    logger.warn("Could not save find and replace history. It will remain available in this editor.", { storageKey }, "viewer");
+    return false;
   }
 }
